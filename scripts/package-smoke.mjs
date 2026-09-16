@@ -1,0 +1,96 @@
+import {execFileSync} from 'node:child_process';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+const projectRoot = fileURLToPath(new URL('../', import.meta.url));
+const temporaryRoot = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'stripe-forge-package-smoke-'),
+);
+
+try {
+  const packRoot = path.join(temporaryRoot, 'pack');
+  const consumerRoot = path.join(temporaryRoot, 'consumer');
+  await fs.mkdir(packRoot);
+  await fs.mkdir(consumerRoot);
+
+  run('pnpm', ['pack', '--pack-destination', packRoot], projectRoot);
+  const archives = (await fs.readdir(packRoot)).filter((entry) =>
+    entry.endsWith('.tgz'),
+  );
+  if (archives.length !== 1) {
+    throw new Error(`Expected one packed archive, found ${archives.length}.`);
+  }
+  const archive = path.join(packRoot, archives[0]);
+
+  await fs.writeFile(
+    path.join(consumerRoot, 'package.json'),
+    `${JSON.stringify({name: 'forge-package-smoke', private: true, type: 'module'}, null, 2)}\n`,
+  );
+  run(
+    'pnpm',
+    ['add', '--offline', '--ignore-scripts', archive],
+    consumerRoot,
+  );
+
+  await fs.writeFile(
+    path.join(consumerRoot, 'esm.mjs'),
+    `
+      import assert from 'node:assert/strict';
+      import * as forge from '@stripe/forge';
+      import * as atif from '@stripe/forge/atif/v1.8';
+      import * as cli from '@stripe/forge/cli';
+      import * as claude from '@stripe/forge/agents/claude-code';
+      import * as docker from '@stripe/forge/runtime/docker';
+      import * as setup from '@stripe/forge/setup';
+      import * as testing from '@stripe/forge/testing';
+
+      assert.equal(typeof forge.executeEval, 'function');
+      assert.equal(typeof forge.parseResolvedRunPlan, 'function');
+      assert.equal(forge.RUN_RESULT_SCHEMA_VERSION, 1);
+      assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
+      assert.equal(atif.isAtifTimestamp('2024-02-29T00:00:00Z'), true);
+      assert.equal(typeof atif.parseNormalizedTrajectory, 'function');
+      assert.equal(typeof cli.runCli, 'function');
+      assert.equal(typeof cli.createDefaultCliComposition, 'function');
+      assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
+      assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '1+gateway');
+      assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
+      assert.equal(typeof setup.createSetupExecutor, 'function');
+      assert.ok(Object.keys(testing).length > 0);
+    `,
+  );
+  run(process.execPath, ['esm.mjs'], consumerRoot);
+  run(
+    path.join(consumerRoot, 'node_modules', '.bin', 'forge'),
+    ['--version'],
+    consumerRoot,
+  );
+
+  // @stripe/forge is ESM-only. Existing CommonJS hosts interoperate through
+  // the standard dynamic import boundary rather than a second package build.
+  await fs.writeFile(
+    path.join(consumerRoot, 'commonjs.cjs'),
+    `
+      const assert = require('node:assert/strict');
+      void import('@stripe/forge').then((forge) => {
+        assert.equal(typeof forge.executeEval, 'function');
+      }).catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+    `,
+  );
+  run(process.execPath, ['commonjs.cjs'], consumerRoot);
+} finally {
+  await fs.rm(temporaryRoot, {recursive: true, force: true});
+}
+
+function run(command, arguments_, cwd) {
+  execFileSync(command, arguments_, {
+    cwd,
+    stdio: 'inherit',
+    env: {...process.env, CI: '1'},
+  });
+}

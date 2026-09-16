@@ -1,0 +1,643 @@
+import {createHash, randomUUID} from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import type {CommandRunner} from '../../contracts/command.js';
+import type {
+  MutableWorkspace,
+  PreparedRuntime,
+  ReadonlyWorkspace,
+  RuntimeAdapter,
+  RuntimePlatform,
+  RuntimePreparation,
+  SealedRuntime,
+  WorkspaceWriteOptions,
+} from '../../contracts/runtime.js';
+import {assertEnvironmentName} from '../../contracts/credentials.js';
+import type {ForgeDockerRuntimeV1} from '../../model/types.js';
+import {
+  createHostCommandRunner,
+  type HostCommandRunner,
+} from '../processCommandRunner.js';
+import {createOwnedWorkspace} from '../workspace.js';
+import {
+  FORGE_CLAUDE_CODE_VERSION,
+  FORGE_RUNTIME_ASSET_DIGEST,
+} from './assets.js';
+import {DockerCommandController} from './commandRunner.js';
+
+const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
+const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;
+const DEFAULT_COMMAND_OUTPUT_BYTES = 16 * 1024 * 1024;
+const FORGE_CONTAINER_USER = '10001:10001';
+const CONTAINER_WORKSPACE = '/workspace';
+const CONTAINER_HOME = '/home/forge';
+const PACKAGED_ASSET_ROOT = fileURLToPath(new URL('./assets', import.meta.url));
+
+export interface DockerRuntimeAdapterOptions {
+  readonly dockerExecutable?: string;
+  readonly temporaryRoot?: string;
+  readonly hostCommands?: HostCommandRunner;
+  readonly operationTimeoutMs?: number;
+  readonly buildTimeoutMs?: number;
+  readonly maximumCommandOutputBytes?: number;
+}
+
+/** Forge-owned, Docker CLI based runtime. It accepts no host Dockerfile. */
+export function createDockerRuntimeAdapter(
+  options: DockerRuntimeAdapterOptions = {},
+): RuntimeAdapter {
+  const dockerExecutable = options.dockerExecutable ?? 'docker';
+  if (!dockerExecutable || dockerExecutable.includes('\0')) {
+    throw new TypeError('dockerExecutable must be a non-empty command path.');
+  }
+  const temporaryRoot = path.resolve(options.temporaryRoot ?? os.tmpdir());
+  const hostCommands = options.hostCommands ?? createHostCommandRunner();
+  const operationTimeoutMs = positive(
+    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
+    'operationTimeoutMs',
+  );
+  const buildTimeoutMs = positive(
+    options.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+    'buildTimeoutMs',
+  );
+  const maximumCommandOutputBytes = positive(
+    options.maximumCommandOutputBytes ?? DEFAULT_COMMAND_OUTPUT_BYTES,
+    'maximumCommandOutputBytes',
+  );
+  const imageBuilds = new Map<RuntimePlatform, Promise<BuiltForgeImage>>();
+
+  return Object.freeze({
+    id: 'forge/docker',
+    version: '1',
+    async prepare(input: RuntimePreparation): Promise<PreparedRuntime> {
+      input.signal.throwIfAborted();
+      const runtime = validateRuntime(input.plan.runtime);
+      validateEnvironment(input.environment);
+      const executableRequirements = validateExecutableRequirements(
+        input.requirements.executables,
+      );
+      const stateRequirements = validateStateRequirements(
+        input.requirements.stateDirectories,
+      );
+      let imageBuild = imageBuilds.get(runtime.platform);
+      if (!imageBuild) {
+        imageBuild = buildForgeImage({
+          buildTimeoutMs,
+          dockerExecutable,
+          hostCommands,
+          platform: runtime.platform,
+          signal: input.signal,
+          temporaryRoot,
+        }).catch((error: unknown) => {
+          imageBuilds.delete(runtime.platform);
+          throw error;
+        });
+        imageBuilds.set(runtime.platform, imageBuild);
+      }
+      const image = await imageBuild;
+      input.signal.throwIfAborted();
+
+      const runRoot = await fs.mkdtemp(path.join(temporaryRoot, 'stripe-forge-run-'));
+      const workspaceRoot = path.join(runRoot, 'workspace');
+      const homeRoot = path.join(runRoot, 'home');
+      const stateRoot = path.join(runRoot, 'state');
+      const environmentFileRoot = path.join(runRoot, 'environment');
+      const cidFile = path.join(runRoot, 'container-id');
+      await fs.mkdir(workspaceRoot, {mode: 0o777});
+      await fs.mkdir(homeRoot, {mode: 0o777});
+      await fs.mkdir(stateRoot, {mode: 0o700});
+      await fs.mkdir(environmentFileRoot, {mode: 0o700});
+      // The unpredictable parent remains 0700; the Docker VM's non-root user
+      // needs write access only to these two run-owned mount leaves.
+      await fs.chmod(workspaceRoot, 0o777);
+      await fs.chmod(homeRoot, 0o777);
+
+      let mutationOpen = true;
+      const ownedWorkspace = await createOwnedWorkspace(workspaceRoot);
+      const workspace = guardedWorkspace(ownedWorkspace, () => mutationOpen);
+      const sealedWorkspace = readonlyWorkspace(ownedWorkspace);
+      const stateDirectories = new Map<string, MutableWorkspace>();
+      const sealedStateDirectories = new Map<string, ReadonlyWorkspace>();
+      const stateMounts: Array<{source: string; target: string}> = [];
+      for (const requirement of stateRequirements) {
+        const source = path.join(stateRoot, requirement.id);
+        await fs.mkdir(source, {mode: 0o777});
+        await fs.chmod(source, 0o777);
+        const ownedState = await createOwnedWorkspace(source);
+        stateDirectories.set(
+          requirement.id,
+          guardedWorkspace(ownedState, () => mutationOpen),
+        );
+        sealedStateDirectories.set(requirement.id, readonlyWorkspace(ownedState));
+        stateMounts.push({source, target: requirement.containerPath});
+      }
+      const containerName = containerNameFor(input.runId);
+      const startArgv = dockerRunArgv({
+        cidFile,
+        containerName,
+        dockerExecutable,
+        homeRoot,
+        image: image.id,
+        platform: runtime.platform,
+        resources: runtime.resources,
+        stateMounts,
+        workspaceRoot,
+      });
+      try {
+        const started = await hostCommands.run(startArgv, {
+          maxOutputBytes: maximumCommandOutputBytes,
+          signal: input.signal,
+          timeoutMs: operationTimeoutMs,
+        });
+        if (started.exitCode !== 0) {
+          throw new Error('Docker could not start the Forge runtime container.');
+        }
+      } catch (error) {
+        const partialContainerId = await readContainerId(cidFile);
+        await bestEffortRemoveContainer(
+          dockerExecutable,
+          partialContainerId ?? containerName,
+          hostCommands,
+          operationTimeoutMs,
+          maximumCommandOutputBytes,
+        );
+        await fs.rm(runRoot, {recursive: true, force: true});
+        throw error;
+      }
+
+      const controller = new DockerCommandController({
+        containerName,
+        defaultTimeoutMs: Math.min(input.plan.limits.run_timeout_ms, 10 * 60_000),
+        dockerExecutable,
+        environment: input.environment,
+        environmentFileRoot,
+        hostCommands,
+        maximumOutputBytes: maximumCommandOutputBytes,
+        maximumTimeoutMs: input.plan.limits.run_timeout_ms,
+      });
+      let sealedPromise: Promise<SealedRuntime> | undefined;
+      let disposePromise: Promise<void> | undefined;
+
+      const dispose = (): Promise<void> => {
+        mutationOpen = false;
+        disposePromise ??= (async () => {
+          // A started quiesce owns the stop barrier. Cleanup never races it.
+          await sealedPromise?.catch(() => undefined);
+          await disposeRuntime({
+            containerName,
+            controller,
+            dockerExecutable,
+            hostCommands,
+            maximumCommandOutputBytes,
+            operationTimeoutMs,
+            runRoot,
+          });
+        })();
+        return disposePromise;
+      };
+      const uncredentialedCommands = controller.withoutCredentials();
+      const sealedRuntime = (): SealedRuntime =>
+        Object.freeze({
+          runtimeId: input.runId,
+          workspace: sealedWorkspace,
+          paths: Object.freeze({
+            workspace: CONTAINER_WORKSPACE,
+            home: CONTAINER_HOME,
+          }),
+          stateDirectories: sealedStateDirectories,
+          metadata: Object.freeze({
+            adapter: 'forge/docker@1',
+            claudeCodeVersion: FORGE_CLAUDE_CODE_VERSION,
+            imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
+            imageId: image.id,
+            imageTag: image.tag,
+            platform: runtime.platform,
+          }),
+        });
+
+      try {
+        await assertExecutablesAvailable(
+          uncredentialedCommands,
+          executableRequirements,
+          input.signal,
+        );
+      } catch (error) {
+        try {
+          await dispose();
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'Runtime executable validation failed and cleanup also failed.',
+          );
+        }
+        throw error;
+      }
+
+      return Object.freeze({
+        runtimeId: input.runId,
+        workspace,
+        paths: Object.freeze({
+          workspace: CONTAINER_WORKSPACE,
+          home: CONTAINER_HOME,
+        }),
+        stateDirectories,
+        commands: Object.freeze({
+          uncredentialed: uncredentialedCommands,
+          setup: controller.forScope('setup'),
+          agent: controller.forScope('agent'),
+        }),
+        quiesce(): Promise<SealedRuntime> {
+          if (disposePromise) {
+            return Promise.reject(new Error('Docker runtime is already disposing.'));
+          }
+          mutationOpen = false;
+          sealedPromise ??= (async () => {
+            await controller.closeAndWait();
+            const stopped = await hostCommands.run(
+              [dockerExecutable, 'stop', '--time', '10', containerName],
+              {
+                maxOutputBytes: maximumCommandOutputBytes,
+                timeoutMs: operationTimeoutMs,
+              },
+            );
+            if (stopped.exitCode !== 0) {
+              throw new Error('Docker could not quiesce the Forge runtime container.');
+            }
+            return sealedRuntime();
+          })();
+          return sealedPromise;
+        },
+        dispose,
+      });
+    },
+  });
+}
+
+function guardedWorkspace(
+  workspace: MutableWorkspace,
+  canMutate: () => boolean,
+): MutableWorkspace {
+  return Object.freeze({
+    inspect: workspace.inspect,
+    readFile: workspace.readFile,
+    listFiles: workspace.listFiles,
+    async writeFile(
+      relativePath: string,
+      body: Uint8Array,
+      options?: WorkspaceWriteOptions,
+    ) {
+      if (!canMutate()) {
+        throw new Error('Runtime workspace has been quiesced.');
+      }
+      await workspace.writeFile(relativePath, body, options);
+    },
+  });
+}
+
+function readonlyWorkspace(workspace: MutableWorkspace): ReadonlyWorkspace {
+  return Object.freeze({
+    inspect: workspace.inspect,
+    readFile: workspace.readFile,
+    listFiles: workspace.listFiles,
+  });
+}
+
+interface BuildForgeImageInput {
+  readonly buildTimeoutMs: number;
+  readonly dockerExecutable: string;
+  readonly hostCommands: HostCommandRunner;
+  readonly platform: RuntimePlatform;
+  readonly signal: AbortSignal;
+  readonly temporaryRoot: string;
+}
+
+interface BuiltForgeImage {
+  readonly tag: string;
+  readonly id: string;
+}
+
+async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeImage> {
+  const buildRoot = await fs.mkdtemp(
+    path.join(input.temporaryRoot, 'stripe-forge-build-'),
+  );
+  const image = imageTag(input.platform);
+  try {
+    const dockerfile = await fs.readFile(path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'));
+    const entrypoint = await fs.readFile(
+      path.join(PACKAGED_ASSET_ROOT, 'entrypoint.sh'),
+    );
+    const digest = createHash('sha256')
+      .update(dockerfile)
+      .update('\0')
+      .update(entrypoint)
+      .digest('hex');
+    if (digest !== FORGE_RUNTIME_ASSET_DIGEST) {
+      throw new Error('Packaged Forge Docker assets do not match their digest.');
+    }
+    await fs.writeFile(path.join(buildRoot, 'Dockerfile'), dockerfile, {mode: 0o644});
+    await fs.writeFile(path.join(buildRoot, 'entrypoint.sh'), entrypoint, {mode: 0o755});
+    const built = await input.hostCommands.run(
+      [
+        input.dockerExecutable,
+        'build',
+        '--platform',
+        input.platform,
+        '--tag',
+        image,
+        '--file',
+        path.join(buildRoot, 'Dockerfile'),
+        buildRoot,
+      ],
+      {
+        maxOutputBytes: 32 * 1024 * 1024,
+        signal: input.signal,
+        timeoutMs: input.buildTimeoutMs,
+      },
+    );
+    if (built.exitCode !== 0) {
+      throw new Error('Docker could not build the Forge-owned runtime image.');
+    }
+    const inspected = await input.hostCommands.run(
+      [
+        input.dockerExecutable,
+        'image',
+        'inspect',
+        '--format',
+        '{{.Id}}',
+        image,
+      ],
+      {
+        maxOutputBytes: 1024 * 1024,
+        signal: input.signal,
+        timeoutMs: input.buildTimeoutMs,
+      },
+    );
+    const id = inspected.stdout.trim();
+    if (inspected.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(id)) {
+      throw new Error('Docker did not return an immutable Forge image ID.');
+    }
+    return Object.freeze({tag: image, id});
+  } finally {
+    await fs.rm(buildRoot, {recursive: true, force: true});
+  }
+}
+
+function dockerRunArgv(input: {
+  cidFile: string;
+  containerName: string;
+  dockerExecutable: string;
+  homeRoot: string;
+  image: string;
+  platform: RuntimePlatform;
+  resources: ForgeDockerRuntimeV1['resources'];
+  stateMounts: readonly {source: string; target: string}[];
+  workspaceRoot: string;
+}): readonly string[] {
+  return [
+    input.dockerExecutable,
+    'run',
+    '--detach',
+    '--name',
+    input.containerName,
+    '--cidfile',
+    input.cidFile,
+    '--platform',
+    input.platform,
+    '--user',
+    FORGE_CONTAINER_USER,
+    '--read-only',
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges:true',
+    '--memory',
+    String(input.resources.memory_bytes),
+    '--cpus',
+    String(input.resources.cpu_count),
+    '--pids-limit',
+    String(input.resources.process_count),
+    '--tmpfs',
+    '/tmp:rw,nosuid,nodev,noexec,size=268435456',
+    '--mount',
+    mountArgument(input.workspaceRoot, '/workspace'),
+    '--mount',
+    mountArgument(input.homeRoot, '/home/forge'),
+    ...input.stateMounts.flatMap(({source, target}) => [
+      '--mount',
+      mountArgument(source, target),
+    ]),
+    '--workdir',
+    '/workspace',
+    input.image,
+  ];
+}
+
+async function disposeRuntime(input: {
+  containerName: string;
+  controller: DockerCommandController;
+  dockerExecutable: string;
+  hostCommands: HostCommandRunner;
+  maximumCommandOutputBytes: number;
+  operationTimeoutMs: number;
+  runRoot: string;
+}): Promise<void> {
+  const failures: unknown[] = [];
+  try {
+    await input.controller.closeAndWait();
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    const removed = await input.hostCommands.run(
+      [input.dockerExecutable, 'rm', '--force', '--volumes', input.containerName],
+      {
+        maxOutputBytes: input.maximumCommandOutputBytes,
+        timeoutMs: input.operationTimeoutMs,
+      },
+    );
+    if (removed.exitCode !== 0) {
+      failures.push(new Error('Docker could not remove the Forge runtime container.'));
+    }
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    await fs.rm(input.runRoot, {recursive: true, force: true});
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Forge Docker runtime cleanup failed.');
+  }
+}
+
+async function bestEffortRemoveContainer(
+  dockerExecutable: string,
+  containerName: string,
+  hostCommands: HostCommandRunner,
+  timeoutMs: number,
+  maxOutputBytes: number,
+): Promise<void> {
+  await hostCommands
+    .run([dockerExecutable, 'rm', '--force', '--volumes', containerName], {
+      maxOutputBytes,
+      timeoutMs,
+    })
+    .catch(() => undefined);
+}
+
+function validateRuntime(runtime: ForgeDockerRuntimeV1): ForgeDockerRuntimeV1 {
+  if (
+    runtime.adapter !== 'docker' ||
+    runtime.image.kind !== 'forge' ||
+    (runtime.platform !== 'linux/amd64' && runtime.platform !== 'linux/arm64')
+  ) {
+    throw new TypeError('Forge v1 supports only its owned Docker runtime image.');
+  }
+  positive(runtime.resources.memory_bytes, 'runtime.resources.memory_bytes');
+  positive(runtime.resources.cpu_count, 'runtime.resources.cpu_count');
+  positive(runtime.resources.process_count, 'runtime.resources.process_count');
+  return runtime;
+}
+
+function validateEnvironment(environment: RuntimePreparation['environment']): void {
+  const seen = new Set<string>();
+  for (const [name, value] of Object.entries(environment.variables)) {
+    assertEnvironmentName(name);
+    if (typeof value !== 'string' || value.includes('\0')) {
+      throw new TypeError(`Invalid plain environment variable: ${name}`);
+    }
+    seen.add(name);
+  }
+  for (const [name, binding] of Object.entries(environment.credentials)) {
+    assertEnvironmentName(name);
+    if (seen.has(name)) {
+      throw new TypeError(`Environment variable ${name} has conflicting bindings.`);
+    }
+    if (!binding.value || binding.value.includes('\0')) {
+      throw new TypeError(`Invalid credential environment variable: ${name}`);
+    }
+  }
+}
+
+function validateExecutableRequirements(
+  requirements: RuntimePreparation['requirements']['executables'],
+): readonly string[] {
+  if (!Array.isArray(requirements)) {
+    throw new TypeError('Runtime executable requirements must be an array.');
+  }
+  const seen = new Set<string>();
+  const normalized = requirements.map((executable) => {
+    if (
+      typeof executable !== 'string' ||
+      executable.length === 0 ||
+      executable.length > 1_024 ||
+      executable.includes('\0')
+    ) {
+      throw new TypeError('Runtime executable requirements must be bounded non-empty strings.');
+    }
+    if (seen.has(executable)) {
+      throw new TypeError(`Duplicate runtime executable requirement: ${executable}`);
+    }
+    seen.add(executable);
+    return executable;
+  });
+  return Object.freeze(normalized);
+}
+
+async function assertExecutablesAvailable(
+  commands: CommandRunner,
+  requirements: readonly string[],
+  signal: AbortSignal,
+): Promise<void> {
+  for (const executable of requirements) {
+    signal.throwIfAborted();
+    const result = await commands.run(
+      [
+        '/bin/sh',
+        '-c',
+        'command -v "$1" >/dev/null 2>&1',
+        'forge-executable-check',
+        executable,
+      ],
+      {signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(`Required runtime executable is unavailable: ${executable}`);
+    }
+  }
+}
+
+function validateStateRequirements(
+  requirements: RuntimePreparation['requirements']['stateDirectories'],
+): RuntimePreparation['requirements']['stateDirectories'] {
+  const ids = new Set<string>();
+  const paths: string[] = [];
+  for (const requirement of requirements) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(requirement.id)) {
+      throw new TypeError(`Invalid runtime state directory id: ${requirement.id}`);
+    }
+    if (ids.has(requirement.id)) {
+      throw new TypeError(`Duplicate runtime state directory id: ${requirement.id}`);
+    }
+    if (
+      !requirement.containerPath.startsWith(`${CONTAINER_HOME}/`) ||
+      requirement.containerPath.includes('\0') ||
+      path.posix.normalize(requirement.containerPath) !== requirement.containerPath
+    ) {
+      throw new TypeError(
+        `Runtime state directory must be a canonical child of ${CONTAINER_HOME}: ${requirement.containerPath}`,
+      );
+    }
+    if (
+      paths.some(
+        (existing) =>
+          existing.startsWith(`${requirement.containerPath}/`) ||
+          requirement.containerPath.startsWith(`${existing}/`),
+      )
+    ) {
+      throw new TypeError('Runtime state directory mounts may not overlap.');
+    }
+    ids.add(requirement.id);
+    paths.push(requirement.containerPath);
+  }
+  return requirements;
+}
+
+async function readContainerId(cidFile: string): Promise<string | undefined> {
+  try {
+    const id = (await fs.readFile(cidFile, 'utf8')).trim();
+    return /^[a-f0-9]{64}$/.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function containerNameFor(runId: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) {
+    throw new TypeError('runId must be a safe non-empty identifier.');
+  }
+  return `stripe-forge-${runId}-${randomUUID().slice(0, 8)}`.slice(0, 200);
+}
+
+function imageTag(platform: RuntimePlatform): string {
+  return `stripe-forge-runtime:${FORGE_RUNTIME_ASSET_DIGEST.slice(0, 20)}-${
+    platform === 'linux/amd64' ? 'amd64' : 'arm64'
+  }`;
+}
+
+function mountArgument(source: string, target: string): string {
+  if (source.includes(',') || source.includes('\0')) {
+    throw new TypeError('Docker runtime mount path contains an unsupported character.');
+  }
+  return `type=bind,source=${source},target=${target}`;
+}
+
+function positive(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive integer.`);
+  }
+  return value;
+}

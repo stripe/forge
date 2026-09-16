@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "id": "forge-quickstart",
+    "version": "0.1.0"
+  },
+  "cases": [
+    {
+      "id": "examples/hello-file",
+      "path": "cases/examples/hello-file.yaml"
+    }
+  ],
+  "files": [
+    {
+      "path": "cases/examples/hello-file.yaml",
+      "size": 350,
+      "sha256": "3debb427a8120d54dc9e4a68590996bdc9945e4c25d225c98c2d821e51339017"
+    }
+  ]
+}

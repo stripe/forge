@@ -1,0 +1,333 @@
+import {sha256Digest} from '../model/hashes.js';
+import {
+  BENCHMARK_SCHEMA_VERSION,
+  DEFAULT_MAX_TURNS,
+  type AgentSelectionV1,
+  type BenchmarkProfileV1,
+  type LoadedBenchmarkProfileV1,
+  type LoadedDatasetV1,
+  type ResolvedRunPlanV1,
+  type RunSelection,
+  type SetupStepV1,
+  type WriteSetupStepV1,
+} from '../model/types.js';
+
+export type PlanningErrorCode =
+  | 'dataset_profile_mismatch'
+  | 'unknown_case'
+  | 'unknown_treatment'
+  | 'unknown_agent'
+  | 'invalid_repetition'
+  | 'missing_role_player'
+  | 'missing_judge'
+  | 'missing_dataset_input';
+
+export class PlanningError extends Error {
+  readonly code: PlanningErrorCode;
+
+  constructor(code: PlanningErrorCode, message: string) {
+    super(message);
+    this.name = 'PlanningError';
+    this.code = code;
+  }
+}
+
+/**
+ * Expand in stable authored order: case, treatment, agent, then repetition.
+ * Retries deliberately do not create new semantic selections.
+ */
+export function expandExperiment(
+  input: BenchmarkProfileV1 | LoadedBenchmarkProfileV1,
+): RunSelection[] {
+  const profile = 'profile' in input ? input.profile : input;
+  const selections: RunSelection[] = [];
+  for (const caseId of profile.matrix.cases) {
+    for (const treatment of profile.matrix.treatments) {
+      for (const agent of profile.matrix.agents) {
+        for (
+          let repetition = 0;
+          repetition < profile.matrix.repetitions;
+          repetition += 1
+        ) {
+          selections.push({
+            case_id: caseId,
+            treatment,
+            agent: {...agent},
+            repetition,
+          });
+        }
+      }
+    }
+  }
+  return selections;
+}
+
+/** Resolve one validated selection into the complete, ambient-free run plan. */
+export function resolveRunPlan(input: {
+  dataset: LoadedDatasetV1;
+  profile: LoadedBenchmarkProfileV1;
+  selection: RunSelection;
+}): ResolvedRunPlanV1 {
+  const {dataset, selection} = input;
+  const profile = input.profile.profile;
+  assertDatasetCompatibility(dataset, profile);
+  assertSelection(profile, selection);
+
+  const loadedCase = dataset.cases.get(selection.case_id);
+  if (!loadedCase) {
+    throw new PlanningError(
+      'unknown_case',
+      'Run selection references a case absent from the loaded dataset.',
+    );
+  }
+  const manifestCase = dataset.manifest.cases.find(
+    ({id}) => id === selection.case_id,
+  );
+  if (!manifestCase) {
+    throw new PlanningError(
+      'unknown_case',
+      'Run selection references a case absent from the dataset manifest.',
+    );
+  }
+
+  const treatment =
+    profile.treatments[selection.treatment] ??
+    (selection.treatment === 'baseline' ? {setup: []} : undefined);
+  if (!treatment) {
+    throw new PlanningError(
+      'unknown_treatment',
+      'Run selection references an undefined treatment.',
+    );
+  }
+  const definition = loadedCase.definition;
+  if (
+    definition.execution_mode === 'multi_turn' &&
+    profile.models.role_player === undefined
+  ) {
+    throw new PlanningError(
+      'missing_role_player',
+      'A multi_turn case requires models.role_player in the benchmark profile.',
+    );
+  }
+  if (
+    definition.success_guidelines.length > 0 &&
+    profile.models.judge === undefined
+  ) {
+    throw new PlanningError(
+      'missing_judge',
+      'A case with success guidelines requires models.judge in the benchmark profile.',
+    );
+  }
+
+  const setup = [
+    ...cloneJson(definition.setup),
+    ...cloneJson(treatment.setup),
+  ];
+  assertDatasetInputsExist(setup, dataset);
+
+  const initialPromptSource =
+    definition.initial_prompt === undefined
+      ? ('case.task' as const)
+      : ('case.initial_prompt' as const);
+  const effectivePrompt = definition.initial_prompt ?? definition.task;
+  if (effectivePrompt === undefined) {
+    // Public parsers prevent this; retain a defensive execution boundary.
+    throw new PlanningError('unknown_case', 'Selected case has no effective prompt.');
+  }
+
+  const plan: ResolvedRunPlanV1 = {
+    schema_version: BENCHMARK_SCHEMA_VERSION,
+    selection: cloneJson(selection),
+    provenance: {
+      dataset: {
+        ...cloneJson(dataset.manifest.dataset),
+        manifest_sha256: dataset.manifestSha256,
+      },
+      profile: {
+        id: profile.id,
+        version: profile.version,
+        sha256: input.profile.sha256,
+      },
+      case: {
+        id: definition.id,
+        path: manifestCase.path,
+        sha256: loadedCase.sha256,
+      },
+      forge: {version: profile.forge.version},
+    },
+    case: cloneJson(definition),
+    treatment: {
+      id: selection.treatment,
+      setup: cloneJson(treatment.setup),
+    },
+    setup,
+    interaction: {
+      mode: definition.execution_mode,
+      ...(definition.task === undefined ? {} : {task: definition.task}),
+      ...(definition.context === undefined ? {} : {context: definition.context}),
+      ...(definition.initial_prompt === undefined
+        ? {}
+        : {initial_prompt: definition.initial_prompt}),
+      initial_prompt_source: initialPromptSource,
+      effective_prompt: effectivePrompt,
+      max_turns:
+        definition.execution_mode === 'one_shot'
+          ? 1
+          : (definition.max_turns ?? DEFAULT_MAX_TURNS),
+    },
+    evaluation: {
+      success_guidelines: [...definition.success_guidelines],
+      ...(definition.checks === undefined
+        ? {}
+        : {checks: cloneJson(definition.checks)}),
+      ...(definition.example_answer === undefined
+        ? {}
+        : {example_answer: definition.example_answer}),
+      ...(definition.success_guidelines.length === 0 ||
+      profile.models.judge === undefined
+        ? {}
+        : {judge: cloneJson(profile.models.judge)}),
+    },
+    ...(definition.execution_mode !== 'multi_turn' ||
+    profile.models.role_player === undefined
+      ? {}
+      : {role_player: cloneJson(profile.models.role_player)}),
+    agent: cloneJson(selection.agent),
+    runtime: cloneJson(profile.runtime),
+    limits: cloneJson(profile.limits),
+  };
+  return deepFreeze(plan);
+}
+
+/** Canonical JSON used when a caller needs a stable resolved-plan digest. */
+export function serializeResolvedRunPlan(plan: ResolvedRunPlanV1): string {
+  return `${JSON.stringify(sortJson(plan))}\n`;
+}
+
+export function resolvedRunPlanSha256(plan: ResolvedRunPlanV1): `sha256:${string}` {
+  return sha256Digest(serializeResolvedRunPlan(plan));
+}
+
+function assertDatasetCompatibility(
+  dataset: LoadedDatasetV1,
+  profile: BenchmarkProfileV1,
+): void {
+  if (
+    dataset.manifest.dataset.id !== profile.dataset.id ||
+    dataset.manifest.dataset.version !== profile.dataset.version ||
+    dataset.manifestSha256 !== profile.dataset.manifest_sha256
+  ) {
+    throw new PlanningError(
+      'dataset_profile_mismatch',
+      'Loaded dataset does not match the benchmark profile pin.',
+    );
+  }
+  for (const caseId of profile.matrix.cases) {
+    if (!dataset.cases.has(caseId)) {
+      throw new PlanningError(
+        'unknown_case',
+        'Benchmark profile references a case absent from the loaded dataset.',
+      );
+    }
+  }
+}
+
+function assertSelection(
+  profile: BenchmarkProfileV1,
+  selection: RunSelection,
+): void {
+  if (!profile.matrix.cases.includes(selection.case_id)) {
+    throw new PlanningError(
+      'unknown_case',
+      'Run selection case is not in the benchmark matrix.',
+    );
+  }
+  if (!profile.matrix.treatments.includes(selection.treatment)) {
+    throw new PlanningError(
+      'unknown_treatment',
+      'Run selection treatment is not in the benchmark matrix.',
+    );
+  }
+  if (
+    !profile.matrix.agents.some((agent) =>
+      agentsEqual(agent, selection.agent),
+    )
+  ) {
+    throw new PlanningError(
+      'unknown_agent',
+      'Run selection agent is not in the benchmark matrix.',
+    );
+  }
+  if (
+    !Number.isSafeInteger(selection.repetition) ||
+    selection.repetition < 0 ||
+    selection.repetition >= profile.matrix.repetitions
+  ) {
+    throw new PlanningError(
+      'invalid_repetition',
+      'Run selection repetition is outside the benchmark matrix.',
+    );
+  }
+}
+
+function assertDatasetInputsExist(
+  steps: readonly SetupStepV1[],
+  dataset: LoadedDatasetV1,
+): void {
+  const files = dataset.manifest.files.map(({path}) => path);
+  for (const step of steps) {
+    if (!isWriteSetupStep(step)) continue;
+    const source = step.with.source;
+    if (!('dataset_path' in source)) continue;
+    if (!files.includes(source.dataset_path)) {
+      throw new PlanningError(
+        'missing_dataset_input',
+        'A setup step references an input absent from the dataset manifest.',
+      );
+    }
+  }
+}
+
+function isWriteSetupStep(step: SetupStepV1): step is WriteSetupStepV1 {
+  return step.uses === 'forge/write@1';
+}
+
+function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {
+  return (
+    left.adapter === right.adapter &&
+    left.provider === right.provider &&
+    left.model === right.model
+  );
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => compareStrings(left, right))
+        .map(([key, entry]) => [key, sortJson(entry)]),
+    );
+  }
+  return value;
+}
+
+function compareStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const entry of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(entry);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}

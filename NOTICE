@@ -1,0 +1,7 @@
+Stripe Forge
+Copyright 2026 Stripe, Inc.
+
+This product includes a TypeScript representation of the Agent Trajectory
+Interchange Format (ATIF), derived from Harbor v0.23.0 at commit
+1e5c5c6db929a10a140d05e606882c671ae20729. Harbor is licensed under the
+Apache License, Version 2.0.

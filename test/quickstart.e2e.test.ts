@@ -1,0 +1,164 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {afterEach, describe, it} from 'node:test';
+
+import {expect} from './support/expect.js';
+
+import {runCli} from '../src/cli.js';
+import type {AgentAdapter} from '../src/contracts/agent.js';
+import {createDirectoryRunInputProvider} from '../src/contracts/inputs.js';
+import {createArtifactStore, verifyCompletedRun} from '../src/results/index.js';
+import {forgeSetupHandlers} from '../src/setup/index.js';
+import {
+  createFakeRuntimeAdapter,
+  createScriptedAgentAdapter,
+  createStaticCredentialResolver,
+} from '../src/testing/index.js';
+
+const repositoryRoot = process.cwd();
+const exampleRoot = path.join(repositoryRoot, 'examples', 'quickstart');
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => fs.rm(directory, {recursive: true, force: true})),
+  );
+});
+
+describe('checked-in quickstart', () => {
+  it('runs through the public CLI and commits verifiable artifacts without Docker', async () => {
+    const temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-quickstart-e2e-'),
+    );
+    temporaryDirectories.push(temporaryRoot);
+    const resultsRoot = path.join(temporaryRoot, 'results');
+    const runtime = createFakeRuntimeAdapter({
+      id: 'forge/docker',
+      metadata: {platform: 'linux/amd64', mode: 'test-double'},
+    });
+    const scripted = createScriptedAgentAdapter({
+      id: 'claude-code',
+      turns: [
+        {
+          text: 'Created hello.txt with the requested contents.',
+          sessionId: 'quickstart-session',
+          toolCalls: [
+            {
+              id: 'write-1',
+              name: 'Write',
+              input: {path: 'hello.txt'},
+            },
+          ],
+        },
+      ],
+    });
+    const agent = agentWhichCreatesHelloFile(scripted.adapter);
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--profile',
+        path.join(exampleRoot, 'profile.yaml'),
+        '--case-file',
+        path.join(
+          exampleRoot,
+          'dataset',
+          'cases',
+          'examples',
+          'hello-file.yaml',
+        ),
+        '--agent',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+        '--output',
+        resultsRoot,
+        '--run-id',
+        'quickstart-e2e',
+      ],
+      {
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        compositionFactory: async ({datasetRoot, resultsRoot: outputRoot}) => ({
+          runtime: runtime.adapter,
+          agents: new Map([[agent.id, agent]]),
+          setupHandlers: forgeSetupHandlers,
+          credentialResolver: createStaticCredentialResolver(),
+          inputProvider: await createDirectoryRunInputProvider(datasetRoot),
+          artifactStore: createArtifactStore({root: outputRoot}),
+        }),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    const summary = JSON.parse(stdout) as {
+      location: string;
+      run_id: string;
+      result: {evaluation: {score: number; status: string}};
+    };
+    expect(summary.run_id).toBe('quickstart-e2e');
+    // v0.1 check-only cases use status as the pass/fail signal. The numeric
+    // score remains the guideline ratio and is therefore zero with no judge.
+    expect(summary.result.evaluation).toMatchObject({score: 0, status: 'passed'});
+
+    const completed = await verifyCompletedRun(summary.location);
+    expect(completed.result.selection).toMatchObject({
+      case_id: 'examples/hello-file',
+      treatment: 'baseline',
+      agent: {
+        adapter: 'claude-code',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    expect(completed.result.artifacts.map(({path: artifactPath}) => artifactPath)).toEqual([
+      'plan.json',
+      'trajectory.json',
+      'workspace-evidence.json',
+      'evaluation.json',
+    ]);
+
+    const workspaceEvidence = JSON.parse(
+      await fs.readFile(
+        path.join(summary.location, 'workspace-evidence.json'),
+        'utf8',
+      ),
+    ) as {entries: Array<{path: string; content_base64?: string}>};
+    const hello = workspaceEvidence.entries.find(({path: filePath}) =>
+      filePath === 'hello.txt',
+    );
+    expect(Buffer.from(hello?.content_base64 ?? '', 'base64').toString('utf8')).toBe(
+      'hello, forge!\n',
+    );
+    expect(runtime.runs[0]?.events).toEqual(['prepare', 'quiesce', 'dispose']);
+  });
+});
+
+function agentWhichCreatesHelloFile(delegate: AgentAdapter): AgentAdapter {
+  return Object.freeze({
+    ...delegate,
+    async openSession(context: Parameters<AgentAdapter['openSession']>[0]) {
+      const session = await delegate.openSession(context);
+      return {
+        sessionId: () => session.sessionId(),
+        async send(message: string, options: {signal: AbortSignal}) {
+          await context.runtime.workspace.writeFile(
+            'hello.txt',
+            Buffer.from('hello, forge!\n', 'utf8'),
+          );
+          return session.send(message, options);
+        },
+      };
+    },
+  });
+}
