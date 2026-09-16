@@ -6,6 +6,7 @@ import {BenchmarkModelError} from './errors.js';
 import {
   parseBenchmarkProfileYaml,
   parseDatasetManifestJson,
+  parseEvalCase,
   parseEvalCaseYaml,
   parseSetupStep,
 } from './parse.js';
@@ -55,6 +56,19 @@ execution_mode: one_shot
 task: One
 initial_prompt: Two
 `),
+    ).toThrow(BenchmarkModelError);
+  });
+
+  it('bounds success guidelines to the persisted result contract', () => {
+    expect(() =>
+      parseEvalCase({
+        schema_version: 1,
+        id: 'safe/oversized-guideline',
+        task: 'Evaluate a bounded guideline.',
+        execution_mode: 'multi_turn',
+        setup: [],
+        success_guidelines: ['x'.repeat(64 * 1024 + 1)],
+      }),
     ).toThrow(BenchmarkModelError);
   });
 

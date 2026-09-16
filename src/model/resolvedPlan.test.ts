@@ -123,6 +123,30 @@ describe('parseResolvedRunPlan', () => {
     ).toThrow(BenchmarkModelError);
   });
 
+  it('rejects completion models when their score-affecting behavior is unused', () => {
+    const withRolePlayer = validPlan();
+    withRolePlayer.role_player = {
+      provider: 'anthropic',
+      model: 'claude-role-player',
+    };
+    expect(() => parseResolvedRunPlan(withRolePlayer)).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining('cannot include a role_player model'),
+      }),
+    );
+
+    const withJudge = validPlan();
+    withJudge.evaluation.judge = {
+      provider: 'anthropic',
+      model: 'claude-judge',
+    };
+    expect(() => parseResolvedRunPlan(withJudge)).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining('cannot include a judge model'),
+      }),
+    );
+  });
+
   it('classifies structural failures as invalid plans', () => {
     const cyclic = validPlan() as unknown as Record<string, unknown>;
     cyclic.self = cyclic;

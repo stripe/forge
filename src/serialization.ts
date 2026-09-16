@@ -66,7 +66,7 @@ function normalize(
         if (child === undefined) {
           throw new TypeError(`Undefined value at ${path}.${key}.`);
         }
-        output[key] = normalize(child, seen, `${path}.${key}`);
+        defineOwnValue(output, key, normalize(child, seen, `${path}.${key}`));
       }
       return output;
     } finally {
@@ -74,6 +74,19 @@ function normalize(
     }
   }
   throw new TypeError(`Non-JSON value at ${path}.`);
+}
+
+function defineOwnValue(
+  output: {[key: string]: SerializableJson},
+  key: string,
+  value: SerializableJson,
+): void {
+  Object.defineProperty(output, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
 }
 
 function enter(value: object, seen: Set<object>, path: string): void {

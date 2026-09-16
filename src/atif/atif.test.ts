@@ -512,7 +512,7 @@ describe('createNormalizedTrajectory', () => {
         error instanceof NormalizedTrajectoryValidationError &&
         error.issues.some((issue) =>
           issue.message.includes(
-            'driver_fallback provenance and fallback completeness',
+            'fallback provenance and fallback completeness',
           ),
         ),
     );

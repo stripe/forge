@@ -42,11 +42,14 @@ try {
       import * as atif from '@stripe/forge/atif/v1.8';
       import * as cli from '@stripe/forge/cli';
       import * as claude from '@stripe/forge/agents/claude-code';
+      import * as anthropic from '@stripe/forge/providers/anthropic';
       import * as docker from '@stripe/forge/runtime/docker';
       import * as setup from '@stripe/forge/setup';
       import * as testing from '@stripe/forge/testing';
 
       assert.equal(typeof forge.executeEval, 'function');
+      assert.equal(typeof forge.preflightEval, 'function');
+      assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
       assert.equal(forge.RUN_RESULT_SCHEMA_VERSION, 1);
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
@@ -56,9 +59,10 @@ try {
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
       assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '1+gateway');
+      assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');
-      assert.ok(Object.keys(testing).length > 0);
+      assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);

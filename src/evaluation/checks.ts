@@ -8,6 +8,7 @@ import {
   WORKSPACE_EVIDENCE_SCHEMA_VERSION,
   type CheckResultV1,
   type EvaluationResultV1,
+  type GuidelineResultV1,
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
@@ -21,6 +22,8 @@ export interface EvaluateRunEvidenceInput {
   readonly plan: ResolvedRunPlanV1;
   readonly trajectory: AtifTrajectoryV1_8;
   readonly workspace: ReadonlyWorkspace;
+  /** Results produced by the configured judge for the plan's exact guidelines. */
+  readonly guidelineResults?: readonly GuidelineResultV1[];
   readonly signal?: AbortSignal;
 }
 
@@ -29,14 +32,26 @@ export interface EvaluatedRunEvidence {
   readonly workspaceEvidence: WorkspaceEvidenceV1;
 }
 
-/** v0 evaluator: canonical ATIF is accepted, while only filesystem checks run. */
+/** Evaluate canonical ATIF and sealed-workspace evidence. */
 export async function evaluateRunEvidence(
   input: EvaluateRunEvidenceInput,
 ): Promise<EvaluatedRunEvidence> {
   input.signal?.throwIfAborted();
-  if (input.plan.evaluation.success_guidelines.length > 0) {
+  const expectedGuidelines = input.plan.evaluation.success_guidelines;
+  if (expectedGuidelines.length > 0 && input.guidelineResults === undefined) {
     throw new UnsupportedEvaluationCapabilityError(
-      'Guideline judging is not implemented in Forge v0.1.',
+      'Guideline results are required to evaluate this run.',
+    );
+  }
+  const guidelineResults = [...(input.guidelineResults ?? [])];
+  if (
+    guidelineResults.length !== expectedGuidelines.length ||
+    guidelineResults.some(
+      (result, index) => result.guideline !== expectedGuidelines[index],
+    )
+  ) {
+    throw new TypeError(
+      'Guideline results must correspond exactly to the resolved plan.',
     );
   }
   // Touch the canonical discriminator so callers cannot accidentally supply a
@@ -55,7 +70,7 @@ export async function evaluateRunEvidence(
   );
   return {
     workspaceEvidence,
-    evaluation: scoreEvaluation([], checks),
+    evaluation: scoreEvaluation(guidelineResults, checks),
   };
 }
 

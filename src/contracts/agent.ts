@@ -113,6 +113,9 @@ export interface AgentAdapter {
   /** Initialize adapter-owned state before authored setup executes. */
   prepare(context: AgentPrepareContext): Promise<void>;
   openSession(context: AgentSessionContext): Promise<AgentSession>;
-  /** Read exact session evidence only after runtime mutation has stopped. */
+  /**
+   * Read exact session evidence only after runtime mutation has stopped.
+   * Completed-run provenance must identify `context.sessionId`.
+   */
   collectEvidence(context: AgentEvidenceContext): Promise<NormalizedTrajectory>;
 }

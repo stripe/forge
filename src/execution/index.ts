@@ -2,6 +2,8 @@ export {
   executeEval,
   FORGE_VERSION,
   type ExecuteEvalInput,
+  preflightEval,
+  type PreflightEvalInput,
 } from './execute.js';
 export {
   ForgeExecutionError,

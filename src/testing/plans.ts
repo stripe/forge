@@ -2,6 +2,7 @@ import {parseResolvedRunPlan} from '../model/parse.js';
 import type {
   AgentSelectionV1,
   ChecksV1,
+  ModelRefV1,
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
@@ -14,6 +15,13 @@ export interface TestResolvedRunPlanOptions {
   readonly forgeVersion?: string;
   readonly caseId?: string;
   readonly prompt?: string;
+  readonly mode?: 'multi_turn' | 'one_shot';
+  readonly context?: string;
+  readonly initialPrompt?: string;
+  readonly maxTurns?: number;
+  readonly successGuidelines?: readonly string[];
+  readonly rolePlayer?: ModelRefV1;
+  readonly judge?: ModelRefV1;
   readonly agent?: AgentSelectionV1;
   readonly caseSetup?: readonly SetupStepV1[];
   readonly treatment?: string;
@@ -27,6 +35,7 @@ export function createTestResolvedRunPlan(
 ): ResolvedRunPlanV1 {
   const caseId = options.caseId ?? 'testing/example';
   const prompt = options.prompt ?? 'Complete the test task.';
+  const mode = options.mode ?? 'one_shot';
   const treatment = options.treatment ?? 'baseline';
   const agent = options.agent ?? {
     adapter: 'test-agent',
@@ -37,6 +46,9 @@ export function createTestResolvedRunPlan(
   const treatmentSetup = [...(options.treatmentSetup ?? [])];
   const setup = [...caseSetup, ...treatmentSetup];
   const checks = options.checks;
+  const successGuidelines = [...(options.successGuidelines ?? [])];
+  const initialPrompt = options.initialPrompt ?? (mode === 'one_shot' ? prompt : undefined);
+  const maxTurns = mode === 'one_shot' ? 1 : (options.maxTurns ?? 10);
 
   return parseResolvedRunPlan({
     schema_version: 1,
@@ -67,25 +79,47 @@ export function createTestResolvedRunPlan(
     case: {
       schema_version: 1,
       id: caseId,
-      initial_prompt: prompt,
-      execution_mode: 'one_shot',
+      ...(mode === 'one_shot' ? {initial_prompt: initialPrompt!} : {task: prompt}),
+      ...(mode === 'multi_turn' && initialPrompt !== undefined
+        ? {initial_prompt: initialPrompt}
+        : {}),
+      ...(options.context === undefined ? {} : {context: options.context}),
+      execution_mode: mode,
+      ...(mode === 'multi_turn' ? {max_turns: maxTurns} : {}),
       setup: caseSetup,
-      success_guidelines: [],
+      success_guidelines: successGuidelines,
       ...(checks === undefined ? {} : {checks}),
     },
     treatment: {id: treatment, setup: treatmentSetup},
     setup,
     interaction: {
-      mode: 'one_shot',
-      initial_prompt: prompt,
-      initial_prompt_source: 'case.initial_prompt',
-      effective_prompt: prompt,
-      max_turns: 1,
+      mode,
+      ...(mode === 'one_shot'
+        ? {
+            initial_prompt: initialPrompt!,
+            initial_prompt_source: 'case.initial_prompt' as const,
+            effective_prompt: initialPrompt!,
+          }
+        : {
+            task: prompt,
+            ...(options.context === undefined ? {} : {context: options.context}),
+            ...(initialPrompt === undefined ? {} : {initial_prompt: initialPrompt}),
+            initial_prompt_source:
+              initialPrompt === undefined
+                ? ('case.task' as const)
+                : ('case.initial_prompt' as const),
+            effective_prompt: initialPrompt ?? prompt,
+          }),
+      max_turns: maxTurns,
     },
     evaluation: {
-      success_guidelines: [],
+      success_guidelines: successGuidelines,
       ...(checks === undefined ? {} : {checks}),
+      ...(options.judge === undefined ? {} : {judge: {...options.judge}}),
     },
+    ...(options.rolePlayer === undefined
+      ? {}
+      : {role_player: {...options.rolePlayer}}),
     agent: {...agent},
     runtime: {
       adapter: 'docker',

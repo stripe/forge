@@ -6,7 +6,7 @@ import {afterEach, describe, it} from 'node:test';
 import {expect} from '../../test/support/expect.js';
 
 import {sha256Digest} from '../model/hashes.js';
-import {canonicalJsonSha256} from '../serialization.js';
+import {canonicalJsonSha256, serializeCanonicalJson} from '../serialization.js';
 import {createArtifactStore, verifyCompletedRun} from './localStore.js';
 import {parseRunResult} from './parse.js';
 import {
@@ -17,6 +17,13 @@ import {
 } from './types.js';
 
 const roots: string[] = [];
+const oneShotInteraction = {
+  schema_version: 1,
+  mode: 'one_shot',
+  stop_reason: 'task_complete',
+  turns: [{turn: 1, user: 'do it', assistant: 'done', tool_calls: []}],
+  failure: null,
+} as const;
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})));
@@ -29,13 +36,17 @@ describe('local artifact store', () => {
     const store = createArtifactStore({root});
     const transaction = await store.begin('run-1');
     const body = Buffer.from('{}\n');
+    const interactionBody = jsonBody(oneShotInteraction);
     await transaction.write({path: 'plan.json', body, mediaType: 'application/json'});
-    const artifacts: ArtifactDescriptorV1[] = [{
-      path: 'plan.json',
-      media_type: 'application/json',
-      size_bytes: body.byteLength,
-      sha256: `sha256:${'ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356'}`,
-    }];
+    await transaction.write({
+      path: 'interaction.json',
+      body: interactionBody,
+      mediaType: 'application/json',
+    });
+    const artifacts: ArtifactDescriptorV1[] = [
+      descriptorFor('plan.json', body),
+      descriptorFor('interaction.json', interactionBody),
+    ];
     const result = resultFor(artifacts);
     const committed = await transaction.commit(
       result as unknown as Readonly<Record<string, unknown>>,
@@ -105,7 +116,176 @@ describe('local artifact store', () => {
       }),
     ).toThrow('Evidence provenance does not match the recorded agent adapter');
   });
+
+  it('strictly parses interaction.json and verifies its result summary', async () => {
+    const missingLocation = await commitArtifacts([]);
+    await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
+      'missing canonical artifact interaction.json',
+    );
+
+    const invalidLocation = await commitArtifacts([
+      {
+        path: 'interaction.json',
+        body: jsonBody({...oneShotInteraction, undeclared: true}),
+      },
+    ]);
+    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
+      'Completed interaction.json does not match its schema.',
+    );
+
+    const mismatchedLocation = await commitArtifacts(
+      [{path: 'interaction.json', body: jsonBody(oneShotInteraction)}],
+      (result) => ({
+        ...result,
+        interaction: {...result.interaction, turn_count: 2},
+      }),
+    );
+    await expect(verifyCompletedRun(mismatchedLocation)).rejects.toThrow(
+      'interaction.json does not match the completed result summary.',
+    );
+  });
+
+  it('requires judge evidence exactly when guidelines were judged', async () => {
+    const missingLocation = await commitArtifacts(
+      [{path: 'interaction.json', body: jsonBody(oneShotInteraction)}],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
+      'missing judge-evidence.json',
+    );
+
+    const trajectory = jsonBody({
+      schema_version: 'ATIF-v1.8',
+      agent: {name: 'test-agent', version: '1'},
+      steps: [{step_id: 1, source: 'user', message: 'do it'}],
+    });
+    const unexpectedLocation = await commitArtifacts([
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: trajectory},
+      {path: 'judge-evidence.json', body: judgeEvidenceBody(trajectory)},
+    ]);
+    await expect(verifyCompletedRun(unexpectedLocation)).rejects.toThrow(
+      'without judged guidelines contains judge-evidence.json',
+    );
+  });
+
+  it('strictly parses judge evidence and binds it to exact trajectory bytes', async () => {
+    const trajectory = jsonBody({
+      schema_version: 'ATIF-v1.8',
+      agent: {name: 'test-agent', version: '1'},
+      steps: [{step_id: 1, source: 'user', message: 'do it'}],
+    });
+    const validLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {path: 'judge-evidence.json', body: judgeEvidenceBody(trajectory)},
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+
+    const mismatchedLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {
+          path: 'judge-evidence.json',
+          body: judgeEvidenceBody(Buffer.from('different trajectory bytes')),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(mismatchedLocation)).rejects.toThrow(
+      'trajectory_sha256 does not match trajectory.json',
+    );
+
+    const validJudgeEvidence = JSON.parse(
+      judgeEvidenceBody(trajectory).toString('utf8'),
+    ) as object;
+    const invalidLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {
+          path: 'judge-evidence.json',
+          body: jsonBody({
+            ...validJudgeEvidence,
+            undeclared: true,
+          }),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
+      'Completed judge-evidence.json does not match its schema.',
+    );
+  });
 });
+
+interface TestArtifact {
+  readonly path: string;
+  readonly body: Buffer;
+}
+
+async function commitArtifacts(
+  artifacts: readonly TestArtifact[],
+  transform: (result: RunResultV1) => RunResultV1 = (result) => result,
+): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
+  roots.push(root);
+  const transaction = await createArtifactStore({root}).begin('run-1');
+  for (const artifact of artifacts) {
+    await transaction.write({...artifact, mediaType: 'application/json'});
+  }
+  const descriptors = artifacts.map(({path: artifactPath, body}) =>
+    descriptorFor(artifactPath, body),
+  );
+  const committed = await transaction.commit(
+    transform(resultFor(descriptors)) as unknown as Readonly<Record<string, unknown>>,
+  );
+  return committed.location;
+}
+
+function descriptorFor(
+  artifactPath: string,
+  body: Buffer,
+): ArtifactDescriptorV1 {
+  return {
+    path: artifactPath,
+    media_type: 'application/json',
+    size_bytes: body.byteLength,
+    sha256: sha256Digest(body),
+  };
+}
+
+function jsonBody(value: unknown): Buffer {
+  return Buffer.from(serializeCanonicalJson(value), 'utf8');
+}
+
+function judgeEvidenceBody(trajectory: Uint8Array): Buffer {
+  return jsonBody({
+    schema_version: 1,
+    prompt_version: '1',
+    trajectory_sha256: sha256Digest(trajectory),
+    workspace: {entries: [], complete: true, warnings: []},
+  });
+}
+
+function withPassingGuideline(result: RunResultV1): RunResultV1 {
+  return {
+    ...result,
+    evaluation: {
+      ...result.evaluation,
+      score: 1,
+      guidelines_passed: 1,
+      guidelines_total: 1,
+      guidelines: [{guideline: 'The task is complete.', passed: true, explanation: 'Met.'}],
+    },
+  };
+}
 
 function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
   return {
@@ -133,6 +313,9 @@ function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
       session_id: 'session',
       cost_usd: null,
     },
+    completion_calls: [],
+    interaction: {mode: 'one_shot', turn_count: 1},
+    failure: null,
     evidence: {
       format: 'atif',
       schema_version: 'ATIF-v1.8',
@@ -161,7 +344,7 @@ function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
     started_at: '2026-09-15T00:00:00.000Z',
     completed_at: '2026-09-15T00:00:01.000Z',
     duration_ms: 1000,
-    stop_reason: 'completed',
+    stop_reason: 'task_complete',
     artifact_set_sha256: canonicalJsonSha256(artifacts),
     artifacts,
     supplemental_artifacts: [],

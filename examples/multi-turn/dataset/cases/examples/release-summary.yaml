@@ -1,0 +1,19 @@
+schema_version: 1
+id: examples/release-summary
+display_name: Multi-turn release summary
+task: Complete a two-step release handoff. The coding assistant must first ask for the exact status sentence. Once asked, provide "Forge is ready for multi-turn evaluation." and have it create release-summary.txt containing exactly that sentence followed by a newline.
+context: You are a developer checking a small release handoff. Do not volunteer the exact status sentence until the coding assistant asks for it.
+initial_prompt: I need a release-summary.txt for this handoff. Before changing any files, ask me for the exact status sentence it should contain.
+execution_mode: multi_turn
+max_turns: 4
+setup: []
+success_guidelines:
+  - The agent used the conversation to obtain the missing status sentence before creating the accurate release-summary deliverable, and it left no unresolved work.
+checks:
+  files_created:
+    - release-summary.txt
+  file_checks:
+    - description: release-summary.txt has the exact requested contents
+      file: release-summary.txt
+      exists: true
+      contains: '^Forge is ready for multi-turn evaluation\.\n$'

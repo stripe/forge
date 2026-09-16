@@ -285,6 +285,13 @@ describe('Forge CLI', () => {
     expect(composition.runtime.id).toBe('forge/docker');
     expect([...composition.agents.keys()]).toEqual(['claude-code']);
     expect(composition.agents.get('claude-code')?.version).toBe('1');
+    expect([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()])
+      .toEqual(['anthropic']);
+    expect(
+      (composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
+        'anthropic',
+      )?.version,
+    ).toBe('1');
     expect([...composition.setupHandlers.keys()].sort()).toEqual([
       'forge/command@1',
       'forge/write@1',
@@ -315,6 +322,11 @@ describe('Forge CLI', () => {
     const claude = composition.agents.get('claude-code');
     expect(claude).toBeDefined();
     expect(claude!.version).toBe('1+gateway');
+    expect(
+      (composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
+        'anthropic',
+      )?.version,
+    ).toBe('1+messages-compatible');
     const requirements = claude!.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',

@@ -11,6 +11,17 @@ describe('serializeCanonicalJson', () => {
     );
   });
 
+  it('preserves reserved JSON keys without invoking object prototype setters', () => {
+    const input = JSON.parse(
+      '{"z":1,"__proto__":{"polluted":true},"constructor":"data"}',
+    ) as unknown;
+
+    expect(serializeCanonicalJson(input)).toBe(
+      '{"__proto__":{"polluted":true},"constructor":"data","z":1}\n',
+    );
+    expect(({} as {polluted?: boolean}).polluted).toBeUndefined();
+  });
+
   it('rejects undefined and cycles', () => {
     expect(() => serializeCanonicalJson({missing: undefined})).toThrow('Undefined');
     const cyclic: {self?: unknown} = {};

@@ -5,7 +5,8 @@
 `@stripe/forge` is a public, portable execution harness for reproducible
 coding-agent evaluations. It owns the benchmark semantics that should be shared
 by every host: dataset verification, planning, automated execution, evidence
-normalization, evaluation, and atomic local results.
+normalization, one-shot and Ava-driven multi-turn interaction, deterministic
+checks, guideline judging, and atomic local results.
 
 The package is also an extension framework. Environment-specific runtimes,
 credentials, setup actions, agents, storage, observation, and publication must
@@ -22,11 +23,16 @@ exist.
 ### Keep cases separate from experiments
 
 - An eval case defines **what** is evaluated: task or initial prompt, context,
-  invariant case setup, checks, guidelines, and example answers.
+  invariant case setup, interaction mode and turn limit, checks, guidelines,
+  and example answers.
 - A benchmark profile defines **how** cases run: dataset pin, treatments, agents,
   models, runtime, limits, repetitions, retries, and the experiment matrix.
 - A run selection chooses one case, treatment, agent/model, and repetition from
   the profile.
+- A selected `multi_turn` case requires an explicit `models.role_player`; a
+  selected case with non-empty success guidelines requires an explicit
+  `models.judge`. Do not infer either from the coding-agent selection or an
+  ambient provider default.
 - A resolved run plan is the complete, validated, ambient-free input to one run.
   Defaults and provenance belong in the plan, not in runtime-side inference.
 - Do not introduce a public format that combines case definitions with
@@ -47,12 +53,23 @@ independent feature flags.
   of host-private implementations.
 - Prefer narrow capability interfaces and composition over subclassing or
   environment checks in the shared engine.
-- Setup and agent `requirements()` methods are pure preflight declarations.
-  They must not resolve credentials, allocate resources, mutate workspaces, or
-  inspect ambient state.
+- Setup, agent, and completion-provider `requirements()` methods are pure
+  preflight declarations. They must not resolve credentials, allocate
+  resources, mutate workspaces, perform provider calls, or inspect ambient
+  state. A completion provider's optional credential-aware `preflight()` runs
+  only during execution, after resolution and before runtime allocation.
 - Plans and recorded provenance must truthfully identify the runtime, agent,
-  model, and adapter behavior used by the run. An injected adapter must not
-  silently execute behavior that contradicts the plan.
+  coding-agent model, harness models, providers, and adapter behavior used by
+  the run. An injected capability must not silently execute behavior that
+  contradicts the plan.
+- `AgentAdapter` owns coding-agent execution, persistent sessions, and native
+  evidence. `CompletionProvider` owns host-side completion transport for the
+  explicit `role_player` and `judge` purposes. It receives no workspace or
+  command authority and must not implement or replace Ava.
+- Ava's state machine and prompt semantics are engine-owned. Keep its private
+  need model out of agent messages and judge inputs. Changes to its bounds,
+  retries, terminal decisions, or audit record are score-affecting behavior and
+  require coordinated tests and documentation.
 - Interactive or human execution is outside the public automated controller,
   but mode-neutral evidence evaluation should remain reusable by such hosts.
 
@@ -60,14 +77,17 @@ independent feature flags.
 
 The required lifecycle order is:
 
-1. Parse, validate, and perform pure capability preflight.
-2. Resolve only explicitly declared credentials.
-3. Prepare the runtime and agent.
+1. Parse, validate, and perform pure capability preflight, including completion
+   provider selection and requirements.
+2. Resolve only explicitly declared runtime and completion credentials, then
+   run optional completion-provider preflight.
+3. Prepare the runtime and coding agent.
 4. Apply case setup, followed by treatment setup.
 5. Run the interaction.
 6. Quiesce all mutation and obtain a sealed runtime.
 7. Select exact run-owned evidence and normalize it to the pinned ATIF version.
-8. Evaluate sealed workspace and transcript evidence.
+8. Evaluate sealed workspace and transcript evidence, including guideline
+   judging when configured.
 9. Stage deterministic artifacts.
 10. Dispose runtime resources.
 11. Commit the completed result atomically.
@@ -77,7 +97,15 @@ Do not read mutable workspace or session evidence before quiescence. Evidence
 code receives sealed, read-only capabilities. If exact native evidence is
 unavailable or incomplete, use the completed driver turns as an explicit
 fallback and record the loss of completeness; never silently select the newest
-unrelated session.
+unrelated session. A role-player failure before the first agent turn uses the
+explicit system-only fallback trajectory and a null session identity.
+
+`interaction.json` is a post-run audit artifact, never an execution input or
+judge input. `judge-evidence.json` exists only when guidelines were judged and
+must bind the prompt version, redacted trajectory digest, and exact bounded
+workspace evidence made available to the judge. Collect judge workspace text
+only from the sealed runtime and preserve all truncation/unavailability
+warnings.
 
 Cleanup must run after failure or cancellation and must not depend on an already
 aborted execution signal. Uncommitted artifact transactions must be rolled back.
@@ -89,8 +117,13 @@ Observers are non-authoritative and may not affect the run result.
   never secret values.
 - Never copy the ambient host environment wholesale into a runtime.
 - Keep setup and agent credential scopes separate.
+- Keep completion-provider credentials host-side and purpose-specific. They do
+  not become runtime environment values unless a runtime capability separately
+  declares the same opaque reference.
 - Avoid secrets in argv, errors, logs, transcripts, and artifacts. Preserve the
-  existing redaction and secret-scanning boundaries when adding new outputs.
+  existing redaction and secret-scanning boundaries across completion prompts
+  and responses, transcripts, interaction audit, judge evidence, and results
+  when adding new outputs.
 - Dataset inputs must remain manifest-listed, hash-verified, bounded, regular
   files. Do not weaken traversal, symlink, special-file, or extra-file checks.
 - Commands use argv vectors. Shell semantics must be requested explicitly by
@@ -112,6 +145,11 @@ Observers are non-authoritative and may not affect the run result.
 - Preserve scoring semantics unless a versioned format change explicitly alters
   them: score is the guideline pass ratio, while a checks-only passing run has
   `status: passed` and numeric `score: 0`.
+- Preserve interaction failure semantics: Ava exhaustion commits
+  `role_player_error`; malformed judge output exhausts retries and fails that
+  guideline closed; exhausted judge transport failures abort without a
+  completed commit. Profile-level `retries` remains distinct from these fixed
+  completion-attempt policies.
 
 ## Public API and TypeScript conventions
 
@@ -129,6 +167,9 @@ Observers are non-authoritative and may not affect the run result.
 - Root exports come from `src/index.ts`; specialized implementations use
   documented subpaths. When adding or changing an entry point, update
   `package.json`, root/subpath export tests, the package smoke test, and README.
+- Keep the built-in host completion transport on
+  `@stripe/forge/providers/anthropic`; provider-specific request and
+  authentication details do not belong in the root completion contract.
 - Consumers must not depend on undeclared `dist/` paths.
 - Do not add a bundler merely to build the library. The package builds with
   `tsc`; `dist/` is generated output and must not be edited by hand.
@@ -141,7 +182,11 @@ Observers are non-authoritative and may not affect the run result.
 - `src/planning`: matrix expansion, case-file selection, and resolved plans.
 - `src/contracts`: host-supplied capability interfaces.
 - `src/execution`: the shared automated lifecycle and phase/error semantics.
+- `src/interaction`: the engine-owned Ava role player, conversation loop,
+  prompts, and interaction audit semantics.
 - `src/agents`: public agent adapters and native-evidence normalization.
+- `src/providers`: public host-side completion transports, currently Anthropic
+  Messages and compatible endpoints.
 - `src/atif`: the pinned ATIF surface and upstream provenance.
 - `src/runtime`: portable runtime mechanics and the public Docker adapter.
 - `src/setup`: built-in actions and ordered setup execution.
@@ -169,10 +214,14 @@ pnpm build
 pnpm test:types
 pnpm test:package
 pnpm check
+# Explicitly opt in and provide provider credentials before running:
+FORGE_LIVE=1 ANTHROPIC_API_KEY=... pnpm test:live
 ```
 
 Do not run a live Docker/agent example unless the task explicitly requires it.
 Live runs need network access and credentials, and model calls may incur cost.
+Keep Docker conformance, one-shot execution, multi-turn interaction, judging,
+and artifact verification in the repository's single live-suite path.
 
 Run the narrowest relevant test while iterating. Run `pnpm check` before handing
 off a change that affects public types, exports, execution, packaging, or release
@@ -181,6 +230,10 @@ artifacts.
 Changes should test successful behavior and the important failure boundary:
 validation before authority, cancellation, bounded I/O, cleanup, rollback,
 artifact collision/path safety, secret handling, and exact-session fallback.
+For Ava and judging, cover zero-turn role-player failure, persistent session
+identity, final-turn assessment, retry exhaustion, fail-closed malformed judge
+output, transport abort, bounded sealed-workspace evidence, completion-call
+summaries, and conditional canonical artifacts.
 
 When changing checked-in examples, update all dependent file sizes and SHA-256
 digests in the dataset manifest and profile, plus any mirrored README snippets.

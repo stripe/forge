@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {
   ATIF_NORMALIZATION_VERSION,
   ATIF_SCHEMA_VERSION,
+  createNormalizedTrajectory,
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
   type AtifNormalizationProvenance,
@@ -14,6 +15,7 @@ import type {
   AgentEvidenceFallbackTurn,
   AgentPrepareRuntime,
   AgentRuntimeRequirements,
+  AgentSession,
   AgentSessionRuntime,
   AgentTurn,
 } from '../contracts/agent.js';
@@ -36,20 +38,48 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.js';
-import {evaluateRunEvidence} from '../evaluation/index.js';
-import {parseResolvedRunPlan, type ResolvedRunPlanV1} from '../model/index.js';
+import {
+  GUIDELINE_JUDGE_PROMPT_VERSION,
+  collectJudgeWorkspaceEvidence,
+  evaluateRunEvidence,
+  judgeGuidelines,
+  renderJudgeWorkspaceEvidence,
+  type JudgeWorkspaceEvidenceV1,
+} from '../evaluation/index.js';
+import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
+import {
+  AVA_PROMPT_VERSION,
+  AvaRolePlayer,
+  runConversation,
+  type AvaConversationAudit,
+  type ConversationTurn,
+} from '../interaction/index.js';
+import {snapshotAgentToolCalls} from '../interaction/conversation.js';
+import {
+  parseResolvedRunPlan,
+  type JsonValue,
+  type ResolvedRunPlanV1,
+} from '../model/index.js';
 import {
   resolvedRunPlanSha256,
   serializeResolvedRunPlan,
 } from '../planning/index.js';
 import {
   RUN_RESULT_SCHEMA_VERSION,
+  parseInteractionArtifact,
+  parseJudgeEvidence,
   parseRunResult,
   type AtifEvidenceProvenanceV1,
   type ArtifactDescriptorV1,
+  type AvaDecisionV1,
   type CompletedRunV1,
+  type CompletionCallSummaryV1,
   type EvaluationResultV1,
+  type InteractionArtifactV1,
+  type JudgeEvidenceV1,
+  type RolePlayerErrorV1,
   type RunResultV1,
+  type RunStopReasonV1,
   type RunWarningV1,
 } from '../results/index.js';
 import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
@@ -62,6 +92,12 @@ import {
 import {executionError, ForgeExecutionError, throwIfAborted} from './errors.js';
 import {createRunEventEmitter} from './events.js';
 import type {RunPhase} from '../contracts/observability.js';
+import {
+  completionBindingsForPlan,
+  prepareCompletionRuntime,
+  type CompletionBinding,
+  type PreparedCompletionRuntime,
+} from './completionRuntime.js';
 
 export const FORGE_VERSION = '0.1.0' as const;
 
@@ -74,8 +110,56 @@ export interface ExecuteEvalInput {
   readonly now?: () => Date;
 }
 
+interface ExecuteEvalTestHooks {
+  readonly waitBeforeCompletionRetry?: (
+    purpose: 'role_player' | 'judge',
+    failedAttempt: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
+}
+
+export interface PreflightEvalInput {
+  readonly plan: ResolvedRunPlanV1;
+  readonly composition: ForgeComposition;
+}
+
+interface EvalPreflight {
+  readonly agent: AgentAdapter;
+  readonly setupExecutor: ReturnType<typeof createSetupExecutor>;
+  readonly requirements: AgentRuntimeRequirements;
+  readonly environmentSpecification: ScopedEnvironmentSpecification;
+  readonly completionBindings: readonly CompletionBinding[];
+}
+
+/**
+ * Validate a resolved plan against one composition without resolving
+ * credentials, allocating a runtime, or performing any other authority-bearing
+ * operation. CLI validation and execution share this exact boundary.
+ */
+export function preflightEval(request: PreflightEvalInput): void {
+  try {
+    const plan = parseResolvedRunPlan(request.plan);
+    buildEvalPreflight(plan, request.composition);
+  } catch (error) {
+    throw executionError(
+      'invalid_plan',
+      'preflight',
+      'Forge could not execute this plan with the supplied composition.',
+      error,
+    );
+  }
+}
+
 /** Execute one already-resolved run and return only after atomic commit. */
 export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1> {
+  return executeEvalWithTestHooks(request, {});
+}
+
+/** @internal Unexported package test seam; production always uses fixed waits. */
+export async function executeEvalWithTestHooks(
+  request: ExecuteEvalInput,
+  hooks: ExecuteEvalTestHooks,
+): Promise<CompletedRunV1> {
   let input: ExecuteEvalInput;
   try {
     input = {...request, plan: parseResolvedRunPlan(request.plan)};
@@ -108,25 +192,7 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
       phase = 'preflight';
       throwIfAborted(signal, phase);
       assertRunId(input.runId);
-      assertExecutableV0Plan(input.plan);
-      const agent = selectedAgent(input.plan, input.composition);
-      const setupExecutor = setupExecutorFor(input.composition);
-      setupExecutor.preflight(input.plan.setup);
-      const requirements = normalizeAgentRequirements(
-        agent.requirements(input.plan.agent),
-      );
-      const setupSpecifications = setupEnvironmentSpecifications(
-        input.plan,
-        input.composition,
-      );
-      const environmentSpecification = mergeEnvironmentSpecifications([
-        {scope: 'agent', specification: requirements.environment},
-        ...setupSpecifications.map((specification) => ({
-          scope: 'setup' as const,
-          specification,
-        })),
-      ]);
-      return {agent, setupExecutor, requirements, environmentSpecification};
+      return buildEvalPreflight(input.plan, input.composition);
     });
 
     const environment = await resolveEnvironment(
@@ -134,7 +200,27 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
       preflight.environmentSpecification,
       signal,
     );
-    const secrets = credentialValues(environment);
+    let completions: PreparedCompletionRuntime;
+    try {
+      completions = await prepareCompletionRuntime({
+        runId: input.runId,
+        bindings: preflight.completionBindings,
+        credentialResolver: input.composition.credentialResolver,
+        redactionSecrets: credentialValues(environment),
+        signal,
+      });
+    } catch (error) {
+      throw executionError(
+        'credential_failed',
+        'preflight',
+        'Forge could not prepare the completion providers required by this run.',
+        error,
+      );
+    }
+    const secrets = uniqueStrings([
+      ...credentialValues(environment),
+      ...completions.secrets,
+    ]);
 
     prepared = await events.phase('runtime_prepare', async () => {
       phase = 'runtime_prepare';
@@ -172,10 +258,10 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
       });
     });
 
-    const {session, turn} = await events.phase('interaction', async () => {
+    const interaction = await events.phase('interaction', async () => {
       phase = 'interaction';
       throwIfAborted(signal, phase);
-      const currentSession = await preflight.agent.openSession({
+      const session = await preflight.agent.openSession({
         runId: input.runId,
         plan: input.plan,
         selection: input.plan.agent,
@@ -183,48 +269,45 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
         inputs: input.composition.inputProvider,
         signal,
       });
-      const currentTurn = await currentSession.send(
-        input.plan.interaction.effective_prompt,
-        {signal},
+      return executeInteraction(
+        input.plan,
+        session,
+        completions,
+        signal,
+        hooks.waitBeforeCompletionRetry,
       );
-      return {session: currentSession, turn: currentTurn};
     });
-    const sessionId = session.sessionId() ?? turn.sessionId;
-    if (!sessionId) {
-      throw new ForgeExecutionError(
-        'agent_failed',
-        'interaction',
-        'Agent completed without a session identity.',
-      );
-    }
 
     sealed = await events.phase('quiesce', async () => {
       phase = 'quiesce';
       return prepared!.quiesce();
     });
 
-    const fallbackTurns: readonly AgentEvidenceFallbackTurn[] = [
-      {
-        user: input.plan.interaction.effective_prompt,
-        assistant: turn.text,
-        toolCalls: turn.toolCalls,
-      },
-    ];
     const nativeEvidence = await events.phase('evidence', async () => {
       phase = 'evidence';
       throwIfAborted(signal, phase);
+      if (interaction.turns.length === 0) {
+        return rolePlayerErrorEvidence(input.plan, preflight.agent);
+      }
+      if (interaction.sessionId === null) {
+        throw new TypeError('A completed agent turn requires a session identity.');
+      }
       const evidence = parseNormalizedTrajectory(
         await preflight.agent.collectEvidence({
           runId: input.runId,
           plan: input.plan,
           selection: input.plan.agent,
           runtime: projectAgentEvidenceRuntime(sealed!),
-          sessionId,
-          fallbackTurns,
+          sessionId: interaction.sessionId,
+          fallbackTurns: interaction.fallbackTurns,
           signal,
         }),
       );
-      assertEvidenceMatchesRun(evidence, preflight.agent, sessionId);
+      assertEvidenceMatchesRun(
+        evidence,
+        preflight.agent,
+        interaction.sessionId,
+      );
       return evidence;
     });
     const redacted = redactNormalizedTrajectory(nativeEvidence, secrets);
@@ -232,18 +315,93 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
       throwIfAborted(signal, phase);
-      return evaluateRunEvidence({
+      const guidelines = input.plan.evaluation.success_guidelines;
+      let guidelineResults = undefined;
+      let judgeEvidence: JudgeEvidenceV1 | undefined;
+      if (guidelines.length > 0) {
+        const collected = await collectJudgeWorkspaceEvidence(
+          sealed!.workspace,
+          {signal},
+        );
+        const safeWorkspace = redactJudgeWorkspaceEvidence(
+          collected.evidence,
+          secrets,
+        );
+        const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
+        const trajectoryJson = serializeAtifTrajectory(
+          redacted.evidence.trajectory,
+        );
+        guidelineResults = await judgeGuidelines(
+          {
+            transcriptJson: serializeCanonicalJson(
+              redacted.evidence.trajectory.steps,
+            ),
+            guidelines,
+            ...(input.plan.evaluation.example_answer === undefined
+              ? {}
+              : {exampleAnswer: input.plan.evaluation.example_answer}),
+            ...(safeWorkspaceText.length === 0
+              ? {}
+              : {workspaceText: safeWorkspaceText}),
+            signal,
+          },
+          async (request) =>
+            (
+              await completions.invoke(
+                'judge',
+                request,
+                request.signal,
+              )
+            ).content,
+          hooks.waitBeforeCompletionRetry === undefined
+            ? {}
+            : {
+                waitBeforeRetry: (attempt, retrySignal) =>
+                  hooks.waitBeforeCompletionRetry!(
+                    'judge',
+                    attempt,
+                    retrySignal ?? signal,
+                  ),
+              },
+        );
+        judgeEvidence = parseJudgeEvidence({
+          schema_version: 1,
+          prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
+          trajectory_sha256: canonicalBytesSha256(
+            Buffer.from(trajectoryJson, 'utf8'),
+          ),
+          workspace: {
+            entries: safeWorkspace.entries.map((entry) => ({
+              path: entry.path,
+              content: entry.content,
+              truncated: entry.truncated,
+            })),
+            complete: safeWorkspace.complete,
+            warnings: safeWorkspace.warnings.map((warning) => ({...warning})),
+          },
+        });
+      }
+      const result = await evaluateRunEvidence({
         plan: input.plan,
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
+        ...(guidelineResults === undefined ? {} : {guidelineResults}),
         signal,
       });
+      return {...result, judgeEvidence};
     });
+
+    const interactionArtifact = redactInteractionArtifact(
+      buildInteractionArtifact(input.plan, interaction),
+      secrets,
+    );
 
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
       redacted.evidence,
+      interactionArtifact,
       evaluated.workspaceEvidence,
+      evaluated.judgeEvidence,
       evaluated.evaluation,
     );
     for (const artifact of coreArtifacts) {
@@ -254,14 +412,14 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
       input,
       agent: preflight.agent,
       runtime: sealed,
-      turn,
-      sessionId,
+      interaction,
+      completionCalls: completions.calls,
       evidence: redacted.evidence,
       redactionCount: redacted.replacements,
       evaluation: evaluated.evaluation,
       coreDescriptors,
       supplementalDescriptors: [],
-      warnings: [],
+      warnings: rolePlayerWarnings(interaction.failure),
       startedAt,
       completedAt: now(),
     });
@@ -283,17 +441,18 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
       }
     });
 
-    const warnings: RunWarningV1[] = [];
+    const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
     await events.phase('runtime_dispose', async () => {
       phase = 'runtime_dispose';
       try {
         await prepared!.dispose();
       } catch {
-        warnings.push({
+        const cleanupWarning: RunWarningV1 = {
           code: 'runtime_cleanup_failed',
           message: 'Runtime cleanup failed after canonical artifacts were staged.',
-        });
-        await events.warning('runtime_dispose', warnings[0]!.message);
+        };
+        warnings.push(cleanupWarning);
+        await events.warning('runtime_dispose', cleanupWarning.message);
       } finally {
         runtimeDisposed = true;
       }
@@ -303,8 +462,8 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
       input,
       agent: preflight.agent,
       runtime: sealed,
-      turn,
-      sessionId,
+      interaction,
+      completionCalls: completions.calls,
       evidence: redacted.evidence,
       redactionCount: redacted.replacements,
       evaluation: evaluated.evaluation,
@@ -346,7 +505,267 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
   }
 }
 
-function assertExecutableV0Plan(plan: ResolvedRunPlanV1): void {
+interface ExecutedInteraction {
+  readonly turns: readonly ConversationTurn[];
+  readonly fallbackTurns: readonly AgentEvidenceFallbackTurn[];
+  readonly stopReason: RunStopReasonV1;
+  readonly totalCostUsd: number | null;
+  readonly sessionId: string | null;
+  readonly avaAudit?: AvaConversationAudit;
+  readonly failure: RolePlayerErrorV1 | null;
+}
+
+async function executeInteraction(
+  plan: ResolvedRunPlanV1,
+  session: AgentSession,
+  completions: PreparedCompletionRuntime,
+  signal: AbortSignal,
+  waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
+): Promise<ExecutedInteraction> {
+  let lastTurnSessionId: string | undefined;
+  const trackedSession: AgentSession = Object.freeze({
+    sessionId: () => session.sessionId(),
+    async send(
+      message: string,
+      options: {signal: AbortSignal},
+    ): Promise<AgentTurn> {
+      const declaredBeforeTurn = session.sessionId();
+      if (
+        declaredBeforeTurn !== undefined &&
+        (!isSafeSessionIdentity(declaredBeforeTurn) ||
+          (lastTurnSessionId !== undefined &&
+            declaredBeforeTurn !== lastTurnSessionId))
+      ) {
+        throw new TypeError(
+          'Agent changed session identity before a completed turn.',
+        );
+      }
+      const turn = snapshotAgentTurn(await session.send(message, options));
+      if (
+        (declaredBeforeTurn !== undefined &&
+          declaredBeforeTurn !== turn.sessionId) ||
+        (lastTurnSessionId !== undefined &&
+          lastTurnSessionId !== turn.sessionId)
+      ) {
+        throw new TypeError('Agent changed session identity between turns.');
+      }
+      const declaredSessionId = session.sessionId();
+      if (
+        declaredSessionId !== undefined &&
+        declaredSessionId !== turn.sessionId
+      ) {
+        throw new TypeError(
+          'Agent turn identity does not match its persistent session.',
+        );
+      }
+      lastTurnSessionId = turn.sessionId;
+      return turn;
+    },
+  });
+
+  if (plan.interaction.mode === 'one_shot') {
+    const response = await trackedSession.send(
+      plan.interaction.effective_prompt,
+      {signal},
+    );
+    const toolCalls = response.toolCalls.map((call) => ({...call}));
+    const turns: readonly ConversationTurn[] = Object.freeze([
+      Object.freeze({
+        turn: 1,
+        user: plan.interaction.effective_prompt,
+        assistant: response.text,
+        toolCalls: Object.freeze(toolCalls),
+      }),
+    ]);
+    const fallbackTurns: readonly AgentEvidenceFallbackTurn[] = Object.freeze([
+      Object.freeze({
+        user: plan.interaction.effective_prompt,
+        assistant: response.text,
+        toolCalls: Object.freeze(toolCalls.map((call) => ({...call}))),
+      }),
+    ]);
+    return Object.freeze({
+      turns,
+      fallbackTurns,
+      stopReason: 'task_complete',
+      totalCostUsd: response.costUsd ?? null,
+      sessionId: resolveSessionId(session, lastTurnSessionId, true),
+      failure: null,
+    });
+  }
+
+  if (plan.role_player === undefined || plan.interaction.task === undefined) {
+    throw new TypeError('A multi-turn plan requires a role-player model and task.');
+  }
+  const ava = new AvaRolePlayer(
+    {
+      task: plan.interaction.task,
+      ...(plan.interaction.context === undefined
+        ? {}
+        : {context: plan.interaction.context}),
+      ...(plan.interaction.initial_prompt === undefined
+        ? {}
+        : {initialPrompt: plan.interaction.initial_prompt}),
+      signal,
+    },
+    (request) => completions.invoke('role_player', request, signal),
+    waitBeforeCompletionRetry === undefined
+      ? {}
+      : {
+          waitBeforeRetry: (attempt, retrySignal) =>
+            waitBeforeCompletionRetry(
+              'role_player',
+              attempt,
+              retrySignal,
+            ),
+        },
+  );
+  const conversation = await runConversation({
+    session: trackedSession,
+    ava,
+    maxTurns: plan.interaction.max_turns,
+    signal,
+  });
+  const failure = conversation.failure === null
+    ? null
+    : rolePlayerErrorRecord(conversation.failure);
+  return Object.freeze({
+    turns: conversation.turns,
+    fallbackTurns: conversation.fallbackTurns,
+    stopReason: conversation.stopReason,
+    totalCostUsd: conversation.totalCostUsd,
+    sessionId: resolveSessionId(
+      session,
+      lastTurnSessionId,
+      conversation.turns.length > 0,
+    ),
+    avaAudit: conversation.avaAudit,
+    failure,
+  });
+}
+
+function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
+  if (
+    !turn ||
+    typeof turn.text !== 'string' ||
+    turn.text.length > 16 * 1024 * 1024 ||
+    !Array.isArray(turn.toolCalls) ||
+    turn.toolCalls.length > 100_000 ||
+    !isSafeSessionIdentity(turn.sessionId) ||
+    (turn.costUsd !== undefined &&
+      (!Number.isFinite(turn.costUsd) || turn.costUsd < 0))
+  ) {
+    throw new TypeError('Agent returned an invalid completed turn.');
+  }
+  for (const call of turn.toolCalls) {
+    if (
+      !call ||
+      !isSafeToolMetadata(call.name) ||
+      (call.id !== undefined && !isSafeToolMetadata(call.id))
+    ) {
+      throw new TypeError('Agent returned an invalid tool call.');
+    }
+  }
+  return Object.freeze({
+    text: turn.text,
+    sessionId: turn.sessionId,
+    toolCalls: snapshotAgentToolCalls(turn.toolCalls),
+    ...(turn.costUsd === undefined ? {} : {costUsd: turn.costUsd}),
+  });
+}
+
+function resolveSessionId(
+  session: AgentSession,
+  lastTurnSessionId: string | undefined,
+  required: boolean,
+): string | null {
+  if (!required) {
+    if (lastTurnSessionId !== undefined) {
+      throw new TypeError(
+        'Agent session identity exists without a completed turn.',
+      );
+    }
+    return null;
+  }
+  const declaredSessionId = session.sessionId();
+  if (
+    declaredSessionId !== undefined &&
+    lastTurnSessionId !== undefined &&
+    declaredSessionId !== lastTurnSessionId
+  ) {
+    throw new TypeError(
+      'Agent turn identity does not match its persistent session.',
+    );
+  }
+  const value = declaredSessionId ?? lastTurnSessionId;
+  if (!isSafeSessionIdentity(value)) {
+    throw new TypeError('Agent completed without a safe session identity.');
+  }
+  return value;
+}
+
+function isSafeSessionIdentity(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 4_096 &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+function isSafeToolMetadata(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 4_096 &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+function rolePlayerErrorRecord(error: {
+  readonly status: 'role_player_error';
+  readonly errorType: 'parse_error' | 'request_error';
+  readonly attempts: number;
+  readonly explanation: string;
+}): RolePlayerErrorV1 {
+  return Object.freeze({
+    status: error.status,
+    error_type: error.errorType,
+    attempts: error.attempts,
+    explanation: error.explanation,
+  });
+}
+
+function buildEvalPreflight(
+  plan: ResolvedRunPlanV1,
+  composition: ForgeComposition,
+): EvalPreflight {
+  assertExecutablePlan(plan);
+  const agent = selectedAgent(plan, composition);
+  const setupExecutor = setupExecutorFor(composition);
+  setupExecutor.preflight(plan.setup);
+  const requirements = normalizeAgentRequirements(
+    agent.requirements(plan.agent),
+  );
+  const setupSpecifications = setupEnvironmentSpecifications(plan, composition);
+  const environmentSpecification = mergeEnvironmentSpecifications([
+    {scope: 'agent', specification: requirements.environment},
+    ...setupSpecifications.map((specification) => ({
+      scope: 'setup' as const,
+      specification,
+    })),
+  ]);
+  const completionBindings = completionBindingsForPlan(plan, composition);
+  return Object.freeze({
+    agent,
+    setupExecutor,
+    requirements,
+    environmentSpecification,
+    completionBindings,
+  });
+}
+
+function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
   if (plan.schema_version !== 1) {
     throw new ForgeExecutionError('invalid_plan', 'preflight', 'Unsupported run-plan version.');
   }
@@ -355,20 +774,6 @@ function assertExecutableV0Plan(plan: ResolvedRunPlanV1): void {
       'invalid_plan',
       'preflight',
       `Run plan requires Forge ${plan.provenance.forge.version}; this build is ${FORGE_VERSION}.`,
-    );
-  }
-  if (plan.interaction.mode !== 'one_shot') {
-    throw new ForgeExecutionError(
-      'unsupported_capability',
-      'preflight',
-      'Forge v0.1 executes only one_shot cases.',
-    );
-  }
-  if (plan.evaluation.success_guidelines.length > 0) {
-    throw new ForgeExecutionError(
-      'unsupported_capability',
-      'preflight',
-      'Forge v0.1 does not yet execute guideline judging.',
     );
   }
   if (plan.runtime.image.kind !== 'forge') {
@@ -697,10 +1102,136 @@ function redactNormalizedTrajectory(
   };
 }
 
+function rolePlayerErrorEvidence(
+  plan: ResolvedRunPlanV1,
+  agent: AgentAdapter,
+): NormalizedTrajectory {
+  return createNormalizedTrajectory({
+    trajectory: {
+      schema_version: ATIF_SCHEMA_VERSION,
+      agent: {
+        name: agent.id,
+        version: agent.version,
+        model_name: plan.agent.model,
+      },
+      steps: [
+        {
+          step_id: 1,
+          source: 'system',
+          message:
+            'The role player failed before any coding-agent turn completed.',
+        },
+      ],
+    },
+    provenance: {
+      source: {
+        kind: 'role_player_error',
+        format: 'forge-system-event',
+      },
+      adapter: {id: agent.id, version: agent.version},
+    },
+    completeness: 'fallback',
+    warnings: [
+      {
+        code: 'fallback_used',
+        message:
+          'Canonical ATIF contains only a system event because the role player failed before the agent was invoked.',
+      },
+    ],
+  });
+}
+
+function redactJudgeWorkspaceEvidence(
+  evidence: JudgeWorkspaceEvidenceV1,
+  secrets: readonly string[],
+): JudgeWorkspaceEvidenceV1 {
+  return boundJudgeWorkspaceEvidence(
+    redactSecrets(evidence, secrets).value,
+  );
+}
+
+function buildInteractionArtifact(
+  plan: ResolvedRunPlanV1,
+  interaction: ExecutedInteraction,
+): InteractionArtifactV1 {
+  const turns = interaction.turns.map((turn) => ({
+    turn: turn.turn,
+    user: turn.user,
+    assistant: turn.assistant,
+    tool_calls: turn.toolCalls.map((call) => ({
+      ...(call.id === undefined ? {} : {id: call.id}),
+      name: call.name,
+      ...(call.input === undefined ? {} : {input: jsonValue(call.input)}),
+    })),
+  }));
+  const rolePlayer = interaction.avaAudit === undefined || plan.role_player === undefined
+    ? {}
+    : {
+        role_player: {
+          model: {...plan.role_player},
+          prompt_version: AVA_PROMPT_VERSION,
+          needs: interaction.avaAudit.needs?.map((need) => ({...need})) ?? null,
+          decisions: interaction.avaAudit.decisions.map(avaDecisionRecord),
+        },
+      };
+  return {
+    schema_version: 1,
+    mode: plan.interaction.mode,
+    stop_reason: interaction.stopReason,
+    turns,
+    ...rolePlayer,
+    failure: interaction.failure,
+  };
+}
+
+function avaDecisionRecord(
+  decision: AvaConversationAudit['decisions'][number],
+): AvaDecisionV1 {
+  return {
+    sequence: decision.sequence,
+    after_agent_turn: decision.afterAgentTurn,
+    message: decision.message,
+    stop: decision.stop,
+    remaining_need_ids: decision.remainingNeedIds,
+    focus_need_id: decision.focusNeedId,
+    coding_agent_invoked: decision.codingAgentInvoked,
+    source: decision.source,
+    ...(decision.error === undefined
+      ? {}
+      : {error: rolePlayerErrorRecord(decision.error)}),
+  };
+}
+
+function redactInteractionArtifact(
+  artifact: InteractionArtifactV1,
+  secrets: readonly string[],
+): InteractionArtifactV1 {
+  return parseInteractionArtifact(redactSecrets(artifact, secrets).value);
+}
+
+function jsonValue(value: unknown): JsonValue {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined
+      ? null
+      : (JSON.parse(serialized) as JsonValue);
+  } catch {
+    return null;
+  }
+}
+
+function rolePlayerWarnings(
+  failure: RolePlayerErrorV1 | null,
+): RunWarningV1[] {
+  return failure === null
+    ? []
+    : [{code: 'role_player_error', message: failure.explanation}];
+}
+
 function assertEvidenceMatchesRun(
   evidence: NormalizedTrajectory,
   agent: AgentAdapter,
-  sessionId: string,
+  sessionId: string | null,
 ): void {
   if (
     evidence.provenance.adapter.id !== agent.id ||
@@ -708,10 +1239,16 @@ function assertEvidenceMatchesRun(
   ) {
     throw new TypeError('Evidence provenance does not match the selected agent adapter.');
   }
-  if (
-    evidence.provenance.source.sessionId !== undefined &&
-    evidence.provenance.source.sessionId !== sessionId
-  ) {
+  const sourceSessionId =
+    'sessionId' in evidence.provenance.source
+      ? evidence.provenance.source.sessionId
+      : undefined;
+  if (sessionId !== null && sourceSessionId === undefined) {
+    throw new TypeError(
+      'Evidence provenance does not identify the selected session.',
+    );
+  }
+  if (sourceSessionId !== undefined && sourceSessionId !== sessionId) {
     throw new TypeError('Evidence provenance does not match the selected session.');
   }
   if (
@@ -725,13 +1262,19 @@ function assertEvidenceMatchesRun(
 function buildCoreArtifacts(
   plan: ResolvedRunPlanV1,
   evidence: NormalizedTrajectory,
+  interaction: InteractionArtifactV1,
   workspaceEvidence: unknown,
+  judgeEvidence: JudgeEvidenceV1 | undefined,
   evaluation: EvaluationResultV1,
 ): RunArtifact[] {
   return [
     jsonArtifact('plan.json', serializeResolvedRunPlan(plan)),
     jsonArtifact('trajectory.json', serializeAtifTrajectory(evidence.trajectory)),
+    jsonArtifact('interaction.json', serializeCanonicalJson(interaction)),
     jsonArtifact('workspace-evidence.json', serializeCanonicalJson(workspaceEvidence)),
+    ...(judgeEvidence === undefined
+      ? []
+      : [jsonArtifact('judge-evidence.json', serializeCanonicalJson(judgeEvidence))]),
     jsonArtifact('evaluation.json', serializeCanonicalJson(evaluation)),
   ];
 }
@@ -772,8 +1315,8 @@ function buildResult(input: {
   input: ExecuteEvalInput;
   agent: AgentAdapter;
   runtime: SealedRuntime;
-  turn: AgentTurn;
-  sessionId: string;
+  interaction: ExecutedInteraction;
+  completionCalls: readonly CompletionCallSummaryV1[];
   evidence: NormalizedTrajectory;
   redactionCount: number;
   evaluation: EvaluationResultV1;
@@ -800,9 +1343,15 @@ function buildResult(input: {
       adapter_version: input.agent.version,
       provider: input.input.plan.agent.provider,
       model: input.input.plan.agent.model,
-      session_id: input.sessionId,
-      cost_usd: input.turn.costUsd ?? null,
+      session_id: input.interaction.sessionId,
+      cost_usd: input.interaction.totalCostUsd,
     },
+    completion_calls: input.completionCalls.map((call) => ({...call})),
+    interaction: {
+      mode: input.input.plan.interaction.mode,
+      turn_count: input.interaction.turns.length,
+    },
+    failure: input.interaction.failure,
     evidence: {
       format: 'atif',
       schema_version: ATIF_SCHEMA_VERSION,
@@ -816,7 +1365,7 @@ function buildResult(input: {
     started_at: input.startedAt.toISOString(),
     completed_at: input.completedAt.toISOString(),
     duration_ms: Math.max(0, input.completedAt.getTime() - input.startedAt.getTime()),
-    stop_reason: 'completed',
+    stop_reason: input.interaction.stopReason,
     artifact_set_sha256: canonicalJsonSha256(input.coreDescriptors),
     artifacts: input.coreDescriptors,
     supplemental_artifacts: input.supplementalDescriptors,
@@ -827,9 +1376,10 @@ function buildResult(input: {
 function resultEvidenceProvenance(
   provenance: AtifNormalizationProvenance,
 ): AtifEvidenceProvenanceV1 {
-  const session = provenance.source.sessionId === undefined
-    ? {}
-    : {session_id: provenance.source.sessionId};
+  const session =
+    'sessionId' in provenance.source && provenance.source.sessionId !== undefined
+      ? {session_id: provenance.source.sessionId}
+      : {};
   const source = provenance.source.kind === 'native_log'
     ? {
         kind: provenance.source.kind,
@@ -843,10 +1393,15 @@ function resultEvidenceProvenance(
           schema_version: provenance.source.schemaVersion,
           ...session,
         }
-      : {
+      : provenance.source.kind === 'driver_fallback'
+        ? {
+            kind: provenance.source.kind,
+            format: provenance.source.format,
+            ...session,
+          }
+        : {
           kind: provenance.source.kind,
           format: provenance.source.format,
-          ...session,
         };
   return {
     source,
@@ -874,6 +1429,10 @@ function canonicalBytesSha256(body: Uint8Array): `sha256:${string}` {
 
 function credentialValues(environment: ResolvedEnvironment): string[] {
   return Object.values(environment.credentials).map(({value}) => value);
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function assertRunId(runId: string): void {

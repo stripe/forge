@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "id": "forge-multi-turn",
+    "version": "0.1.0"
+  },
+  "cases": [
+    {
+      "id": "examples/release-summary",
+      "path": "cases/examples/release-summary.yaml"
+    }
+  ],
+  "files": [
+    {
+      "path": "cases/examples/release-summary.yaml",
+      "size": 1137,
+      "sha256": "fa82c800831105fe9521ed03847d381523d774c706288a53a8082e34241991f3"
+    }
+  ]
+}
