@@ -1,0 +1,87 @@
+{
+  "name": "@stripe/forge",
+  "version": "0.1.0",
+  "description": "Portable execution harness for reproducible coding-agent evaluations",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stripe/forge.git"
+  },
+  "homepage": "https://github.com/stripe/forge#readme",
+  "bugs": {
+    "url": "https://github.com/stripe/forge/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.6.0",
+  "bin": {
+    "forge": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./atif": {
+      "types": "./dist/atif/index.d.ts",
+      "import": "./dist/atif/index.js"
+    },
+    "./atif/v1.8": {
+      "types": "./dist/atif/index.d.ts",
+      "import": "./dist/atif/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
+    "./agents/claude-code": {
+      "types": "./dist/agents/claude-code/index.d.ts",
+      "import": "./dist/agents/claude-code/index.js"
+    },
+    "./runtime/docker": {
+      "types": "./dist/runtime/docker/index.d.ts",
+      "import": "./dist/runtime/docker/index.js"
+    },
+    "./setup": {
+      "types": "./dist/setup/index.d.ts",
+      "import": "./dist/setup/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "test:live:docker": "pnpm build && node scripts/live-docker-conformance.mjs",
+    "test:live:claude": "pnpm build && node scripts/live-claude-quickstart.mjs",
+    "check": "pnpm typecheck && pnpm test && pnpm build && publint && pnpm test:types && pnpm test:package",
+    "test:package": "node scripts/package-smoke.mjs",
+    "test:types": "attw --pack . --profile esm-only",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@types/node": "^22.15.30",
+    "publint": "^0.3.12",
+    "typescript": "^5.9.3"
+  }
+}

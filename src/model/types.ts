@@ -1,0 +1,235 @@
+/** Wire schema version shared by Forge's initial benchmark artifacts. */
+export const BENCHMARK_SCHEMA_VERSION = 1 as const;
+
+export const DEFAULT_MAX_TURNS = 10;
+export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
+export const DEFAULT_DOCKER_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+export const DEFAULT_DOCKER_CPU_COUNT = 2;
+export const DEFAULT_DOCKER_PROCESS_COUNT = 512;
+
+/** Types are aliases rather than brands so parsed values remain plain data. */
+export type Sha256Hex = string;
+export type Sha256Digest = `sha256:${string}`;
+export type DatasetRelativePath = string;
+export type CaseId = string;
+export type TreatmentId = string;
+
+export type JsonPrimitive = null | boolean | number | string;
+export type JsonValue = JsonPrimitive | JsonValue[] | JsonObject;
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+export interface DatasetIdentityV1 {
+  id: string;
+  version: string;
+}
+
+export interface DatasetManifestCaseV1 {
+  id: CaseId;
+  path: DatasetRelativePath;
+}
+
+export interface DatasetManifestFileV1 {
+  path: DatasetRelativePath;
+  size: number;
+  sha256: Sha256Hex;
+}
+
+export interface DatasetManifestV1 {
+  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
+  dataset: DatasetIdentityV1;
+  cases: DatasetManifestCaseV1[];
+  files: DatasetManifestFileV1[];
+}
+
+export interface WriteSetupStepV1 {
+  uses: 'forge/write@1';
+  with: {
+    target: string;
+    source: {content: string} | {dataset_path: DatasetRelativePath};
+  };
+}
+
+export interface CommandSetupStepV1 {
+  uses: 'forge/command@1';
+  with: {
+    argv: string[];
+    cwd?: string;
+    timeout_ms?: number;
+  };
+}
+
+/**
+ * Extension payloads remain JSON so resolved plans can be hashed and stored.
+ * A registered setup handler owns the payload's domain-specific validation.
+ */
+export interface ExtensionSetupStepV1 {
+  uses: string;
+  with: JsonObject;
+}
+
+export type SetupStepV1 =
+  | WriteSetupStepV1
+  | CommandSetupStepV1
+  | ExtensionSetupStepV1;
+
+export interface FilesystemCheckV1 {
+  description?: string;
+  file: string;
+  exists: boolean;
+  contains?: string;
+}
+
+export interface ChecksV1 {
+  files_created?: string[];
+  file_checks?: FilesystemCheckV1[];
+}
+
+/**
+ * The benchmark case defines what is evaluated, never which agent runs it.
+ * Prompt fields intentionally preserve the imported case semantics.
+ */
+export interface EvalCaseV1 {
+  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
+  id: CaseId;
+  display_name?: string;
+  task?: string;
+  initial_prompt?: string;
+  context?: string;
+  execution_mode: 'multi_turn' | 'one_shot';
+  max_turns?: number;
+  setup: SetupStepV1[];
+  success_guidelines: string[];
+  checks?: ChecksV1;
+  example_answer?: string;
+}
+
+export interface ModelRefV1 {
+  provider: string;
+  model: string;
+}
+
+export interface AgentSelectionV1 extends ModelRefV1 {
+  adapter: string;
+}
+
+export interface TreatmentV1 {
+  setup: SetupStepV1[];
+}
+
+export interface DockerResourcesV1 {
+  memory_bytes: number;
+  cpu_count: number;
+  process_count: number;
+}
+
+export interface ForgeDockerRuntimeV1 {
+  adapter: 'docker';
+  image: {kind: 'forge'};
+  platform: 'linux/amd64' | 'linux/arm64';
+  resources: DockerResourcesV1;
+}
+
+export interface BenchmarkProfileV1 {
+  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
+  id: string;
+  version: string;
+  dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
+  forge: {version: string};
+  runtime: ForgeDockerRuntimeV1;
+  models: {
+    role_player?: ModelRefV1;
+    judge?: ModelRefV1;
+  };
+  treatments: Record<TreatmentId, TreatmentV1>;
+  matrix: {
+    cases: CaseId[];
+    treatments: TreatmentId[];
+    agents: AgentSelectionV1[];
+    /** Number of independent samples; selections use a zero-based index. */
+    repetitions: number;
+    /** Campaign retry policy; a retry does not change the run selection. */
+    retries: number;
+  };
+  limits: {
+    run_timeout_ms: number;
+  };
+}
+
+export interface LoadedEvalCaseV1 {
+  definition: EvalCaseV1;
+  path: string;
+  sha256: Sha256Digest;
+}
+
+export interface LoadedDatasetV1 {
+  root: string;
+  manifestPath: string;
+  manifestRaw: string;
+  manifestSha256: Sha256Digest;
+  manifest: DatasetManifestV1;
+  cases: ReadonlyMap<CaseId, LoadedEvalCaseV1>;
+}
+
+export interface LoadedBenchmarkProfileV1 {
+  path: string;
+  root: string;
+  raw: string;
+  sha256: Sha256Digest;
+  profile: BenchmarkProfileV1;
+}
+
+export interface RunSelection {
+  case_id: CaseId;
+  treatment: TreatmentId;
+  agent: AgentSelectionV1;
+  /** Zero-based sample index, bounded by matrix.repetitions. */
+  repetition: number;
+}
+
+export type InitialPromptSourceV1 =
+  | 'case.task'
+  | 'case.initial_prompt';
+
+export interface ResolvedRunPlanV1 {
+  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
+  selection: RunSelection;
+  provenance: {
+    dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
+    profile: {
+      id: string;
+      version: string;
+      sha256: Sha256Digest;
+    };
+    case: {
+      id: CaseId;
+      path: DatasetRelativePath;
+      sha256: Sha256Digest;
+    };
+    forge: {version: string};
+  };
+  case: EvalCaseV1;
+  treatment: {id: TreatmentId; setup: SetupStepV1[]};
+  /** Invariant case setup followed by the selected treatment setup. */
+  setup: SetupStepV1[];
+  interaction: {
+    mode: 'multi_turn' | 'one_shot';
+    task?: string;
+    context?: string;
+    initial_prompt?: string;
+    initial_prompt_source: InitialPromptSourceV1;
+    effective_prompt: string;
+    max_turns: number;
+  };
+  evaluation: {
+    success_guidelines: string[];
+    checks?: ChecksV1;
+    example_answer?: string;
+    judge?: ModelRefV1;
+  };
+  role_player?: ModelRefV1;
+  agent: AgentSelectionV1;
+  runtime: ForgeDockerRuntimeV1;
+  limits: {run_timeout_ms: number};
+}
