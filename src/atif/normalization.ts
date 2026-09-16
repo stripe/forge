@@ -41,6 +41,12 @@ const NormalizationSourceSchema = z.discriminatedUnion('kind', [
       sessionId: MetadataTextSchema.optional(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('role_player_error'),
+      format: z.literal('forge-system-event'),
+    })
+    .strict(),
 ]);
 
 const NormalizationWarningSchema = z
@@ -77,14 +83,16 @@ const NormalizedTrajectorySchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    const fallbackSource = value.provenance.source.kind === 'driver_fallback';
+    const fallbackSource =
+      value.provenance.source.kind === 'driver_fallback' ||
+      value.provenance.source.kind === 'role_player_error';
     const fallbackCompleteness = value.completeness === 'fallback';
     if (fallbackSource !== fallbackCompleteness) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['completeness'],
         message:
-          'driver_fallback provenance and fallback completeness must be used together',
+          'fallback provenance and fallback completeness must be used together',
       });
     }
     if (value.completeness === 'complete' && value.warnings.length > 0) {
@@ -141,6 +149,10 @@ export type AtifNormalizationSource =
       kind: 'driver_fallback';
       format: 'forge-driver-turns';
       sessionId?: string;
+    }
+  | {
+      kind: 'role_player_error';
+      format: 'forge-system-event';
     };
 
 export interface AtifNormalizationProvenance {

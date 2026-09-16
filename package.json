@@ -49,6 +49,10 @@
       "types": "./dist/agents/claude-code/index.d.ts",
       "import": "./dist/agents/claude-code/index.js"
     },
+    "./providers/anthropic": {
+      "types": "./dist/providers/anthropic/index.d.ts",
+      "import": "./dist/providers/anthropic/index.js"
+    },
     "./runtime/docker": {
       "types": "./dist/runtime/docker/index.d.ts",
       "import": "./dist/runtime/docker/index.js"
@@ -67,8 +71,7 @@
     "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/run-tests.mjs",
-    "test:live:docker": "pnpm build && node scripts/live-docker-conformance.mjs",
-    "test:live:claude": "pnpm build && node scripts/live-claude-quickstart.mjs",
+    "test:live": "pnpm build && node scripts/live-e2e.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && publint && pnpm test:types && pnpm test:package",
     "test:package": "node scripts/package-smoke.mjs",
     "test:types": "attw --pack . --profile esm-only",

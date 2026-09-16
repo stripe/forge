@@ -21,6 +21,17 @@ describe('credential redaction', () => {
     expect(input.message).toContain('sk-secret');
   });
 
+  it('preserves an own __proto__ JSON key without mutating object prototypes', () => {
+    const input = JSON.parse('{"__proto__":{"token":"sk-secret"}}') as unknown;
+    const result = redactSecrets(input, ['sk-secret']);
+
+    expect(Object.hasOwn(result.value as object, '__proto__')).toBe(true);
+    expect(result.value).toEqual({
+      ['__proto__']: {token: REDACTED_SECRET},
+    });
+    expect(({} as {token?: string}).token).toBeUndefined();
+  });
+
   it('rejects canonical bytes which still contain a credential', () => {
     expect(() => assertNoSecrets('before sk-secret after', ['sk-secret'], 'result.json'))
       .toThrow(SecretLeakError);

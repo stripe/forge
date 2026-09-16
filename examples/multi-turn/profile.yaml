@@ -1,0 +1,41 @@
+schema_version: 1
+id: examples/multi-turn
+version: 0.1.0
+dataset:
+  id: forge-multi-turn
+  version: 0.1.0
+  manifest_sha256: sha256:acd68e0d7c13dd6d3a46382e802ad2345d0f82de8813ecd239a84ed21d032447
+forge:
+  version: 0.1.0
+runtime:
+  adapter: docker
+  image:
+    kind: forge
+  platform: linux/amd64
+  resources:
+    memory_bytes: 4294967296
+    cpu_count: 2
+    process_count: 512
+models:
+  role_player:
+    provider: anthropic
+    model: claude-sonnet-4-6
+  judge:
+    provider: anthropic
+    model: claude-sonnet-4-6
+treatments:
+  baseline:
+    setup: []
+matrix:
+  cases:
+    - examples/release-summary
+  treatments:
+    - baseline
+  agents:
+    - adapter: claude-code
+      provider: anthropic
+      model: claude-sonnet-4-6
+  repetitions: 1
+  retries: 0
+limits:
+  run_timeout_ms: 900000

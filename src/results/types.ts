@@ -2,11 +2,18 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.js';
-import type {RunSelection, Sha256Digest} from '../model/types.js';
+import type {
+  ModelRefV1,
+  JsonValue,
+  RunSelection,
+  Sha256Digest,
+} from '../model/types.js';
 
 export const RUN_RESULT_SCHEMA_VERSION = 1 as const;
 export const EVALUATION_SCHEMA_VERSION = 1 as const;
 export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const INTERACTION_SCHEMA_VERSION = 1 as const;
+export const JUDGE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 
 export type EvalStatus = 'passed' | 'partial' | 'failed';
 
@@ -50,6 +57,104 @@ export interface WorkspaceEvidenceV1 {
   readonly warnings: readonly {code: string; message: string; path?: string}[];
 }
 
+export type CompletionPurposeV1 = 'role_player' | 'judge';
+export type CompletionStopReasonV1 =
+  | 'end_turn'
+  | 'max_tokens'
+  | 'stop_sequence'
+  | 'tool_use'
+  | 'pause_turn'
+  | 'refusal'
+  | 'model_context_window_exceeded'
+  | 'other';
+
+export interface CompletionCallSummaryV1 {
+  readonly sequence: number;
+  readonly purpose: CompletionPurposeV1;
+  readonly provider: string;
+  readonly provider_version: string;
+  readonly model: string;
+  readonly status: 'succeeded' | 'failed';
+  readonly stop_reason: CompletionStopReasonV1 | null;
+  readonly input_tokens: number | null;
+  readonly output_tokens: number | null;
+  readonly cached_tokens: number | null;
+  readonly cost_usd: number | null;
+  readonly error_code: string | null;
+}
+
+export interface InteractionToolCallV1 {
+  readonly id?: string;
+  readonly name: string;
+  readonly input?: JsonValue;
+}
+
+export interface InteractionTurnV1 {
+  readonly turn: number;
+  readonly user: string;
+  readonly assistant: string;
+  readonly tool_calls: readonly InteractionToolCallV1[];
+}
+
+export interface AvaNeedV1 {
+  readonly id: string;
+  readonly description: string;
+}
+
+export interface RolePlayerErrorV1 {
+  readonly status: 'role_player_error';
+  readonly error_type: 'parse_error' | 'request_error';
+  readonly attempts: number;
+  readonly explanation: string;
+}
+
+export interface AvaDecisionV1 {
+  readonly sequence: number;
+  readonly after_agent_turn: number | null;
+  readonly message: string;
+  readonly stop: boolean;
+  readonly remaining_need_ids: readonly string[] | null;
+  readonly focus_need_id: string | null;
+  readonly coding_agent_invoked: boolean;
+  readonly source: 'configured_initial_prompt' | 'generated';
+  readonly error?: RolePlayerErrorV1;
+}
+
+export interface InteractionArtifactV1 {
+  readonly schema_version: typeof INTERACTION_SCHEMA_VERSION;
+  readonly mode: 'multi_turn' | 'one_shot';
+  readonly stop_reason: RunStopReasonV1;
+  readonly turns: readonly InteractionTurnV1[];
+  readonly role_player?: {
+    readonly model: ModelRefV1;
+    readonly prompt_version: string;
+    readonly needs: readonly AvaNeedV1[] | null;
+    readonly decisions: readonly AvaDecisionV1[];
+  };
+  readonly failure: RolePlayerErrorV1 | null;
+}
+
+export interface JudgeWorkspaceEntryV1 {
+  readonly path: string;
+  readonly content: string;
+  readonly truncated: boolean;
+}
+
+export interface JudgeEvidenceV1 {
+  readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
+  readonly prompt_version: string;
+  readonly trajectory_sha256: Sha256Digest;
+  readonly workspace: {
+    readonly entries: readonly JudgeWorkspaceEntryV1[];
+    readonly complete: boolean;
+    readonly warnings: readonly {
+      readonly code: string;
+      readonly message: string;
+      readonly path?: string;
+    }[];
+  };
+}
+
 export interface ArtifactDescriptorV1 {
   readonly path: string;
   readonly media_type: string;
@@ -61,6 +166,11 @@ export interface RunWarningV1 {
   readonly code: string;
   readonly message: string;
 }
+
+export type RunStopReasonV1 =
+  | 'task_complete'
+  | 'max_turns'
+  | 'role_player_error';
 
 export type AtifEvidenceSourceV1 =
   | {
@@ -78,6 +188,10 @@ export type AtifEvidenceSourceV1 =
       readonly kind: 'driver_fallback';
       readonly format: 'forge-driver-turns';
       readonly session_id?: string;
+    }
+  | {
+      readonly kind: 'role_player_error';
+      readonly format: 'forge-system-event';
     };
 
 export interface AtifEvidenceProvenanceV1 {
@@ -117,11 +231,17 @@ interface RunResultCommon {
     session_id: string | null;
     cost_usd: number | null;
   };
+  readonly completion_calls: readonly CompletionCallSummaryV1[];
+  readonly interaction: {
+    readonly mode: 'multi_turn' | 'one_shot';
+    readonly turn_count: number;
+  };
+  readonly failure: RolePlayerErrorV1 | null;
   readonly evaluation: EvaluationResultV1;
   readonly started_at: string;
   readonly completed_at: string;
   readonly duration_ms: number;
-  readonly stop_reason: 'completed';
+  readonly stop_reason: RunStopReasonV1;
   readonly artifact_set_sha256: Sha256Digest;
   readonly artifacts: readonly ArtifactDescriptorV1[];
   readonly supplemental_artifacts: readonly ArtifactDescriptorV1[];

@@ -8,6 +8,8 @@ import {
   credentialReference,
   evaluateRunEvidence,
   executeEval,
+  parseInteractionArtifact,
+  preflightEval,
   parseResolvedRunPlan,
   resolveManifestCaseIdFromFile,
   resolveRunPlan,
@@ -19,6 +21,8 @@ import {
 describe('@stripe/forge package root', () => {
   it('exports the engine, wire model, persistence, and extension contracts', () => {
     expect(executeEval).toBeTypeOf('function');
+    expect(preflightEval).toBeTypeOf('function');
+    expect(parseInteractionArtifact).toBeTypeOf('function');
     expect(evaluateRunEvidence).toBeTypeOf('function');
     expect(resolveRunPlan).toBeTypeOf('function');
     expect(parseResolvedRunPlan).toBeTypeOf('function');

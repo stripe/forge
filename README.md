@@ -2,14 +2,16 @@
 
 Forge is a portable execution harness for reproducible coding-agent evaluations.
 It loads a versioned dataset and benchmark profile, resolves one selection into
-an ambient-free run plan, executes the plan in Docker, normalizes agent evidence
-to ATIF, evaluates the workspace, and atomically commits a neutral local result.
+an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session in
+Docker, normalizes agent evidence to ATIF, evaluates checks and success
+guidelines, and atomically commits a neutral local result.
 
-> **v0.1 status:** the implemented end-to-end path is one-shot Claude Code with
-> direct Anthropic or explicitly configured Anthropic-compatible endpoint
-> credentials, the Forge-owned Docker image, file checks, ATIF v1.8 evidence,
-> and local results. See [Current limitations](#current-limitations) before
-> authoring a benchmark.
+> **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
+> Ava multi-turn Claude Code runs, with file checks, model-judged success
+> guidelines, ATIF v1.8 evidence, and local results. The public CLI supports
+> direct Anthropic or an explicitly configured Anthropic Messages-compatible
+> endpoint. See [Current limitations](#current-limitations) before authoring a
+> benchmark.
 
 ## Requirements
 
@@ -21,7 +23,11 @@ to ATIF, evaluates the workspace, and atomically commits a neutral local result.
   Anthropic's applicable terms.
 - Provider credentials for `forge run`: either `ANTHROPIC_API_KEY` for direct
   Anthropic, or `ANTHROPIC_BASE_URL` plus `ANTHROPIC_AUTH_TOKEN` for an
-  Anthropic-compatible endpoint. Validation and planning do not resolve them.
+  Anthropic Messages-compatible endpoint. The public CLI uses the selected
+  credential for Claude Code and, when required by the plan, host-side Ava and
+  judge completions. Validation and planning do not resolve it.
+- Ava and guideline judging use strict structured outputs. The built-in
+  Anthropic completion provider accepts Claude 4.5 or newer model identifiers.
 - Enough Docker capacity for the profile's limits. Defaults are 4 GiB memory,
   2 CPUs, and 512 processes.
 
@@ -79,9 +85,11 @@ checks:
 ```
 <!-- quickstart-case:end -->
 
-An executable v0.1 case must use `execution_mode: one_shot` and must leave
-`success_guidelines` empty. A one-shot case supplies exactly one of `task` or
-`initial_prompt`; this example uses `initial_prompt`.
+This minimal quickstart uses one-shot interaction and deterministic file checks,
+so it needs no harness completion models. A one-shot case supplies exactly one
+of `task` or `initial_prompt`; this example uses `initial_prompt`. Multi-turn
+cases and success guidelines are described in
+[Multi-turn Ava and guideline judging](#multi-turn-ava-and-guideline-judging).
 
 ### 2. Dataset manifest
 
@@ -164,6 +172,12 @@ The profile independently pins the dataset identity and the SHA-256 digest of
 the raw `manifest.json` bytes. `forge.version` is an execution compatibility
 pin, not a range: v0.1 refuses to run a plan for another harness version.
 
+`models: {}` is intentional for this one-shot, checks-only case. A profile must
+set `models.role_player` for every selected `multi_turn` case and
+`models.judge` for every selected case with non-empty `success_guidelines`.
+Those model coordinates select host-side completion providers; the agent model
+remains independently selected in `matrix.agents`.
+
 Use `linux/arm64` only when that is the benchmark's intentional, released
 platform. Changing the platform, model, setup, resources, or any other profile
 field creates a different experiment.
@@ -180,7 +194,10 @@ npx @stripe/forge@0.1.0 validate \
 
 `validate` verifies schemas, the complete manifest inventory and hashes,
 dataset/profile identity, all matrix references, setup inputs, and every
-resolvable matrix selection. It does not build Docker or resolve credentials.
+resolvable matrix selection. It also constructs the selected composition and
+runs pure agent, setup, and completion-provider compatibility preflight for
+every resolved plan. It does not resolve credentials, invoke provider
+preflight or completions, build or allocate Docker, or run setup.
 
 Inspect the canonical resolved plan:
 
@@ -251,6 +268,7 @@ needed selectors (`--case` and `--case-file` are mutually exclusive):
 result.json
 plan.json
 trajectory.json
+interaction.json
 workspace-evidence.json
 evaluation.json
 ```
@@ -260,6 +278,13 @@ quiesces the runtime, stages the artifacts, disposes the runtime, then uses a
 directory rename as the atomic completion boundary. Use
 `verifyCompletedRun(location)` to re-read and verify a committed result. Result
 schema version 1 records the evidence source and adapter provenance.
+
+`interaction.json` is a post-run audit record, not an execution input. It
+contains the public agent turns, stop reason, and, for multi-turn runs, Ava's
+private need model and decision history. It is not supplied to the guideline
+judge. Forge adds `judge-evidence.json` only when judging ran; it binds the
+judge prompt version to the redacted trajectory digest and records the exact
+bounded workspace text and warnings made available to the judge.
 
 For native Claude evidence, the result contains an evidence descriptor like:
 
@@ -288,7 +313,7 @@ Forge deliberately separates what is evaluated from how it is run:
 
 - The dataset contains cases and fixture bytes. Stable case IDs are independent
   of the dataset's location on disk.
-- A case owns the prompt, invariant setup, checks, and future guideline rules.
+- A case owns the prompt, invariant setup, checks, and success guidelines.
 - A profile pins one dataset and defines treatments, agents, models, resources,
   limits, repetitions, retries, and the experiment matrix.
 - A run selection chooses one case, treatment, agent, and repetition.
@@ -299,6 +324,108 @@ YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
 non-canonical paths, unsupported Forge action versions, and oversized values are
 rejected. YAML parsing additionally rejects duplicate keys. Defaults are
 materialized in the resolved plan rather than inferred by the runtime.
+
+## Multi-turn Ava and guideline judging
+
+A multi-turn case describes the developer's goal and optional background while
+leaving the agent, role-player model, and judge model in the profile:
+
+```yaml
+schema_version: 1
+id: examples/design-review
+task: Work with the coding assistant to finish the requested design.
+context: You are a developer maintaining this project.
+execution_mode: multi_turn
+max_turns: 6
+setup: []
+success_guidelines:
+  - The assistant implements the requested behavior and explains the tradeoff.
+checks: {}
+example_answer: A concise reference answer used only to calibrate the judge.
+```
+
+`task` is required for `multi_turn`; `context` and `initial_prompt` are
+optional. `max_turns` defaults to 10 and is capped at 100. When an
+`initial_prompt` is present, Forge sends it verbatim as the first user turn,
+then Ava initializes after the coding agent responds. Otherwise Ava generates
+the opening turn.
+
+The corresponding profile declares explicit host-side models:
+
+```yaml
+models:
+  role_player:
+    provider: anthropic
+    model: claude-sonnet-4-6
+  judge:
+    provider: anthropic
+    model: claude-sonnet-4-6
+```
+
+`models.role_player` is required exactly when a selected case is multi-turn.
+`models.judge` is required exactly when a selected case has one or more success
+guidelines. Unused model settings are not copied into checks-only, one-shot
+plans. The profile's model providers must match entries in the composition's
+`completionProviders`; the public CLI registers the built-in `anthropic`
+provider.
+
+### Ava interaction semantics
+
+Ava is Forge's engine-owned role player. It privately derives up to six
+high-level needs, each described in at most 240 characters, from the case task
+and context. It pursues one need at a time with messages of at most 500
+characters and never sends that private model to the coding agent. Every agent
+turn uses the same persistent `AgentSession`. After each response, including
+the final allowed response, Ava reassesses the remaining needs.
+
+The interaction ends with one of three recorded stop reasons:
+
+- `task_complete` when Ava reports no remaining needs;
+- `max_turns` when Ava has assessed the final allowed agent response but needs
+  remain; or
+- `role_player_error` when Ava cannot obtain valid structured output.
+
+Each Ava decision gets up to three completion attempts, with fixed one-second
+and five-second waits after the first two failures. Exhaustion is committed as
+a `role_player_error` result rather than aborting the run. If the failure occurs
+before any agent turn, Forge emits a system-only fallback ATIF trajectory and a
+null agent session ID; otherwise it preserves the completed session evidence.
+The result and `interaction.json` record bounded failure details, while
+`result.json` records safe per-call provider, model, usage, cost, stop, and error
+summaries without prompts, responses, endpoints, or credentials.
+
+### Guideline semantics
+
+After the runtime is quiesced and agent evidence is normalized and redacted,
+Forge judges every authored success guideline independently. The judge sees the
+redacted ATIF steps, optional `example_answer`, and relevant bounded text from
+the sealed workspace. It never sees `interaction.json` or Ava's private needs.
+Each authored guideline is capped at 65,536 characters, matching the persisted
+evaluation-result bound.
+At most four guidelines are judged concurrently, with temperature 0, a
+1,024-token response limit, and a strict one-guideline JSON schema.
+
+Each guideline gets up to three attempts with the same one-second and
+five-second retry waits. Repeated malformed structured output fails that
+guideline closed and records it as not passed. If the provider request itself
+still fails on the final attempt, execution aborts, runtime cleanup runs, and no
+completed result is committed.
+
+Judge workspace collection skips symlinks, agent state, dependency and build
+directories, lockfiles, and common binary formats. Hard bounds are 10,000
+listed entries, depth 32, two seconds, 512,000 bytes read, 20,000 characters per
+file, and 80,000 rendered characters total. Truncation and unavailable files
+are explicit evidence warnings. `judge-evidence.json` records the redacted
+workspace subset and the digest of the exact `trajectory.json`; it is an audit
+artifact, not an input to a later judge call.
+
+The numeric score remains the fraction of success guidelines that passed.
+Deterministic checks are evaluated as additional pass/fail constraints. A
+checks-only passing run retains numeric score `0`.
+
+After adding the case to the manifest and updating its exact size and hashes,
+use the same `forge validate`, `forge plan`, and `forge run` selection flow as
+the quickstart.
 
 ### Built-in setup actions
 
@@ -384,14 +511,68 @@ const completed = await executeEval({
 console.log(completed.location);
 ```
 
+### Completion providers
+
+An `AgentAdapter` and a `CompletionProvider` have intentionally different
+authority. The agent adapter drives the selected coding agent inside the
+runtime, maintains its session, and collects run-owned evidence. A completion
+provider makes host-side text/structured-output calls for Forge-owned
+score-affecting behavior: currently Ava (`role_player`) and success-guideline
+judging (`judge`). It does not receive a workspace, run commands, own the Ava
+state machine, or replace the selected coding agent.
+
+`CompletionProvider.requirements()` is a pure declaration evaluated during
+composition preflight. On `run`, Forge resolves only those declared credential
+references, calls the provider's optional credential-aware `preflight()`, then
+invokes `complete()` with a provider-neutral model, purpose, system prompt,
+message history, strict response schema, and abort signal. Prompts are redacted
+before dispatch, responses are redacted before parsing or persistence, and only
+safe call summaries enter `result.json`.
+
+Register providers by ID, or provide a `CompletionProviderResolver` when model
+routing needs more than a map:
+
+```js
+import {
+  createEnvironmentCredentialResolver,
+  credentialReference,
+} from '@stripe/forge';
+import {createAnthropicCompletionProvider} from '@stripe/forge/providers/anthropic';
+
+const anthropicCompletions = createAnthropicCompletionProvider({
+  credential: credentialReference('anthropic.api-key'),
+});
+
+const credentialResolver = createEnvironmentCredentialResolver({
+  bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
+});
+
+const completionProviders = new Map([
+  [anthropicCompletions.id, anthropicCompletions],
+]);
+```
+
+Pass `completionProviders` and `credentialResolver` in `ForgeComposition`.
+The `provider` in `models.role_player` or `models.judge` must match the resolved
+provider's `id`. The field is optional only when the plan needs neither Ava nor
+guideline judging.
+
 ### Anthropic-compatible endpoints
 
+The built-in completion provider is exported from
+`@stripe/forge/providers/anthropic`. It uses Node.js 22's native `fetch`, calls
+the Anthropic Messages API, supports strict JSON-schema output, and never reads
+ambient credentials itself. A custom `baseUrl` selects a Messages-compatible
+service root; Forge appends `/v1/messages`. HTTPS is required except for a
+loopback development endpoint.
+
 The public CLI selects its authentication mode from the environment. With no
-`ANTHROPIC_BASE_URL`, it uses direct Anthropic and resolves
-`ANTHROPIC_API_KEY`. With `ANTHROPIC_BASE_URL`, it passes that URL to Claude
-Code and resolves `ANTHROPIC_AUTH_TOKEN` instead. Completed result metadata
-records the gateway variant as Claude adapter version `1+gateway` without
-adding endpoint or token fields; direct runs record adapter version `1`.
+`ANTHROPIC_BASE_URL`, Claude Code and host-side completions use direct Anthropic
+and resolve `ANTHROPIC_API_KEY`. With `ANTHROPIC_BASE_URL`, both use that URL and
+resolve `ANTHROPIC_AUTH_TOKEN` instead. Completed result metadata records the
+gateway variant as Claude adapter version `1+gateway` and completion-provider
+version `1+messages-compatible`, without adding endpoint or token fields;
+direct runs record version `1` for both.
 
 A programmatic host makes the same choice explicitly on its agent adapter.
 Declare the non-secret base URL and bind the token through an opaque credential
@@ -403,6 +584,7 @@ import {
   credentialReference,
 } from '@stripe/forge';
 import {createClaudeCodeAdapter} from '@stripe/forge/agents/claude-code';
+import {createAnthropicCompletionProvider} from '@stripe/forge/providers/anthropic';
 
 const gatewayBaseUrl = process.env.ANTHROPIC_BASE_URL;
 if (!gatewayBaseUrl) throw new Error('ANTHROPIC_BASE_URL is required');
@@ -415,6 +597,13 @@ const gatewayClaude = createClaudeCodeAdapter({
   credentialEnvironmentName: 'ANTHROPIC_AUTH_TOKEN',
 });
 
+const gatewayCompletions = createAnthropicCompletionProvider({
+  id: 'anthropic-compatible',
+  baseUrl: gatewayBaseUrl,
+  auth: 'bearer',
+  credential: credentialReference('anthropic.gateway-token'),
+});
+
 const credentialResolver = createEnvironmentCredentialResolver({
   bindings: {
     'anthropic.gateway-token': 'ANTHROPIC_AUTH_TOKEN',
@@ -422,21 +611,33 @@ const credentialResolver = createEnvironmentCredentialResolver({
 });
 ```
 
-Register `gatewayClaude` and `credentialResolver` in the `ForgeComposition`
-passed to `executeEval`, and select matching profile coordinates:
+Register `gatewayClaude`, `gatewayCompletions`, and `credentialResolver` in the
+`ForgeComposition` passed to `executeEval`, and select matching profile
+coordinates. The agent selection uses the adapter, while any harness models use
+the completion provider:
 
 ```yaml
-adapter: claude-code-gateway
-provider: anthropic-compatible
-model: claude-sonnet-4-6
+models:
+  role_player:
+    provider: anthropic-compatible
+    model: claude-sonnet-4-6
+  judge:
+    provider: anthropic-compatible
+    model: claude-sonnet-4-6
+matrix:
+  agents:
+    - adapter: claude-code-gateway
+      provider: anthropic-compatible
+      model: claude-sonnet-4-6
 ```
 
-The gateway must implement the Anthropic API expected by Claude Code. If it
-also requires a private CA, special proxying, custom mounts, or network
-allowlisting, supply a custom `RuntimeAdapter`; those are runtime concerns and
-are not inferred from the host environment. The URL must be reachable from
-inside the evaluation container: a loopback URL points at the container, not a
-gateway process running on the host. Keep gateway tokens out of cases, profiles,
+The gateway must implement the Anthropic APIs expected by Claude Code and the
+provider's `/v1/messages` requests, including structured output. If it also
+requires a private CA, special proxying, custom mounts, or network allowlisting,
+supply a custom `RuntimeAdapter`; those are runtime concerns and are not
+inferred from the host environment. The URL must be reachable from both the
+host process and inside the evaluation container: a loopback URL points at the
+container when used by Claude Code. Keep gateway tokens out of cases, profiles,
 plans, logs, and result metadata.
 
 CommonJS applications can use the standard asynchronous bridge:
@@ -456,9 +657,10 @@ async function loadForge() {
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
+| `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in setup handlers and setup executor |
-| `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, test plans, and runtime conformance checks |
+| `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
 
 Only documented package exports are public. Do not import `dist/` files or
 undeclared internal paths.
@@ -480,11 +682,13 @@ Forge persists the canonical agent trajectory as a standalone
 - If native evidence is absent, invalid, oversized, incomplete, or compacted,
   Forge constructs ATIF from completed driver turns and records
   `completeness: fallback` plus normalization warnings in `result.json`.
+- If Ava exhausts its retries before the first agent turn, Forge instead writes
+  a system-only fallback trajectory with `role_player_error` provenance.
 - Unknown native events and omitted values produce explicit warnings rather
   than silently changing the wire format.
 - Result schema v1 records the normalization source kind, native format, source
-  session when available, and adapter identity. Forge rejects adapter evidence
-  whose provenance contradicts the selected adapter or session.
+  session, and adapter identity for every completed agent interaction. Forge
+  rejects adapter evidence which omits or contradicts the selected session.
 - Exact credential values are redacted before evidence and results are staged.
 
 Use the versioned surface when consuming stored artifacts:
@@ -509,6 +713,14 @@ The composition contains:
 - a `CredentialResolver` and read-only `RunInputProvider`;
 - a transactional `RunArtifactStore`;
 - optional completion providers, one observer, and artifact contributors.
+
+Completion providers may be a read-only ID map or a
+`CompletionProviderResolver`. Forge selects them from the explicit
+`models.role_player` and `models.judge` coordinates in the resolved plan.
+Providers declare their own opaque credential references by purpose and receive
+resolved values only for their host-side calls; those values are never placed
+in the runtime environment unless an agent or setup capability independently
+declares the same reference.
 
 Adapters declare executable, credential-reference, and logical state-directory
 requirements before allocation. Credential values stay resolver-owned and do
@@ -616,8 +828,12 @@ selecting host-owned capabilities.
   source. Uncredentialed preparation commands receive neither scope. Docker
   passes secrets through short-lived mode-0600 environment files, not Docker
   argv or permanent container configuration.
-- Workspace evidence is bounded and does not follow symlinks. Local artifacts
-  are staged and claimed by digest before atomic commit.
+- Completion providers separately declare credentials for each score-affecting
+  purpose. Forge redacts all resolved secret values from completion prompts,
+  responses, ATIF, interaction audit, judge evidence, and result metadata.
+- Workspace evidence is bounded and does not follow symlinks. Guideline judges
+  receive only the separately bounded, redacted text subset described above.
+  Local artifacts are staged and claimed by digest before atomic commit.
 
 Docker itself is a privileged host service. Anyone who can replace the Docker
 binary, control the daemon, or modify Forge extension code is already outside
@@ -626,30 +842,38 @@ ordinary host JavaScript and must be trusted even though the capabilities Forge
 passes to them are narrow.
 
 The evaluated agent receives its selected provider credential and has outbound
-network access. It can intentionally disclose that credential. Use a dedicated,
-restricted, short-lived key with appropriate account limits. Exact-value
-redaction does not detect transformed, encoded, encrypted, or partially leaked
-secrets. v0.1 does not provide domain allowlisting, a network proxy, or an
-offline execution mode.
+network access. It can intentionally disclose that credential. Ava and judge
+providers also receive benchmark prompts and the explicitly documented evidence
+needed for their purpose. Use providers appropriate for the data, plus a
+dedicated, restricted, short-lived key with appropriate account limits.
+Exact-value redaction does not detect transformed, encoded, encrypted, or
+partially leaked secrets. v0.1 does not provide domain allowlisting, a network
+proxy, or an offline execution mode.
 
 ## Current limitations
 
-The schemas reserve forward-compatible concepts that v0.1 cannot yet execute:
-
-- Only `one_shot` runs execute. Multi-turn conversations and role-player-driven
-  interactions are not implemented.
-- Success-guideline judging is not implemented; executable cases must use
-  `success_guidelines: []`. Evaluation currently covers file creation, file
-  existence, and regular-expression content checks.
-- Claude Code is the only built-in agent. The CLI supports direct Anthropic or
-  an explicitly configured Anthropic-compatible endpoint; programmatic
-  compositions can add other provider and network behavior. Codex, Cursor,
-  OpenAI, and OpenRouter integrations are not included.
+- Multi-turn automation uses the fixed engine-owned Ava semantics. There is no
+  alternate role-player engine, interactive human controller, or public
+  conversation-policy plugin. Programmatic hosts may supply completion
+  providers, but they cannot replace Ava's lifecycle from the composition.
+- Success guidelines are model-judged pass/fail criteria. The deterministic
+  built-in evaluator remains limited to file creation, file existence, and
+  regular-expression content checks; there are no built-in test-command,
+  static-analysis, or custom deterministic check plugins.
+- Claude Code is the only built-in agent. Codex and Cursor adapters are not
+  included.
+- Anthropic is the only built-in completion provider. It supports direct
+  Anthropic and Anthropic Messages-compatible endpoints and requires Claude
+  4.5-or-newer model identifiers for strict structured output. OpenAI,
+  OpenRouter-native, and other provider protocols are not included, though a
+  programmatic composition can implement the public provider contract.
 - Only the Forge-owned Docker image is accepted. Custom images, Dockerfiles,
   direct-process runtimes, interactive/human runs, and custom mounts are absent.
 - `run` executes one selected matrix entry. There is no campaign scheduler,
-  concurrency manager, or automatic retry loop; `repetitions` create selectable
-  entries and `retries` is not acted on by the v0.1 CLI.
+  concurrency manager, or automatic run retry loop; `repetitions` create
+  selectable entries and profile-level `retries` is not acted on by the v0.1
+  CLI. Ava and guideline completion attempts have their own fixed retry policy
+  and do not implement the profile's campaign retry field.
 - Built-in setup is limited to `forge/write@1` and `forge/command@1`.
 - Results are local. There is no remote publisher, worker/control plane, hosted
   execution service, or human-result policy in the public package.
@@ -672,45 +896,57 @@ pnpm test:package
 
 ### Opt-in live tests
 
-Live tests are separate from `pnpm test` and `pnpm check`. They require a
-running Docker daemon and may build the packaged Forge image.
-
-Exercise the real Docker runtime lifecycle without credentials or a model call:
-
-```sh
-pnpm test:live:docker
-```
-
-This starts a container, writes and seals a workspace probe, checks cleanup and
-idempotent disposal, and prints a conformance report. Set
-`FORGE_LIVE_TIMEOUT_MS` to a positive millisecond timeout (the default is 20
-minutes), or `FORGE_DOCKER_EXECUTABLE` to an alternate Docker CLI path.
-
-The Claude quickstart makes a billable model-provider call and therefore always
-requires an explicit acknowledgement. For direct Anthropic, supply its API
-key:
+The repository has one live suite. It is separate from `pnpm test` and
+`pnpm check` because it needs a running Docker daemon, may build the packaged
+image, and makes several potentially billable model calls. Direct Anthropic
+uses a dedicated API key:
 
 ```sh
-FORGE_LIVE_CLAUDE=1 \
+FORGE_LIVE=1 \
 ANTHROPIC_API_KEY=your-restricted-key \
-pnpm test:live:claude
+pnpm test:live
 ```
 
-To exercise an Anthropic-compatible endpoint, supply its URL and token instead:
+An Anthropic Messages-compatible endpoint uses its URL and bearer token:
 
 ```sh
-FORGE_LIVE_CLAUDE=1 \
+FORGE_LIVE=1 \
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
-pnpm test:live:claude
+pnpm test:live
 ```
 
-It runs the checked-in quickstart selection with `claude-sonnet-4-6`, verifies
-the committed result, requires a passing evaluation, and fails if evidence fell
-back from the native Claude session. Results remain under `results/live` by
-default. `FORGE_LIVE_RUN_ID` selects a run ID and `FORGE_LIVE_RESULTS_ROOT`
-selects another results directory. Its report identifies only the selected
-authentication mode; it never prints the endpoint or credential.
+One invocation builds once and runs the following checks in order:
+
+1. The real Docker adapter conformance probe, including sealing, cleanup, and
+   idempotent disposal.
+2. The checked-in one-shot quickstart, which must pass its deterministic checks
+   without calling a host completion provider.
+3. The checked-in multi-turn example, which must exercise at least two turns in
+   one persistent Claude session and pass both deterministic checks and model
+   judging.
+4. Full `verifyCompletedRun` integrity verification plus targeted checks of the
+   interaction, trajectory, judge evidence, completion calls, and session
+   provenance.
+
+When `ANTHROPIC_BASE_URL` names a host-loopback endpoint, the live suite creates
+an ephemeral authenticated bridge for Claude Code in Docker. The container sees
+only a one-run bridge credential; the real gateway token remains in the host
+process and host-side completions call the original endpoint directly. The
+bridge exposes no general proxy and is removed during cleanup. This convenience
+belongs only to the repository live suite; the public `forge run` command still
+requires its configured endpoint to be reachable from the container. The
+loopback bridge requires a Docker implementation which provides
+`host.docker.internal`, such as Docker Desktop, and fails its connectivity
+preflight before making model calls when that route is unavailable.
+
+Results remain under `results/live` by default. `FORGE_LIVE_RUN_ID` selects the
+suite ID used as the prefix for its three run IDs,
+`FORGE_LIVE_RESULTS_ROOT` selects another results directory,
+`FORGE_LIVE_TIMEOUT_MS` sets the overall positive millisecond timeout (30
+minutes by default), and `FORGE_DOCKER_EXECUTABLE` selects another Docker CLI.
+The final report contains bounded result summaries but never prints endpoints,
+prompts, responses, or credentials.
 
 The package smoke test installs the packed tarball into an isolated consumer and
 checks every documented ESM subpath plus CommonJS dynamic import. Forge is

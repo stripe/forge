@@ -22,6 +22,17 @@ export {
   type TestCommandScope,
 } from './fakes.js';
 export {
+  createScriptedCompletionProvider,
+  type RecordedCompletionCall,
+  type ScriptedCompletionHandler,
+  type ScriptedCompletionPreflightHandler,
+  type ScriptedCompletionProviderFixture,
+  type ScriptedCompletionProviderOptions,
+  type ScriptedCompletionRequirementsHandler,
+  type ScriptedCompletionStep,
+  type ScriptedCompletionValue,
+} from './completionProvider.js';
+export {
   createMemoryRunInputProvider,
   type MemoryRunInputProviderOptions,
 } from './memoryInputs.js';

@@ -87,6 +87,7 @@ describe('executeEval', () => {
       'artifact:begin',
       'artifact:write:plan.json',
       'artifact:write:trajectory.json',
+      'artifact:write:interaction.json',
       'artifact:write:workspace-evidence.json',
       'artifact:write:evaluation.json',
       'runtime:dispose',
@@ -122,6 +123,21 @@ describe('executeEval', () => {
     await expect(
       executeEval({
         runId: 'run-bad-evidence',
+        plan: fixture.plan,
+        composition: fixture.composition(inertStore()),
+        now: monotonicClock(),
+      }),
+    ).rejects.toMatchObject({code: 'evidence_failed', phase: 'evidence'});
+    expect(fixture.calls).not.toContain('artifact:begin');
+    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+  });
+
+  it('rejects completed evidence without exact session provenance', async () => {
+    const fixture = await executionFixture({omitEvidenceSession: true});
+
+    await expect(
+      executeEval({
+        runId: 'run-unowned-evidence',
         plan: fixture.plan,
         composition: fixture.composition(inertStore()),
         now: monotonicClock(),
@@ -292,7 +308,11 @@ describe('executeEval', () => {
 });
 
 async function executionFixture(
-  options: {openSessionFailure?: boolean; evidenceAdapterId?: string} = {},
+  options: {
+    openSessionFailure?: boolean;
+    evidenceAdapterId?: string;
+    omitEvidenceSession?: boolean;
+  } = {},
 ): Promise<{
   root: string;
   plan: ResolvedRunPlanV1;
@@ -384,7 +404,7 @@ async function executionFixture(
           calls.push('agent:send');
           return {
             text: 'done',
-            sessionId: 'turn-session',
+            sessionId: 'canonical-session',
             toolCalls: [],
           };
         },
@@ -400,9 +420,14 @@ async function executionFixture(
       expect('set' in context.runtime.stateDirectories).toBe(false);
       calls.push(`agent:evidence:${context.sessionId}`);
       return normalizedTrajectory(
-        options.evidenceAdapterId === undefined
-          ? {}
-          : {adapterId: options.evidenceAdapterId},
+        {
+          ...(options.evidenceAdapterId === undefined
+            ? {}
+            : {adapterId: options.evidenceAdapterId}),
+          ...(options.omitEvidenceSession === undefined
+            ? {}
+            : {omitSession: options.omitEvidenceSession}),
+        },
       );
     },
   };
@@ -429,12 +454,14 @@ async function executionFixture(
 }
 
 function normalizedTrajectory(
-  options: {adapterId?: string} = {},
+  options: {adapterId?: string; omitSession?: boolean} = {},
 ): NormalizedTrajectory {
   return createNormalizedTrajectory({
     trajectory: {
       schema_version: 'ATIF-v1.8',
-      session_id: 'canonical-session',
+      ...(options.omitSession === true
+        ? {}
+        : {session_id: 'canonical-session'}),
       agent: {name: 'claude-code', version: 'test', model_name: 'sonnet'},
       steps: [
         {step_id: 1, source: 'user', message: 'Create greeting.txt'},
@@ -445,7 +472,9 @@ function normalizedTrajectory(
       source: {
         kind: 'native_log',
         format: 'claude-code-jsonl',
-        sessionId: 'canonical-session',
+        ...(options.omitSession === true
+          ? {}
+          : {sessionId: 'canonical-session'}),
       },
       adapter: {
         id: options.adapterId ?? 'claude-code',

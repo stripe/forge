@@ -42,7 +42,12 @@ export function redactSecrets<T>(value: T, secrets: readonly string[]): Redactio
         if (Object.hasOwn(output, redactedKey)) {
           throw new TypeError('Secret redaction produced duplicate object keys.');
         }
-        output[redactedKey] = visit(child, seen);
+        Object.defineProperty(output, redactedKey, {
+          configurable: true,
+          enumerable: true,
+          value: visit(child, seen),
+          writable: true,
+        });
       }
       seen.delete(input);
       return output;

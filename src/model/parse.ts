@@ -42,11 +42,18 @@ const MAX_SETUP_STEPS = 1_000;
 const MAX_RESOLVED_SETUP_STEPS = MAX_SETUP_STEPS * 2;
 const MAX_COMMAND_ARGUMENTS = 256;
 const MAX_CHECK_REGEX_BYTES = 1_024;
+const MAX_SUCCESS_GUIDELINE_CHARACTERS = 64 * 1024;
 
 const FiniteNumberSchema = z.number().finite();
 const PositiveIntegerSchema = FiniteNumberSchema.int().safe().positive();
 const NonnegativeIntegerSchema = FiniteNumberSchema.int().safe().nonnegative();
 const TrimmedTextSchema = z.string().trim().min(1).refine(isBoundedText);
+const SuccessGuidelineSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_SUCCESS_GUIDELINE_CHARACTERS)
+  .refine(isBoundedText);
 const MetadataSchema = z.string().trim().min(1).refine(isSafeMetadata);
 const SimpleIdentifierSchema = z
   .string()
@@ -191,7 +198,7 @@ const EvalCaseSchema = z
     max_turns: PositiveIntegerSchema.max(100).optional(),
     setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS).default([]),
     success_guidelines: z
-      .array(TrimmedTextSchema)
+      .array(SuccessGuidelineSchema)
       .max(1_000)
       .default([]),
     checks: ChecksSchema.optional(),
@@ -443,7 +450,7 @@ const MaterializedEvalCaseSchema = z.intersection(
       id: CaseIdSchema,
       execution_mode: z.enum(['multi_turn', 'one_shot']),
       setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
-      success_guidelines: z.array(TrimmedTextSchema).max(1_000),
+      success_guidelines: z.array(SuccessGuidelineSchema).max(1_000),
     })
     .passthrough(),
   EvalCaseSchema,
@@ -519,7 +526,7 @@ const ResolvedRunPlanSchema = z
       .strict(),
     evaluation: z
       .object({
-        success_guidelines: z.array(TrimmedTextSchema).max(1_000),
+        success_guidelines: z.array(SuccessGuidelineSchema).max(1_000),
         checks: ChecksSchema.optional(),
         example_answer: z.string().refine(isBoundedText).optional(),
         judge: ModelRefSchema.optional(),
@@ -654,6 +661,16 @@ const ResolvedRunPlanSchema = z
       );
     }
     if (
+      plan.case.execution_mode === 'one_shot' &&
+      plan.role_player !== undefined
+    ) {
+      addPlanIssue(
+        context,
+        ['role_player'],
+        'one_shot plans cannot include a role_player model',
+      );
+    }
+    if (
       plan.case.success_guidelines.length > 0 &&
       plan.evaluation.judge === undefined
     ) {
@@ -661,6 +678,16 @@ const ResolvedRunPlanSchema = z
         context,
         ['evaluation', 'judge'],
         'plans with success guidelines require a judge model',
+      );
+    }
+    if (
+      plan.case.success_guidelines.length === 0 &&
+      plan.evaluation.judge !== undefined
+    ) {
+      addPlanIssue(
+        context,
+        ['evaluation', 'judge'],
+        'plans without success guidelines cannot include a judge model',
       );
     }
   });

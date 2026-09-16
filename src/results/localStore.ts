@@ -10,7 +10,11 @@ import type {
 import {sha256Digest} from '../model/hashes.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
 import {canonicalJsonSha256, serializeCanonicalJson} from '../serialization.js';
-import {parseRunResult} from './parse.js';
+import {
+  parseInteractionArtifact,
+  parseJudgeEvidence,
+  parseRunResult,
+} from './parse.js';
 import type {
   ArtifactDescriptorV1,
   CompletedRun,
@@ -19,6 +23,11 @@ import type {
 
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
+const VERIFIED_ARTIFACT_PATHS = new Set([
+  'interaction.json',
+  'judge-evidence.json',
+  'trajectory.json',
+]);
 
 export interface CreateArtifactStoreOptions {
   readonly root: string;
@@ -155,6 +164,7 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
   }
 
   const expectedPaths = new Set(['result.json']);
+  const artifactBodies = new Map<string, Buffer>();
   for (const descriptor of [...result.artifacts, ...result.supplemental_artifacts]) {
     assertArtifactPath(descriptor.path);
     if (expectedPaths.has(descriptor.path)) {
@@ -171,6 +181,9 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
     ) {
       throw new ArtifactStoreError(`Artifact does not match its descriptor: ${descriptor.path}`);
     }
+    if (VERIFIED_ARTIFACT_PATHS.has(descriptor.path)) {
+      artifactBodies.set(descriptor.path, body);
+    }
   }
   const actualPaths = await listRegularFiles(runDir);
   if (
@@ -182,6 +195,8 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
   if (canonicalJsonSha256(result.artifacts) !== result.artifact_set_sha256) {
     throw new ArtifactStoreError('Canonical artifact-set digest is invalid.');
   }
+  verifyInteractionArtifact(result, artifactBodies);
+  verifyJudgeEvidence(result, artifactBodies);
   return {runId: result.run_id, location: runDir, result};
 }
 
@@ -227,6 +242,105 @@ function assertResultArtifacts(
   }
   if (canonicalJsonSha256(result.artifacts) !== result.artifact_set_sha256) {
     throw new ArtifactStoreError('Result artifact-set digest is invalid.');
+  }
+}
+
+function verifyInteractionArtifact(
+  result: RunResult,
+  artifactBodies: ReadonlyMap<string, Buffer>,
+): void {
+  const body = requireCoreArtifact(result, artifactBodies, 'interaction.json');
+  const interaction = parseJsonArtifact(
+    'interaction.json',
+    body,
+    parseInteractionArtifact,
+  );
+  if (
+    interaction.mode !== result.interaction.mode ||
+    interaction.turns.length !== result.interaction.turn_count ||
+    interaction.stop_reason !== result.stop_reason ||
+    serializeCanonicalJson(interaction.failure) !==
+      serializeCanonicalJson(result.failure)
+  ) {
+    throw new ArtifactStoreError(
+      'interaction.json does not match the completed result summary.',
+    );
+  }
+}
+
+function verifyJudgeEvidence(
+  result: RunResult,
+  artifactBodies: ReadonlyMap<string, Buffer>,
+): void {
+  const path = 'judge-evidence.json';
+  const body = artifactBodies.get(path);
+  const judgingRan = result.evaluation.guidelines_total > 0;
+  if ((body !== undefined) !== judgingRan) {
+    throw new ArtifactStoreError(
+      judgingRan
+        ? 'Completed result with judged guidelines is missing judge-evidence.json.'
+        : 'Completed result without judged guidelines contains judge-evidence.json.',
+    );
+  }
+  if (body === undefined) return;
+  if (!result.artifacts.some((descriptor) => descriptor.path === path)) {
+    throw new ArtifactStoreError(
+      'Canonical artifact judge-evidence.json must be claimed in result artifacts.',
+    );
+  }
+  const judgeEvidence = parseJsonArtifact(path, body, parseJudgeEvidence);
+  const trajectory = requireCoreArtifact(
+    result,
+    artifactBodies,
+    'trajectory.json',
+  );
+  if (judgeEvidence.trajectory_sha256 !== sha256Digest(trajectory)) {
+    throw new ArtifactStoreError(
+      'judge-evidence.json trajectory_sha256 does not match trajectory.json.',
+    );
+  }
+}
+
+function requireCoreArtifact(
+  result: RunResult,
+  artifactBodies: ReadonlyMap<string, Buffer>,
+  artifactPath: string,
+): Buffer {
+  const body = artifactBodies.get(artifactPath);
+  if (body === undefined) {
+    throw new ArtifactStoreError(
+      `Completed result is missing canonical artifact ${artifactPath}.`,
+    );
+  }
+  if (!result.artifacts.some((descriptor) => descriptor.path === artifactPath)) {
+    throw new ArtifactStoreError(
+      `Canonical artifact ${artifactPath} must be claimed in result artifacts.`,
+    );
+  }
+  return body;
+}
+
+function parseJsonArtifact<T>(
+  artifactPath: string,
+  body: Buffer,
+  parse: (input: unknown) => T,
+): T {
+  let value: unknown;
+  try {
+    value = JSON.parse(body.toString('utf8'));
+  } catch (error) {
+    throw new ArtifactStoreError(
+      `Completed ${artifactPath} is invalid JSON.`,
+      {cause: error},
+    );
+  }
+  try {
+    return parse(value);
+  } catch (error) {
+    throw new ArtifactStoreError(
+      `Completed ${artifactPath} does not match its schema.`,
+      {cause: error},
+    );
   }
 }
 

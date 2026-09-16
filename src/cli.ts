@@ -10,7 +10,7 @@ import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
 import {createDirectoryRunInputProvider} from './contracts/inputs.js';
-import {executeEval, FORGE_VERSION} from './execution/index.js';
+import {executeEval, FORGE_VERSION, preflightEval} from './execution/index.js';
 import {
   loadBenchmarkProfile,
   loadDataset,
@@ -27,6 +27,7 @@ import {
 } from './planning/index.js';
 import {createArtifactStore} from './results/index.js';
 import {createDockerRuntimeAdapter} from './runtime/docker/index.js';
+import {createAnthropicCompletionProvider} from './providers/anthropic/index.js';
 import {serializeCanonicalJson} from './serialization.js';
 import {forgeSetupHandlers} from './setup/index.js';
 
@@ -123,6 +124,11 @@ export async function createDefaultCliComposition(
     credentialEnvironmentName,
     ...(baseUrl === undefined ? {} : {baseUrl}),
   });
+  const completionProvider = createAnthropicCompletionProvider({
+    credential,
+    auth: gatewaySelected ? 'bearer' : 'api-key',
+    ...(baseUrl === undefined ? {} : {baseUrl}),
+  });
   const credentialResolver = createEnvironmentCredentialResolver({
     bindings: {
       [credential]: credentialEnvironmentName,
@@ -134,6 +140,9 @@ export async function createDefaultCliComposition(
     runtime: createDockerRuntimeAdapter(),
     agents: new Map([[claude.id, claude]]),
     setupHandlers: forgeSetupHandlers,
+    completionProviders: new Map([
+      [completionProvider.id, completionProvider],
+    ]),
     credentialResolver,
     inputProvider: await createDirectoryRunInputProvider(options.datasetRoot),
     artifactStore: createArtifactStore({root: options.resultsRoot}),
@@ -199,8 +208,20 @@ export async function runCli(
 
     if (command === 'validate') {
       const selections = expandExperiment(profile);
-      for (const selection of selections) {
-        resolveRunPlan({dataset, profile, selection});
+      const plans = selections.map((selection) =>
+        resolveRunPlan({dataset, profile, selection}),
+      );
+      const compositionFactory =
+        options.compositionFactory ?? createDefaultCliComposition;
+      const composition = await compositionFactory({
+        datasetRoot: dataset.root,
+        resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
+        ...(options.environment === undefined
+          ? {}
+          : {environment: options.environment}),
+      });
+      for (const plan of plans) {
+        preflightEval({plan, composition});
       }
       stdout(
         serializeCanonicalJson({

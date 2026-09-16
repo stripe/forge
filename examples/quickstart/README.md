@@ -60,26 +60,25 @@ eval file.
 
 ## Opt-in live checks
 
-From the repository root, `pnpm test:live:docker` exercises the real Docker
-lifecycle without credentials or a model call. `pnpm test:live:claude` runs
-this quickstart against a model provider and may be billable, so it additionally
-requires `FORGE_LIVE_CLAUDE=1` every time.
-
-Use either direct authentication:
+Repository contributors exercise this quickstart as part of the single live
+suite. It also checks Docker conformance and the multi-turn example, so it may
+make several billable calls and requires an explicit acknowledgement:
 
 ```sh
-FORGE_LIVE_CLAUDE=1 \
+FORGE_LIVE=1 \
 ANTHROPIC_API_KEY=your-restricted-key \
-pnpm test:live:claude
+pnpm test:live
 ```
 
-or an Anthropic-compatible endpoint:
+An Anthropic Messages-compatible endpoint uses the same command:
 
 ```sh
-FORGE_LIVE_CLAUDE=1 \
+FORGE_LIVE=1 \
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
-pnpm test:live:claude
+pnpm test:live
 ```
 
-Live checks are not part of `pnpm test` or `pnpm check`.
+The suite verifies this run's checks, native Claude evidence, canonical
+artifacts, and absence of unexpected host completion calls. Live checks are not
+part of `pnpm test` or `pnpm check`.
