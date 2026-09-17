@@ -6,12 +6,12 @@ export {
   sha256Digest,
   sha256Hex,
 } from './hashes.js';
-export {loadBenchmarkProfile, loadDataset} from './loaders.js';
+export {loadDataset, loadExperimentConfig} from './loaders.js';
 export {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
-  parseBenchmarkProfile,
-  parseBenchmarkProfileYaml,
+  parseExperimentConfig,
+  parseExperimentConfigYaml,
   parseDatasetManifest,
   parseDatasetManifestJson,
   parseEvalCase,

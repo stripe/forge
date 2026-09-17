@@ -8,7 +8,7 @@ import type {
 } from '../model/types.js';
 
 const DATASET_DIGEST = `sha256:${'1'.repeat(64)}` as const;
-const PROFILE_DIGEST = `sha256:${'2'.repeat(64)}` as const;
+const EXPERIMENT_DIGEST = `sha256:${'2'.repeat(64)}` as const;
 const CASE_DIGEST = `sha256:${'3'.repeat(64)}` as const;
 
 export interface TestResolvedRunPlanOptions {
@@ -64,10 +64,10 @@ export function createTestResolvedRunPlan(
         version: '1.0.0',
         manifest_sha256: DATASET_DIGEST,
       },
-      profile: {
-        id: 'testing/profile',
+      experiment: {
+        id: 'testing/experiment',
         version: '1.0.0',
-        sha256: PROFILE_DIGEST,
+        sha256: EXPERIMENT_DIGEST,
       },
       case: {
         id: caseId,

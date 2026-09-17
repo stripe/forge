@@ -12,10 +12,10 @@ import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
 import {createDirectoryRunInputProvider} from './contracts/inputs.js';
 import {executeEval, FORGE_VERSION, preflightEval} from './execution/index.js';
 import {
-  loadBenchmarkProfile,
+  loadExperimentConfig,
   loadDataset,
   parseRunSelection,
-  type BenchmarkProfileV1,
+  type ExperimentConfigV1,
   type RunSelection,
 } from './model/index.js';
 import {
@@ -39,7 +39,7 @@ const ANTHROPIC_AUTH_TOKEN_ENVIRONMENT = 'ANTHROPIC_AUTH_TOKEN';
 const ANTHROPIC_BASE_URL_ENVIRONMENT = 'ANTHROPIC_BASE_URL';
 
 const CLI_OPTIONS = {
-  profile: {type: 'string', short: 'p'},
+  experiment: {type: 'string', short: 'e'},
   dataset: {type: 'string', short: 'd'},
   case: {type: 'string'},
   'case-file': {type: 'string'},
@@ -67,11 +67,11 @@ const SELECTOR_OPTIONS: readonly CliOptionName[] = [
 ];
 
 const USAGE = `Usage:
-  forge validate --profile <file> --dataset <directory>
-  forge plan --profile <file> --dataset <directory> [selection options]
-  forge plan --profile <file> --case-file <file> [selection options]
-  forge run --profile <file> --dataset <directory> [selection options] [--output <directory>] [--run-id <id>]
-  forge run --profile <file> --case-file <file> [selection options] [--output <directory>] [--run-id <id>]
+  forge validate --experiment <file> --dataset <directory>
+  forge plan --experiment <file> --dataset <directory> [selection options]
+  forge plan --experiment <file> --case-file <file> [selection options]
+  forge run --experiment <file> --dataset <directory> [selection options] [--output <directory>] [--run-id <id>]
+  forge run --experiment <file> --case-file <file> [selection options] [--output <directory>] [--run-id <id>]
 
 Selection options:
   --case <id>          Select an eval case
@@ -179,7 +179,7 @@ export async function runCli(
     }
 
     const allowed: CliOptionName[] = [
-      'profile',
+      'experiment',
       'dataset',
       ...(command === 'validate' ? [] : SELECTOR_OPTIONS),
       ...(command === 'run' ? (['output', 'run-id'] as const) : []),
@@ -187,7 +187,11 @@ export async function runCli(
     assertAllowedOptions(parsed.values, allowed);
 
     const cwd = path.resolve(options.cwd ?? process.cwd());
-    const profilePath = resolveRequiredPath(parsed.values.profile, 'profile', cwd);
+    const experimentPath = resolveRequiredPath(
+      parsed.values.experiment,
+      'experiment',
+      cwd,
+    );
     if (parsed.values.case !== undefined && parsed.values['case-file'] !== undefined) {
       throw new CliUsageError('--case and --case-file cannot be combined.');
     }
@@ -201,15 +205,15 @@ export async function runCli(
         ? resolveRequiredPath(undefined, 'dataset', cwd)
         : await discoverDatasetRoot(caseFilePath)
       : resolveRequiredPath(parsed.values.dataset, 'dataset', cwd);
-    const [dataset, profile] = await Promise.all([
+    const [dataset, experiment] = await Promise.all([
       loadDataset(datasetPath),
-      loadBenchmarkProfile(profilePath),
+      loadExperimentConfig(experimentPath),
     ]);
 
     if (command === 'validate') {
-      const selections = expandExperiment(profile);
+      const selections = expandExperiment(experiment);
       const plans = selections.map((selection) =>
-        resolveRunPlan({dataset, profile, selection}),
+        resolveRunPlan({dataset, experiment, selection}),
       );
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
@@ -226,9 +230,9 @@ export async function runCli(
       stdout(
         serializeCanonicalJson({
           dataset: dataset.manifest.dataset,
-          profile: {
-            id: profile.profile.id,
-            version: profile.profile.version,
+          experiment: {
+            id: experiment.config.id,
+            version: experiment.config.version,
           },
           run_count: selections.length,
           valid: true,
@@ -248,7 +252,7 @@ export async function runCli(
         throw error;
       }
     }
-    const selection = selectOne(profile.profile, {
+    const selection = selectOne(experiment.config, {
       caseId,
       treatment: parsed.values.treatment,
       adapter: parsed.values.agent,
@@ -256,7 +260,7 @@ export async function runCli(
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
     });
-    const plan = resolveRunPlan({dataset, profile, selection});
+    const plan = resolveRunPlan({dataset, experiment, selection});
 
     if (command === 'plan') {
       stdout(serializeResolvedRunPlan(plan));
@@ -310,10 +314,10 @@ interface SelectionFilters {
 }
 
 function selectOne(
-  profile: BenchmarkProfileV1,
+  experiment: ExperimentConfigV1,
   filters: SelectionFilters,
 ): RunSelection {
-  const matches = expandExperiment(profile).filter((selection) =>
+  const matches = expandExperiment(experiment).filter((selection) =>
     (filters.caseId === undefined || selection.case_id === filters.caseId) &&
     (filters.treatment === undefined || selection.treatment === filters.treatment) &&
     (filters.adapter === undefined || selection.agent.adapter === filters.adapter) &&

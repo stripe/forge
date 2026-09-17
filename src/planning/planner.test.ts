@@ -4,10 +4,10 @@ import {expect} from '../../test/support/expect.js';
 
 import {sha256Digest} from '../model/hashes.js';
 import type {
-  BenchmarkProfileV1,
   EvalCaseV1,
-  LoadedBenchmarkProfileV1,
+  ExperimentConfigV1,
   LoadedDatasetV1,
+  LoadedExperimentConfigV1,
   RunSelection,
 } from '../model/types.js';
 import {
@@ -20,11 +20,11 @@ import {
 
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const CASE_DIGEST = `sha256:${'b'.repeat(64)}` as const;
-const PROFILE_DIGEST = `sha256:${'c'.repeat(64)}` as const;
+const EXPERIMENT_DIGEST = `sha256:${'c'.repeat(64)}` as const;
 
 describe('experiment expansion and run planning', () => {
   it('expands deterministically in case/treatment/agent/repetition order', () => {
-    const profile = benchmarkProfile({
+    const experiment = experimentConfig({
       matrix: {
         cases: ['case/a', 'case/b'],
         treatments: ['baseline', 'with-seed'],
@@ -37,7 +37,7 @@ describe('experiment expansion and run planning', () => {
       },
     });
 
-    const selections = expandExperiment(profile);
+    const selections = expandExperiment(experiment);
     expect(selections).toHaveLength(16);
     expect(selections.slice(0, 5)).toEqual([
       selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
@@ -82,7 +82,7 @@ describe('experiment expansion and run planning', () => {
     });
     expect(plan.provenance).toMatchObject({
       dataset: {manifest_sha256: MANIFEST_DIGEST},
-      profile: {sha256: PROFILE_DIGEST},
+      experiment: {sha256: EXPERIMENT_DIGEST},
       case: {sha256: CASE_DIGEST},
     });
     expect(Object.isFrozen(plan)).toBe(true);
@@ -105,7 +105,7 @@ describe('experiment expansion and run planning', () => {
       },
       // Configured but unused harness models must not enter a one-shot,
       // checks-only resolved plan.
-      profile: benchmarkProfile(),
+      experiment: experimentConfig(),
     });
     const plan = resolveRunPlan({
       ...loaded,
@@ -130,7 +130,7 @@ describe('experiment expansion and run planning', () => {
   });
 
   it('requires harness models only when their behavior is selected', () => {
-    const noModels = inputs({profile: benchmarkProfile({models: {}})});
+    const noModels = inputs({experiment: experimentConfig({models: {}})});
     expect(() =>
       resolveRunPlan({
         ...noModels,
@@ -146,7 +146,7 @@ describe('experiment expansion and run planning', () => {
     ).toThrowError(expect.objectContaining({code: 'missing_role_player'}));
 
     const noJudge = inputs({
-      profile: benchmarkProfile({
+      experiment: experimentConfig({
         models: {role_player: {provider: 'anthropic', model: 'role-model'}},
       }),
     });
@@ -165,7 +165,7 @@ describe('experiment expansion and run planning', () => {
     ).toThrowError(expect.objectContaining({code: 'missing_judge'}));
   });
 
-  it('rejects profile/dataset drift, selections outside the matrix, and missing inputs', () => {
+  it('rejects experiment/dataset drift, selections outside the matrix, and missing inputs', () => {
     const loaded = inputs();
     const selected = selection(
       'case/a',
@@ -178,12 +178,12 @@ describe('experiment expansion and run planning', () => {
     expect(() =>
       resolveRunPlan({
         ...loaded,
-        profile: {
-          ...loaded.profile,
-          profile: {
-            ...loaded.profile.profile,
+        experiment: {
+          ...loaded.experiment,
+          config: {
+            ...loaded.experiment.config,
             dataset: {
-              ...loaded.profile.profile.dataset,
+              ...loaded.experiment.config.dataset,
               manifest_sha256: `sha256:${'0'.repeat(64)}`,
             },
           },
@@ -191,7 +191,7 @@ describe('experiment expansion and run planning', () => {
         selection: selected,
       }),
     ).toThrowError(
-      expect.objectContaining({code: 'dataset_profile_mismatch'}),
+      expect.objectContaining({code: 'dataset_experiment_mismatch'}),
     );
     expect(() =>
       resolveRunPlan({...loaded, selection: {...selected, repetition: 2}}),
@@ -213,7 +213,7 @@ describe('experiment expansion and run planning', () => {
     ).toThrowError(expect.objectContaining({code: 'missing_dataset_input'}));
 
     const directoryInput = inputs({
-      profile: benchmarkProfile({
+      experiment: experimentConfig({
         treatments: {
           directory: {
             setup: [
@@ -228,7 +228,7 @@ describe('experiment expansion and run planning', () => {
           },
         },
         matrix: {
-          ...benchmarkProfile().matrix,
+          ...experimentConfig().matrix,
           treatments: ['directory'],
         },
       }),
@@ -300,12 +300,12 @@ function evalCase(): EvalCaseV1 {
   };
 }
 
-function benchmarkProfile(
-  overrides: Partial<BenchmarkProfileV1> = {},
-): BenchmarkProfileV1 {
-  const profile: BenchmarkProfileV1 = {
+function experimentConfig(
+  overrides: Partial<ExperimentConfigV1> = {},
+): ExperimentConfigV1 {
+  const config: ExperimentConfigV1 = {
     schema_version: 1,
-    id: 'profile/default',
+    id: 'experiment/default',
     version: '2026.09.0',
     dataset: {
       id: 'dataset',
@@ -352,18 +352,18 @@ function benchmarkProfile(
     },
     limits: {run_timeout_ms: 1_800_000},
   };
-  return {...profile, ...overrides};
+  return {...config, ...overrides};
 }
 
 function inputs(
   options: {
     caseDefinition?: EvalCaseV1;
-    profile?: BenchmarkProfileV1;
+    experiment?: ExperimentConfigV1;
     manifestFiles?: LoadedDatasetV1['manifest']['files'];
   } = {},
-): {dataset: LoadedDatasetV1; profile: LoadedBenchmarkProfileV1} {
+): {dataset: LoadedDatasetV1; experiment: LoadedExperimentConfigV1} {
   const definition = options.caseDefinition ?? evalCase();
-  const profile = options.profile ?? benchmarkProfile();
+  const config = options.experiment ?? experimentConfig();
   const manifestFiles = options.manifestFiles ?? [
     {path: 'cases/case/a/eval.yaml', size: 100, sha256: 'b'.repeat(64)},
     {path: 'fixtures/seed.txt', size: 4, sha256: 'd'.repeat(64)},
@@ -387,12 +387,12 @@ function inputs(
         ],
       ]),
     },
-    profile: {
-      path: '/profile/default.yaml',
-      root: '/profile',
+    experiment: {
+      path: '/experiment/default.yaml',
+      root: '/experiment',
       raw: '',
-      sha256: PROFILE_DIGEST,
-      profile,
+      sha256: EXPERIMENT_DIGEST,
+      config,
     },
   };
 }

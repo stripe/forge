@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 describe('Forge CLI', () => {
-  it('validates a dataset/profile pair and emits its resolved run count', async () => {
+  it('validates a dataset/experiment pair and emits its resolved run count', async () => {
     const fixture = await createBenchmarkFixture();
     let stdout = '';
     let stderr = '';
@@ -28,8 +28,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'validate',
-        '--profile',
-        'profiles/default.yaml',
+        '--experiment',
+        'experiments/default.yaml',
         '--dataset',
         'dataset',
       ],
@@ -44,7 +44,7 @@ describe('Forge CLI', () => {
     expect(stderr).toBe('');
     expect(JSON.parse(stdout)).toMatchObject({
       dataset: {id: 'example-dataset', version: '2026.09.0'},
-      profile: {id: 'profile/default', version: '2026.09.0'},
+      experiment: {id: 'experiment/default', version: '2026.09.0'},
       run_count: 1,
       valid: true,
     });
@@ -57,8 +57,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
         '--case',
@@ -103,8 +103,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
         '--case-file',
@@ -135,8 +135,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        'profiles/default.yaml',
+        '--experiment',
+        'experiments/default.yaml',
         '--case-file',
         'dataset/cases/example.yaml',
       ],
@@ -158,8 +158,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'run',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--case-file',
         fixture.caseFilePath,
         '--run-id',
@@ -193,8 +193,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
         '--case',
@@ -218,8 +218,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
         '--case-file',
@@ -239,8 +239,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
         '--case-file',
@@ -253,15 +253,15 @@ describe('Forge CLI', () => {
     expect(stderr).toMatch(/manifest.*case|case.*manifest/i);
   });
 
-  it('rejects a manifest case that is not a profile matrix member', async () => {
+  it('rejects a manifest case that is not an experiment matrix member', async () => {
     const fixture = await createBenchmarkFixture({includeUnselectedCase: true});
     let stderr = '';
 
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
         '--case-file',
@@ -372,8 +372,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
       ],
@@ -390,8 +390,8 @@ describe('Forge CLI', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--case-file',
         fixture.caseFilePath,
       ],
@@ -408,7 +408,7 @@ async function createBenchmarkFixture(
 ): Promise<{
   root: string;
   datasetRoot: string;
-  profilePath: string;
+  experimentPath: string;
   caseFilePath: string;
   unselectedCaseFilePath?: string;
 }> {
@@ -416,10 +416,10 @@ async function createBenchmarkFixture(
   temporaryDirectories.push(root);
   const datasetRoot = path.join(root, 'dataset');
   const casesRoot = path.join(datasetRoot, 'cases');
-  const profilesRoot = path.join(root, 'profiles');
+  const experimentsRoot = path.join(root, 'experiments');
   await Promise.all([
     fs.mkdir(casesRoot, {recursive: true}),
-    fs.mkdir(profilesRoot, {recursive: true}),
+    fs.mkdir(experimentsRoot, {recursive: true}),
   ]);
 
   const caseBody = `schema_version: 1
@@ -474,11 +474,11 @@ success_guidelines: []
   }, null, 2)}\n`;
   await fs.writeFile(path.join(datasetRoot, 'manifest.json'), manifestRaw);
 
-  const profilePath = path.join(profilesRoot, 'default.yaml');
+  const experimentPath = path.join(experimentsRoot, 'default.yaml');
   await fs.writeFile(
-    profilePath,
+    experimentPath,
     `schema_version: 1
-id: profile/default
+id: experiment/default
 version: 2026.09.0
 dataset:
   id: example-dataset
@@ -514,7 +514,7 @@ limits:
   return {
     root,
     datasetRoot,
-    profilePath,
+    experimentPath,
     caseFilePath,
     ...(options.includeUnselectedCase ? {unselectedCaseFilePath} : {}),
   };

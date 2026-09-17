@@ -6,7 +6,7 @@ import {afterEach, describe, it} from 'node:test';
 import {expect} from '../../test/support/expect.js';
 
 import {sha256Digest, sha256Hex} from './hashes.js';
-import {loadBenchmarkProfile, loadDataset} from './loaders.js';
+import {loadDataset, loadExperimentConfig} from './loaders.js';
 
 const temporaryRoots: string[] = [];
 
@@ -50,15 +50,15 @@ describe('benchmark filesystem loaders', () => {
     });
   });
 
-  it('loads a profile with an exact source digest', async () => {
+  it('loads an experiment config with an exact source digest', async () => {
     const root = await temporaryDirectory();
-    const profilePath = path.join(root, 'default.yaml');
-    const raw = profileYaml('a'.repeat(64));
-    await fs.writeFile(profilePath, raw);
+    const experimentPath = path.join(root, 'default.yaml');
+    const raw = experimentConfigYaml('a'.repeat(64));
+    await fs.writeFile(experimentPath, raw);
 
-    const loaded = await loadBenchmarkProfile(profilePath);
+    const loaded = await loadExperimentConfig(experimentPath);
     expect(loaded.sha256).toBe(sha256Digest(raw));
-    expect(loaded.profile.id).toBe('forge-smoke');
+    expect(loaded.config.id).toBe('forge-smoke');
   });
 });
 
@@ -113,7 +113,7 @@ async function temporaryDirectory(): Promise<string> {
   return root;
 }
 
-function profileYaml(manifestHash: string): string {
+function experimentConfigYaml(manifestHash: string): string {
   return `
 schema_version: 1
 id: forge-smoke

@@ -75,8 +75,8 @@ describe('multi-turn CLI end to end', () => {
     const validationCode = await runCli(
       [
         'validate',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--dataset',
         fixture.datasetRoot,
       ],
@@ -99,8 +99,8 @@ describe('multi-turn CLI end to end', () => {
     const exitCode = await runCli(
       [
         'run',
-        '--profile',
-        fixture.profilePath,
+        '--experiment',
+        fixture.experimentPath,
         '--case-file',
         fixture.casePath,
         '--agent',
@@ -159,7 +159,7 @@ describe('multi-turn CLI end to end', () => {
 async function benchmarkFixture(): Promise<{
   readonly root: string;
   readonly datasetRoot: string;
-  readonly profilePath: string;
+  readonly experimentPath: string;
   readonly casePath: string;
   readonly resultsRoot: string;
 }> {
@@ -204,11 +204,11 @@ checks:
   }, null, 2)}\n`;
   await fs.writeFile(path.join(datasetRoot, 'manifest.json'), manifestRaw);
 
-  const profilePath = path.join(root, 'profile.yaml');
+  const experimentPath = path.join(root, 'experiment.yaml');
   await fs.writeFile(
-    profilePath,
+    experimentPath,
     `schema_version: 1
-id: examples/multi-profile
+id: examples/multi-experiment
 version: 1.0.0
 dataset:
   id: multi-e2e
@@ -245,7 +245,7 @@ limits:
   return {
     root,
     datasetRoot,
-    profilePath,
+    experimentPath,
     casePath,
     resultsRoot: path.join(root, 'results'),
   };

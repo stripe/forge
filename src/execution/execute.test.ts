@@ -591,7 +591,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
     },
     provenance: {
       dataset: {id: 'sample', version: '1', manifest_sha256: DIGEST_A},
-      profile: {id: 'local', version: '1', sha256: DIGEST_B},
+      experiment: {id: 'local', version: '1', sha256: DIGEST_B},
       case: {id: 'sample/case', path: 'cases/case.yaml', sha256: DIGEST_C},
       forge: {version: '0.1.0'},
     },

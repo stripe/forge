@@ -30,7 +30,7 @@ import {
   credentialReference,
   expandExperiment,
   forgeSetupHandlers,
-  loadBenchmarkProfile,
+  loadExperimentConfig,
   loadDataset,
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -231,17 +231,17 @@ try {
 }
 
 async function runDockerConformance(runtime, runId, executionSignal) {
-  const [dataset, profile] = await Promise.all([
+  const [dataset, experiment] = await Promise.all([
     loadDataset(path.join(repositoryRoot, 'examples', 'quickstart', 'dataset')),
-    loadBenchmarkProfile(
-      path.join(repositoryRoot, 'examples', 'quickstart', 'profile.yaml'),
+    loadExperimentConfig(
+      path.join(repositoryRoot, 'examples', 'quickstart', 'experiment.yaml'),
     ),
   ]);
-  const selection = expandExperiment(profile)[0];
+  const selection = expandExperiment(experiment)[0];
   if (selection === undefined) {
-    throw new Error('The quickstart profile contains no run selection.');
+    throw new Error('The quickstart experiment config contains no run selection.');
   }
-  const plan = resolveRunPlan({dataset, profile, selection});
+  const plan = resolveRunPlan({dataset, experiment, selection});
   const report = await assertRuntimeAdapterConforms(
     runtime,
     {
@@ -278,8 +278,8 @@ async function runSelection({
   const exitCode = await runCli(
     [
       'run',
-      '--profile',
-      path.join(repositoryRoot, 'examples', example, 'profile.yaml'),
+      '--experiment',
+      path.join(repositoryRoot, 'examples', example, 'experiment.yaml'),
       '--case-file',
       path.join(
         repositoryRoot,

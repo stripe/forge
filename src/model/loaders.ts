@@ -8,13 +8,13 @@ import {prefixedSha256, sha256Digest} from './hashes.js';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
-  parseBenchmarkProfileYaml,
+  parseExperimentConfigYaml,
   parseDatasetManifestJson,
   parseEvalCaseYaml,
 } from './parse.js';
 import {isSafeDatasetRelativePath} from './paths.js';
 import type {
-  LoadedBenchmarkProfileV1,
+  LoadedExperimentConfigV1,
   LoadedDatasetV1,
   LoadedEvalCaseV1,
   Sha256Hex,
@@ -108,30 +108,30 @@ export async function loadDataset(datasetRoot: string): Promise<LoadedDatasetV1>
   };
 }
 
-/** Load a strict profile and retain the exact input digest for run provenance. */
-export async function loadBenchmarkProfile(
-  profilePath: string,
-): Promise<LoadedBenchmarkProfileV1> {
-  const absolutePath = path.resolve(profilePath);
-  const stat = await lstatOrModelError(absolutePath, 'Benchmark profile');
+/** Load a strict experiment config and retain its exact digest for provenance. */
+export async function loadExperimentConfig(
+  experimentPath: string,
+): Promise<LoadedExperimentConfigV1> {
+  const absolutePath = path.resolve(experimentPath);
+  const stat = await lstatOrModelError(absolutePath, 'Experiment config');
   if (stat.isSymbolicLink() || !stat.isFile()) {
     throw new BenchmarkModelError(
       'unsafe_path',
-      'Benchmark profile must be a regular, non-symbolic-link file.',
+      'Experiment config must be a regular, non-symbolic-link file.',
     );
   }
   const raw = await readBoundedRegularFile(
     absolutePath,
     MAX_BENCHMARK_YAML_BYTES,
-    'Benchmark profile',
+    'Experiment config',
   );
-  const profile = parseBenchmarkProfileYaml(raw);
+  const config = parseExperimentConfigYaml(raw);
   return {
     path: absolutePath,
     root: path.dirname(absolutePath),
     raw,
     sha256: sha256Digest(raw),
-    profile,
+    config,
   };
 }
 

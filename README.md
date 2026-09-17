@@ -1,7 +1,7 @@
 # Stripe Forge
 
 Forge is a portable execution harness for reproducible coding-agent evaluations.
-It loads a versioned dataset and benchmark profile, resolves one selection into
+It loads a versioned dataset and experiment config, resolves one selection into
 an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session in
 Docker, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
@@ -17,7 +17,7 @@ guidelines, and atomically commits a neutral local result.
 
 - Node.js 22 or newer.
 - A running Docker daemon and Docker CLI capable of building Linux images.
-- `linux/amd64` or `linux/arm64`, selected explicitly by the benchmark profile.
+- `linux/amd64` or `linux/arm64`, selected explicitly by the experiment config.
 - Network access to Docker Hub and npm when Forge first builds its runtime image.
 - The runtime image obtains Claude Code from npm; its use remains subject to
   Anthropic's applicable terms.
@@ -28,8 +28,8 @@ guidelines, and atomically commits a neutral local result.
   judge completions. Validation and planning do not resolve it.
 - Ava and guideline judging use strict structured outputs. The built-in
   Anthropic completion provider accepts Claude 4.5 or newer model identifiers.
-- Enough Docker capacity for the profile's limits. Defaults are 4 GiB memory,
-  2 CPUs, and 512 processes.
+- Enough Docker capacity for the experiment config's limits. Defaults are 4 GiB
+  memory, 2 CPUs, and 512 processes.
 
 Forge is ESM-only. Install the exact harness version named by the benchmark:
 
@@ -56,7 +56,7 @@ quickstart/
 │   └── cases/
 │       └── examples/
 │           └── hello-file.yaml
-└── profile.yaml
+└── experiment.yaml
 ```
 
 The hashes below are for the exact UTF-8 file contents shown, including the
@@ -124,11 +124,11 @@ Create `quickstart/dataset/manifest.json`:
 do not include `manifest.json` itself. Extra, missing, modified, symbolic-link,
 or special-file payloads make the dataset invalid.
 
-### 3. Benchmark profile
+### 3. Experiment config
 
-Create `quickstart/profile.yaml`:
+Create `quickstart/experiment.yaml`:
 
-<!-- quickstart-profile:start -->
+<!-- quickstart-experiment:start -->
 ```yaml
 schema_version: 1
 id: examples/quickstart
@@ -166,21 +166,21 @@ matrix:
 limits:
   run_timeout_ms: 900000
 ```
-<!-- quickstart-profile:end -->
+<!-- quickstart-experiment:end -->
 
-The profile independently pins the dataset identity and the SHA-256 digest of
-the raw `manifest.json` bytes. `forge.version` is an execution compatibility
+The experiment config independently pins the dataset identity and SHA-256 digest
+of the raw `manifest.json` bytes. `forge.version` is an execution compatibility
 pin, not a range: v0.1 refuses to run a plan for another harness version.
 
-`models: {}` is intentional for this one-shot, checks-only case. A profile must
-set `models.role_player` for every selected `multi_turn` case and
+`models: {}` is intentional for this one-shot, checks-only case. An experiment
+config must set `models.role_player` for every selected `multi_turn` case and
 `models.judge` for every selected case with non-empty `success_guidelines`.
 Those model coordinates select host-side completion providers; the agent model
 remains independently selected in `matrix.agents`.
 
 Use `linux/arm64` only when that is the benchmark's intentional, released
-platform. Changing the platform, model, setup, resources, or any other profile
-field creates a different experiment.
+platform. Changing the platform, model, setup, resources, or any other
+experiment config field creates a different experiment.
 
 ### 4. Validate, plan, and run
 
@@ -188,12 +188,12 @@ From `quickstart/`:
 
 ```sh
 npx @stripe/forge@0.1.0 validate \
-  --profile ./profile.yaml \
+  --experiment ./experiment.yaml \
   --dataset ./dataset
 ```
 
 `validate` verifies schemas, the complete manifest inventory and hashes,
-dataset/profile identity, all matrix references, setup inputs, and every
+dataset/experiment identity, all matrix references, setup inputs, and every
 resolvable matrix selection. It also constructs the selected composition and
 runs pure agent, setup, and completion-provider compatibility preflight for
 every resolved plan. It does not resolve credentials, invoke provider
@@ -203,7 +203,7 @@ Inspect the canonical resolved plan:
 
 ```sh
 npx @stripe/forge@0.1.0 plan \
-  --profile ./profile.yaml \
+  --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6
@@ -214,7 +214,7 @@ Run the single selection:
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
 npx @stripe/forge@0.1.0 run \
-  --profile ./profile.yaml \
+  --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
@@ -223,14 +223,14 @@ npx @stripe/forge@0.1.0 run \
 ```
 
 That command uses direct Anthropic when `ANTHROPIC_BASE_URL` is absent. To use
-an Anthropic-compatible endpoint, keep the same profile and command but set a
-valid endpoint URL and its token instead:
+an Anthropic-compatible endpoint, keep the same experiment config and command
+but set a valid endpoint URL and its token instead:
 
 ```sh
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
 npx @stripe/forge@0.1.0 run \
-  --profile ./profile.yaml \
+  --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
@@ -241,13 +241,13 @@ npx @stripe/forge@0.1.0 run \
 When `ANTHROPIC_BASE_URL` is set, the CLI requires
 `ANTHROPIC_AUTH_TOKEN` and does not select `ANTHROPIC_API_KEY`. Credentials and
 the endpoint remain execution configuration; they do not belong in the case,
-dataset manifest, or profile.
+dataset manifest, or experiment config.
 
 `--case-file` discovers the nearest ancestor `manifest.json`, verifies the
 dataset, and maps the exact regular file back to its declared case ID. The case
-must still be present in the selected profile's matrix; this option does not
-create a combined case/profile format. Pass `--dataset` explicitly when the
-manifest cannot be discovered.
+must still be present in the selected experiment config's matrix; this option
+does not create a combined case/experiment format. Pass `--dataset` explicitly
+when the manifest cannot be discovered.
 
 The CLI requires one unambiguous matrix entry. For a larger matrix, add any
 needed selectors (`--case` and `--case-file` are mutually exclusive):
@@ -329,18 +329,19 @@ For native Claude evidence, the result contains an evidence descriptor like:
 }
 ```
 
-## Dataset, profile, and plan boundaries
+## Dataset, experiment config, and plan boundaries
 
 Forge deliberately separates what is evaluated from how it is run:
 
 - The dataset contains cases and fixture bytes. Stable case IDs are independent
   of the dataset's location on disk.
 - A case owns the prompt, invariant setup, checks, and success guidelines.
-- A profile pins one dataset and defines treatments, agents, models, resources,
-  limits, repetitions, retries, and the experiment matrix.
+- An experiment config pins one dataset and defines treatments, agents, models,
+  resources, limits, repetitions, retries, and the experiment matrix.
 - A run selection chooses one case, treatment, agent, and repetition.
 - `resolveRunPlan` applies defaults and emits the complete immutable input for
-  one execution. The plan records dataset, case, profile, and Forge provenance.
+  one execution. The plan records dataset, case, experiment, and Forge
+  provenance.
 
 YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
 non-canonical paths, unsupported Forge action versions, and oversized values are
@@ -350,7 +351,7 @@ materialized in the resolved plan rather than inferred by the runtime.
 ## Multi-turn Ava and guideline judging
 
 A multi-turn case describes the developer's goal and optional background while
-leaving the agent, role-player model, and judge model in the profile:
+leaving the agent, role-player model, and judge model in the experiment config:
 
 ```yaml
 schema_version: 1
@@ -372,7 +373,7 @@ optional. `max_turns` defaults to 10 and is capped at 100. When an
 then Ava initializes after the coding agent responds. Otherwise Ava generates
 the opening turn.
 
-The corresponding profile declares explicit host-side models:
+The corresponding experiment config declares explicit host-side models:
 
 ```yaml
 models:
@@ -387,9 +388,9 @@ models:
 `models.role_player` is required exactly when a selected case is multi-turn.
 `models.judge` is required exactly when a selected case has one or more success
 guidelines. Unused model settings are not copied into checks-only, one-shot
-plans. The profile's model providers must match entries in the composition's
-`completionProviders`; the public CLI registers the built-in `anthropic`
-provider.
+plans. The experiment config's model providers must match entries in the
+composition's `completionProviders`; the public CLI registers the built-in
+`anthropic` provider.
 
 ### Ava interaction semantics
 
@@ -541,21 +542,21 @@ import {
   executeEval,
   expandExperiment,
   forgeSetupHandlers,
-  loadBenchmarkProfile,
+  loadExperimentConfig,
   loadDataset,
   resolveRunPlan,
 } from '@stripe/forge';
 import {createClaudeCodeAdapter} from '@stripe/forge/agents/claude-code';
 import {createDockerRuntimeAdapter} from '@stripe/forge/runtime/docker';
 
-const [dataset, profile] = await Promise.all([
+const [dataset, experiment] = await Promise.all([
   loadDataset('./dataset'),
-  loadBenchmarkProfile('./profile.yaml'),
+  loadExperimentConfig('./experiment.yaml'),
 ]);
-const selections = expandExperiment(profile);
+const selections = expandExperiment(experiment);
 if (selections.length !== 1) throw new Error('Choose exactly one selection');
 
-const plan = resolveRunPlan({dataset, profile, selection: selections[0]});
+const plan = resolveRunPlan({dataset, experiment, selection: selections[0]});
 const claude = createClaudeCodeAdapter();
 const completed = await executeEval({
   runId: 'hello-001',
@@ -677,7 +678,7 @@ const credentialResolver = createEnvironmentCredentialResolver({
 ```
 
 Register `gatewayClaude`, `gatewayCompletions`, and `credentialResolver` in the
-`ForgeComposition` passed to `executeEval`, and select matching profile
+`ForgeComposition` passed to `executeEval`, and select matching experiment
 coordinates. The agent selection uses the adapter, while any harness models use
 the completion provider:
 
@@ -702,8 +703,8 @@ requires a private CA, special proxying, custom mounts, or network allowlisting,
 supply a custom `RuntimeAdapter`; those are runtime concerns and are not
 inferred from the host environment. The URL must be reachable from both the
 host process and inside the evaluation container: a loopback URL points at the
-container when used by Claude Code. Keep gateway tokens out of cases, profiles,
-plans, logs, and result metadata.
+container when used by Claude Code. Keep gateway tokens out of cases, experiment
+configs, plans, logs, and result metadata.
 
 CommonJS applications can use the standard asynchronous bridge:
 
@@ -811,9 +812,9 @@ declares the same reference.
 
 Adapters declare executable, credential-reference, and logical state-directory
 requirements before allocation. Credential values stay resolver-owned and do
-not enter profiles, plans, events, or result records. Runtimes expose distinct
-mutable and sealed capabilities; evidence collection receives only the sealed
-workspace and run-owned agent state.
+not enter experiment configs, plans, events, or result records. Runtimes expose
+distinct mutable and sealed capabilities; evidence collection receives only the
+sealed workspace and run-owned agent state.
 
 Forge assigns credential scope from the capability which declares a reference;
 extensions do not select their own scope. For example, an agent requirement is
@@ -913,8 +914,9 @@ selecting host-owned capabilities.
   registries when the image is built. Forge records the resulting immutable
   image ID; a future release should add stronger dependency-level integrity
   pins if byte-for-byte rebuilds are required across registry state changes.
-- The profile selects an explicit Linux platform. Forge records both its runtime
-  asset digest and Docker's immutable built image ID in the result metadata.
+- The experiment config selects an explicit Linux platform. Forge records both
+  its runtime asset digest and Docker's immutable built image ID in the result
+  metadata.
 - Containers run as UID/GID `10001`, with a read-only root filesystem, all Linux
   capabilities dropped, `no-new-privileges`, bounded memory/CPU/processes,
   bounded commands, and run-owned workspace/home/state mounts.
@@ -968,9 +970,9 @@ proxy, or an offline execution mode.
   direct-process runtimes, interactive/human runs, and custom mounts are absent.
 - `run` executes one selected matrix entry. There is no campaign scheduler,
   concurrency manager, or automatic run retry loop; `repetitions` create
-  selectable entries and profile-level `retries` is not acted on by the v0.1
+  selectable entries and experiment-level `retries` is not acted on by the v0.1
   CLI. Ava and guideline completion attempts have their own fixed retry policy
-  and do not implement the profile's campaign retry field.
+  and do not implement the experiment config's campaign retry field.
 - Built-in setup is limited to `forge/write@1` and `forge/command@1`.
 - Results are local. There is no remote publisher, worker/control plane, hosted
   execution service, or human-result policy in the public package.

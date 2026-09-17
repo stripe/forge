@@ -1,7 +1,7 @@
 export type BenchmarkModelErrorCode =
   | 'invalid_manifest'
   | 'invalid_case'
-  | 'invalid_profile'
+  | 'invalid_experiment_config'
   | 'invalid_plan'
   | 'invalid_yaml'
   | 'unsafe_path'

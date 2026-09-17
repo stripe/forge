@@ -4,7 +4,7 @@ import {expect} from '../../test/support/expect.js';
 
 import {BenchmarkModelError} from './errors.js';
 import {
-  parseBenchmarkProfileYaml,
+  parseExperimentConfigYaml,
   parseDatasetManifestJson,
   parseEvalCase,
   parseEvalCaseYaml,
@@ -139,12 +139,12 @@ task: safe
     ).toThrow(/Invalid eval case YAML/);
   });
 
-  it('parses a checks-only profile without harness completion models', () => {
-    const profile = parseBenchmarkProfileYaml(profileYaml());
-    expect(profile.models).toEqual({});
-    expect(profile.treatments).toEqual({baseline: {setup: []}});
-    expect(profile.matrix).toMatchObject({repetitions: 1, retries: 0});
-    expect(profile.runtime.resources).toMatchObject({
+  it('parses a checks-only experiment config without harness completion models', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    expect(config.models).toEqual({});
+    expect(config.treatments).toEqual({baseline: {setup: []}});
+    expect(config.matrix).toMatchObject({repetitions: 1, retries: 0});
+    expect(config.runtime.resources).toMatchObject({
       memory_bytes: 4 * 1024 * 1024 * 1024,
       cpu_count: 2,
       process_count: 512,
@@ -153,8 +153,8 @@ task: safe
 
   it('rejects mutable baseline setup and undefined matrix treatments', () => {
     expect(() =>
-      parseBenchmarkProfileYaml(
-        profileYaml(`
+      parseExperimentConfigYaml(
+        experimentConfigYaml(`
 treatments:
   baseline:
     setup:
@@ -164,8 +164,11 @@ treatments:
       ),
     ).toThrow(/baseline setup must be empty/);
     expect(() =>
-      parseBenchmarkProfileYaml(
-        profileYaml().replace('treatments: [baseline]', 'treatments: [missing]'),
+      parseExperimentConfigYaml(
+        experimentConfigYaml().replace(
+          'treatments: [baseline]',
+          'treatments: [missing]',
+        ),
       ),
     ).toThrow(/undefined treatment/);
   });
@@ -196,7 +199,7 @@ treatments:
   });
 });
 
-function profileYaml(extra = ''): string {
+function experimentConfigYaml(extra = ''): string {
   return `
 schema_version: 1
 id: forge-smoke
