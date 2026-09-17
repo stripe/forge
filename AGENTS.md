@@ -101,11 +101,50 @@ unrelated session. A role-player failure before the first agent turn uses the
 explicit system-only fallback trajectory and a null session identity.
 
 `interaction.json` is a post-run audit artifact, never an execution input or
-judge input. `judge-evidence.json` exists only when guidelines were judged and
-must bind the prompt version, redacted trajectory digest, and exact bounded
-workspace evidence made available to the judge. Collect judge workspace text
-only from the sealed runtime and preserve all truncation/unavailability
-warnings.
+judge input. The canonical redacted `trajectory.json` remains the full selected
+audit trajectory and may retain normalized private reasoning. Guideline judges
+receive a deterministic positive projection of current-run root ATIF behavior.
+It includes only user and agent step identity, source, and messages; tool-call
+IDs, names, and arguments; and tool-result content and error status.
+Tool results without a source-call ID remain visible; correlation is retained
+when the source provides it. The projector promotes only an exact boolean
+`observation.results[].extra.is_error` to the explicit judge-visible
+`is_error`; every other result `extra` field is excluded.
+System steps,
+`is_copied_context` steps, reasoning, timestamps, model/provider metadata,
+metrics, arbitrary `extra`, and subagent references or trajectories are not
+judge-visible. Agent steps with no nonempty text or media and no retained tool
+behavior are also omitted. Opaque tool arguments and result content remain
+intact after credential redaction, including nested keys named
+`reasoning_content`.
+Subagent work counts only when surfaced through a root message or tool result,
+or through separately selected workspace evidence. Image and audio content
+parts retain only their ATIF references; the text-only completion request does
+not attach the referenced media bytes. `judge-evidence.json` exists only when
+guidelines were judged and must record the prompt version, positive
+transcript-projection policy, and exact bounded workspace evidence made
+available to the judge. The canonical artifact descriptors in `result.json`
+already bind the stored trajectory bytes. Derive the projection only after
+credential redaction. Public judging helpers must accept and validate the
+versioned projection rather than arbitrary transcript JSON. Apply transcript
+byte and bounded-JSON graph limits before recursive validation, and bound the
+complete rendered prompt before invoking a provider. Changing its root-step
+scope, included fields, or serialization requires a new projection version.
+Final completion-prompt redaction must be a no-op for a judge request; fail
+closed before dispatch
+rather than silently rewrite the selected transcript or recorded workspace
+evidence.
+Collect judge workspace text only from the sealed runtime and preserve all
+truncation/unavailability warnings.
+
+Every completed run contains `result.json`, `plan.json`, `trajectory.json`, and
+`interaction.json`. Emit `workspace-evidence.json` only when at least one
+deterministic file check is configured, and `judge-evidence.json` only when at
+least one guideline is judged. Evaluation lives only in
+`result.json.evaluation`; do not reintroduce a duplicate `evaluation.json`.
+Host-contributed supplemental files must remain below
+`extensions/<contributor-id>/`. Keep this inventory synchronized across the
+producer, verifier, documentation, and live assertions.
 
 Cleanup must run after failure or cancellation and must not depend on an already
 aborted execution signal. Uncommitted artifact transactions must be rolled back.

@@ -152,7 +152,6 @@ describe('multi-turn CLI end to end', () => {
       'interaction.json',
       'workspace-evidence.json',
       'judge-evidence.json',
-      'evaluation.json',
     ]);
   });
 });

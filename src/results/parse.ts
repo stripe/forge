@@ -1,5 +1,14 @@
 import {z} from 'zod';
 
+import {
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+} from '../evaluation/judgeTranscript.js';
 import {parseRunSelection} from '../model/index.js';
 import {
   EVALUATION_SCHEMA_VERSION,
@@ -178,7 +187,28 @@ const interactionArtifactSchema = z.object({
 const judgeEvidenceSchema = z.object({
   schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
   prompt_version: safeText,
-  trajectory_sha256: digest,
+  transcript: z.object({
+    source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
+    projection_id: z.literal(JUDGE_TRANSCRIPT_PROJECTION_ID),
+    projection_version: z.literal(JUDGE_TRANSCRIPT_PROJECTION_VERSION),
+    trajectory_scope: z.literal(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE),
+    included_step_sources: z.tuple([
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES[0]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES[1]),
+    ]),
+    copied_context: z.literal(JUDGE_TRANSCRIPT_COPIED_CONTEXT),
+    included_fields: z.tuple([
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[0]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[1]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[2]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[3]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[4]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[5]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[6]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[7]),
+      z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[8]),
+    ]),
+  }).strict(),
   workspace: z.object({
     entries: z.array(z.object({
       path: safeText,
@@ -377,7 +407,6 @@ const runResultFields = {
   completed_at: isoTimestamp,
   duration_ms: z.number().int().nonnegative(),
   stop_reason: z.enum(['task_complete', 'max_turns', 'role_player_error']),
-  artifact_set_sha256: digest,
   artifacts: z.array(artifactDescriptor),
   supplemental_artifacts: z.array(artifactDescriptor),
   warnings: z.array(z.object({code: safeText, message: z.string().min(1).max(64 * 1024)}).strict()),

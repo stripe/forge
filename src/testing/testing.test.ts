@@ -97,7 +97,7 @@ describe('@stripe/forge/testing', () => {
     expect(agent.messages).toEqual(['Complete the test task.']);
     expect(runtime.runs[0]?.events).toContain('quiesce');
     expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
-    expect(artifacts.runs.get('unit-run-1')?.artifacts.size).toBe(5);
+    expect(artifacts.runs.get('unit-run-1')?.artifacts.size).toBe(4);
     expect(artifacts.events.at(-1)).toBe('commit:unit-run-1');
   });
 });

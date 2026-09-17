@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+} from '../evaluation/judgeTranscript.js';
 import {parseInteractionArtifact, parseJudgeEvidence} from './parse.js';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -97,7 +105,15 @@ describe('canonical interaction and judge evidence parsing', () => {
     const evidence = {
       schema_version: 1,
       prompt_version: '1',
-      trajectory_sha256: DIGEST,
+      transcript: {
+        source: 'trajectory.json',
+        projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
+        projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+        trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+        included_step_sources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+        copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+        included_fields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+      },
       workspace: {
         entries: [
           {path: 'answer.txt', content: 'done', truncated: false},
@@ -108,7 +124,81 @@ describe('canonical interaction and judge evidence parsing', () => {
     };
     assert.deepEqual(parseJudgeEvidence(evidence), evidence);
     assert.throws(() =>
-      parseJudgeEvidence({...evidence, trajectory_sha256: 'sha256:invalid'}),
+      parseJudgeEvidence({...evidence, trajectory_sha256: DIGEST}),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, source: 'interaction.json'},
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, projection_id: 'unknown'},
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, projection_version: 2},
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          trajectory_scope: 'root-and-subagents',
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          included_step_sources: ['agent', 'user'],
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, copied_context: 'included'},
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          included_fields: [
+            ...evidence.transcript.included_fields.slice(0, -1),
+          ],
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          excluded_fields: ['reasoning_content', 'reasoning_effort'],
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, sha256: DIGEST},
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, unknown: true},
+      }),
     );
     assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
   });

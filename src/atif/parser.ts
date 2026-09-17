@@ -75,7 +75,8 @@ export function parseAtifTrajectory(input: unknown): AtifTrajectoryV1_8 {
   }
 }
 
-function assertBoundedJsonValue(input: unknown): void {
+/** Internal shared JSON-graph preflight used before recursive wire parsing. */
+export function assertBoundedJsonValue(input: unknown): void {
   const budget: GraphBudget = {
     nodes: 0,
     collectionEntries: 0,

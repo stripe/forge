@@ -17,6 +17,14 @@ import {runCli} from '../dist/cli.js';
 import {createClaudeCodeAdapter} from '../dist/agents/claude-code/index.js';
 import {parseAtifTrajectory} from '../dist/atif/index.js';
 import {
+  GUIDELINE_JUDGE_PROMPT_VERSION,
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   createArtifactStore,
   createDirectoryRunInputProvider,
   credentialReference,
@@ -363,7 +371,6 @@ async function verifyOneShotRun(completed) {
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',
-      'evaluation.json',
     ],
     completed.location,
   );
@@ -429,7 +436,6 @@ async function verifyMultiTurnRun(completed) {
       'interaction.json',
       'workspace-evidence.json',
       'judge-evidence.json',
-      'evaluation.json',
     ],
     completed.location,
   );
@@ -465,16 +471,31 @@ async function verifyMultiTurnRun(completed) {
   );
   verifyTrajectoryTurns(trajectory, interaction.turns, completed.location);
 
-  const trajectoryDescriptor = result.artifacts.find(
-    ({path: artifactPath}) => artifactPath === 'trajectory.json',
-  );
   const releaseSummary = judgeEvidence.workspace.entries.find(
     ({path: evidencePath}) => evidencePath === 'release-summary.txt',
   );
   requireCondition(
-    judgeEvidence.prompt_version === '1' &&
-      trajectoryDescriptor !== undefined &&
-      judgeEvidence.trajectory_sha256 === trajectoryDescriptor.sha256 &&
+    judgeEvidence.prompt_version === GUIDELINE_JUDGE_PROMPT_VERSION &&
+      judgeEvidence.transcript.source === JUDGE_TRANSCRIPT_SOURCE &&
+      judgeEvidence.transcript.projection_id ===
+        JUDGE_TRANSCRIPT_PROJECTION_ID &&
+      judgeEvidence.transcript.projection_version ===
+        JUDGE_TRANSCRIPT_PROJECTION_VERSION &&
+      judgeEvidence.transcript.trajectory_scope ===
+        JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE &&
+      judgeEvidence.transcript.included_step_sources.length ===
+        JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES.length &&
+      judgeEvidence.transcript.included_step_sources.every(
+        (source, index) =>
+          source === JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES[index],
+      ) &&
+      judgeEvidence.transcript.copied_context ===
+        JUDGE_TRANSCRIPT_COPIED_CONTEXT &&
+      judgeEvidence.transcript.included_fields.length ===
+        JUDGE_TRANSCRIPT_INCLUDED_FIELDS.length &&
+      judgeEvidence.transcript.included_fields.every(
+        (field, index) => field === JUDGE_TRANSCRIPT_INCLUDED_FIELDS[index],
+      ) &&
       judgeEvidence.workspace.complete === true &&
       judgeEvidence.workspace.warnings.length === 0 &&
       releaseSummary?.truncated === false &&

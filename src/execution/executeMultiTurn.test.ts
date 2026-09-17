@@ -4,8 +4,16 @@ import {describe, it} from 'node:test';
 import {parseAtifTrajectory} from '../atif/index.js';
 import {credentialReference} from '../contracts/credentials.js';
 import {
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_JUDGE_WORKSPACE_FILE_CHARACTERS,
   MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
+  createJudgeTranscriptProjection,
   renderJudgeWorkspaceEvidence,
   type JudgeWorkspaceEvidenceV1,
   type JudgeWorkspaceWarningCode,
@@ -24,6 +32,20 @@ import {executeEval, executeEvalWithTestHooks} from './execute.js';
 const SECRET = 'completion-secret-for-redaction';
 const AGENT_SECRET = 'agent-secret-for-redaction';
 const SHORT_SECRET = 'zz';
+const PRIVATE_REASONING_MARKER =
+  'PRIVATE_REASONING_MARKER_must_remain_out_of_judge_requests';
+const PRIVATE_REASONING_EFFORT_MARKER =
+  'PRIVATE_REASONING_EFFORT_MARKER_must_remain_out_of_judge_requests';
+const OMITTED_JUDGE_METADATA_MARKER =
+  'OMITTED_JUDGE_METADATA_MARKER_must_remain_out_of_judge_requests';
+const COPIED_CONTEXT_MARKER =
+  'COPIED_CONTEXT_MARKER_must_remain_out_of_judge_requests';
+const SYSTEM_STEP_MARKER =
+  'SYSTEM_STEP_MARKER_must_remain_out_of_judge_requests';
+const VISIBLE_TOOL_PAYLOAD_MARKER =
+  'VISIBLE_TOOL_PAYLOAD_MARKER_must_remain_in_judge_requests';
+const VISIBLE_RESPONSE_MARKER = 'VISIBLE_RESPONSE_MARKER_for_judging';
+const VISIBLE_TOOL_MARKER = 'VISIBLE_TOOL_MARKER_for_judging';
 const ROLE_MODEL = {provider: 'test-provider', model: 'role-model'} as const;
 const JUDGE_MODEL = {provider: 'test-provider', model: 'judge-model'} as const;
 
@@ -177,7 +199,6 @@ describe('executeEval multi-turn and judging integration', () => {
       'interaction.json',
       'workspace-evidence.json',
       'judge-evidence.json',
-      'evaluation.json',
     ]);
     const interaction = artifactJson(stored, 'interaction.json') as {
       turns: Array<{assistant: string}>;
@@ -189,7 +210,6 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.equal(interaction.role_player.decisions.length, 2);
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      trajectory_sha256: string;
       workspace: {
         complete: boolean;
         entries: Array<{path: string; content: string; truncated: boolean}>;
@@ -200,10 +220,6 @@ describe('executeEval multi-turn and judging integration', () => {
         }>;
       };
     };
-    assert.equal(
-      judgeEvidence.trajectory_sha256,
-      completed.result.artifacts.find(({path}) => path === 'trajectory.json')?.sha256,
-    );
     assert.match(
       judgeEvidence.workspace.entries.find(({path}) => path === 'answer.txt')
         ?.content ?? '',
@@ -349,6 +365,12 @@ describe('executeEval multi-turn and judging integration', () => {
 
     const stored = artifacts.runs.get('incomplete-native-fallback-1');
     assert.ok(stored);
+    assert.deepEqual([...stored.artifacts.keys()], [
+      'plan.json',
+      'trajectory.json',
+      'interaction.json',
+      'judge-evidence.json',
+    ]);
     const interaction = artifactJson(stored, 'interaction.json') as {
       turns: Array<{
         turn: number;
@@ -388,15 +410,302 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.ok(judgeSystemPrompt.includes(firstAssistant));
     assert.ok(judgeSystemPrompt.includes(secondUser));
     assert.ok(judgeSystemPrompt.includes(secondAssistant));
+  });
+
+  it('judges one post-redaction visible projection while preserving private reasoning in ATIF', async () => {
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({
+      turns: [
+        {
+          text: 'Driver-visible response.',
+          sessionId: 'reasoning-session',
+          toolCalls: [
+            {
+              id: 'visible-call',
+              name: VISIBLE_TOOL_MARKER,
+              input: {path: 'answer.txt'},
+            },
+          ],
+        },
+      ],
+      requirements: {
+        executables: [],
+        environment: {
+          credentials: {
+            AGENT_TOKEN: {reference: credentialReference('agent.token')},
+          },
+        },
+        stateDirectories: [],
+      },
+      evidence: {
+        kind: 'available',
+        trajectory: {
+          schema_version: 'ATIF-v1.8',
+          session_id: 'reasoning-session',
+          agent: {
+            name: 'test-agent',
+            version: '1',
+            model_name: 'test-model',
+          },
+          steps: [
+            {
+              step_id: 1,
+              source: 'agent',
+              message: COPIED_CONTEXT_MARKER,
+              is_copied_context: true,
+            },
+            {
+              step_id: 2,
+              source: 'system',
+              message: SYSTEM_STEP_MARKER,
+              extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
+            },
+            {
+              step_id: 3,
+              source: 'user',
+              message: 'Produce visible evidence.',
+            },
+            {
+              step_id: 4,
+              source: 'agent',
+              message: `${VISIBLE_RESPONSE_MARKER}: ${AGENT_SECRET}`,
+              timestamp: '2026-09-16T00:00:00Z',
+              model_name: OMITTED_JUDGE_METADATA_MARKER,
+              llm_call_count: 1,
+              reasoning_content: PRIVATE_REASONING_MARKER,
+              reasoning_effort: PRIVATE_REASONING_EFFORT_MARKER,
+              metrics: {
+                prompt_token_ids: [112, 114, 105, 118, 97, 116, 101],
+                extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
+              },
+              tool_calls: [
+                {
+                  tool_call_id: 'visible-call',
+                  function_name: VISIBLE_TOOL_MARKER,
+                  arguments: {
+                    path: 'answer.txt',
+                    reasoning_content: VISIBLE_TOOL_PAYLOAD_MARKER,
+                  },
+                  extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
+                },
+              ],
+              observation: {
+                results: [
+                  {
+                    source_call_id: 'visible-call',
+                    content: `Visible result containing reasoning_effort: ${VISIBLE_TOOL_PAYLOAD_MARKER}`,
+                    subagent_trajectory_ref: [
+                      {
+                        trajectory_path: 'private-child.json',
+                        extra: {
+                          private_metadata: OMITTED_JUDGE_METADATA_MARKER,
+                        },
+                      },
+                    ],
+                    extra: {
+                      is_error: false,
+                      private_metadata: OMITTED_JUDGE_METADATA_MARKER,
+                    },
+                  },
+                ],
+              },
+              extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
+            },
+          ],
+        },
+        source: {
+          kind: 'native_log',
+          format: 'test-jsonl',
+          sessionId: 'reasoning-session',
+        },
+        warnings: [],
+      },
+    });
+    const judgePrompts: string[] = [];
+    const judgeResponse = (request: {purpose: string; systemPrompt?: string}) => {
+      assert.equal(request.purpose, 'judge');
+      const serializedRequest = JSON.stringify(request);
+      assert.ok(!serializedRequest.includes(PRIVATE_REASONING_MARKER));
+      assert.ok(!serializedRequest.includes(PRIVATE_REASONING_EFFORT_MARKER));
+      assert.ok(!serializedRequest.includes(OMITTED_JUDGE_METADATA_MARKER));
+      assert.ok(!serializedRequest.includes(COPIED_CONTEXT_MARKER));
+      assert.ok(!serializedRequest.includes(SYSTEM_STEP_MARKER));
+      assert.ok(!serializedRequest.includes('private-child.json'));
+      assert.ok(!serializedRequest.includes(AGENT_SECRET));
+      assert.match(request.systemPrompt ?? '', /\[REDACTED\]/);
+      assert.ok((request.systemPrompt ?? '').includes(VISIBLE_RESPONSE_MARKER));
+      assert.ok((request.systemPrompt ?? '').includes(VISIBLE_TOOL_MARKER));
+      assert.ok(
+        (request.systemPrompt ?? '').includes(VISIBLE_TOOL_PAYLOAD_MARKER),
+      );
+      assert.ok((request.systemPrompt ?? '').includes('"is_error":false'));
+      judgePrompts.push(request.systemPrompt ?? '');
+      return JSON.stringify({
+        results: [
+          {index: 0, passed: true, explanation: 'Visible evidence passed.'},
+        ],
+      });
+    };
+    const provider = createScriptedCompletionProvider({
+      id: 'test-provider',
+      responses: [judgeResponse, judgeResponse],
+    });
+    const artifacts = createMemoryArtifactStore();
+    const plan = createTestResolvedRunPlan({
+      prompt: 'Produce visible evidence.',
+      successGuidelines: [
+        'The assistant produced a visible response.',
+        'The assistant invoked the visible tool.',
+      ],
+      judge: JUDGE_MODEL,
+    });
+
+    const completed = await executeEval({
+      runId: 'reasoning-projection-1',
+      plan,
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        setupHandlers: new Map(),
+        completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        credentialResolver: createStaticCredentialResolver({
+          'agent.token': AGENT_SECRET,
+        }),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: artifacts.store,
+      },
+    });
+
+    assert.equal(judgePrompts.length, 2);
+    assert.equal(completed.result.evidence.provenance.source.kind, 'native_log');
+    const stored = artifacts.runs.get('reasoning-projection-1');
+    assert.ok(stored);
+    const trajectory = parseAtifTrajectory(
+      artifactJson(stored, 'trajectory.json'),
+    );
+    const agentStep = trajectory.steps.find(
+      (step) => step.source === 'agent' && step.is_copied_context !== true,
+    );
+    assert.equal(agentStep?.source, 'agent');
+    assert.equal(agentStep?.reasoning_content, PRIVATE_REASONING_MARKER);
+    assert.equal(
+      agentStep?.reasoning_effort,
+      PRIVATE_REASONING_EFFORT_MARKER,
+    );
+    assert.match(
+      typeof agentStep?.message === 'string' ? agentStep.message : '',
+      /\[REDACTED\]/,
+    );
+    const projection = createJudgeTranscriptProjection(trajectory);
+    for (const prompt of judgePrompts) {
+      assert.ok(prompt.includes(projection.transcriptJson));
+    }
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      trajectory_sha256: string;
+      transcript: {
+        source: string;
+        projection_id: string;
+        projection_version: number;
+        trajectory_scope: string;
+        included_step_sources: string[];
+        copied_context: string;
+        included_fields: string[];
+      };
     };
-    assert.equal(
-      judgeEvidence.trajectory_sha256,
-      completed.result.artifacts.find(({path}) => path === 'trajectory.json')
-        ?.sha256,
+    assert.deepEqual(judgeEvidence.transcript, {
+      source: JUDGE_TRANSCRIPT_SOURCE,
+      projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
+      projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+      trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+      included_step_sources: [...JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES],
+      copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+      included_fields: [...JUDGE_TRANSCRIPT_INCLUDED_FIELDS],
+    });
+  });
+
+  it('fails closed when final prompt redaction would rewrite selected evidence bytes', async () => {
+    // This credential is not present in any ATIF string. It appears only when
+    // compact JSON joins the message value to the following source key.
+    const boundarySecret = 'x\",\"source';
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({
+      turns: [
+        {
+          text: 'x',
+          sessionId: 'redaction-boundary-session',
+          toolCalls: [],
+        },
+      ],
+      evidence: {
+        kind: 'available',
+        trajectory: {
+          schema_version: 'ATIF-v1.8',
+          session_id: 'redaction-boundary-session',
+          agent: {name: 'test-agent', version: '1'},
+          steps: [
+            {step_id: 1, source: 'user', message: 'Produce an answer.'},
+            {step_id: 2, source: 'agent', message: 'x'},
+          ],
+        },
+        source: {
+          kind: 'native_log',
+          format: 'test-jsonl',
+          sessionId: 'redaction-boundary-session',
+        },
+        warnings: [],
+      },
+    });
+    const provider = createScriptedCompletionProvider({
+      id: 'test-provider',
+      requirements: {
+        credentials: {
+          token: {reference: credentialReference('completion.boundary-token')},
+        },
+      },
+      responses: [
+        JSON.stringify({
+          results: [
+            {index: 0, passed: true, explanation: 'Visible evidence passed.'},
+          ],
+        }),
+      ],
+    });
+    const artifacts = createMemoryArtifactStore();
+
+    await assert.rejects(
+      executeEvalWithTestHooks(
+        {
+          runId: 'redaction-boundary-1',
+          plan: createTestResolvedRunPlan({
+            prompt: 'Produce an answer.',
+            successGuidelines: ['The assistant produced an answer.'],
+            judge: JUDGE_MODEL,
+          }),
+          composition: {
+            runtime: runtime.adapter,
+            agents: new Map([[agent.adapter.id, agent.adapter]]),
+            setupHandlers: new Map(),
+            completionProviders: new Map([
+              [provider.provider.id, provider.provider],
+            ]),
+            credentialResolver: createStaticCredentialResolver({
+              'completion.boundary-token': boundarySecret,
+            }),
+            inputProvider: createMemoryRunInputProvider(),
+            artifactStore: artifacts.store,
+          },
+        },
+        {waitBeforeCompletionRetry: async () => undefined},
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'evaluation_failed',
     );
+    assert.equal(provider.calls.length, 0);
+    assert.equal(provider.remainingResponses, 1);
+    assert.equal(artifacts.runs.size, 0);
+    assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('commits a zero-turn role-player failure with system-only fallback ATIF', async () => {
