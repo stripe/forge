@@ -292,14 +292,14 @@ For native Claude evidence, the result contains an evidence descriptor like:
 {
   "format": "atif",
   "schema_version": "ATIF-v1.8",
-  "normalization_version": 2,
+  "normalization_version": 1,
   "provenance": {
     "source": {
       "kind": "native_log",
       "format": "claude-code-jsonl",
       "session_id": "session-123"
     },
-    "adapter": {"id": "claude-code", "version": "2"}
+    "adapter": {"id": "claude-code", "version": "1"}
   },
   "completeness": "complete",
   "warnings": [],
@@ -570,9 +570,9 @@ The public CLI selects its authentication mode from the environment. With no
 `ANTHROPIC_BASE_URL`, Claude Code and host-side completions use direct Anthropic
 and resolve `ANTHROPIC_API_KEY`. With `ANTHROPIC_BASE_URL`, both use that URL and
 resolve `ANTHROPIC_AUTH_TOKEN` instead. Completed result metadata records the
-gateway variant as Claude adapter version `2+gateway` and completion-provider
+gateway variant as Claude adapter version `1+gateway` and completion-provider
 version `1+messages-compatible`, without adding endpoint or token fields;
-direct runs record Claude adapter version `2` and completion-provider version
+direct runs record Claude adapter version `1` and completion-provider version
 `1`.
 
 A programmatic host makes the same choice explicitly on its agent adapter.

@@ -262,7 +262,7 @@ const normalizationProvenance = z.object({
 const evidenceV1 = z.object({
   format: z.literal('atif'),
   schema_version: z.literal('ATIF-v1.8'),
-  normalization_version: z.literal(2),
+  normalization_version: z.literal(1),
   provenance: normalizationProvenance,
   completeness: z.enum(['complete', 'partial', 'fallback']),
   warnings: z.array(normalizationWarning),

@@ -10,7 +10,7 @@ import {
  * Version of Forge's native-log-to-ATIF mapping semantics. It is deliberately
  * independent from the upstream ATIF schema version.
  */
-export const ATIF_NORMALIZATION_VERSION = 2 as const;
+export const ATIF_NORMALIZATION_VERSION = 1 as const;
 
 const MAX_METADATA_TEXT_LENGTH = 4_096;
 const MAX_WARNING_MESSAGE_LENGTH = 64 * 1_024;

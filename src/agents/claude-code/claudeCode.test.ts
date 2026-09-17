@@ -10,7 +10,7 @@ import {parseClaudeStream} from './stream.js';
 describe('Claude Code adapter', () => {
   it('declares authentication and exact session state for engine-assigned scope', () => {
     const adapter = createClaudeCodeAdapter({sessionIdFactory: () => 'session-1'});
-    expect(adapter.version).toBe('2');
+    expect(adapter.version).toBe('1');
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',
@@ -34,7 +34,7 @@ describe('Claude Code adapter', () => {
       credential: 'gateway.routing-token',
       credentialEnvironmentName: 'ANTHROPIC_AUTH_TOKEN',
     });
-    expect(adapter.version).toBe('2+gateway');
+    expect(adapter.version).toBe('1+gateway');
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic-compatible',

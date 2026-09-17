@@ -14,8 +14,8 @@ import {FORGE_CLAUDE_CODE_VERSION} from '../../runtime/docker/assets.js';
 import {loadClaudeEvidence} from './evidence.js';
 import {isSafeSessionId, parseClaudeStream} from './stream.js';
 
-export const CLAUDE_CODE_ADAPTER_VERSION = '2' as const;
-export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '2+gateway' as const;
+export const CLAUDE_CODE_ADAPTER_VERSION = '1' as const;
+export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '1+gateway' as const;
 export const CLAUDE_PROJECTS_STATE_ID = 'claude-projects' as const;
 
 export interface ClaudeCodeAdapterOptions {

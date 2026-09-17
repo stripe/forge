@@ -634,7 +634,7 @@ function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
     evidence: {
       format: 'atif',
       schema_version: 'ATIF-v1.8',
-      normalization_version: 2,
+      normalization_version: 1,
       provenance: {
         source: {
           kind: 'native_log',

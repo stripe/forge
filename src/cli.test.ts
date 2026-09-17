@@ -284,7 +284,7 @@ describe('Forge CLI', () => {
 
     expect(composition.runtime.id).toBe('forge/docker');
     expect([...composition.agents.keys()]).toEqual(['claude-code']);
-    expect(composition.agents.get('claude-code')?.version).toBe('2');
+    expect(composition.agents.get('claude-code')?.version).toBe('1');
     expect([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()])
       .toEqual(['anthropic']);
     expect(
@@ -321,7 +321,7 @@ describe('Forge CLI', () => {
     });
     const claude = composition.agents.get('claude-code');
     expect(claude).toBeDefined();
-    expect(claude!.version).toBe('2+gateway');
+    expect(claude!.version).toBe('1+gateway');
     expect(
       (composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
         'anthropic',
