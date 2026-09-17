@@ -11,7 +11,10 @@ import {
   type CredentialReference,
 } from '../../contracts/credentials.js';
 import {FORGE_CLAUDE_CODE_VERSION} from '../../runtime/docker/assets.js';
-import {loadClaudeEvidence} from './evidence.js';
+import {
+  loadClaudeEvidence,
+  loadClaudeNativeArtifact,
+} from './evidence.js';
 import {isSafeSessionId, parseClaudeStream} from './stream.js';
 
 export const CLAUDE_CODE_ADAPTER_VERSION = '1' as const;
@@ -157,6 +160,13 @@ export function createClaudeCodeAdapter(
         sessionId: context.sessionId,
         agentVersion: expectedVersion,
         model: context.selection.model,
+        signal: context.signal,
+      });
+    },
+    collectNativeArtifact(context) {
+      return loadClaudeNativeArtifact({
+        project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
+        sessionId: context.sessionId,
         signal: context.signal,
       });
     },

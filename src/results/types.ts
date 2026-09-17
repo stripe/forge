@@ -177,6 +177,8 @@ export interface ArtifactDescriptorV1 {
   readonly media_type: string;
   readonly size_bytes: number;
   readonly sha256: Sha256Digest;
+  /** Present only for artifacts which may contain unredacted sensitive data. */
+  readonly sensitivity?: 'restricted';
 }
 
 export interface RunWarningV1 {

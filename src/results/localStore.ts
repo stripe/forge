@@ -92,12 +92,22 @@ export function createArtifactStore(
           if (!(artifact.body instanceof Uint8Array) || !artifact.mediaType) {
             throw new ArtifactStoreError('Artifacts require bytes and a media type.');
           }
+          if (
+            artifact.sensitivity !== undefined &&
+            artifact.sensitivity !== 'restricted'
+          ) {
+            throw new ArtifactStoreError('Artifact sensitivity is invalid.');
+          }
+          const restricted = artifact.sensitivity === 'restricted';
           const destination = path.join(
             stagingRunDir,
             ...artifact.path.split('/'),
           );
-          await fs.mkdir(path.dirname(destination), {recursive: true, mode: 0o755});
-          const handle = await fs.open(destination, 'wx', 0o644);
+          await fs.mkdir(path.dirname(destination), {
+            recursive: true,
+            mode: restricted ? 0o700 : 0o755,
+          });
+          const handle = await fs.open(destination, 'wx', restricted ? 0o600 : 0o644);
           try {
             await handle.writeFile(artifact.body);
             await handle.sync();
@@ -109,6 +119,9 @@ export function createArtifactStore(
             media_type: artifact.mediaType,
             size_bytes: artifact.body.byteLength,
             sha256: sha256Digest(artifact.body),
+            ...(artifact.sensitivity === undefined
+              ? {}
+              : {sensitivity: artifact.sensitivity}),
           });
         },
         async commit(value: Readonly<Record<string, unknown>>): Promise<CommittedRun> {
@@ -253,7 +266,8 @@ function assertResultArtifacts(
       !actual ||
       actual.media_type !== descriptor.media_type ||
       actual.size_bytes !== descriptor.size_bytes ||
-      actual.sha256 !== descriptor.sha256
+      actual.sha256 !== descriptor.sha256 ||
+      actual.sensitivity !== descriptor.sensitivity
     ) {
       throw new ArtifactStoreError(`Result descriptor mismatch: ${descriptor.path}`);
     }
@@ -336,10 +350,34 @@ function verifyCanonicalArtifactInventory(
       'Canonical run artifacts must use the application/json media type.',
     );
   }
-  for (const {path: artifactPath} of result.supplemental_artifacts) {
-    if (!/^extensions\/[a-z0-9][a-z0-9._-]{0,127}\//.test(artifactPath)) {
+  if (result.artifacts.some(({sensitivity}) => sensitivity !== undefined)) {
+    throw new ArtifactStoreError(
+      'Canonical run artifacts cannot contain restricted source bytes.',
+    );
+  }
+  let nativeArtifacts = 0;
+  for (const descriptor of result.supplemental_artifacts) {
+    const artifactPath = descriptor.path;
+    if (/^extensions\/[a-z0-9][a-z0-9._-]{0,127}\//.test(artifactPath)) {
+      continue;
+    }
+    const nativePrefix = `native/${result.agent.adapter}/session.`;
+    const extension = artifactPath.startsWith(nativePrefix)
+      ? artifactPath.slice(nativePrefix.length)
+      : '';
+    if (
+      !/^[a-z0-9]{1,16}$/.test(extension) ||
+      descriptor.sensitivity !== 'restricted' ||
+      result.agent.session_id === null
+    ) {
       throw new ArtifactStoreError(
-        `Supplemental artifact is outside an extension namespace: ${artifactPath}`,
+        `Supplemental artifact has an unsupported path or classification: ${artifactPath}`,
+      );
+    }
+    nativeArtifacts += 1;
+    if (nativeArtifacts > 1) {
+      throw new ArtifactStoreError(
+        'Completed result contains more than one root native artifact.',
       );
     }
   }

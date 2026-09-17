@@ -6,12 +6,14 @@ import {
   type AtifAgentStep,
   type AtifObservationResult,
   type AtifStep,
+  type AtifSystemStep,
   type AtifTrajectoryV1_8,
   type AtifToolCall,
   type JsonObject,
   type JsonValue,
 } from '../../atif/index.js';
 import type {
+  AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.js';
@@ -21,6 +23,8 @@ import {isSafeSessionId} from './stream.js';
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
 const MAX_SESSION_LINES = 100_000;
 const MAX_SESSION_LINE_BYTES = 1024 * 1024;
+const MAX_RENDERED_ATTACHMENT_PARTS = 64;
+const SAFE_ATTACHMENT_TYPE = /^[a-z][a-z0-9_-]{0,127}$/;
 const IGNORED_RECORD_TYPES = new Set([
   'agent-name',
   'ai-title',
@@ -72,7 +76,9 @@ interface SessionRecord {
   isCompactSummary?: boolean;
   isMeta?: boolean;
   isSidechain?: boolean;
-  attachment?: {type?: string};
+  attachment?: unknown;
+  rendered?: unknown;
+  atis?: unknown;
   message?: {content?: string | SessionBlock[]};
 }
 
@@ -82,6 +88,32 @@ export interface LoadClaudeEvidenceInput {
   readonly agentVersion: string;
   readonly model: string;
   readonly signal: AbortSignal;
+}
+
+/** Capture the exact selected Claude project JSONL without transforming it. */
+export async function loadClaudeNativeArtifact(
+  input: Pick<LoadClaudeEvidenceInput, 'project' | 'sessionId' | 'signal'>,
+): Promise<AgentNativeArtifact | undefined> {
+  if (!input.project || !isSafeSessionId(input.sessionId)) return undefined;
+  input.signal.throwIfAborted();
+  try {
+    const bytes = await readExactSessionBytes(
+      input.project,
+      input.sessionId,
+      input.signal,
+    );
+    if (bytes === undefined) return undefined;
+    return {
+      format: 'claude-code-jsonl',
+      sessionId: input.sessionId,
+      mediaType: 'application/x-ndjson',
+      extension: 'jsonl',
+      body: Uint8Array.from(bytes),
+    };
+  } catch {
+    if (input.signal.aborted) input.signal.throwIfAborted();
+    return undefined;
+  }
 }
 
 /** Load and normalize exact native evidence; Forge's engine owns fallback selection. */
@@ -97,15 +129,15 @@ export async function loadClaudeEvidence(
     return unavailable('source_unavailable', 'The exact Claude session is unavailable.');
   }
   input.signal.throwIfAborted();
-  const relativePath = `${input.sessionId}.jsonl`;
   try {
-    const entry = await input.project.inspect(relativePath);
-    if (entry.kind !== 'file') {
+    const bytes = await readExactSessionBytes(
+      input.project,
+      input.sessionId,
+      input.signal,
+    );
+    if (bytes === undefined) {
       return unavailable('source_unavailable', 'The exact Claude session is unavailable.');
     }
-    const bytes = await input.project.readFile(relativePath, {
-      maxBytes: MAX_SESSION_BYTES,
-    });
     const records = parseJsonl(Buffer.from(bytes).toString('utf8'), input.signal);
     const converted = recordsToAtif(records, input);
     return {
@@ -129,6 +161,22 @@ export async function loadClaudeEvidence(
         : 'source_invalid';
     return unavailable(code, safeSessionFailure(error));
   }
+}
+
+async function readExactSessionBytes(
+  project: ReadonlyWorkspace,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<Uint8Array | undefined> {
+  signal.throwIfAborted();
+  const relativePath = `${sessionId}.jsonl`;
+  const entry = await project.inspect(relativePath);
+  if (entry.kind !== 'file') return undefined;
+  const bytes = await project.readFile(relativePath, {
+    maxBytes: MAX_SESSION_BYTES,
+  });
+  signal.throwIfAborted();
+  return bytes;
 }
 
 function recordsToAtif(
@@ -266,7 +314,7 @@ function recordsToAtif(
         ...timestampField(record.timestamp, warnings, recordIndex),
       });
     } else if (record.type !== undefined) {
-      handleNonConversationRecord(record, warnings, recordIndex);
+      handleNonConversationRecord(record, warnings, recordIndex, addStep);
     } else {
       throw new ClaudeSessionIncompleteError(
         'A Claude session record did not identify its type.',
@@ -472,9 +520,24 @@ function handleNonConversationRecord(
   record: SessionRecord,
   warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
+  addStep: (step: Omit<AtifStep, 'step_id'>) => void,
 ): void {
   if (IGNORED_RECORD_TYPES.has(record.type ?? '')) {
     return;
+  }
+  if (record.type === 'atis-latch') {
+    const latch = plainRecord(record);
+    if (
+      latch !== undefined &&
+      hasExactKeys(latch, ['type', 'atis', 'sessionId']) &&
+      record.atis === '' &&
+      typeof record.sessionId === 'string'
+    ) {
+      return;
+    }
+    throw new ClaudeSessionIncompleteError(
+      'A Claude ATIS latch record had an unsupported shape.',
+    );
   }
   if (
     record.type === 'system' &&
@@ -483,14 +546,74 @@ function handleNonConversationRecord(
     return;
   }
   if (record.type === 'attachment') {
-    const attachmentType = record.attachment?.type;
+    const attachment = plainRecord(record.attachment);
+    if (attachment === undefined) {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude attachment did not identify a supported type.',
+      );
+    }
+    const attachmentType = attachment.type;
+    if (
+      typeof attachmentType !== 'string' ||
+      !SAFE_ATTACHMENT_TYPE.test(attachmentType)
+    ) {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude attachment did not identify a supported type.',
+      );
+    }
     if (attachmentType === 'queued_command') {
       throw new ClaudeSessionIncompleteError(
         'A Claude queued-command attachment may contain an unrepresented user turn.',
       );
     }
+
+    const rendered = renderedAttachmentContent(record.rendered);
+    if (rendered.length > 0) {
+      const timestamp = timestampField(record.timestamp, warnings, recordIndex);
+      for (const message of rendered) {
+        const step: Omit<AtifSystemStep, 'step_id'> = {
+          source: 'system',
+          message,
+          extra: {
+            native_record_type: 'attachment',
+            attachment_type: attachmentType,
+          },
+          ...timestamp,
+        };
+        addStep(step);
+      }
+      return;
+    }
+
+    if (attachmentType === 'session_context') {
+      const context = plainRecord(attachment.context);
+      if (
+        hasExactKeys(attachment, ['type', 'context']) &&
+        context !== undefined &&
+        Object.keys(context).length === 0
+      ) {
+        return;
+      }
+      throw new ClaudeSessionIncompleteError(
+        'A Claude session-context attachment had unrepresented content.',
+      );
+    }
+
+    if (attachmentType === 'prompt_snapshot') {
+      if (!isPromptSnapshot(attachment)) {
+        throw new ClaudeSessionIncompleteError(
+          'A Claude prompt snapshot had an unsupported shape.',
+        );
+      }
+      warnings.push({
+        code: 'unsupported_native_event',
+        message: 'Claude prompt snapshot detail was retained only in native evidence.',
+        path: `line:${recordIndex + 1}`,
+      });
+      return;
+    }
+
     if (
-      attachmentType !== undefined &&
       OMITTED_ATTACHMENT_TYPES.has(attachmentType)
     ) {
       warnings.push({
@@ -504,6 +627,60 @@ function handleNonConversationRecord(
   throw new ClaudeSessionIncompleteError(
     'A Claude session contained an unsupported conversation record.',
   );
+}
+
+function renderedAttachmentContent(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_RENDERED_ATTACHMENT_PARTS) {
+    throw new ClaudeSessionIncompleteError(
+      'A Claude attachment had unsupported rendered content.',
+    );
+  }
+  return value.map((part) => {
+    const record = plainRecord(part);
+    if (record === undefined || typeof record.content !== 'string') {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude attachment had unsupported rendered content.',
+      );
+    }
+    return record.content;
+  });
+}
+
+function isPromptSnapshot(value: Readonly<Record<string, unknown>>): boolean {
+  const systemPrompt = value.systemPrompt;
+  const cliPrefix = value.cliPrefix;
+  const tools = value.tools;
+  return (
+    (hasExactKeys(value, ['type', 'systemPrompt']) ||
+      hasExactKeys(value, ['type', 'systemPrompt', 'cliPrefix', 'tools'])) &&
+    Array.isArray(systemPrompt) &&
+    systemPrompt.every((part) => typeof part === 'string') &&
+    (cliPrefix === undefined || cliPrefix === null || typeof cliPrefix === 'string') &&
+    (tools === undefined ||
+      tools === null ||
+      (Array.isArray(tools) && tools.every((tool) => plainRecord(tool) !== undefined)))
+  );
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[],
+): boolean {
+  const actual = Object.keys(value);
+  return (
+    actual.length === expected.length &&
+    expected.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return undefined;
+  return value as Record<string, unknown>;
 }
 
 function safeSessionFailure(error: unknown): string {

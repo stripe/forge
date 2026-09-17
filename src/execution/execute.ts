@@ -13,6 +13,8 @@ import type {
   AgentAdapter,
   AgentEvidenceRuntime,
   AgentEvidenceIdentity,
+  AgentNativeArtifact,
+  AgentNativeEvidenceResult,
   AgentPrepareRuntime,
   AgentRuntimeRequirements,
   AgentSession,
@@ -58,6 +60,7 @@ import {
 } from '../interaction/index.js';
 import {snapshotAgentToolCalls} from '../interaction/conversation.js';
 import {
+  isSafeSimpleIdentifier,
   parseResolvedRunPlan,
   type JsonValue,
   type ResolvedRunPlanV1,
@@ -108,6 +111,12 @@ import {
 } from './completionRuntime.js';
 
 export const FORGE_VERSION = '0.1.0' as const;
+
+const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
+const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;
+const SAFE_NATIVE_MEDIA_TYPE =
+  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
+const SAFE_NATIVE_EXTENSION = /^[a-z0-9]{1,16}$/;
 
 export interface ExecuteEvalInput {
   readonly runId: string;
@@ -296,23 +305,36 @@ export async function executeEvalWithTestHooks(
       phase = 'evidence';
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
-        return rolePlayerErrorEvidence(
-          input.plan,
-          preflight.agent,
-          preflight.agentEvidenceIdentity,
-        );
+        return {
+          evidence: rolePlayerErrorEvidence(
+            input.plan,
+            preflight.agent,
+            preflight.agentEvidenceIdentity,
+          ),
+          nativeArtifact: undefined,
+        };
       }
       if (interaction.sessionId === null) {
         throw new TypeError('A completed agent turn requires a session identity.');
       }
-      const collected = await preflight.agent.collectEvidence({
+      const evidenceContext = {
         runId: input.runId,
         plan: input.plan,
         selection: input.plan.agent,
         runtime: projectAgentEvidenceRuntime(sealed!),
         sessionId: interaction.sessionId,
         signal,
-      });
+      };
+      const captured = await preflight.agent.collectNativeArtifact?.(
+        evidenceContext,
+      );
+      const collected = await preflight.agent.collectEvidence(evidenceContext);
+      const nativeArtifact = buildNativeArtifact(
+        captured,
+        collected,
+        preflight.agent,
+        interaction.sessionId,
+      );
       const evidence = selectAgentEvidence({
         agent: preflight.agent,
         identity: preflight.agentEvidenceIdentity,
@@ -326,9 +348,9 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return evidence;
+      return {evidence, nativeArtifact};
     });
-    const redacted = redactNormalizedTrajectory(selectedEvidence, secrets);
+    const redacted = redactNormalizedTrajectory(selectedEvidence.evidence, secrets);
     const trajectoryJson = serializeAtifTrajectory(redacted.evidence.trajectory);
 
     const evaluated = await events.phase('evaluation', async () => {
@@ -432,6 +454,10 @@ export async function executeEvalWithTestHooks(
       assertNoSecrets(artifact.body, secrets, artifact.path);
     }
     const coreDescriptors = coreArtifacts.map(describeArtifact);
+    const nativeArtifacts = selectedEvidence.nativeArtifact === undefined
+      ? []
+      : [selectedEvidence.nativeArtifact];
+    const nativeDescriptors = nativeArtifacts.map(describeArtifact);
     let result = buildResult({
       input,
       agent: preflight.agent,
@@ -442,18 +468,19 @@ export async function executeEvalWithTestHooks(
       redactionCount: redacted.replacements,
       evaluation: evaluated.evaluation,
       coreDescriptors,
-      supplementalDescriptors: [],
+      supplementalDescriptors: nativeDescriptors,
       warnings: rolePlayerWarnings(interaction.failure),
       startedAt,
       completedAt: now(),
     });
 
-    const supplementalArtifacts = await buildSupplementalArtifacts(
+    const contributedArtifacts = await buildSupplementalArtifacts(
       input,
       result,
       secrets,
       signal,
     );
+    const supplementalArtifacts = [...nativeArtifacts, ...contributedArtifacts];
     const supplementalDescriptors = supplementalArtifacts.map(describeArtifact);
     result = {...result, supplemental_artifacts: supplementalDescriptors};
 
@@ -1278,6 +1305,43 @@ function assertEvidenceMatchesRun(
   }
 }
 
+function buildNativeArtifact(
+  captured: AgentNativeArtifact | undefined,
+  collected: AgentNativeEvidenceResult,
+  agent: AgentAdapter,
+  sessionId: string,
+): RunArtifact | undefined {
+  if (captured === undefined) return undefined;
+  if (
+    captured === null ||
+    typeof captured !== 'object' ||
+    !(captured.body instanceof Uint8Array) ||
+    captured.body.byteLength > MAX_NATIVE_ARTIFACT_BYTES ||
+    captured.sessionId !== sessionId ||
+    !SAFE_NATIVE_FORMAT.test(captured.format) ||
+    !SAFE_NATIVE_MEDIA_TYPE.test(captured.mediaType) ||
+    !SAFE_NATIVE_EXTENSION.test(captured.extension) ||
+    !isSafeSimpleIdentifier(agent.id)
+  ) {
+    throw new TypeError('Agent returned an invalid native artifact.');
+  }
+  if (
+    collected.kind === 'available' &&
+    (collected.source.sessionId !== captured.sessionId ||
+      collected.source.format !== captured.format)
+  ) {
+    throw new TypeError(
+      'Agent native artifact does not match its normalized evidence source.',
+    );
+  }
+  return {
+    path: `native/${agent.id}/session.${captured.extension}`,
+    body: Uint8Array.from(captured.body),
+    mediaType: captured.mediaType,
+    sensitivity: 'restricted',
+  };
+}
+
 function buildCoreArtifacts(
   plan: ResolvedRunPlanV1,
   trajectoryJson: string,
@@ -1443,6 +1507,9 @@ function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
     media_type: artifact.mediaType,
     size_bytes: artifact.body.byteLength,
     sha256: hash,
+    ...(artifact.sensitivity === undefined
+      ? {}
+      : {sensitivity: artifact.sensitivity}),
   };
 }
 

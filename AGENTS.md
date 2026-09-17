@@ -104,6 +104,11 @@ explicit system-only fallback trajectory and a null session identity.
 judge input. The canonical redacted `trajectory.json` remains the full selected
 audit trajectory and may retain normalized private reasoning. Guideline judges
 receive a deterministic positive projection of current-run root ATIF behavior.
+Agent-native context known to have been rendered to the coding agent belongs in
+ATIF as system steps, with bounded native provenance in `extra`; do not turn it
+into user behavior or expose it to guideline judges. Recorder-only native
+metadata may be omitted only after its shape and non-conversation semantics are
+validated.
 It includes only user and agent step identity, source, and messages; tool-call
 IDs, names, and arguments; and tool-result content and error status.
 Tool results without a source-call ID remain visible; correlation is retained
@@ -142,6 +147,10 @@ Every completed run contains `result.json`, `plan.json`, `trajectory.json`, and
 deterministic file check is configured, and `judge-evidence.json` only when at
 least one guideline is judged. Evaluation lives only in
 `result.json.evaluation`; do not reintroduce a duplicate `evaluation.json`.
+An adapter may additionally retain its exact selected root-session source under
+`native/<adapter-id>/` as a restricted, unredacted supplemental artifact. Never
+make that source score-bearing, judge-visible, or selectable by a directory
+crawl.
 Host-contributed supplemental files must remain below
 `extensions/<contributor-id>/`. Keep this inventory synchronized across the
 producer, verifier, documentation, and live assertions.
@@ -159,10 +168,13 @@ Observers are non-authoritative and may not affect the run result.
 - Keep completion-provider credentials host-side and purpose-specific. They do
   not become runtime environment values unless a runtime capability separately
   declares the same opaque reference.
-- Avoid secrets in argv, errors, logs, transcripts, and artifacts. Preserve the
-  existing redaction and secret-scanning boundaries across completion prompts
-  and responses, transcripts, interaction audit, judge evidence, and results
-  when adding new outputs.
+- Avoid secrets in argv, errors, logs, transcripts, and ordinary artifacts.
+  Preserve the existing redaction and secret-scanning boundaries across
+  completion prompts and responses, normalized transcripts, interaction audit,
+  judge evidence, and result metadata when adding new outputs. The only native
+  source exception is the exact root-session artifact explicitly marked
+  `restricted`; artifact stores and publishers must preserve that
+  classification and appropriate access controls.
 - Dataset inputs must remain manifest-listed, hash-verified, bounded, regular
   files. Do not weaken traversal, symlink, special-file, or extra-file checks.
 - Commands use argv vectors. Shell semantics must be requested explicitly by
