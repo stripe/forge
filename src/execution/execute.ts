@@ -68,6 +68,7 @@ import {
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
+import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {
   resolvedRunPlanSha256,
   serializeResolvedRunPlan,
@@ -89,6 +90,7 @@ import {
   type RunResultV1,
   type RunStopReasonV1,
   type RunWarningV1,
+  type WorkspaceEvidenceV1,
 } from '../results/index.js';
 import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
 import {serializeCanonicalJson} from '../serialization.js';
@@ -428,7 +430,6 @@ export async function executeEvalWithTestHooks(
       interactionArtifact,
       evaluated.workspaceEvidence,
       evaluated.judgeEvidence,
-      evaluated.evaluation,
     );
     for (const artifact of coreArtifacts) {
       assertNoSecrets(artifact.body, secrets, artifact.path);
@@ -1284,19 +1285,24 @@ function buildCoreArtifacts(
   plan: ResolvedRunPlanV1,
   trajectoryJson: string,
   interaction: InteractionArtifactV1,
-  workspaceEvidence: unknown,
+  workspaceEvidence: WorkspaceEvidenceV1,
   judgeEvidence: JudgeEvidenceV1 | undefined,
-  evaluation: EvaluationResultV1,
 ): RunArtifact[] {
   return [
     jsonArtifact('plan.json', serializeResolvedRunPlan(plan)),
     jsonArtifact('trajectory.json', trajectoryJson),
     jsonArtifact('interaction.json', serializeCanonicalJson(interaction)),
-    jsonArtifact('workspace-evidence.json', serializeCanonicalJson(workspaceEvidence)),
+    ...(hasDeterministicWorkspaceChecks(plan.evaluation.checks)
+      ? [
+          jsonArtifact(
+            'workspace-evidence.json',
+            serializeCanonicalJson(workspaceEvidence),
+          ),
+        ]
+      : []),
     ...(judgeEvidence === undefined
       ? []
       : [jsonArtifact('judge-evidence.json', serializeCanonicalJson(judgeEvidence))]),
-    jsonArtifact('evaluation.json', serializeCanonicalJson(evaluation)),
   ];
 }
 

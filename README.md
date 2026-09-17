@@ -262,30 +262,51 @@ needed selectors (`--case` and `--case-file` are mutually exclusive):
 ```
 
 `run` prints a JSON summary after commit. The completed run is stored at
-`results/runs/hello-001/` and contains:
+`results/runs/hello-001/`. Every completed run contains:
 
 ```text
 result.json
 plan.json
 trajectory.json
 interaction.json
-workspace-evidence.json
-evaluation.json
 ```
 
-`result.json` claims the size and digest of every accompanying artifact. Forge
-quiesces the runtime, stages the artifacts, disposes the runtime, then uses a
-directory rename as the atomic completion boundary. Use
+Additional artifacts are emitted only when their capability is used:
+
+```text
+workspace-evidence.json            # one or more deterministic file checks
+judge-evidence.json                # one or more guidelines judged
+extensions/<contributor-id>/...    # optional host-contributed artifacts
+```
+
+The checked-in quickstart includes `workspace-evidence.json` because its case
+defines file checks. `result.json.evaluation` is the sole canonical evaluation
+record; Forge does not write a duplicate `evaluation.json`.
+
+`result.json` is the atomic commit marker and is not listed in its own artifact
+array. Its `artifacts` and `supplemental_artifacts` arrays claim the media type,
+size, and digest of every accompanying file. Forge quiesces the runtime, stages
+the artifacts, disposes the runtime, then uses a directory rename as the atomic
+completion boundary. Use
 `verifyCompletedRun(location)` to re-read and verify a committed result. Result
 schema version 1 records the evidence source and adapter provenance.
 
-`interaction.json` is a post-run audit record, not an execution input. It
-contains the public agent turns, stop reason, and, for multi-turn runs, Ava's
-private need model and decision history. It is not supplied to the guideline
-judge. Forge adds `judge-evidence.json` only when judging ran; it records the
-judge prompt and transcript-projection versions alongside the bounded workspace
-text and warnings made available to the judge. The existing `result.json`
-artifact descriptors independently identify the stored trajectory bytes.
+`plan.json` is the exact resolved execution plan. `trajectory.json` is the full
+selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
+post-run driver audit record, not an execution input: it contains the public
+agent turns, stop reason, and, for multi-turn runs, Ava's private need model and
+decision history. It is not supplied to the guideline judge.
+
+`workspace-evidence.json` contains bounded evidence for the paths inspected by
+configured deterministic file checks; it is not a workspace snapshot.
+`judge-evidence.json` exists only when judging ran and records the judge prompt
+and transcript-projection versions alongside the bounded workspace text and
+warnings made available to the judge. These two evidence artifacts have
+different scopes and are independently conditional.
+
+Files below `extensions/<contributor-id>/` are optional supplemental artifacts
+from registered `RunArtifactContributor`s. The `result.json` descriptors
+independently identify all stored companion bytes.
 
 For native Claude evidence, the result contains an evidence descriptor like:
 

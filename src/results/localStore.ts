@@ -10,8 +10,17 @@ import type {
 import {parseAtifTrajectory} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
+import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {sha256Digest} from '../model/hashes.js';
+import {
+  parseResolvedRunPlan,
+  type ResolvedRunPlanV1,
+} from '../model/index.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
+import {
+  resolvedRunPlanSha256,
+  serializeResolvedRunPlan,
+} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
   parseInteractionArtifact,
@@ -30,6 +39,7 @@ const MAX_RESULT_BYTES = 1024 * 1024;
 const VERIFIED_ARTIFACT_PATHS = new Set([
   'interaction.json',
   'judge-evidence.json',
+  'plan.json',
   'trajectory.json',
 ]);
 
@@ -196,13 +206,15 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
   ) {
     throw new ArtifactStoreError('Completed run contains an unclaimed file.');
   }
+  const plan = verifyPlanArtifact(result, artifactBodies);
   const interaction = verifyInteractionArtifact(result, artifactBodies);
   verifyTrajectoryArtifact(
     result,
     interaction,
     artifactBodies,
   );
-  verifyJudgeEvidence(result, artifactBodies);
+  verifyJudgeEvidence(result, plan, artifactBodies);
+  verifyCanonicalArtifactInventory(result, plan);
   return {runId: result.run_id, location: runDir, result};
 }
 
@@ -244,6 +256,91 @@ function assertResultArtifacts(
       actual.sha256 !== descriptor.sha256
     ) {
       throw new ArtifactStoreError(`Result descriptor mismatch: ${descriptor.path}`);
+    }
+  }
+}
+
+function verifyPlanArtifact(
+  result: RunResult,
+  artifactBodies: ReadonlyMap<string, Buffer>,
+): ResolvedRunPlanV1 {
+  const path = 'plan.json';
+  const body = requireCoreArtifact(result, artifactBodies, path);
+  const plan = parseJsonArtifact(path, body, parseResolvedRunPlan);
+  if (body.toString('utf8') !== serializeResolvedRunPlan(plan)) {
+    throw new ArtifactStoreError('Completed plan.json is not canonical.');
+  }
+  if (resolvedRunPlanSha256(plan) !== result.plan_sha256) {
+    throw new ArtifactStoreError(
+      'plan.json does not match the completed result plan digest.',
+    );
+  }
+  if (
+    serializeCanonicalJson(plan.selection) !==
+      serializeCanonicalJson(result.selection) ||
+    plan.provenance.forge.version !== result.forge.version
+  ) {
+    throw new ArtifactStoreError(
+      'plan.json does not match the completed result summary.',
+    );
+  }
+  const plannedGuidelines = plan.evaluation.success_guidelines;
+  const recordedGuidelines = result.evaluation.guidelines.map(
+    ({guideline}) => guideline,
+  );
+  if (
+    serializeCanonicalJson(plannedGuidelines) !==
+      serializeCanonicalJson(recordedGuidelines) ||
+    hasDeterministicWorkspaceChecks(plan.evaluation.checks) !==
+      (result.evaluation.checks.length > 0)
+  ) {
+    throw new ArtifactStoreError(
+      'plan.json evaluation configuration does not match the completed result.',
+    );
+  }
+  return plan;
+}
+
+function verifyCanonicalArtifactInventory(
+  result: RunResult,
+  plan: ResolvedRunPlanV1,
+): void {
+  const expectedPaths = [
+    'plan.json',
+    'trajectory.json',
+    'interaction.json',
+    ...(hasDeterministicWorkspaceChecks(plan.evaluation.checks)
+      ? ['workspace-evidence.json']
+      : []),
+    ...(plan.evaluation.success_guidelines.length > 0
+      ? ['judge-evidence.json']
+      : []),
+  ];
+  const actualPaths = result.artifacts.map(({path}) => path);
+  for (const expectedPath of expectedPaths) {
+    if (!actualPaths.includes(expectedPath)) {
+      throw new ArtifactStoreError(
+        `Completed result is missing canonical artifact ${expectedPath}.`,
+      );
+    }
+  }
+  for (const actualPath of actualPaths) {
+    if (!expectedPaths.includes(actualPath)) {
+      throw new ArtifactStoreError(
+        `Completed result contains noncanonical core artifact ${actualPath}.`,
+      );
+    }
+  }
+  if (result.artifacts.some(({media_type}) => media_type !== 'application/json')) {
+    throw new ArtifactStoreError(
+      'Canonical run artifacts must use the application/json media type.',
+    );
+  }
+  for (const {path: artifactPath} of result.supplemental_artifacts) {
+    if (!/^extensions\/[a-z0-9][a-z0-9._-]{0,127}\//.test(artifactPath)) {
+      throw new ArtifactStoreError(
+        `Supplemental artifact is outside an extension namespace: ${artifactPath}`,
+      );
     }
   }
 }
@@ -330,11 +427,12 @@ function verifyTrajectoryArtifact(
 
 function verifyJudgeEvidence(
   result: RunResult,
+  plan: ResolvedRunPlanV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
 ): void {
   const path = 'judge-evidence.json';
   const body = artifactBodies.get(path);
-  const judgingRan = result.evaluation.guidelines_total > 0;
+  const judgingRan = plan.evaluation.success_guidelines.length > 0;
   if ((body !== undefined) !== judgingRan) {
     throw new ArtifactStoreError(
       judgingRan

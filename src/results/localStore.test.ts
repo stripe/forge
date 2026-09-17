@@ -7,7 +7,13 @@ import {expect} from '../../test/support/expect.js';
 
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {sha256Digest} from '../model/hashes.js';
+import type {ResolvedRunPlanV1} from '../model/types.js';
+import {
+  resolvedRunPlanSha256,
+  serializeResolvedRunPlan,
+} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
+import {createTestResolvedRunPlan} from '../testing/plans.js';
 import {createArtifactStore, verifyCompletedRun} from './localStore.js';
 import {parseRunResult} from './parse.js';
 import {
@@ -19,6 +25,12 @@ import {
 } from './types.js';
 
 const roots: string[] = [];
+const testPlan = createTestResolvedRunPlan({
+  caseId: 'sample/case',
+  prompt: 'do it',
+  agent: {adapter: 'claude-code', provider: 'anthropic', model: 'test'},
+});
+const testPlanBody = Buffer.from(serializeResolvedRunPlan(testPlan), 'utf8');
 const oneShotInteraction = {
   schema_version: 1,
   mode: 'one_shot',
@@ -134,10 +146,13 @@ describe('local artifact store', () => {
     roots.push(root);
     const store = createArtifactStore({root});
     const transaction = await store.begin('run-1');
-    const body = Buffer.from('{}\n');
     const interactionBody = jsonBody(oneShotInteraction);
     const trajectoryBody = oneShotTrajectory;
-    await transaction.write({path: 'plan.json', body, mediaType: 'application/json'});
+    await transaction.write({
+      path: 'plan.json',
+      body: testPlanBody,
+      mediaType: 'application/json',
+    });
     await transaction.write({
       path: 'interaction.json',
       body: interactionBody,
@@ -149,7 +164,7 @@ describe('local artifact store', () => {
       mediaType: 'application/json',
     });
     const artifacts: ArtifactDescriptorV1[] = [
-      descriptorFor('plan.json', body),
+      descriptorFor('plan.json', testPlanBody),
       descriptorFor('interaction.json', interactionBody),
       descriptorFor('trajectory.json', trajectoryBody),
     ];
@@ -172,7 +187,7 @@ describe('local artifact store', () => {
       mediaType: 'application/json',
     });
     await transaction.write({
-      path: 'evaluation.json',
+      path: 'other.json',
       body: second,
       mediaType: 'application/json',
     });
@@ -230,6 +245,56 @@ describe('local artifact store', () => {
         },
       }),
     ).toThrow('Evidence provenance does not match the recorded agent adapter');
+  });
+
+  it('requires the exact canonical core artifact inventory', async () => {
+    const canonical = [
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+    ];
+    const missingPlan = await commitArtifacts(
+      canonical,
+      (result) => result,
+      {includePlan: false},
+    );
+    await expect(verifyCompletedRun(missingPlan)).rejects.toThrow(
+      'missing canonical artifact plan.json',
+    );
+
+    const legacyEvaluation = await commitArtifacts([
+      ...canonical,
+      {path: 'evaluation.json', body: jsonBody({schema_version: 1})},
+    ]);
+    await expect(verifyCompletedRun(legacyEvaluation)).rejects.toThrow(
+      'noncanonical core artifact evaluation.json',
+    );
+
+    const unexpectedWorkspace = await commitArtifacts([
+      ...canonical,
+      {path: 'workspace-evidence.json', body: emptyWorkspaceEvidenceBody()},
+    ]);
+    await expect(verifyCompletedRun(unexpectedWorkspace)).rejects.toThrow(
+      'noncanonical core artifact workspace-evidence.json',
+    );
+
+    const missingWorkspace = await commitArtifacts(
+      canonical,
+      withPassingWorkspaceCheck,
+    );
+    await expect(verifyCompletedRun(missingWorkspace)).rejects.toThrow(
+      'missing canonical artifact workspace-evidence.json',
+    );
+
+    const checkedRun = await commitArtifacts(
+      [
+        ...canonical,
+        {path: 'workspace-evidence.json', body: emptyWorkspaceEvidenceBody()},
+      ],
+      withPassingWorkspaceCheck,
+    );
+    await expect(verifyCompletedRun(checkedRun)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
   });
 
   it('strictly parses interaction.json and verifies its result summary', async () => {
@@ -554,20 +619,48 @@ interface TestArtifact {
 async function commitArtifacts(
   artifacts: readonly TestArtifact[],
   transform: (result: RunResultV1) => RunResultV1 = (result) => result,
+  options: {readonly includePlan?: boolean} = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
   roots.push(root);
   const transaction = await createArtifactStore({root}).begin('run-1');
-  for (const artifact of artifacts) {
+  const plan = testPlanForResult(transform(resultFor([])));
+  const planBody = Buffer.from(serializeResolvedRunPlan(plan), 'utf8');
+  const completeArtifacts =
+    options.includePlan === false ||
+    artifacts.some(({path: artifactPath}) => artifactPath === 'plan.json')
+      ? [...artifacts]
+      : [{path: 'plan.json', body: planBody}, ...artifacts];
+  for (const artifact of completeArtifacts) {
     await transaction.write({...artifact, mediaType: 'application/json'});
   }
-  const descriptors = artifacts.map(({path: artifactPath, body}) =>
+  const descriptors = completeArtifacts.map(({path: artifactPath, body}) =>
     descriptorFor(artifactPath, body),
   );
   const committed = await transaction.commit(
-    transform(resultFor(descriptors)) as unknown as Readonly<Record<string, unknown>>,
+    transform(resultFor(descriptors, plan)) as unknown as Readonly<Record<string, unknown>>,
   );
   return committed.location;
+}
+
+function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
+  const multiTurn = result.interaction.mode === 'multi_turn';
+  const guidelines = result.evaluation.guidelines.map(({guideline}) => guideline);
+  const hasChecks = result.evaluation.checks.length > 0;
+  return createTestResolvedRunPlan({
+    caseId: 'sample/case',
+    prompt: 'do it',
+    mode: result.interaction.mode,
+    ...(multiTurn
+      ? {rolePlayer: {provider: 'test-provider', model: 'role-model'}}
+      : {}),
+    successGuidelines: guidelines,
+    ...(guidelines.length === 0
+      ? {}
+      : {judge: {provider: 'test-provider', model: 'judge-model'}}),
+    ...(hasChecks ? {checks: {files_created: ['answer.txt']}} : {}),
+    agent: {adapter: 'claude-code', provider: 'anthropic', model: 'test'},
+  });
 }
 
 function descriptorFor(
@@ -616,6 +709,10 @@ function judgeEvidenceBody(): Buffer {
   return jsonBody(judgeEvidenceValue());
 }
 
+function emptyWorkspaceEvidenceBody(): Buffer {
+  return jsonBody({schema_version: 1, entries: [], complete: true, warnings: []});
+}
+
 function withPassingGuideline(result: RunResultV1): RunResultV1 {
   return {
     ...result,
@@ -625,6 +722,16 @@ function withPassingGuideline(result: RunResultV1): RunResultV1 {
       guidelines_passed: 1,
       guidelines_total: 1,
       guidelines: [{guideline: 'The task is complete.', passed: true, explanation: 'Met.'}],
+    },
+  };
+}
+
+function withPassingWorkspaceCheck(result: RunResultV1): RunResultV1 {
+  return {
+    ...result,
+    evaluation: {
+      ...result.evaluation,
+      checks: [{name: 'file_created: answer.txt', passed: true}],
     },
   };
 }
@@ -670,18 +777,16 @@ function withZeroTurnRolePlayerFailure(result: RunResultV1): RunResultV1 {
   };
 }
 
-function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
+function resultFor(
+  artifacts: ArtifactDescriptorV1[],
+  plan: ResolvedRunPlanV1 = testPlan,
+): RunResultV1 {
   return {
     schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: 'run-1',
-    selection: {
-      case_id: 'sample/case',
-      treatment: 'baseline',
-      agent: {adapter: 'claude-code', provider: 'anthropic', model: 'test'},
-      repetition: 0,
-    },
-    plan_sha256: `sha256:${'0'.repeat(64)}`,
-    forge: {version: '0.1.0'},
+    selection: plan.selection,
+    plan_sha256: resolvedRunPlanSha256(plan),
+    forge: {version: plan.provenance.forge.version},
     runtime: {
       adapter: 'docker',
       runtime_id: 'run-1',
@@ -691,8 +796,8 @@ function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
     agent: {
       adapter: 'claude-code',
       adapter_version: '1',
-      provider: 'anthropic',
-      model: 'test',
+      provider: plan.agent.provider,
+      model: plan.agent.model,
       session_id: 'session',
       cost_usd: null,
     },

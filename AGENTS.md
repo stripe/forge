@@ -118,6 +118,15 @@ selected transcript or recorded workspace evidence.
 Collect judge workspace text only from the sealed runtime and preserve all
 truncation/unavailability warnings.
 
+Every completed run contains `result.json`, `plan.json`, `trajectory.json`, and
+`interaction.json`. Emit `workspace-evidence.json` only when at least one
+deterministic file check is configured, and `judge-evidence.json` only when at
+least one guideline is judged. Evaluation lives only in
+`result.json.evaluation`; do not reintroduce a duplicate `evaluation.json`.
+Host-contributed supplemental files must remain below
+`extensions/<contributor-id>/`. Keep this inventory synchronized across the
+producer, verifier, documentation, and live assertions.
+
 Cleanup must run after failure or cancellation and must not depend on an already
 aborted execution signal. Uncommitted artifact transactions must be rolled back.
 Observers are non-authoritative and may not affect the run result.

@@ -188,7 +188,6 @@ describe('executeEval multi-turn and judging integration', () => {
       'interaction.json',
       'workspace-evidence.json',
       'judge-evidence.json',
-      'evaluation.json',
     ]);
     const interaction = artifactJson(stored, 'interaction.json') as {
       turns: Array<{assistant: string}>;
@@ -355,6 +354,12 @@ describe('executeEval multi-turn and judging integration', () => {
 
     const stored = artifacts.runs.get('incomplete-native-fallback-1');
     assert.ok(stored);
+    assert.deepEqual([...stored.artifacts.keys()], [
+      'plan.json',
+      'trajectory.json',
+      'interaction.json',
+      'judge-evidence.json',
+    ]);
     const interaction = artifactJson(stored, 'interaction.json') as {
       turns: Array<{
         turn: number;

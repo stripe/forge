@@ -126,7 +126,6 @@ describe('checked-in quickstart', () => {
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',
-      'evaluation.json',
     ]);
 
     const workspaceEvidence = JSON.parse(

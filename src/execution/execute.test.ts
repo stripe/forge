@@ -88,7 +88,6 @@ describe('executeEval', () => {
       'artifact:write:trajectory.json',
       'artifact:write:interaction.json',
       'artifact:write:workspace-evidence.json',
-      'artifact:write:evaluation.json',
       'runtime:dispose',
       'artifact:commit',
     ]);
@@ -114,6 +113,55 @@ describe('executeEval', () => {
     );
     expect(trajectory).toContain('[REDACTED]');
     expect(trajectory).not.toContain(SECRET);
+  });
+
+  it('omits standalone evaluation and empty workspace evidence artifacts', async () => {
+    const emptyCheckVariants: Array<
+      readonly [
+        string,
+        ResolvedRunPlanV1['evaluation']['checks'],
+      ]
+    > = [
+      ['omitted', undefined],
+      ['empty', {files_created: [], file_checks: []}],
+    ];
+    for (const [suffix, emptyChecks] of emptyCheckVariants) {
+      const fixture = await executionFixture();
+      const caseWithoutChecks = {...fixture.plan.case};
+      delete caseWithoutChecks.checks;
+      const evalCase =
+        emptyChecks === undefined
+          ? caseWithoutChecks
+          : {...caseWithoutChecks, checks: emptyChecks};
+      const plan: ResolvedRunPlanV1 = {
+        ...fixture.plan,
+        case: evalCase,
+        evaluation: {
+          success_guidelines: [],
+          ...(emptyChecks === undefined ? {} : {checks: emptyChecks}),
+        },
+      };
+      const completed = await executeEval({
+        runId: `run-minimal-artifacts-${suffix}`,
+        plan,
+        composition: fixture.composition(
+          createArtifactStore({
+            root: path.join(fixture.root, `minimal-artifacts-${suffix}`),
+          }),
+        ),
+        now: monotonicClock(),
+      });
+
+      expect(completed.result.evaluation).toMatchObject({status: 'passed', score: 0});
+      expect(completed.result.artifacts.map(({path: artifactPath}) => artifactPath)).toEqual([
+        'plan.json',
+        'trajectory.json',
+        'interaction.json',
+      ]);
+      await expect(verifyCompletedRun(completed.location)).resolves.toMatchObject({
+        runId: `run-minimal-artifacts-${suffix}`,
+      });
+    }
   });
 
   it('rejects adapter-produced fallback evidence', async () => {

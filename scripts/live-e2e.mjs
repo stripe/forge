@@ -368,7 +368,6 @@ async function verifyOneShotRun(completed) {
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',
-      'evaluation.json',
     ],
     completed.location,
   );
@@ -434,7 +433,6 @@ async function verifyMultiTurnRun(completed) {
       'interaction.json',
       'workspace-evidence.json',
       'judge-evidence.json',
-      'evaluation.json',
     ],
     completed.location,
   );
