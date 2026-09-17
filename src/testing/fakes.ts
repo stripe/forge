@@ -1,11 +1,7 @@
-import {
-  ATIF_SCHEMA_VERSION,
-  createNormalizedTrajectory,
-  type NormalizedTrajectory,
-} from '../atif/index.js';
 import type {
   AgentAdapter,
   AgentEvidenceContext,
+  AgentNativeEvidenceResult,
   AgentRuntimeRequirements,
   AgentTurn,
 } from '../contracts/agent.js';
@@ -148,8 +144,8 @@ export interface ScriptedAgentOptions {
   readonly turns?: readonly AgentTurn[];
   readonly requirements?: AgentRuntimeRequirements;
   readonly evidence?:
-    | NormalizedTrajectory
-    | ((context: AgentEvidenceContext) => Promise<NormalizedTrajectory>);
+    | AgentNativeEvidenceResult
+    | ((context: AgentEvidenceContext) => Promise<AgentNativeEvidenceResult>);
 }
 
 export interface ScriptedAgentFixture {
@@ -191,6 +187,14 @@ export function createScriptedAgentAdapter(
       }
       return requirements;
     },
+    evidenceIdentity(selection) {
+      if (selection.adapter !== id) {
+        throw new TypeError(
+          `Scripted agent ${id} cannot serve adapter ${selection.adapter}.`,
+        );
+      }
+      return {name: id, version};
+    },
     async prepare(): Promise<void> {
       events.push('prepare');
     },
@@ -218,7 +222,13 @@ export function createScriptedAgentAdapter(
         return options.evidence(context);
       }
       if (options.evidence !== undefined) return options.evidence;
-      return fallbackEvidence(context, id, version);
+      return {
+        kind: 'unavailable',
+        reason: {
+          code: 'source_unavailable',
+          message: 'The scripted agent has no native evidence.',
+        },
+      };
     },
   };
 
@@ -385,67 +395,6 @@ export function createFakeRuntimeAdapter(
   };
 
   return Object.freeze({adapter: Object.freeze(adapter), runs});
-}
-
-function fallbackEvidence(
-  context: AgentEvidenceContext,
-  adapterId: string,
-  adapterVersion: string,
-): NormalizedTrajectory {
-  let stepId = 0;
-  const steps = context.fallbackTurns.flatMap((turn) => [
-    {
-      step_id: ++stepId,
-      source: 'user' as const,
-      message: turn.user,
-    },
-    {
-      step_id: ++stepId,
-      source: 'agent' as const,
-      message: turn.assistant,
-    },
-  ]);
-  if (steps.length === 0) {
-    throw new Error('Cannot synthesize evidence without a completed agent turn.');
-  }
-  const omittedToolDetails = context.fallbackTurns.some(
-    (turn) => turn.toolCalls.length > 0,
-  );
-  return createNormalizedTrajectory({
-    trajectory: {
-      schema_version: ATIF_SCHEMA_VERSION,
-      session_id: context.sessionId,
-      agent: {
-        name: adapterId,
-        version: adapterVersion,
-        model_name: context.selection.model,
-      },
-      steps,
-    },
-    provenance: {
-      source: {
-        kind: 'driver_fallback',
-        format: 'forge-driver-turns',
-        sessionId: context.sessionId,
-      },
-      adapter: {id: adapterId, version: adapterVersion},
-    },
-    completeness: 'fallback',
-    warnings: [
-      {
-        code: 'fallback_used',
-        message: 'The scripted test adapter synthesized evidence from driver turns.',
-      },
-      ...(omittedToolDetails
-        ? [
-            {
-              code: 'value_omitted' as const,
-              message: 'Fallback ATIF omitted test tool-call payloads.',
-            },
-          ]
-        : []),
-    ],
-  });
 }
 
 function copyAgentTurn(turn: AgentTurn): AgentTurn {

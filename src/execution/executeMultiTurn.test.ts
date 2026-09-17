@@ -239,6 +239,166 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.ok(judgeSystemPrompt.includes(auditedWorkspaceText));
   });
 
+  it('falls back to every completed driver turn when native evidence misses the final turn', async () => {
+    const firstUser = 'Complete the first part.';
+    const firstAssistant = 'Completed the first part.';
+    const secondUser = 'Now complete the second part.';
+    const secondAssistant = 'Completed the second part.';
+    const sessionId = 'incomplete-native-session';
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({
+      turns: [
+        {
+          text: firstAssistant,
+          sessionId,
+          toolCalls: [],
+        },
+        {
+          text: secondAssistant,
+          sessionId,
+          toolCalls: [],
+        },
+      ],
+      evidence: {
+        kind: 'available',
+        trajectory: {
+          schema_version: 'ATIF-v1.8',
+          session_id: sessionId,
+          agent: {
+            name: 'test-agent',
+            version: '1',
+            model_name: 'test-model',
+          },
+          steps: [
+            {step_id: 1, source: 'user', message: firstUser},
+            {step_id: 2, source: 'agent', message: firstAssistant},
+          ],
+        },
+        source: {
+          kind: 'native_log',
+          format: 'test-jsonl',
+          sessionId,
+        },
+        warnings: [],
+      },
+    });
+    let judgeSystemPrompt = '';
+    const provider = createScriptedCompletionProvider({
+      id: 'test-provider',
+      responses: [
+        JSON.stringify({
+          user_needs: [
+            {description: 'Complete both parts', status: 'remaining'},
+          ],
+          message: firstUser,
+        }),
+        JSON.stringify({
+          remaining_need_ids: ['need_1'],
+          message: secondUser,
+        }),
+        JSON.stringify({remaining_need_ids: [], message: ''}),
+        (request) => {
+          assert.equal(request.purpose, 'judge');
+          judgeSystemPrompt = request.systemPrompt ?? '';
+          return JSON.stringify({
+            results: [
+              {
+                index: 0,
+                passed: true,
+                explanation: 'Both completed turns are present.',
+              },
+            ],
+          });
+        },
+      ],
+    });
+    const artifacts = createMemoryArtifactStore();
+
+    const completed = await executeEval({
+      runId: 'incomplete-native-fallback-1',
+      plan: createTestResolvedRunPlan({
+        mode: 'multi_turn',
+        prompt: 'Complete both parts.',
+        maxTurns: 3,
+        successGuidelines: ['Both requested parts are complete.'],
+        rolePlayer: ROLE_MODEL,
+        judge: JUDGE_MODEL,
+      }),
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        setupHandlers: new Map(),
+        completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        credentialResolver: createStaticCredentialResolver(),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: artifacts.store,
+      },
+      now: incrementingClock(),
+    });
+
+    assert.deepEqual(agent.messages, [firstUser, secondUser]);
+    assert.equal(completed.result.evidence.completeness, 'fallback');
+    assert.equal(
+      completed.result.evidence.provenance.source.kind,
+      'driver_fallback',
+    );
+    assert.deepEqual(
+      completed.result.evidence.warnings.map(({code}) => code),
+      ['source_incomplete', 'fallback_used'],
+    );
+
+    const stored = artifacts.runs.get('incomplete-native-fallback-1');
+    assert.ok(stored);
+    const interaction = artifactJson(stored, 'interaction.json') as {
+      turns: Array<{
+        turn: number;
+        user: string;
+        assistant: string;
+        tool_calls: unknown[];
+      }>;
+    };
+    assert.deepEqual(interaction.turns, [
+      {
+        turn: 1,
+        user: firstUser,
+        assistant: firstAssistant,
+        tool_calls: [],
+      },
+      {
+        turn: 2,
+        user: secondUser,
+        assistant: secondAssistant,
+        tool_calls: [],
+      },
+    ]);
+
+    const trajectory = parseAtifTrajectory(
+      artifactJson(stored, 'trajectory.json'),
+    );
+    assert.deepEqual(
+      trajectory.steps.map(({source, message}) => ({source, message})),
+      [
+        {source: 'user', message: firstUser},
+        {source: 'agent', message: firstAssistant},
+        {source: 'user', message: secondUser},
+        {source: 'agent', message: secondAssistant},
+      ],
+    );
+    assert.ok(judgeSystemPrompt.includes(firstUser));
+    assert.ok(judgeSystemPrompt.includes(firstAssistant));
+    assert.ok(judgeSystemPrompt.includes(secondUser));
+    assert.ok(judgeSystemPrompt.includes(secondAssistant));
+
+    const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
+      trajectory_sha256: string;
+    };
+    assert.equal(
+      judgeEvidence.trajectory_sha256,
+      completed.result.artifacts.find(({path}) => path === 'trajectory.json')
+        ?.sha256,
+    );
+  });
+
   it('commits a zero-turn role-player failure with system-only fallback ATIF', async () => {
     const runtime = createFakeRuntimeAdapter();
     const agent = createScriptedAgentAdapter();
@@ -384,13 +544,6 @@ describe('executeEval multi-turn and judging integration', () => {
         context: Parameters<typeof agent.adapter.collectEvidence>[0],
       ) {
         toolInput.path = 'mutated-after-interaction.txt';
-        assert.deepEqual(context.fallbackTurns[0]?.toolCalls[0]?.input, {
-          path: 'original.txt',
-        });
-        assert.equal(
-          Object.isFrozen(context.fallbackTurns[0]?.toolCalls[0]?.input),
-          true,
-        );
         return originalCollectEvidence(context);
       },
     };
@@ -415,6 +568,13 @@ describe('executeEval multi-turn and judging integration', () => {
       turns: Array<{tool_calls: Array<{input: unknown}>}>;
     };
     assert.deepEqual(interaction.turns[0]?.tool_calls[0]?.input, {
+      path: 'original.txt',
+    });
+    const trajectory = parseAtifTrajectory(artifactJson(stored, 'trajectory.json'));
+    const fallbackAgentStep = trajectory.steps.find(
+      (step) => step.source === 'agent',
+    );
+    assert.deepEqual(fallbackAgentStep?.tool_calls?.[0]?.arguments, {
       path: 'original.txt',
     });
   });

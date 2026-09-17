@@ -12,7 +12,7 @@ import {
 import type {
   AgentAdapter,
   AgentEvidenceRuntime,
-  AgentEvidenceFallbackTurn,
+  AgentEvidenceIdentity,
   AgentPrepareRuntime,
   AgentRuntimeRequirements,
   AgentSession,
@@ -93,6 +93,10 @@ import {executionError, ForgeExecutionError, throwIfAborted} from './errors.js';
 import {createRunEventEmitter} from './events.js';
 import type {RunPhase} from '../contracts/observability.js';
 import {
+  parseAgentEvidenceIdentity,
+  selectAgentEvidence,
+} from '../evidence/selection.js';
+import {
   completionBindingsForPlan,
   prepareCompletionRuntime,
   type CompletionBinding,
@@ -125,6 +129,7 @@ export interface PreflightEvalInput {
 
 interface EvalPreflight {
   readonly agent: AgentAdapter;
+  readonly agentEvidenceIdentity: AgentEvidenceIdentity;
   readonly setupExecutor: ReturnType<typeof createSetupExecutor>;
   readonly requirements: AgentRuntimeRequirements;
   readonly environmentSpecification: ScopedEnvironmentSpecification;
@@ -283,26 +288,35 @@ export async function executeEvalWithTestHooks(
       return prepared!.quiesce();
     });
 
-    const nativeEvidence = await events.phase('evidence', async () => {
+    const selectedEvidence = await events.phase('evidence', async () => {
       phase = 'evidence';
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
-        return rolePlayerErrorEvidence(input.plan, preflight.agent);
+        return rolePlayerErrorEvidence(
+          input.plan,
+          preflight.agent,
+          preflight.agentEvidenceIdentity,
+        );
       }
       if (interaction.sessionId === null) {
         throw new TypeError('A completed agent turn requires a session identity.');
       }
-      const evidence = parseNormalizedTrajectory(
-        await preflight.agent.collectEvidence({
-          runId: input.runId,
-          plan: input.plan,
-          selection: input.plan.agent,
-          runtime: projectAgentEvidenceRuntime(sealed!),
-          sessionId: interaction.sessionId,
-          fallbackTurns: interaction.fallbackTurns,
-          signal,
-        }),
-      );
+      const collected = await preflight.agent.collectEvidence({
+        runId: input.runId,
+        plan: input.plan,
+        selection: input.plan.agent,
+        runtime: projectAgentEvidenceRuntime(sealed!),
+        sessionId: interaction.sessionId,
+        signal,
+      });
+      const evidence = selectAgentEvidence({
+        agent: preflight.agent,
+        identity: preflight.agentEvidenceIdentity,
+        model: input.plan.agent.model,
+        sessionId: interaction.sessionId,
+        completedTurns: interaction.turns,
+        collected,
+      });
       assertEvidenceMatchesRun(
         evidence,
         preflight.agent,
@@ -310,7 +324,7 @@ export async function executeEvalWithTestHooks(
       );
       return evidence;
     });
-    const redacted = redactNormalizedTrajectory(nativeEvidence, secrets);
+    const redacted = redactNormalizedTrajectory(selectedEvidence, secrets);
 
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
@@ -507,7 +521,6 @@ export async function executeEvalWithTestHooks(
 
 interface ExecutedInteraction {
   readonly turns: readonly ConversationTurn[];
-  readonly fallbackTurns: readonly AgentEvidenceFallbackTurn[];
   readonly stopReason: RunStopReasonV1;
   readonly totalCostUsd: number | null;
   readonly sessionId: string | null;
@@ -577,16 +590,8 @@ async function executeInteraction(
         toolCalls: Object.freeze(toolCalls),
       }),
     ]);
-    const fallbackTurns: readonly AgentEvidenceFallbackTurn[] = Object.freeze([
-      Object.freeze({
-        user: plan.interaction.effective_prompt,
-        assistant: response.text,
-        toolCalls: Object.freeze(toolCalls.map((call) => ({...call}))),
-      }),
-    ]);
     return Object.freeze({
       turns,
-      fallbackTurns,
       stopReason: 'task_complete',
       totalCostUsd: response.costUsd ?? null,
       sessionId: resolveSessionId(session, lastTurnSessionId, true),
@@ -631,7 +636,6 @@ async function executeInteraction(
     : rolePlayerErrorRecord(conversation.failure);
   return Object.freeze({
     turns: conversation.turns,
-    fallbackTurns: conversation.fallbackTurns,
     stopReason: conversation.stopReason,
     totalCostUsd: conversation.totalCostUsd,
     sessionId: resolveSessionId(
@@ -742,6 +746,9 @@ function buildEvalPreflight(
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
+  const agentEvidenceIdentity = parseAgentEvidenceIdentity(
+    agent.evidenceIdentity(plan.agent),
+  );
   const setupExecutor = setupExecutorFor(composition);
   setupExecutor.preflight(plan.setup);
   const requirements = normalizeAgentRequirements(
@@ -758,6 +765,7 @@ function buildEvalPreflight(
   const completionBindings = completionBindingsForPlan(plan, composition);
   return Object.freeze({
     agent,
+    agentEvidenceIdentity,
     setupExecutor,
     requirements,
     environmentSpecification,
@@ -1105,13 +1113,14 @@ function redactNormalizedTrajectory(
 function rolePlayerErrorEvidence(
   plan: ResolvedRunPlanV1,
   agent: AgentAdapter,
+  identity: AgentEvidenceIdentity,
 ): NormalizedTrajectory {
   return createNormalizedTrajectory({
     trajectory: {
       schema_version: ATIF_SCHEMA_VERSION,
       agent: {
-        name: agent.id,
-        version: agent.version,
+        name: identity.name,
+        version: identity.version,
         model_name: plan.agent.model,
       },
       steps: [

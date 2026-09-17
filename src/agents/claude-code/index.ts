@@ -91,6 +91,10 @@ export function createClaudeCodeAdapter(
     id,
     version: adapterVersion,
     requirements,
+    evidenceIdentity(selection) {
+      requirements(selection);
+      return {name: 'claude-code', version: expectedVersion};
+    },
     async prepare(context) {
       requirements(context.selection);
       const result = await context.runtime.commands.uncredentialed.run(
@@ -151,10 +155,7 @@ export function createClaudeCodeAdapter(
       return loadClaudeEvidence({
         project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
         sessionId: context.sessionId,
-        fallbackTurns: context.fallbackTurns,
         agentVersion: expectedVersion,
-        adapterId: id,
-        adapterVersion,
         model: context.selection.model,
         signal: context.signal,
       });

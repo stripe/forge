@@ -5,11 +5,10 @@ import {afterEach, describe, it} from 'node:test';
 
 import {expect} from '../../test/support/expect.js';
 
-import {
-  createNormalizedTrajectory,
-  type NormalizedTrajectory,
-} from '../atif/index.js';
-import type {AgentAdapter} from '../contracts/agent.js';
+import type {
+  AgentAdapter,
+  AgentNativeEvidenceResult,
+} from '../contracts/agent.js';
 import type {
   RunArtifactStore,
   RunArtifactTransaction,
@@ -117,8 +116,8 @@ describe('executeEval', () => {
     expect(trajectory).not.toContain(SECRET);
   });
 
-  it('rejects evidence provenance that contradicts the selected adapter', async () => {
-    const fixture = await executionFixture({evidenceAdapterId: 'other-agent'});
+  it('rejects adapter-produced fallback evidence', async () => {
+    const fixture = await executionFixture({adapterFallbackEvidence: true});
 
     await expect(
       executeEval({
@@ -305,12 +304,52 @@ describe('executeEval', () => {
     expect(credentialResolved).toBe(false);
     expect(runtimePrepared).toBe(false);
   });
+
+  it('validates the fallback agent identity before resolving authority', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const selected = composition.agents.get('claude-code')!;
+    let credentialResolved = false;
+    let runtimePrepared = false;
+    const unsafeAgent: AgentAdapter = {
+      ...selected,
+      evidenceIdentity() {
+        return {name: 'claude-code\nforged', version: 'test'};
+      },
+    };
+
+    await expect(
+      executeEval({
+        runId: 'run-unsafe-evidence-identity',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+          credentialResolver: {
+            async resolve() {
+              credentialResolved = true;
+              return 'must-not-resolve';
+            },
+          },
+          runtime: {
+            ...composition.runtime,
+            async prepare(input) {
+              runtimePrepared = true;
+              return composition.runtime.prepare(input);
+            },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
+    expect(credentialResolved).toBe(false);
+    expect(runtimePrepared).toBe(false);
+  });
 });
 
 async function executionFixture(
   options: {
     openSessionFailure?: boolean;
-    evidenceAdapterId?: string;
+    adapterFallbackEvidence?: boolean;
     omitEvidenceSession?: boolean;
   } = {},
 ): Promise<{
@@ -381,6 +420,9 @@ async function executionFixture(
         stateDirectories: [],
       };
     },
+    evidenceIdentity() {
+      return {name: 'claude-code', version: 'test'};
+    },
     async prepare(context) {
       expect(Object.keys(context.runtime.commands)).toEqual(['uncredentialed']);
       expect('quiesce' in context.runtime).toBe(false);
@@ -419,16 +461,14 @@ async function executionFixture(
       expect('writeFile' in context.runtime.workspace).toBe(false);
       expect('set' in context.runtime.stateDirectories).toBe(false);
       calls.push(`agent:evidence:${context.sessionId}`);
-      return normalizedTrajectory(
-        {
-          ...(options.evidenceAdapterId === undefined
-            ? {}
-            : {adapterId: options.evidenceAdapterId}),
-          ...(options.omitEvidenceSession === undefined
-            ? {}
-            : {omitSession: options.omitEvidenceSession}),
-        },
-      );
+      return nativeEvidence({
+        ...(options.adapterFallbackEvidence === undefined
+          ? {}
+          : {adapterFallback: options.adapterFallbackEvidence}),
+        ...(options.omitEvidenceSession === undefined
+          ? {}
+          : {omitSession: options.omitEvidenceSession}),
+      });
     },
   };
   const plan = resolvedPlan();
@@ -453,10 +493,11 @@ async function executionFixture(
   };
 }
 
-function normalizedTrajectory(
-  options: {adapterId?: string; omitSession?: boolean} = {},
-): NormalizedTrajectory {
-  return createNormalizedTrajectory({
+function nativeEvidence(
+  options: {adapterFallback?: boolean; omitSession?: boolean} = {},
+): AgentNativeEvidenceResult {
+  return {
+    kind: 'available',
     trajectory: {
       schema_version: 'ATIF-v1.8',
       ...(options.omitSession === true
@@ -468,21 +509,18 @@ function normalizedTrajectory(
         {step_id: 2, source: 'agent', message: `done with ${SECRET}`},
       ],
     },
-    provenance: {
-      source: {
-        kind: 'native_log',
-        format: 'claude-code-jsonl',
-        ...(options.omitSession === true
-          ? {}
-          : {sessionId: 'canonical-session'}),
-      },
-      adapter: {
-        id: options.adapterId ?? 'claude-code',
-        version: 'test-adapter',
-      },
+    source: {
+      kind: options.adapterFallback === true ? 'driver_fallback' : 'native_log',
+      format:
+        options.adapterFallback === true
+          ? 'forge-driver-turns'
+          : 'claude-code-jsonl',
+      ...(options.omitSession === true
+        ? {}
+        : {sessionId: 'canonical-session'}),
     },
-    completeness: 'complete',
-  });
+    warnings: [],
+  } as AgentNativeEvidenceResult;
 }
 
 function resolvedPlan(): ResolvedRunPlanV1 {

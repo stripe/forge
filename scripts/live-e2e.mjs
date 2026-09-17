@@ -534,50 +534,62 @@ function verifyNativeSession(result, trajectory, minimumAgentSteps, location) {
 }
 
 function verifyTrajectoryTurns(trajectory, turns, location) {
-  let stepIndex = 0;
-  for (const turn of turns) {
-    stepIndex = findTrajectoryMessage(
-      trajectory.steps,
-      stepIndex,
-      'user',
-      turn.user,
-    );
-    if (stepIndex < 0) {
+  const trajectoryTurns = [];
+  let current;
+  for (const step of trajectory.steps) {
+    if (step.is_copied_context === true || step.source === 'system') continue;
+    if (step.source === 'user') {
+      if (typeof step.message !== 'string') {
+        current = undefined;
+        trajectoryTurns.push({
+          user: undefined,
+          hasAgent: false,
+          hasResponse: false,
+        });
+        continue;
+      }
+      current = {user: step.message, hasAgent: false, hasResponse: false};
+      trajectoryTurns.push(current);
+      continue;
+    }
+    if (current === undefined) {
       requireCondition(
         false,
-        'The native trajectory omitted a completed user turn.',
+        'The native trajectory contains agent activity before a completed user turn.',
         location,
       );
     }
-    stepIndex = findTrajectoryMessage(
-      trajectory.steps,
-      stepIndex + 1,
-      'agent',
-      turn.assistant,
-    );
-    if (stepIndex < 0) {
-      requireCondition(
-        false,
-        'The native trajectory omitted a completed agent turn.',
-        location,
-      );
-    }
-    stepIndex += 1;
-  }
-}
-
-function findTrajectoryMessage(steps, start, source, expected) {
-  for (let index = start; index < steps.length; index += 1) {
-    const step = steps[index];
+    current.hasAgent = true;
+    const hasMessage =
+      typeof step.message === 'string'
+        ? step.message.length > 0
+        : Array.isArray(step.message) &&
+          step.message.some(
+            (part) => part.type !== 'text' || part.text.length > 0,
+          );
     if (
-      step?.source === source &&
-      typeof step.message === 'string' &&
-      step.message === expected
+      hasMessage ||
+      (step.tool_calls?.length ?? 0) > 0
     ) {
-      return index;
+      current.hasResponse = true;
     }
   }
-  return -1;
+
+  requireCondition(
+    trajectoryTurns.length === turns.length &&
+      turns.every((turn, index) => {
+        const persisted = trajectoryTurns[index];
+        const completedHasResponse =
+          turn.assistant.length > 0 || turn.tool_calls.length > 0;
+        return (
+          persisted?.user === turn.user &&
+          persisted.hasAgent &&
+          (!completedHasResponse || persisted.hasResponse)
+        );
+      }),
+    'The native trajectory does not structurally cover every completed turn.',
+    location,
+  );
 }
 
 function requireArtifactPaths(result, expected, location) {

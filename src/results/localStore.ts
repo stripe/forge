@@ -7,6 +7,8 @@ import type {
   RunArtifactStore,
   RunArtifactTransaction,
 } from '../contracts/artifacts.js';
+import {parseAtifTrajectory} from '../atif/index.js';
+import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
 import {sha256Digest} from '../model/hashes.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
 import {canonicalJsonSha256, serializeCanonicalJson} from '../serialization.js';
@@ -18,6 +20,7 @@ import {
 import type {
   ArtifactDescriptorV1,
   CompletedRun,
+  InteractionArtifactV1,
   RunResult,
 } from './types.js';
 
@@ -195,8 +198,13 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
   if (canonicalJsonSha256(result.artifacts) !== result.artifact_set_sha256) {
     throw new ArtifactStoreError('Canonical artifact-set digest is invalid.');
   }
-  verifyInteractionArtifact(result, artifactBodies);
-  verifyJudgeEvidence(result, artifactBodies);
+  const interaction = verifyInteractionArtifact(result, artifactBodies);
+  const trajectoryBody = verifyTrajectoryArtifact(
+    result,
+    interaction,
+    artifactBodies,
+  );
+  verifyJudgeEvidence(result, artifactBodies, trajectoryBody);
   return {runId: result.run_id, location: runDir, result};
 }
 
@@ -248,7 +256,7 @@ function assertResultArtifacts(
 function verifyInteractionArtifact(
   result: RunResult,
   artifactBodies: ReadonlyMap<string, Buffer>,
-): void {
+): InteractionArtifactV1 {
   const body = requireCoreArtifact(result, artifactBodies, 'interaction.json');
   const interaction = parseJsonArtifact(
     'interaction.json',
@@ -266,11 +274,70 @@ function verifyInteractionArtifact(
       'interaction.json does not match the completed result summary.',
     );
   }
+  return interaction;
+}
+
+function verifyTrajectoryArtifact(
+  result: RunResult,
+  interaction: InteractionArtifactV1,
+  artifactBodies: ReadonlyMap<string, Buffer>,
+): Buffer {
+  const path = 'trajectory.json';
+  const body = requireCoreArtifact(result, artifactBodies, path);
+  const trajectory = parseJsonArtifact(path, body, parseAtifTrajectory);
+
+  if (interaction.turns.length === 0) {
+    const validRolePlayerFailure =
+      result.stop_reason === 'role_player_error' &&
+      result.failure !== null &&
+      result.agent.session_id === null &&
+      result.evidence.provenance.source.kind === 'role_player_error' &&
+      trajectory.session_id == null &&
+      trajectory.steps.length === 1 &&
+      trajectory.steps[0]?.source === 'system';
+    if (!validRolePlayerFailure) {
+      throw new ArtifactStoreError(
+        'Zero-turn interaction requires the system-only role-player-error trajectory.',
+      );
+    }
+    return body;
+  }
+
+  const sessionId = result.agent.session_id;
+  const source = result.evidence.provenance.source;
+  const sourceSessionId =
+    'session_id' in source ? source.session_id : undefined;
+  if (
+    sessionId === null ||
+    sourceSessionId !== sessionId ||
+    trajectory.session_id !== sessionId
+  ) {
+    throw new ArtifactStoreError(
+      'trajectory.json session identity does not match the completed run.',
+    );
+  }
+
+  if (
+    !trajectoryCoversCompletedTurns(
+      trajectory,
+      interaction.turns.map((turn) => ({
+        user: turn.user,
+        assistant: turn.assistant,
+        toolCalls: turn.tool_calls,
+      })),
+    )
+  ) {
+    throw new ArtifactStoreError(
+      'trajectory.json does not cover every completed interaction turn.',
+    );
+  }
+  return body;
 }
 
 function verifyJudgeEvidence(
   result: RunResult,
   artifactBodies: ReadonlyMap<string, Buffer>,
+  trajectory: Uint8Array,
 ): void {
   const path = 'judge-evidence.json';
   const body = artifactBodies.get(path);
@@ -289,11 +356,6 @@ function verifyJudgeEvidence(
     );
   }
   const judgeEvidence = parseJsonArtifact(path, body, parseJudgeEvidence);
-  const trajectory = requireCoreArtifact(
-    result,
-    artifactBodies,
-    'trajectory.json',
-  );
   if (judgeEvidence.trajectory_sha256 !== sha256Digest(trajectory)) {
     throw new ArtifactStoreError(
       'judge-evidence.json trajectory_sha256 does not match trajectory.json.',
