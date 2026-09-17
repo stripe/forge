@@ -74,6 +74,7 @@ const artifactDescriptor = z.object({
   media_type: safeText,
   size_bytes: z.number().int().nonnegative(),
   sha256: digest,
+  sensitivity: z.literal('restricted').optional(),
 }).strict();
 
 const rolePlayerError = z.object({

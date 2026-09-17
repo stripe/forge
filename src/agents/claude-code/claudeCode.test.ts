@@ -5,6 +5,7 @@ import {parseAtifTrajectory} from '../../atif/index.js';
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
 
 import {createClaudeCodeAdapter, loadClaudeEvidence} from './index.js';
+import {loadClaudeNativeArtifact} from './evidence.js';
 import {parseClaudeStream} from './stream.js';
 
 describe('Claude Code adapter', () => {
@@ -162,6 +163,29 @@ describe('Claude Code adapter', () => {
         message: 'The exact Claude session is unavailable.',
       },
     });
+  });
+
+  it('captures only the exact selected Claude JSONL without transforming bytes', async () => {
+    const raw =
+      '{"type":"attachment","attachment":{"type":"environment","credential":"raw-secret"}}\n';
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': raw,
+      'session-2.jsonl': '{"type":"user","message":{"content":"other"}}\n',
+    });
+
+    const artifact = await loadClaudeNativeArtifact({
+      project: project.readonly,
+      sessionId: 'session-1',
+      signal: new AbortController().signal,
+    });
+
+    expect(artifact).toMatchObject({
+      format: 'claude-code-jsonl',
+      sessionId: 'session-1',
+      mediaType: 'application/x-ndjson',
+      extension: 'jsonl',
+    });
+    expect(Buffer.from(artifact?.body ?? []).toString('utf8')).toBe(raw);
   });
 
   it('classifies malformed native JSONL as invalid', async () => {
@@ -334,6 +358,7 @@ describe('Claude Code adapter', () => {
     const project = createMemoryWorkspace({
       'session-1.jsonl': [
         ...metadataTypes.map((type) => JSON.stringify({type})),
+        JSON.stringify({type: 'atis-latch', atis: '', sessionId: 'session-1'}),
         JSON.stringify({type: 'system', subtype: 'stop_hook_summary'}),
         JSON.stringify({type: 'system', subtype: 'turn_duration'}),
         JSON.stringify({
@@ -366,6 +391,132 @@ describe('Claude Code adapter', () => {
       {source: 'agent', message: 'Done'},
     ]);
     expect(evidence.warnings).toEqual([]);
+  });
+
+  it('maps rendered Claude attachments to ATIF system steps', async () => {
+    const rendered =
+      '<system-reminder>\n# Environment\nPrimary working directory: /workspace\n</system-reminder>';
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({
+          type: 'attachment',
+          sessionId: 'session-1',
+          timestamp: '2026-09-17T16:02:51.921Z',
+          attachment: {
+            type: 'environment',
+            snapshot: {workingDirectory: '/workspace'},
+          },
+          rendered: [{content: rendered}],
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    expect(
+      trajectory.steps.map(({step_id, source, message}) => ({
+        step_id,
+        source,
+        message,
+      })),
+    ).toEqual([
+      {step_id: 1, source: 'user', message: 'Do the task'},
+      {
+        step_id: 2,
+        source: 'system',
+        message: rendered,
+      },
+      {step_id: 3, source: 'agent', message: 'Done'},
+    ]);
+    expect(trajectory.steps[1]).toMatchObject({
+      timestamp: '2026-09-17T16:02:51.921Z',
+      extra: {
+        native_record_type: 'attachment',
+        attachment_type: 'environment',
+      },
+    });
+    expect(evidence.warnings).toEqual([]);
+  });
+
+  it('drops empty session context and retains prompt snapshots as partial native detail', async () => {
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        JSON.stringify({
+          type: 'attachment',
+          attachment: {type: 'session_context', context: {}},
+        }),
+        JSON.stringify({
+          type: 'attachment',
+          attachment: {
+            type: 'prompt_snapshot',
+            systemPrompt: ['System prompt'],
+          },
+        }),
+        JSON.stringify({
+          type: 'attachment',
+          attachment: {
+            type: 'prompt_snapshot',
+            systemPrompt: ['System prompt'],
+            cliPrefix: 'CLI prefix',
+            tools: [{name: 'Read'}],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    expect(evidence.warnings).toEqual([
+      {
+        code: 'unsupported_native_event',
+        message: 'Claude prompt snapshot detail was retained only in native evidence.',
+        path: 'line:2',
+      },
+      {
+        code: 'unsupported_native_event',
+        message: 'Claude prompt snapshot detail was retained only in native evidence.',
+        path: 'line:3',
+      },
+    ]);
   });
 
   it('marks known Claude attachment context as omitted optional detail', async () => {
@@ -411,7 +562,37 @@ describe('Claude Code adapter', () => {
   for (const {description, record} of [
     {
       description: 'queued command attachment',
-      record: {type: 'attachment', attachment: {type: 'queued_command'}},
+      record: {
+        type: 'attachment',
+        attachment: {type: 'queued_command'},
+        rendered: [{content: 'Queued user command'}],
+      },
+    },
+    {
+      description: 'malformed rendered attachment',
+      record: {
+        type: 'attachment',
+        attachment: {type: 'environment'},
+        rendered: [{content: 42}],
+      },
+    },
+    {
+      description: 'nonempty session context attachment',
+      record: {
+        type: 'attachment',
+        attachment: {type: 'session_context', context: {mode: 'future'}},
+      },
+    },
+    {
+      description: 'malformed prompt snapshot attachment',
+      record: {
+        type: 'attachment',
+        attachment: {type: 'prompt_snapshot', systemPrompt: 'not-an-array'},
+      },
+    },
+    {
+      description: 'nonempty ATIS latch',
+      record: {type: 'atis-latch', atis: 'future-state', sessionId: 'session-1'},
     },
     {
       description: 'conversation-bearing system event',

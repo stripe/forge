@@ -2,6 +2,8 @@ export interface RunArtifact {
   readonly path: string;
   readonly body: Uint8Array;
   readonly mediaType: string;
+  /** Restricted artifacts may contain unredacted credentials or private data. */
+  readonly sensitivity?: 'restricted';
 }
 
 export interface RunArtifactContributionContext {

@@ -276,6 +276,7 @@ Additional artifacts are emitted only when their capability is used:
 ```text
 workspace-evidence.json            # one or more deterministic file checks
 judge-evidence.json                # one or more guidelines judged
+native/claude-code/session.jsonl   # exact selected Claude source session
 extensions/<contributor-id>/...    # optional host-contributed artifacts
 ```
 
@@ -307,6 +308,18 @@ artifacts have different scopes and are independently conditional.
 Files below `extensions/<contributor-id>/` are optional supplemental artifacts
 from registered `RunArtifactContributor`s. The `result.json` descriptors
 independently identify all stored companion bytes.
+
+The built-in Claude adapter retains only the exact root-session project JSONL
+selected for the run. Forge copies those bytes without redaction, filtering,
+normalization, or reserialization to
+`native/<adapter-id>/session.jsonl`, including when ATIF normalization falls
+back. This restricted supplemental artifact may contain credentials, prompts,
+private reasoning, tool payloads, file contents, or other sensitive data. It is
+written mode `0600` by the local store, never supplied to a judge, and never
+affects scoring. Its descriptor sets `sensitivity: restricted`; custom stores
+and caller-owned publishers must preserve appropriate access controls. The
+normalized, credential-redacted `trajectory.json` remains the canonical
+portable evidence.
 
 For native Claude evidence, the result contains an evidence descriptor like:
 
@@ -745,6 +758,17 @@ Forge persists the canonical agent trajectory as a standalone
 - Agent-native evidence is read only after runtime quiescence.
 - The Claude adapter selects the exact run-owned session JSONL. It does not use
   a newest-session heuristic.
+- The same exact selected root JSONL is retained byte-for-byte as a restricted
+  supplemental artifact under `native/`. Forge does not crawl or retain sibling
+  sessions or subagent traces.
+- Structurally valid Claude attachment records with one or more
+  string-valued `rendered[].content` entries are preserved as ATIF system steps
+  in native order. The exact rendered text and timestamp are retained, while
+  `extra` identifies the
+  native record and attachment types. These system steps remain excluded from
+  guideline judging. Empty session-context bookkeeping is ignored; prompt
+  snapshots remain in the restricted native source and produce a partial-detail
+  warning until their per-call semantics can be normalized faithfully.
 - Forge accepts that native candidate only when it identifies the selected
   session and structurally covers the completed driver ledger: the same number
   of logical turns, the same ordered user prompts, and visible response or tool
@@ -764,20 +788,37 @@ Forge persists the canonical agent trajectory as a standalone
 - If Ava exhausts its retries before the first agent turn, Forge instead writes
   a system-only fallback trajectory with `role_player_error` provenance.
 - Known non-conversation metadata is ignored explicitly. Unknown conversation
-  records, unknown content blocks, sidechains, and compaction make the native
-  candidate incomplete and trigger whole-trajectory fallback. Loss of optional
-  detail such as an invalid timestamp remains an explicit partial-evidence
-  warning.
+  records, attachments without renderable or explicitly classified content,
+  unknown content blocks, sidechains, and compaction make the native candidate
+  incomplete and trigger whole-trajectory fallback. Loss of optional detail
+  such as an invalid timestamp remains an explicit partial-evidence warning.
 - Result schema v1 records the normalization source kind, native format, source
   session, and adapter identity for every completed agent interaction. Forge
   rejects adapter evidence which omits or contradicts the selected session.
 - `verifyCompletedRun` independently parses `trajectory.json` and applies the
   same session and completed-turn coverage checks before trusting a committed
   result.
-- Exact credential values are redacted before evidence and results are staged.
+- Exact credential values are redacted before normalized evidence and ordinary
+  result artifacts are staged. The explicitly restricted native source artifact
+  is an unredacted exception.
 - The full selected, redacted trajectory remains the canonical audit artifact.
   Guideline judging uses a separately defined positive projection of
   current-run root user/agent messages and tool behavior.
+
+For example, a Claude `environment` attachment whose rendered content is
+`<system-reminder>workspace: /workspace</system-reminder>` becomes:
+
+```json
+{
+  "step_id": 2,
+  "source": "system",
+  "message": "<system-reminder>workspace: /workspace</system-reminder>",
+  "extra": {
+    "native_record_type": "attachment",
+    "attachment_type": "environment"
+  }
+}
+```
 
 Use the versioned surface when consuming stored artifacts:
 
@@ -895,6 +936,9 @@ Artifact contributors may add files only below
 Forge scans their output for resolved secret values. Observer failures are
 isolated and never change the benchmark result. External publication is a
 caller-owned post-commit step; the default composition writes only locally.
+Publishers must explicitly account for descriptors marked
+`sensitivity: restricted` rather than assuming every committed artifact is safe
+to distribute.
 
 This is the intended boundary for a private integration: depend on an exact
 `@stripe/forge` version, implement public contracts, and pass the resulting
@@ -928,7 +972,9 @@ selecting host-owned capabilities.
   argv or permanent container configuration.
 - Completion providers separately declare credentials for each score-affecting
   purpose. Forge redacts all resolved secret values from completion prompts,
-  responses, ATIF, interaction audit, judge evidence, and result metadata.
+  responses, ATIF, interaction audit, judge evidence, and result metadata. The
+  exact selected native agent log is deliberately retained unredacted as a
+  restricted local artifact and may contain values the agent recorded.
 - Workspace evidence is bounded and does not follow symlinks. Guideline judges
   receive only the separately bounded, redacted text subset and the
   visible transcript projection described above. Local artifacts are
@@ -1026,7 +1072,7 @@ One invocation builds once and runs the following checks in order:
    judging.
 4. Full `verifyCompletedRun` integrity verification plus targeted checks of the
    interaction, trajectory, judge evidence, completion calls, and session
-   provenance.
+   provenance, including the exact restricted Claude source artifact.
 
 When `ANTHROPIC_BASE_URL` names a host-loopback endpoint, the live suite creates
 an ephemeral authenticated bridge for Claude Code in Docker. The container sees

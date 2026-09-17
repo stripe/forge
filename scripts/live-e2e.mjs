@@ -615,10 +615,17 @@ function verifyTrajectoryTurns(trajectory, turns, location) {
 
 function requireArtifactPaths(result, expected, location) {
   const actual = result.artifacts.map(({path: artifactPath}) => artifactPath);
+  const nativePath = `native/${result.agent.adapter}/session.jsonl`;
+  const nativeArtifact = result.supplemental_artifacts.find(
+    ({path: artifactPath}) => artifactPath === nativePath,
+  );
   requireCondition(
     actual.length === expected.length &&
       expected.every((artifactPath) => actual.includes(artifactPath)) &&
-      result.supplemental_artifacts.length === 0,
+      result.supplemental_artifacts.length === 1 &&
+      nativeArtifact?.media_type === 'application/x-ndjson' &&
+      nativeArtifact.sensitivity === 'restricted' &&
+      nativeArtifact.size_bytes > 0,
     'The live run did not commit the expected canonical artifact set.',
     location,
   );

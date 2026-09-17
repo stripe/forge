@@ -28,6 +28,22 @@ export interface AgentEvidenceIdentity {
   readonly version: string;
 }
 
+/** Exact agent-native source bytes retained independently from normalization. */
+export interface AgentNativeArtifact {
+  /** Agent-native format identifier, such as `claude-code-jsonl`. */
+  readonly format: string;
+  /** Must identify the exact root session requested by AgentEvidenceContext. */
+  readonly sessionId: string;
+  readonly mediaType: string;
+  /** Safe extension without a leading dot, such as `jsonl`. */
+  readonly extension: string;
+  /**
+   * Unmodified source bytes. These may contain credentials or other sensitive
+   * agent-visible data and are never score-bearing or supplied to a judge.
+   */
+  readonly body: Uint8Array;
+}
+
 export type AgentNativeEvidenceSource =
   | {
       readonly kind: 'native_log';
@@ -168,4 +184,12 @@ export interface AgentAdapter {
    * Completed-run provenance must identify `context.sessionId`.
    */
   collectEvidence(context: AgentEvidenceContext): Promise<AgentNativeEvidenceResult>;
+  /**
+   * Optionally retain the exact root-session source independently from its
+   * normalized evidence. Forge assigns the final artifact path and treats the
+   * returned bytes as restricted and unredacted.
+   */
+  collectNativeArtifact?(
+    context: AgentEvidenceContext,
+  ): Promise<AgentNativeArtifact | undefined>;
 }

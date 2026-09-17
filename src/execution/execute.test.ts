@@ -30,6 +30,7 @@ import {executeEval} from './execute.js';
 
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
+const RAW_NATIVE_SESSION = `{"type":"system","credential":"${SECRET}"}\n`;
 const DIGEST_A = `sha256:${'a'.repeat(64)}` as const;
 const DIGEST_B = `sha256:${'b'.repeat(64)}` as const;
 const DIGEST_C = `sha256:${'c'.repeat(64)}` as const;
@@ -44,7 +45,7 @@ afterEach(async () => {
 
 describe('executeEval', () => {
   it('runs the shared lifecycle, redacts credentials, and atomically commits', async () => {
-    const fixture = await executionFixture();
+    const fixture = await executionFixture({nativeArtifact: true});
     const localStore = createArtifactStore({
       root: path.join(fixture.root, 'artifacts'),
     });
@@ -73,6 +74,13 @@ describe('executeEval', () => {
           adapter: {id: 'claude-code', version: 'test-adapter'},
         },
       },
+      supplemental_artifacts: [
+        {
+          path: 'native/claude-code/session.jsonl',
+          media_type: 'application/x-ndjson',
+          sensitivity: 'restricted',
+        },
+      ],
       evaluation: {status: 'passed', score: 0},
     });
     expect(fixture.calls).toEqual([
@@ -82,12 +90,14 @@ describe('executeEval', () => {
       'agent:open',
       'agent:send',
       'runtime:quiesce',
+      'agent:native:canonical-session',
       'agent:evidence:canonical-session',
       'artifact:begin',
       'artifact:write:plan.json',
       'artifact:write:trajectory.json',
       'artifact:write:interaction.json',
       'artifact:write:workspace-evidence.json',
+      'artifact:write:native/claude-code/session.jsonl',
       'runtime:dispose',
       'artifact:commit',
     ]);
@@ -113,6 +123,12 @@ describe('executeEval', () => {
     );
     expect(trajectory).toContain('[REDACTED]');
     expect(trajectory).not.toContain(SECRET);
+    const nativePath = path.join(
+      completed.location,
+      'native/claude-code/session.jsonl',
+    );
+    expect(await fs.readFile(nativePath, 'utf8')).toBe(RAW_NATIVE_SESSION);
+    expect((await fs.stat(nativePath)).mode & 0o777).toBe(0o600);
   });
 
   it('omits standalone evaluation and empty workspace evidence artifacts', async () => {
@@ -192,6 +208,56 @@ describe('executeEval', () => {
     ).rejects.toMatchObject({code: 'evidence_failed', phase: 'evidence'});
     expect(fixture.calls).not.toContain('artifact:begin');
     expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+  });
+
+  it('rejects a native artifact for a different session before staging', async () => {
+    const fixture = await executionFixture({
+      nativeArtifact: true,
+      nativeArtifactSessionId: 'other-session',
+    });
+
+    await expect(
+      executeEval({
+        runId: 'run-mismatched-native-artifact',
+        plan: fixture.plan,
+        composition: fixture.composition(inertStore()),
+        now: monotonicClock(),
+      }),
+    ).rejects.toMatchObject({code: 'evidence_failed', phase: 'evidence'});
+    expect(fixture.calls).not.toContain('artifact:begin');
+    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+  });
+
+  it('retains exact native bytes when normalization uses driver fallback', async () => {
+    const fixture = await executionFixture({
+      nativeArtifact: true,
+      nativeEvidenceUnavailable: true,
+    });
+    const completed = await executeEval({
+      runId: 'run-native-fallback',
+      plan: fixture.plan,
+      composition: fixture.composition(
+        createArtifactStore({root: path.join(fixture.root, 'native-fallback')}),
+      ),
+      now: monotonicClock(),
+    });
+
+    expect(completed.result.evidence).toMatchObject({
+      completeness: 'fallback',
+      provenance: {source: {kind: 'driver_fallback'}},
+    });
+    expect(
+      await fs.readFile(
+        path.join(
+          completed.location,
+          'native/claude-code/session.jsonl',
+        ),
+        'utf8',
+      ),
+    ).toBe(RAW_NATIVE_SESSION);
+    await expect(verifyCompletedRun(completed.location)).resolves.toMatchObject({
+      runId: 'run-native-fallback',
+    });
   });
 
   it('rolls back an opened artifact transaction when staging fails', async () => {
@@ -399,6 +465,9 @@ async function executionFixture(
     openSessionFailure?: boolean;
     adapterFallbackEvidence?: boolean;
     omitEvidenceSession?: boolean;
+    nativeArtifact?: boolean;
+    nativeArtifactSessionId?: string;
+    nativeEvidenceUnavailable?: boolean;
   } = {},
 ): Promise<{
   root: string;
@@ -503,12 +572,38 @@ async function executionFixture(
         },
       };
     },
+    ...(options.nativeArtifact === true
+      ? {
+          async collectNativeArtifact(context) {
+            expect('commands' in context.runtime).toBe(false);
+            expect('writeFile' in context.runtime.workspace).toBe(false);
+            calls.push(`agent:native:${context.sessionId}`);
+            return {
+              format: 'claude-code-jsonl',
+              sessionId:
+                options.nativeArtifactSessionId ?? context.sessionId,
+              mediaType: 'application/x-ndjson',
+              extension: 'jsonl',
+              body: Buffer.from(RAW_NATIVE_SESSION, 'utf8'),
+            };
+          },
+        }
+      : {}),
     async collectEvidence(context) {
       expect('commands' in context.runtime).toBe(false);
       expect('dispose' in context.runtime).toBe(false);
       expect('writeFile' in context.runtime.workspace).toBe(false);
       expect('set' in context.runtime.stateDirectories).toBe(false);
       calls.push(`agent:evidence:${context.sessionId}`);
+      if (options.nativeEvidenceUnavailable === true) {
+        return {
+          kind: 'unavailable',
+          reason: {
+            code: 'source_incomplete',
+            message: 'The native source contains an unsupported record.',
+          },
+        };
+      }
       return nativeEvidence({
         ...(options.adapterFallbackEvidence === undefined
           ? {}

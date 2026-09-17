@@ -411,6 +411,9 @@ function copyArtifact(artifact: RunArtifact): RunArtifact {
     path: artifact.path,
     mediaType: artifact.mediaType,
     body: Uint8Array.from(artifact.body),
+    ...(artifact.sensitivity === undefined
+      ? {}
+      : {sensitivity: artifact.sensitivity}),
   });
 }
 
