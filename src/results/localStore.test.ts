@@ -5,6 +5,9 @@ import {afterEach, describe, it} from 'node:test';
 
 import {expect} from '../../test/support/expect.js';
 
+import {parseAtifTrajectory} from '../atif/index.js';
+import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
+import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
 import {canonicalJsonSha256, serializeCanonicalJson} from '../serialization.js';
 import {createArtifactStore, verifyCompletedRun} from './localStore.js';
@@ -13,6 +16,7 @@ import {
   EVALUATION_SCHEMA_VERSION,
   RUN_RESULT_SCHEMA_VERSION,
   type ArtifactDescriptorV1,
+  type JudgeEvidenceV1,
   type RunResultV1,
 } from './types.js';
 
@@ -436,12 +440,22 @@ describe('local artifact store', () => {
   });
 
   it('strictly parses judge evidence and binds it to exact trajectory bytes', async () => {
-    const trajectory = oneShotTrajectory;
+    const trajectory = trajectoryBody([
+      {step_id: 1, source: 'user', message: 'do it'},
+      {
+        step_id: 2,
+        source: 'agent',
+        message: 'done',
+        reasoning_content: 'private reasoning',
+        reasoning_effort: 'high',
+      },
+    ]);
+    const validJudgeEvidence = judgeEvidenceValue(trajectory);
     const validLocation = await commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
         {path: 'trajectory.json', body: trajectory},
-        {path: 'judge-evidence.json', body: judgeEvidenceBody(trajectory)},
+        {path: 'judge-evidence.json', body: jsonBody(validJudgeEvidence)},
       ],
       withPassingGuideline,
     );
@@ -455,7 +469,10 @@ describe('local artifact store', () => {
         {path: 'trajectory.json', body: trajectory},
         {
           path: 'judge-evidence.json',
-          body: judgeEvidenceBody(Buffer.from('different trajectory bytes')),
+          body: jsonBody({
+            ...validJudgeEvidence,
+            trajectory_sha256: sha256Digest('different trajectory bytes'),
+          }),
         },
       ],
       withPassingGuideline,
@@ -464,9 +481,86 @@ describe('local artifact store', () => {
       'trajectory_sha256 does not match trajectory.json',
     );
 
-    const validJudgeEvidence = JSON.parse(
-      judgeEvidenceBody(trajectory).toString('utf8'),
-    ) as object;
+    const mismatchedTranscriptLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {
+          path: 'judge-evidence.json',
+          body: jsonBody({
+            ...validJudgeEvidence,
+            transcript: {
+              ...validJudgeEvidence.transcript,
+              sha256: sha256Digest('different projected transcript'),
+            },
+          }),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(mismatchedTranscriptLocation)).rejects.toThrow(
+      'transcript sha256 does not match its declared trajectory projection',
+    );
+
+    const unsupportedPromptLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {
+          path: 'judge-evidence.json',
+          body: jsonBody({...validJudgeEvidence, prompt_version: 'unsupported'}),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(unsupportedPromptLocation)).rejects.toThrow(
+      'prompt_version is not supported by this Forge build',
+    );
+
+    const unsupportedProjectionLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {
+          path: 'judge-evidence.json',
+          body: jsonBody({
+            ...validJudgeEvidence,
+            transcript: {
+              ...validJudgeEvidence.transcript,
+              projection_id: 'unsupported-projection',
+            },
+          }),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(unsupportedProjectionLocation)).rejects.toThrow(
+      'Completed judge-evidence.json does not match its schema.',
+    );
+
+    const malformedTrajectory = jsonBody({
+      schema_version: 'ATIF-v1.8',
+      agent: {name: 'test-agent', version: '1'},
+      steps: [{step_id: 1, source: 'unknown', message: 'do it'}],
+    });
+    const malformedTrajectoryLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: malformedTrajectory},
+        {
+          path: 'judge-evidence.json',
+          body: jsonBody({
+            ...validJudgeEvidence,
+            trajectory_sha256: sha256Digest(malformedTrajectory),
+          }),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(malformedTrajectoryLocation)).rejects.toThrow(
+      'Completed trajectory.json does not match its schema.',
+    );
+
     const invalidLocation = await commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
@@ -539,13 +633,28 @@ function trajectoryBody(
   });
 }
 
-function judgeEvidenceBody(trajectory: Uint8Array): Buffer {
-  return jsonBody({
+function judgeEvidenceValue(trajectoryBody: Uint8Array): JudgeEvidenceV1 {
+  const trajectory = parseAtifTrajectory(
+    JSON.parse(Buffer.from(trajectoryBody).toString('utf8')),
+  );
+  const projection = createJudgeTranscriptProjection(trajectory);
+  return {
     schema_version: 1,
-    prompt_version: '1',
-    trajectory_sha256: sha256Digest(trajectory),
+    prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
+    trajectory_sha256: sha256Digest(trajectoryBody),
+    transcript: {
+      source: projection.source,
+      projection_id: projection.projectionId,
+      projection_version: projection.projectionVersion,
+      excluded_fields: projection.excludedFields,
+      sha256: projection.transcriptSha256,
+    },
     workspace: {entries: [], complete: true, warnings: []},
-  });
+  };
+}
+
+function judgeEvidenceBody(trajectory: Uint8Array): Buffer {
+  return jsonBody(judgeEvidenceValue(trajectory));
 }
 
 function withPassingGuideline(result: RunResultV1): RunResultV1 {

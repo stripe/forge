@@ -51,6 +51,14 @@ try {
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
+      assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
+      assert.equal(forge.JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');
+      assert.equal(forge.JUDGE_TRANSCRIPT_PROJECTION_ID, 'forge-visible-atif-steps');
+      assert.equal(forge.JUDGE_TRANSCRIPT_PROJECTION_VERSION, 1);
+      assert.deepEqual(forge.JUDGE_TRANSCRIPT_EXCLUDED_FIELDS, [
+        'reasoning_content',
+        'reasoning_effort',
+      ]);
       assert.equal(forge.RUN_RESULT_SCHEMA_VERSION, 1);
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
       assert.equal(atif.isAtifTimestamp('2024-02-29T00:00:00Z'), true);

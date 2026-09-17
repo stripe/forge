@@ -17,8 +17,14 @@ import {runCli} from '../dist/cli.js';
 import {createClaudeCodeAdapter} from '../dist/agents/claude-code/index.js';
 import {parseAtifTrajectory} from '../dist/atif/index.js';
 import {
+  GUIDELINE_JUDGE_PROMPT_VERSION,
+  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
   createArtifactStore,
   createDirectoryRunInputProvider,
+  createJudgeTranscriptProjection,
   credentialReference,
   expandExperiment,
   forgeSetupHandlers,
@@ -464,6 +470,7 @@ async function verifyMultiTurnRun(completed) {
     completed.location,
   );
   verifyTrajectoryTurns(trajectory, interaction.turns, completed.location);
+  const judgeTranscript = createJudgeTranscriptProjection(trajectory);
 
   const trajectoryDescriptor = result.artifacts.find(
     ({path: artifactPath}) => artifactPath === 'trajectory.json',
@@ -472,9 +479,20 @@ async function verifyMultiTurnRun(completed) {
     ({path: evidencePath}) => evidencePath === 'release-summary.txt',
   );
   requireCondition(
-    judgeEvidence.prompt_version === '1' &&
+    judgeEvidence.prompt_version === GUIDELINE_JUDGE_PROMPT_VERSION &&
       trajectoryDescriptor !== undefined &&
       judgeEvidence.trajectory_sha256 === trajectoryDescriptor.sha256 &&
+      judgeEvidence.transcript.source === JUDGE_TRANSCRIPT_SOURCE &&
+      judgeEvidence.transcript.projection_id ===
+        JUDGE_TRANSCRIPT_PROJECTION_ID &&
+      judgeEvidence.transcript.projection_version ===
+        JUDGE_TRANSCRIPT_PROJECTION_VERSION &&
+      judgeEvidence.transcript.excluded_fields.length ===
+        JUDGE_TRANSCRIPT_EXCLUDED_FIELDS.length &&
+      judgeEvidence.transcript.excluded_fields.every(
+        (field, index) => field === JUDGE_TRANSCRIPT_EXCLUDED_FIELDS[index],
+      ) &&
+      judgeEvidence.transcript.sha256 === judgeTranscript.transcriptSha256 &&
       judgeEvidence.workspace.complete === true &&
       judgeEvidence.workspace.warnings.length === 0 &&
       releaseSummary?.truncated === false &&

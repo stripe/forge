@@ -1,5 +1,11 @@
 import {z} from 'zod';
 
+import {
+  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+} from '../evaluation/judgeTranscript.js';
 import {parseRunSelection} from '../model/index.js';
 import {
   EVALUATION_SCHEMA_VERSION,
@@ -179,6 +185,16 @@ const judgeEvidenceSchema = z.object({
   schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
   prompt_version: safeText,
   trajectory_sha256: digest,
+  transcript: z.object({
+    source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
+    projection_id: z.literal(JUDGE_TRANSCRIPT_PROJECTION_ID),
+    projection_version: z.literal(JUDGE_TRANSCRIPT_PROJECTION_VERSION),
+    excluded_fields: z.tuple([
+      z.literal(JUDGE_TRANSCRIPT_EXCLUDED_FIELDS[0]),
+      z.literal(JUDGE_TRANSCRIPT_EXCLUDED_FIELDS[1]),
+    ]),
+    sha256: digest,
+  }).strict(),
   workspace: z.object({
     entries: z.array(z.object({
       path: safeText,

@@ -57,6 +57,16 @@ describe('judgeGuidelines', () => {
       request.systemPrompt,
       /THE_TRANSCRIPT[\s\S]*THE_WORKSPACE[\s\S]*THE_EXAMPLE[\s\S]*THE_GUIDELINE/,
     );
+    assert.match(request.systemPrompt, /reasoning_content/);
+    assert.match(request.systemPrompt, /reasoning_effort/);
+    assert.match(
+      request.systemPrompt,
+      /Identically named keys inside tool inputs[\s\S]*may remain as visible evidence/,
+    );
+    assert.match(
+      request.systemPrompt,
+      /Do not infer the excluded reasoning or reward its possible presence or quality/,
+    );
     assert.ok(request.signal instanceof AbortSignal);
   });
 

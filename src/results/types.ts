@@ -3,6 +3,12 @@ import type {
   AtifNormalizationWarning,
 } from '../atif/index.js';
 import type {
+  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+} from '../evaluation/judgeTranscript.js';
+import type {
   ModelRefV1,
   JsonValue,
   RunSelection,
@@ -144,6 +150,13 @@ export interface JudgeEvidenceV1 {
   readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
   readonly prompt_version: string;
   readonly trajectory_sha256: Sha256Digest;
+  readonly transcript: {
+    readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
+    readonly projection_id: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
+    readonly projection_version: typeof JUDGE_TRANSCRIPT_PROJECTION_VERSION;
+    readonly excluded_fields: typeof JUDGE_TRANSCRIPT_EXCLUDED_FIELDS;
+    readonly sha256: Sha256Digest;
+  };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];
     readonly complete: boolean;

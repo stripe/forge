@@ -101,11 +101,21 @@ unrelated session. A role-player failure before the first agent turn uses the
 explicit system-only fallback trajectory and a null session identity.
 
 `interaction.json` is a post-run audit artifact, never an execution input or
-judge input. `judge-evidence.json` exists only when guidelines were judged and
-must bind the prompt version, redacted trajectory digest, and exact bounded
-workspace evidence made available to the judge. Collect judge workspace text
-only from the sealed runtime and preserve all truncation/unavailability
-warnings.
+judge input. The canonical redacted `trajectory.json` remains the full selected
+audit trajectory and may retain normalized private reasoning. Guideline judges
+receive a deterministic projection of its root ATIF steps which removes only
+the typed `reasoning_content` and `reasoning_effort` fields; visible messages,
+tool calls, tool results, and identically named keys inside opaque payloads must
+remain intact. `judge-evidence.json` exists only when guidelines were judged and
+must bind the prompt version, full redacted trajectory digest, exact projected
+transcript digest and policy, and exact bounded workspace evidence made
+available to the judge. Derive the projection only after credential redaction.
+Changing its root-step scope, excluded fields, or serialization requires a new
+projection version. Final completion-prompt redaction must be a no-op for a
+judge request; fail closed before dispatch rather than let it rewrite bytes
+whose digests were already computed.
+Collect judge workspace text only from the sealed runtime and preserve all
+truncation/unavailability warnings.
 
 Cleanup must run after failure or cancellation and must not depend on an already
 aborted execution signal. Uncommitted artifact transactions must be rolled back.

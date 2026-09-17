@@ -283,8 +283,9 @@ schema version 1 records the evidence source and adapter provenance.
 contains the public agent turns, stop reason, and, for multi-turn runs, Ava's
 private need model and decision history. It is not supplied to the guideline
 judge. Forge adds `judge-evidence.json` only when judging ran; it binds the
-judge prompt version to the redacted trajectory digest and records the exact
-bounded workspace text and warnings made available to the judge.
+judge prompt version, the full redacted trajectory digest, the exact
+visible transcript projection and digest, and the bounded workspace text and
+warnings made available to the judge.
 
 For native Claude evidence, the result contains an evidence descriptor like:
 
@@ -397,11 +398,26 @@ summaries without prompts, responses, endpoints, or credentials.
 ### Guideline semantics
 
 After the runtime is quiesced and agent evidence is normalized and redacted,
-Forge judges every authored success guideline independently. The judge sees the
-redacted ATIF steps, optional `example_answer`, and relevant bounded text from
-the sealed workspace. It never sees `interaction.json` or Ava's private needs.
-Each authored guideline is capped at 65,536 characters, matching the persisted
-evaluation-result bound.
+Forge judges every authored success guideline independently. It derives a
+deterministic visible-evidence projection from the root ATIF steps and removes
+the typed `reasoning_content` and `reasoning_effort` fields. The projection
+retains visible assistant messages, tool calls, tool results, and same-named
+keys inside opaque tool, observation, or `extra` payloads. The judge sees this
+projection, optional `example_answer`, and relevant bounded text from the sealed
+workspace. It never sees `interaction.json`, Ava's private needs, or normative
+ATIF reasoning fields, and the prompt tells it not to infer or reward private
+reasoning. Each authored guideline is capped at 65,536 characters, matching the
+persisted evaluation-result bound.
+
+`trajectory.json` remains the full selected, normalized, redacted audit
+trajectory; it can retain normative reasoning fields even though those fields
+are excluded from judging.
+
+Programmatic consumers can reproduce the exact judge transcript bytes and
+digest with `createJudgeTranscriptProjection` from `@stripe/forge`. The
+exported projection ID, version, source, and excluded-field constants describe
+the policy recorded in `judge-evidence.json`.
+
 At most four guidelines are judged concurrently, with temperature 0, a
 1,024-token response limit, and a strict one-guideline JSON schema.
 
@@ -416,8 +432,12 @@ directories, lockfiles, and common binary formats. Hard bounds are 10,000
 listed entries, depth 32, two seconds, 512,000 bytes read, 20,000 characters per
 file, and 80,000 rendered characters total. Truncation and unavailable files
 are explicit evidence warnings. `judge-evidence.json` records the redacted
-workspace subset and the digest of the exact `trajectory.json`; it is an audit
-artifact, not an input to a later judge call.
+workspace subset, the digest of the exact `trajectory.json`, and the digest and
+policy metadata for the exact transcript projection sent to the judge. It is an
+audit artifact, not an input to a later judge call. `verifyCompletedRun`
+reconstructs the projection from the stored trajectory and verifies both
+digests. Forge refuses to dispatch a judge request if its final defensive
+credential-redaction pass would rewrite the already-audited prompt evidence.
 
 The numeric score remains the fraction of success guidelines that passed.
 Deterministic checks are evaluated as additional pass/fail constraints. A
@@ -709,6 +729,9 @@ Forge persists the canonical agent trajectory as a standalone
   same session and completed-turn coverage checks before trusting a committed
   result.
 - Exact credential values are redacted before evidence and results are staged.
+- The full selected, redacted trajectory remains the canonical audit artifact.
+  Guideline judging uses a separately digest-bound projection without step-level
+  `reasoning_content` or `reasoning_effort`.
 
 Use the versioned surface when consuming stored artifacts:
 
@@ -860,8 +883,9 @@ selecting host-owned capabilities.
   purpose. Forge redacts all resolved secret values from completion prompts,
   responses, ATIF, interaction audit, judge evidence, and result metadata.
 - Workspace evidence is bounded and does not follow symlinks. Guideline judges
-  receive only the separately bounded, redacted text subset described above.
-  Local artifacts are staged and claimed by digest before atomic commit.
+  receive only the separately bounded, redacted text subset and the
+  visible transcript projection described above. Local artifacts are
+  staged and claimed by digest before atomic commit.
 
 Docker itself is a privileged host service. Anyone who can replace the Docker
 binary, control the daemon, or modify Forge extension code is already outside

@@ -23,6 +23,14 @@ export {
   type GuidelineJudgeInput,
 } from './guidelineJudge.js';
 export {
+  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+  createJudgeTranscriptProjection,
+  type JudgeTranscriptProjectionV1,
+} from './judgeTranscript.js';
+export {
   JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION,
   MAX_JUDGE_WORKSPACE_COLLECTION_MS,
   MAX_JUDGE_WORKSPACE_DEPTH,

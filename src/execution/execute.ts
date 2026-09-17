@@ -44,9 +44,17 @@ import {
   evaluateRunEvidence,
   judgeGuidelines,
   renderJudgeWorkspaceEvidence,
+  type GuidelineCompletionRequest,
   type JudgeWorkspaceEvidenceV1,
 } from '../evaluation/index.js';
 import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
+import {
+  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_PROJECTION_ID,
+  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_SOURCE,
+  createJudgeTranscriptProjection,
+} from '../evaluation/judgeTranscript.js';
 import {
   AVA_PROMPT_VERSION,
   AvaRolePlayer,
@@ -325,6 +333,7 @@ export async function executeEvalWithTestHooks(
       return evidence;
     });
     const redacted = redactNormalizedTrajectory(selectedEvidence, secrets);
+    const trajectoryJson = serializeAtifTrajectory(redacted.evidence.trajectory);
 
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
@@ -342,14 +351,12 @@ export async function executeEvalWithTestHooks(
           secrets,
         );
         const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
-        const trajectoryJson = serializeAtifTrajectory(
+        const judgeTranscript = createJudgeTranscriptProjection(
           redacted.evidence.trajectory,
         );
         guidelineResults = await judgeGuidelines(
           {
-            transcriptJson: serializeCanonicalJson(
-              redacted.evidence.trajectory.steps,
-            ),
+            transcriptJson: judgeTranscript.transcriptJson,
             guidelines,
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
@@ -359,14 +366,16 @@ export async function executeEvalWithTestHooks(
               : {workspaceText: safeWorkspaceText}),
             signal,
           },
-          async (request) =>
-            (
+          async (request) => {
+            assertJudgePromptWillRemainUnchanged(request, secrets);
+            return (
               await completions.invoke(
                 'judge',
                 request,
                 request.signal,
               )
-            ).content,
+            ).content;
+          },
           hooks.waitBeforeCompletionRetry === undefined
             ? {}
             : {
@@ -384,6 +393,13 @@ export async function executeEvalWithTestHooks(
           trajectory_sha256: canonicalBytesSha256(
             Buffer.from(trajectoryJson, 'utf8'),
           ),
+          transcript: {
+            source: JUDGE_TRANSCRIPT_SOURCE,
+            projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
+            projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+            excluded_fields: [...JUDGE_TRANSCRIPT_EXCLUDED_FIELDS],
+            sha256: judgeTranscript.transcriptSha256,
+          },
           workspace: {
             entries: safeWorkspace.entries.map((entry) => ({
               path: entry.path,
@@ -412,7 +428,7 @@ export async function executeEvalWithTestHooks(
 
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
-      redacted.evidence,
+      trajectoryJson,
       interactionArtifact,
       evaluated.workspaceEvidence,
       evaluated.judgeEvidence,
@@ -1270,7 +1286,7 @@ function assertEvidenceMatchesRun(
 
 function buildCoreArtifacts(
   plan: ResolvedRunPlanV1,
-  evidence: NormalizedTrajectory,
+  trajectoryJson: string,
   interaction: InteractionArtifactV1,
   workspaceEvidence: unknown,
   judgeEvidence: JudgeEvidenceV1 | undefined,
@@ -1278,7 +1294,7 @@ function buildCoreArtifacts(
 ): RunArtifact[] {
   return [
     jsonArtifact('plan.json', serializeResolvedRunPlan(plan)),
-    jsonArtifact('trajectory.json', serializeAtifTrajectory(evidence.trajectory)),
+    jsonArtifact('trajectory.json', trajectoryJson),
     jsonArtifact('interaction.json', serializeCanonicalJson(interaction)),
     jsonArtifact('workspace-evidence.json', serializeCanonicalJson(workspaceEvidence)),
     ...(judgeEvidence === undefined
@@ -1434,6 +1450,28 @@ function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
 
 function canonicalBytesSha256(body: Uint8Array): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(body).digest('hex')}`;
+}
+
+/**
+ * The transcript digest and recorded workspace evidence describe exact
+ * substrings of the final judge prompt. CompletionRuntime still performs
+ * defensive redaction, so fail closed if that final pass would rewrite any
+ * prompt bytes after the digests were computed. This also catches
+ * secret-shaped strings formed only at JSON or prompt-template boundaries.
+ */
+function assertJudgePromptWillRemainUnchanged(
+  request: Pick<GuidelineCompletionRequest, 'systemPrompt' | 'messages'>,
+  secrets: readonly string[],
+): void {
+  const projected = redactSecrets(
+    {systemPrompt: request.systemPrompt, messages: request.messages},
+    secrets,
+  );
+  if (projected.replacements !== 0) {
+    throw new TypeError(
+      'Judge prompt cannot be sent without changing its audited evidence.',
+    );
+  }
 }
 
 function credentialValues(environment: ResolvedEnvironment): string[] {
