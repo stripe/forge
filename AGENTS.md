@@ -152,8 +152,8 @@ Observers are non-authoritative and may not affect the run result.
 
 ### Treat credentials and inputs as capabilities
 
-- Profiles, plans, events, and results contain opaque credential references,
-  never secret values.
+- Experiment configs, plans, events, and results contain opaque credential
+  references, never secret values.
 - Never copy the ambient host environment wholesale into a runtime.
 - Keep setup and agent credential scopes separate.
 - Keep completion-provider credentials host-side and purpose-specific. They do
@@ -187,8 +187,8 @@ Observers are non-authoritative and may not affect the run result.
 - Preserve interaction failure semantics: Ava exhaustion commits
   `role_player_error`; malformed judge output exhausts retries and fails that
   guideline closed; exhausted judge transport failures abort without a
-  completed commit. Profile-level `retries` remains distinct from these fixed
-  completion-attempt policies.
+  completed commit. Experiment-config-level `retries` remains distinct from
+  these fixed completion-attempt policies.
 
 ## Public API and TypeScript conventions
 
