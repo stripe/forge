@@ -205,7 +205,7 @@ export interface AtifEvidenceProvenanceV1 {
 export interface RunEvidenceV1 {
   readonly format: 'atif';
   readonly schema_version: 'ATIF-v1.8';
-  readonly normalization_version: 1;
+  readonly normalization_version: 2;
   readonly provenance: AtifEvidenceProvenanceV1;
   readonly completeness: AtifNormalizationCompleteness;
   readonly warnings: readonly AtifNormalizationWarning[];

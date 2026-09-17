@@ -185,6 +185,8 @@ Observers are non-authoritative and may not affect the run result.
 - `src/interaction`: the engine-owned Ava role player, conversation loop,
   prompts, and interaction audit semantics.
 - `src/agents`: public agent adapters and native-evidence normalization.
+- `src/evidence`: engine-owned native-evidence validation, structural
+  reconciliation, and driver-fallback construction.
 - `src/providers`: public host-side completion transports, currently Anthropic
   Messages and compatible endpoints.
 - `src/atif`: the pinned ATIF surface and upstream provenance.

@@ -14,8 +14,8 @@ import {FORGE_CLAUDE_CODE_VERSION} from '../../runtime/docker/assets.js';
 import {loadClaudeEvidence} from './evidence.js';
 import {isSafeSessionId, parseClaudeStream} from './stream.js';
 
-export const CLAUDE_CODE_ADAPTER_VERSION = '1' as const;
-export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '1+gateway' as const;
+export const CLAUDE_CODE_ADAPTER_VERSION = '2' as const;
+export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '2+gateway' as const;
 export const CLAUDE_PROJECTS_STATE_ID = 'claude-projects' as const;
 
 export interface ClaudeCodeAdapterOptions {
@@ -91,6 +91,10 @@ export function createClaudeCodeAdapter(
     id,
     version: adapterVersion,
     requirements,
+    evidenceIdentity(selection) {
+      requirements(selection);
+      return {name: 'claude-code', version: expectedVersion};
+    },
     async prepare(context) {
       requirements(context.selection);
       const result = await context.runtime.commands.uncredentialed.run(
@@ -151,10 +155,7 @@ export function createClaudeCodeAdapter(
       return loadClaudeEvidence({
         project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
         sessionId: context.sessionId,
-        fallbackTurns: context.fallbackTurns,
         agentVersion: expectedVersion,
-        adapterId: id,
-        adapterVersion,
         model: context.selection.model,
         signal: context.signal,
       });

@@ -1,6 +1,7 @@
 import {describe, it} from 'node:test';
 
 import {expect} from '../../../test/support/expect.js';
+import {parseAtifTrajectory} from '../../atif/index.js';
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
 
 import {createClaudeCodeAdapter, loadClaudeEvidence} from './index.js';
@@ -9,7 +10,7 @@ import {parseClaudeStream} from './stream.js';
 describe('Claude Code adapter', () => {
   it('declares authentication and exact session state for engine-assigned scope', () => {
     const adapter = createClaudeCodeAdapter({sessionIdFactory: () => 'session-1'});
-    expect(adapter.version).toBe('1');
+    expect(adapter.version).toBe('2');
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',
@@ -33,7 +34,7 @@ describe('Claude Code adapter', () => {
       credential: 'gateway.routing-token',
       credentialEnvironmentName: 'ANTHROPIC_AUTH_TOKEN',
     });
-    expect(adapter.version).toBe('1+gateway');
+    expect(adapter.version).toBe('2+gateway');
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic-compatible',
@@ -127,24 +128,493 @@ describe('Claude Code adapter', () => {
     ).toThrow(/different environment variables/);
   });
 
-  it('records a configured adapter identity and gateway variant in evidence', async () => {
+  it('returns unavailable native evidence without constructing fallback', async () => {
     const evidence = await loadClaudeEvidence({
       project: undefined,
       sessionId: 'session-1',
-      fallbackTurns: [
-        {user: 'Do the task', assistant: 'Done', toolCalls: []},
-      ],
       agentVersion: '2.1.273',
-      adapterId: 'claude-code-gateway',
-      adapterVersion: '1+gateway',
       model: 'claude-test',
       signal: new AbortController().signal,
     });
 
-    expect(evidence.provenance.adapter).toEqual({
-      id: 'claude-code-gateway',
-      version: '1+gateway',
+    expect(evidence).toEqual({
+      kind: 'unavailable',
+      reason: {
+        code: 'source_unavailable',
+        message: 'The exact Claude session is unavailable.',
+      },
     });
+  });
+
+  it('classifies a missing exact session file as unavailable', async () => {
+    const evidence = await loadClaudeEvidence({
+      project: createMemoryWorkspace().readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    expect(evidence).toEqual({
+      kind: 'unavailable',
+      reason: {
+        code: 'source_unavailable',
+        message: 'The exact Claude session is unavailable.',
+      },
+    });
+  });
+
+  it('classifies malformed native JSONL as invalid', async () => {
+    const evidence = await loadClaudeEvidence({
+      project: createMemoryWorkspace({
+        'session-1.jsonl': '{"type":"user"}\nnot-json',
+      }).readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    expect(evidence).toEqual({
+      kind: 'unavailable',
+      reason: {
+        code: 'source_invalid',
+        message: 'Claude session evidence could not be normalized safely.',
+      },
+    });
+  });
+
+  for (const {description, marker} of [
+    {
+      description: 'compact summary flag',
+      marker: {type: 'summary', isCompactSummary: true},
+    },
+    {
+      description: 'compact boundary subtype',
+      marker: {type: 'system', subtype: 'compact_boundary'},
+    },
+  ]) {
+    it(`classifies the ${description} as incomplete native evidence`, async () => {
+      const project = createMemoryWorkspace({
+        'session-1.jsonl': [
+          JSON.stringify(marker),
+          JSON.stringify({
+            type: 'user',
+            sessionId: 'session-1',
+            message: {content: 'Do the task'},
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            sessionId: 'session-1',
+            message: {content: 'Done'},
+          }),
+        ].join('\n'),
+      });
+
+      const evidence = await loadClaudeEvidence({
+        project: project.readonly,
+        sessionId: 'session-1',
+        agentVersion: '2.1.273',
+        model: 'claude-test',
+        signal: new AbortController().signal,
+      });
+
+      expect(evidence).toEqual({
+        kind: 'unavailable',
+        reason: {
+          code: 'source_incomplete',
+          message: 'Claude session evidence could not be normalized safely.',
+        },
+      });
+    });
+  }
+
+  it('classifies an unknown root conversation record as incomplete', async () => {
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({type: 'future-conversation-record'}),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    expect(evidence).toEqual({
+      kind: 'unavailable',
+      reason: {
+        code: 'source_incomplete',
+        message: 'Claude session evidence could not be normalized safely.',
+      },
+    });
+  });
+
+  for (const {description, records} of [
+    {
+      description: 'user',
+      records: [
+        {
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: [{type: 'future-user-block'}]},
+        },
+        {
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        },
+      ],
+    },
+    {
+      description: 'assistant',
+      records: [
+        {
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        },
+        {
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: [{type: 'future-assistant-block'}]},
+        },
+      ],
+    },
+  ]) {
+    it(`classifies an unknown ${description} content block as incomplete`, async () => {
+      const project = createMemoryWorkspace({
+        'session-1.jsonl': records.map((record) => JSON.stringify(record)).join('\n'),
+      });
+
+      const evidence = await loadClaudeEvidence({
+        project: project.readonly,
+        sessionId: 'session-1',
+        agentVersion: '2.1.273',
+        model: 'claude-test',
+        signal: new AbortController().signal,
+      });
+
+      expect(evidence).toEqual({
+        kind: 'unavailable',
+        reason: {
+          code: 'source_incomplete',
+          message: 'Claude session evidence could not be normalized safely.',
+        },
+      });
+    });
+  }
+
+  it('accepts explicitly supported metadata records without adding steps', async () => {
+    const metadataTypes = [
+      'agent-name',
+      'ai-title',
+      'custom-title',
+      'file-history-snapshot',
+      'last-prompt',
+      'mode',
+      'permission-mode',
+      'pr-link',
+      'queue-operation',
+      'summary',
+    ];
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        ...metadataTypes.map((type) => JSON.stringify({type})),
+        JSON.stringify({type: 'system', subtype: 'stop_hook_summary'}),
+        JSON.stringify({type: 'system', subtype: 'turn_duration'}),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    expect(trajectory.steps.map(({source, message}) => ({source, message}))).toEqual([
+      {source: 'user', message: 'Do the task'},
+      {source: 'agent', message: 'Done'},
+    ]);
+    expect(evidence.warnings).toEqual([]);
+  });
+
+  it('marks known Claude attachment context as omitted optional detail', async () => {
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        JSON.stringify({
+          type: 'attachment',
+          attachment: {type: 'nested_memory'},
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    expect(evidence.warnings).toEqual([
+      {
+        code: 'unsupported_native_event',
+        message: 'Known Claude attachment context was omitted from ATIF.',
+        path: 'line:1',
+      },
+    ]);
+  });
+
+  for (const {description, record} of [
+    {
+      description: 'queued command attachment',
+      record: {type: 'attachment', attachment: {type: 'queued_command'}},
+    },
+    {
+      description: 'conversation-bearing system event',
+      record: {type: 'system', subtype: 'local_command'},
+    },
+    {
+      description: 'unclassified progress event',
+      record: {type: 'progress'},
+    },
+  ]) {
+    it(`classifies a ${description} as incomplete`, async () => {
+      const project = createMemoryWorkspace({
+        'session-1.jsonl': [
+          JSON.stringify(record),
+          JSON.stringify({
+            type: 'user',
+            sessionId: 'session-1',
+            message: {content: 'Do the task'},
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            sessionId: 'session-1',
+            message: {content: 'Done'},
+          }),
+        ].join('\n'),
+      });
+
+      const evidence = await loadClaudeEvidence({
+        project: project.readonly,
+        sessionId: 'session-1',
+        agentVersion: '2.1.273',
+        model: 'claude-test',
+        signal: new AbortController().signal,
+      });
+
+      expect(evidence).toEqual({
+        kind: 'unavailable',
+        reason: {
+          code: 'source_incomplete',
+          message: 'Claude session evidence could not be normalized safely.',
+        },
+      });
+    });
+  }
+
+  it('ignores meta user records before validating their conversation blocks', async () => {
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        JSON.stringify({
+          type: 'user',
+          isMeta: true,
+          sessionId: 'session-1',
+          message: {content: [{type: 'future-meta-block'}]},
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    expect(trajectory.steps.map(({source, message}) => ({source, message}))).toEqual([
+      {source: 'user', message: 'Do the task'},
+      {source: 'agent', message: 'Done'},
+    ]);
+    expect(evidence.warnings).toEqual([]);
+  });
+
+  it('classifies sidechain records as incomplete primary-session evidence', async () => {
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': JSON.stringify({
+        type: 'assistant',
+        isSidechain: true,
+        sessionId: 'session-1',
+        message: {content: 'Subagent response'},
+      }),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    expect(evidence).toEqual({
+      kind: 'unavailable',
+      reason: {
+        code: 'source_incomplete',
+        message: 'Claude session evidence could not be normalized safely.',
+      },
+    });
+  });
+
+  it('preserves multiple tool-result records on their preceding agent step', async () => {
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {content: 'Do the task'},
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {type: 'thinking', thinking: 'Use both tools.'},
+              {type: 'tool_use', id: 'call-1', name: 'Read', input: {path: 'a.txt'}},
+              {type: 'tool_use', id: 'call-2', name: 'Write', input: {path: 'b.txt'}},
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'unrelated-call',
+                name: 'Edit',
+                input: {path: 'unrelated.txt'},
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          isMeta: true,
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {type: 'tool_result', tool_use_id: 'call-1', content: 'read output'},
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-2',
+                content: 'write output',
+                is_error: true,
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {content: 'Done'},
+        }),
+      ].join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    const toolStep = trajectory.steps[1];
+    expect(toolStep?.source).toBe('agent');
+    expect(toolStep?.observation?.results).toEqual([
+      {source_call_id: 'call-1', content: 'read output'},
+      {
+        source_call_id: 'call-2',
+        content: 'write output',
+        extra: {is_error: true},
+      },
+    ]);
+    expect(trajectory.steps[2]?.observation).toBeUndefined();
+    expect(trajectory.steps[3]?.message).toBe('Done');
+    expect(evidence.warnings).toEqual([]);
   });
 
   it('omits impossible native timestamps without discarding the session', async () => {
@@ -167,19 +637,17 @@ describe('Claude Code adapter', () => {
     const evidence = await loadClaudeEvidence({
       project: project.readonly,
       sessionId: 'session-1',
-      fallbackTurns: [
-        {user: 'Do the task', assistant: 'Fallback', toolCalls: []},
-      ],
       agentVersion: '2.1.273',
-      adapterId: 'claude-code',
-      adapterVersion: '1',
       model: 'claude-test',
       signal: new AbortController().signal,
     });
 
-    expect(evidence.completeness).toBe('partial');
-    expect(evidence.trajectory.steps[0]?.timestamp).toBeUndefined();
-    expect(evidence.trajectory.steps[1]?.timestamp).toBe(
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    expect(trajectory.steps[0]?.timestamp).toBeUndefined();
+    expect(trajectory.steps[1]?.timestamp).toBe(
       '2025-03-01T00:00:00Z',
     );
     expect(evidence.warnings).toEqual([

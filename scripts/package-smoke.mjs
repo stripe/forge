@@ -58,7 +58,7 @@ try {
       assert.equal(typeof cli.runCli, 'function');
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
-      assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '1+gateway');
+      assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '2+gateway');
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');

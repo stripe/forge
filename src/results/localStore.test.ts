@@ -24,6 +24,103 @@ const oneShotInteraction = {
   turns: [{turn: 1, user: 'do it', assistant: 'done', tool_calls: []}],
   failure: null,
 } as const;
+const oneShotTrajectory = jsonBody({
+  schema_version: 'ATIF-v1.8',
+  session_id: 'session',
+  agent: {name: 'test-agent', version: '1'},
+  steps: [
+    {step_id: 1, source: 'user', message: 'do it'},
+    {step_id: 2, source: 'agent', message: 'done'},
+  ],
+});
+const multiTurnInteraction = {
+  schema_version: 1,
+  mode: 'multi_turn',
+  stop_reason: 'task_complete',
+  turns: [
+    {
+      turn: 1,
+      user: 'first prompt',
+      assistant: 'first driver response',
+      tool_calls: [{id: 'driver-call', name: 'Write', input: {path: 'a.txt'}}],
+    },
+    {
+      turn: 2,
+      user: 'second prompt',
+      assistant: 'second driver response',
+      tool_calls: [],
+    },
+  ],
+  role_player: {
+    model: {provider: 'test-provider', model: 'test-role-player'},
+    prompt_version: '1',
+    needs: [{id: 'need_1', description: 'Complete the requested task.'}],
+    decisions: [
+      {
+        sequence: 1,
+        after_agent_turn: null,
+        message: 'first prompt',
+        stop: false,
+        remaining_need_ids: ['need_1'],
+        focus_need_id: 'need_1',
+        coding_agent_invoked: true,
+        source: 'generated',
+      },
+      {
+        sequence: 2,
+        after_agent_turn: 1,
+        message: 'second prompt',
+        stop: false,
+        remaining_need_ids: ['need_1'],
+        focus_need_id: 'need_1',
+        coding_agent_invoked: true,
+        source: 'generated',
+      },
+      {
+        sequence: 3,
+        after_agent_turn: 2,
+        message: '',
+        stop: true,
+        remaining_need_ids: [],
+        focus_need_id: null,
+        coding_agent_invoked: false,
+        source: 'generated',
+      },
+    ],
+  },
+  failure: null,
+} as const;
+const rolePlayerFailure = {
+  status: 'role_player_error',
+  error_type: 'request_error',
+  attempts: 3,
+  explanation: 'Ava request failed after 3 attempts.',
+} as const;
+const zeroTurnInteraction = {
+  schema_version: 1,
+  mode: 'multi_turn',
+  stop_reason: 'role_player_error',
+  turns: [],
+  role_player: {
+    model: {provider: 'test-provider', model: 'test-role-player'},
+    prompt_version: '1',
+    needs: null,
+    decisions: [
+      {
+        sequence: 1,
+        after_agent_turn: null,
+        message: '',
+        stop: true,
+        remaining_need_ids: null,
+        focus_need_id: null,
+        coding_agent_invoked: false,
+        source: 'generated',
+        error: rolePlayerFailure,
+      },
+    ],
+  },
+  failure: rolePlayerFailure,
+} as const;
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})));
@@ -37,15 +134,22 @@ describe('local artifact store', () => {
     const transaction = await store.begin('run-1');
     const body = Buffer.from('{}\n');
     const interactionBody = jsonBody(oneShotInteraction);
+    const trajectoryBody = oneShotTrajectory;
     await transaction.write({path: 'plan.json', body, mediaType: 'application/json'});
     await transaction.write({
       path: 'interaction.json',
       body: interactionBody,
       mediaType: 'application/json',
     });
+    await transaction.write({
+      path: 'trajectory.json',
+      body: trajectoryBody,
+      mediaType: 'application/json',
+    });
     const artifacts: ArtifactDescriptorV1[] = [
       descriptorFor('plan.json', body),
       descriptorFor('interaction.json', interactionBody),
+      descriptorFor('trajectory.json', trajectoryBody),
     ];
     const result = resultFor(artifacts);
     const committed = await transaction.commit(
@@ -145,20 +249,182 @@ describe('local artifact store', () => {
     );
   });
 
+  it('always requires a valid trajectory with the completed session identity', async () => {
+    const missingLocation = await commitArtifacts([
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+    ]);
+    await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
+      'missing canonical artifact trajectory.json',
+    );
+
+    const invalidLocation = await commitArtifacts([
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {
+        path: 'trajectory.json',
+        body: jsonBody({
+          schema_version: 'ATIF-v1.8',
+          session_id: 'session',
+          agent: {name: 'test-agent', version: '1'},
+          steps: [{step_id: 1, source: 'unknown', message: 'do it'}],
+        }),
+      },
+    ]);
+    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
+      'Completed trajectory.json does not match its schema.',
+    );
+
+    const mismatchedSessionLocation = await commitArtifacts([
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {
+        path: 'trajectory.json',
+        body: trajectoryBody(
+          [
+            {step_id: 1, source: 'user', message: 'do it'},
+            {step_id: 2, source: 'agent', message: 'done'},
+          ],
+          'other-session',
+        ),
+      },
+    ]);
+    await expect(verifyCompletedRun(mismatchedSessionLocation)).rejects.toThrow(
+      'trajectory.json session identity does not match the completed run.',
+    );
+  });
+
+  it('accepts projection differences while requiring every ordered prompt and response', async () => {
+    const compatibleTrajectory = trajectoryBody([
+      {step_id: 1, source: 'user', message: 'first prompt'},
+      {
+        step_id: 2,
+        source: 'agent',
+        message: '',
+        tool_calls: [
+          {
+            tool_call_id: 'native-call',
+            function_name: 'DifferentNativeTool',
+            arguments: {different: true},
+          },
+        ],
+      },
+      {step_id: 3, source: 'user', message: 'second prompt'},
+      {step_id: 4, source: 'agent', message: 'different native response'},
+    ]);
+    const compatibleLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(multiTurnInteraction)},
+        {path: 'trajectory.json', body: compatibleTrajectory},
+      ],
+      withMultiTurnSummary,
+    );
+    await expect(verifyCompletedRun(compatibleLocation)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+
+    const incompatibleSteps = [
+      [
+        {step_id: 1, source: 'user', message: 'first prompt'},
+        {step_id: 2, source: 'agent', message: 'only the first response'},
+      ],
+      [
+        {step_id: 1, source: 'user', message: 'first prompt'},
+        {step_id: 2, source: 'agent', message: 'first response'},
+        {step_id: 3, source: 'user', message: 'second prompt'},
+        {step_id: 4, source: 'agent', message: 'second response'},
+        {step_id: 5, source: 'user', message: 'unexpected third prompt'},
+        {step_id: 6, source: 'agent', message: 'third response'},
+      ],
+      [
+        {step_id: 1, source: 'user', message: 'second prompt'},
+        {step_id: 2, source: 'agent', message: 'second response'},
+        {step_id: 3, source: 'user', message: 'first prompt'},
+        {step_id: 4, source: 'agent', message: 'first response'},
+      ],
+      [
+        {step_id: 1, source: 'user', message: 'first prompt'},
+        {step_id: 2, source: 'agent', message: ''},
+        {step_id: 3, source: 'user', message: 'second prompt'},
+        {step_id: 4, source: 'agent', message: 'second response'},
+      ],
+      [
+        {step_id: 1, source: 'user', message: 'first prompt'},
+        {
+          step_id: 2,
+          source: 'agent',
+          message: [{type: 'text', text: ''}],
+        },
+        {step_id: 3, source: 'user', message: 'second prompt'},
+        {step_id: 4, source: 'agent', message: 'second response'},
+      ],
+    ];
+    for (const steps of incompatibleSteps) {
+      const location = await commitArtifacts(
+        [
+          {path: 'interaction.json', body: jsonBody(multiTurnInteraction)},
+          {path: 'trajectory.json', body: trajectoryBody(steps)},
+        ],
+        withMultiTurnSummary,
+      );
+      await expect(verifyCompletedRun(location)).rejects.toThrow(
+        'trajectory.json does not cover every completed interaction turn.',
+      );
+    }
+  });
+
+  it('accepts only the system fallback for a zero-turn role-player failure', async () => {
+    const systemTrajectory = jsonBody({
+      schema_version: 'ATIF-v1.8',
+      agent: {name: 'test-agent', version: '1'},
+      steps: [
+        {
+          step_id: 1,
+          source: 'system',
+          message: 'The role player failed before the coding agent was invoked.',
+        },
+      ],
+    });
+    const validLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(zeroTurnInteraction)},
+        {path: 'trajectory.json', body: systemTrajectory},
+      ],
+      withZeroTurnRolePlayerFailure,
+    );
+    await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+
+    const invalidLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(zeroTurnInteraction)},
+        {
+          path: 'trajectory.json',
+          body: jsonBody({
+            schema_version: 'ATIF-v1.8',
+            agent: {name: 'test-agent', version: '1'},
+            steps: [{step_id: 1, source: 'user', message: 'unsent prompt'}],
+          }),
+        },
+      ],
+      withZeroTurnRolePlayerFailure,
+    );
+    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
+      'Zero-turn interaction requires the system-only role-player-error trajectory.',
+    );
+  });
+
   it('requires judge evidence exactly when guidelines were judged', async () => {
     const missingLocation = await commitArtifacts(
-      [{path: 'interaction.json', body: jsonBody(oneShotInteraction)}],
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: oneShotTrajectory},
+      ],
       withPassingGuideline,
     );
     await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
       'missing judge-evidence.json',
     );
 
-    const trajectory = jsonBody({
-      schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
-      steps: [{step_id: 1, source: 'user', message: 'do it'}],
-    });
+    const trajectory = oneShotTrajectory;
     const unexpectedLocation = await commitArtifacts([
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
       {path: 'trajectory.json', body: trajectory},
@@ -170,11 +436,7 @@ describe('local artifact store', () => {
   });
 
   it('strictly parses judge evidence and binds it to exact trajectory bytes', async () => {
-    const trajectory = jsonBody({
-      schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
-      steps: [{step_id: 1, source: 'user', message: 'do it'}],
-    });
+    const trajectory = oneShotTrajectory;
     const validLocation = await commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
@@ -265,6 +527,18 @@ function jsonBody(value: unknown): Buffer {
   return Buffer.from(serializeCanonicalJson(value), 'utf8');
 }
 
+function trajectoryBody(
+  steps: readonly unknown[],
+  sessionId = 'session',
+): Buffer {
+  return jsonBody({
+    schema_version: 'ATIF-v1.8',
+    session_id: sessionId,
+    agent: {name: 'test-agent', version: '1'},
+    steps,
+  });
+}
+
 function judgeEvidenceBody(trajectory: Uint8Array): Buffer {
   return jsonBody({
     schema_version: 1,
@@ -284,6 +558,47 @@ function withPassingGuideline(result: RunResultV1): RunResultV1 {
       guidelines_total: 1,
       guidelines: [{guideline: 'The task is complete.', passed: true, explanation: 'Met.'}],
     },
+  };
+}
+
+function withMultiTurnSummary(result: RunResultV1): RunResultV1 {
+  return {
+    ...result,
+    interaction: {mode: 'multi_turn', turn_count: 2},
+  };
+}
+
+function withZeroTurnRolePlayerFailure(result: RunResultV1): RunResultV1 {
+  return {
+    ...result,
+    agent: {...result.agent, session_id: null},
+    interaction: {mode: 'multi_turn', turn_count: 0},
+    failure: rolePlayerFailure,
+    evidence: {
+      ...result.evidence,
+      provenance: {
+        source: {
+          kind: 'role_player_error',
+          format: 'forge-system-event',
+        },
+        adapter: result.evidence.provenance.adapter,
+      },
+      completeness: 'fallback',
+      warnings: [
+        {
+          code: 'fallback_used',
+          message:
+            'Canonical ATIF contains only a system event because the role player failed before the agent was invoked.',
+        },
+      ],
+    },
+    stop_reason: 'role_player_error',
+    warnings: [
+      {
+        code: 'role_player_error',
+        message: rolePlayerFailure.explanation,
+      },
+    ],
   };
 }
 
@@ -319,7 +634,7 @@ function resultFor(artifacts: ArtifactDescriptorV1[]): RunResultV1 {
     evidence: {
       format: 'atif',
       schema_version: 'ATIF-v1.8',
-      normalization_version: 1,
+      normalization_version: 2,
       provenance: {
         source: {
           kind: 'native_log',

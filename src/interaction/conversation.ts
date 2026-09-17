@@ -1,8 +1,4 @@
-import type {
-  AgentEvidenceFallbackTurn,
-  AgentSession,
-  AgentToolCall,
-} from '../contracts/agent.js';
+import type {AgentSession, AgentToolCall} from '../contracts/agent.js';
 import type {AvaError, AvaNeed, AvaRolePlayer, AvaTurn} from './ava.js';
 
 export interface ConversationTurn {
@@ -39,8 +35,6 @@ export type ConversationStopReason =
 
 export interface ConversationResult {
   readonly turns: readonly ConversationTurn[];
-  /** Stable neutral turns ready for AgentAdapter.collectEvidence fallback. */
-  readonly fallbackTurns: readonly AgentEvidenceFallbackTurn[];
   readonly stopReason: ConversationStopReason;
   readonly avaAudit: AvaConversationAudit;
   /** Null when any completed agent turn omitted cost information. */
@@ -73,7 +67,6 @@ export async function runConversation(
   }
 
   const turns: ConversationTurn[] = [];
-  const fallbackTurns: AgentEvidenceFallbackTurn[] = [];
   const decisions: AvaDecisionAudit[] = [];
   let needs: readonly AvaNeed[] | null = null;
   let stopReason: ConversationStopReason = 'max_turns';
@@ -159,13 +152,7 @@ export async function runConversation(
         assistant: response.text,
         toolCalls,
       });
-      const fallbackTurn = Object.freeze({
-        user: avaTurn.message,
-        assistant: response.text,
-        toolCalls,
-      });
       turns.push(completedTurn);
-      fallbackTurns.push(fallbackTurn);
       options.validateCompletedTurns?.(Object.freeze([...turns]));
       lastResponse = response.text;
 
@@ -180,7 +167,6 @@ export async function runConversation(
   const frozenNeeds = needs === null ? null : snapshotNeeds(needs);
   return Object.freeze({
     turns: Object.freeze([...turns]),
-    fallbackTurns: Object.freeze([...fallbackTurns]),
     stopReason,
     avaAudit: Object.freeze({
       needs: frozenNeeds,

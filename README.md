@@ -292,14 +292,14 @@ For native Claude evidence, the result contains an evidence descriptor like:
 {
   "format": "atif",
   "schema_version": "ATIF-v1.8",
-  "normalization_version": 1,
+  "normalization_version": 2,
   "provenance": {
     "source": {
       "kind": "native_log",
       "format": "claude-code-jsonl",
       "session_id": "session-123"
     },
-    "adapter": {"id": "claude-code", "version": "1"}
+    "adapter": {"id": "claude-code", "version": "2"}
   },
   "completeness": "complete",
   "warnings": [],
@@ -570,9 +570,10 @@ The public CLI selects its authentication mode from the environment. With no
 `ANTHROPIC_BASE_URL`, Claude Code and host-side completions use direct Anthropic
 and resolve `ANTHROPIC_API_KEY`. With `ANTHROPIC_BASE_URL`, both use that URL and
 resolve `ANTHROPIC_AUTH_TOKEN` instead. Completed result metadata records the
-gateway variant as Claude adapter version `1+gateway` and completion-provider
+gateway variant as Claude adapter version `2+gateway` and completion-provider
 version `1+messages-compatible`, without adding endpoint or token fields;
-direct runs record version `1` for both.
+direct runs record Claude adapter version `2` and completion-provider version
+`1`.
 
 A programmatic host makes the same choice explicitly on its agent adapter.
 Declare the non-secret base URL and bind the token through an opaque credential
@@ -679,16 +680,34 @@ Forge persists the canonical agent trajectory as a standalone
 - Agent-native evidence is read only after runtime quiescence.
 - The Claude adapter selects the exact run-owned session JSONL. It does not use
   a newest-session heuristic.
+- Forge accepts that native candidate only when it identifies the selected
+  session and structurally covers the completed driver ledger: the same number
+  of logical turns, the same ordered user prompts, and visible response or tool
+  activity for each completed response. Native assistant text and tool payloads
+  need not be byte-identical because live and persisted protocols are lossy
+  projections of the same turn.
 - If native evidence is absent, invalid, oversized, incomplete, or compacted,
-  Forge constructs ATIF from completed driver turns and records
+  or fails that structural reconciliation, Forge discards the entire native
+  candidate, constructs ATIF from every completed driver turn, and records
   `completeness: fallback` plus normalization warnings in `result.json`.
+  Driver fallback preserves every ordered user prompt and a visible response
+  marker for every completed invocation, but it may deterministically truncate
+  assistant text, tool calls, or tool arguments to stay inside ATIF safety
+  limits. Such loss adds a `value_omitted` warning. Evaluation and guideline
+  judging consume and bind that exact bounded trajectory.
 - If Ava exhausts its retries before the first agent turn, Forge instead writes
   a system-only fallback trajectory with `role_player_error` provenance.
-- Unknown native events and omitted values produce explicit warnings rather
-  than silently changing the wire format.
+- Known non-conversation metadata is ignored explicitly. Unknown conversation
+  records, unknown content blocks, sidechains, and compaction make the native
+  candidate incomplete and trigger whole-trajectory fallback. Loss of optional
+  detail such as an invalid timestamp remains an explicit partial-evidence
+  warning.
 - Result schema v1 records the normalization source kind, native format, source
   session, and adapter identity for every completed agent interaction. Forge
   rejects adapter evidence which omits or contradicts the selected session.
+- `verifyCompletedRun` independently parses `trajectory.json` and applies the
+  same session and completed-turn coverage checks before trusting a committed
+  result.
 - Exact credential values are redacted before evidence and results are staged.
 
 Use the versioned surface when consuming stored artifacts:
@@ -756,6 +775,15 @@ Neither agent phase receives runtime `quiesce()` or `dispose()` authority.
 Evidence collection receives a separately projected, read-only runtime without
 commands or cleanup authority. `executeEval` retains the original prepared
 runtime and is the only component which quiesces and disposes it.
+
+An agent adapter's pure `evidenceIdentity()` method declares the coding-agent
+name and version to record if Forge must build fallback ATIF. After quiescence,
+`collectEvidence()` may return only an exact-session native candidate or an
+explicit unavailable reason. The engine validates and reconciles that candidate
+against its completed-turn ledger; adapters do not construct or select fallback
+evidence themselves. An adapter must translate failure to read or normalize its
+native source into an explicit unavailable reason. Malformed data labeled
+`available` is an adapter contract violation and fails the run.
 
 Custom setup action IDs must use `owner/action@<positive-version>`, for example
 `acme/install-tool@1`. The `forge/` namespace is reserved, and built-in handlers

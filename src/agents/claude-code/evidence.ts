@@ -1,20 +1,18 @@
 import {
   ATIF_SCHEMA_VERSION,
-  createNormalizedTrajectory,
   isAtifTimestamp,
+  parseAtifTrajectory,
   type AtifAgentStep,
-  type AtifNormalizationWarning,
   type AtifObservationResult,
   type AtifStep,
   type AtifTrajectoryV1_8,
   type AtifToolCall,
   type JsonObject,
   type JsonValue,
-  type NormalizedTrajectory,
 } from '../../atif/index.js';
 import type {
-  AgentEvidenceFallbackTurn,
-  AgentToolCall,
+  AgentNativeEvidenceResult,
+  AgentNativeEvidenceWarning,
 } from '../../contracts/agent.js';
 import type {ReadonlyWorkspace} from '../../contracts/runtime.js';
 import {isSafeSessionId} from './stream.js';
@@ -22,6 +20,35 @@ import {isSafeSessionId} from './stream.js';
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
 const MAX_SESSION_LINES = 100_000;
 const MAX_SESSION_LINE_BYTES = 1024 * 1024;
+const IGNORED_RECORD_TYPES = new Set([
+  'agent-name',
+  'ai-title',
+  'custom-title',
+  'file-history-snapshot',
+  'last-prompt',
+  'mode',
+  'permission-mode',
+  'pr-link',
+  'queue-operation',
+  'summary',
+]);
+const IGNORED_SYSTEM_SUBTYPES = new Set([
+  'stop_hook_summary',
+  'turn_duration',
+]);
+const OMITTED_ATTACHMENT_TYPES = new Set([
+  'agent_listing_delta',
+  'command_permissions',
+  'compact_file_reference',
+  'deferred_tools_delta',
+  'dynamic_skill',
+  'file',
+  'invoked_skills',
+  'mcp_instructions_delta',
+  'nested_memory',
+  'skill_listing',
+  'task_reminder',
+]);
 
 interface SessionBlock {
   type?: string;
@@ -42,32 +69,28 @@ interface SessionRecord {
   sessionId?: string;
   session_id?: string;
   isCompactSummary?: boolean;
+  isMeta?: boolean;
+  isSidechain?: boolean;
+  attachment?: {type?: string};
   message?: {content?: string | SessionBlock[]};
 }
 
 export interface LoadClaudeEvidenceInput {
   readonly project: ReadonlyWorkspace | undefined;
   readonly sessionId: string;
-  readonly fallbackTurns: readonly AgentEvidenceFallbackTurn[];
   readonly agentVersion: string;
-  readonly adapterId: string;
-  readonly adapterVersion: string;
   readonly model: string;
   readonly signal: AbortSignal;
 }
 
-/** Select exact native evidence and fall back to completed driver turns safely. */
+/** Load and normalize exact native evidence; Forge's engine owns fallback selection. */
 export async function loadClaudeEvidence(
   input: LoadClaudeEvidenceInput,
-): Promise<NormalizedTrajectory> {
-  const unavailable = async (
+): Promise<AgentNativeEvidenceResult> {
+  const unavailable = (
     code: 'source_unavailable' | 'source_invalid' | 'source_incomplete',
     message: string,
-  ): Promise<NormalizedTrajectory> =>
-    fallbackTrajectory(input, [
-      {code, message},
-      {code: 'fallback_used', message: 'Canonical ATIF was built from completed driver turns.'},
-    ]);
+  ): AgentNativeEvidenceResult => ({kind: 'unavailable', reason: {code, message}});
 
   if (!input.project || !isSafeSessionId(input.sessionId)) {
     return unavailable('source_unavailable', 'The exact Claude session is unavailable.');
@@ -84,24 +107,25 @@ export async function loadClaudeEvidence(
     });
     const records = parseJsonl(Buffer.from(bytes).toString('utf8'), input.signal);
     const converted = recordsToAtif(records, input);
-    return createNormalizedTrajectory({
-      trajectory: converted.trajectory,
-      provenance: {
-        source: {
-          kind: 'native_log',
-          format: 'claude-code-jsonl',
-          sessionId: input.sessionId,
-        },
-        adapter: {id: input.adapterId, version: input.adapterVersion},
+    return {
+      kind: 'available',
+      // Adapters classify source parsing/normalization failures. The engine
+      // authoritatively parses this fresh projection again at its trust boundary.
+      trajectory: parseAtifTrajectory(converted.trajectory),
+      source: {
+        kind: 'native_log',
+        format: 'claude-code-jsonl',
+        sessionId: input.sessionId,
       },
-      completeness: converted.warnings.length === 0 ? 'complete' : 'partial',
       warnings: converted.warnings,
-    });
+    };
   } catch (error) {
     if (input.signal.aborted) input.signal.throwIfAborted();
-    const code = error instanceof ClaudeSessionLimitError
-      ? 'source_incomplete'
-      : 'source_invalid';
+    const code =
+      error instanceof ClaudeSessionLimitError ||
+      error instanceof ClaudeSessionIncompleteError
+        ? 'source_incomplete'
+        : 'source_invalid';
     return unavailable(code, safeSessionFailure(error));
   }
 }
@@ -109,22 +133,40 @@ export async function loadClaudeEvidence(
 function recordsToAtif(
   records: readonly SessionRecord[],
   input: LoadClaudeEvidenceInput,
-): {trajectory: AtifTrajectoryV1_8; warnings: AtifNormalizationWarning[]} {
+): {trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[]} {
   const steps: AtifStep[] = [];
-  const warnings: AtifNormalizationWarning[] = [];
+  const warnings: AgentNativeEvidenceWarning[] = [];
   let reportedSessionId: string | undefined;
   let lastAgentStep: AtifAgentStep | undefined;
+  const toolStepsByCallId = new Map<string, AtifAgentStep>();
 
   const addStep = (step: Omit<AtifStep, 'step_id'>): void => {
     const completed = {...step, step_id: steps.length + 1} as AtifStep;
     steps.push(completed);
     lastAgentStep = completed.source === 'agent' ? completed : undefined;
+    if (completed.source === 'agent') {
+      for (const call of completed.tool_calls ?? []) {
+        if (toolStepsByCallId.has(call.tool_call_id)) {
+          throw new ClaudeSessionIncompleteError(
+            'A Claude tool-call identity was reused across native steps.',
+          );
+        }
+        toolStepsByCallId.set(call.tool_call_id, completed);
+      }
+    }
   };
 
   for (const [recordIndex, record] of records.entries()) {
     input.signal.throwIfAborted();
     if (record.isCompactSummary === true || record.subtype === 'compact_boundary') {
-      throw new Error('Compacted Claude sessions are not supported by normalization v1.');
+      throw new ClaudeSessionIncompleteError(
+        'Compacted Claude sessions are not supported by normalization v2.',
+      );
+    }
+    if (record.isSidechain === true) {
+      throw new ClaudeSessionIncompleteError(
+        'Sidechain records are not supported in a primary Claude trajectory.',
+      );
     }
     const recordSessionId = record.sessionId ?? record.session_id;
     if (typeof recordSessionId === 'string') {
@@ -135,6 +177,18 @@ function recordsToAtif(
     }
     if (record.type === 'user') {
       const content = record.message?.content;
+      if (record.isMeta === true) {
+        if (Array.isArray(content)) {
+          attachToolResults(
+            lastAgentStep,
+            toolStepsByCallId,
+            content.filter((block) => block.type === 'tool_result'),
+            warnings,
+            recordIndex,
+          );
+        }
+        continue;
+      }
       if (typeof content === 'string') {
         addStep({
           source: 'user',
@@ -142,8 +196,15 @@ function recordsToAtif(
           ...timestampField(record.timestamp, warnings, recordIndex),
         });
       } else if (Array.isArray(content)) {
+        assertSupportedUserBlocks(content);
         const toolResults = content.filter((block) => block.type === 'tool_result');
-        attachToolResults(lastAgentStep, toolResults, warnings, recordIndex);
+        attachToolResults(
+          lastAgentStep,
+          toolStepsByCallId,
+          toolResults,
+          warnings,
+          recordIndex,
+        );
         const userText = content
           .filter((block) => block.type === 'text' && typeof block.text === 'string')
           .map((block) => block.text as string)
@@ -155,14 +216,28 @@ function recordsToAtif(
             ...timestampField(record.timestamp, warnings, recordIndex),
           });
         }
+      } else {
+        throw new ClaudeSessionIncompleteError(
+          'A Claude user record had unsupported conversation content.',
+        );
       }
     } else if (record.type === 'assistant') {
       const content = record.message?.content;
+      if (
+        content !== undefined &&
+        typeof content !== 'string' &&
+        !Array.isArray(content)
+      ) {
+        throw new ClaudeSessionIncompleteError(
+          'A Claude assistant record had unsupported conversation content.',
+        );
+      }
       const blocks = typeof content === 'string'
         ? [{type: 'text', text: content}]
         : Array.isArray(content)
           ? content
           : [];
+      assertSupportedAssistantBlocks(blocks, warnings, recordIndex);
       const text = blocks
         .filter((block) => block.type === 'text' && typeof block.text === 'string')
         .map((block) => block.text as string)
@@ -189,12 +264,12 @@ function recordsToAtif(
         ...(toolCalls.length > 0 ? {tool_calls: toolCalls} : {}),
         ...timestampField(record.timestamp, warnings, recordIndex),
       });
-    } else if (record.type && !isMetadataRecord(record.type)) {
-      warnings.push({
-        code: 'unsupported_native_event',
-        message: 'An unsupported Claude session event was omitted.',
-        path: `line:${recordIndex + 1}`,
-      });
+    } else if (record.type !== undefined) {
+      handleNonConversationRecord(record, warnings, recordIndex);
+    } else {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude session record did not identify its type.',
+      );
     }
   }
 
@@ -219,99 +294,94 @@ function recordsToAtif(
   };
 }
 
-function attachToolResults(
-  step: AtifAgentStep | undefined,
+function assertSupportedUserBlocks(blocks: readonly SessionBlock[]): void {
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude user record contained an invalid conversation block.',
+      );
+    }
+    if (block.type === 'tool_result') continue;
+    if (block.type === 'text' && typeof block.text === 'string') continue;
+    throw new ClaudeSessionIncompleteError(
+      'A Claude user record contained an unsupported conversation block.',
+    );
+  }
+}
+
+function assertSupportedAssistantBlocks(
   blocks: readonly SessionBlock[],
-  warnings: AtifNormalizationWarning[],
+  warnings: AgentNativeEvidenceWarning[],
+  recordIndex: number,
+): void {
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude assistant record contained an invalid conversation block.',
+      );
+    }
+    if (block.type === 'text' && typeof block.text === 'string') continue;
+    if (block.type === 'thinking' && typeof block.thinking === 'string') continue;
+    if (block.type === 'tool_use' && typeof block.name === 'string') continue;
+    if (block.type === 'redacted_thinking') {
+      warnings.push({
+        code: 'unsupported_native_event',
+        message: 'A redacted Claude reasoning block was omitted.',
+        path: `line:${recordIndex + 1}`,
+      });
+      continue;
+    }
+    throw new ClaudeSessionIncompleteError(
+      'A Claude assistant record contained an unsupported conversation block.',
+    );
+  }
+}
+
+function attachToolResults(
+  fallbackStep: AtifAgentStep | undefined,
+  toolStepsByCallId: ReadonlyMap<string, AtifAgentStep>,
+  blocks: readonly SessionBlock[],
+  warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
 ): void {
   if (blocks.length === 0) return;
-  const callIds = new Set((step?.tool_calls ?? []).map(({tool_call_id}) => tool_call_id));
-  const results: AtifObservationResult[] = blocks.map((block) => {
-    const sourceId = typeof block.tool_use_id === 'string' && callIds.has(block.tool_use_id)
-      ? block.tool_use_id
-      : undefined;
-    if (!sourceId && block.tool_use_id) {
+  for (const block of blocks) {
+    const requestedCallId =
+      typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined;
+    const matchedStep =
+      requestedCallId === undefined
+        ? undefined
+        : toolStepsByCallId.get(requestedCallId);
+    if (requestedCallId !== undefined && matchedStep === undefined) {
       warnings.push({
         code: 'value_omitted',
-        message: 'A Claude tool result referenced a call outside its ATIF step.',
+        message: 'A Claude tool result referenced an unknown ATIF tool call.',
         path: `line:${recordIndex + 1}`,
       });
+      continue;
     }
-    return {
-      ...(sourceId === undefined ? {} : {source_call_id: sourceId}),
+    const step = matchedStep ?? fallbackStep;
+    const result: AtifObservationResult = {
+      ...(matchedStep === undefined || requestedCallId === undefined
+        ? {}
+        : {source_call_id: requestedCallId}),
       content: nativeContent(block.content),
       ...(block.is_error === undefined
         ? {}
         : {extra: {is_error: block.is_error}}),
     };
-  });
-  if (!step) {
-    warnings.push({
-      code: 'value_omitted',
-      message: 'Claude tool results appeared without a preceding agent step.',
-      path: `line:${recordIndex + 1}`,
-    });
-    return;
+    if (!step) {
+      warnings.push({
+        code: 'value_omitted',
+        message: 'Claude tool results appeared without a preceding agent step.',
+        path: `line:${recordIndex + 1}`,
+      });
+      continue;
+    }
+    step.observation = {
+      results: [...(step.observation?.results ?? []), result],
+    };
   }
-  step.observation = {results};
-}
-
-function fallbackTrajectory(
-  input: LoadClaudeEvidenceInput,
-  warnings: readonly AtifNormalizationWarning[],
-): NormalizedTrajectory {
-  const steps: AtifStep[] = [];
-  for (const turn of input.fallbackTurns) {
-    steps.push({step_id: steps.length + 1, source: 'user', message: turn.user});
-    steps.push({
-      step_id: steps.length + 1,
-      source: 'agent',
-      model_name: input.model,
-      message: turn.assistant,
-      ...(turn.toolCalls.length === 0
-        ? {}
-        : {tool_calls: fallbackToolCalls(turn.toolCalls, steps.length + 1)}),
-    });
-  }
-  if (steps.length === 0) {
-    // ATIF requires at least one step. This path is only reachable after an
-    // adapter bug because lifecycle records a completed send before evidence.
-    throw new Error('Cannot create fallback ATIF without completed turns.');
-  }
-  return createNormalizedTrajectory({
-    trajectory: {
-      schema_version: ATIF_SCHEMA_VERSION,
-      session_id: input.sessionId,
-      agent: {
-        name: 'claude-code',
-        version: input.agentVersion,
-        model_name: input.model,
-      },
-      steps,
-    },
-    provenance: {
-      source: {
-        kind: 'driver_fallback',
-        format: 'forge-driver-turns',
-        sessionId: input.sessionId,
-      },
-      adapter: {id: input.adapterId, version: input.adapterVersion},
-    },
-    completeness: 'fallback',
-    warnings,
-  });
-}
-
-function fallbackToolCalls(
-  calls: readonly AgentToolCall[],
-  stepId: number,
-): AtifToolCall[] {
-  return calls.map((call, index) => ({
-    tool_call_id: call.id ?? `driver-call-${stepId}-${index + 1}`,
-    function_name: call.name,
-    arguments: jsonObject(call.input, [], `fallback:${stepId}`),
-  }));
 }
 
 function parseJsonl(raw: string, signal: AbortSignal): SessionRecord[] {
@@ -346,10 +416,11 @@ function parseJsonl(raw: string, signal: AbortSignal): SessionRecord[] {
 }
 
 class ClaudeSessionLimitError extends Error {}
+class ClaudeSessionIncompleteError extends Error {}
 
 function jsonObject(
   value: unknown,
-  warnings: AtifNormalizationWarning[],
+  warnings: AgentNativeEvidenceWarning[],
   path: string,
 ): JsonObject {
   const json = jsonValue(value);
@@ -383,7 +454,7 @@ function nativeContent(value: unknown): string {
 
 function timestampField(
   value: string | undefined,
-  warnings: AtifNormalizationWarning[],
+  warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
 ): {timestamp?: string} {
   if (value === undefined) return {};
@@ -396,8 +467,42 @@ function timestampField(
   return {};
 }
 
-function isMetadataRecord(type: string): boolean {
-  return ['system', 'summary', 'file-history-snapshot', 'queue-operation'].includes(type);
+function handleNonConversationRecord(
+  record: SessionRecord,
+  warnings: AgentNativeEvidenceWarning[],
+  recordIndex: number,
+): void {
+  if (IGNORED_RECORD_TYPES.has(record.type ?? '')) {
+    return;
+  }
+  if (
+    record.type === 'system' &&
+    IGNORED_SYSTEM_SUBTYPES.has(record.subtype ?? '')
+  ) {
+    return;
+  }
+  if (record.type === 'attachment') {
+    const attachmentType = record.attachment?.type;
+    if (attachmentType === 'queued_command') {
+      throw new ClaudeSessionIncompleteError(
+        'A Claude queued-command attachment may contain an unrepresented user turn.',
+      );
+    }
+    if (
+      attachmentType !== undefined &&
+      OMITTED_ATTACHMENT_TYPES.has(attachmentType)
+    ) {
+      warnings.push({
+        code: 'unsupported_native_event',
+        message: 'Known Claude attachment context was omitted from ATIF.',
+        path: `line:${recordIndex + 1}`,
+      });
+      return;
+    }
+  }
+  throw new ClaudeSessionIncompleteError(
+    'A Claude session contained an unsupported conversation record.',
+  );
 }
 
 function safeSessionFailure(error: unknown): string {

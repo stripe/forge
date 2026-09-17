@@ -1,4 +1,3 @@
-import type {NormalizedTrajectory} from '../atif/index.js';
 import type {AgentSelectionV1, ResolvedRunPlanV1} from '../model/types.js';
 import type {RunInputProvider} from './inputs.js';
 import type {EnvironmentSpecification} from './credentials.js';
@@ -22,6 +21,63 @@ export interface AgentTurn {
   readonly toolCalls: readonly AgentToolCall[];
   readonly costUsd?: number;
 }
+
+/** Coding-agent identity recorded in ATIF independently of adapter provenance. */
+export interface AgentEvidenceIdentity {
+  readonly name: string;
+  readonly version: string;
+}
+
+export type AgentNativeEvidenceSource =
+  | {
+      readonly kind: 'native_log';
+      readonly format: string;
+      readonly sessionId: string;
+    }
+  | {
+      readonly kind: 'atif';
+      readonly format: 'atif';
+      readonly schemaVersion: string;
+      readonly sessionId: string;
+    };
+
+export interface AgentNativeEvidenceAvailable {
+  readonly kind: 'available';
+  /**
+   * JSON-shaped ATIF normalized by the adapter. Forge performs the
+   * authoritative parse; malformed `available` data is a contract violation.
+   */
+  readonly trajectory: unknown;
+  readonly source: AgentNativeEvidenceSource;
+  /** Loss of optional native detail; completed-turn coverage is checked separately. */
+  readonly warnings: readonly AgentNativeEvidenceWarning[];
+}
+
+export interface AgentNativeEvidenceWarning {
+  /**
+   * Omission of known optional detail only. An unknown event which could carry
+   * conversation evidence must make the source unavailable as `source_incomplete`.
+   */
+  readonly code: 'unsupported_native_event' | 'value_omitted';
+  readonly message: string;
+  readonly path?: string;
+}
+
+export interface AgentNativeEvidenceUnavailable {
+  readonly kind: 'unavailable';
+  readonly reason: {
+    readonly code:
+      | 'source_unavailable'
+      | 'source_invalid'
+      | 'source_incomplete';
+    readonly message: string;
+  };
+}
+
+/** Native evidence candidate. The engine, never the adapter, selects fallback. */
+export type AgentNativeEvidenceResult =
+  | AgentNativeEvidenceAvailable
+  | AgentNativeEvidenceUnavailable;
 
 export interface AgentSession {
   send(message: string, options: {signal: AbortSignal}): Promise<AgentTurn>;
@@ -93,15 +149,7 @@ export interface AgentEvidenceContext {
   readonly selection: AgentSelectionV1;
   readonly runtime: AgentEvidenceRuntime;
   readonly sessionId: string;
-  /** Ordered neutral transcript used only when native evidence is unavailable. */
-  readonly fallbackTurns: readonly AgentEvidenceFallbackTurn[];
   readonly signal: AbortSignal;
-}
-
-export interface AgentEvidenceFallbackTurn {
-  readonly user: string;
-  readonly assistant: string;
-  readonly toolCalls: readonly AgentToolCall[];
 }
 
 /** One coding-agent integration configured by the host composition. */
@@ -110,6 +158,8 @@ export interface AgentAdapter {
   readonly version: string;
   /** Pure declaration used before credentials resolve or a runtime allocates. */
   requirements(selection: AgentSelectionV1): AgentRuntimeRequirements;
+  /** Pure coding-agent identity used when Forge must construct fallback ATIF. */
+  evidenceIdentity(selection: AgentSelectionV1): AgentEvidenceIdentity;
   /** Initialize adapter-owned state before authored setup executes. */
   prepare(context: AgentPrepareContext): Promise<void>;
   openSession(context: AgentSessionContext): Promise<AgentSession>;
@@ -117,5 +167,5 @@ export interface AgentAdapter {
    * Read exact session evidence only after runtime mutation has stopped.
    * Completed-run provenance must identify `context.sessionId`.
    */
-  collectEvidence(context: AgentEvidenceContext): Promise<NormalizedTrajectory>;
+  collectEvidence(context: AgentEvidenceContext): Promise<AgentNativeEvidenceResult>;
 }

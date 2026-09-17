@@ -78,7 +78,7 @@ const noRetryWait = {
 };
 
 describe('runConversation', () => {
-  it('uses one persistent session, aggregates cost, and returns stable fallback turns', async () => {
+  it('uses one persistent session, aggregates cost, and returns stable completed turns', async () => {
     const needs = [
       'Understand the desired checkout experience',
       'Confirm the implementation was verified',
@@ -180,8 +180,9 @@ describe('runConversation', () => {
         },
       ],
     });
-    assert.deepEqual(result.fallbackTurns, [
+    assert.deepEqual(result.turns, [
       {
+        turn: 1,
         user: 'How should checkout work?',
         assistant: 'I implemented Checkout.',
         toolCalls: [
@@ -189,17 +190,18 @@ describe('runConversation', () => {
         ],
       },
       {
+        turn: 2,
         user: 'How did you verify it?',
         assistant: 'I ran the verification.',
         toolCalls: [],
       },
     ]);
     toolInput.path = 'mutated-after-completion.txt';
-    assert.deepEqual(result.fallbackTurns[0]!.toolCalls[0]!.input, {
+    assert.deepEqual(result.turns[0]!.toolCalls[0]!.input, {
       path: 'answer.txt',
     });
-    assert.equal(Object.isFrozen(result.fallbackTurns), true);
-    assert.equal(Object.isFrozen(result.fallbackTurns[0]!.toolCalls), true);
+    assert.equal(Object.isFrozen(result.turns), true);
+    assert.equal(Object.isFrozen(result.turns[0]!.toolCalls), true);
   });
 
   it('performs a final Ava assessment without exceeding maxTurns', async () => {
