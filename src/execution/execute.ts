@@ -48,13 +48,7 @@ import {
   type JudgeWorkspaceEvidenceV1,
 } from '../evaluation/index.js';
 import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
-import {
-  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
-  JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
-  JUDGE_TRANSCRIPT_SOURCE,
-  createJudgeTranscriptProjection,
-} from '../evaluation/judgeTranscript.js';
+import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {
   AVA_PROMPT_VERSION,
   AvaRolePlayer,
@@ -358,7 +352,7 @@ export async function executeEvalWithTestHooks(
         );
         guidelineResults = await judgeGuidelines(
           {
-            transcriptJson: judgeTranscript.transcriptJson,
+            transcript: judgeTranscript,
             guidelines,
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
@@ -393,10 +387,13 @@ export async function executeEvalWithTestHooks(
           schema_version: 1,
           prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
           transcript: {
-            source: JUDGE_TRANSCRIPT_SOURCE,
-            projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
-            projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
-            excluded_fields: [...JUDGE_TRANSCRIPT_EXCLUDED_FIELDS],
+            source: judgeTranscript.source,
+            projection_id: judgeTranscript.projectionId,
+            projection_version: judgeTranscript.projectionVersion,
+            trajectory_scope: judgeTranscript.trajectoryScope,
+            included_step_sources: [...judgeTranscript.includedStepSources],
+            copied_context: judgeTranscript.copiedContext,
+            included_fields: [...judgeTranscript.includedFields],
           },
           workspace: {
             entries: safeWorkspace.entries.map((entry) => ({

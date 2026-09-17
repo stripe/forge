@@ -300,9 +300,9 @@ decision history. It is not supplied to the guideline judge.
 `workspace-evidence.json` contains bounded evidence for the paths inspected by
 configured deterministic file checks; it is not a workspace snapshot.
 `judge-evidence.json` exists only when judging ran and records the judge prompt
-and transcript-projection versions alongside the bounded workspace text and
-warnings made available to the judge. These two evidence artifacts have
-different scopes and are independently conditional.
+version and positive transcript-projection policy alongside the bounded
+workspace text and warnings made available to the judge. These two evidence
+artifacts have different scopes and are independently conditional.
 
 Files below `extensions/<contributor-id>/` are optional supplemental artifacts
 from registered `RunArtifactContributor`s. The `result.json` descriptors
@@ -420,15 +420,36 @@ summaries without prompts, responses, endpoints, or credentials.
 
 After the runtime is quiesced and agent evidence is normalized and redacted,
 Forge judges every authored success guideline independently. It derives a
-deterministic visible-evidence projection from the root ATIF steps and removes
-the typed `reasoning_content` and `reasoning_effort` fields. The projection
-retains visible assistant messages, tool calls, tool results, and same-named
-keys inside opaque tool, observation, or `extra` payloads. The judge sees this
-projection, optional `example_answer`, and relevant bounded text from the sealed
-workspace. It never sees `interaction.json`, Ava's private needs, or normative
-ATIF reasoning fields, and the prompt tells it not to infer or reward private
-reasoning. Each authored guideline is capped at 65,536 characters, matching the
-persisted evaluation-result bound.
+deterministic positive projection of current-run root ATIF behavior. The
+allowlist contains root user and agent step identity, source, and messages;
+tool-call IDs, names, and arguments; and tool-result content and
+error status. Tool results without a source-call ID remain visible; correlation
+is retained when the source provides it. An exact boolean
+`observation.results[].extra.is_error` is promoted to the explicit
+judge-visible `is_error`; all other result `extra` fields are excluded. System
+steps and steps marked
+`is_copied_context` are excluded,
+as are reasoning, timestamps, model/provider metadata, metrics, arbitrary
+`extra`, and subagent references or trajectories. Agent steps with no nonempty
+text or media and no retained tool behavior are omitted rather than exposing
+provider-specific hidden-call segmentation.
+
+Opaque tool arguments and result content remain intact after credential
+redaction, including nested keys named `reasoning_content`: tool behavior is
+observable evidence, not private model reasoning. Subagent work is visible only
+when it is surfaced in a root message or tool result, or in separately selected
+workspace evidence. ATIF image and audio content parts retain their media type
+and path references, but the completion transport is text-only: Forge does not
+load or attach those referenced bytes as multimodal judge input.
+
+The judge sees this projection, optional `example_answer`, and relevant bounded
+text from the sealed workspace. It never sees `interaction.json`, Ava's private
+needs, or the excluded ATIF data, and the prompt tells it not to infer or reward
+private reasoning. Each authored guideline is capped at 65,536 characters,
+matching the persisted evaluation-result bound. Projected transcript JSON is
+capped at 786,432 UTF-8 bytes and receives the same bounded-JSON graph preflight
+as ATIF before recursive validation. The complete rendered prompt is capped at
+1,048,576 UTF-8 bytes before any completion provider is invoked.
 
 `trajectory.json` remains the full selected, normalized, redacted audit
 trajectory; it can retain normative reasoning fields even though those fields
@@ -436,8 +457,10 @@ are excluded from judging.
 
 Programmatic consumers can reproduce the exact judge transcript bytes and
 policy with `createJudgeTranscriptProjection` from `@stripe/forge`. The exported
-projection ID, version, source, and excluded-field constants describe the
-policy recorded in `judge-evidence.json`.
+projection ID, version, source, and positive included-field policy describe the
+policy recorded in `judge-evidence.json`. The public `judgeGuidelines` helper
+accepts this validated projection object rather than an arbitrary transcript
+string, so callers cannot accidentally bypass the projection policy.
 
 At most four guidelines are judged concurrently, with temperature 0, a
 1,024-token response limit, and a strict one-guideline JSON schema.
@@ -453,8 +476,8 @@ directories, lockfiles, and common binary formats. Hard bounds are 10,000
 listed entries, depth 32, two seconds, 512,000 bytes read, 20,000 characters per
 file, and 80,000 rendered characters total. Truncation and unavailable files
 are explicit evidence warnings. `judge-evidence.json` records the redacted
-workspace subset and policy metadata for the transcript projection sent to the
-judge. It is an audit artifact, not an input to a later judge call.
+workspace subset and positive allowlist policy for the transcript projection
+sent to the judge. It is an audit artifact, not an input to a later judge call.
 `verifyCompletedRun` verifies the existing artifact descriptors, strict ATIF
 trajectory, completed-turn coverage, and projection-policy declaration. Forge
 refuses to dispatch a judge request if its final defensive
@@ -736,7 +759,7 @@ Forge persists the canonical agent trajectory as a standalone
   assistant text, tool calls, or tool arguments to stay inside ATIF safety
   limits. Such loss adds a `value_omitted` warning. Evaluation consumes that
   exact bounded trajectory, and guideline judging consumes it through the
-  declared reasoning-excluding projection.
+  declared positive root-behavior projection.
 - If Ava exhausts its retries before the first agent turn, Forge instead writes
   a system-only fallback trajectory with `role_player_error` provenance.
 - Known non-conversation metadata is ignored explicitly. Unknown conversation
@@ -752,8 +775,8 @@ Forge persists the canonical agent trajectory as a standalone
   result.
 - Exact credential values are redacted before evidence and results are staged.
 - The full selected, redacted trajectory remains the canonical audit artifact.
-  Guideline judging uses a separately defined projection without step-level
-  `reasoning_content` or `reasoning_effort`.
+  Guideline judging uses a separately defined positive projection of
+  current-run root user/agent messages and tool behavior.
 
 Use the versioned surface when consuming stored artifacts:
 

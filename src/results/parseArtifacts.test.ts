@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
 import {
-  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
 } from '../evaluation/judgeTranscript.js';
 import {parseInteractionArtifact, parseJudgeEvidence} from './parse.js';
 
@@ -106,7 +109,10 @@ describe('canonical interaction and judge evidence parsing', () => {
         source: 'trajectory.json',
         projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
         projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
-        excluded_fields: JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+        trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+        included_step_sources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+        copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+        included_fields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
       },
       workspace: {
         entries: [
@@ -143,7 +149,42 @@ describe('canonical interaction and judge evidence parsing', () => {
         ...evidence,
         transcript: {
           ...evidence.transcript,
-          excluded_fields: ['reasoning_effort', 'reasoning_content'],
+          trajectory_scope: 'root-and-subagents',
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          included_step_sources: ['agent', 'user'],
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {...evidence.transcript, copied_context: 'included'},
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          included_fields: [
+            ...evidence.transcript.included_fields.slice(0, -1),
+          ],
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseJudgeEvidence({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          excluded_fields: ['reasoning_content', 'reasoning_effort'],
         },
       }),
     );

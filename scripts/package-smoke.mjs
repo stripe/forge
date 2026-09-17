@@ -55,10 +55,26 @@ try {
       assert.equal(forge.JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');
       assert.equal(forge.JUDGE_TRANSCRIPT_PROJECTION_ID, 'forge-visible-atif-steps');
       assert.equal(forge.JUDGE_TRANSCRIPT_PROJECTION_VERSION, 1);
-      assert.deepEqual(forge.JUDGE_TRANSCRIPT_EXCLUDED_FIELDS, [
-        'reasoning_content',
-        'reasoning_effort',
+      assert.equal(forge.JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE, 'root');
+      assert.deepEqual(forge.JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES, [
+        'user',
+        'agent',
       ]);
+      assert.equal(forge.JUDGE_TRANSCRIPT_COPIED_CONTEXT, 'excluded');
+      assert.equal(forge.MAX_JUDGE_TRANSCRIPT_BYTES, 768 * 1024);
+      assert.equal(forge.MAX_GUIDELINE_JUDGE_PROMPT_BYTES, 1024 * 1024);
+      assert.deepEqual(forge.JUDGE_TRANSCRIPT_INCLUDED_FIELDS, [
+        'step_id',
+        'source',
+        'message',
+        'tool_calls[].tool_call_id',
+        'tool_calls[].function_name',
+        'tool_calls[].arguments',
+        'observation.results[].source_call_id',
+        'observation.results[].content',
+        'observation.results[].is_error',
+      ]);
+      assert.equal(typeof forge.parseJudgeTranscriptProjection, 'function');
       assert.equal(forge.RUN_RESULT_SCHEMA_VERSION, 1);
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
       assert.equal(atif.isAtifTimestamp('2024-02-29T00:00:00Z'), true);

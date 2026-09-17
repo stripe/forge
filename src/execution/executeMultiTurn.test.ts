@@ -4,10 +4,13 @@ import {describe, it} from 'node:test';
 import {parseAtifTrajectory} from '../atif/index.js';
 import {credentialReference} from '../contracts/credentials.js';
 import {
-  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_JUDGE_WORKSPACE_FILE_CHARACTERS,
   MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
   createJudgeTranscriptProjection,
@@ -33,6 +36,14 @@ const PRIVATE_REASONING_MARKER =
   'PRIVATE_REASONING_MARKER_must_remain_out_of_judge_requests';
 const PRIVATE_REASONING_EFFORT_MARKER =
   'PRIVATE_REASONING_EFFORT_MARKER_must_remain_out_of_judge_requests';
+const OMITTED_JUDGE_METADATA_MARKER =
+  'OMITTED_JUDGE_METADATA_MARKER_must_remain_out_of_judge_requests';
+const COPIED_CONTEXT_MARKER =
+  'COPIED_CONTEXT_MARKER_must_remain_out_of_judge_requests';
+const SYSTEM_STEP_MARKER =
+  'SYSTEM_STEP_MARKER_must_remain_out_of_judge_requests';
+const VISIBLE_TOOL_PAYLOAD_MARKER =
+  'VISIBLE_TOOL_PAYLOAD_MARKER_must_remain_in_judge_requests';
 const VISIBLE_RESPONSE_MARKER = 'VISIBLE_RESPONSE_MARKER_for_judging';
 const VISIBLE_TOOL_MARKER = 'VISIBLE_TOOL_MARKER_for_judging';
 const ROLE_MODEL = {provider: 'test-provider', model: 'role-model'} as const;
@@ -439,22 +450,66 @@ describe('executeEval multi-turn and judging integration', () => {
           steps: [
             {
               step_id: 1,
+              source: 'agent',
+              message: COPIED_CONTEXT_MARKER,
+              is_copied_context: true,
+            },
+            {
+              step_id: 2,
+              source: 'system',
+              message: SYSTEM_STEP_MARKER,
+              extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
+            },
+            {
+              step_id: 3,
               source: 'user',
               message: 'Produce visible evidence.',
             },
             {
-              step_id: 2,
+              step_id: 4,
               source: 'agent',
               message: `${VISIBLE_RESPONSE_MARKER}: ${AGENT_SECRET}`,
+              timestamp: '2026-09-16T00:00:00Z',
+              model_name: OMITTED_JUDGE_METADATA_MARKER,
+              llm_call_count: 1,
               reasoning_content: PRIVATE_REASONING_MARKER,
               reasoning_effort: PRIVATE_REASONING_EFFORT_MARKER,
+              metrics: {
+                prompt_token_ids: [112, 114, 105, 118, 97, 116, 101],
+                extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
+              },
               tool_calls: [
                 {
                   tool_call_id: 'visible-call',
                   function_name: VISIBLE_TOOL_MARKER,
-                  arguments: {path: 'answer.txt'},
+                  arguments: {
+                    path: 'answer.txt',
+                    reasoning_content: VISIBLE_TOOL_PAYLOAD_MARKER,
+                  },
+                  extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
                 },
               ],
+              observation: {
+                results: [
+                  {
+                    source_call_id: 'visible-call',
+                    content: `Visible result containing reasoning_effort: ${VISIBLE_TOOL_PAYLOAD_MARKER}`,
+                    subagent_trajectory_ref: [
+                      {
+                        trajectory_path: 'private-child.json',
+                        extra: {
+                          private_metadata: OMITTED_JUDGE_METADATA_MARKER,
+                        },
+                      },
+                    ],
+                    extra: {
+                      is_error: false,
+                      private_metadata: OMITTED_JUDGE_METADATA_MARKER,
+                    },
+                  },
+                ],
+              },
+              extra: {private_metadata: OMITTED_JUDGE_METADATA_MARKER},
             },
           ],
         },
@@ -472,10 +527,18 @@ describe('executeEval multi-turn and judging integration', () => {
       const serializedRequest = JSON.stringify(request);
       assert.ok(!serializedRequest.includes(PRIVATE_REASONING_MARKER));
       assert.ok(!serializedRequest.includes(PRIVATE_REASONING_EFFORT_MARKER));
+      assert.ok(!serializedRequest.includes(OMITTED_JUDGE_METADATA_MARKER));
+      assert.ok(!serializedRequest.includes(COPIED_CONTEXT_MARKER));
+      assert.ok(!serializedRequest.includes(SYSTEM_STEP_MARKER));
+      assert.ok(!serializedRequest.includes('private-child.json'));
       assert.ok(!serializedRequest.includes(AGENT_SECRET));
       assert.match(request.systemPrompt ?? '', /\[REDACTED\]/);
       assert.ok((request.systemPrompt ?? '').includes(VISIBLE_RESPONSE_MARKER));
       assert.ok((request.systemPrompt ?? '').includes(VISIBLE_TOOL_MARKER));
+      assert.ok(
+        (request.systemPrompt ?? '').includes(VISIBLE_TOOL_PAYLOAD_MARKER),
+      );
+      assert.ok((request.systemPrompt ?? '').includes('"is_error":false'));
       judgePrompts.push(request.systemPrompt ?? '');
       return JSON.stringify({
         results: [
@@ -520,7 +583,9 @@ describe('executeEval multi-turn and judging integration', () => {
     const trajectory = parseAtifTrajectory(
       artifactJson(stored, 'trajectory.json'),
     );
-    const agentStep = trajectory.steps[1];
+    const agentStep = trajectory.steps.find(
+      (step) => step.source === 'agent' && step.is_copied_context !== true,
+    );
     assert.equal(agentStep?.source, 'agent');
     assert.equal(agentStep?.reasoning_content, PRIVATE_REASONING_MARKER);
     assert.equal(
@@ -541,14 +606,20 @@ describe('executeEval multi-turn and judging integration', () => {
         source: string;
         projection_id: string;
         projection_version: number;
-        excluded_fields: string[];
+        trajectory_scope: string;
+        included_step_sources: string[];
+        copied_context: string;
+        included_fields: string[];
       };
     };
     assert.deepEqual(judgeEvidence.transcript, {
       source: JUDGE_TRANSCRIPT_SOURCE,
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
       projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
-      excluded_fields: [...JUDGE_TRANSCRIPT_EXCLUDED_FIELDS],
+      trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+      included_step_sources: [...JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES],
+      copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+      included_fields: [...JUDGE_TRANSCRIPT_INCLUDED_FIELDS],
     });
   });
 

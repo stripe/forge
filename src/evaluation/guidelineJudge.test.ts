@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {createJudgeTranscriptProjection} from './judgeTranscript.js';
 import {
   GUIDELINE_JUDGMENT_RESPONSE_SCHEMA,
   GUIDELINE_JUDGE_RETRY_DELAYS_MS,
   MAX_GUIDELINE_EXPLANATION_CHARACTERS,
   MAX_GUIDELINE_JUDGE_ATTEMPTS,
+  MAX_GUIDELINE_JUDGE_PROMPT_BYTES,
   buildGuidelineJudgePrompt,
   judgeGuidelines,
   parseGuidelineJudgment,
@@ -16,6 +18,20 @@ import {
 const noRetryWait = {
   waitBeforeRetry: async (): Promise<void> => undefined,
 };
+
+const EMPTY_TRANSCRIPT = createJudgeTranscriptProjection({
+  schema_version: 'ATIF-v1.8',
+  agent: {name: 'test-agent', version: '1'},
+  steps: [{step_id: 1, source: 'system', message: 'not judge evidence'}],
+});
+
+function visibleTranscript(message: string) {
+  return createJudgeTranscriptProjection({
+    schema_version: 'ATIF-v1.8',
+    agent: {name: 'test-agent', version: '1'},
+    steps: [{step_id: 1, source: 'user', message}],
+  });
+}
 
 function valid(
   passed = true,
@@ -34,7 +50,7 @@ describe('judgeGuidelines', () => {
 
     const results = await judgeGuidelines(
       {
-        transcriptJson: 'THE_TRANSCRIPT',
+        transcript: visibleTranscript('THE_TRANSCRIPT'),
         guidelines: ['THE_GUIDELINE'],
         exampleAnswer: 'THE_EXAMPLE',
         workspaceText: 'THE_WORKSPACE',
@@ -57,22 +73,26 @@ describe('judgeGuidelines', () => {
       request.systemPrompt,
       /THE_TRANSCRIPT[\s\S]*THE_WORKSPACE[\s\S]*THE_EXAMPLE[\s\S]*THE_GUIDELINE/,
     );
-    assert.match(request.systemPrompt, /reasoning_content/);
-    assert.match(request.systemPrompt, /reasoning_effort/);
+    assert.match(request.systemPrompt, /private reasoning/);
+    assert.match(request.systemPrompt, /copied context/);
     assert.match(
       request.systemPrompt,
-      /Identically named keys inside tool inputs[\s\S]*may remain as visible evidence/,
+      /Identically named keys[\s\S]*inside actual tool arguments or result content remain/,
     );
     assert.match(
       request.systemPrompt,
-      /Do not infer the excluded reasoning or reward its possible presence or quality/,
+      /Do not infer omitted material or reward its possible presence or quality/,
+    );
+    assert.match(
+      request.systemPrompt,
+      /Image and audio objects are path references only/,
     );
     assert.ok(request.signal instanceof AbortSignal);
   });
 
   it('omits the optional example and workspace sections', () => {
     const prompt = buildGuidelineJudgePrompt(
-      {transcriptJson: 'TRANSCRIPT'},
+      {transcript: visibleTranscript('TRANSCRIPT')},
       'GUIDELINE',
     );
 
@@ -82,6 +102,43 @@ describe('judgeGuidelines', () => {
       /Only mark the guideline as passed if the assistant explicitly addressed it/,
     );
     assert.match(prompt, /TRANSCRIPT[\s\S]*GUIDELINE/);
+  });
+
+  it('rejects an arbitrary transcript string at the public judging boundary', async () => {
+    let calls = 0;
+    await assert.rejects(
+      judgeGuidelines(
+        {
+          transcript: {transcriptJson: '[]\n'} as never,
+          guidelines: ['guideline'],
+        },
+        async () => {
+          calls += 1;
+          return valid();
+        },
+      ),
+    );
+    assert.equal(calls, 0);
+  });
+
+  it('rejects an oversized final prompt before invoking or retrying a provider', async () => {
+    let calls = 0;
+    await assert.rejects(
+      judgeGuidelines(
+        {
+          transcript: EMPTY_TRANSCRIPT,
+          guidelines: ['guideline'],
+          workspaceText: 'w'.repeat(MAX_GUIDELINE_JUDGE_PROMPT_BYTES),
+        },
+        async () => {
+          calls += 1;
+          return valid();
+        },
+        noRetryWait,
+      ),
+      new RegExp(`${MAX_GUIDELINE_JUDGE_PROMPT_BYTES}-byte limit`),
+    );
+    assert.equal(calls, 0);
   });
 
   it('bounds concurrency at four while preserving authored result order', async () => {
@@ -101,7 +158,7 @@ describe('judgeGuidelines', () => {
     };
 
     const results = await judgeGuidelines(
-      {transcriptJson: '[]', guidelines},
+      {transcript: EMPTY_TRANSCRIPT, guidelines},
       invoke,
     );
 
@@ -132,7 +189,7 @@ describe('judgeGuidelines', () => {
 
     const results = await judgeGuidelines(
       {
-        transcriptJson: '[]',
+        transcript: EMPTY_TRANSCRIPT,
         guidelines: ['first', 'second', 'third'],
       },
       invoke,
@@ -166,7 +223,7 @@ describe('judgeGuidelines', () => {
     };
 
     const results = await judgeGuidelines(
-      {transcriptJson: '[]', guidelines: ['guideline']},
+      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
       invoke,
       noRetryWait,
     );
@@ -186,7 +243,7 @@ describe('judgeGuidelines', () => {
 
     await assert.rejects(
       judgeGuidelines(
-        {transcriptJson: '[]', guidelines: ['guideline']},
+        {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
         invoke,
         noRetryWait,
       ),
@@ -203,7 +260,7 @@ describe('judgeGuidelines', () => {
 
     await assert.rejects(
       judgeGuidelines(
-        {transcriptJson: '[]', guidelines: ['failing', 'peer']},
+        {transcript: EMPTY_TRANSCRIPT, guidelines: ['failing', 'peer']},
         async (request) => {
           if (request.systemPrompt.includes('Success Guideline:\nfailing\n')) {
             failingCalls += 1;
@@ -237,7 +294,7 @@ describe('judgeGuidelines', () => {
     };
 
     const results = await judgeGuidelines(
-      {transcriptJson: '[]', guidelines: ['guideline']},
+      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
       invoke,
       noRetryWait,
     );
@@ -258,7 +315,7 @@ describe('judgeGuidelines', () => {
     let calls = 0;
     const oversized = 'x'.repeat(MAX_GUIDELINE_EXPLANATION_CHARACTERS + 1);
     const results = await judgeGuidelines(
-      {transcriptJson: '[]', guidelines: ['guideline']},
+      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
       async () => {
         calls += 1;
         return valid(true, oversized);
@@ -290,7 +347,7 @@ describe('judgeGuidelines', () => {
     await assert.rejects(
       judgeGuidelines(
         {
-          transcriptJson: '[]',
+          transcript: EMPTY_TRANSCRIPT,
           guidelines: ['guideline'],
           signal: controller.signal,
         },
@@ -305,7 +362,7 @@ describe('judgeGuidelines', () => {
   it('does not invoke a completion for an empty guideline list', async () => {
     let calls = 0;
     const results = await judgeGuidelines(
-      {transcriptJson: '[]', guidelines: []},
+      {transcript: EMPTY_TRANSCRIPT, guidelines: []},
       async () => {
         calls += 1;
         return valid();
@@ -319,7 +376,7 @@ describe('judgeGuidelines', () => {
   it('uses the fixed one-second and five-second retry schedule', async () => {
     const waits: number[] = [];
     const results = await judgeGuidelines(
-      {transcriptJson: '[]', guidelines: ['guideline']},
+      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
       async () => '{}',
       {
         waitBeforeRetry: async (attempt) => {

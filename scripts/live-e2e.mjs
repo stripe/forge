@@ -18,10 +18,13 @@ import {createClaudeCodeAdapter} from '../dist/agents/claude-code/index.js';
 import {parseAtifTrajectory} from '../dist/atif/index.js';
 import {
   GUIDELINE_JUDGE_PROMPT_VERSION,
-  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   createArtifactStore,
   createDirectoryRunInputProvider,
   credentialReference,
@@ -478,10 +481,20 @@ async function verifyMultiTurnRun(completed) {
         JUDGE_TRANSCRIPT_PROJECTION_ID &&
       judgeEvidence.transcript.projection_version ===
         JUDGE_TRANSCRIPT_PROJECTION_VERSION &&
-      judgeEvidence.transcript.excluded_fields.length ===
-        JUDGE_TRANSCRIPT_EXCLUDED_FIELDS.length &&
-      judgeEvidence.transcript.excluded_fields.every(
-        (field, index) => field === JUDGE_TRANSCRIPT_EXCLUDED_FIELDS[index],
+      judgeEvidence.transcript.trajectory_scope ===
+        JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE &&
+      judgeEvidence.transcript.included_step_sources.length ===
+        JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES.length &&
+      judgeEvidence.transcript.included_step_sources.every(
+        (source, index) =>
+          source === JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES[index],
+      ) &&
+      judgeEvidence.transcript.copied_context ===
+        JUDGE_TRANSCRIPT_COPIED_CONTEXT &&
+      judgeEvidence.transcript.included_fields.length ===
+        JUDGE_TRANSCRIPT_INCLUDED_FIELDS.length &&
+      judgeEvidence.transcript.included_fields.every(
+        (field, index) => field === JUDGE_TRANSCRIPT_INCLUDED_FIELDS[index],
       ) &&
       judgeEvidence.workspace.complete === true &&
       judgeEvidence.workspace.warnings.length === 0 &&

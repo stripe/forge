@@ -3,10 +3,13 @@ import type {
   AtifNormalizationWarning,
 } from '../atif/index.js';
 import type {
-  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
 } from '../evaluation/judgeTranscript.js';
 import type {
   ModelRefV1,
@@ -153,7 +156,10 @@ export interface JudgeEvidenceV1 {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
     readonly projection_id: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
     readonly projection_version: typeof JUDGE_TRANSCRIPT_PROJECTION_VERSION;
-    readonly excluded_fields: typeof JUDGE_TRANSCRIPT_EXCLUDED_FIELDS;
+    readonly trajectory_scope: typeof JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE;
+    readonly included_step_sources: typeof JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES;
+    readonly copied_context: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
+    readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];

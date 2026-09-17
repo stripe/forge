@@ -14,6 +14,7 @@ export {
   MAX_CONCURRENT_GUIDELINE_JUDGMENTS,
   MAX_GUIDELINE_EXPLANATION_CHARACTERS,
   MAX_GUIDELINE_JUDGE_ATTEMPTS,
+  MAX_GUIDELINE_JUDGE_PROMPT_BYTES,
   buildGuidelineJudgePrompt,
   judgeGuidelines,
   parseGuidelineJudgment,
@@ -23,11 +24,23 @@ export {
   type GuidelineJudgeInput,
 } from './guidelineJudge.js';
 export {
-  JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+  JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+  JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
+  JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  MAX_JUDGE_TRANSCRIPT_BYTES,
   createJudgeTranscriptProjection,
+  parseJudgeTranscriptProjection,
+  type JudgeVisibleAgentStepV1,
+  type JudgeVisibleContentV1,
+  type JudgeVisibleObservationResultV1,
+  type JudgeVisibleObservationV1,
+  type JudgeVisibleStepV1,
+  type JudgeVisibleToolCallV1,
+  type JudgeVisibleUserStepV1,
   type JudgeTranscriptProjectionV1,
 } from './judgeTranscript.js';
 export {
