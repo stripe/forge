@@ -200,7 +200,6 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.equal(interaction.role_player.decisions.length, 2);
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      trajectory_sha256: string;
       workspace: {
         complete: boolean;
         entries: Array<{path: string; content: string; truncated: boolean}>;
@@ -211,10 +210,6 @@ describe('executeEval multi-turn and judging integration', () => {
         }>;
       };
     };
-    assert.equal(
-      judgeEvidence.trajectory_sha256,
-      completed.result.artifacts.find(({path}) => path === 'trajectory.json')?.sha256,
-    );
     assert.match(
       judgeEvidence.workspace.entries.find(({path}) => path === 'answer.txt')
         ?.content ?? '',
@@ -399,15 +394,6 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.ok(judgeSystemPrompt.includes(firstAssistant));
     assert.ok(judgeSystemPrompt.includes(secondUser));
     assert.ok(judgeSystemPrompt.includes(secondAssistant));
-
-    const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      trajectory_sha256: string;
-    };
-    assert.equal(
-      judgeEvidence.trajectory_sha256,
-      completed.result.artifacts.find(({path}) => path === 'trajectory.json')
-        ?.sha256,
-    );
   });
 
   it('judges one post-redaction visible projection while preserving private reasoning in ATIF', async () => {
@@ -546,13 +532,11 @@ describe('executeEval multi-turn and judging integration', () => {
     }
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      trajectory_sha256: string;
       transcript: {
         source: string;
         projection_id: string;
         projection_version: number;
         excluded_fields: string[];
-        sha256: string;
       };
     };
     assert.deepEqual(judgeEvidence.transcript, {
@@ -560,16 +544,10 @@ describe('executeEval multi-turn and judging integration', () => {
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
       projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
       excluded_fields: [...JUDGE_TRANSCRIPT_EXCLUDED_FIELDS],
-      sha256: projection.transcriptSha256,
     });
-    assert.equal(
-      judgeEvidence.trajectory_sha256,
-      completed.result.artifacts.find(({path}) => path === 'trajectory.json')
-        ?.sha256,
-    );
   });
 
-  it('fails closed when final prompt redaction would rewrite audited projection bytes', async () => {
+  it('fails closed when final prompt redaction would rewrite selected evidence bytes', async () => {
     // This credential is not present in any ATIF string. It appears only when
     // compact JSON joins the message value to the following source key.
     const boundarySecret = 'x\",\"source';

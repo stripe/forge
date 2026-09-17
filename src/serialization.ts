@@ -1,5 +1,3 @@
-import {createHash} from 'node:crypto';
-
 /** JSON values accepted by Forge's deterministic wire serializer. */
 export type SerializableJson =
   | null
@@ -18,11 +16,6 @@ export function serializeCanonicalJson(value: unknown): string {
   const seen = new Set<object>();
   const normalized = normalize(value, seen, '$');
   return `${JSON.stringify(normalized)}\n`;
-}
-
-export function canonicalJsonSha256(value: unknown): `sha256:${string}` {
-  const body = serializeCanonicalJson(value);
-  return `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`;
 }
 
 function normalize(

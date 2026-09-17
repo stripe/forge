@@ -149,13 +149,11 @@ export interface JudgeWorkspaceEntryV1 {
 export interface JudgeEvidenceV1 {
   readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
   readonly prompt_version: string;
-  readonly trajectory_sha256: Sha256Digest;
   readonly transcript: {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
     readonly projection_id: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
     readonly projection_version: typeof JUDGE_TRANSCRIPT_PROJECTION_VERSION;
     readonly excluded_fields: typeof JUDGE_TRANSCRIPT_EXCLUDED_FIELDS;
-    readonly sha256: Sha256Digest;
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];
@@ -255,7 +253,6 @@ interface RunResultCommon {
   readonly completed_at: string;
   readonly duration_ms: number;
   readonly stop_reason: RunStopReasonV1;
-  readonly artifact_set_sha256: Sha256Digest;
   readonly artifacts: readonly ArtifactDescriptorV1[];
   readonly supplemental_artifacts: readonly ArtifactDescriptorV1[];
   readonly warnings: readonly RunWarningV1[];

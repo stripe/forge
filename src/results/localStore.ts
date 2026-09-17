@@ -7,16 +7,12 @@ import type {
   RunArtifactStore,
   RunArtifactTransaction,
 } from '../contracts/artifacts.js';
-import {
-  parseAtifTrajectory,
-  type AtifTrajectoryV1_8,
-} from '../atif/index.js';
+import {parseAtifTrajectory} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
-import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
-import {canonicalJsonSha256, serializeCanonicalJson} from '../serialization.js';
+import {serializeCanonicalJson} from '../serialization.js';
 import {
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -36,11 +32,6 @@ const VERIFIED_ARTIFACT_PATHS = new Set([
   'judge-evidence.json',
   'trajectory.json',
 ]);
-
-interface VerifiedTrajectoryArtifact {
-  readonly body: Buffer;
-  readonly trajectory: AtifTrajectoryV1_8;
-}
 
 export interface CreateArtifactStoreOptions {
   readonly root: string;
@@ -205,16 +196,13 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
   ) {
     throw new ArtifactStoreError('Completed run contains an unclaimed file.');
   }
-  if (canonicalJsonSha256(result.artifacts) !== result.artifact_set_sha256) {
-    throw new ArtifactStoreError('Canonical artifact-set digest is invalid.');
-  }
   const interaction = verifyInteractionArtifact(result, artifactBodies);
-  const trajectory = verifyTrajectoryArtifact(
+  verifyTrajectoryArtifact(
     result,
     interaction,
     artifactBodies,
   );
-  verifyJudgeEvidence(result, artifactBodies, trajectory);
+  verifyJudgeEvidence(result, artifactBodies);
   return {runId: result.run_id, location: runDir, result};
 }
 
@@ -258,9 +246,6 @@ function assertResultArtifacts(
       throw new ArtifactStoreError(`Result descriptor mismatch: ${descriptor.path}`);
     }
   }
-  if (canonicalJsonSha256(result.artifacts) !== result.artifact_set_sha256) {
-    throw new ArtifactStoreError('Result artifact-set digest is invalid.');
-  }
 }
 
 function verifyInteractionArtifact(
@@ -291,7 +276,7 @@ function verifyTrajectoryArtifact(
   result: RunResult,
   interaction: InteractionArtifactV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
-): VerifiedTrajectoryArtifact {
+): void {
   const path = 'trajectory.json';
   const body = requireCoreArtifact(result, artifactBodies, path);
   const trajectory = parseJsonArtifact(path, body, parseAtifTrajectory);
@@ -310,7 +295,7 @@ function verifyTrajectoryArtifact(
         'Zero-turn interaction requires the system-only role-player-error trajectory.',
       );
     }
-    return {body, trajectory};
+    return;
   }
 
   const sessionId = result.agent.session_id;
@@ -341,13 +326,11 @@ function verifyTrajectoryArtifact(
       'trajectory.json does not cover every completed interaction turn.',
     );
   }
-  return {body, trajectory};
 }
 
 function verifyJudgeEvidence(
   result: RunResult,
   artifactBodies: ReadonlyMap<string, Buffer>,
-  verifiedTrajectory: VerifiedTrajectoryArtifact,
 ): void {
   const path = 'judge-evidence.json';
   const body = artifactBodies.get(path);
@@ -369,19 +352,6 @@ function verifyJudgeEvidence(
   if (judgeEvidence.prompt_version !== GUIDELINE_JUDGE_PROMPT_VERSION) {
     throw new ArtifactStoreError(
       'judge-evidence.json prompt_version is not supported by this Forge build.',
-    );
-  }
-  if (judgeEvidence.trajectory_sha256 !== sha256Digest(verifiedTrajectory.body)) {
-    throw new ArtifactStoreError(
-      'judge-evidence.json trajectory_sha256 does not match trajectory.json.',
-    );
-  }
-  const projection = createJudgeTranscriptProjection(
-    verifiedTrajectory.trajectory,
-  );
-  if (judgeEvidence.transcript.sha256 !== projection.transcriptSha256) {
-    throw new ArtifactStoreError(
-      'judge-evidence.json transcript sha256 does not match its declared trajectory projection.',
     );
   }
 }

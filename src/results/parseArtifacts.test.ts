@@ -102,13 +102,11 @@ describe('canonical interaction and judge evidence parsing', () => {
     const evidence = {
       schema_version: 1,
       prompt_version: '1',
-      trajectory_sha256: DIGEST,
       transcript: {
         source: 'trajectory.json',
         projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
         projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
         excluded_fields: JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
-        sha256: DIGEST,
       },
       workspace: {
         entries: [
@@ -120,7 +118,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     };
     assert.deepEqual(parseJudgeEvidence(evidence), evidence);
     assert.throws(() =>
-      parseJudgeEvidence({...evidence, trajectory_sha256: 'sha256:invalid'}),
+      parseJudgeEvidence({...evidence, trajectory_sha256: DIGEST}),
     );
     assert.throws(() =>
       parseJudgeEvidence({
@@ -152,7 +150,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(() =>
       parseJudgeEvidence({
         ...evidence,
-        transcript: {...evidence.transcript, sha256: 'sha256:invalid'},
+        transcript: {...evidence.transcript, sha256: DIGEST},
       }),
     );
     assert.throws(() =>

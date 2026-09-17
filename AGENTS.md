@@ -107,13 +107,14 @@ receive a deterministic projection of its root ATIF steps which removes only
 the typed `reasoning_content` and `reasoning_effort` fields; visible messages,
 tool calls, tool results, and identically named keys inside opaque payloads must
 remain intact. `judge-evidence.json` exists only when guidelines were judged and
-must bind the prompt version, full redacted trajectory digest, exact projected
-transcript digest and policy, and exact bounded workspace evidence made
-available to the judge. Derive the projection only after credential redaction.
+must record the prompt version, exact transcript-projection policy, and exact
+bounded workspace evidence made available to the judge. The canonical artifact
+descriptors in `result.json` already bind the stored trajectory bytes. Derive
+the projection only after credential redaction.
 Changing its root-step scope, excluded fields, or serialization requires a new
 projection version. Final completion-prompt redaction must be a no-op for a
-judge request; fail closed before dispatch rather than let it rewrite bytes
-whose digests were already computed.
+judge request; fail closed before dispatch rather than silently rewrite the
+selected transcript or recorded workspace evidence.
 Collect judge workspace text only from the sealed runtime and preserve all
 truncation/unavailability warnings.
 

@@ -6,7 +6,6 @@ import {
   type AtifStep,
   type AtifTrajectoryV1_8,
 } from '../atif/index.js';
-import {sha256Digest} from '../model/hashes.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
   JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
@@ -137,7 +136,7 @@ describe('createJudgeTranscriptProjection', () => {
     assert.equal(JSON.parse(projection.transcriptJson).length, 3);
   });
 
-  it('returns immutable metadata and hashes exact canonical JSON bytes', () => {
+  it('returns immutable metadata and exact canonical JSON bytes', () => {
     const trajectory: AtifTrajectoryV1_8 = {
       schema_version: 'ATIF-v1.8',
       agent: {name: 'test-agent', version: '1'},
@@ -179,9 +178,7 @@ describe('createJudgeTranscriptProjection', () => {
 
     assert.equal(first.transcriptJson, expected);
     assert.equal(first.transcriptJson.endsWith('\n'), true);
-    assert.equal(first.transcriptSha256, sha256Digest(expected));
     assert.equal(second.transcriptJson, first.transcriptJson);
-    assert.equal(second.transcriptSha256, first.transcriptSha256);
     assert.equal(Object.isFrozen(first), true);
     assert.equal(Object.isFrozen(first.excludedFields), true);
   });

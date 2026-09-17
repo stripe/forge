@@ -184,7 +184,6 @@ const interactionArtifactSchema = z.object({
 const judgeEvidenceSchema = z.object({
   schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
   prompt_version: safeText,
-  trajectory_sha256: digest,
   transcript: z.object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
     projection_id: z.literal(JUDGE_TRANSCRIPT_PROJECTION_ID),
@@ -193,7 +192,6 @@ const judgeEvidenceSchema = z.object({
       z.literal(JUDGE_TRANSCRIPT_EXCLUDED_FIELDS[0]),
       z.literal(JUDGE_TRANSCRIPT_EXCLUDED_FIELDS[1]),
     ]),
-    sha256: digest,
   }).strict(),
   workspace: z.object({
     entries: z.array(z.object({
@@ -393,7 +391,6 @@ const runResultFields = {
   completed_at: isoTimestamp,
   duration_ms: z.number().int().nonnegative(),
   stop_reason: z.enum(['task_complete', 'max_turns', 'role_player_error']),
-  artifact_set_sha256: digest,
   artifacts: z.array(artifactDescriptor),
   supplemental_artifacts: z.array(artifactDescriptor),
   warnings: z.array(z.object({code: safeText, message: z.string().min(1).max(64 * 1024)}).strict()),

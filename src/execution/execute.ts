@@ -91,7 +91,7 @@ import {
   type RunWarningV1,
 } from '../results/index.js';
 import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
-import {canonicalJsonSha256, serializeCanonicalJson} from '../serialization.js';
+import {serializeCanonicalJson} from '../serialization.js';
 import {
   createSetupExecutor,
   forgeSetupHandlers,
@@ -390,15 +390,11 @@ export async function executeEvalWithTestHooks(
         judgeEvidence = parseJudgeEvidence({
           schema_version: 1,
           prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
-          trajectory_sha256: canonicalBytesSha256(
-            Buffer.from(trajectoryJson, 'utf8'),
-          ),
           transcript: {
             source: JUDGE_TRANSCRIPT_SOURCE,
             projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
             projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
             excluded_fields: [...JUDGE_TRANSCRIPT_EXCLUDED_FIELDS],
-            sha256: judgeTranscript.transcriptSha256,
           },
           workspace: {
             entries: safeWorkspace.entries.map((entry) => ({
@@ -1391,7 +1387,6 @@ function buildResult(input: {
     completed_at: input.completedAt.toISOString(),
     duration_ms: Math.max(0, input.completedAt.getTime() - input.startedAt.getTime()),
     stop_reason: input.interaction.stopReason,
-    artifact_set_sha256: canonicalJsonSha256(input.coreDescriptors),
     artifacts: input.coreDescriptors,
     supplemental_artifacts: input.supplementalDescriptors,
     warnings: input.warnings,
@@ -1453,11 +1448,12 @@ function canonicalBytesSha256(body: Uint8Array): `sha256:${string}` {
 }
 
 /**
- * The transcript digest and recorded workspace evidence describe exact
+ * The projected transcript and recorded workspace evidence are exact
  * substrings of the final judge prompt. CompletionRuntime still performs
  * defensive redaction, so fail closed if that final pass would rewrite any
- * prompt bytes after the digests were computed. This also catches
- * secret-shaped strings formed only at JSON or prompt-template boundaries.
+ * prompt bytes after those evidence values were constructed. This also
+ * catches secret-shaped strings formed only at JSON or prompt-template
+ * boundaries.
  */
 function assertJudgePromptWillRemainUnchanged(
   request: Pick<GuidelineCompletionRequest, 'systemPrompt' | 'messages'>,

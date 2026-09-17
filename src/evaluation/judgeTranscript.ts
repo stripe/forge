@@ -3,8 +3,6 @@ import {
   type AtifStep,
   type AtifTrajectoryV1_8,
 } from '../atif/index.js';
-import {sha256Digest} from '../model/hashes.js';
-import type {Sha256Digest} from '../model/types.js';
 import {serializeCanonicalJson} from '../serialization.js';
 
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
@@ -23,7 +21,6 @@ export interface JudgeTranscriptProjectionV1 {
   readonly excludedFields: typeof JUDGE_TRANSCRIPT_EXCLUDED_FIELDS;
   /** Exact canonical JSON supplied to the judge, including its final LF. */
   readonly transcriptJson: string;
-  readonly transcriptSha256: Sha256Digest;
 }
 
 /**
@@ -47,7 +44,6 @@ export function createJudgeTranscriptProjection(
     projectionVersion: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
     excludedFields: JUDGE_TRANSCRIPT_EXCLUDED_FIELDS,
     transcriptJson,
-    transcriptSha256: sha256Digest(transcriptJson),
   });
 }
 
