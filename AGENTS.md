@@ -25,10 +25,10 @@ exist.
 - An eval case defines **what** is evaluated: task or initial prompt, context,
   invariant case setup, interaction mode and turn limit, checks, guidelines,
   and example answers.
-- A benchmark profile defines **how** cases run: dataset pin, treatments, agents,
+- An experiment config defines **how** cases run: dataset pin, treatments, agents,
   models, runtime, limits, repetitions, retries, and the experiment matrix.
 - A run selection chooses one case, treatment, agent/model, and repetition from
-  the profile.
+  the experiment config.
 - A selected `multi_turn` case requires an explicit `models.role_player`; a
   selected case with non-empty success guidelines requires an explicit
   `models.judge`. Do not infer either from the coding-agent selection or an
@@ -152,8 +152,8 @@ Observers are non-authoritative and may not affect the run result.
 
 ### Treat credentials and inputs as capabilities
 
-- Profiles, plans, events, and results contain opaque credential references,
-  never secret values.
+- Experiment configs, plans, events, and results contain opaque credential
+  references, never secret values.
 - Never copy the ambient host environment wholesale into a runtime.
 - Keep setup and agent credential scopes separate.
 - Keep completion-provider credentials host-side and purpose-specific. They do
@@ -187,8 +187,8 @@ Observers are non-authoritative and may not affect the run result.
 - Preserve interaction failure semantics: Ava exhaustion commits
   `role_player_error`; malformed judge output exhausts retries and fails that
   guideline closed; exhausted judge transport failures abort without a
-  completed commit. Profile-level `retries` remains distinct from these fixed
-  completion-attempt policies.
+  completed commit. Experiment-config-level `retries` remains distinct from
+  these fixed completion-attempt policies.
 
 ## Public API and TypeScript conventions
 
@@ -235,7 +235,7 @@ Observers are non-authoritative and may not affect the run result.
 - `src/results`: result schemas, transactional storage, and verification.
 - `src/testing`: public fakes, fixtures, and adapter conformance helpers.
 - `test`: package-level and end-to-end orchestration tests.
-- `examples`: checked-in runnable datasets and profiles.
+- `examples`: checked-in runnable datasets and experiment configs.
 
 ## Testing and verification
 
@@ -277,7 +277,8 @@ output, transport abort, bounded sealed-workspace evidence, completion-call
 summaries, and conditional canonical artifacts.
 
 When changing checked-in examples, update all dependent file sizes and SHA-256
-digests in the dataset manifest and profile, plus any mirrored README snippets.
+digests in the dataset manifest and experiment config, plus any mirrored README
+snippets.
 When changing packaged Docker assets or tool pins, update and test their recorded
 digests and runtime metadata. ATIF changes must remain tied to a specific
 upstream version and update provenance, conformance tests, and notices together.

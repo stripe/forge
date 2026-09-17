@@ -7,7 +7,7 @@ case decoupled from experiment configuration:
   handoff, its opening message and role-player context, a turn limit, one success
   guideline, and deterministic filesystem checks. It contains no agent,
   provider, model, runtime, or repetition choice.
-- `profile.yaml` selects Claude Code for the coding agent and independently
+- `experiment.yaml` selects Claude Code for the coding agent and independently
   selects `claude-sonnet-4-6` through the Anthropic provider for both Ava's
   role-player decisions and guideline judging.
 
@@ -29,8 +29,9 @@ this exact payload:
 
 The raw `dataset/manifest.json` digest is
 `sha256:acd68e0d7c13dd6d3a46382e802ad2345d0f82de8813ecd239a84ed21d032447`.
-`profile.yaml` pins that exact digest, so changing the case or manifest requires
-updating the size, payload SHA-256, and profile manifest digest together.
+`experiment.yaml` pins that exact digest, so changing the case or manifest
+requires updating the size, payload SHA-256, and experiment config's manifest
+digest together.
 
 ## Validate and inspect the plan
 
@@ -39,18 +40,18 @@ From the repository root:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --profile examples/multi-turn/profile.yaml \
+  --experiment examples/multi-turn/experiment.yaml \
   --dataset examples/multi-turn/dataset
 
 node dist/cli.js plan \
-  --profile examples/multi-turn/profile.yaml \
+  --experiment examples/multi-turn/experiment.yaml \
   --case-file examples/multi-turn/dataset/cases/examples/release-summary.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6
 ```
 
 `--case-file` discovers and verifies the dataset manifest, then selects the
-case's stable ID from the profile matrix. It does not turn the case into an
+case's stable ID from the experiment matrix. It does not turn the case into an
 unversioned ad hoc experiment.
 
 ## Run with Docker and Anthropic
@@ -61,7 +62,7 @@ calls for the coding agent, Ava role player, and guideline judge:
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
 node dist/cli.js run \
-  --profile examples/multi-turn/profile.yaml \
+  --experiment examples/multi-turn/experiment.yaml \
   --case-file examples/multi-turn/dataset/cases/examples/release-summary.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
@@ -69,14 +70,14 @@ node dist/cli.js run \
   --run-id multi-turn-001
 ```
 
-For an Anthropic Messages-compatible endpoint, use the same profile and run
-command with an endpoint and bearer token instead:
+For an Anthropic Messages-compatible endpoint, use the same experiment config
+and run command with an endpoint and bearer token instead:
 
 ```sh
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
 node dist/cli.js run \
-  --profile examples/multi-turn/profile.yaml \
+  --experiment examples/multi-turn/experiment.yaml \
   --case-file examples/multi-turn/dataset/cases/examples/release-summary.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
@@ -85,8 +86,8 @@ node dist/cli.js run \
 ```
 
 Credentials and compatible-endpoint configuration stay in the execution
-environment; they are never stored in the case, profile, resolved plan, or
-result artifacts.
+environment; they are never stored in the case, experiment config, resolved
+plan, or result artifacts.
 
 Repository contributors can run the same selection with post-run conformance
 checks by explicitly acknowledging its multiple potentially billable calls:

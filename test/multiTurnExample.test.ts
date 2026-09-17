@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import {describe, it} from 'node:test';
 
 import {runCli} from '../src/cli.js';
-import {loadBenchmarkProfile, loadDataset} from '../src/model/index.js';
+import {loadExperimentConfig, loadDataset} from '../src/model/index.js';
 import {expandExperiment, resolveRunPlan} from '../src/planning/index.js';
 
 const MANIFEST_SHA256 =
@@ -12,7 +12,7 @@ const CASE_SHA256 =
   'sha256:fa82c800831105fe9521ed03847d381523d774c706288a53a8082e34241991f3';
 const exampleRoot = path.join(process.cwd(), 'examples', 'multi-turn');
 const datasetRoot = path.join(exampleRoot, 'dataset');
-const profilePath = path.join(exampleRoot, 'profile.yaml');
+const experimentPath = path.join(exampleRoot, 'experiment.yaml');
 const casePath = path.join(
   datasetRoot,
   'cases',
@@ -22,9 +22,9 @@ const casePath = path.join(
 
 describe('checked-in multi-turn example', () => {
   it('loads its pinned dataset and resolves the same plan through the CLI', async () => {
-    const [dataset, profile] = await Promise.all([
+    const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),
-      loadBenchmarkProfile(profilePath),
+      loadExperimentConfig(experimentPath),
     ]);
 
     assert.equal(dataset.manifestSha256, MANIFEST_SHA256);
@@ -35,9 +35,9 @@ describe('checked-in multi-turn example', () => {
         sha256: CASE_SHA256.slice('sha256:'.length),
       },
     ]);
-    assert.equal(profile.profile.dataset.manifest_sha256, MANIFEST_SHA256);
+    assert.equal(experiment.config.dataset.manifest_sha256, MANIFEST_SHA256);
 
-    const selections = expandExperiment(profile);
+    const selections = expandExperiment(experiment);
     assert.deepEqual(selections, [
       {
         case_id: 'examples/release-summary',
@@ -51,7 +51,11 @@ describe('checked-in multi-turn example', () => {
       },
     ]);
 
-    const plan = resolveRunPlan({dataset, profile, selection: selections[0]!});
+    const plan = resolveRunPlan({
+      dataset,
+      experiment,
+      selection: selections[0]!,
+    });
     assert.equal(plan.provenance.case.sha256, CASE_SHA256);
     assert.deepEqual(plan.role_player, {
       provider: 'anthropic',
@@ -75,8 +79,8 @@ describe('checked-in multi-turn example', () => {
     const exitCode = await runCli(
       [
         'plan',
-        '--profile',
-        profilePath,
+        '--experiment',
+        experimentPath,
         '--case-file',
         casePath,
         '--agent',

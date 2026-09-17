@@ -62,8 +62,8 @@ describe('checked-in quickstart', () => {
     const exitCode = await runCli(
       [
         'run',
-        '--profile',
-        path.join(exampleRoot, 'profile.yaml'),
+        '--experiment',
+        path.join(exampleRoot, 'experiment.yaml'),
         '--case-file',
         path.join(
           exampleRoot,

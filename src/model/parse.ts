@@ -22,7 +22,7 @@ import {
   DEFAULT_DOCKER_PROCESS_COUNT,
   DEFAULT_MAX_TURNS,
   DEFAULT_RUN_TIMEOUT_MS,
-  type BenchmarkProfileV1,
+  type ExperimentConfigV1,
   type DatasetManifestV1,
   type EvalCaseV1,
   type JsonValue,
@@ -352,7 +352,7 @@ const RuntimeSchema = z
   })
   .strict();
 
-const BenchmarkProfileSchema = z
+const ExperimentConfigSchema = z
   .object({
     schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
     id: CaseIdSchema,
@@ -391,8 +391,8 @@ const BenchmarkProfileSchema = z
       .default({}),
   })
   .strict()
-  .superRefine((profile, context) => {
-    for (const treatment of Object.keys(profile.treatments)) {
+  .superRefine((config, context) => {
+    for (const treatment of Object.keys(config.treatments)) {
       if (!isSafeSimpleIdentifier(treatment)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -401,7 +401,7 @@ const BenchmarkProfileSchema = z
         });
       }
     }
-    const baseline = profile.treatments.baseline;
+    const baseline = config.treatments.baseline;
     if (baseline !== undefined && baseline.setup.length !== 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -410,22 +410,22 @@ const BenchmarkProfileSchema = z
           'baseline setup must be empty; invariant setup belongs to the case',
       });
     }
-    addDuplicateIssues(profile.matrix.cases, context, ['matrix', 'cases']);
+    addDuplicateIssues(config.matrix.cases, context, ['matrix', 'cases']);
     addDuplicateIssues(
-      profile.matrix.treatments,
+      config.matrix.treatments,
       context,
       ['matrix', 'treatments'],
     );
     addDuplicateIssues(
-      profile.matrix.agents.map(agentKey),
+      config.matrix.agents.map(agentKey),
       context,
       ['matrix', 'agents'],
     );
     const treatmentNames = new Set([
       'baseline',
-      ...Object.keys(profile.treatments),
+      ...Object.keys(config.treatments),
     ]);
-    for (const [index, treatment] of profile.matrix.treatments.entries()) {
+    for (const [index, treatment] of config.matrix.treatments.entries()) {
       if (!isSafeSimpleIdentifier(treatment)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -482,7 +482,7 @@ const ResolvedRunPlanSchema = z
             .string()
             .refine(isSha256Digest, 'must be a sha256: digest'),
         }).strict(),
-        profile: z
+        experiment: z
           .object({
             id: CaseIdSchema,
             version: VersionSchema,
@@ -730,13 +730,13 @@ export function parseEvalCaseYaml(source: string): EvalCaseV1 {
   return parseEvalCase(parseYaml(source, 'eval case'));
 }
 
-export function parseBenchmarkProfile(value: unknown): BenchmarkProfileV1 {
+export function parseExperimentConfig(value: unknown): ExperimentConfigV1 {
   const parsed = parseWithSchema(
-    BenchmarkProfileSchema,
+    ExperimentConfigSchema,
     value,
-    'invalid_profile',
-    'benchmark profile',
-  ) as BenchmarkProfileV1;
+    'invalid_experiment_config',
+    'experiment config',
+  ) as ExperimentConfigV1;
   return {
     ...parsed,
     treatments: {
@@ -746,8 +746,8 @@ export function parseBenchmarkProfile(value: unknown): BenchmarkProfileV1 {
   };
 }
 
-export function parseBenchmarkProfileYaml(source: string): BenchmarkProfileV1 {
-  return parseBenchmarkProfile(parseYaml(source, 'benchmark profile'));
+export function parseExperimentConfigYaml(source: string): ExperimentConfigV1 {
+  return parseExperimentConfig(parseYaml(source, 'experiment config'));
 }
 
 /** Parse an untrusted CLI, worker, or API selection before matrix resolution. */
@@ -755,7 +755,7 @@ export function parseRunSelection(value: unknown): RunSelection {
   return parseWithSchema(
     RunSelectionSchema,
     value,
-    'invalid_profile',
+    'invalid_experiment_config',
     'run selection',
   ) as RunSelection;
 }
@@ -806,7 +806,7 @@ function parseWithSchema(
   code:
     | 'invalid_manifest'
     | 'invalid_case'
-    | 'invalid_profile'
+    | 'invalid_experiment_config'
     | 'invalid_plan',
   label: string,
 ): unknown {

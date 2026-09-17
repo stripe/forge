@@ -3,8 +3,8 @@ import {
   BENCHMARK_SCHEMA_VERSION,
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
-  type BenchmarkProfileV1,
-  type LoadedBenchmarkProfileV1,
+  type ExperimentConfigV1,
+  type LoadedExperimentConfigV1,
   type LoadedDatasetV1,
   type ResolvedRunPlanV1,
   type RunSelection,
@@ -13,7 +13,7 @@ import {
 } from '../model/types.js';
 
 export type PlanningErrorCode =
-  | 'dataset_profile_mismatch'
+  | 'dataset_experiment_mismatch'
   | 'unknown_case'
   | 'unknown_treatment'
   | 'unknown_agent'
@@ -37,16 +37,16 @@ export class PlanningError extends Error {
  * Retries deliberately do not create new semantic selections.
  */
 export function expandExperiment(
-  input: BenchmarkProfileV1 | LoadedBenchmarkProfileV1,
+  input: ExperimentConfigV1 | LoadedExperimentConfigV1,
 ): RunSelection[] {
-  const profile = 'profile' in input ? input.profile : input;
+  const config = 'config' in input ? input.config : input;
   const selections: RunSelection[] = [];
-  for (const caseId of profile.matrix.cases) {
-    for (const treatment of profile.matrix.treatments) {
-      for (const agent of profile.matrix.agents) {
+  for (const caseId of config.matrix.cases) {
+    for (const treatment of config.matrix.treatments) {
+      for (const agent of config.matrix.agents) {
         for (
           let repetition = 0;
-          repetition < profile.matrix.repetitions;
+          repetition < config.matrix.repetitions;
           repetition += 1
         ) {
           selections.push({
@@ -65,13 +65,13 @@ export function expandExperiment(
 /** Resolve one validated selection into the complete, ambient-free run plan. */
 export function resolveRunPlan(input: {
   dataset: LoadedDatasetV1;
-  profile: LoadedBenchmarkProfileV1;
+  experiment: LoadedExperimentConfigV1;
   selection: RunSelection;
 }): ResolvedRunPlanV1 {
   const {dataset, selection} = input;
-  const profile = input.profile.profile;
-  assertDatasetCompatibility(dataset, profile);
-  assertSelection(profile, selection);
+  const config = input.experiment.config;
+  assertDatasetCompatibility(dataset, config);
+  assertSelection(config, selection);
 
   const loadedCase = dataset.cases.get(selection.case_id);
   if (!loadedCase) {
@@ -91,7 +91,7 @@ export function resolveRunPlan(input: {
   }
 
   const treatment =
-    profile.treatments[selection.treatment] ??
+    config.treatments[selection.treatment] ??
     (selection.treatment === 'baseline' ? {setup: []} : undefined);
   if (!treatment) {
     throw new PlanningError(
@@ -102,20 +102,20 @@ export function resolveRunPlan(input: {
   const definition = loadedCase.definition;
   if (
     definition.execution_mode === 'multi_turn' &&
-    profile.models.role_player === undefined
+    config.models.role_player === undefined
   ) {
     throw new PlanningError(
       'missing_role_player',
-      'A multi_turn case requires models.role_player in the benchmark profile.',
+      'A multi_turn case requires models.role_player in the experiment config.',
     );
   }
   if (
     definition.success_guidelines.length > 0 &&
-    profile.models.judge === undefined
+    config.models.judge === undefined
   ) {
     throw new PlanningError(
       'missing_judge',
-      'A case with success guidelines requires models.judge in the benchmark profile.',
+      'A case with success guidelines requires models.judge in the experiment config.',
     );
   }
 
@@ -143,17 +143,17 @@ export function resolveRunPlan(input: {
         ...cloneJson(dataset.manifest.dataset),
         manifest_sha256: dataset.manifestSha256,
       },
-      profile: {
-        id: profile.id,
-        version: profile.version,
-        sha256: input.profile.sha256,
+      experiment: {
+        id: config.id,
+        version: config.version,
+        sha256: input.experiment.sha256,
       },
       case: {
         id: definition.id,
         path: manifestCase.path,
         sha256: loadedCase.sha256,
       },
-      forge: {version: profile.forge.version},
+      forge: {version: config.forge.version},
     },
     case: cloneJson(definition),
     treatment: {
@@ -184,17 +184,17 @@ export function resolveRunPlan(input: {
         ? {}
         : {example_answer: definition.example_answer}),
       ...(definition.success_guidelines.length === 0 ||
-      profile.models.judge === undefined
+      config.models.judge === undefined
         ? {}
-        : {judge: cloneJson(profile.models.judge)}),
+        : {judge: cloneJson(config.models.judge)}),
     },
     ...(definition.execution_mode !== 'multi_turn' ||
-    profile.models.role_player === undefined
+    config.models.role_player === undefined
       ? {}
-      : {role_player: cloneJson(profile.models.role_player)}),
+      : {role_player: cloneJson(config.models.role_player)}),
     agent: cloneJson(selection.agent),
-    runtime: cloneJson(profile.runtime),
-    limits: cloneJson(profile.limits),
+    runtime: cloneJson(config.runtime),
+    limits: cloneJson(config.limits),
   };
   return deepFreeze(plan);
 }
@@ -210,46 +210,46 @@ export function resolvedRunPlanSha256(plan: ResolvedRunPlanV1): `sha256:${string
 
 function assertDatasetCompatibility(
   dataset: LoadedDatasetV1,
-  profile: BenchmarkProfileV1,
+  config: ExperimentConfigV1,
 ): void {
   if (
-    dataset.manifest.dataset.id !== profile.dataset.id ||
-    dataset.manifest.dataset.version !== profile.dataset.version ||
-    dataset.manifestSha256 !== profile.dataset.manifest_sha256
+    dataset.manifest.dataset.id !== config.dataset.id ||
+    dataset.manifest.dataset.version !== config.dataset.version ||
+    dataset.manifestSha256 !== config.dataset.manifest_sha256
   ) {
     throw new PlanningError(
-      'dataset_profile_mismatch',
-      'Loaded dataset does not match the benchmark profile pin.',
+      'dataset_experiment_mismatch',
+      'Loaded dataset does not match the experiment config pin.',
     );
   }
-  for (const caseId of profile.matrix.cases) {
+  for (const caseId of config.matrix.cases) {
     if (!dataset.cases.has(caseId)) {
       throw new PlanningError(
         'unknown_case',
-        'Benchmark profile references a case absent from the loaded dataset.',
+        'Experiment config references a case absent from the loaded dataset.',
       );
     }
   }
 }
 
 function assertSelection(
-  profile: BenchmarkProfileV1,
+  config: ExperimentConfigV1,
   selection: RunSelection,
 ): void {
-  if (!profile.matrix.cases.includes(selection.case_id)) {
+  if (!config.matrix.cases.includes(selection.case_id)) {
     throw new PlanningError(
       'unknown_case',
       'Run selection case is not in the benchmark matrix.',
     );
   }
-  if (!profile.matrix.treatments.includes(selection.treatment)) {
+  if (!config.matrix.treatments.includes(selection.treatment)) {
     throw new PlanningError(
       'unknown_treatment',
       'Run selection treatment is not in the benchmark matrix.',
     );
   }
   if (
-    !profile.matrix.agents.some((agent) =>
+    !config.matrix.agents.some((agent) =>
       agentsEqual(agent, selection.agent),
     )
   ) {
@@ -261,7 +261,7 @@ function assertSelection(
   if (
     !Number.isSafeInteger(selection.repetition) ||
     selection.repetition < 0 ||
-    selection.repetition >= profile.matrix.repetitions
+    selection.repetition >= config.matrix.repetitions
   ) {
     throw new PlanningError(
       'invalid_repetition',

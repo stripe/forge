@@ -35,8 +35,8 @@ function validPlan(): ResolvedRunPlanV1 {
         version: '1.0.0',
         manifest_sha256: DIGEST,
       },
-      profile: {
-        id: 'sample/profile',
+      experiment: {
+        id: 'sample/experiment',
         version: '1.0.0',
         sha256: DIGEST,
       },

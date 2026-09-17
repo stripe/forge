@@ -131,7 +131,7 @@ export interface ForgeDockerRuntimeV1 {
   resources: DockerResourcesV1;
 }
 
-export interface BenchmarkProfileV1 {
+export interface ExperimentConfigV1 {
   schema_version: typeof BENCHMARK_SCHEMA_VERSION;
   id: string;
   version: string;
@@ -172,12 +172,12 @@ export interface LoadedDatasetV1 {
   cases: ReadonlyMap<CaseId, LoadedEvalCaseV1>;
 }
 
-export interface LoadedBenchmarkProfileV1 {
+export interface LoadedExperimentConfigV1 {
   path: string;
   root: string;
   raw: string;
   sha256: Sha256Digest;
-  profile: BenchmarkProfileV1;
+  config: ExperimentConfigV1;
 }
 
 export interface RunSelection {
@@ -197,7 +197,7 @@ export interface ResolvedRunPlanV1 {
   selection: RunSelection;
   provenance: {
     dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
-    profile: {
+    experiment: {
       id: string;
       version: string;
       sha256: Sha256Digest;
