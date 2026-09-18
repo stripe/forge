@@ -9,7 +9,6 @@ import {runCli} from '../src/cli.js';
 import type {AgentAdapter} from '../src/contracts/agent.js';
 import {createDirectoryRunInputProvider} from '../src/contracts/inputs.js';
 import {createArtifactStore, verifyCompletedRun} from '../src/results/index.js';
-import {forgeSetupHandlers} from '../src/setup/index.js';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
@@ -91,7 +90,6 @@ describe('checked-in quickstart', () => {
         compositionFactory: async ({datasetRoot, resultsRoot: outputRoot}) => ({
           runtime: runtime.adapter,
           agents: new Map([[agent.id, agent]]),
-          setupHandlers: forgeSetupHandlers,
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: await createDirectoryRunInputProvider(datasetRoot),
           artifactStore: createArtifactStore({root: outputRoot}),
@@ -107,7 +105,7 @@ describe('checked-in quickstart', () => {
       result: {evaluation: {score: number; status: string}};
     };
     expect(summary.run_id).toBe('quickstart-e2e');
-    // v0.1 check-only cases use status as the pass/fail signal. The numeric
+    // v0.2 check-only cases use status as the pass/fail signal. The numeric
     // score remains the guideline ratio and is therefore zero with no judge.
     expect(summary.result.evaluation).toMatchObject({score: 0, status: 'passed'});
 

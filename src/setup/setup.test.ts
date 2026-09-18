@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 import type {CommandResult} from '../contracts/command.js';
+import {credentialReference} from '../contracts/credentials.js';
 import type {MutableWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
 import type {SetupStepV1} from '../model/types.js';
-import {createSetupExecutor} from './executor.js';
+import {
+  createSetupExecutor,
+  firstPartySetupHandlers,
+} from './executor.js';
+import type {SetupStepHandler, SetupStepRequirements} from './types.js';
+
+const setupTarget = Object.freeze({
+  selection: Object.freeze({
+    adapter: 'test-agent',
+    provider: 'test-provider',
+    model: 'test-model',
+  }),
+  runtime: Object.freeze({
+    adapter: 'docker' as const,
+    image: Object.freeze({kind: 'forge' as const}),
+    platform: 'linux/amd64' as const,
+    resources: Object.freeze({
+      memory_bytes: 1024,
+      cpu_count: 1,
+      process_count: 8,
+    }),
+  }),
+});
 
 function result(exitCode = 0): CommandResult {
   return {stdout: '', stderr: '', exitCode, durationMs: 1};
@@ -46,15 +69,24 @@ describe('portable setup actions', () => {
       },
     ];
 
-    await createSetupExecutor().apply(steps, {
+    const prepared = createSetupExecutor().preflight(steps, setupTarget);
+    await prepared.apply({
       runId: 'run-1',
+      paths: {workspace: '/workspace', home: '/home/forge'},
       workspace,
       commands: {
-        async run(argv, options) {
-          events.push(`command:${argv.join(' ')}`);
-          assert.equal(options?.cwd, '.');
-          assert.equal(options?.timeoutMs, 1234);
-          return result();
+        uncredentialed: {
+          async run(argv, options) {
+            events.push(`command:${argv.join(' ')}`);
+            assert.equal(options?.cwd, '.');
+            assert.equal(options?.timeoutMs, 1234);
+            return result();
+          },
+        },
+        setup: {
+          async run() {
+            throw new Error('credential-free commands must not use setup credentials');
+          },
         },
       },
       inputs: {
@@ -82,29 +114,254 @@ describe('portable setup actions', () => {
 
   it('preflights all handlers before performing mutations', async () => {
     let mutated = false;
-    const executor = createSetupExecutor();
+    const mutatingHandler: SetupStepHandler = {
+      uses: 'acme/mutate@1',
+      preflight() {
+        return {
+          requirements: {},
+          async apply() {
+            mutated = true;
+          },
+        };
+      },
+    };
+    const executor = createSetupExecutor({
+      extensions: new Map([[mutatingHandler.uses, mutatingHandler]]),
+    });
     const steps: SetupStepV1[] = [
-      {uses: 'forge/write@1', with: {target: 'ok', source: {content: 'x'}}},
+      {uses: mutatingHandler.uses, with: {}},
       {uses: 'example/missing@1', with: {}},
     ];
+    assert.throws(
+      () => executor.preflight(steps, setupTarget),
+      /No setup handler/,
+    );
+    assert.equal(mutated, false);
+  });
+
+  it('binds setup and agent requirements during one pure preflight', async () => {
+    const events: string[] = [];
+    const handler: SetupStepHandler = {
+      uses: 'acme/configure@1',
+      preflight(_step, context) {
+        assert.equal(Object.isFrozen(context.selection), true);
+        assert.equal(Object.isFrozen(context.runtime), true);
+        assert.equal(Object.isFrozen(context.runtime.resources), true);
+        events.push(
+          `preflight:${context.stepIndex}:${context.selection.adapter}:${context.runtime.platform}`,
+        );
+        return {
+          requirements: {
+            variables: {FEATURE_MODE: 'enabled'},
+            credentials: {
+              setup: {
+                PACKAGE_TOKEN: {
+                  reference: credentialReference('acme.package-token'),
+                },
+              },
+              agent: {
+                SERVICE_TOKEN: {
+                  reference: credentialReference('acme.service-token'),
+                },
+              },
+            },
+          },
+          async apply(applyContext) {
+            events.push(
+              `apply:${applyContext.stepIndex}:${applyContext.selection.adapter}:${applyContext.paths.workspace}`,
+            );
+            await applyContext.commands.run(['configure']);
+          },
+        };
+      },
+    };
+    const prepared = createSetupExecutor({
+      extensions: new Map([[handler.uses, handler]]),
+    }).preflight([{uses: handler.uses, with: {}}], setupTarget);
+
+    assert.deepEqual(prepared.requirements, {
+      variables: {FEATURE_MODE: 'enabled'},
+      credentials: {
+        setup: {
+          PACKAGE_TOKEN: {reference: 'acme.package-token'},
+        },
+        agent: {
+          SERVICE_TOKEN: {reference: 'acme.service-token'},
+        },
+      },
+    });
+    assert.equal(Object.isFrozen(prepared.requirements), true);
+
+    await prepared.apply({
+      runId: 'run-requirements',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: emptyWorkspace(),
+      commands: {
+        uncredentialed: {
+          async run() {
+            throw new Error('credentialed setup must use the setup projection');
+          },
+        },
+        setup: {
+          async run() {
+            events.push('command:setup');
+            return result();
+          },
+        },
+      },
+      inputs: emptyInputs(),
+      signal: new AbortController().signal,
+    });
+
+    assert.deepEqual(events, [
+      'preflight:0:test-agent:linux/amd64',
+      'apply:0:test-agent:/workspace',
+      'command:setup',
+    ]);
     await assert.rejects(
-      executor.apply(steps, {
+      prepared.apply({
+        runId: 'run-requirements-repeated',
+        paths: {workspace: '/workspace', home: '/home/forge'},
+        workspace: emptyWorkspace(),
+        commands: inertCommandProjections(),
+        inputs: emptyInputs(),
+        signal: new AbortController().signal,
+      }),
+      /already been applied/,
+    );
+  });
+
+  it('rejects conflicting setup and agent credential references during preflight', () => {
+    const handler: SetupStepHandler = {
+      uses: 'acme/conflict@1',
+      preflight() {
+        return {
+          requirements: {
+            credentials: {
+              setup: {
+                SHARED_TOKEN: {reference: credentialReference('setup-token')},
+              },
+              agent: {
+                SHARED_TOKEN: {reference: credentialReference('agent-token')},
+              },
+            },
+          },
+          async apply() {},
+        };
+      },
+    };
+
+    assert.throws(
+      () => createSetupExecutor({
+        extensions: new Map([[handler.uses, handler]]),
+      }).preflight([{uses: handler.uses, with: {}}], setupTarget),
+      /conflicting references/,
+    );
+  });
+
+  it('rejects handler-assigned raw credential scopes', () => {
+    const handler: SetupStepHandler = {
+      uses: 'acme/unsafe-scope@1',
+      preflight() {
+        return {
+          requirements: {
+            credentials: {
+              agent: {
+                TOKEN: {
+                  reference: credentialReference('acme.token'),
+                  scopes: ['setup'],
+                },
+              },
+            },
+          } as unknown as SetupStepRequirements,
+          async apply() {},
+        };
+      },
+    };
+
+    assert.throws(
+      () => createSetupExecutor({
+        extensions: new Map([[handler.uses, handler]]),
+      }).preflight([{uses: handler.uses, with: {}}], setupTarget),
+      /binding TOKEN is invalid/,
+    );
+  });
+
+  it('reserves first-party action namespaces and tolerates exact built-ins', () => {
+    const replacement: SetupStepHandler = {
+      uses: 'stripe/cli@1',
+      preflight() {
+        return {requirements: {}, async apply() {}};
+      },
+    };
+
+    assert.throws(
+      () => createSetupExecutor({
+        extensions: new Map([[replacement.uses, replacement]]),
+      }),
+      /stripe\/.*reserved/,
+    );
+    assert.doesNotThrow(() => createSetupExecutor({
+      extensions: firstPartySetupHandlers,
+    }));
+  });
+
+  it('keeps the engine registry isolated from the exported registry view', () => {
+    const exportedView = firstPartySetupHandlers as Map<
+      string,
+      SetupStepHandler
+    >;
+    const snapshot = [...exportedView];
+    try {
+      exportedView.clear();
+      assert.doesNotThrow(() => createSetupExecutor().preflight(
+        [
+          {
+            uses: 'forge/write@1',
+            with: {target: 'ready.txt', source: {content: 'ready'}},
+          },
+        ],
+        setupTarget,
+      ));
+    } finally {
+      for (const [uses, handler] of snapshot) exportedView.set(uses, handler);
+    }
+  });
+
+  it('does not attach potentially sensitive command output to setup errors', async () => {
+    const prepared = createSetupExecutor().preflight(
+      [{uses: 'forge/command@1', with: {argv: ['false']}}],
+      setupTarget,
+    );
+    await assert.rejects(
+      prepared.apply({
         runId: 'run-1',
+        paths: {workspace: '/workspace', home: '/home/forge'},
         workspace: {
           async inspect(path): Promise<WorkspaceEntry> {
             return {path, kind: 'absent'};
           },
-          async readFile() {
-            return new Uint8Array();
+          async readFile() { return new Uint8Array(); },
+          async listFiles() { return []; },
+          async writeFile() {},
+        },
+        commands: {
+          uncredentialed: {
+            async run() {
+              return {
+                stdout: 'TOP_SECRET',
+                stderr: 'TOP_SECRET',
+                exitCode: 9,
+                durationMs: 1,
+              };
+            },
           },
-          async listFiles() {
-            return [];
-          },
-          async writeFile() {
-            mutated = true;
+          setup: {
+            async run() {
+              throw new Error('forge/command@1 must run uncredentialed');
+            },
           },
         },
-        commands: {async run() { return result(); }},
         inputs: {
           async inspect(path) { return {path, kind: 'file'}; },
           async read() { return new Uint8Array(); },
@@ -112,36 +369,6 @@ describe('portable setup actions', () => {
         },
         signal: new AbortController().signal,
       }),
-      /No setup handler/,
-    );
-    assert.equal(mutated, false);
-  });
-
-  it('does not attach potentially sensitive command output to setup errors', async () => {
-    await assert.rejects(
-      createSetupExecutor().apply(
-        [{uses: 'forge/command@1', with: {argv: ['false']}}],
-        {
-          runId: 'run-1',
-          workspace: {
-            async inspect(path): Promise<WorkspaceEntry> { return {path, kind: 'absent'}; },
-            async readFile() { return new Uint8Array(); },
-            async listFiles() { return []; },
-            async writeFile() {},
-          },
-          commands: {
-            async run() {
-              return {stdout: 'TOP_SECRET', stderr: 'TOP_SECRET', exitCode: 9, durationMs: 1};
-            },
-          },
-          inputs: {
-            async inspect(path) { return {path, kind: 'file'}; },
-            async read() { return new Uint8Array(); },
-            async listFiles() { return []; },
-          },
-          signal: new AbortController().signal,
-        },
-      ),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.equal(String(error).includes('TOP_SECRET'), false);
@@ -150,3 +377,27 @@ describe('portable setup actions', () => {
     );
   });
 });
+
+function emptyWorkspace(): MutableWorkspace {
+  return {
+    async inspect(path): Promise<WorkspaceEntry> { return {path, kind: 'absent'}; },
+    async readFile() { return new Uint8Array(); },
+    async listFiles() { return []; },
+    async writeFile() {},
+  };
+}
+
+function emptyInputs() {
+  return {
+    async inspect(path: string) { return {path, kind: 'file' as const}; },
+    async read() { return new Uint8Array(); },
+    async listFiles() { return []; },
+  };
+}
+
+function inertCommandProjections() {
+  return {
+    uncredentialed: {async run() { return result(); }},
+    setup: {async run() { return result(); }},
+  };
+}

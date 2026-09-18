@@ -45,7 +45,7 @@ function validPlan(): ResolvedRunPlanV1 {
         path: 'cases/sample/write/eval.yaml',
         sha256: DIGEST,
       },
-      forge: {version: '0.1.0'},
+      forge: {version: '0.2.0'},
     },
     case: {
       schema_version: 1,

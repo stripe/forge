@@ -26,6 +26,7 @@ import type {CommandOptions, CommandRunner} from '../contracts/command.js';
 import type {ForgeComposition} from '../contracts/composition.js';
 import {
   createEnvironmentResolver,
+  credentialReference,
   type CredentialEnvironmentBinding,
   type CredentialScope,
   type EnvironmentSpecification,
@@ -93,8 +94,7 @@ import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
   createSetupExecutor,
-  forgeSetupHandlers,
-  type SetupStepHandler,
+  type PreparedSetup,
 } from '../setup/index.js';
 import {executionError, ForgeExecutionError, throwIfAborted} from './errors.js';
 import {createRunEventEmitter} from './events.js';
@@ -110,7 +110,7 @@ import {
   type PreparedCompletionRuntime,
 } from './completionRuntime.js';
 
-export const FORGE_VERSION = '0.1.0' as const;
+export const FORGE_VERSION = '0.2.0' as const;
 
 const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;
@@ -143,7 +143,7 @@ export interface PreflightEvalInput {
 interface EvalPreflight {
   readonly agent: AgentAdapter;
   readonly agentEvidenceIdentity: AgentEvidenceIdentity;
-  readonly setupExecutor: ReturnType<typeof createSetupExecutor>;
+  readonly setup: PreparedSetup;
   readonly requirements: AgentRuntimeRequirements;
   readonly environmentSpecification: ScopedEnvironmentSpecification;
   readonly completionBindings: readonly CompletionBinding[];
@@ -267,10 +267,14 @@ export async function executeEvalWithTestHooks(
     await events.phase('setup', async () => {
       phase = 'setup';
       throwIfAborted(signal, phase);
-      await preflight.setupExecutor.apply(input.plan.setup, {
+      await preflight.setup.apply({
         runId: input.runId,
+        paths: prepared!.paths,
         workspace: prepared!.workspace,
-        commands: prepared!.commands.setup,
+        commands: Object.freeze({
+          uncredentialed: prepared!.commands.uncredentialed,
+          setup: prepared!.commands.setup,
+        }),
         inputs: input.composition.inputProvider,
         signal,
       });
@@ -787,23 +791,40 @@ function buildEvalPreflight(
     agent.evidenceIdentity(plan.agent),
   );
   const setupExecutor = setupExecutorFor(composition);
-  setupExecutor.preflight(plan.setup);
+  const setup = setupExecutor.preflight(plan.setup, {
+    selection: plan.agent,
+    runtime: plan.runtime,
+  });
   const requirements = normalizeAgentRequirements(
     agent.requirements(plan.agent),
   );
-  const setupSpecifications = setupEnvironmentSpecifications(plan, composition);
   const environmentSpecification = mergeEnvironmentSpecifications([
     {scope: 'agent', specification: requirements.environment},
-    ...setupSpecifications.map((specification) => ({
-      scope: 'setup' as const,
-      specification,
-    })),
+    {
+      scope: 'setup',
+      specification: {
+        ...(setup.requirements.variables === undefined
+          ? {}
+          : {variables: setup.requirements.variables}),
+        ...(setup.requirements.credentials?.setup === undefined
+          ? {}
+          : {credentials: setup.requirements.credentials.setup}),
+      },
+    },
+    {
+      scope: 'agent',
+      specification: {
+        ...(setup.requirements.credentials?.agent === undefined
+          ? {}
+          : {credentials: setup.requirements.credentials.agent}),
+      },
+    },
   ]);
   const completionBindings = completionBindingsForPlan(plan, composition);
   return Object.freeze({
     agent,
     agentEvidenceIdentity,
-    setupExecutor,
+    setup,
     requirements,
     environmentSpecification,
     completionBindings,
@@ -844,29 +865,11 @@ function selectedAgent(
 }
 
 function setupExecutorFor(composition: ForgeComposition) {
-  const extensions = new Map<string, SetupStepHandler>();
-  for (const [uses, handler] of composition.setupHandlers) {
-    const builtin = forgeSetupHandlers.get(uses);
-    if (builtin) {
-      if (handler !== builtin) {
-        throw new TypeError(`Built-in setup handler ${uses} cannot be replaced.`);
-      }
-      continue;
-    }
-    extensions.set(uses, handler);
-  }
-  return createSetupExecutor({handlers: extensions});
-}
-
-function setupEnvironmentSpecifications(
-  plan: ResolvedRunPlanV1,
-  composition: ForgeComposition,
-): EnvironmentSpecification[] {
-  return plan.setup.flatMap((step) => {
-    const handler = composition.setupHandlers.get(step.uses) ?? forgeSetupHandlers.get(step.uses);
-    const specification = handler?.requirements?.(step);
-    return specification ? [specification] : [];
-  });
+  return createSetupExecutor(
+    composition.setupExtensions === undefined
+      ? {}
+      : {extensions: composition.setupExtensions},
+  );
 }
 
 async function resolveEnvironment(
@@ -913,12 +916,7 @@ function mergeEnvironmentSpecifications(
       if (Object.hasOwn(variables, name)) {
         throw new TypeError(`Environment ${name} has conflicting plain and secret bindings.`);
       }
-      if (
-        !binding ||
-        typeof binding.reference !== 'string' ||
-        binding.reference.length === 0 ||
-        binding.reference.includes('\0')
-      ) {
+      if (!binding || typeof binding.reference !== 'string') {
         throw new TypeError(`Environment ${name} has an invalid credential reference.`);
       }
       if ('scopes' in binding) {
@@ -936,7 +934,7 @@ function mergeEnvironmentSpecifications(
         credentials,
         name,
         Object.freeze({
-          reference: binding.reference,
+          reference: credentialReference(binding.reference),
           scopes: orderedCredentialScopes(previous?.scopes ?? [], scope),
         }),
       );

@@ -292,10 +292,7 @@ describe('Forge CLI', () => {
         'anthropic',
       )?.version,
     ).toBe('1');
-    expect([...composition.setupHandlers.keys()].sort()).toEqual([
-      'forge/command@1',
-      'forge/write@1',
-    ]);
+    expect(composition.setupExtensions).toBeUndefined();
     await expect(
       composition.credentialResolver.resolve(
         credentialReference('anthropic.api-key'),
@@ -364,6 +361,121 @@ describe('Forge CLI', () => {
         },
       ),
     ).rejects.toThrow('No environment binding exists');
+  });
+
+  it('binds explicit credential references to host environment variables for run', async () => {
+    const fixture = await createBenchmarkFixture();
+    let resolved: string | undefined;
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--credential-env',
+        'stripe.mcp-token=STRIPE_MCP_TOKEN',
+      ],
+      {
+        stdout: () => undefined,
+        environment: {
+          ANTHROPIC_API_KEY: 'anthropic-key',
+          STRIPE_MCP_TOKEN: 'mcp-secret',
+          UNDECLARED_TOKEN: 'must-not-be-selected',
+        },
+        execute: async ({runId, composition}) => {
+          resolved = await composition.credentialResolver.resolve(
+            credentialReference('stripe.mcp-token'),
+            {
+              runId,
+              purpose: 'test',
+              signal: new AbortController().signal,
+            },
+          );
+          return {
+            runId,
+            location: '/results/credential-run',
+            result: {status: 'passed'} as never,
+          };
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(resolved).toBe('mcp-secret');
+  });
+
+  it('allows an explicit credential binding to override the CLI default', async () => {
+    const fixture = await createBenchmarkFixture();
+    const composition = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      credentialBindings: {'anthropic.api-key': 'ALTERNATE_ANTHROPIC_KEY'},
+      environment: {
+        ANTHROPIC_API_KEY: 'default-key',
+        ALTERNATE_ANTHROPIC_KEY: 'alternate-key',
+      },
+    });
+
+    await expect(
+      composition.credentialResolver.resolve(
+        credentialReference('anthropic.api-key'),
+        {
+          runId: 'run-override',
+          purpose: 'test',
+          signal: new AbortController().signal,
+        },
+      ),
+    ).resolves.toBe('alternate-key');
+  });
+
+  it('rejects malformed credential mappings without echoing their value', async () => {
+    const fixture = await createBenchmarkFixture();
+    const accidentalSecret = 'sk-live-accidental-secret';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--credential-env',
+        `stripe.token=${accidentalSecret}`,
+      ],
+      {stderr: (text) => { stderr += text; }},
+    );
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain('--credential-env must be');
+    expect(stderr).not.toContain(accidentalSecret);
+  });
+
+  it('rejects conflicting credential mappings without echoing host variable names', async () => {
+    const fixture = await createBenchmarkFixture();
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--credential-env',
+        'stripe.token=FIRST_SECRET_NAME',
+        '--credential-env',
+        'stripe.token=SECOND_SECRET_NAME',
+      ],
+      {stderr: (text) => { stderr += text; }},
+    );
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain('stripe.token');
+    expect(stderr).not.toContain('FIRST_SECRET_NAME');
+    expect(stderr).not.toContain('SECOND_SECRET_NAME');
   });
 
   it('returns a usage exit code when a selection is ambiguous', async () => {
@@ -485,7 +597,7 @@ dataset:
   version: 2026.09.0
   manifest_sha256: ${sha256Digest(manifestRaw)}
 forge:
-  version: 0.1.0
+  version: 0.2.0
 runtime:
   adapter: docker
   image: {kind: forge}

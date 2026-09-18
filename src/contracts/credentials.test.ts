@@ -109,4 +109,41 @@ describe('credential and environment resolution', () => {
     );
     assert.deepEqual(resolved, []);
   });
+
+  it('rejects runtime-incompatible credential values before returning them', async () => {
+    const credentials = createEnvironmentCredentialResolver({
+      bindings: {'provider/key': 'FORGE_TEST_TOKEN'},
+      environment: {FORGE_TEST_TOKEN: 'secret\nsecond-line'},
+    });
+
+    await assert.rejects(
+      credentials.resolve(credentialReference('provider/key'), {
+        runId: 'run-newline',
+        purpose: 'runtime',
+        signal: new AbortController().signal,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.message.includes('secret'), false);
+        assert.match(error.message, /provider\/key/);
+        return true;
+      },
+    );
+  });
+
+  it('does not resolve inherited object properties as credential values', async () => {
+    const credentials = createEnvironmentCredentialResolver({
+      bindings: {'provider/key': '__proto__'},
+      environment: {},
+    });
+
+    await assert.rejects(
+      credentials.resolve(credentialReference('provider/key'), {
+        runId: 'run-inherited',
+        purpose: 'runtime',
+        signal: new AbortController().signal,
+      }),
+      /provider\/key/,
+    );
+  });
 });

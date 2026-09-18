@@ -14,7 +14,7 @@ integrate through documented public contracts rather than being imported or
 discovered by the core.
 
 Read `README.md` and `package.json` before changing behavior or public exports.
-The README describes the currently implemented v0.1 capabilities; do not imply
+The README describes the currently implemented v0.2 capabilities; do not imply
 that a reserved schema concept is executable until its implementation and tests
 exist.
 
@@ -53,8 +53,8 @@ independent feature flags.
   of host-private implementations.
 - Prefer narrow capability interfaces and composition over subclassing or
   environment checks in the shared engine.
-- Setup, agent, and completion-provider `requirements()` methods are pure
-  preflight declarations. They must not resolve credentials, allocate
+- Setup-handler `preflight()`, agent `requirements()`, and completion-provider
+  `requirements()` methods are pure declarations. They must not resolve credentials, allocate
   resources, mutate workspaces, perform provider calls, or inspect ambient
   state. A completion provider's optional credential-aware `preflight()` runs
   only during execution, after resolution and before runtime allocation.
@@ -164,7 +164,11 @@ Observers are non-authoritative and may not affect the run result.
 - Experiment configs, plans, events, and results contain opaque credential
   references, never secret values.
 - Never copy the ambient host environment wholesale into a runtime.
-- Keep setup and agent credential scopes separate.
+- Keep setup and agent credential scopes separate. Setup preflight declarations
+  identify lifecycle purpose, while Forge assigns concrete scopes and rejects
+  bindings which attempt to attach raw scope metadata.
+- Give credential-free setup actions the uncredentialed command projection;
+  access to setup credentials must follow an explicit setup declaration.
 - Keep completion-provider credentials host-side and purpose-specific. They do
   not become runtime environment values unless a runtime capability separately
   declares the same opaque reference.
@@ -179,8 +183,9 @@ Observers are non-authoritative and may not affect the run result.
   files. Do not weaken traversal, symlink, special-file, or extra-file checks.
 - Commands use argv vectors. Shell semantics must be requested explicitly by
   invoking a shell.
-- Custom setup action IDs are versioned as `owner/action@N`; the `forge/`
-  namespace is reserved for built-in actions.
+- Custom setup action IDs are versioned as `owner/action@N`; the `forge/` and
+  `stripe/` namespaces are reserved for first-party actions implemented in this
+  repository and always installed by the engine.
 
 ### Keep results deterministic and atomic
 

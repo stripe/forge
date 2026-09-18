@@ -6,7 +6,7 @@ an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session i
 Docker, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
 
-> **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
+> **v0.2 status:** the implemented end-to-end paths are one-shot and engine-owned
 > Ava multi-turn Claude Code runs, with file checks, model-judged success
 > guidelines, ATIF v1.8 evidence, and local results. The public CLI supports
 > direct Anthropic or an explicitly configured Anthropic Messages-compatible
@@ -34,7 +34,7 @@ guidelines, and atomically commits a neutral local result.
 Forge is ESM-only. Install the exact harness version named by the benchmark:
 
 ```sh
-npm install --save-dev --save-exact @stripe/forge@0.1.0
+npm install --save-dev --save-exact @stripe/forge@0.2.0
 ```
 
 From a source checkout, use the pinned package manager:
@@ -138,7 +138,7 @@ dataset:
   version: 0.1.0
   manifest_sha256: sha256:2d75e3a65ff5c3b6c9612a572f078e6dd496c0b63007cf3c6e6da94c62fcd4e0
 forge:
-  version: 0.1.0
+  version: 0.2.0
 runtime:
   adapter: docker
   image:
@@ -170,7 +170,7 @@ limits:
 
 The experiment config independently pins the dataset identity and SHA-256 digest
 of the raw `manifest.json` bytes. `forge.version` is an execution compatibility
-pin, not a range: v0.1 refuses to run a plan for another harness version.
+pin, not a range: v0.2 refuses to run a plan for another harness version.
 
 `models: {}` is intentional for this one-shot, checks-only case. An experiment
 config must set `models.role_player` for every selected `multi_turn` case and
@@ -187,7 +187,7 @@ experiment config field creates a different experiment.
 From `quickstart/`:
 
 ```sh
-npx @stripe/forge@0.1.0 validate \
+npx @stripe/forge@0.2.0 validate \
   --experiment ./experiment.yaml \
   --dataset ./dataset
 ```
@@ -202,7 +202,7 @@ preflight or completions, build or allocate Docker, or run setup.
 Inspect the canonical resolved plan:
 
 ```sh
-npx @stripe/forge@0.1.0 plan \
+npx @stripe/forge@0.2.0 plan \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -213,7 +213,7 @@ Run the single selection:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
-npx @stripe/forge@0.1.0 run \
+npx @stripe/forge@0.2.0 run \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -229,7 +229,7 @@ but set a valid endpoint URL and its token instead:
 ```sh
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
-npx @stripe/forge@0.1.0 run \
+npx @stripe/forge@0.2.0 run \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -242,6 +242,23 @@ When `ANTHROPIC_BASE_URL` is set, the CLI requires
 `ANTHROPIC_AUTH_TOKEN` and does not select `ANTHROPIC_API_KEY`. Credentials and
 the endpoint remain execution configuration; they do not belong in the case,
 dataset manifest, or experiment config.
+
+First-party setup actions may declare additional opaque credential references.
+Bind each required reference to a host environment variable explicitly for the
+run; pass the variable name, never its value:
+
+```sh
+STRIPE_MCP_TOKEN=your-restricted-token \
+npx @stripe/forge@0.2.0 run \
+  --experiment ./experiment.yaml \
+  --dataset ./dataset \
+  --credential-env stripe.mcp-token=STRIPE_MCP_TOKEN
+```
+
+The experiment and resolved plan contain only `stripe.mcp-token`. Forge resolves
+only references required by the selected run, and the declaring capability
+determines whether each value is exposed to setup commands or agent commands.
+Unrelated host environment variables are never copied into the runtime.
 
 `--case-file` discovers the nearest ancestor `manifest.json`, verifies the
 dataset, and maps the exact regular file back to its declared case ID. The case
@@ -541,7 +558,9 @@ setup:
 To request shell semantics, select the shell explicitly, for example
 `argv: [sh, -lc, "printf ready > status.txt"]`. Setup failures stop the run.
 Captured command output is not attached to setup errors because it may contain
-credentials.
+credentials. The command action itself declares no credentials and runs with
+Forge's uncredentialed command projection; use a typed setup action for an
+operation that requires a credential.
 
 ## Programmatic API
 
@@ -554,7 +573,6 @@ import {
   createEnvironmentCredentialResolver,
   executeEval,
   expandExperiment,
-  forgeSetupHandlers,
   loadExperimentConfig,
   loadDataset,
   resolveRunPlan,
@@ -577,7 +595,6 @@ const completed = await executeEval({
   composition: {
     runtime: createDockerRuntimeAdapter(),
     agents: new Map([[claude.id, claude]]),
-    setupHandlers: forgeSetupHandlers,
     credentialResolver: createEnvironmentCredentialResolver({
       bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
     }),
@@ -834,11 +851,14 @@ import {
 
 `executeEval` owns lifecycle semantics. A host supplies mechanisms through one
 `ForgeComposition`; Forge never discovers plugins or private services globally.
+The setup preflight, first-party action, and credential-lifecycle design is
+documented in
+[Agent-aware setup and credential contracts](docs/agent-aware-setup-and-credentials.md).
 The composition contains:
 
 - a `RuntimeAdapter`;
 - an ID-to-`AgentAdapter` map;
-- an action-ID-to-`SetupStepHandler` map;
+- an optional action-ID-to-`SetupStepHandler` extension map;
 - a `CredentialResolver` and read-only `RunInputProvider`;
 - a transactional `RunArtifactStore`;
 - optional completion providers, one observer, and artifact contributors.
@@ -857,9 +877,10 @@ not enter experiment configs, plans, events, or result records. Runtimes expose
 distinct mutable and sealed capabilities; evidence collection receives only the
 sealed workspace and run-owned agent state.
 
-Forge assigns credential scope from the capability which declares a reference;
-extensions do not select their own scope. For example, an agent requirement is
-automatically agent-scoped:
+Forge assigns concrete credential scope from the declaration surface. Handlers
+identify lifecycle purpose through fixed setup and agent collections; they
+cannot attach raw scope metadata. For example, an agent requirement is
+automatically assigned agent scope:
 
 ```ts
 requirements() {
@@ -895,11 +916,16 @@ evidence themselves. An adapter must translate failure to read or normalize its
 native source into an explicit unavailable reason. Malformed data labeled
 `available` is an adapter contract violation and fails the run.
 
-Custom setup action IDs must use `owner/action@<positive-version>`, for example
-`acme/install-tool@1`. The `forge/` namespace is reserved, and built-in handlers
-cannot be replaced. A handler may declare credential references in its pure
-`requirements` method and receives only the selected workspace, setup command
-runner, dataset inputs, run ID, and abort signal when executed.
+First-party actions are always installed by the engine and do not belong in a
+host composition. The `forge/` and `stripe/` namespaces are reserved for
+first-party actions shipped in this repository. Custom action IDs must use a
+different `owner/action@<positive-version>` identifier, such as
+`acme/install-tool@1`, and are registered through `setupExtensions`.
+
+A handler's pure `preflight` method validates its step once and returns the
+exact operation later applied by the engine. Its requirements distinguish
+setup-only and agent-only credential references; handlers never assign raw
+credential scopes or receive resolved values directly.
 
 ```ts
 import {
@@ -909,27 +935,37 @@ import {
 
 const installHandler: SetupStepHandler = {
   uses: 'acme/install@1',
-  requirements() {
+  preflight() {
     return {
-      credentials: {
-        PACKAGE_TOKEN: {
-          reference: credentialReference('acme.package-token'),
+      requirements: {
+        credentials: {
+          setup: {
+            PACKAGE_TOKEN: {
+              reference: credentialReference('acme.package-token'),
+            },
+          },
         },
       },
+      async apply(context) {
+        await context.commands.run(['acme-install', '--locked'], {
+          signal: context.signal,
+        });
+      },
     };
-  },
-  async execute(step, context) {
-    await context.commands.run(['acme-install', '--locked'], {
-      signal: context.signal,
-    });
   },
 };
 ```
 
-Here `PACKAGE_TOKEN` is available to the setup command but not to agent or
-uncredentialed commands. If setup and an agent both need the same reference,
-both capabilities must declare it independently; Forge validates that the
-bindings agree before resolving the value.
+Register it explicitly as
+`setupExtensions: new Map([[installHandler.uses, installHandler]])` in the host
+composition.
+
+Here `PACKAGE_TOKEN` is available to the prepared setup operation but not to
+agent or uncredentialed commands. A handler can instead declare the binding in
+`credentials.agent`, or in both collections when both phases need the same
+name and reference. Forge validates and combines all declarations before
+resolving the first value. A prepared operation which declares no setup
+credential receives only the uncredentialed command projection.
 
 Artifact contributors may add files only below
 `extensions/<contributor-id>/`. They cannot replace canonical artifacts, and
@@ -992,7 +1028,7 @@ providers also receive benchmark prompts and the explicitly documented evidence
 needed for their purpose. Use providers appropriate for the data, plus a
 dedicated, restricted, short-lived key with appropriate account limits.
 Exact-value redaction does not detect transformed, encoded, encrypted, or
-partially leaked secrets. v0.1 does not provide domain allowlisting, a network
+partially leaked secrets. v0.2 does not provide domain allowlisting, a network
 proxy, or an offline execution mode.
 
 ## Current limitations
@@ -1016,7 +1052,7 @@ proxy, or an offline execution mode.
   direct-process runtimes, interactive/human runs, and custom mounts are absent.
 - `run` executes one selected matrix entry. There is no campaign scheduler,
   concurrency manager, or automatic run retry loop; `repetitions` create
-  selectable entries and experiment-level `retries` is not acted on by the v0.1
+  selectable entries and experiment-level `retries` is not acted on by the v0.2
   CLI. Ava and guideline completion attempts have their own fixed retry policy
   and do not implement the experiment config's campaign retry field.
 - Built-in setup is limited to `forge/write@1` and `forge/command@1`.

@@ -85,7 +85,7 @@ describe('@stripe/forge/testing', () => {
       composition: {
         runtime: runtime.adapter,
         agents: new Map([[agent.adapter.id, agent.adapter]]),
-        setupHandlers: new Map(),
+        setupExtensions: new Map(),
         credentialResolver: createStaticCredentialResolver(),
         inputProvider: createMemoryRunInputProvider(),
         artifactStore: artifacts.store,

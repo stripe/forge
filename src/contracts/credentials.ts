@@ -1,4 +1,6 @@
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MAX_CREDENTIAL_REFERENCE_BYTES = 1024;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 export type CredentialReference = string & {
   readonly __credentialReference: unique symbol;
@@ -31,7 +33,7 @@ export interface CredentialEnvironmentBinding extends CredentialRequirement {
   readonly scopes: readonly CredentialScope[];
 }
 
-/** Environment requirements declared by one extension capability. */
+/** Environment requirements declared by one runtime capability. */
 export interface EnvironmentSpecification {
   readonly variables?: Readonly<Record<string, string>>;
   readonly credentials?: Readonly<Record<string, CredentialRequirement>>;
@@ -89,7 +91,11 @@ export function createEnvironmentResolver(
           purpose: `${context.purpose}:${name}`,
         });
         throwIfAborted(context.signal);
-        if (typeof value !== 'string' || value.length === 0 || value.includes('\0')) {
+        if (
+          typeof value !== 'string' ||
+          value.length === 0 ||
+          /[\0\r\n]/.test(value)
+        ) {
           throw new TypeError(`Credential resolver returned an invalid value for ${name}.`);
         }
         defineRecordValue(credentials, name, Object.freeze({value, scopes}));
@@ -117,9 +123,7 @@ export function createEnvironmentCredentialResolver(
   const environment = options.environment ?? process.env;
   const bindings = new Map<string, string>();
   for (const [reference, name] of Object.entries(options.bindings)) {
-    if (!reference || reference.includes('\0')) {
-      throw new TypeError('Credential references must be non-empty strings without NUL bytes.');
-    }
+    credentialReference(reference);
     assertEnvironmentName(name);
     bindings.set(reference, name);
   }
@@ -129,11 +133,19 @@ export function createEnvironmentCredentialResolver(
       throwIfAborted(context.signal);
       const name = bindings.get(reference);
       if (!name) {
-        throw new Error(`No environment binding exists for credential reference ${reference}.`);
+        throw new Error(
+          `No environment binding exists for credential reference ${JSON.stringify(reference)}.`,
+        );
       }
-      const value = environment[name];
-      if (!value || value.includes('\0')) {
-        throw new Error(`Credential environment variable ${name} is not set.`);
+      const value = Object.hasOwn(environment, name) ? environment[name] : undefined;
+      if (
+        typeof value !== 'string' ||
+        value.length === 0 ||
+        /[\0\r\n]/.test(value)
+      ) {
+        throw new Error(
+          `No value is available for credential reference ${JSON.stringify(reference)}.`,
+        );
       }
       return value;
     },
@@ -141,8 +153,15 @@ export function createEnvironmentCredentialResolver(
 }
 
 export function credentialReference(reference: string): CredentialReference {
-  if (!reference || reference.includes('\0')) {
-    throw new TypeError('Credential references must be non-empty strings.');
+  if (
+    typeof reference !== 'string' ||
+    reference.length === 0 ||
+    Buffer.byteLength(reference, 'utf8') > MAX_CREDENTIAL_REFERENCE_BYTES ||
+    CONTROL_CHARACTER.test(reference)
+  ) {
+    throw new TypeError(
+      `Credential references must be bounded non-empty strings without control characters.`,
+    );
   }
   return reference as CredentialReference;
 }
@@ -153,7 +172,7 @@ function validatePlainVariables(
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(input)) {
     assertEnvironmentName(name);
-    if (typeof value !== 'string' || value.includes('\0')) {
+    if (typeof value !== 'string' || /[\0\r\n]/.test(value)) {
       throw new TypeError(`Environment variable ${name} has an invalid value.`);
     }
     defineRecordValue(output, name, value);
@@ -181,18 +200,14 @@ function validateCredentialBindings(
         `Environment variable ${name} cannot be both plain and credential-backed.`,
       );
     }
-    if (
-      !binding ||
-      typeof binding.reference !== 'string' ||
-      binding.reference.length === 0 ||
-      binding.reference.includes('\0')
-    ) {
+    if (!binding || typeof binding.reference !== 'string') {
       throw new TypeError(`Credential binding ${name} is invalid.`);
     }
+    const reference = credentialReference(binding.reference);
     output.push(
       Object.freeze({
         name,
-        reference: binding.reference,
+        reference,
         scopes: normalizeScopes(binding.scopes, name),
       }),
     );

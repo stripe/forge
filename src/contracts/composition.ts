@@ -24,7 +24,8 @@ export type CompletionProviderCollection =
 export interface ForgeComposition {
   readonly runtime: RuntimeAdapter;
   readonly agents: ReadonlyMap<string, AgentAdapter>;
-  readonly setupHandlers: ReadonlyMap<string, SetupStepHandler>;
+  /** Optional host actions. First-party actions are always installed by Forge. */
+  readonly setupExtensions?: ReadonlyMap<string, SetupStepHandler>;
   readonly completionProviders?: CompletionProviderCollection;
   readonly credentialResolver: CredentialResolver;
   readonly inputProvider: RunInputProvider;

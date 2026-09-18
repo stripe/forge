@@ -18,6 +18,7 @@ import {
   credentialReference,
   evaluateRunEvidence,
   executeEval,
+  firstPartySetupHandlers,
   parseInteractionArtifact,
   parseJudgeTranscriptProjection,
   preflightEval,
@@ -40,6 +41,10 @@ describe('@stripe/forge package root', () => {
     expect(resolveManifestCaseIdFromFile).toBeTypeOf('function');
     expect(createArtifactStore).toBeTypeOf('function');
     expect(createSetupExecutor).toBeTypeOf('function');
+    expect([...firstPartySetupHandlers.keys()].sort()).toEqual([
+      'forge/command@1',
+      'forge/write@1',
+    ]);
     expect(credentialReference).toBeTypeOf('function');
     expect(createJudgeTranscriptProjection).toBeTypeOf('function');
     expect(parseJudgeTranscriptProjection).toBeTypeOf('function');

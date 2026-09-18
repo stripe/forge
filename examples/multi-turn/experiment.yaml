@@ -6,7 +6,7 @@ dataset:
   version: 0.1.0
   manifest_sha256: sha256:acd68e0d7c13dd6d3a46382e802ad2345d0f82de8813ecd239a84ed21d032447
 forge:
-  version: 0.1.0
+  version: 0.2.0
 runtime:
   adapter: docker
   image:

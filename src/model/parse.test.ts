@@ -98,6 +98,9 @@ initial_prompt: Two
       parseSetupStep({uses: 'forge/future@2', with: {}}),
     ).toThrow(/reserved forge namespace/);
     expect(() =>
+      parseSetupStep({uses: 'stripe/future@1', with: {}}),
+    ).toThrow(/reserved stripe namespace/);
+    expect(() =>
       parseSetupStep({uses: 'not-versioned', with: {}}),
     ).toThrow(/namespaced/);
   });
@@ -209,7 +212,7 @@ dataset:
   version: 2026.09.0
   manifest_sha256: sha256:${HASH}
 forge:
-  version: 0.1.0
+  version: 0.2.0
 runtime:
   adapter: docker
   image: {kind: forge}

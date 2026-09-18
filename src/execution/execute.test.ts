@@ -24,7 +24,10 @@ import type {
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../results/index.js';
 import {createOwnedWorkspace} from '../runtime/workspace.js';
-import type {SetupStepHandler} from '../setup/types.js';
+import type {
+  SetupExecutionContext,
+  SetupStepHandler,
+} from '../setup/types.js';
 import {ForgeExecutionError} from './errors.js';
 import {executeEval} from './execute.js';
 
@@ -328,16 +331,35 @@ describe('executeEval', () => {
     };
     const handler: SetupStepHandler = {
       uses: step.uses,
-      requirements() {
-        return {
-          credentials: {
-            SETUP_TOKEN: {
-              reference: credentialReference('setup.token'),
-            },
+      preflight() {
+        return Object.freeze({
+          requirements: Object.freeze({
+            credentials: Object.freeze({
+              setup: Object.freeze({
+                SETUP_TOKEN: Object.freeze({
+                  reference: credentialReference('setup.token'),
+                }),
+                SHARED_TOKEN: Object.freeze({
+                  reference: credentialReference('shared.token'),
+                }),
+              }),
+              agent: Object.freeze({
+                SERVICE_TOKEN: Object.freeze({
+                  reference: credentialReference('service.token'),
+                }),
+                SHARED_TOKEN: Object.freeze({
+                  reference: credentialReference('shared.token'),
+                }),
+              }),
+            }),
+          }),
+          async apply(context: SetupExecutionContext) {
+            expect(context.stepIndex).toBe(0);
+            expect(context.selection.adapter).toBe('claude-code');
+            expect(context.paths.workspace).toBe('/workspace');
           },
-        };
+        });
       },
-      async execute() {},
     };
     const localStore = createArtifactStore({
       root: path.join(fixture.root, 'scoped-artifacts'),
@@ -359,13 +381,65 @@ describe('executeEval', () => {
             expect(input.environment.credentials.SETUP_TOKEN?.scopes).toEqual([
               'setup',
             ]);
+            expect(input.environment.credentials.SERVICE_TOKEN?.scopes).toEqual([
+              'agent',
+            ]);
+            expect(input.environment.credentials.SHARED_TOKEN?.scopes).toEqual([
+              'setup',
+              'agent',
+            ]);
             return runtime.prepare(input);
           },
         },
-        setupHandlers: new Map([[handler.uses, handler]]),
+        setupExtensions: new Map([[handler.uses, handler]]),
       },
       now: monotonicClock(),
     });
+  });
+
+  it('preflights every setup operation before resolving credentials or allocating', async () => {
+    const fixture = await executionFixture();
+    const step = {uses: 'acme/invalid@1', with: {}} as const;
+    const plan: ResolvedRunPlanV1 = {
+      ...fixture.plan,
+      treatment: {id: fixture.plan.treatment.id, setup: [step]},
+      setup: [step],
+    };
+    const handler: SetupStepHandler = {
+      uses: step.uses,
+      preflight() {
+        throw new TypeError('invalid extension payload');
+      },
+    };
+    const composition = fixture.composition(inertStore());
+    let credentialResolved = false;
+    let runtimePrepared = false;
+
+    await expect(
+      executeEval({
+        runId: 'run-invalid-setup-preflight',
+        plan,
+        composition: {
+          ...composition,
+          setupExtensions: new Map([[handler.uses, handler]]),
+          credentialResolver: {
+            async resolve() {
+              credentialResolved = true;
+              return 'must-not-resolve';
+            },
+          },
+          runtime: {
+            ...composition.runtime,
+            async prepare(input) {
+              runtimePrepared = true;
+              return composition.runtime.prepare(input);
+            },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
+    expect(credentialResolved).toBe(false);
+    expect(runtimePrepared).toBe(false);
   });
 
   it('rejects extension-assigned credential scopes before resolving authority', async () => {
@@ -623,7 +697,7 @@ async function executionFixture(
     composition: (artifactStore) => ({
       runtime,
       agents: new Map([[agent.id, agent]]),
-      setupHandlers: new Map(),
+      setupExtensions: new Map(),
       credentialResolver: {
         async resolve(reference) {
           calls.push(`credential:${reference}`);
@@ -688,7 +762,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       dataset: {id: 'sample', version: '1', manifest_sha256: DIGEST_A},
       experiment: {id: 'local', version: '1', sha256: DIGEST_B},
       case: {id: 'sample/case', path: 'cases/case.yaml', sha256: DIGEST_C},
-      forge: {version: '0.1.0'},
+      forge: {version: '0.2.0'},
     },
     case: {
       schema_version: 1,

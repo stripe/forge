@@ -312,7 +312,7 @@ function experimentConfig(
       version: '2026.09.0',
       manifest_sha256: MANIFEST_DIGEST,
     },
-    forge: {version: '0.1.0'},
+    forge: {version: '0.2.0'},
     runtime: {
       adapter: 'docker',
       image: {kind: 'forge'},

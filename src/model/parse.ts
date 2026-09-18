@@ -145,11 +145,14 @@ const SetupStepEnvelopeSchema = z
       });
       return;
     }
-    if (step.uses.startsWith('forge/')) {
+    const firstPartyNamespace = ['forge', 'stripe'].find((namespace) =>
+      step.uses.startsWith(`${namespace}/`),
+    );
+    if (firstPartyNamespace !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['uses'],
-        message: 'unknown actions in the reserved forge namespace are invalid',
+        message: `unknown actions in the reserved ${firstPartyNamespace} namespace are invalid`,
       });
     }
   });
