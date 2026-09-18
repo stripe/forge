@@ -31,7 +31,7 @@ import {
 } from './index.js';
 
 describe('@stripe/forge package root', () => {
-  it('exports the engine, wire model, persistence, and extension contracts', () => {
+  it('exports the engine, wire model, persistence, and composition contracts', () => {
     expect(executeEval).toBeTypeOf('function');
     expect(preflightEval).toBeTypeOf('function');
     expect(parseInteractionArtifact).toBeTypeOf('function');

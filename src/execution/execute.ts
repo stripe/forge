@@ -96,6 +96,7 @@ import {serializeCanonicalJson} from '../serialization.js';
 import {
   createSetupExecutor,
   type PreparedSetup,
+  type SetupExecutor,
 } from '../setup/index.js';
 import {executionError, ForgeExecutionError, throwIfAborted} from './errors.js';
 import {createRunEventEmitter} from './events.js';
@@ -134,6 +135,8 @@ interface ExecuteEvalTestHooks {
     failedAttempt: number,
     signal: AbortSignal,
   ) => Promise<void>;
+  /** Injects first-party test actions without exposing a host action registry. */
+  readonly setupExecutor?: SetupExecutor;
 }
 
 export interface PreflightEvalInput {
@@ -211,7 +214,11 @@ export async function executeEvalWithTestHooks(
       phase = 'preflight';
       throwIfAborted(signal, phase);
       assertRunId(input.runId);
-      return buildEvalPreflight(input.plan, input.composition);
+      return buildEvalPreflight(
+        input.plan,
+        input.composition,
+        hooks.setupExecutor,
+      );
     });
 
     const environment = await resolveEnvironment(
@@ -786,13 +793,13 @@ function rolePlayerErrorRecord(error: {
 function buildEvalPreflight(
   plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
+  setupExecutor: SetupExecutor = createSetupExecutor(),
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
   const agentEvidenceIdentity = parseAgentEvidenceIdentity(
     agent.evidenceIdentity(plan.agent),
   );
-  const setupExecutor = setupExecutorFor(composition);
   const setup = setupExecutor.preflight(plan.setup, {
     selection: plan.agent,
     runtime: plan.runtime,
@@ -864,14 +871,6 @@ function selectedAgent(
     );
   }
   return agent;
-}
-
-function setupExecutorFor(composition: ForgeComposition) {
-  return createSetupExecutor(
-    composition.setupExtensions === undefined
-      ? {}
-      : {extensions: composition.setupExtensions},
-  );
 }
 
 async function resolveEnvironment(

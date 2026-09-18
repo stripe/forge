@@ -6,6 +6,7 @@ import type {MutableWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
 import type {SetupStepV1} from '../model/types.js';
 import {
   createSetupExecutor,
+  createSetupExecutorWithHandlers,
   firstPartySetupHandlers,
 } from './executor.js';
 import type {SetupStepHandler, SetupStepRequirements} from './types.js';
@@ -123,12 +124,12 @@ describe('portable setup actions', () => {
         };
       },
     };
-    const executor = createSetupExecutor({
-      extensions: new Map([[mutatingHandler.uses, mutatingHandler]]),
-    });
+    const executor = createSetupExecutorWithHandlers(
+      new Map([[mutatingHandler.uses, mutatingHandler]]),
+    );
     const steps: SetupStepV1[] = [
-      {uses: mutatingHandler.uses, with: {}},
-      {uses: 'example/missing@1', with: {}},
+      {uses: mutatingHandler.uses, with: {}} as unknown as SetupStepV1,
+      {uses: 'example/missing@1', with: {}} as unknown as SetupStepV1,
     ];
     assert.throws(
       () => executor.preflight(steps, setupTarget),
@@ -173,9 +174,12 @@ describe('portable setup actions', () => {
         };
       },
     };
-    const prepared = createSetupExecutor({
-      extensions: new Map([[handler.uses, handler]]),
-    }).preflight([{uses: handler.uses, with: {}}], setupTarget);
+    const prepared = createSetupExecutorWithHandlers(
+      new Map([[handler.uses, handler]]),
+    ).preflight(
+      [{uses: handler.uses, with: {}} as unknown as SetupStepV1],
+      setupTarget,
+    );
 
     assert.deepEqual(prepared.requirements, {
       variables: {FEATURE_MODE: 'enabled'},
@@ -253,9 +257,12 @@ describe('portable setup actions', () => {
     };
 
     assert.throws(
-      () => createSetupExecutor({
-        extensions: new Map([[handler.uses, handler]]),
-      }).preflight([{uses: handler.uses, with: {}}], setupTarget),
+      () => createSetupExecutorWithHandlers(
+        new Map([[handler.uses, handler]]),
+      ).preflight(
+        [{uses: handler.uses, with: {}} as unknown as SetupStepV1],
+        setupTarget,
+      ),
       /conflicting references/,
     );
   });
@@ -268,7 +275,7 @@ describe('portable setup actions', () => {
     const handler: SetupStepHandler = {
       uses: 'acme/install@1',
       preflight(step) {
-        const payload = step.with as Readonly<{
+        const payload = step.with as unknown as Readonly<{
           credential_name: string;
           credential_reference: string;
         }>;
@@ -291,9 +298,9 @@ describe('portable setup actions', () => {
         };
       },
     };
-    const prepared = createSetupExecutor({
-      extensions: new Map([[handler.uses, handler]]),
-    }).preflight(
+    const prepared = createSetupExecutorWithHandlers(
+      new Map([[handler.uses, handler]]),
+    ).preflight(
       [
         {
           uses: handler.uses,
@@ -301,14 +308,14 @@ describe('portable setup actions', () => {
             credential_name: 'TOKEN_A',
             credential_reference: 'acme.token-a',
           },
-        },
+        } as unknown as SetupStepV1,
         {
           uses: handler.uses,
           with: {
             credential_name: 'TOKEN_B',
             credential_reference: 'acme.token-b',
           },
-        },
+        } as unknown as SetupStepV1,
       ],
       setupTarget,
     );
@@ -356,7 +363,7 @@ describe('portable setup actions', () => {
     const handler: SetupStepHandler = {
       uses: inputStep.uses,
       preflight(step) {
-        const payload = step.with as Readonly<{value: string}>;
+        const payload = step.with as unknown as Readonly<{value: string}>;
         frozenDuringPreflight =
           Object.isFrozen(step) && Object.isFrozen(step.with);
         return {
@@ -367,9 +374,9 @@ describe('portable setup actions', () => {
         };
       },
     };
-    const prepared = createSetupExecutor({
-      extensions: new Map([[handler.uses, handler]]),
-    }).preflight([inputStep], setupTarget);
+    const prepared = createSetupExecutorWithHandlers(
+      new Map([[handler.uses, handler]]),
+    ).preflight([inputStep as unknown as SetupStepV1], setupTarget);
 
     inputStep.with.value = 'after';
     await prepared.apply({
@@ -406,30 +413,14 @@ describe('portable setup actions', () => {
     };
 
     assert.throws(
-      () => createSetupExecutor({
-        extensions: new Map([[handler.uses, handler]]),
-      }).preflight([{uses: handler.uses, with: {}}], setupTarget),
+      () => createSetupExecutorWithHandlers(
+        new Map([[handler.uses, handler]]),
+      ).preflight(
+        [{uses: handler.uses, with: {}} as unknown as SetupStepV1],
+        setupTarget,
+      ),
       /binding TOKEN is invalid/,
     );
-  });
-
-  it('reserves first-party action namespaces and tolerates exact built-ins', () => {
-    const replacement: SetupStepHandler = {
-      uses: 'stripe/cli@1',
-      preflight() {
-        return {requirements: {}, async apply() {}};
-      },
-    };
-
-    assert.throws(
-      () => createSetupExecutor({
-        extensions: new Map([[replacement.uses, replacement]]),
-      }),
-      /stripe\/.*reserved/,
-    );
-    assert.doesNotThrow(() => createSetupExecutor({
-      extensions: firstPartySetupHandlers,
-    }));
   });
 
   it('keeps the engine registry isolated from the exported registry view', () => {

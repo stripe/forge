@@ -292,7 +292,6 @@ describe('Forge CLI', () => {
         'anthropic',
       )?.version,
     ).toBe('1');
-    expect(composition.setupExtensions).toBeUndefined();
     await expect(
       composition.credentialResolver.resolve(
         credentialReference('anthropic.api-key'),

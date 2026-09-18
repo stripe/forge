@@ -23,13 +23,6 @@ import {
   type SetupExecutor,
 } from './types.js';
 
-const FIRST_PARTY_NAMESPACES = Object.freeze(['forge/', 'stripe/']);
-
-export interface CreateSetupExecutorOptions {
-  /** Explicit host-provided actions. First-party actions are always installed. */
-  readonly extensions?: ReadonlyMap<string, SetupStepHandler>;
-}
-
 const ENGINE_SETUP_HANDLERS: ReadonlyMap<string, SetupStepHandler> = new Map([
   [writeSetupHandler.uses, writeSetupHandler],
   [commandSetupHandler.uses, commandSetupHandler],
@@ -39,43 +32,15 @@ const ENGINE_SETUP_HANDLERS: ReadonlyMap<string, SetupStepHandler> = new Map([
 export const firstPartySetupHandlers: ReadonlyMap<string, SetupStepHandler> =
   new Map(ENGINE_SETUP_HANDLERS);
 
-/** @deprecated First-party actions no longer need to be supplied by composition. */
-export const forgeSetupHandlers = firstPartySetupHandlers;
+export function createSetupExecutor(): SetupExecutor {
+  return createSetupExecutorWithHandlers(ENGINE_SETUP_HANDLERS);
+}
 
-export function createSetupExecutor(
-  options: CreateSetupExecutorOptions = {},
+/** @internal Contract-test seam; not exported from the package entry point. */
+export function createSetupExecutorWithHandlers(
+  handlers: ReadonlyMap<string, SetupStepHandler>,
 ): SetupExecutor {
-  const handlers = new Map<string, SetupStepHandler>(ENGINE_SETUP_HANDLERS);
-
-  for (const [registeredUses, handler] of options.extensions ?? []) {
-    if (!handler || typeof handler.preflight !== 'function') {
-      throw new TypeError('Setup handlers must provide a preflight function.');
-    }
-    if (!isSafeActionIdentifier(handler.uses)) {
-      throw new TypeError(`Invalid setup action identifier: ${String(handler.uses)}`);
-    }
-    if (registeredUses !== handler.uses) {
-      throw new TypeError(
-        `Setup handler key ${registeredUses} does not match ${handler.uses}.`,
-      );
-    }
-    const firstParty = ENGINE_SETUP_HANDLERS.get(handler.uses);
-    if (firstParty) {
-      if (firstParty === handler) continue;
-      throw new TypeError(
-        `First-party setup action ${handler.uses} cannot be replaced.`,
-      );
-    }
-    if (isFirstPartyNamespace(handler.uses)) {
-      throw new TypeError(
-        `The ${namespaceOf(handler.uses)} namespace is reserved for first-party actions.`,
-      );
-    }
-    if (handlers.has(handler.uses)) {
-      throw new TypeError(`Duplicate setup action handler: ${handler.uses}`);
-    }
-    handlers.set(handler.uses, handler);
-  }
+  const selectedHandlers = new Map(handlers);
 
   const executor: SetupExecutor = {
     preflight(
@@ -101,7 +66,7 @@ export function createSetupExecutor(
           throw new UnsupportedSetupActionError(String(inputStep?.uses), index);
         }
         const step = freezeClone(inputStep);
-        const handler = handlers.get(step.uses);
+        const handler = selectedHandlers.get(step.uses);
         if (!handler) {
           throw new UnsupportedSetupActionError(step.uses, index);
         }
@@ -319,14 +284,6 @@ function freezeRequirements(input: {
           }),
         }),
   });
-}
-
-function isFirstPartyNamespace(uses: string): boolean {
-  return FIRST_PARTY_NAMESPACES.some((prefix) => uses.startsWith(prefix));
-}
-
-function namespaceOf(uses: string): string {
-  return `${uses.slice(0, uses.indexOf('/') + 1)}`;
 }
 
 function defineRecordValue<T>(

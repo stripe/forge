@@ -1,8 +1,6 @@
 export {
   createSetupExecutor,
   firstPartySetupHandlers,
-  forgeSetupHandlers,
-  type CreateSetupExecutorOptions,
 } from './executor.js';
 export {commandSetupHandler} from './forgeCommand.js';
 export {writeSetupHandler} from './forgeWrite.js';

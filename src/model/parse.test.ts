@@ -72,22 +72,19 @@ initial_prompt: Two
     ).toThrow(BenchmarkModelError);
   });
 
-  it('strictly validates built-in setup payloads and extension identifiers', () => {
+  it('strictly validates built-in setup payloads and rejects unknown actions', () => {
     expect(
       parseSetupStep({
         uses: 'forge/write@1',
         with: {target: 'src/config.json', source: {dataset_path: 'fixtures/a.json'}},
       }),
     ).toMatchObject({uses: 'forge/write@1'});
-    expect(
+    expect(() =>
       parseSetupStep({
         uses: 'acme/link-cli@1',
         with: {channel: 'stable'},
       }),
-    ).toEqual({
-      uses: 'acme/link-cli@1',
-      with: {channel: 'stable'},
-    });
+    ).toThrow(/unknown setup action/);
     expect(() =>
       parseSetupStep({
         uses: 'forge/command@1',
@@ -96,10 +93,10 @@ initial_prompt: Two
     ).toThrow(BenchmarkModelError);
     expect(() =>
       parseSetupStep({uses: 'forge/future@2', with: {}}),
-    ).toThrow(/reserved forge namespace/);
+    ).toThrow(/unknown setup action/);
     expect(() =>
       parseSetupStep({uses: 'stripe/future@1', with: {}}),
-    ).toThrow(/reserved stripe namespace/);
+    ).toThrow(/unknown setup action/);
     expect(() =>
       parseSetupStep({uses: 'not-versioned', with: {}}),
     ).toThrow(/namespaced/);

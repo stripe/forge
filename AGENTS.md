@@ -8,10 +8,11 @@ by every host: dataset verification, planning, automated execution, evidence
 normalization, one-shot and Ava-driven multi-turn interaction, deterministic
 checks, guideline judging, and atomic local results.
 
-The package is also an extension framework. Environment-specific runtimes,
-credentials, setup actions, agents, storage, observation, and publication must
-integrate through documented public contracts rather than being imported or
-discovered by the core.
+The package is also an adapter framework. Environment-specific runtimes,
+credentials, setup-resource resolution, agents, storage, observation, and
+publication must integrate through documented public contracts rather than
+being imported or discovered by the core. Setup action schemas and handlers
+themselves are first-party and ship in this repository.
 
 Read `README.md` and `package.json` before changing behavior or public exports.
 The README describes the currently implemented v0.1 capabilities; do not imply
@@ -184,9 +185,11 @@ Observers are non-authoritative and may not affect the run result.
   files. Do not weaken traversal, symlink, special-file, or extra-file checks.
 - Commands use argv vectors. Shell semantics must be requested explicitly by
   invoking a shell.
-- Custom setup action IDs are versioned as `owner/action@N`; the `forge/` and
-  `stripe/` namespaces are reserved for first-party actions implemented in this
-  repository and always installed by the engine.
+- Setup action IDs are versioned as `forge/action@N` or `stripe/action@N` and
+  identify first-party actions implemented in this repository. Unknown actions
+  fail validation, and hosts cannot register or replace handlers. Environment-
+  specific resource selection belongs behind typed action-specific resolver
+  contracts and must retain explicit, digestible provenance.
 
 ### Keep results deterministic and atomic
 
@@ -197,8 +200,8 @@ Observers are non-authoritative and may not affect the run result.
 - A cleanup warning learned after staging belongs in the final result.
 - Publication is downstream of a successful, verified local commit. The public
   execution engine must not call a host-specific remote publisher.
-- Extensions must not overwrite canonical artifacts or bypass path, size,
-  collision, digest, or secret validation.
+- Artifact contributors must not overwrite canonical artifacts or bypass path,
+  size, collision, digest, or secret validation.
 - Preserve scoring semantics unless a versioned format change explicitly alters
   them: score is the guideline pass ratio, while a checks-only passing run has
   `status: passed` and numeric `score: 0`.

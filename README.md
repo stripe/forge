@@ -748,7 +748,7 @@ async function loadForge() {
 
 | Entry point | Purpose |
 | --- | --- |
-| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and extension contracts |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
@@ -847,7 +847,7 @@ import {
 } from '@stripe/forge/atif/v1.8';
 ```
 
-## Extensions and private compositions
+## Adapters and private compositions
 
 `executeEval` owns lifecycle semantics. A host supplies mechanisms through one
 `ForgeComposition`; Forge never discovers plugins or private services globally.
@@ -858,7 +858,6 @@ The composition contains:
 
 - a `RuntimeAdapter`;
 - an ID-to-`AgentAdapter` map;
-- an optional action-ID-to-`SetupStepHandler` extension map;
 - a `CredentialResolver` and read-only `RunInputProvider`;
 - a transactional `RunArtifactStore`;
 - optional completion providers, one observer, and artifact contributors.
@@ -916,58 +915,27 @@ evidence themselves. An adapter must translate failure to read or normalize its
 native source into an explicit unavailable reason. Malformed data labeled
 `available` is an adapter contract violation and fails the run.
 
-First-party actions are always installed by the engine and do not belong in a
-host composition. The `forge/` and `stripe/` namespaces are reserved for
-first-party actions shipped in this repository. Custom action IDs must use a
-different `owner/action@<positive-version>` identifier, such as
-`acme/install-tool@1`, and are registered through `setupExtensions`.
+Setup action schemas and handlers are always shipped by the exact installed
+Forge version and do not belong in a host composition. Unknown action IDs fail
+validation. A host cannot register a new action or replace the meaning of a
+first-party `forge/` or `stripe/` action.
 
-A handler's pure `preflight` method validates its step once and returns the
-exact operation later applied by the engine. Its requirements distinguish
-setup-only and agent-only credential references; handlers never assign raw
-credential scopes or receive resolved values directly.
+A first-party handler's pure `preflight` method validates its step once and
+returns the exact operation later applied by the engine. Its requirements
+distinguish setup-only and agent-only credential references; handlers never
+assign raw credential scopes or receive resolved values directly. A prepared
+operation which declares no setup credential receives only the uncredentialed
+command projection. A credentialed operation receives exactly the setup
+environment names it declared, never credentials required only by another
+operation.
 
-```ts
-import {
-  credentialReference,
-  type SetupStepHandler,
-} from '@stripe/forge';
-
-const installHandler: SetupStepHandler = {
-  uses: 'acme/install@1',
-  preflight() {
-    return {
-      requirements: {
-        credentials: {
-          setup: {
-            PACKAGE_TOKEN: {
-              reference: credentialReference('acme.package-token'),
-            },
-          },
-        },
-      },
-      async apply(context) {
-        await context.commands.run(['acme-install', '--locked'], {
-          signal: context.signal,
-        });
-      },
-    };
-  },
-};
-```
-
-Register it explicitly as
-`setupExtensions: new Map([[installHandler.uses, installHandler]])` in the host
-composition.
-
-Here `PACKAGE_TOKEN` is available to the prepared setup operation but not to
-agent or uncredentialed commands. A handler can instead declare the binding in
-`credentials.agent`, or in both collections when both phases need the same
-name and reference. Forge validates and combines all declarations before
-resolving the first value. A prepared operation which declares no setup
-credential receives only the uncredentialed command projection. A credentialed
-operation receives exactly the setup environment names it declared, never the
-setup credentials required only by another operation.
+Future `forge/mcp@1` and `forge/skill@1` actions will expose typed resource
+resolution contracts without making their handlers replaceable. The public
+action owns validation and portable semantics. A public resolver can select a
+normal MCP service or published skill, while an internal resolver can select a
+Stripe service, an explicit devbox proxy, or a snapshot of local skill files.
+The chosen binding must be represented in run provenance, and local content
+must be captured and hashed rather than read later from an ambient path.
 
 Artifact contributors may add files only below
 `extensions/<contributor-id>/`. They cannot replace canonical artifacts, and
@@ -1019,10 +987,10 @@ selecting host-owned capabilities.
   staged and claimed by digest before atomic commit.
 
 Docker itself is a privileged host service. Anyone who can replace the Docker
-binary, control the daemon, or modify Forge extension code is already outside
-the container trust boundary. Extension handlers and artifact contributors are
-ordinary host JavaScript and must be trusted even though the capabilities Forge
-passes to them are narrow.
+binary, control the daemon, or modify the installed Forge code is already
+outside the container trust boundary. Artifact contributors are ordinary host
+JavaScript and must be trusted even though the capabilities Forge passes to
+them are narrow.
 
 The evaluated agent receives its selected provider credential and has outbound
 network access. It can intentionally disclose that credential. Ava and judge

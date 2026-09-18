@@ -17,9 +17,8 @@ export const writeSetupHandler: SetupStepHandler =
       if (step.uses !== 'forge/write@1') {
         throw new TypeError(`forge/write@1 cannot handle ${JSON.stringify(step.uses)}.`);
       }
-      // Extension actions intentionally overlap built-in discriminators in the
-      // plain TypeScript model. Runtime schema validation guarantees this wire
-      // shape before setup; the handler remains defensive about its identity.
+      // Runtime schema validation guarantees this wire shape before setup; the
+      // handler remains defensive about its identity.
       const writeStep = step as WriteSetupStepV1;
       if (!isSafeWorkspaceRelativePath(writeStep.with.target)) {
         throw new TypeError(`Invalid workspace target: ${String(writeStep.with.target)}`);

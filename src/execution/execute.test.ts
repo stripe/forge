@@ -24,12 +24,17 @@ import type {
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../results/index.js';
 import {createOwnedWorkspace} from '../runtime/workspace.js';
+import {createSetupExecutorWithHandlers} from '../setup/executor.js';
 import type {
   SetupExecutionContext,
   SetupStepHandler,
 } from '../setup/types.js';
 import {ForgeExecutionError} from './errors.js';
-import {executeEval, preflightEval} from './execute.js';
+import {
+  executeEval,
+  executeEvalWithTestHooks,
+  preflightEval,
+} from './execute.js';
 
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
@@ -321,9 +326,12 @@ describe('executeEval', () => {
     expect(fixture.calls.at(-1)).toBe('runtime:dispose');
   });
 
-  it('assigns credential scope from the declaring capability', async () => {
+  it('assigns credential scope from a first-party setup capability', async () => {
     const fixture = await executionFixture();
-    const step = {uses: 'acme/use-token@1', with: {}} as const;
+    const step: ResolvedRunPlanV1['setup'][number] = {
+      uses: 'forge/command@1',
+      with: {argv: ['true']},
+    };
     const plan: ResolvedRunPlanV1 = {
       ...fixture.plan,
       treatment: {id: fixture.plan.treatment.id, setup: [step]},
@@ -367,39 +375,48 @@ describe('executeEval', () => {
     const composition = fixture.composition(localStore);
     const runtime = composition.runtime;
 
-    await executeEval({
-      runId: 'run-scoped-credentials',
-      plan,
-      composition: {
-        ...composition,
-        runtime: {
-          ...runtime,
-          async prepare(input) {
-            expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
-              'agent',
-            ]);
-            expect(input.environment.credentials.SETUP_TOKEN?.scopes).toEqual([
-              'setup',
-            ]);
-            expect(input.environment.credentials.SERVICE_TOKEN?.scopes).toEqual([
-              'agent',
-            ]);
-            expect(input.environment.credentials.SHARED_TOKEN?.scopes).toEqual([
-              'setup',
-              'agent',
-            ]);
-            return runtime.prepare(input);
+    await executeEvalWithTestHooks(
+      {
+        runId: 'run-scoped-credentials',
+        plan,
+        composition: {
+          ...composition,
+          runtime: {
+            ...runtime,
+            async prepare(input) {
+              expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
+                'agent',
+              ]);
+              expect(input.environment.credentials.SETUP_TOKEN?.scopes).toEqual([
+                'setup',
+              ]);
+              expect(input.environment.credentials.SERVICE_TOKEN?.scopes).toEqual([
+                'agent',
+              ]);
+              expect(input.environment.credentials.SHARED_TOKEN?.scopes).toEqual([
+                'setup',
+                'agent',
+              ]);
+              return runtime.prepare(input);
+            },
           },
         },
-        setupExtensions: new Map([[handler.uses, handler]]),
+        now: monotonicClock(),
       },
-      now: monotonicClock(),
-    });
+      {
+        setupExecutor: createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ),
+      },
+    );
   });
 
-  it('preflights every setup operation before resolving credentials or allocating', async () => {
+  it('preflights every first-party setup operation before resolving credentials or allocating', async () => {
     const fixture = await executionFixture();
-    const step = {uses: 'acme/invalid@1', with: {}} as const;
+    const step: ResolvedRunPlanV1['setup'][number] = {
+      uses: 'forge/command@1',
+      with: {argv: ['true']},
+    };
     const plan: ResolvedRunPlanV1 = {
       ...fixture.plan,
       treatment: {id: fixture.plan.treatment.id, setup: [step]},
@@ -408,7 +425,7 @@ describe('executeEval', () => {
     const handler: SetupStepHandler = {
       uses: step.uses,
       preflight() {
-        throw new TypeError('invalid extension payload');
+        throw new TypeError('invalid first-party payload');
       },
     };
     const composition = fixture.composition(inertStore());
@@ -416,27 +433,33 @@ describe('executeEval', () => {
     let runtimePrepared = false;
 
     await expect(
-      executeEval({
-        runId: 'run-invalid-setup-preflight',
-        plan,
-        composition: {
-          ...composition,
-          setupExtensions: new Map([[handler.uses, handler]]),
-          credentialResolver: {
-            async resolve() {
-              credentialResolved = true;
-              return 'must-not-resolve';
+      executeEvalWithTestHooks(
+        {
+          runId: 'run-invalid-setup-preflight',
+          plan,
+          composition: {
+            ...composition,
+            credentialResolver: {
+              async resolve() {
+                credentialResolved = true;
+                return 'must-not-resolve';
+              },
             },
-          },
-          runtime: {
-            ...composition.runtime,
-            async prepare(input) {
-              runtimePrepared = true;
-              return composition.runtime.prepare(input);
+            runtime: {
+              ...composition.runtime,
+              async prepare(input) {
+                runtimePrepared = true;
+                return composition.runtime.prepare(input);
+              },
             },
           },
         },
-      }),
+        {
+          setupExecutor: createSetupExecutorWithHandlers(
+            new Map([[handler.uses, handler]]),
+          ),
+        },
+      ),
     ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
     expect(credentialResolved).toBe(false);
     expect(runtimePrepared).toBe(false);
@@ -509,7 +532,7 @@ describe('executeEval', () => {
     expect(runtimePrepared).toBe(false);
   });
 
-  it('rejects extension-assigned credential scopes before resolving authority', async () => {
+  it('rejects capability-assigned credential scopes before resolving authority', async () => {
     const fixture = await executionFixture();
     const composition = fixture.composition(inertStore());
     const selected = composition.agents.get('claude-code')!;
@@ -764,7 +787,6 @@ async function executionFixture(
     composition: (artifactStore) => ({
       runtime,
       agents: new Map([[agent.id, agent]]),
-      setupExtensions: new Map(),
       credentialResolver: {
         async resolve(reference) {
           calls.push(`credential:${reference}`);

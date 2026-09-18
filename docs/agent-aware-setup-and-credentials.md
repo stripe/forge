@@ -19,7 +19,9 @@ This design makes setup a two-stage operation:
 The foundation in this change covers prepared setup, credential lifecycle
 declarations, the first-party action boundary, and explicit CLI credential
 bindings. Concrete `forge/skill@1`, `forge/mcp@1`, `stripe/cli@1`, and plugin
-actions follow as separate vertical slices.
+actions follow as separate vertical slices. Typed resource resolvers will let a
+host select public, private, or explicit devbox resources without replacing the
+action handler or changing its semantics.
 
 ## Motivation
 
@@ -51,7 +53,9 @@ Codex configuration.
   through the standard Forge CLI and programmatic engine.
 - The action namespace identifies semantic ownership, not code location or
   loading behavior. Both `forge/mcp@1` and `stripe/cli@1` are first-party.
-- Host composition is only for actions Forge does not officially ship.
+- Hosts cannot register setup actions or replace first-party handlers.
+- Environment-specific service and source selection uses typed, action-specific
+  resolver contracts rather than an arbitrary handler registry.
 - Preflight is pure and completes for every step before Forge resolves the
   first credential or allocates a runtime.
 - Experiment configs and resolved plans contain opaque credential references,
@@ -64,9 +68,8 @@ Codex configuration.
 
 | Category | Examples | Schema owner | Mechanism owner |
 | --- | --- | --- | --- |
-| Generic first-party | `forge/write@1`, `forge/command@1`, `forge/skill@1`, `forge/mcp@1`, `forge/plugin@1` | Forge | Forge or selected adapter |
+| Generic first-party | `forge/write@1`, `forge/command@1`, `forge/skill@1`, `forge/mcp@1`, `forge/plugin@1` | Forge | Forge, a typed resource resolver, or the selected adapter |
 | Product first-party | `stripe/cli@1`, `stripe/link-cli@1` | Forge repository action owner | Forge repository action owner |
-| External | `acme/install-tool@1` | Host extension | Host composition |
 
 This change retains the two currently executable first-party actions:
 `forge/write@1` and `forge/command@1`. The latter is the argv-based counterpart
@@ -75,12 +78,10 @@ Skills, MCP, plugins, and Stripe CLIs in this table describe the intended action
 ownership model, but remain non-executable until the follow-up slices below land.
 
 The engine always installs the first-party registry. `ForgeComposition` exposes
-only an optional `setupExtensions` map. Both `forge/` and `stripe/` are reserved
-first-party namespaces, and a host cannot replace any registered first-party
-handler. Supplying the exact existing first-party object is tolerated only as a
-migration convenience. The exported registry is an introspection and migration
-view; the engine retains its own registry so mutating that JavaScript object
-cannot change execution behavior.
+no setup-handler registry. Unknown action IDs fail schema validation, and a host
+cannot replace a registered first-party handler. The exported registry is an
+introspection view; the engine retains its own registry so mutating that
+JavaScript object cannot change execution behavior.
 
 Different teams may own action-specific directories and review through
 `CODEOWNERS`; that organizational boundary does not make an action dynamically
@@ -189,26 +190,65 @@ references selected by capability preflight are resolved.
 availability, adapter compatibility, and requirement conflicts without reading
 host credential values.
 
+## Public actions and environment-specific resources
+
+There should not be a separate internal implementation of Forge setup actions.
+The internal eval-runner depends on the exact public Forge package and supplies
+narrow resolver implementations through public contracts.
+
+The public Forge repository owns:
+
+- the versioned `forge/mcp@1` and `forge/skill@1` wire schemas;
+- strict parsing, normalization, credential declaration, and portable errors;
+- the typed MCP-binding and skill-source resolver interfaces;
+- the action handlers and their ordering within the shared lifecycle;
+- agent-realization requests for Claude, Codex, and other supported adapters;
+- provenance, content-digest, and verification rules; and
+- default implementations for genuinely public source forms.
+
+The internal eval-runner owns only environment-specific implementations and
+policy:
+
+- resolving a logical Stripe MCP binding to the normal service or an explicitly
+  selected devbox proxy;
+- turning an explicit local skill override into an immutable input snapshot;
+- resolving Stripe-private artifact coordinates and credentials;
+- exposing internal CLI flags or configuration which select those overrides;
+  and
+- enforcing any Stripe-specific access and network policy.
+
+An override is an input selection, not a replacement handler. It must be chosen
+before the final run plan is frozen and represented by safe provenance. Local
+skill bytes must be captured and content-hashed; the setup action must not read
+an ambient devbox path later during execution. An MCP binding must record a
+stable binding identity and resolver provenance without recording secret values.
+This makes a devbox run distinguishable and auditable while keeping the action's
+meaning identical to a normal run.
+
 ## Future agent realization
 
-Portable agent-oriented actions will use typed adapter capabilities rather than
-adapter-owned action handlers. The flow for MCP will be:
+Portable agent-oriented actions will use typed resource resolvers and adapter
+capabilities rather than host- or adapter-owned action handlers. The flow for
+MCP will be:
 
-1. The Forge-owned `forge/mcp@1` handler validates the canonical HTTP MCP
-   payload.
-2. It derives a deterministic sandbox credential variable and declares its
+1. Before the plan is frozen, the selected MCP binding resolver turns the
+   authored logical binding and any explicit override into a canonical,
+   provenance-bearing binding with no secret values.
+2. The Forge-owned `forge/mcp@1` handler validates that canonical binding.
+3. It derives a deterministic sandbox credential variable and declares its
    opaque reference under `credentials.agent`.
-3. It creates a normalized MCP request containing the server name, URL,
+4. It creates a normalized MCP request containing the server name, URL,
    transport, and sandbox variable name, but no secret value.
-4. It verifies during pure preflight that the selected adapter exposes an MCP
+5. It verifies during pure preflight that the selected adapter exposes an MCP
    realization capability.
-5. The prepared operation invokes that capability during ordered setup.
-6. Claude may render `.mcp.json`; Codex may use its native CLI. Both mechanisms
+6. The prepared operation invokes that capability during ordered setup.
+7. Claude may render `.mcp.json`; Codex may use its native CLI. Both mechanisms
    receive the same normalized semantics.
 
-The same boundary applies to skills and plugins. Forge validates sources,
-identities, versions, and public semantics; the adapter selects native paths
-and commands.
+For skills, the resolver produces a content-addressed input snapshot before the
+plan is frozen. The same boundary applies to plugins. Forge validates sources,
+identities, versions, and public semantics; the resolver selects immutable
+bytes, and the adapter selects native paths and commands.
 
 ## First-party Stripe CLI
 
@@ -227,8 +267,7 @@ declared under `credentials.agent`; installation itself does not need it.
 
 Because the action ships with Forge, its implementation is identified by the
 exact Forge version, `stripe/cli@1`, the configured CLI version and digest, and
-the selected runtime platform. Separate handler-package provenance is needed
-only for genuine external extensions.
+the selected runtime platform. There is no separately injected handler package.
 
 ## Lifecycle
 
@@ -236,7 +275,7 @@ The resulting execution order is:
 
 1. Parse and resolve an ambient-free run plan.
 2. Select the coding-agent adapter.
-3. Install the first-party action registry and explicit host extensions.
+3. Install the first-party action registry.
 4. Resolve and preflight every setup step.
 5. Aggregate and validate setup and agent credential declarations.
 6. Obtain normal agent and completion-provider requirements.
@@ -266,8 +305,8 @@ The foundation must prove:
 - Case setup continues preceding treatment setup.
 - Selection and runtime context are fixed at preflight.
 - Parsed plans and setup-step inputs remain immutable through application.
-- First-party actions cannot be replaced through composition.
-- Unknown `forge/` and `stripe/` actions fail parsing.
+- Composition has no arbitrary setup-action registry.
+- Every unknown setup action fails parsing.
 - Setup-only, agent-only, and shared credentials receive the intended scopes.
 - Conflicting names or references fail before credential resolution.
 - Raw scope assignment fails.
@@ -281,9 +320,11 @@ The foundation must prove:
 
 ## Follow-up sequence
 
-1. Add typed agent setup realization interfaces with `forge/skill@1` as the
-   first secret-free vertical slice.
-2. Add `forge/mcp@1` and prove agent-only bearer delivery.
+1. Add typed skill-source resolution and agent realization with `forge/skill@1`
+   as the first secret-free vertical slice, including immutable devbox input
+   snapshots.
+2. Add typed MCP-binding resolution with `forge/mcp@1`, including explicit
+   devbox proxy selection and agent-only bearer delivery.
 3. Add a writable runtime tools path and implement first-party `stripe/cli@1`.
 4. Add `forge/plugin@1` with immutable coordinates and setup-only marketplace
    credentials where required.
