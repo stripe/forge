@@ -64,10 +64,10 @@ import {
 import {snapshotAgentToolCalls} from '../interaction/conversation.js';
 import {
   isSafeSimpleIdentifier,
-  parseResolvedRunPlan,
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
+import {parseResolvedRunPlanWithSetupActions} from '../model/parse.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {
   resolvedRunPlanSha256,
@@ -95,10 +95,14 @@ import {
 import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
-  createSetupExecutor,
   type PreparedSetup,
   type SetupExecutor,
 } from '../setup/index.js';
+import {createSetupExecutorForRegistry} from '../setup/executor.js';
+import {
+  defaultSetupActionRegistry,
+  type SetupActionRegistry,
+} from '../setup/registry.js';
 import {executionError, ForgeExecutionError, throwIfAborted} from './errors.js';
 import {createRunEventEmitter} from './events.js';
 import type {RunPhase} from '../contracts/observability.js';
@@ -160,9 +164,21 @@ interface EvalPreflight {
  * operation. CLI validation and execution share this exact boundary.
  */
 export function preflightEval(request: PreflightEvalInput): void {
+  return preflightEvalWithSetupActions(request, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function preflightEvalWithSetupActions(
+  request: PreflightEvalInput,
+  setupActions: SetupActionRegistry,
+): void {
   try {
-    const plan = parseResolvedRunPlan(request.plan);
-    buildEvalPreflight(plan, request.composition);
+    const plan = parseResolvedRunPlanWithSetupActions(request.plan, setupActions);
+    buildEvalPreflight(
+      plan,
+      request.composition,
+      createSetupExecutorForRegistry(setupActions),
+    );
   } catch (error) {
     throw executionError(
       'invalid_plan',
@@ -175,17 +191,29 @@ export function preflightEval(request: PreflightEvalInput): void {
 
 /** Execute one already-resolved run and return only after atomic commit. */
 export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1> {
-  return executeEvalWithTestHooks(request, {});
+  return executeEvalWithSetupActions(request, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export async function executeEvalWithSetupActions(
+  request: ExecuteEvalInput,
+  setupActions: SetupActionRegistry,
+): Promise<CompletedRunV1> {
+  return executeEvalWithTestHooks(request, {}, setupActions);
 }
 
 /** @internal Unexported package test seam; production always uses fixed waits. */
 export async function executeEvalWithTestHooks(
   request: ExecuteEvalInput,
   hooks: ExecuteEvalTestHooks,
+  setupActions: SetupActionRegistry = defaultSetupActionRegistry,
 ): Promise<CompletedRunV1> {
   let input: ExecuteEvalInput;
   try {
-    input = {...request, plan: parseResolvedRunPlan(request.plan)};
+    input = {
+      ...request,
+      plan: parseResolvedRunPlanWithSetupActions(request.plan, setupActions),
+    };
   } catch (error) {
     throw executionError(
       'invalid_plan',
@@ -218,7 +246,7 @@ export async function executeEvalWithTestHooks(
       return buildEvalPreflight(
         input.plan,
         input.composition,
-        hooks.setupExecutor,
+        hooks.setupExecutor ?? createSetupExecutorForRegistry(setupActions),
       );
     });
 
@@ -794,7 +822,7 @@ function rolePlayerErrorRecord(error: {
 function buildEvalPreflight(
   plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
-  setupExecutor: SetupExecutor = createSetupExecutor(),
+  setupExecutor: SetupExecutor,
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
@@ -1417,7 +1445,17 @@ function buildResult(input: {
     run_id: input.input.runId,
     selection: input.input.plan.selection,
     plan_sha256: resolvedRunPlanSha256(input.input.plan),
-    forge: {version: FORGE_VERSION},
+    forge: {
+      version: FORGE_VERSION,
+      ...(input.input.plan.provenance.forge.action_bundles === undefined
+        ? {}
+        : {
+            action_bundles:
+              input.input.plan.provenance.forge.action_bundles.map(
+                (bundle) => ({...bundle}),
+              ),
+          }),
+    },
     runtime: {
       adapter: input.input.composition.runtime.id,
       runtime_id: input.runtime.runtimeId,

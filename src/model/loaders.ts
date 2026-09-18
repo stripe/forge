@@ -8,11 +8,15 @@ import {prefixedSha256, sha256Digest} from './hashes.js';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
-  parseExperimentConfigYaml,
+  parseExperimentConfigYamlWithSetupActions,
   parseDatasetManifestJson,
-  parseEvalCaseYaml,
+  parseEvalCaseYamlWithSetupActions,
 } from './parse.js';
 import {isSafeDatasetRelativePath} from './paths.js';
+import {
+  defaultSetupActionRegistry,
+  type SetupActionRegistry,
+} from '../setup/registry.js';
 import type {
   LoadedExperimentConfigV1,
   LoadedDatasetV1,
@@ -26,6 +30,14 @@ const MAX_DATASET_TOTAL_BYTES = 4 * 1024 * 1024 * 1024;
 
 /** Load and verify every byte named by a dataset's manifest. */
 export async function loadDataset(datasetRoot: string): Promise<LoadedDatasetV1> {
+  return loadDatasetWithSetupActions(datasetRoot, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export async function loadDatasetWithSetupActions(
+  datasetRoot: string,
+  setupActions: SetupActionRegistry,
+): Promise<LoadedDatasetV1> {
   const root = await resolveRealDirectory(datasetRoot, 'Dataset root');
   const manifestPath = path.join(root, 'manifest.json');
   const manifestRaw = await readBoundedRegularFile(
@@ -87,7 +99,7 @@ export async function loadDataset(datasetRoot: string): Promise<LoadedDatasetV1>
       MAX_BENCHMARK_YAML_BYTES,
       'Eval case',
     );
-    const definition = parseEvalCaseYaml(raw);
+    const definition = parseEvalCaseYamlWithSetupActions(raw, setupActions);
     if (definition.id !== entry.id) {
       throw integrityError('An eval case ID does not match its manifest entry.');
     }
@@ -112,6 +124,17 @@ export async function loadDataset(datasetRoot: string): Promise<LoadedDatasetV1>
 export async function loadExperimentConfig(
   experimentPath: string,
 ): Promise<LoadedExperimentConfigV1> {
+  return loadExperimentConfigWithSetupActions(
+    experimentPath,
+    defaultSetupActionRegistry,
+  );
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export async function loadExperimentConfigWithSetupActions(
+  experimentPath: string,
+  setupActions: SetupActionRegistry,
+): Promise<LoadedExperimentConfigV1> {
   const absolutePath = path.resolve(experimentPath);
   const stat = await lstatOrModelError(absolutePath, 'Experiment config');
   if (stat.isSymbolicLink() || !stat.isFile()) {
@@ -125,7 +148,7 @@ export async function loadExperimentConfig(
     MAX_BENCHMARK_YAML_BYTES,
     'Experiment config',
   );
-  const config = parseExperimentConfigYaml(raw);
+  const config = parseExperimentConfigYamlWithSetupActions(raw, setupActions);
   return {
     path: absolutePath,
     root: path.dirname(absolutePath),

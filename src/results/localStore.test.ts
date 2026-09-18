@@ -222,6 +222,45 @@ describe('local artifact store', () => {
     expect(() => parseRunResult({...resultFor([]), schema_version: 2})).toThrow();
   });
 
+  it('requires non-empty, unique, canonically ordered action bundle provenance', () => {
+    const first = {
+      namespace: 'acme-evals',
+      version: '1.0.0',
+      sha256: `sha256:${'a'.repeat(64)}`,
+    };
+    const second = {
+      namespace: 'zeta-evals',
+      version: '2.0.0',
+      sha256: `sha256:${'b'.repeat(64)}`,
+    };
+    const result = resultFor([]);
+
+    expect(() =>
+      parseRunResult({
+        ...result,
+        forge: {...result.forge, action_bundles: []},
+      }),
+    ).toThrow();
+    expect(() =>
+      parseRunResult({
+        ...result,
+        forge: {...result.forge, action_bundles: [first, first]},
+      }),
+    ).toThrow(/unique/);
+    expect(() =>
+      parseRunResult({
+        ...result,
+        forge: {...result.forge, action_bundles: [second, first]},
+      }),
+    ).toThrow(/canonical namespace order/);
+    expect(
+      parseRunResult({
+        ...result,
+        forge: {...result.forge, action_bundles: [first, second]},
+      }).forge.action_bundles,
+    ).toEqual([first, second]);
+  });
+
   it('rejects the removed aggregate artifact-set digest', () => {
     expect(() =>
       parseRunResult({

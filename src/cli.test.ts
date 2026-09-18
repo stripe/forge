@@ -7,7 +7,16 @@ import {expect} from '../test/support/expect.js';
 
 import {createDefaultCliComposition, runCli} from './cli.js';
 import {credentialReference} from './contracts/credentials.js';
+import {createForgeEngine} from './engine.js';
 import {sha256Digest, sha256Hex} from './model/index.js';
+import {defineSetupActionBundle} from './setup/index.js';
+import {
+  createFakeRuntimeAdapter,
+  createMemoryArtifactStore,
+  createMemoryRunInputProvider,
+  createScriptedAgentAdapter,
+  createStaticCredentialResolver,
+} from './testing/index.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -92,6 +101,180 @@ describe('Forge CLI', () => {
         repetition: 0,
       },
       interaction: {mode: 'one_shot', effective_prompt: 'Do the thing'},
+    });
+  });
+
+  it('uses an explicitly supplied engine for host action bundles', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment
+        .replace(
+          'forge:\n  version: 0.1.0',
+          `forge:\n  version: 0.1.0\n  action_bundles:\n    - namespace: acme-evals\n      version: 1.0.0\n      sha256: sha256:${'a'.repeat(64)}`,
+        )
+        .replace(
+          'treatments:\n  baseline:\n    setup: []',
+          'treatments:\n  baseline:\n    setup: []\n  with-tool:\n    setup:\n      - uses: acme-evals/tool@1\n        with: {name: formatter}',
+        )
+        .replace('treatments: [baseline]', 'treatments: [with-tool]'),
+    );
+    const engine = createForgeEngine({
+      setupActionBundles: [
+        defineSetupActionBundle({
+          manifest: {
+            namespace: 'acme-evals',
+            version: '1.0.0',
+            sha256: `sha256:${'a'.repeat(64)}`,
+          },
+          actions: [
+            {
+              uses: 'acme-evals/tool@1',
+              parseWith(input) {
+                if (
+                  input === null ||
+                  typeof input !== 'object' ||
+                  typeof (input as {name?: unknown}).name !== 'string'
+                ) {
+                  throw new TypeError('invalid tool');
+                }
+                return {name: (input as {name: string}).name};
+              },
+              preflight() {
+                return {requirements: {}, async apply() {}};
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'plan',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+      ],
+      {
+        engine,
+        stdout: (text) => { stdout += text; },
+        stderr: (text) => { stderr += text; },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      setup: [{uses: 'acme-evals/tool@1', with: {name: 'formatter'}}],
+      provenance: {
+        forge: {
+          action_bundles: [
+            {namespace: 'acme-evals', version: '1.0.0'},
+          ],
+        },
+      },
+    });
+  });
+
+  it('runs a host action bundle through an explicitly supplied engine', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment
+        .replace(
+          'forge:\n  version: 0.1.0',
+          `forge:\n  version: 0.1.0\n  action_bundles:\n    - namespace: acme-evals\n      version: 1.0.0\n      sha256: sha256:${'a'.repeat(64)}`,
+        )
+        .replace(
+          'treatments:\n  baseline:\n    setup: []',
+          'treatments:\n  baseline:\n    setup: []\n  with-tool:\n    setup:\n      - uses: acme-evals/tool@1\n        with: {name: formatter}',
+        )
+        .replace('treatments: [baseline]', 'treatments: [with-tool]'),
+    );
+    let applied = false;
+    const engine = createForgeEngine({
+      setupActionBundles: [
+        defineSetupActionBundle({
+          manifest: {
+            namespace: 'acme-evals',
+            version: '1.0.0',
+            sha256: `sha256:${'a'.repeat(64)}`,
+          },
+          actions: [
+            {
+              uses: 'acme-evals/tool@1',
+              parseWith(input) {
+                if (
+                  input === null ||
+                  typeof input !== 'object' ||
+                  typeof (input as {name?: unknown}).name !== 'string'
+                ) {
+                  throw new TypeError('invalid tool');
+                }
+                return {name: (input as {name: string}).name};
+              },
+              preflight() {
+                return {
+                  requirements: {},
+                  async apply() {
+                    applied = true;
+                  },
+                };
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const runtime = createFakeRuntimeAdapter({id: 'forge/docker'});
+    const agent = createScriptedAgentAdapter({id: 'claude-code'});
+    const artifacts = createMemoryArtifactStore();
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--run-id',
+        'host-action-run',
+      ],
+      {
+        engine,
+        compositionFactory: async () => ({
+          runtime: runtime.adapter,
+          agents: new Map([[agent.adapter.id, agent.adapter]]),
+          credentialResolver: createStaticCredentialResolver(),
+          inputProvider: createMemoryRunInputProvider(),
+          artifactStore: artifacts.store,
+        }),
+        stdout: (text) => { stdout += text; },
+        stderr: (text) => { stderr += text; },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(applied).toBe(true);
+    expect(artifacts.runs.has('host-action-run')).toBe(true);
+    expect(JSON.parse(stdout)).toMatchObject({
+      run_id: 'host-action-run',
+      result: {
+        forge: {
+          action_bundles: [
+            {namespace: 'acme-evals', version: '1.0.0'},
+          ],
+        },
+      },
     });
   });
 

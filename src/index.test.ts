@@ -13,8 +13,10 @@ import {
   MAX_GUIDELINE_JUDGE_PROMPT_BYTES,
   MAX_JUDGE_TRANSCRIPT_BYTES,
   createArtifactStore,
+  createForgeEngine,
   createJudgeTranscriptProjection,
   createSetupExecutor,
+  defineSetupActionBundle,
   credentialReference,
   evaluateRunEvidence,
   executeEval,
@@ -41,7 +43,9 @@ describe('@stripe/forge package root', () => {
     expect(parseResolvedRunPlan).toBeTypeOf('function');
     expect(resolveManifestCaseIdFromFile).toBeTypeOf('function');
     expect(createArtifactStore).toBeTypeOf('function');
+    expect(createForgeEngine).toBeTypeOf('function');
     expect(createSetupExecutor).toBeTypeOf('function');
+    expect(defineSetupActionBundle).toBeTypeOf('function');
     expect([...firstPartySetupHandlers.keys()].sort()).toEqual([
       'forge/command@1',
       'forge/write@1',

@@ -11,6 +11,10 @@ import {
 } from '../evaluation/judgeTranscript.js';
 import {parseRunSelection} from '../model/index.js';
 import {
+  isSafeSimpleIdentifier,
+  isSafeVersion,
+} from '../model/paths.js';
+import {
   EVALUATION_SCHEMA_VERSION,
   INTERACTION_SCHEMA_VERSION,
   JUDGE_EVIDENCE_SCHEMA_VERSION,
@@ -22,6 +26,8 @@ import {
 
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const safeText = z.string().min(1).max(4096).refine((value) => !/[\u0000-\u001f\u007f]/.test(value));
+const safeIdentifier = z.string().refine(isSafeSimpleIdentifier);
+const safeVersion = z.string().refine(isSafeVersion);
 const isoTimestamp = z.string().datetime({offset: true});
 const boundedArtifactText = z.string().max(16 * 1024 * 1024);
 
@@ -358,7 +364,45 @@ const runResultFields = {
     }
   }),
   plan_sha256: digest,
-  forge: z.object({version: safeText}).strict(),
+  forge: z.object({
+    version: safeVersion,
+    action_bundles: z
+      .array(
+        z
+          .object({
+            namespace: safeIdentifier,
+            version: safeVersion,
+            sha256: digest,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100)
+      .superRefine((bundles, context) => {
+        const seen = new Set<string>();
+        for (const [index, bundle] of bundles.entries()) {
+          if (seen.has(bundle.namespace)) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [index, 'namespace'],
+              message: 'Action bundle namespaces must be unique.',
+            });
+          }
+          if (
+            index > 0 &&
+            bundles[index - 1]!.namespace >= bundle.namespace
+          ) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [index, 'namespace'],
+              message: 'Action bundles must be in canonical namespace order.',
+            });
+          }
+          seen.add(bundle.namespace);
+        }
+      })
+      .optional(),
+  }).strict(),
   runtime: z.object({
     adapter: safeText,
     runtime_id: safeText,

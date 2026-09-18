@@ -11,8 +11,9 @@ checks, guideline judging, and atomic local results.
 The package is also an adapter framework. Environment-specific runtimes,
 credentials, setup-resource resolution, agents, storage, observation, and
 publication must integrate through documented public contracts rather than
-being imported or discovered by the core. Setup action schemas and handlers
-themselves are first-party and ship in this repository.
+being imported or discovered by the core. Built-in setup actions ship in this
+repository; embedding hosts may explicitly import manifest-backed action
+bundles when constructing an immutable engine.
 
 Read `README.md` and `package.json` before changing behavior or public exports.
 The README describes the currently implemented v0.1 capabilities; do not imply
@@ -49,9 +50,11 @@ independent feature flags.
 - `executeEval` owns all score-affecting lifecycle ordering.
 - Adapters provide mechanisms; they must not reorder setup, interaction,
   quiescence, evidence selection, evaluation, staging, cleanup, or commit.
-- Varying authority is supplied explicitly through `ForgeComposition`. Do not
-  add global plugin discovery, hidden process-environment fallbacks, or imports
-  of host-private implementations.
+- Varying authority is supplied explicitly through `ForgeComposition`. Setup
+  semantics are supplied separately through action bundles fixed at
+  `ForgeEngine` construction. Do not add global plugin discovery, hidden
+  process-environment fallbacks, YAML-driven imports, or core imports of
+  host-private implementations.
 - Prefer narrow capability interfaces and composition over subclassing or
   environment checks in the shared engine.
 - Setup-handler `preflight()`, agent `requirements()`, and completion-provider
@@ -185,13 +188,19 @@ Observers are non-authoritative and may not affect the run result.
   files. Do not weaken traversal, symlink, special-file, or extra-file checks.
 - Commands use argv vectors. Shell semantics must be requested explicitly by
   invoking a shell.
-- Setup action IDs are versioned as `forge/action@N` or `stripe/action@N` and
-  identify first-party actions implemented in this repository. Unknown actions
-  fail validation, and hosts cannot register or replace handlers. Environment-
-  specific resource selection belongs behind typed action-specific resolver
-  contracts and must retain explicit, digestible provenance. Network routing
-  and proxying belong to the runtime boundary, with the selected policy
-  identified in the plan rather than hidden in an action or ambient host state.
+- Setup action IDs are positively versioned. `forge/action@N` and
+  `stripe/action@N` identify reserved built-ins implemented in this repository.
+  Other namespaces may be supplied only by explicitly imported, immutable
+  action bundles whose version and implementation digest are pinned in the
+  experiment and selected plan. Unknown actions fail engine validation, and
+  bundles cannot replace built-ins. An action's pure payload parser must produce
+  a canonical fixed point. Authoring may normalize into that value, but resolved
+  plan parsing, execution, and verification must reject rather than accept any
+  further transformation. Environment-specific resource selection
+  belongs behind typed inputs or capabilities and must retain explicit,
+  digestible provenance. Network routing and proxying belong to the runtime
+  boundary, with the selected policy identified in the plan rather than hidden
+  in an action or ambient host state.
 
 ### Keep results deterministic and atomic
 
