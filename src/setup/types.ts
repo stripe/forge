@@ -97,12 +97,6 @@ export interface SetupExecutor {
   ): PreparedSetup;
 }
 
-/** @deprecated Use SetupExecutionContext. */
-export type SetupContext = SetupExecutionContext;
-
-/** @deprecated Use SetupStepHandler. */
-export type SetupActionHandler = SetupStepHandler;
-
 export class UnsupportedSetupActionError extends Error {
   readonly code = 'unsupported_setup_action' as const;
 
