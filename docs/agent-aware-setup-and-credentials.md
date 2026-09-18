@@ -19,9 +19,10 @@ This design makes setup a two-stage operation:
 The foundation in this change covers prepared setup, credential lifecycle
 declarations, the first-party action boundary, and explicit CLI credential
 bindings. Concrete `forge/skill@1`, `forge/mcp@1`, `stripe/cli@1`, and plugin
-actions follow as separate vertical slices. Typed resource resolvers will let a
-host select public, private, or explicit devbox resources without replacing the
-action handler or changing its semantics.
+actions follow as separate vertical slices. Typed resource inputs let a host
+select public, private, or explicit devbox sources without replacing the action
+handler or changing its semantics. Network proxying remains a separate runtime
+concern.
 
 ## Motivation
 
@@ -56,6 +57,8 @@ Codex configuration.
 - Hosts cannot register setup actions or replace first-party handlers.
 - Environment-specific service and source selection uses typed, action-specific
   resolver contracts rather than an arbitrary handler registry.
+- Network routing and proxying belong to the runtime boundary rather than an
+  MCP action or binding resolver.
 - Preflight is pure and completes for every step before Forge resolves the
   first credential or allocates a runtime.
 - Experiment configs and resolved plans contain opaque credential references,
@@ -200,7 +203,9 @@ The public Forge repository owns:
 
 - the versioned `forge/mcp@1` and `forge/skill@1` wire schemas;
 - strict parsing, normalization, credential declaration, and portable errors;
-- the typed MCP-binding and skill-source resolver interfaces;
+- canonical MCP binding and content-addressed skill-source contracts;
+- typed source-resolution interfaces where portable source coordinates require
+  resolution before planning;
 - the action handlers and their ordering within the shared lifecycle;
 - agent-realization requests for Claude, Codex, and other supported adapters;
 - provenance, content-digest, and verification rules; and
@@ -209,46 +214,52 @@ The public Forge repository owns:
 The internal eval-runner owns only environment-specific implementations and
 policy:
 
-- resolving a logical Stripe MCP binding to the normal service or an explicitly
-  selected devbox proxy;
+- projecting Stripe-private source coordinates into canonical action inputs;
 - turning an explicit local skill override into an immutable input snapshot;
 - resolving Stripe-private artifact coordinates and credentials;
+- implementing devbox MITM proxy mechanics, certificate handling, and routing
+  in an internal runtime adapter;
 - exposing internal CLI flags or configuration which select those overrides;
   and
 - enforcing any Stripe-specific access and network policy.
 
-An override is an input selection, not a replacement handler. It must be chosen
-before the final run plan is frozen and represented by safe provenance. Local
-skill bytes must be captured and content-hashed; the setup action must not read
-an ambient devbox path later during execution. An MCP binding must record a
-stable binding identity and resolver provenance without recording secret values.
-This makes a devbox run distinguishable and auditable while keeping the action's
-meaning identical to a normal run.
+An override is an input or runtime-policy selection, not a replacement handler.
+It must be chosen before the final run plan is frozen and represented by safe
+provenance. Local skill bytes must be captured and content-hashed; the setup
+action must not read an ambient devbox path later during execution. A selected
+network policy must have a stable identity and digest without recording secret
+values. This makes a devbox run distinguishable and auditable while keeping the
+action's meaning identical to a normal run.
 
 ## Future agent realization
 
-Portable agent-oriented actions will use typed resource resolvers and adapter
+Portable agent-oriented actions will use typed resource inputs and adapter
 capabilities rather than host- or adapter-owned action handlers. The flow for
 MCP will be:
 
-1. Before the plan is frozen, the selected MCP binding resolver turns the
-   authored logical binding and any explicit override into a canonical,
-   provenance-bearing binding with no secret values.
-2. The Forge-owned `forge/mcp@1` handler validates that canonical binding.
-3. It derives a deterministic sandbox credential variable and declares its
+1. The Forge-owned `forge/mcp@1` handler validates the canonical server name,
+   URL, transport, and optional credential reference.
+2. It derives a deterministic sandbox credential variable and declares its
    opaque reference under `credentials.agent`.
-4. It creates a normalized MCP request containing the server name, URL,
+3. It creates a normalized MCP request containing the server name, URL,
    transport, and sandbox variable name, but no secret value.
-5. It verifies during pure preflight that the selected adapter exposes an MCP
+4. It verifies during pure preflight that the selected adapter exposes an MCP
    realization capability.
-6. The prepared operation invokes that capability during ordered setup.
-7. Claude may render `.mcp.json`; Codex may use its native CLI. Both mechanisms
+5. The prepared operation invokes that capability during ordered setup.
+6. Claude may render `.mcp.json`; Codex may use its native CLI. Both mechanisms
    receive the same normalized semantics.
 
-For skills, the resolver produces a content-addressed input snapshot before the
-plan is frozen. The same boundary applies to plugins. Forge validates sources,
-identities, versions, and public semantics; the resolver selects immutable
-bytes, and the adapter selects native paths and commands.
+The MCP handler does not know whether traffic later passes directly to that URL
+or through a devbox proxy. A separate runtime/network slice must make the
+selected proxy policy identity and digest plan-visible; the internal runtime
+adapter owns the actual proxy, CA, and rewrite mechanics. An MCP binding resolver
+is needed only if authoring uses a logical service coordinate instead of a
+canonical URL, and its output must become ordinary plan input before freezing.
+
+For skills, source projection produces a content-addressed input snapshot before
+the plan is frozen. The same boundary applies to plugins. Forge validates
+sources, identities, versions, and public semantics; source resolution selects
+immutable bytes, and the adapter selects native paths and commands.
 
 ## First-party Stripe CLI
 
@@ -320,14 +331,16 @@ The foundation must prove:
 
 ## Follow-up sequence
 
-1. Add typed skill-source resolution and agent realization with `forge/skill@1`
+1. Add a plan-visible runtime network-policy identity and digest so an internal
+   adapter can implement eval-runner's devbox proxy without hidden inputs.
+2. Add typed skill-source resolution and agent realization with `forge/skill@1`
    as the first secret-free vertical slice, including immutable devbox input
    snapshots.
-2. Add typed MCP-binding resolution with `forge/mcp@1`, including explicit
-   devbox proxy selection and agent-only bearer delivery.
-3. Add a writable runtime tools path and implement first-party `stripe/cli@1`.
-4. Add `forge/plugin@1` with immutable coordinates and setup-only marketplace
+3. Add `forge/mcp@1` with canonical bindings and agent-only bearer delivery;
+   keep runtime proxy selection outside the action.
+4. Add a writable runtime tools path and implement first-party `stripe/cli@1`.
+5. Add `forge/plugin@1` with immutable coordinates and setup-only marketplace
    credentials where required.
-5. Add first-party `stripe/link-cli@1` if it remains part of the supported
+6. Add first-party `stripe/link-cli@1` if it remains part of the supported
    action set.
-6. Add Codex realizations and run the shared cross-adapter conformance suite.
+7. Add Codex realizations and run the shared cross-adapter conformance suite.

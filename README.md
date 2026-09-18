@@ -929,13 +929,14 @@ command projection. A credentialed operation receives exactly the setup
 environment names it declared, never credentials required only by another
 operation.
 
-Future `forge/mcp@1` and `forge/skill@1` actions will expose typed resource
-resolution contracts without making their handlers replaceable. The public
-action owns validation and portable semantics. A public resolver can select a
-normal MCP service or published skill, while an internal resolver can select a
-Stripe service, an explicit devbox proxy, or a snapshot of local skill files.
-The chosen binding must be represented in run provenance, and local content
-must be captured and hashed rather than read later from an ambient path.
+Future `forge/mcp@1` and `forge/skill@1` actions will use typed resource inputs
+without making their handlers replaceable. The public action owns validation
+and portable semantics. Devbox network proxying is a runtime concern: the MCP
+action keeps its canonical server URL while an internal runtime adapter may
+route that host to a devbox service. The selected network policy must be
+identified and digested in run-plan provenance. A local skill override must be
+captured and hashed as an immutable input rather than read later from an
+ambient path.
 
 Artifact contributors may add files only below
 `extensions/<contributor-id>/`. They cannot replace canonical artifacts, and

@@ -189,7 +189,9 @@ Observers are non-authoritative and may not affect the run result.
   identify first-party actions implemented in this repository. Unknown actions
   fail validation, and hosts cannot register or replace handlers. Environment-
   specific resource selection belongs behind typed action-specific resolver
-  contracts and must retain explicit, digestible provenance.
+  contracts and must retain explicit, digestible provenance. Network routing
+  and proxying belong to the runtime boundary, with the selected policy
+  identified in the plan rather than hidden in an action or ambient host state.
 
 ### Keep results deterministic and atomic
 
