@@ -167,8 +167,9 @@ Observers are non-authoritative and may not affect the run result.
 - Keep setup and agent credential scopes separate. Setup preflight declarations
   identify lifecycle purpose, while Forge assigns concrete scopes and rejects
   bindings which attempt to attach raw scope metadata.
-- Give credential-free setup actions the uncredentialed command projection;
-  access to setup credentials must follow an explicit setup declaration.
+- Give credential-free setup actions the uncredentialed command projection.
+  Give credentialed setup actions exactly the environment names they declare,
+  never a phase-wide collection of setup credentials.
 - Keep completion-provider credentials host-side and purpose-specific. They do
   not become runtime environment values unless a runtime capability separately
   declares the same opaque reference.

@@ -772,12 +772,14 @@ export function parseRunSelection(value: unknown): RunSelection {
  * by editing only one copy inside a serialized plan.
  */
 export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1 {
-  return parseWithSchema(
-    ResolvedRunPlanSchema,
-    value,
-    'invalid_plan',
-    'resolved run plan',
-  ) as ResolvedRunPlanV1;
+  return deepFreeze(
+    parseWithSchema(
+      ResolvedRunPlanSchema,
+      value,
+      'invalid_plan',
+      'resolved run plan',
+    ) as ResolvedRunPlanV1,
+  );
 }
 
 function parseYaml(source: string, label: string): unknown {
@@ -982,6 +984,16 @@ function agentKey(agent: {
   model: string;
 }): string {
   return JSON.stringify([agent.adapter, agent.provider, agent.model]);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(nested);
+    }
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function isBoundedText(value: string): boolean {

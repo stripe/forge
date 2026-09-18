@@ -965,7 +965,9 @@ agent or uncredentialed commands. A handler can instead declare the binding in
 `credentials.agent`, or in both collections when both phases need the same
 name and reference. Forge validates and combines all declarations before
 resolving the first value. A prepared operation which declares no setup
-credential receives only the uncredentialed command projection.
+credential receives only the uncredentialed command projection. A credentialed
+operation receives exactly the setup environment names it declared, never the
+setup credentials required only by another operation.
 
 Artifact contributors may add files only below
 `extensions/<contributor-id>/`. They cannot replace canonical artifacts, and

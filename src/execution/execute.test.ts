@@ -29,7 +29,7 @@ import type {
   SetupStepHandler,
 } from '../setup/types.js';
 import {ForgeExecutionError} from './errors.js';
-import {executeEval} from './execute.js';
+import {executeEval, preflightEval} from './execute.js';
 
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
@@ -442,6 +442,73 @@ describe('executeEval', () => {
     expect(runtimePrepared).toBe(false);
   });
 
+  it('rejects invalid agent environment declarations during pure preflight', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const selected = composition.agents.get('claude-code')!;
+
+    for (const variables of [
+      {'BAD-NAME': 'value'},
+      {VALID_NAME: 'line-one\nline-two'},
+    ]) {
+      const unsafeAgent: AgentAdapter = {
+        ...selected,
+        requirements(selection) {
+          return {
+            ...selected.requirements(selection),
+            environment: {variables},
+          };
+        },
+      };
+      expect(() =>
+        preflightEval({
+          plan: fixture.plan,
+          composition: {
+            ...composition,
+            agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+          },
+        }),
+      ).toThrow(ForgeExecutionError);
+    }
+
+    let credentialResolved = false;
+    let runtimePrepared = false;
+    const unsafeAgent: AgentAdapter = {
+      ...selected,
+      requirements(selection) {
+        return {
+          ...selected.requirements(selection),
+          environment: {variables: {VALID_NAME: 'line-one\nline-two'}},
+        };
+      },
+    };
+    await expect(
+      executeEval({
+        runId: 'run-invalid-agent-environment',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+          credentialResolver: {
+            async resolve() {
+              credentialResolved = true;
+              return 'must-not-resolve';
+            },
+          },
+          runtime: {
+            ...composition.runtime,
+            async prepare(input) {
+              runtimePrepared = true;
+              return composition.runtime.prepare(input);
+            },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
+    expect(credentialResolved).toBe(false);
+    expect(runtimePrepared).toBe(false);
+  });
+
   it('rejects extension-assigned credential scopes before resolving authority', async () => {
     const fixture = await executionFixture();
     const composition = fixture.composition(inertStore());
@@ -573,7 +640,7 @@ async function executionFixture(
     stateDirectories: new Map(),
     commands: {
       uncredentialed: inertCommandRunner(),
-      setup: inertCommandRunner(),
+      setup: () => inertCommandRunner(),
       agent: inertCommandRunner(),
     },
     async quiesce() {

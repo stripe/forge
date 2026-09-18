@@ -4,6 +4,7 @@ import {
   createEnvironmentCredentialResolver,
   createEnvironmentResolver,
   credentialReference,
+  normalizeScopedEnvironmentSpecification,
 } from './credentials.js';
 
 describe('credential and environment resolution', () => {
@@ -108,6 +109,41 @@ describe('credential and environment resolution', () => {
       /must declare at least one scope/,
     );
     assert.deepEqual(resolved, []);
+  });
+
+  it('purely normalizes and freezes a scoped environment specification', () => {
+    const normalized = normalizeScopedEnvironmentSpecification({
+      variables: {PUBLIC_SETTING: 'enabled'},
+      credentials: {
+        API_TOKEN: {
+          reference: credentialReference('provider/key'),
+          scopes: ['setup'],
+        },
+      },
+    });
+
+    assert.deepEqual(normalized, {
+      variables: {PUBLIC_SETTING: 'enabled'},
+      credentials: {
+        API_TOKEN: {reference: 'provider/key', scopes: ['setup']},
+      },
+    });
+    assert.equal(Object.isFrozen(normalized), true);
+    assert.equal(Object.isFrozen(normalized.variables), true);
+    assert.equal(Object.isFrozen(normalized.credentials.API_TOKEN), true);
+    assert.equal(Object.isFrozen(normalized.credentials.API_TOKEN!.scopes), true);
+    assert.throws(
+      () => normalizeScopedEnvironmentSpecification({
+        variables: {'BAD-NAME': 'value'},
+      }),
+      /Invalid environment variable name/,
+    );
+    assert.throws(
+      () => normalizeScopedEnvironmentSpecification({
+        variables: {VALID_NAME: 'line-one\nline-two'},
+      }),
+      /invalid value/,
+    );
   });
 
   it('rejects runtime-incompatible credential values before returning them', async () => {

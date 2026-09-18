@@ -93,6 +93,10 @@ function preparation(overrides: Partial<RuntimePreparation> = {}): RuntimePrepar
       variables: {PUBLIC_VALUE: 'visible'},
       credentials: {
         SETUP_SECRET: {value: 'setup-secret-value', scopes: ['setup']},
+        UNRELATED_SETUP_SECRET: {
+          value: 'unrelated-setup-secret-value',
+          scopes: ['setup'],
+        },
         AGENT_SECRET: {value: 'agent-secret-value', scopes: ['agent']},
       },
     },
@@ -146,8 +150,13 @@ describe('Forge Docker runtime', () => {
     );
 
     await prepared.commands.uncredentialed.run(['probe-tool']);
-    await prepared.commands.setup.run(['setup-tool'], {timeoutMs: 999_999});
+    const setupCommands = prepared.commands.setup(['SETUP_SECRET']);
+    await setupCommands.run(['setup-tool'], {timeoutMs: 999_999});
     await prepared.commands.agent.run(['claude', '--version']);
+    assert.throws(
+      () => prepared.commands.setup(['AGENT_SECRET']),
+      /not available in setup scope/,
+    );
     const execs = docker.calls.filter((call) => call.argv[1] === 'exec');
     assert.equal(execs.length, 4);
     const executableCheck = execs.find((call) =>
@@ -161,6 +170,7 @@ describe('Forge Docker runtime', () => {
       assert.doesNotMatch(call.environmentBody!, /SETUP_SECRET|AGENT_SECRET/);
     }
     assert.match(setup.environmentBody!, /SETUP_SECRET=setup-secret-value/);
+    assert.doesNotMatch(setup.environmentBody!, /UNRELATED_SETUP_SECRET/);
     assert.doesNotMatch(setup.environmentBody!, /AGENT_SECRET/);
     assert.match(agent.environmentBody!, /AGENT_SECRET=agent-secret-value/);
     assert.doesNotMatch(agent.environmentBody!, /SETUP_SECRET/);
@@ -192,7 +202,11 @@ describe('Forge Docker runtime', () => {
       `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
     );
     assert.equal(sealed.metadata.claudeCodeVersion, FORGE_CLAUDE_CODE_VERSION);
-    for (const commands of Object.values(prepared.commands)) {
+    for (const commands of [
+      prepared.commands.uncredentialed,
+      setupCommands,
+      prepared.commands.agent,
+    ]) {
       await assert.rejects(commands.run(['true']), /quiesced/);
     }
     await assert.rejects(

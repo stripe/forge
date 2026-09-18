@@ -42,8 +42,8 @@ export interface SetupApplyContext {
   readonly commands: Readonly<{
     /** Explicit non-secret variables only. */
     readonly uncredentialed: CommandRunner;
-    /** Explicit variables plus all setup-scoped credentials. */
-    readonly setup: CommandRunner;
+    /** Project exactly the setup credentials selected by the executor. */
+    setup(credentialEnvironmentNames: readonly string[]): CommandRunner;
   }>;
   readonly inputs: RunInputProvider;
   readonly signal: AbortSignal;
@@ -57,7 +57,8 @@ export interface SetupExecutionContext
   readonly runtime: ResolvedRunPlanV1['runtime'];
   /**
    * Uses the setup projection only when this step declared a setup credential;
-   * otherwise it contains explicit non-secret variables only.
+   * that projection contains exactly this step's declarations. Otherwise it
+   * contains explicit non-secret variables only.
    */
   readonly commands: CommandRunner;
 }

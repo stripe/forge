@@ -45,6 +45,11 @@ export interface ScopedEnvironmentSpecification {
   readonly credentials?: Readonly<Record<string, CredentialEnvironmentBinding>>;
 }
 
+export interface NormalizedScopedEnvironmentSpecification {
+  readonly variables: Readonly<Record<string, string>>;
+  readonly credentials: Readonly<Record<string, CredentialEnvironmentBinding>>;
+}
+
 export interface ResolvedCredentialEnvironmentBinding {
   readonly value: string;
   readonly scopes: readonly CredentialScope[];
@@ -74,17 +79,15 @@ export function createEnvironmentResolver(
 ): EnvironmentResolver {
   return {
     async resolve(specification, context) {
-      const variables = validatePlainVariables(specification.variables ?? {});
-      const credentialEntries = validateCredentialBindings(
-        specification.credentials ?? {},
-        variables,
-      );
+      const normalized = normalizeScopedEnvironmentSpecification(specification);
       const credentials: Record<string, ResolvedCredentialEnvironmentBinding> =
         {};
 
       // Every binding is validated above before the first authority-bearing
       // credential lookup occurs.
-      for (const {name, reference, scopes} of credentialEntries) {
+      for (const [name, {reference, scopes}] of Object.entries(
+        normalized.credentials,
+      )) {
         throwIfAborted(context.signal);
         const value = await credentialResolver.resolve(reference, {
           ...context,
@@ -102,11 +105,46 @@ export function createEnvironmentResolver(
       }
 
       return Object.freeze({
-        variables: Object.freeze(variables),
+        variables: normalized.variables,
         credentials: Object.freeze(credentials),
       });
     },
   };
+}
+
+/**
+ * Purely validate, clone, and freeze a scoped environment before any
+ * credential lookup or runtime allocation.
+ */
+export function normalizeScopedEnvironmentSpecification(
+  specification: ScopedEnvironmentSpecification,
+): NormalizedScopedEnvironmentSpecification {
+  if (
+    !specification ||
+    typeof specification !== 'object' ||
+    Array.isArray(specification)
+  ) {
+    throw new TypeError('Environment specification must be an object.');
+  }
+  const variables = Object.freeze(
+    validatePlainVariables(specification.variables ?? {}),
+  );
+  const credentialEntries = validateCredentialBindings(
+    specification.credentials ?? {},
+    variables,
+  );
+  const credentials: Record<string, CredentialEnvironmentBinding> = {};
+  for (const {name, reference, scopes} of credentialEntries) {
+    defineRecordValue(
+      credentials,
+      name,
+      Object.freeze({reference, scopes}),
+    );
+  }
+  return Object.freeze({
+    variables,
+    credentials: Object.freeze(credentials),
+  });
 }
 
 export interface EnvironmentCredentialResolverOptions {

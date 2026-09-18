@@ -14,7 +14,11 @@ import type {
   SealedRuntime,
   WorkspaceWriteOptions,
 } from '../../contracts/runtime.js';
-import {assertEnvironmentName} from '../../contracts/credentials.js';
+import {
+  assertEnvironmentName,
+  type CredentialScope,
+  type ResolvedEnvironment,
+} from '../../contracts/credentials.js';
 import type {ForgeDockerRuntimeV1} from '../../model/types.js';
 import {
   createHostCommandRunner,
@@ -245,8 +249,12 @@ export function createDockerRuntimeAdapter(
         stateDirectories,
         commands: Object.freeze({
           uncredentialed: uncredentialedCommands,
-          setup: controller.forScope('setup'),
-          agent: controller.forScope('agent'),
+          setup: (credentialEnvironmentNames: readonly string[]) =>
+            controller.forScope('setup', credentialEnvironmentNames),
+          agent: controller.forScope(
+            'agent',
+            credentialEnvironmentNamesForScope(input.environment, 'agent'),
+          ),
         }),
         quiesce(): Promise<SealedRuntime> {
           if (disposePromise) {
@@ -273,6 +281,18 @@ export function createDockerRuntimeAdapter(
       });
     },
   });
+}
+
+function credentialEnvironmentNamesForScope(
+  environment: ResolvedEnvironment,
+  scope: CredentialScope,
+): readonly string[] {
+  return Object.freeze(
+    Object.entries(environment.credentials)
+      .filter(([, binding]) => binding.scopes.includes(scope))
+      .map(([name]) => name)
+      .sort(compareCodeUnits),
+  );
 }
 
 function guardedWorkspace(
@@ -640,4 +660,8 @@ function positive(value: number, name: string): number {
     throw new TypeError(`${name} must be a positive integer.`);
   }
   return value;
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -88,6 +88,11 @@ describe('parseResolvedRunPlan', () => {
 
     expect(parsed).toEqual(input);
     expect(parsed).not.toBe(input);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(Object.isFrozen(parsed.setup)).toBe(true);
+    expect(Object.isFrozen(parsed.case)).toBe(true);
+    expect(Object.isFrozen(parsed.runtime.resources)).toBe(true);
+    expect(Object.isFrozen(input)).toBe(false);
   });
 
   it('rejects inconsistent duplicated execution fields', () => {

@@ -91,14 +91,16 @@ export function createSetupExecutor(
         readonly index: number;
         readonly uses: string;
         readonly prepared: PreparedSetupStep;
+        readonly setupCredentialEnvironmentNames: readonly string[];
       }> = [];
       const requirementAccumulator = createRequirementAccumulator();
 
       for (let index = 0; index < steps.length; index += 1) {
-        const step = steps[index];
-        if (!step || !isSafeActionIdentifier(step.uses)) {
-          throw new UnsupportedSetupActionError(String(step?.uses), index);
+        const inputStep = steps[index];
+        if (!inputStep || !isSafeActionIdentifier(inputStep.uses)) {
+          throw new UnsupportedSetupActionError(String(inputStep?.uses), index);
         }
+        const step = freezeClone(inputStep);
         const handler = handlers.get(step.uses);
         if (!handler) {
           throw new UnsupportedSetupActionError(step.uses, index);
@@ -108,7 +110,19 @@ export function createSetupExecutor(
           step.uses,
         );
         requirementAccumulator.add(prepared.requirements);
-        preparedSteps.push(Object.freeze({index, uses: step.uses, prepared}));
+        const setupCredentialEnvironmentNames = Object.freeze(
+          Object.keys(prepared.requirements.credentials?.setup ?? {}).sort(
+            compareCodeUnits,
+          ),
+        );
+        preparedSteps.push(
+          Object.freeze({
+            index,
+            uses: step.uses,
+            prepared,
+            setupCredentialEnvironmentNames,
+          }),
+        );
       }
 
       const requirements = requirementAccumulator.finish();
@@ -123,15 +137,14 @@ export function createSetupExecutor(
           for (const step of preparedSteps) {
             applyContext.signal.throwIfAborted();
             try {
-              const setupCredentials =
-                step.prepared.requirements.credentials?.setup;
               await step.prepared.apply({
                 ...applyContext,
                 commands:
-                  setupCredentials === undefined ||
-                  Object.keys(setupCredentials).length === 0
+                  step.setupCredentialEnvironmentNames.length === 0
                     ? applyContext.commands.uncredentialed
-                    : applyContext.commands.setup,
+                    : applyContext.commands.setup(
+                        step.setupCredentialEnvironmentNames,
+                      ),
                 stepIndex: step.index,
                 selection,
                 runtime,
@@ -329,9 +342,7 @@ function defineRecordValue<T>(
   });
 }
 
-function freezeClone<T extends AgentSelectionV1 | ResolvedRunPlanV1['runtime']>(
-  value: T,
-): T {
+function freezeClone<T>(value: T): T {
   return deepFreeze(structuredClone(value));
 }
 
@@ -341,4 +352,8 @@ function deepFreeze<T>(value: T): T {
     for (const nested of Object.values(value)) deepFreeze(nested);
   }
   return value;
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

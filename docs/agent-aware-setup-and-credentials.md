@@ -94,10 +94,12 @@ requirements and the exact operation that will later apply. The executor
 preflights all steps, aggregates their requirements, and returns one
 `PreparedSetup`.
 
-The prepared object captures the selected handlers and normalized values in
-memory. Execution does not repeat handler lookup or requirement derivation.
-This prevents composition mutation or a second interpretation of the same wire
-payload after credentials have been resolved.
+The prepared object captures the selected handlers and deep-frozen clones of
+their normalized inputs in memory. Resolved plans are also deep-frozen at their
+parse boundary before any handler, runtime, or agent adapter receives them.
+Execution does not repeat handler lookup or requirement derivation. This
+prevents composition or input mutation from causing a second interpretation of
+the same wire payload after credentials have been resolved.
 
 The public requirement shape has three explicit concepts:
 
@@ -110,13 +112,15 @@ The public requirement shape has three explicit concepts:
 
 The top-level apply context includes uncredentialed and setup-scoped command
 projections. For each prepared step, Forge exposes the setup projection only
-when that step declared at least one setup credential; otherwise the operation
-receives the uncredentialed projection. This keeps `forge/command@1`, which
-declares no credentials, from observing credentials required by another setup
-action. The per-step context also includes the selected agent coordinates,
-runtime selection, step index, logical runtime paths, run-owned workspace,
-input provider, and abort signal. It does not contain credential values, the
-agent command runner, runtime cleanup authority, or ambient host state.
+when that step declared at least one setup credential, and that projection
+contains exactly the environment names declared by that step. Otherwise the
+operation receives the uncredentialed projection. This prevents both
+`forge/command@1` and one credentialed installer from observing credentials
+required only by another setup action. The per-step context also includes the
+selected agent coordinates, runtime selection, step index, logical runtime
+paths, run-owned workspace, input provider, and abort signal. It does not
+contain credential values, the agent command runner, runtime cleanup authority,
+or ambient host state.
 
 ## Credential aggregation
 
@@ -140,14 +144,21 @@ Aggregation is completed and validated before resolution:
   allocation because Docker's environment-file transport cannot represent
   them safely.
 
+The complete merged environment is normalized during the same authority-free
+preflight used by `forge validate`. Execution repeats validation defensively,
+but cannot discover a new structural environment error after validation has
+succeeded.
+
 The runtime continues exposing three projections:
 
 1. Uncredentialed agent preparation receives explicit non-secret variables.
-2. Setup receives those variables and setup-scoped credentials.
+2. Each setup action receives those variables and exactly its declared
+   setup-scoped credentials.
 3. Agent interaction receives those variables and agent-scoped credentials.
 
 Within setup, a credential-free prepared step receives projection 1. A step
-which explicitly declares a setup credential receives projection 2.
+which explicitly declares setup credentials receives a distinct projection 2
+limited to those names.
 
 Setup operations which declare an agent-only credential never receive its
 value. They write a reference to a deterministic sandbox environment variable
@@ -253,15 +264,17 @@ The foundation must prove:
 - Prepared steps apply exactly once in authored order.
 - Case setup continues preceding treatment setup.
 - Selection and runtime context are fixed at preflight.
+- Parsed plans and setup-step inputs remain immutable through application.
 - First-party actions cannot be replaced through composition.
 - Unknown `forge/` and `stripe/` actions fail parsing.
 - Setup-only, agent-only, and shared credentials receive the intended scopes.
 - Conflicting names or references fail before credential resolution.
 - Raw scope assignment fails.
 - Invalid runtime credential bytes fail before allocation.
+- Invalid agent environment declarations fail during authority-free preflight.
 - CLI mappings are explicit and errors do not echo accidental values.
-- Credential-free actions, including `forge/command@1`, cannot observe setup
-  credentials declared by another action.
+- No action, including a credentialed installer, can observe a setup credential
+  declared only by another action.
 - Existing write, command, interaction, evidence, evaluation, and result
   behavior remains unchanged.
 

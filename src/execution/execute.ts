@@ -27,6 +27,7 @@ import type {ForgeComposition} from '../contracts/composition.js';
 import {
   createEnvironmentResolver,
   credentialReference,
+  normalizeScopedEnvironmentSpecification,
   type CredentialEnvironmentBinding,
   type CredentialScope,
   type EnvironmentSpecification,
@@ -273,7 +274,8 @@ export async function executeEvalWithTestHooks(
         workspace: prepared!.workspace,
         commands: Object.freeze({
           uncredentialed: prepared!.commands.uncredentialed,
-          setup: prepared!.commands.setup,
+          setup: (credentialEnvironmentNames: readonly string[]) =>
+            prepared!.commands.setup(credentialEnvironmentNames),
         }),
         inputs: input.composition.inputProvider,
         signal,
@@ -940,10 +942,7 @@ function mergeEnvironmentSpecifications(
       );
     }
   }
-  return Object.freeze({
-    variables: Object.freeze(variables),
-    credentials: Object.freeze(credentials),
-  });
+  return normalizeScopedEnvironmentSpecification({variables, credentials});
 }
 
 function normalizeAgentRequirements(

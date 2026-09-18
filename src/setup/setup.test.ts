@@ -83,10 +83,8 @@ describe('portable setup actions', () => {
             return result();
           },
         },
-        setup: {
-          async run() {
-            throw new Error('credential-free commands must not use setup credentials');
-          },
+        setup() {
+          throw new Error('credential-free commands must not use setup credentials');
         },
       },
       inputs: {
@@ -202,11 +200,14 @@ describe('portable setup actions', () => {
             throw new Error('credentialed setup must use the setup projection');
           },
         },
-        setup: {
-          async run() {
-            events.push('command:setup');
-            return result();
-          },
+        setup(credentialEnvironmentNames) {
+          assert.deepEqual(credentialEnvironmentNames, ['PACKAGE_TOKEN']);
+          return {
+            async run() {
+              events.push('command:setup');
+              return result();
+            },
+          };
         },
       },
       inputs: emptyInputs(),
@@ -257,6 +258,131 @@ describe('portable setup actions', () => {
       }).preflight([{uses: handler.uses, with: {}}], setupTarget),
       /conflicting references/,
     );
+  });
+
+  it('projects only the setup credentials declared by each prepared step', async () => {
+    const projections: Array<{
+      credentialEnvironmentNames: readonly string[];
+      argv: readonly string[];
+    }> = [];
+    const handler: SetupStepHandler = {
+      uses: 'acme/install@1',
+      preflight(step) {
+        const payload = step.with as Readonly<{
+          credential_name: string;
+          credential_reference: string;
+        }>;
+        const credentialName = payload.credential_name;
+        return {
+          requirements: {
+            credentials: {
+              setup: {
+                [credentialName]: {
+                  reference: credentialReference(
+                    payload.credential_reference,
+                  ),
+                },
+              },
+            },
+          },
+          async apply(context) {
+            await context.commands.run(['install', credentialName]);
+          },
+        };
+      },
+    };
+    const prepared = createSetupExecutor({
+      extensions: new Map([[handler.uses, handler]]),
+    }).preflight(
+      [
+        {
+          uses: handler.uses,
+          with: {
+            credential_name: 'TOKEN_A',
+            credential_reference: 'acme.token-a',
+          },
+        },
+        {
+          uses: handler.uses,
+          with: {
+            credential_name: 'TOKEN_B',
+            credential_reference: 'acme.token-b',
+          },
+        },
+      ],
+      setupTarget,
+    );
+
+    await prepared.apply({
+      runId: 'run-projected-credentials',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: emptyWorkspace(),
+      commands: {
+        uncredentialed: {
+          async run() {
+            throw new Error('credentialed steps must use a credential projection');
+          },
+        },
+        setup(credentialEnvironmentNames) {
+          const selected = Object.freeze([...credentialEnvironmentNames]);
+          return {
+            async run(argv) {
+              projections.push({
+                credentialEnvironmentNames: selected,
+                argv: Object.freeze([...argv]),
+              });
+              return result();
+            },
+          };
+        },
+      },
+      inputs: emptyInputs(),
+      signal: new AbortController().signal,
+    });
+
+    assert.deepEqual(projections, [
+      {credentialEnvironmentNames: ['TOKEN_A'], argv: ['install', 'TOKEN_A']},
+      {credentialEnvironmentNames: ['TOKEN_B'], argv: ['install', 'TOKEN_B']},
+    ]);
+  });
+
+  it('binds prepared operations to an immutable setup-step snapshot', async () => {
+    const inputStep = {
+      uses: 'acme/capture@1',
+      with: {value: 'before'},
+    };
+    let frozenDuringPreflight = false;
+    let appliedValue: string | undefined;
+    const handler: SetupStepHandler = {
+      uses: inputStep.uses,
+      preflight(step) {
+        const payload = step.with as Readonly<{value: string}>;
+        frozenDuringPreflight =
+          Object.isFrozen(step) && Object.isFrozen(step.with);
+        return {
+          requirements: {},
+          async apply() {
+            appliedValue = payload.value;
+          },
+        };
+      },
+    };
+    const prepared = createSetupExecutor({
+      extensions: new Map([[handler.uses, handler]]),
+    }).preflight([inputStep], setupTarget);
+
+    inputStep.with.value = 'after';
+    await prepared.apply({
+      runId: 'run-immutable-step',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: emptyWorkspace(),
+      commands: inertCommandProjections(),
+      inputs: emptyInputs(),
+      signal: new AbortController().signal,
+    });
+
+    assert.equal(frozenDuringPreflight, true);
+    assert.equal(appliedValue, 'before');
   });
 
   it('rejects handler-assigned raw credential scopes', () => {
@@ -356,10 +482,8 @@ describe('portable setup actions', () => {
               };
             },
           },
-          setup: {
-            async run() {
-              throw new Error('forge/command@1 must run uncredentialed');
-            },
+          setup() {
+            throw new Error('forge/command@1 must run uncredentialed');
           },
         },
         inputs: {
@@ -398,6 +522,6 @@ function emptyInputs() {
 function inertCommandProjections() {
   return {
     uncredentialed: {async run() { return result(); }},
-    setup: {async run() { return result(); }},
+    setup: () => ({async run() { return result(); }}),
   };
 }
