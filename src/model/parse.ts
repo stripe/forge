@@ -16,6 +16,11 @@ import {
   isSafeWorkspaceRelativePath,
 } from './paths.js';
 import {
+  defaultSetupActionRegistry,
+  type SetupActionDefinition,
+  type SetupActionRegistry,
+} from '../setup/registry.js';
+import {
   BENCHMARK_SCHEMA_VERSION,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
@@ -25,6 +30,7 @@ import {
   type ExperimentConfigV1,
   type DatasetManifestV1,
   type EvalCaseV1,
+  type JsonObject,
   type JsonValue,
   type ResolvedRunPlanV1,
   type RunSelection,
@@ -40,7 +46,7 @@ const MAX_COLLECTION_ENTRIES = 10_000;
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_SETUP_STEPS = 1_000;
 const MAX_RESOLVED_SETUP_STEPS = MAX_SETUP_STEPS * 2;
-const MAX_COMMAND_ARGUMENTS = 256;
+const MAX_ACTION_BUNDLES = 100;
 const MAX_CHECK_REGEX_BYTES = 1_024;
 const MAX_SUCCESS_GUIDELINE_CHARACTERS = 64 * 1024;
 
@@ -76,12 +82,6 @@ const WorkspacePathSchema = z
     isSafeWorkspaceRelativePath,
     'must be a canonical workspace-relative POSIX path',
   );
-const WorkspaceDirectorySchema = z
-  .string()
-  .refine(
-    (value) => isSafeWorkspaceRelativePath(value, {allowRoot: true}),
-    'must be a canonical workspace-relative POSIX directory',
-  );
 
 const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -97,59 +97,45 @@ const JsonObjectSchema = z
   .record(z.string(), JsonValueSchema)
   .superRefine(rejectUnsafeObjectKeys);
 
-const WriteSetupWithSchema = z
-  .object({
-    target: WorkspacePathSchema,
-    source: z.union([
-      z.object({content: z.string().refine(isBoundedText)}).strict(),
-      z.object({dataset_path: DatasetPathSchema}).strict(),
-    ]),
-  })
-  .strict();
-
-const CommandSetupWithSchema = z
-  .object({
-    argv: z
-      .array(z.string().min(1).refine(isBoundedText))
-      .min(1)
-      .max(MAX_COMMAND_ARGUMENTS),
-    cwd: WorkspaceDirectorySchema.optional(),
-    timeout_ms: PositiveIntegerSchema.max(60 * 60 * 1000).optional(),
-  })
-  .strict();
-
 const SetupStepEnvelopeSchema = z
   .object({
-    uses: z.string(),
+    uses: z
+      .string()
+      .refine(
+        isSafeActionIdentifier,
+        'uses must be a namespaced, positive-version action ID',
+      ),
     with: JsonObjectSchema,
   })
+  .strict();
+
+const SetupActionBundleReferenceSchema = z
+  .object({
+    namespace: SimpleIdentifierSchema,
+    version: VersionSchema,
+    sha256: z
+      .string()
+      .refine(isSha256Digest, 'must be a sha256: digest'),
+  })
+  .strict();
+
+const ForgeDependencySchema = z
+  .object({
+    version: VersionSchema,
+    action_bundles: z
+      .array(SetupActionBundleReferenceSchema)
+      .min(1)
+      .max(MAX_ACTION_BUNDLES)
+      .optional(),
+  })
   .strict()
-  .superRefine((step, context) => {
-    if (step.uses === 'forge/write@1') {
-      addNestedIssues(WriteSetupWithSchema.safeParse(step.with), context, [
-        'with',
-      ]);
-      return;
-    }
-    if (step.uses === 'forge/command@1') {
-      addNestedIssues(CommandSetupWithSchema.safeParse(step.with), context, [
-        'with',
-      ]);
-      return;
-    }
-    if (!isSafeActionIdentifier(step.uses)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['uses'],
-        message: 'uses must be a namespaced, positive-version action ID',
-      });
-      return;
-    }
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['uses'],
-      message: `unknown setup action: ${step.uses}`,
-    });
+  .superRefine((forge, context) => {
+    addDuplicateIssues(
+      (forge.action_bundles ?? []).map(({namespace}) => namespace),
+      context,
+      ['action_bundles'],
+      'namespace',
+    );
   });
 
 const FilesystemCheckSchema = z
@@ -360,7 +346,7 @@ const ExperimentConfigSchema = z
         .string()
         .refine(isSha256Digest, 'must be a sha256: digest'),
     }).strict(),
-    forge: z.object({version: VersionSchema}).strict(),
+    forge: ForgeDependencySchema,
     runtime: RuntimeSchema,
     models: z
       .object({
@@ -498,7 +484,7 @@ const ResolvedRunPlanSchema = z
               .refine(isSha256Digest, 'must be a sha256: digest'),
           })
           .strict(),
-        forge: z.object({version: VersionSchema}).strict(),
+        forge: ForgeDependencySchema,
       })
       .strict(),
     case: MaterializedEvalCaseSchema,
@@ -716,36 +702,115 @@ export function parseDatasetManifestJson(source: string): DatasetManifestV1 {
 }
 
 export function parseEvalCase(value: unknown): EvalCaseV1 {
-  return parseWithSchema(
+  return parseEvalCaseWithSetupActions(value, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function parseEvalCaseWithSetupActions(
+  value: unknown,
+  setupActions: SetupActionRegistry,
+): EvalCaseV1 {
+  const parsed = parseWithSchema(
     EvalCaseSchema,
     value,
     'invalid_case',
     'eval case',
   ) as EvalCaseV1;
+  return {
+    ...parsed,
+    setup: normalizeSetupSteps(
+      parsed.setup,
+      setupActions,
+      'authoring',
+      'invalid_case',
+      'eval case setup step',
+    ),
+  };
 }
 
 export function parseEvalCaseYaml(source: string): EvalCaseV1 {
-  return parseEvalCase(parseYaml(source, 'eval case'));
+  return parseEvalCaseYamlWithSetupActions(source, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function parseEvalCaseYamlWithSetupActions(
+  source: string,
+  setupActions: SetupActionRegistry,
+): EvalCaseV1 {
+  return parseEvalCaseWithSetupActions(parseYaml(source, 'eval case'), setupActions);
 }
 
 export function parseExperimentConfig(value: unknown): ExperimentConfigV1 {
+  return parseExperimentConfigWithSetupActions(
+    value,
+    defaultSetupActionRegistry,
+  );
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function parseExperimentConfigWithSetupActions(
+  value: unknown,
+  setupActions: SetupActionRegistry,
+): ExperimentConfigV1 {
   const parsed = parseWithSchema(
     ExperimentConfigSchema,
     value,
     'invalid_experiment_config',
     'experiment config',
   ) as ExperimentConfigV1;
-  return {
+  const treatments = Object.fromEntries(
+    Object.entries(parsed.treatments).map(([name, treatment]) => [
+      name,
+      {
+        setup: normalizeSetupSteps(
+          treatment.setup,
+          setupActions,
+          'authoring',
+          'invalid_experiment_config',
+          `treatment ${JSON.stringify(name)} setup step`,
+        ),
+      },
+    ]),
+  );
+  const config: ExperimentConfigV1 = {
     ...parsed,
     treatments: {
       baseline: {setup: []},
-      ...parsed.treatments,
+      ...treatments,
     },
   };
+  try {
+    const references = config.forge.action_bundles ?? [];
+    setupActions.assertReferencesMatch(references);
+    for (const treatment of Object.values(config.treatments)) {
+      setupActions.assertStepsDeclared(treatment.setup, references);
+    }
+  } catch (error) {
+    throw new BenchmarkModelError(
+      'invalid_experiment_config',
+      'Invalid experiment config: setup action bundle references do not match its actions.',
+      {cause: error},
+    );
+  }
+  return config;
 }
 
 export function parseExperimentConfigYaml(source: string): ExperimentConfigV1 {
-  return parseExperimentConfig(parseYaml(source, 'experiment config'));
+  return parseExperimentConfigYamlWithSetupActions(
+    source,
+    defaultSetupActionRegistry,
+  );
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function parseExperimentConfigYamlWithSetupActions(
+  source: string,
+  setupActions: SetupActionRegistry,
+): ExperimentConfigV1 {
+  return parseExperimentConfigWithSetupActions(
+    parseYaml(source, 'experiment config'),
+    setupActions,
+  );
 }
 
 /** Parse an untrusted CLI, worker, or API selection before matrix resolution. */
@@ -767,13 +832,69 @@ export function parseRunSelection(value: unknown): RunSelection {
  * by editing only one copy inside a serialized plan.
  */
 export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1 {
-  return deepFreeze(
-    parseWithSchema(
-      ResolvedRunPlanSchema,
-      value,
+  return parseResolvedRunPlanWithSetupActions(
+    value,
+    defaultSetupActionRegistry,
+  );
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function parseResolvedRunPlanWithSetupActions(
+  value: unknown,
+  setupActions: SetupActionRegistry,
+): ResolvedRunPlanV1 {
+  const parsed = parseWithSchema(
+    ResolvedRunPlanSchema,
+    value,
+    'invalid_plan',
+    'resolved run plan',
+  ) as ResolvedRunPlanV1;
+  const caseSetup = normalizeSetupSteps(
+    parsed.case.setup,
+    setupActions,
+    'canonical',
+    'invalid_plan',
+    'resolved case setup step',
+  );
+  const treatmentSetup = normalizeSetupSteps(
+    parsed.treatment.setup,
+    setupActions,
+    'canonical',
+    'invalid_plan',
+    'resolved treatment setup step',
+  );
+  const normalized: ResolvedRunPlanV1 = {
+    ...parsed,
+    case: {
+      ...parsed.case,
+      setup: caseSetup,
+    },
+    treatment: {
+      ...parsed.treatment,
+      setup: treatmentSetup,
+    },
+    setup: [...caseSetup, ...treatmentSetup],
+  };
+  const rechecked = parseWithSchema(
+    ResolvedRunPlanSchema,
+    normalized,
+    'invalid_plan',
+    'resolved run plan',
+  ) as ResolvedRunPlanV1;
+  try {
+    setupActions.assertExactReferences(
+      rechecked.setup,
+      rechecked.provenance.forge.action_bundles ?? [],
+    );
+  } catch (error) {
+    throw new BenchmarkModelError(
       'invalid_plan',
-      'resolved run plan',
-    ) as ResolvedRunPlanV1,
+      'Invalid resolved run plan: setup action bundle provenance is not the exact canonical set required by its actions.',
+      {cause: error},
+    );
+  }
+  return deepFreeze(
+    rechecked,
   );
 }
 
@@ -929,17 +1050,6 @@ function assertBoundedDataGraph(
   }
 }
 
-function addNestedIssues(
-  result: z.SafeParseReturnType<unknown, unknown>,
-  context: z.RefinementCtx,
-  prefix: (string | number)[],
-): void {
-  if (result.success) return;
-  for (const issue of result.error.issues) {
-    context.addIssue({...issue, path: [...prefix, ...issue.path]});
-  }
-}
-
 function addDuplicateIssues(
   values: readonly string[],
   context: z.RefinementCtx,
@@ -1002,12 +1112,241 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-/** Narrow a parsed envelope to the public setup union without exporting Zod. */
+/** Parse and canonicalize an authored setup envelope using public built-ins. */
 export function parseSetupStep(value: unknown): SetupStepV1 {
-  return parseWithSchema(
-    SetupStepEnvelopeSchema,
+  return parseSetupStepWithSetupActions(value, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function parseSetupStepWithSetupActions(
+  value: unknown,
+  setupActions: SetupActionRegistry,
+): SetupStepV1 {
+  return normalizeSetupStep(
     value,
+    setupActions,
+    'authoring',
     'invalid_case',
     'setup step',
+  );
+}
+
+type SetupStepParseMode = 'authoring' | 'canonical';
+
+function normalizeSetupSteps(
+  input: readonly SetupStepV1[],
+  setupActions: SetupActionRegistry,
+  mode: SetupStepParseMode,
+  code: 'invalid_case' | 'invalid_experiment_config' | 'invalid_plan',
+  label: string,
+): SetupStepV1[] {
+  return input.map((step, index) =>
+    normalizeSetupStep(
+      step,
+      setupActions,
+      mode,
+      code,
+      `${label} at index ${index}`,
+    ),
+  );
+}
+
+function normalizeSetupStep(
+  value: unknown,
+  setupActions: SetupActionRegistry,
+  mode: SetupStepParseMode,
+  code: 'invalid_case' | 'invalid_experiment_config' | 'invalid_plan',
+  label: string,
+): SetupStepV1 {
+  assertBoundedDataGraph(value, label, code);
+  assertPlainJsonGraph(value, label, code);
+  assertBoundedJsonBytes(value, label, code);
+  const envelope = parseWithSchema(
+    SetupStepEnvelopeSchema,
+    value,
+    code,
+    label,
   ) as SetupStepV1;
+  const action = setupActions.action(envelope.uses);
+  if (!action) {
+    throw new BenchmarkModelError(
+      code,
+      `Invalid ${label}: unknown setup action: ${envelope.uses}.`,
+    );
+  }
+
+  const normalizedWith = parseSetupActionWith(
+    action,
+    envelope,
+    code,
+    label,
+  );
+  if (mode === 'canonical') {
+    if (!jsonValuesEqual(envelope.with, normalizedWith)) {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: action ${JSON.stringify(envelope.uses)} with payload is not canonical.`,
+      );
+    }
+  } else {
+    let reparsedWith: JsonObject;
+    try {
+      reparsedWith = parseSetupActionWith(
+        action,
+        {uses: envelope.uses, with: normalizedWith},
+        code,
+        `${label} normalized output`,
+      );
+    } catch (error) {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: action ${JSON.stringify(envelope.uses)} did not produce a stable canonical with payload.`,
+        {cause: error},
+      );
+    }
+    if (!jsonValuesEqual(normalizedWith, reparsedWith)) {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: action ${JSON.stringify(envelope.uses)} did not produce a stable canonical with payload.`,
+      );
+    }
+  }
+
+  return Object.freeze({
+    uses: envelope.uses,
+    with: normalizedWith,
+  });
+}
+
+function parseSetupActionWith(
+  action: SetupActionDefinition,
+  step: SetupStepV1,
+  code: 'invalid_case' | 'invalid_experiment_config' | 'invalid_plan',
+  label: string,
+): JsonObject {
+  let output: unknown;
+  try {
+    output = action.parseWith(deepFreeze(structuredClone(step.with)));
+  } catch (error) {
+    throw new BenchmarkModelError(
+      code,
+      `Invalid ${label}: action ${JSON.stringify(step.uses)} rejected its with payload.`,
+      {cause: error},
+    );
+  }
+  const normalizedLabel = `${label} normalized with payload`;
+  assertBoundedDataGraph(output, normalizedLabel, code);
+  assertPlainJsonGraph(output, normalizedLabel, code);
+  assertBoundedJsonBytes(output, normalizedLabel, code);
+  const normalizedWith = parseWithSchema(
+    JsonObjectSchema,
+    output,
+    code,
+    normalizedLabel,
+  ) as JsonObject;
+  return deepFreeze(normalizedWith);
+}
+
+function assertBoundedJsonBytes(
+  value: unknown,
+  label: string,
+  code: 'invalid_case' | 'invalid_experiment_config' | 'invalid_plan',
+): void {
+  const pending: unknown[] = [value];
+  const visited = new Set<object>();
+  let bytes = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === 'string') {
+      bytes += Buffer.byteLength(current, 'utf8');
+    } else if (Array.isArray(current)) {
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...current);
+    } else if (current !== null && typeof current === 'object') {
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const entries = Object.entries(current as Record<string, unknown>);
+      for (const [key, nested] of entries) {
+        bytes += Buffer.byteLength(key, 'utf8');
+        pending.push(nested);
+      }
+    } else {
+      bytes += 8;
+    }
+    if (bytes > MAX_TEXT_BYTES) {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: payload exceeds the ${MAX_TEXT_BYTES}-byte limit.`,
+      );
+    }
+  }
+}
+
+function assertPlainJsonGraph(
+  value: unknown,
+  label: string,
+  code: 'invalid_case' | 'invalid_experiment_config' | 'invalid_plan',
+): void {
+  const pending: unknown[] = [value];
+  const visited = new Set<object>();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (
+      current === null ||
+      typeof current === 'string' ||
+      typeof current === 'boolean' ||
+      (typeof current === 'number' && Number.isFinite(current))
+    ) {
+      continue;
+    }
+    if (typeof current !== 'object') {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: payload must contain only JSON values.`,
+      );
+    }
+    if (visited.has(current)) continue;
+    visited.add(current);
+    if (Array.isArray(current)) {
+      const keys = Reflect.ownKeys(current).filter((key) => key !== 'length');
+      if (
+        keys.length !== current.length ||
+        keys.some(
+          (key, index) =>
+            key !== String(index) ||
+            Object.getOwnPropertyDescriptor(current, key)?.enumerable !== true,
+        )
+      ) {
+        throw new BenchmarkModelError(
+          code,
+          `Invalid ${label}: arrays contain unsupported fields.`,
+        );
+      }
+      pending.push(...current);
+      continue;
+    }
+    const prototype = Object.getPrototypeOf(current);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: payload must contain only plain JSON objects.`,
+      );
+    }
+    const record = current as Record<string, unknown>;
+    const keys = Reflect.ownKeys(record);
+    if (
+      keys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          Object.getOwnPropertyDescriptor(record, key)?.enumerable !== true,
+      )
+    ) {
+      throw new BenchmarkModelError(
+        code,
+        `Invalid ${label}: objects contain unsupported fields.`,
+      );
+    }
+    pending.push(...(keys as string[]).map((key) => record[key]));
+  }
 }

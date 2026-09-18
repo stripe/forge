@@ -562,6 +562,62 @@ credentials. The command action itself declares no credentials and runs with
 Forge's uncredentialed command projection; use a typed setup action for an
 operation that requires a credential.
 
+### Setup action bundles
+
+Embedding hosts may supply trusted setup actions without adding their names or
+implementations to this package. A bundle owns one non-reserved namespace and
+is imported by host code before an immutable engine is constructed. YAML never
+names a JavaScript package to download or import. The bundle may be an ordinary
+module colocated with the embedding eval runner; it does not need to be
+published as a separate package.
+
+```js
+import {
+  createForgeEngine,
+  defineSetupActionBundle,
+} from '@stripe/forge';
+
+const actions = defineSetupActionBundle({
+  manifest: {
+    namespace: 'acme-evals',
+    version: '1.0.0',
+    sha256: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  },
+  actions: [{
+    uses: 'acme-evals/tool@1',
+    parseWith(input) {
+      if (typeof input?.name !== 'string') throw new TypeError('invalid tool');
+      return {name: input.name};
+    },
+    preflight(step) {
+      return {
+        requirements: {},
+        async apply(context) {
+          await context.commands.run(['install-tool', step.with.name]);
+        },
+      };
+    },
+  }],
+});
+
+const engine = createForgeEngine({setupActionBundles: [actions]});
+```
+
+An experiment which uses the action pins the same namespace, version, and
+implementation digest under `forge.action_bundles`. The selected resolved plan
+and `result.json` contain only bundles actually used by that run. A missing or
+mismatched bundle fails before credentials resolve or a runtime is allocated.
+
+The `forge` and `stripe` action namespaces remain reserved for implementations
+shipped by this package. Bundles execute trusted host code in the Forge process,
+but their `parseWith`, `preflight`, credential declarations, and `apply`
+operations retain the same validation and least-privilege lifecycle as built-in
+actions. `parseWith` must produce a stable canonical value: Forge proves its
+output is a fixed point during authoring and rejects any resolved plan that the
+parser would transform. See
+[Setup action bundles](docs/setup-action-bundles.md) for the full contract and
+release boundary.
+
 ## Programmatic API
 
 All root APIs use ESM:
@@ -755,7 +811,7 @@ async function loadForge() {
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
-| `@stripe/forge/setup` | Built-in setup handlers and setup executor |
+| `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
 | `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
 
 Only documented package exports are public. Do not import `dist/` files or
@@ -849,8 +905,10 @@ import {
 
 ## Adapters and private compositions
 
-`executeEval` owns lifecycle semantics. A host supplies mechanisms through one
-`ForgeComposition`; Forge never discovers plugins or private services globally.
+`executeEval` owns lifecycle semantics. A host supplies environment mechanisms
+through one `ForgeComposition`; Forge never discovers plugins or private
+services globally. Setup semantics are selected separately when a host creates
+an immutable `ForgeEngine` with explicitly imported action bundles.
 The setup preflight, first-party action, and credential-lifecycle design is
 documented in
 [Agent-aware setup and credential contracts](docs/agent-aware-setup-and-credentials.md).
@@ -917,28 +975,21 @@ evidence themselves. An adapter must translate failure to read or normalize its
 native source into an explicit unavailable reason. Malformed data labeled
 `available` is an adapter contract violation and fails the run.
 
-Setup action schemas and handlers are always shipped by the exact installed
-Forge version and do not belong in a host composition. Unknown action IDs fail
-validation. A host cannot register a new action or replace the meaning of a
-first-party `forge/` or `stripe/` action.
+The built-in setup schemas and handlers are shipped by the exact installed
+Forge version and do not belong in a host composition. The default engine
+rejects unknown action IDs. An embedding host may create a separate engine with
+explicit, manifest-backed action bundles, but no bundle can replace the meaning
+of a first-party `forge/` or `stripe/` action.
 
-A first-party handler's pure `preflight` method validates its step once and
-returns the exact operation later applied by the engine. Its requirements
-distinguish setup-only and agent-only credential references; handlers never
-assign raw credential scopes or receive resolved values directly. A prepared
-operation which declares no setup credential receives only the uncredentialed
-command projection. A credentialed operation receives exactly the setup
-environment names it declared, never credentials required only by another
-operation.
-
-Future `forge/mcp@1` and `forge/skill@1` actions will use typed resource inputs
-without making their handlers replaceable. The public action owns validation
-and portable semantics. Devbox network proxying is a runtime concern: the MCP
-action keeps its canonical server URL while an internal runtime adapter may
-route that host to a devbox service. The selected network policy must be
-identified and digested in run-plan provenance. A local skill override must be
-captured and hashed as an immutable input rather than read later from an
-ambient path.
+A setup action's pure `parseWith` method turns authored input into a stable
+canonical payload. Resolved-plan boundaries revalidate that payload but reject
+any transformation. Its pure `preflight` method then binds the exact operation
+applied later by the engine. Requirements distinguish setup-only and agent-only
+credential references; actions never assign raw credential scopes or receive
+resolved values directly. A prepared operation which declares no setup
+credential receives only the uncredentialed command projection. A credentialed
+operation receives exactly the setup environment names it declared, never
+credentials required only by another operation.
 
 Artifact contributors may add files only below
 `extensions/<contributor-id>/`. They cannot replace canonical artifacts, and
@@ -949,12 +1000,12 @@ Publishers must explicitly account for descriptors marked
 `sensitivity: restricted` rather than assuming every committed artifact is safe
 to distribute.
 
-This is the intended boundary for a private integration: depend on an exact
-`@stripe/forge` version, implement public contracts, and pass the resulting
-composition to `executeEval`. Do not fork or override the shared lifecycle.
-Private command-line wrappers can import `runCli` from `@stripe/forge/cli` and
-provide a `compositionFactory`, preserving the public command grammar while
-selecting host-owned capabilities.
+This is the intended boundary for an embedding integration: depend on an exact
+`@stripe/forge` version, implement public contracts, and construct one engine
+and composition without overriding the shared lifecycle. Command-line wrappers
+can import `runCli` from `@stripe/forge/cli` and provide both that engine and a
+`compositionFactory`, preserving the public command grammar while selecting
+host-owned semantics and capabilities.
 
 ## Security and reproducibility
 

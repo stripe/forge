@@ -15,6 +15,7 @@ import type {
   ModelRefV1,
   JsonValue,
   RunSelection,
+  SetupActionBundleReferenceV1,
   Sha256Digest,
 } from '../model/types.js';
 
@@ -235,7 +236,10 @@ interface RunResultCommon {
   readonly run_id: string;
   readonly selection: RunSelection;
   readonly plan_sha256: Sha256Digest;
-  readonly forge: {version: string};
+  readonly forge: {
+    version: string;
+    action_bundles?: readonly SetupActionBundleReferenceV1[];
+  };
   readonly runtime: {
     adapter: string;
     runtime_id: string;

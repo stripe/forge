@@ -11,6 +11,10 @@ import {
   type SetupStepV1,
   type WriteSetupStepV1,
 } from '../model/types.js';
+import {
+  defaultSetupActionRegistry,
+  type SetupActionRegistry,
+} from '../setup/registry.js';
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'
@@ -20,13 +24,14 @@ export type PlanningErrorCode =
   | 'invalid_repetition'
   | 'missing_role_player'
   | 'missing_judge'
-  | 'missing_dataset_input';
+  | 'missing_dataset_input'
+  | 'action_bundle_mismatch';
 
 export class PlanningError extends Error {
   readonly code: PlanningErrorCode;
 
-  constructor(code: PlanningErrorCode, message: string) {
-    super(message);
+  constructor(code: PlanningErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'PlanningError';
     this.code = code;
   }
@@ -68,6 +73,18 @@ export function resolveRunPlan(input: {
   experiment: LoadedExperimentConfigV1;
   selection: RunSelection;
 }): ResolvedRunPlanV1 {
+  return resolveRunPlanWithSetupActions(input, defaultSetupActionRegistry);
+}
+
+/** @internal Engine-bound variant using one already-frozen action registry. */
+export function resolveRunPlanWithSetupActions(
+  input: {
+    dataset: LoadedDatasetV1;
+    experiment: LoadedExperimentConfigV1;
+    selection: RunSelection;
+  },
+  setupActions: SetupActionRegistry,
+): ResolvedRunPlanV1 {
   const {dataset, selection} = input;
   const config = input.experiment.config;
   assertDatasetCompatibility(dataset, config);
@@ -123,6 +140,17 @@ export function resolveRunPlan(input: {
     ...cloneJson(definition.setup),
     ...cloneJson(treatment.setup),
   ];
+  const configuredActionBundles = config.forge.action_bundles ?? [];
+  try {
+    setupActions.assertStepsDeclared(setup, configuredActionBundles);
+  } catch (error) {
+    throw new PlanningError(
+      'action_bundle_mismatch',
+      'Selected setup actions do not match the experiment action bundle pins.',
+      {cause: error},
+    );
+  }
+  const requiredActionBundles = setupActions.requiredActionBundles(setup);
   assertDatasetInputsExist(setup, dataset);
 
   const initialPromptSource =
@@ -153,7 +181,12 @@ export function resolveRunPlan(input: {
         path: manifestCase.path,
         sha256: loadedCase.sha256,
       },
-      forge: {version: config.forge.version},
+      forge: {
+        version: config.forge.version,
+        ...(requiredActionBundles.length === 0
+          ? {}
+          : {action_bundles: cloneJson([...requiredActionBundles])}),
+      },
     },
     case: cloneJson(definition),
     treatment: {

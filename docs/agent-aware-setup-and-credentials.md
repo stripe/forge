@@ -2,12 +2,11 @@
 
 ## Summary
 
-Forge needs to support setup actions whose public meaning is portable but whose
-native realization depends on the selected coding agent. Skills, MCP servers,
-and plugins are the initial examples. Forge also needs first-party product
-actions, such as `stripe/cli@1`, whose implementation ships in this public
-repository even though their semantic owner is not the generic `forge/`
-namespace.
+Forge needs to support setup actions whose realization may depend on the
+selected coding agent or embedding host. Public plugin installation is the
+initial agent-aware built-in use case. A host may also supply explicitly
+imported, manifest-backed action bundles for semantics which do not belong in
+the public package.
 
 This design makes setup a two-stage operation:
 
@@ -16,13 +15,12 @@ This design makes setup a two-stage operation:
 2. After Forge resolves those declarations and prepares the runtime, it applies
    the already-preflighted operations in source order.
 
-The foundation in this change covers prepared setup, credential lifecycle
-declarations, the first-party action boundary, and explicit CLI credential
-bindings. Concrete `forge/skill@1`, `forge/mcp@1`, `stripe/cli@1`, and plugin
-actions follow as separate vertical slices. Typed resource inputs let a host
-select public, private, or explicit devbox sources without replacing the action
-handler or changing its semantics. Network proxying remains a separate runtime
-concern.
+The foundation covers prepared setup, credential lifecycle declarations, pure
+payload parsing, built-in actions, versioned host action bundles, and explicit
+CLI credential bindings. Concrete public actions follow as separate vertical
+slices. Typed resource inputs and bundle-owned schemas let a host represent
+non-public setup behavior without changing the shared lifecycle. Network
+proxying remains a separate runtime concern.
 
 ## Motivation
 
@@ -40,21 +38,22 @@ copying ambient host variables into the runtime would be non-reproducible and
 overbroad.
 
 Agent-aware setup does not mean putting an agent selector into every treatment.
-One treatment should express `forge/mcp@1` once. Forge owns that action's schema
-and semantics, and the selected adapter realizes a typed request as Claude or
-Codex configuration.
+One action expresses portable semantics once; a selected adapter or a
+host-owned action can realize its typed request without changing lifecycle
+ordering.
 
 ## Design principles
 
-- Forge owns the schema, validation, ordering, and portable semantics of every
-  first-party action.
+- Forge owns validation, ordering, and the portable semantics of every built-in
+  action. A host bundle owns the schema and semantics of its namespace.
 - Agent adapters provide narrow native realization mechanisms; they do not own
   arbitrary `forge/*` handlers.
-- All official actions are implemented in this public repository and available
+- All built-in actions are implemented in this public repository and available
   through the standard Forge CLI and programmatic engine.
-- The action namespace identifies semantic ownership, not code location or
-  loading behavior. Both `forge/mcp@1` and `stripe/cli@1` are first-party.
-- Hosts cannot register setup actions or replace first-party handlers.
+- The action namespace identifies semantic ownership. The `forge` and `stripe`
+  namespaces are reserved for built-ins shipped by this package.
+- A host may explicitly import an action bundle when constructing an engine,
+  but cannot register or replace built-in handlers.
 - Environment-specific service and source selection uses typed, action-specific
   resolver contracts rather than an arbitrary handler registry.
 - Network routing and proxying belong to the runtime boundary rather than an
@@ -71,24 +70,25 @@ Codex configuration.
 
 | Category | Examples | Schema owner | Mechanism owner |
 | --- | --- | --- | --- |
-| Generic first-party | `forge/write@1`, `forge/command@1`, `forge/skill@1`, `forge/mcp@1`, `forge/plugin@1` | Forge | Forge, a typed resource resolver, or the selected adapter |
-| Product first-party | `stripe/cli@1`, `stripe/link-cli@1` | Forge repository action owner | Forge repository action owner |
+| Generic built-in | `forge/write@1`, `forge/command@1`, future `forge/plugin@1` | Forge | Forge or the selected adapter |
+| Product built-in | Future public `stripe/*` actions | Forge repository action owner | Forge repository action owner |
+| Host bundle | `acme-evals/skill@1`, `acme-evals/tool@1` | Explicitly imported bundle | Bundle, runtime, or selected adapter |
 
 This change retains the two currently executable first-party actions:
-`forge/write@1` and `forge/command@1`. The latter is the argv-based counterpart
-to eval-runner's `shell` setup step; it does not add implicit shell parsing.
-Skills, MCP, plugins, and Stripe CLIs in this table describe the intended action
-ownership model, but remain non-executable until the follow-up slices below land.
+`forge/write@1` and `forge/command@1`. The latter is argv-based and does not add
+implicit shell parsing.
+Plugin support remains non-executable until its follow-up slice lands. Other
+agent-aware actions need a concrete public use case before becoming built-ins.
 
-The engine always installs the first-party registry. `ForgeComposition` exposes
-no setup-handler registry. Unknown action IDs fail schema validation, and a host
-cannot replace a registered first-party handler. The exported registry is an
-introspection view; the engine retains its own registry so mutating that
-JavaScript object cannot change execution behavior.
+The default engine installs only the built-in registry. `ForgeComposition`
+exposes no setup-handler registry. An embedding host instead supplies bundles
+to `createForgeEngine`; the engine snapshots that registry before parsing and
+uses it through result verification. Unknown action IDs fail engine validation,
+and a host cannot replace a registered built-in handler. The exported built-in
+registry remains an introspection view.
 
-Different teams may own action-specific directories and review through
-`CODEOWNERS`; that organizational boundary does not make an action dynamically
-loaded or private.
+Bundles are imported by trusted host code. YAML never causes dynamic package
+loading or action discovery. See [Setup action bundles](setup-action-bundles.md).
 
 ## Prepared setup contract
 
@@ -104,6 +104,12 @@ parse boundary before any handler, runtime, or agent adapter receives them.
 Execution does not repeat handler lookup or requirement derivation. This
 prevents composition or input mutation from causing a second interpretation of
 the same wire payload after credentials have been resolved.
+
+An action parser must produce a canonical fixed point: parsing its normalized
+output must return the same JSON value. Forge proves this while parsing authored
+configuration. At resolved-plan, execution, and verification boundaries it
+rejects any payload the parser would transform, so revalidation cannot silently
+change the plan or its digest.
 
 The public requirement shape has three explicit concepts:
 
@@ -195,92 +201,34 @@ references selected by capability preflight are resolved.
 availability, adapter compatibility, and requirement conflicts without reading
 host credential values.
 
-## Public actions and environment-specific resources
+## Built-in and host-owned actions
 
-There should not be a separate internal implementation of Forge setup actions.
-The internal eval-runner depends on the exact public Forge package and supplies
-narrow resolver implementations through public contracts.
+The public Forge repository owns built-in action schemas, implementations,
+ordering, portable errors, and any agent-realization capability required by a
+public action. The exact Forge version identifies their implementation.
 
-The public Forge repository owns:
+An embedding repository may own additional semantics in an action bundle. The
+public Forge package contains only the generic bundle contract; it does not name
+or import a host package. A bundle owns one non-reserved namespace, and its
+manifest version and implementation digest are pinned by the experiment and
+selected plan.
 
-- the versioned `forge/mcp@1` and `forge/skill@1` wire schemas;
-- strict parsing, normalization, credential declaration, and portable errors;
-- canonical MCP binding and content-addressed skill-source contracts;
-- typed source-resolution interfaces where portable source coordinates require
-  resolution before planning;
-- the action handlers and their ordering within the shared lifecycle;
-- agent-realization requests for Claude, Codex, and other supported adapters;
-- provenance, content-digest, and verification rules; and
-- default implementations for genuinely public source forms.
+Host-owned source projection still happens before the plan is frozen. Local
+directories become immutable content snapshots; private artifacts are selected
+by digest; credential values remain behind opaque references; and selected
+network policy has a safe identity and digest. An action never reads an ambient
+host path or silently chooses a different service during apply.
 
-The internal eval-runner owns only environment-specific implementations and
-policy:
+Agent-oriented bundle actions may use public, narrow adapter capabilities when
+native realization differs. For example, a generic skill-snapshot capability
+can let one host action target different agent-native directories without
+putting that action's schema in public Forge. A generic writable tools path can
+similarly support a host-owned CLI action. The bundle owns the action semantics;
+the public adapter or runtime owns only the narrow mechanism.
 
-- projecting Stripe-private source coordinates into canonical action inputs;
-- turning an explicit local skill override into an immutable input snapshot;
-- resolving Stripe-private artifact coordinates and credentials;
-- implementing devbox MITM proxy mechanics, certificate handling, and routing
-  in an internal runtime adapter;
-- exposing internal CLI flags or configuration which select those overrides;
-  and
-- enforcing any Stripe-specific access and network policy.
-
-An override is an input or runtime-policy selection, not a replacement handler.
-It must be chosen before the final run plan is frozen and represented by safe
-provenance. Local skill bytes must be captured and content-hashed; the setup
-action must not read an ambient devbox path later during execution. A selected
-network policy must have a stable identity and digest without recording secret
-values. This makes a devbox run distinguishable and auditable while keeping the
-action's meaning identical to a normal run.
-
-## Future agent realization
-
-Portable agent-oriented actions will use typed resource inputs and adapter
-capabilities rather than host- or adapter-owned action handlers. The flow for
-MCP will be:
-
-1. The Forge-owned `forge/mcp@1` handler validates the canonical server name,
-   URL, transport, and optional credential reference.
-2. It derives a deterministic sandbox credential variable and declares its
-   opaque reference under `credentials.agent`.
-3. It creates a normalized MCP request containing the server name, URL,
-   transport, and sandbox variable name, but no secret value.
-4. It verifies during pure preflight that the selected adapter exposes an MCP
-   realization capability.
-5. The prepared operation invokes that capability during ordered setup.
-6. Claude may render `.mcp.json`; Codex may use its native CLI. Both mechanisms
-   receive the same normalized semantics.
-
-The MCP handler does not know whether traffic later passes directly to that URL
-or through a devbox proxy. A separate runtime/network slice must make the
-selected proxy policy identity and digest plan-visible; the internal runtime
-adapter owns the actual proxy, CA, and rewrite mechanics. An MCP binding resolver
-is needed only if authoring uses a logical service coordinate instead of a
-canonical URL, and its output must become ordinary plan input before freezing.
-
-For skills, source projection produces a content-addressed input snapshot before
-the plan is frozen. The same boundary applies to plugins. Forge validates
-sources, identities, versions, and public semantics; source resolution selects
-immutable bytes, and the adapter selects native paths and commands.
-
-## First-party Stripe CLI
-
-`stripe/cli@1` is a first-party action implemented in this repository and
-installed by the standard engine. It is not a composition extension. Its
-`stripe/` namespace communicates product ownership while its exact
-implementation remains pinned by the Forge version.
-
-Stripe CLI requires one additional runtime capability not included in this
-foundation: a run-owned, non-root tools directory on the agent's `PATH`. The
-planned implementation will expose a logical tools path backed by
-`/home/forge/.local/bin`, download a platform-specific pinned artifact to a
-temporary path, verify its SHA-256 digest, set executable permissions, rename it
-atomically, and verify its version. An optional Stripe credential will be
-declared under `credentials.agent`; installation itself does not need it.
-
-Because the action ships with Forge, its implementation is identified by the
-exact Forge version, `stripe/cli@1`, the configured CLI version and digest, and
-the selected runtime platform. There is no separately injected handler package.
+Public plugin support remains a built-in because it is part of the portable
+benchmark behavior. Plugin coordinates, versions, digests, credentials, and
+agent-native realization must be explicit in its eventual public contract.
 
 ## Lifecycle
 
@@ -288,7 +236,7 @@ The resulting execution order is:
 
 1. Parse and resolve an ambient-free run plan.
 2. Select the coding-agent adapter.
-3. Install the first-party action registry.
+3. Freeze the built-in registry plus explicitly imported action bundles.
 4. Resolve and preflight every setup step.
 5. Aggregate and validate setup and agent credential declarations.
 6. Obtain normal agent and completion-provider requirements.
@@ -306,8 +254,10 @@ being finalized as part of the initial `0.1.0` release; there is no earlier
 published contract to preserve with a compatibility shim. Experiment and case
 `schema_version` remain `1`: no existing wire field changes meaning, and each
 future action has an independent `@N` semantic version. Experiment configs pin
-the exact compatible Forge package version. After `0.1.0` is released, a future
-breaking public-contract change must advance the package compatibility version.
+the exact compatible Forge package version and every extension bundle namespace,
+version, and implementation digest they may select. Selected plans retain only
+the bundles they use. After `0.1.0` is released, a future breaking
+public-contract change must advance the package compatibility version.
 
 ## Verification
 
@@ -318,8 +268,11 @@ The foundation must prove:
 - Case setup continues preceding treatment setup.
 - Selection and runtime context are fixed at preflight.
 - Parsed plans and setup-step inputs remain immutable through application.
-- Composition has no arbitrary setup-action registry.
-- Every unknown setup action fails parsing.
+- Composition has no setup-action registry or dynamic loading authority.
+- The default engine rejects every unknown action.
+- An extended engine accepts only actions in its immutable, manifest-backed
+  bundle registry.
+- Bundle references and selected actions match exactly before authority.
 - Setup-only, agent-only, and shared credentials receive the intended scopes.
 - Conflicting names or references fail before credential resolution.
 - Raw scope assignment fails.
@@ -333,16 +286,11 @@ The foundation must prove:
 
 ## Follow-up sequence
 
-1. Add a plan-visible runtime network-policy identity and digest so an internal
-   adapter can implement eval-runner's devbox proxy without hidden inputs.
-2. Add typed skill-source resolution and agent realization with `forge/skill@1`
-   as the first secret-free vertical slice, including immutable devbox input
-   snapshots.
-3. Add `forge/mcp@1` with canonical bindings and agent-only bearer delivery;
-   keep runtime proxy selection outside the action.
-4. Add a writable runtime tools path and implement first-party `stripe/cli@1`.
-5. Add `forge/plugin@1` with immutable coordinates and setup-only marketplace
+1. Complete versioned setup-action bundles and engine-bound lifecycle tests.
+2. Add a plan-visible runtime network-policy identity and digest for hosts which
+   require explicit proxy behavior.
+3. Add `forge/plugin@1` with immutable coordinates and setup-only marketplace
    credentials where required.
-6. Add first-party `stripe/link-cli@1` if it remains part of the supported
-   action set.
-7. Add Codex realizations and run the shared cross-adapter conformance suite.
+4. Add generic agent skill-snapshot and writable tools-path capabilities needed
+   by bundle-owned actions without adding those actions to the default registry.
+5. Add Codex realizations and run the shared cross-adapter conformance suite.

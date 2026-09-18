@@ -48,6 +48,7 @@ try {
       import * as testing from '@stripe/forge/testing';
 
       assert.equal(typeof forge.executeEval, 'function');
+      assert.equal(typeof forge.createForgeEngine, 'function');
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
@@ -86,7 +87,34 @@ try {
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');
+      assert.equal(typeof setup.defineSetupActionBundle, 'function');
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
+
+      const bundle = setup.defineSetupActionBundle({
+        manifest: {
+          namespace: 'package-smoke',
+          version: '1.0.0',
+          sha256: 'sha256:${'a'.repeat(64)}',
+        },
+        actions: [{
+          uses: 'package-smoke/tool@1',
+          parseWith(input) {
+            if (typeof input.name !== 'string') throw new TypeError('invalid');
+            return {name: input.name};
+          },
+          preflight() {
+            return {requirements: {}, async apply() {}};
+          },
+        }],
+      });
+      const engine = forge.createForgeEngine({setupActionBundles: [bundle]});
+      assert.deepEqual(
+        engine.parseSetupStep({
+          uses: 'package-smoke/tool@1',
+          with: {name: 'formatter'},
+        }),
+        {uses: 'package-smoke/tool@1', with: {name: 'formatter'}},
+      );
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);

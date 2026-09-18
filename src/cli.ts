@@ -10,10 +10,9 @@ import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
 import {createDirectoryRunInputProvider} from './contracts/inputs.js';
-import {executeEval, FORGE_VERSION, preflightEval} from './execution/index.js';
+import {executeEval, FORGE_VERSION} from './execution/index.js';
+import {defaultForgeEngine, type ForgeEngine} from './engine.js';
 import {
-  loadExperimentConfig,
-  loadDataset,
   parseRunSelection,
   type ExperimentConfigV1,
   type RunSelection,
@@ -22,7 +21,6 @@ import {
   expandExperiment,
   ManifestCaseFileError,
   resolveManifestCaseIdFromFile,
-  resolveRunPlan,
   serializeResolvedRunPlan,
 } from './planning/index.js';
 import {createArtifactStore} from './results/index.js';
@@ -105,6 +103,8 @@ export interface RunCliOptions {
   readonly signal?: AbortSignal;
   readonly stdout?: (text: string) => void;
   readonly stderr?: (text: string) => void;
+  /** Immutable model/execution semantics; defaults to public built-ins only. */
+  readonly engine?: ForgeEngine;
   /** Test/embedding seams; the executable uses the public defaults. */
   readonly compositionFactory?: (
     options: DefaultCliCompositionOptions,
@@ -164,6 +164,7 @@ export async function runCli(
 ): Promise<number> {
   const stdout = options.stdout ?? ((text: string) => void process.stdout.write(text));
   const stderr = options.stderr ?? ((text: string) => void process.stderr.write(text));
+  const engine = options.engine ?? defaultForgeEngine;
 
   try {
     const parsed = parseArgs({
@@ -216,14 +217,14 @@ export async function runCli(
         : await discoverDatasetRoot(caseFilePath)
       : resolveRequiredPath(parsed.values.dataset, 'dataset', cwd);
     const [dataset, experiment] = await Promise.all([
-      loadDataset(datasetPath),
-      loadExperimentConfig(experimentPath),
+      engine.loadDataset(datasetPath),
+      engine.loadExperimentConfig(experimentPath),
     ]);
 
     if (command === 'validate') {
       const selections = expandExperiment(experiment);
       const plans = selections.map((selection) =>
-        resolveRunPlan({dataset, experiment, selection}),
+        engine.resolveRunPlan({dataset, experiment, selection}),
       );
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
@@ -235,7 +236,7 @@ export async function runCli(
           : {environment: options.environment}),
       });
       for (const plan of plans) {
-        preflightEval({plan, composition});
+        engine.preflightEval({plan, composition});
       }
       stdout(
         serializeCanonicalJson({
@@ -270,7 +271,7 @@ export async function runCli(
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
     });
-    const plan = resolveRunPlan({dataset, experiment, selection});
+    const plan = engine.resolveRunPlan({dataset, experiment, selection});
 
     if (command === 'plan') {
       stdout(serializeResolvedRunPlan(plan));
@@ -299,7 +300,7 @@ export async function runCli(
         ? {}
         : {credentialBindings}),
     });
-    const completed = await (options.execute ?? executeEval)({
+    const completed = await (options.execute ?? engine.executeEval)({
       runId,
       plan,
       composition,

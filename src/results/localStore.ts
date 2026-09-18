@@ -169,7 +169,17 @@ export function createArtifactStore(
 }
 
 /** Read and hash every claimed file before treating a run as complete. */
-export async function verifyCompletedRun(location: string): Promise<CompletedRun> {
+export async function verifyCompletedRun(
+  location: string,
+): Promise<CompletedRun> {
+  return verifyCompletedRunWithPlanParser(location, parseResolvedRunPlan);
+}
+
+/** @internal Engine-bound variant for plans using its immutable action registry. */
+export async function verifyCompletedRunWithPlanParser(
+  location: string,
+  parsePlan: (value: unknown) => ResolvedRunPlanV1,
+): Promise<CompletedRun> {
   const runDir = path.resolve(location);
   const stat = await fs.lstat(runDir);
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
@@ -219,7 +229,11 @@ export async function verifyCompletedRun(location: string): Promise<CompletedRun
   ) {
     throw new ArtifactStoreError('Completed run contains an unclaimed file.');
   }
-  const plan = verifyPlanArtifact(result, artifactBodies);
+  const plan = verifyPlanArtifact(
+    result,
+    artifactBodies,
+    parsePlan,
+  );
   const interaction = verifyInteractionArtifact(result, artifactBodies);
   verifyTrajectoryArtifact(
     result,
@@ -277,10 +291,11 @@ function assertResultArtifacts(
 function verifyPlanArtifact(
   result: RunResult,
   artifactBodies: ReadonlyMap<string, Buffer>,
+  parsePlan: (value: unknown) => ResolvedRunPlanV1,
 ): ResolvedRunPlanV1 {
   const path = 'plan.json';
   const body = requireCoreArtifact(result, artifactBodies, path);
-  const plan = parseJsonArtifact(path, body, parseResolvedRunPlan);
+  const plan = parseJsonArtifact(path, body, parsePlan);
   if (body.toString('utf8') !== serializeResolvedRunPlan(plan)) {
     throw new ArtifactStoreError('Completed plan.json is not canonical.');
   }
@@ -292,7 +307,8 @@ function verifyPlanArtifact(
   if (
     serializeCanonicalJson(plan.selection) !==
       serializeCanonicalJson(result.selection) ||
-    plan.provenance.forge.version !== result.forge.version
+    serializeCanonicalJson(plan.provenance.forge) !==
+      serializeCanonicalJson(result.forge)
   ) {
     throw new ArtifactStoreError(
       'plan.json does not match the completed result summary.',

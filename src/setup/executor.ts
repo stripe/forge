@@ -9,8 +9,10 @@ import type {
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
-import {commandSetupHandler} from './forgeCommand.js';
-import {writeSetupHandler} from './forgeWrite.js';
+import {
+  defaultSetupActionRegistry,
+  type SetupActionRegistry,
+} from './registry.js';
 import {
   SetupActionError,
   UnsupportedSetupActionError,
@@ -23,17 +25,19 @@ import {
   type SetupExecutor,
 } from './types.js';
 
-const ENGINE_SETUP_HANDLERS: ReadonlyMap<string, SetupStepHandler> = new Map([
-  [writeSetupHandler.uses, writeSetupHandler],
-  [commandSetupHandler.uses, commandSetupHandler],
-]);
-
 /** Actions implemented and shipped by the exact installed Forge version. */
 export const firstPartySetupHandlers: ReadonlyMap<string, SetupStepHandler> =
-  new Map(ENGINE_SETUP_HANDLERS);
+  handlersForRegistry(defaultSetupActionRegistry);
 
 export function createSetupExecutor(): SetupExecutor {
-  return createSetupExecutorWithHandlers(ENGINE_SETUP_HANDLERS);
+  return createSetupExecutorForRegistry(defaultSetupActionRegistry);
+}
+
+/** Construct an executor bound to the exact immutable registry owned by an engine. */
+export function createSetupExecutorForRegistry(
+  registry: SetupActionRegistry,
+): SetupExecutor {
+  return createSetupExecutorWithHandlers(handlersForRegistry(registry));
 }
 
 /** @internal Contract-test seam; not exported from the package entry point. */
@@ -132,7 +136,11 @@ function normalizePreparedStep(
   input: PreparedSetupStep,
   uses: string,
 ): PreparedSetupStep {
-  if (!input || typeof input !== 'object' || typeof input.apply !== 'function') {
+  if (
+    !isPlainRecord(input) ||
+    !hasExactKeys(input, ['requirements', 'apply']) ||
+    typeof input.apply !== 'function'
+  ) {
     throw new TypeError(`Setup handler ${uses} returned an invalid prepared step.`);
   }
   const requirements = normalizeStepRequirements(input.requirements, uses);
@@ -143,18 +151,26 @@ function normalizeStepRequirements(
   input: SetupStepRequirements,
   uses: string,
 ): SetupStepRequirements {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+  if (!isPlainRecord(input)) {
     throw new TypeError(`Setup handler ${uses} returned invalid requirements.`);
   }
-  const unknownKeys = Object.keys(input).filter(
-    (key) => key !== 'variables' && key !== 'credentials',
-  );
+  const unknownKeys = ownStringKeys(
+    input,
+    `Setup handler ${uses} requirements`,
+  ).filter((key) => key !== 'variables' && key !== 'credentials');
   if (unknownKeys.length > 0) {
     throw new TypeError(`Setup handler ${uses} returned unknown requirements.`);
   }
 
+  const variablesInput = Object.hasOwn(input, 'variables')
+    ? input.variables
+    : {};
+  if (!isPlainRecord(variablesInput)) {
+    throw new TypeError(`Setup handler ${uses} returned invalid variables.`);
+  }
   const variables: Record<string, string> = {};
-  for (const [name, value] of Object.entries(input.variables ?? {})) {
+  for (const name of ownStringKeys(variablesInput, 'Setup variables')) {
+    const value = variablesInput[name];
     assertEnvironmentName(name);
     if (typeof value !== 'string' || /[\0\r\n]/.test(value)) {
       throw new TypeError(`Setup variable ${name} is invalid.`);
@@ -162,41 +178,52 @@ function normalizeStepRequirements(
     defineRecordValue(variables, name, value);
   }
 
-  const credentialsInput = input.credentials ?? {};
-  if (!credentialsInput || typeof credentialsInput !== 'object') {
+  const credentialsInput = Object.hasOwn(input, 'credentials')
+    ? input.credentials
+    : {};
+  if (!isPlainRecord(credentialsInput)) {
     throw new TypeError(`Setup handler ${uses} returned invalid credentials.`);
   }
-  const unknownCredentialKeys = Object.keys(credentialsInput).filter(
+  const unknownCredentialKeys = ownStringKeys(
+    credentialsInput,
+    `Setup handler ${uses} credentials`,
+  ).filter(
     (key) => key !== 'setup' && key !== 'agent',
   );
   if (unknownCredentialKeys.length > 0) {
     throw new TypeError(`Setup handler ${uses} assigned an invalid credential scope.`);
   }
-  const setup = normalizeCredentialRequirements(credentialsInput.setup ?? {}, uses);
-  const agent = normalizeCredentialRequirements(credentialsInput.agent ?? {}, uses);
+  const setup = normalizeCredentialRequirements(
+    Object.hasOwn(credentialsInput, 'setup') ? credentialsInput.setup : {},
+    uses,
+  );
+  const agent = normalizeCredentialRequirements(
+    Object.hasOwn(credentialsInput, 'agent') ? credentialsInput.agent : {},
+    uses,
+  );
 
   return freezeRequirements({variables, setup, agent});
 }
 
 function normalizeCredentialRequirements(
-  input: SetupCredentialRequirements,
+  input: unknown,
   uses: string,
 ): SetupCredentialRequirements {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+  if (!isPlainRecord(input)) {
     throw new TypeError(
       `Setup handler ${uses} returned invalid credential requirements.`,
     );
   }
   const output: Record<string, CredentialRequirement> = {};
-  for (const [name, binding] of Object.entries(input)) {
+  for (const name of ownStringKeys(input, 'Setup credential requirements')) {
+    const binding = input[name];
     assertEnvironmentName(name);
     if (
-      !binding ||
-      typeof binding !== 'object' ||
+      !isPlainRecord(binding) ||
+      !hasExactKeys(binding, ['reference']) ||
       typeof binding.reference !== 'string' ||
       binding.reference.length === 0 ||
-      binding.reference.includes('\0') ||
-      'scopes' in binding
+      binding.reference.includes('\0')
     ) {
       throw new TypeError(`Setup credential binding ${name} is invalid.`);
     }
@@ -313,4 +340,50 @@ function deepFreeze<T>(value: T): T {
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function ownStringKeys(
+  value: Record<string, unknown>,
+  label: string,
+): string[] {
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== 'string')) {
+    throw new TypeError(`${label} contains a non-string field.`);
+  }
+  return keys as string[];
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Reflect.ownKeys(value);
+  const expectedKeys = new Set(expected);
+  return (
+    keys.length === expected.length &&
+    keys.every((key) => typeof key === 'string' && expectedKeys.has(key))
+  );
+}
+
+function handlersForRegistry(
+  registry: SetupActionRegistry,
+): ReadonlyMap<string, SetupStepHandler> {
+  return new Map(
+    registry.actionIds.map((uses) => {
+      const action = registry.action(uses);
+      if (!action) throw new TypeError(`Missing registered setup action: ${uses}.`);
+      return [
+        uses,
+        Object.freeze({uses, preflight: action.preflight}),
+      ] as const;
+    }),
+  );
 }

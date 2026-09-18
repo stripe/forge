@@ -9,7 +9,11 @@ import {
   createSetupExecutorWithHandlers,
   firstPartySetupHandlers,
 } from './executor.js';
-import type {SetupStepHandler, SetupStepRequirements} from './types.js';
+import type {
+  PreparedSetupStep,
+  SetupStepHandler,
+  SetupStepRequirements,
+} from './types.js';
 
 const setupTarget = Object.freeze({
   selection: Object.freeze({
@@ -420,6 +424,72 @@ describe('portable setup actions', () => {
         setupTarget,
       ),
       /binding TOKEN is invalid/,
+    );
+  });
+
+  it('strictly rejects malformed extension requirement collections and bindings', () => {
+    const malformed: unknown[] = [
+      new Date(),
+      {variables: null},
+      {variables: []},
+      {variables: new Date()},
+      {credentials: null},
+      {credentials: []},
+      {credentials: {setup: null}},
+      {credentials: {agent: []}},
+      {credentials: {setup: new Date()}},
+      Object.assign({}, {[Symbol('unexpected')]: true}),
+      {
+        credentials: {
+          setup: {
+            TOKEN: {
+              reference: credentialReference('acme.token'),
+              extra: true,
+            },
+          },
+        },
+      },
+    ];
+
+    for (const requirements of malformed) {
+      const handler: SetupStepHandler = {
+        uses: 'acme/malformed@1',
+        preflight() {
+          return {
+            requirements: requirements as SetupStepRequirements,
+            async apply() {},
+          };
+        },
+      };
+      assert.throws(() =>
+        createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ).preflight(
+          [{uses: handler.uses, with: {}}],
+          setupTarget,
+        ),
+      );
+    }
+  });
+
+  it('rejects unknown prepared-step fields instead of discarding them', () => {
+    const handler: SetupStepHandler = {
+      uses: 'acme/malformed-prepared@1',
+      preflight() {
+        return {
+          requirements: {},
+          async apply() {},
+          unknown: true,
+        } as unknown as PreparedSetupStep;
+      },
+    };
+
+    assert.throws(
+      () =>
+        createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ).preflight([{uses: handler.uses, with: {}}], setupTarget),
+      /invalid prepared step/,
     );
   });
 

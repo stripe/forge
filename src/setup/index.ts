@@ -17,3 +17,8 @@ export {
   type SetupPreflightContext,
   type SetupStepRequirements,
 } from './types.js';
+export {
+  defineSetupActionBundle,
+  type SetupActionBundle,
+  type SetupActionDefinition,
+} from './registry.js';

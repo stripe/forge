@@ -43,24 +43,42 @@ export interface DatasetManifestV1 {
   files: DatasetManifestFileV1[];
 }
 
-export interface WriteSetupStepV1 {
+/** Exact host-supplied implementation identity for one setup-action namespace. */
+export interface SetupActionBundleReferenceV1 {
+  namespace: string;
+  version: string;
+  sha256: Sha256Digest;
+}
+
+/** Common JSON wire envelope understood before an action implementation is selected. */
+export interface SetupStepV1<TWith extends JsonObject = JsonObject> {
+  uses: string;
+  with: TWith;
+}
+
+export interface WriteSetupWithV1 extends JsonObject {
+  target: string;
+  source: {content: string} | {dataset_path: DatasetRelativePath};
+}
+
+export interface WriteSetupStepV1 extends SetupStepV1<WriteSetupWithV1> {
   uses: 'forge/write@1';
-  with: {
-    target: string;
-    source: {content: string} | {dataset_path: DatasetRelativePath};
-  };
+  with: WriteSetupWithV1;
 }
 
-export interface CommandSetupStepV1 {
+export interface CommandSetupWithV1 extends JsonObject {
+  argv: string[];
+  cwd?: string;
+  timeout_ms?: number;
+}
+
+export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
   uses: 'forge/command@1';
-  with: {
-    argv: string[];
-    cwd?: string;
-    timeout_ms?: number;
-  };
+  with: CommandSetupWithV1;
 }
 
-export type SetupStepV1 =
+/** Closed union for consumers which intentionally handle only package built-ins. */
+export type BuiltInSetupStepV1 =
   | WriteSetupStepV1
   | CommandSetupStepV1;
 
@@ -126,7 +144,10 @@ export interface ExperimentConfigV1 {
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
-  forge: {version: string};
+  forge: {
+    version: string;
+    action_bundles?: SetupActionBundleReferenceV1[];
+  };
   runtime: ForgeDockerRuntimeV1;
   models: {
     role_player?: ModelRefV1;
@@ -197,7 +218,10 @@ export interface ResolvedRunPlanV1 {
       path: DatasetRelativePath;
       sha256: Sha256Digest;
     };
-    forge: {version: string};
+    forge: {
+      version: string;
+      action_bundles?: SetupActionBundleReferenceV1[];
+    };
   };
   case: EvalCaseV1;
   treatment: {id: TreatmentId; setup: SetupStepV1[]};
