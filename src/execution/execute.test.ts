@@ -465,22 +465,29 @@ describe('executeEval', () => {
     expect(runtimePrepared).toBe(false);
   });
 
-  it('rejects invalid agent environment declarations during pure preflight', async () => {
+  it('rejects malformed agent environment declarations during pure preflight', async () => {
     const fixture = await executionFixture();
     const composition = fixture.composition(inertStore());
     const selected = composition.agents.get('claude-code')!;
 
-    for (const variables of [
-      {'BAD-NAME': 'value'},
-      {VALID_NAME: 'line-one\nline-two'},
+    for (const environment of [
+      [],
+      {credential: {TOKEN: {reference: 'unsafe.token'}}},
+      {variables: []},
+      {variables: null},
+      {variables: {'BAD-NAME': 'value'}},
+      {variables: {VALID_NAME: 'line-one\nline-two'}},
+      {credentials: []},
+      {credentials: null},
+      {credentials: {TOKEN: {reference: 'unsafe.token', extra: true}}},
     ]) {
       const unsafeAgent: AgentAdapter = {
         ...selected,
         requirements(selection) {
           return {
             ...selected.requirements(selection),
-            environment: {variables},
-          };
+            environment,
+          } as unknown as ReturnType<AgentAdapter['requirements']>;
         },
       };
       expect(() =>
@@ -501,8 +508,10 @@ describe('executeEval', () => {
       requirements(selection) {
         return {
           ...selected.requirements(selection),
-          environment: {variables: {VALID_NAME: 'line-one\nline-two'}},
-        };
+          environment: {
+            credential: {TOKEN: {reference: 'unsafe.token'}},
+          },
+        } as unknown as ReturnType<AgentAdapter['requirements']>;
       },
     };
     await expect(

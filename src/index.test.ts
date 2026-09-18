@@ -19,6 +19,7 @@ import {
   evaluateRunEvidence,
   executeEval,
   firstPartySetupHandlers,
+  normalizeEnvironmentSpecification,
   parseInteractionArtifact,
   parseJudgeTranscriptProjection,
   preflightEval,
@@ -46,6 +47,7 @@ describe('@stripe/forge package root', () => {
       'forge/write@1',
     ]);
     expect(credentialReference).toBeTypeOf('function');
+    expect(normalizeEnvironmentSpecification).toBeTypeOf('function');
     expect(createJudgeTranscriptProjection).toBeTypeOf('function');
     expect(parseJudgeTranscriptProjection).toBeTypeOf('function');
     expect(JUDGE_TRANSCRIPT_SOURCE).toBe('trajectory.json');

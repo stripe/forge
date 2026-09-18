@@ -142,6 +142,8 @@ Aggregation is completed and validated before resolution:
   both scopes.
 - The same environment name with different references is rejected.
 - A plain variable and credential cannot share a name.
+- Environment declarations and their nested collections must be plain objects;
+  arrays, explicit `null`, unknown fields, and extra binding fields are rejected.
 - Environment names and references must be valid and bounded.
 - A handler-supplied `scopes` field is rejected.
 - Resolved runtime values containing NUL, CR, or LF are rejected before runtime

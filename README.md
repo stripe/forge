@@ -878,8 +878,10 @@ sealed workspace and run-owned agent state.
 
 Forge assigns concrete credential scope from the declaration surface. Handlers
 identify lifecycle purpose through fixed setup and agent collections; they
-cannot attach raw scope metadata. For example, an agent requirement is
-automatically assigned agent scope:
+cannot attach raw scope metadata. Environment declarations are strict,
+JSON-like objects: arrays, explicit `null`, unknown fields, and extra credential
+binding fields fail pure preflight rather than being discarded. For example,
+an agent requirement is automatically assigned agent scope:
 
 ```ts
 requirements() {

@@ -27,6 +27,7 @@ import type {ForgeComposition} from '../contracts/composition.js';
 import {
   createEnvironmentResolver,
   credentialReference,
+  normalizeEnvironmentSpecification,
   normalizeScopedEnvironmentSpecification,
   type CredentialEnvironmentBinding,
   type CredentialScope,
@@ -904,7 +905,8 @@ function mergeEnvironmentSpecifications(
   const variables: Record<string, string> = {};
   const credentials: Record<string, CredentialEnvironmentBinding> = {};
   for (const {scope, specification} of declarations) {
-    for (const [name, value] of Object.entries(specification.variables ?? {})) {
+    const normalized = normalizeEnvironmentSpecification(specification);
+    for (const [name, value] of Object.entries(normalized.variables)) {
       if (Object.hasOwn(credentials, name)) {
         throw new TypeError(`Environment ${name} has conflicting plain and secret bindings.`);
       }
@@ -913,7 +915,7 @@ function mergeEnvironmentSpecifications(
       }
       defineRecordValue(variables, name, value);
     }
-    for (const [name, binding] of Object.entries(specification.credentials ?? {})) {
+    for (const [name, binding] of Object.entries(normalized.credentials)) {
       if (Object.hasOwn(variables, name)) {
         throw new TypeError(`Environment ${name} has conflicting plain and secret bindings.`);
       }
@@ -971,7 +973,7 @@ function normalizeAgentRequirements(
   });
   return Object.freeze({
     executables: Object.freeze(executables),
-    environment: requirements.environment,
+    environment: normalizeEnvironmentSpecification(requirements.environment),
     stateDirectories: Object.freeze(
       requirements.stateDirectories.map(({id, containerPath}) =>
         Object.freeze({id, containerPath}),

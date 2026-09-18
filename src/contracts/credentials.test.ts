@@ -4,6 +4,7 @@ import {
   createEnvironmentCredentialResolver,
   createEnvironmentResolver,
   credentialReference,
+  normalizeEnvironmentSpecification,
   normalizeScopedEnvironmentSpecification,
 } from './credentials.js';
 
@@ -111,6 +112,51 @@ describe('credential and environment resolution', () => {
     assert.deepEqual(resolved, []);
   });
 
+  it('strictly normalizes and snapshots capability environment declarations', () => {
+    const input = {
+      variables: {PUBLIC_SETTING: 'enabled'},
+      credentials: {
+        API_TOKEN: {reference: credentialReference('provider/key')},
+      },
+    };
+    const normalized = normalizeEnvironmentSpecification(input);
+
+    input.variables.PUBLIC_SETTING = 'changed';
+    input.credentials.API_TOKEN.reference = credentialReference('changed/key');
+    assert.deepEqual(normalized, {
+      variables: {PUBLIC_SETTING: 'enabled'},
+      credentials: {
+        API_TOKEN: {reference: 'provider/key'},
+      },
+    });
+    assert.equal(Object.isFrozen(normalized), true);
+    assert.equal(Object.isFrozen(normalized.variables), true);
+    assert.equal(Object.isFrozen(normalized.credentials), true);
+    assert.equal(Object.isFrozen(normalized.credentials.API_TOKEN), true);
+  });
+
+  it('rejects malformed capability environment declarations', () => {
+    const malformed: readonly unknown[] = [
+      null,
+      [],
+      new Date(),
+      {credential: {TOKEN: {reference: 'provider/key'}}},
+      {variables: null},
+      {variables: undefined},
+      {variables: []},
+      {credentials: null},
+      {credentials: undefined},
+      {credentials: []},
+      {credentials: {TOKEN: null}},
+      {credentials: {TOKEN: {reference: 'provider/key', extra: true}}},
+      {credentials: {TOKEN: {reference: 'provider/key', scopes: ['agent']}}},
+    ];
+
+    for (const input of malformed) {
+      assert.throws(() => normalizeEnvironmentSpecification(input));
+    }
+  });
+
   it('purely normalizes and freezes a scoped environment specification', () => {
     const normalized = normalizeScopedEnvironmentSpecification({
       variables: {PUBLIC_SETTING: 'enabled'},
@@ -144,6 +190,21 @@ describe('credential and environment resolution', () => {
       }),
       /invalid value/,
     );
+    for (const malformed of [
+      [],
+      {credential: {}},
+      {variables: null},
+      {variables: []},
+      {credentials: null},
+      {credentials: []},
+      {
+        credentials: {
+          TOKEN: {reference: 'provider/key', scopes: ['agent'], extra: true},
+        },
+      },
+    ]) {
+      assert.throws(() => normalizeScopedEnvironmentSpecification(malformed));
+    }
   });
 
   it('rejects runtime-incompatible credential values before returning them', async () => {

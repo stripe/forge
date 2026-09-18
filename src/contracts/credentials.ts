@@ -39,6 +39,11 @@ export interface EnvironmentSpecification {
   readonly credentials?: Readonly<Record<string, CredentialRequirement>>;
 }
 
+export interface NormalizedEnvironmentSpecification {
+  readonly variables: Readonly<Record<string, string>>;
+  readonly credentials: Readonly<Record<string, CredentialRequirement>>;
+}
+
 /** Environment requirements after Forge assigns setup or agent scope. */
 export interface ScopedEnvironmentSpecification {
   readonly variables?: Readonly<Record<string, string>>;
@@ -68,6 +73,43 @@ export interface EnvironmentResolver {
     specification: ScopedEnvironmentSpecification,
     context: CredentialResolutionContext,
   ): Promise<ResolvedEnvironment>;
+}
+
+/** Purely validate, clone, and freeze one capability's raw declaration. */
+export function normalizeEnvironmentSpecification(
+  specification: unknown,
+): NormalizedEnvironmentSpecification {
+  assertPlainRecord(specification, 'Environment specification');
+  assertExactKeys(
+    specification,
+    ['variables', 'credentials'],
+    'Environment specification',
+  );
+  const variables = Object.freeze(
+    validatePlainVariables(
+      Object.hasOwn(specification, 'variables')
+        ? specification.variables
+        : {},
+    ),
+  );
+  const credentialEntries = validateCredentialRequirements(
+    Object.hasOwn(specification, 'credentials')
+      ? specification.credentials
+      : {},
+    variables,
+  );
+  const credentials: Record<string, CredentialRequirement> = {};
+  for (const {name, reference} of credentialEntries) {
+    defineRecordValue(
+      credentials,
+      name,
+      Object.freeze({reference}),
+    );
+  }
+  return Object.freeze({
+    variables,
+    credentials: Object.freeze(credentials),
+  });
 }
 
 /**
@@ -117,20 +159,25 @@ export function createEnvironmentResolver(
  * credential lookup or runtime allocation.
  */
 export function normalizeScopedEnvironmentSpecification(
-  specification: ScopedEnvironmentSpecification,
+  specification: unknown,
 ): NormalizedScopedEnvironmentSpecification {
-  if (
-    !specification ||
-    typeof specification !== 'object' ||
-    Array.isArray(specification)
-  ) {
-    throw new TypeError('Environment specification must be an object.');
-  }
+  assertPlainRecord(specification, 'Scoped environment specification');
+  assertExactKeys(
+    specification,
+    ['variables', 'credentials'],
+    'Scoped environment specification',
+  );
   const variables = Object.freeze(
-    validatePlainVariables(specification.variables ?? {}),
+    validatePlainVariables(
+      Object.hasOwn(specification, 'variables')
+        ? specification.variables
+        : {},
+    ),
   );
   const credentialEntries = validateCredentialBindings(
-    specification.credentials ?? {},
+    Object.hasOwn(specification, 'credentials')
+      ? specification.credentials
+      : {},
     variables,
   );
   const credentials: Record<string, CredentialEnvironmentBinding> = {};
@@ -205,8 +252,9 @@ export function credentialReference(reference: string): CredentialReference {
 }
 
 function validatePlainVariables(
-  input: Readonly<Record<string, string>>,
+  input: unknown,
 ): Record<string, string> {
+  assertPlainRecord(input, 'Environment variables');
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(input)) {
     assertEnvironmentName(name);
@@ -218,14 +266,49 @@ function validatePlainVariables(
   return output;
 }
 
+function validateCredentialRequirements(
+  input: unknown,
+  variables: Readonly<Record<string, string>>,
+): readonly Readonly<{
+  name: string;
+  reference: CredentialReference;
+}>[] {
+  assertPlainRecord(input, 'Credential requirements');
+  const output: Array<{
+    name: string;
+    reference: CredentialReference;
+  }> = [];
+  for (const [name, binding] of Object.entries(input)) {
+    assertEnvironmentName(name);
+    if (Object.hasOwn(variables, name)) {
+      throw new TypeError(
+        `Environment variable ${name} cannot be both plain and credential-backed.`,
+      );
+    }
+    assertPlainRecord(binding, `Credential requirement ${name}`);
+    assertExactKeys(binding, ['reference'], `Credential requirement ${name}`);
+    if (typeof binding.reference !== 'string') {
+      throw new TypeError(`Credential requirement ${name} is invalid.`);
+    }
+    output.push(
+      Object.freeze({
+        name,
+        reference: credentialReference(binding.reference),
+      }),
+    );
+  }
+  return Object.freeze(output);
+}
+
 function validateCredentialBindings(
-  input: Readonly<Record<string, CredentialEnvironmentBinding>>,
+  input: unknown,
   variables: Readonly<Record<string, string>>,
 ): readonly Readonly<{
   name: string;
   reference: CredentialReference;
   scopes: readonly CredentialScope[];
 }>[] {
+  assertPlainRecord(input, 'Credential bindings');
   const output: Array<{
     name: string;
     reference: CredentialReference;
@@ -238,7 +321,13 @@ function validateCredentialBindings(
         `Environment variable ${name} cannot be both plain and credential-backed.`,
       );
     }
-    if (!binding || typeof binding.reference !== 'string') {
+    assertPlainRecord(binding, `Credential binding ${name}`);
+    assertExactKeys(
+      binding,
+      ['reference', 'scopes'],
+      `Credential binding ${name}`,
+    );
+    if (typeof binding.reference !== 'string') {
       throw new TypeError(`Credential binding ${name} is invalid.`);
     }
     const reference = credentialReference(binding.reference);
@@ -254,7 +343,7 @@ function validateCredentialBindings(
 }
 
 function normalizeScopes(
-  input: readonly CredentialScope[],
+  input: unknown,
   name: string,
 ): readonly CredentialScope[] {
   if (!Array.isArray(input) || input.length === 0) {
@@ -267,6 +356,34 @@ function normalizeScopes(
   return Object.freeze(
     (['setup', 'agent'] as const).filter((scope) => scopes.includes(scope)),
   );
+}
+
+function assertPlainRecord(
+  input: unknown,
+  label: string,
+): asserts input is Record<PropertyKey, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label} must be a plain object.`);
+  }
+}
+
+function assertExactKeys(
+  input: Record<PropertyKey, unknown>,
+  allowed: readonly string[],
+  label: string,
+): void {
+  const allowedKeys = new Set(allowed);
+  if (
+    Reflect.ownKeys(input).some(
+      (key) => typeof key !== 'string' || !allowedKeys.has(key),
+    )
+  ) {
+    throw new TypeError(`${label} contains unknown fields.`);
+  }
 }
 
 function defineRecordValue<T>(
