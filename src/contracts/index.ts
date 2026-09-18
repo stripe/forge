@@ -6,4 +6,5 @@ export * from './composition.js';
 export * from './credentials.js';
 export * from './inputs.js';
 export * from './observability.js';
+export * from './plugin.js';
 export * from './runtime.js';

@@ -61,6 +61,7 @@ describe('ForgeEngine setup action bundles', () => {
   it('keeps extension names absent from and unavailable to the default engine', () => {
     expect(defaultForgeEngine.setupActionIds).toEqual([
       'forge/command@1',
+      'forge/plugin@1',
       'forge/write@1',
     ]);
     expect(() =>

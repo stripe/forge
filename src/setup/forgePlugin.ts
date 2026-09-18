@@ -1,0 +1,75 @@
+import type {
+  PluginSetupStepV1,
+  SetupStepV1,
+} from '../model/types.js';
+import type {PreparedAgentPluginInstallation} from '../contracts/plugin.js';
+import type {
+  PreparedSetupStep,
+  SetupExecutionContext,
+  SetupPreflightContext,
+  SetupStepHandler,
+} from './types.js';
+
+export const pluginSetupHandler: SetupStepHandler = Object.freeze({
+  uses: 'forge/plugin@1',
+  preflight(step: SetupStepV1, context: SetupPreflightContext): PreparedSetupStep {
+    if (step.uses !== 'forge/plugin@1') {
+      throw new TypeError(
+        `forge/plugin@1 cannot handle ${JSON.stringify(step.uses)}.`,
+      );
+    }
+    const pluginStep = step as PluginSetupStepV1;
+    const distribution = pluginStep.with.agents[context.selection.adapter];
+    if (!distribution) {
+      throw new TypeError(
+        `forge/plugin@1 does not define a distribution for agent ${JSON.stringify(context.selection.adapter)}.`,
+      );
+    }
+    if (!context.pluginInstaller) {
+      throw new TypeError(
+        `Agent ${JSON.stringify(context.selection.adapter)} does not support forge/plugin@1.`,
+      );
+    }
+    const prepared = context.pluginInstaller.preflight(distribution, {
+      selection: context.selection,
+      runtime: context.runtime,
+    });
+    assertPreparedInstallation(prepared);
+
+    return Object.freeze({
+      requirements: Object.freeze({
+        executables: prepared.requirements.executables,
+        stateDirectories: prepared.requirements.stateDirectories,
+      }),
+      async apply(applyContext: SetupExecutionContext): Promise<void> {
+        await prepared.install({
+          runId: applyContext.runId,
+          paths: applyContext.paths,
+          stateDirectories: applyContext.stateDirectories,
+          commands: applyContext.commands,
+          signal: applyContext.signal,
+        });
+      },
+    });
+  },
+});
+
+function assertPreparedInstallation(
+  value: PreparedAgentPluginInstallation,
+): void {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Reflect.ownKeys(value).length !== 2 ||
+    !Object.hasOwn(value, 'requirements') ||
+    !Object.hasOwn(value, 'install') ||
+    typeof value.install !== 'function' ||
+    value.requirements === null ||
+    typeof value.requirements !== 'object' ||
+    !Array.isArray(value.requirements.executables) ||
+    !Array.isArray(value.requirements.stateDirectories)
+  ) {
+    throw new TypeError('Agent plugin installer returned an invalid prepared operation.');
+  }
+}

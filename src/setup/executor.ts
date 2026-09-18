@@ -1,3 +1,5 @@
+import * as path from 'node:path';
+
 import {
   assertEnvironmentName,
   credentialReference,
@@ -9,6 +11,11 @@ import type {
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
+import type {AgentPluginInstaller} from '../contracts/plugin.js';
+import type {
+  MutableWorkspace,
+  RuntimeStateDirectoryRequirement,
+} from '../contracts/runtime.js';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
@@ -52,6 +59,7 @@ export function createSetupExecutorWithHandlers(
       context: Readonly<{
         selection: AgentSelectionV1;
         runtime: ResolvedRunPlanV1['runtime'];
+        pluginInstaller?: AgentPluginInstaller;
       }>,
     ) {
       const selection = freezeClone(context.selection);
@@ -61,6 +69,7 @@ export function createSetupExecutorWithHandlers(
         readonly uses: string;
         readonly prepared: PreparedSetupStep;
         readonly setupCredentialEnvironmentNames: readonly string[];
+        readonly stateDirectoryIds: readonly string[];
       }> = [];
       const requirementAccumulator = createRequirementAccumulator();
 
@@ -75,7 +84,14 @@ export function createSetupExecutorWithHandlers(
           throw new UnsupportedSetupActionError(step.uses, index);
         }
         const prepared = normalizePreparedStep(
-          handler.preflight(step, {stepIndex: index, selection, runtime}),
+          handler.preflight(step, {
+            stepIndex: index,
+            selection,
+            runtime,
+            ...(context.pluginInstaller === undefined
+              ? {}
+              : {pluginInstaller: context.pluginInstaller}),
+          }),
           step.uses,
         );
         requirementAccumulator.add(prepared.requirements);
@@ -84,12 +100,16 @@ export function createSetupExecutorWithHandlers(
             compareCodeUnits,
           ),
         );
+        const stateDirectoryIds = Object.freeze(
+          (prepared.requirements.stateDirectories ?? []).map(({id}) => id),
+        );
         preparedSteps.push(
           Object.freeze({
             index,
             uses: step.uses,
             prepared,
             setupCredentialEnvironmentNames,
+            stateDirectoryIds,
           }),
         );
       }
@@ -108,6 +128,10 @@ export function createSetupExecutorWithHandlers(
             try {
               await step.prepared.apply({
                 ...applyContext,
+                stateDirectories: selectStateDirectories(
+                  applyContext.stateDirectories,
+                  step.stateDirectoryIds,
+                ),
                 commands:
                   step.setupCredentialEnvironmentNames.length === 0
                     ? applyContext.commands.uncredentialed
@@ -157,10 +181,25 @@ function normalizeStepRequirements(
   const unknownKeys = ownStringKeys(
     input,
     `Setup handler ${uses} requirements`,
-  ).filter((key) => key !== 'variables' && key !== 'credentials');
+  ).filter(
+    (key) =>
+      key !== 'executables' &&
+      key !== 'stateDirectories' &&
+      key !== 'variables' &&
+      key !== 'credentials',
+  );
   if (unknownKeys.length > 0) {
     throw new TypeError(`Setup handler ${uses} returned unknown requirements.`);
   }
+
+  const executables = normalizeExecutableRequirements(
+    Object.hasOwn(input, 'executables') ? input.executables : [],
+    uses,
+  );
+  const stateDirectories = normalizeStateDirectoryRequirements(
+    Object.hasOwn(input, 'stateDirectories') ? input.stateDirectories : [],
+    uses,
+  );
 
   const variablesInput = Object.hasOwn(input, 'variables')
     ? input.variables
@@ -202,7 +241,83 @@ function normalizeStepRequirements(
     uses,
   );
 
-  return freezeRequirements({variables, setup, agent});
+  return freezeRequirements({executables, stateDirectories, variables, setup, agent});
+}
+
+function normalizeExecutableRequirements(
+  input: unknown,
+  uses: string,
+): readonly string[] {
+  if (!Array.isArray(input)) {
+    throw new TypeError(`Setup handler ${uses} returned invalid executables.`);
+  }
+  const seen = new Set<string>();
+  const output = input.map((executable) => {
+    if (
+      typeof executable !== 'string' ||
+      executable.length === 0 ||
+      executable.length > 1_024 ||
+      executable.includes('\0') ||
+      seen.has(executable)
+    ) {
+      throw new TypeError(`Setup handler ${uses} returned invalid executables.`);
+    }
+    seen.add(executable);
+    return executable;
+  });
+  return Object.freeze(output.sort(compareCodeUnits));
+}
+
+function normalizeStateDirectoryRequirements(
+  input: unknown,
+  uses: string,
+): readonly RuntimeStateDirectoryRequirement[] {
+  if (!Array.isArray(input)) {
+    throw new TypeError(`Setup handler ${uses} returned invalid state directories.`);
+  }
+  const ids = new Set<string>();
+  const paths: string[] = [];
+  const output = input.map((requirement) => {
+    if (!isPlainRecord(requirement)) {
+      throw new TypeError(`Setup handler ${uses} returned an invalid state directory.`);
+    }
+    const keys = ownStringKeys(requirement, 'Setup state directory');
+    if (
+      keys.some(
+        (key) =>
+          key !== 'id' && key !== 'containerPath' && key !== 'sealAfterSetup',
+      ) ||
+      !Object.hasOwn(requirement, 'id') ||
+      !Object.hasOwn(requirement, 'containerPath') ||
+      (Object.hasOwn(requirement, 'sealAfterSetup') &&
+        typeof requirement.sealAfterSetup !== 'boolean') ||
+      typeof requirement.id !== 'string' ||
+      !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(requirement.id) ||
+      typeof requirement.containerPath !== 'string' ||
+      !requirement.containerPath.startsWith('/') ||
+      requirement.containerPath.includes('\0') ||
+      path.posix.normalize(requirement.containerPath) !== requirement.containerPath ||
+      ids.has(requirement.id) ||
+      paths.some((existing) =>
+        pathsOverlap(existing, requirement.containerPath as string),
+      )
+    ) {
+      throw new TypeError(`Setup handler ${uses} returned an invalid state directory.`);
+    }
+    const id = requirement.id as string;
+    const containerPath = requirement.containerPath as string;
+    const sealAfterSetup = requirement.sealAfterSetup as boolean | undefined;
+    ids.add(id);
+    paths.push(containerPath);
+    return Object.freeze({
+      id,
+      containerPath,
+      ...(sealAfterSetup === undefined
+        ? {}
+        : {sealAfterSetup}),
+    });
+  });
+  return Object.freeze(output.sort((left, right) => compareCodeUnits(left.id, right.id)));
 }
 
 function normalizeCredentialRequirements(
@@ -243,6 +358,9 @@ function createRequirementAccumulator(): Readonly<{
   const variables: Record<string, string> = {};
   const setup: Record<string, CredentialRequirement> = {};
   const agent: Record<string, CredentialRequirement> = {};
+  const executables = new Set<string>();
+  const stateDirectories = new Map<string, RuntimeStateDirectoryRequirement>();
+  const statePaths = new Map<string, string>();
   const credentials = new Map<string, string>();
 
   const addCredentials = (
@@ -272,6 +390,34 @@ function createRequirementAccumulator(): Readonly<{
 
   return Object.freeze({
     add(input) {
+      for (const executable of input.executables ?? []) executables.add(executable);
+      for (const requirement of input.stateDirectories ?? []) {
+        const existing = stateDirectories.get(requirement.id);
+        if (
+          existing !== undefined &&
+          (existing.containerPath !== requirement.containerPath ||
+            (existing.sealAfterSetup ?? false) !==
+              (requirement.sealAfterSetup ?? false))
+        ) {
+          throw new TypeError(
+            `Runtime state directory ${requirement.id} has conflicting requirements.`,
+          );
+        }
+        for (const [existingPath, existingId] of statePaths) {
+          if (
+            existingId !== requirement.id &&
+            pathsOverlap(existingPath, requirement.containerPath)
+          ) {
+            throw new TypeError(
+              `Runtime state path ${requirement.containerPath} has conflicting requirements.`,
+            );
+          }
+        }
+        if (existing === undefined) {
+          stateDirectories.set(requirement.id, requirement);
+          statePaths.set(requirement.containerPath, requirement.id);
+        }
+      }
       for (const [name, value] of Object.entries(input.variables ?? {})) {
         if (credentials.has(name)) {
           throw new TypeError(
@@ -287,20 +433,34 @@ function createRequirementAccumulator(): Readonly<{
       addCredentials(input.credentials?.agent, agent);
     },
     finish() {
-      return freezeRequirements({variables, setup, agent});
+      return freezeRequirements({
+        executables: [...executables].sort(compareCodeUnits),
+        stateDirectories: [...stateDirectories.values()].sort((left, right) =>
+          compareCodeUnits(left.id, right.id),
+        ),
+        variables,
+        setup,
+        agent,
+      });
     },
   });
 }
 
 function freezeRequirements(input: {
+  readonly executables: readonly string[];
+  readonly stateDirectories: readonly RuntimeStateDirectoryRequirement[];
   readonly variables: Record<string, string>;
   readonly setup: Record<string, CredentialRequirement>;
   readonly agent: Record<string, CredentialRequirement>;
 }): SetupStepRequirements {
+  const executables = Object.freeze([...input.executables]);
+  const stateDirectories = Object.freeze([...input.stateDirectories]);
   const variables = Object.freeze(input.variables);
   const setup = Object.freeze(input.setup);
   const agent = Object.freeze(input.agent);
   return Object.freeze({
+    ...(executables.length === 0 ? {} : {executables}),
+    ...(stateDirectories.length === 0 ? {} : {stateDirectories}),
     ...(Object.keys(variables).length === 0 ? {} : {variables}),
     ...(Object.keys(setup).length === 0 && Object.keys(agent).length === 0
       ? {}
@@ -311,6 +471,71 @@ function freezeRequirements(input: {
           }),
         }),
   });
+}
+
+function selectStateDirectories(
+  available: ReadonlyMap<string, MutableWorkspace>,
+  selectedIds: readonly string[],
+): ReadonlyMap<string, MutableWorkspace> {
+  const selected = new Map<string, MutableWorkspace>();
+  for (const id of selectedIds) {
+    const workspace = available.get(id);
+    if (!workspace) {
+      throw new TypeError(`Prepared runtime omitted setup state directory ${id}.`);
+    }
+    selected.set(id, workspace);
+  }
+  return new ReadonlyMapView(selected);
+}
+
+class ReadonlyMapView<Key, Value> implements ReadonlyMap<Key, Value> {
+  readonly size: number;
+
+  constructor(private readonly source: ReadonlyMap<Key, Value>) {
+    this.size = source.size;
+    Object.freeze(this);
+  }
+
+  entries(): MapIterator<[Key, Value]> {
+    return this.source.entries();
+  }
+
+  forEach(
+    callbackfn: (value: Value, key: Key, map: ReadonlyMap<Key, Value>) => void,
+    thisArg?: unknown,
+  ): void {
+    for (const [key, value] of this.source) callbackfn.call(thisArg, value, key, this);
+  }
+
+  get(key: Key): Value | undefined {
+    return this.source.get(key);
+  }
+
+  has(key: Key): boolean {
+    return this.source.has(key);
+  }
+
+  keys(): MapIterator<Key> {
+    return this.source.keys();
+  }
+
+  values(): MapIterator<Value> {
+    return this.source.values();
+  }
+
+  [Symbol.iterator](): MapIterator<[Key, Value]> {
+    return this.entries();
+  }
+
+  get [Symbol.toStringTag](): string {
+    return 'ReadonlyMap';
+  }
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return (
+    left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+  );
 }
 
 function defineRecordValue<T>(

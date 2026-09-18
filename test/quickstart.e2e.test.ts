@@ -138,7 +138,12 @@ describe('checked-in quickstart', () => {
     expect(Buffer.from(hello?.content_base64 ?? '', 'base64').toString('utf8')).toBe(
       'hello, forge!\n',
     );
-    expect(runtime.runs[0]?.events).toEqual(['prepare', 'quiesce', 'dispose']);
+    expect(runtime.runs[0]?.events).toEqual([
+      'prepare',
+      'finalizeSetup',
+      'quiesce',
+      'dispose',
+    ]);
   });
 });
 

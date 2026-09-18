@@ -70,15 +70,16 @@ ordering.
 
 | Category | Examples | Schema owner | Mechanism owner |
 | --- | --- | --- | --- |
-| Generic built-in | `forge/write@1`, `forge/command@1`, future `forge/plugin@1` | Forge | Forge or the selected adapter |
+| Generic built-in | `forge/write@1`, `forge/command@1`, `forge/plugin@1` | Forge | Forge or the selected adapter |
 | Product built-in | Future public `stripe/*` actions | Forge repository action owner | Forge repository action owner |
 | Host bundle | `acme-evals/skill@1`, `acme-evals/tool@1` | Explicitly imported bundle | Bundle, runtime, or selected adapter |
 
-This change retains the two currently executable first-party actions:
-`forge/write@1` and `forge/command@1`. The latter is argv-based and does not add
-implicit shell parsing.
-Plugin support remains non-executable until its follow-up slice lands. Other
-agent-aware actions need a concrete public use case before becoming built-ins.
+The executable first-party actions are `forge/write@1`, `forge/command@1`, and
+`forge/plugin@1`. Command remains argv-based and does not add implicit shell
+parsing. Plugin uses a narrow selected-adapter capability and setup-sealed
+runtime state; its complete contract is documented in [Marketplace plugin
+treatments](plugin-action.md). Other agent-aware actions need a concrete public
+use case before becoming built-ins.
 
 The default engine installs only the built-in registry. `ForgeComposition`
 exposes no setup-handler registry. An embedding host instead supplies bundles
@@ -226,9 +227,12 @@ putting that action's schema in public Forge. A generic writable tools path can
 similarly support a host-owned CLI action. The bundle owns the action semantics;
 the public adapter or runtime owns only the narrow mechanism.
 
-Public plugin support remains a built-in because it is part of the portable
-benchmark behavior. Plugin coordinates, versions, digests, credentials, and
-agent-native realization must be explicit in its eventual public contract.
+Public plugin support is a built-in because it is part of portable benchmark
+behavior. Version 1 explicitly selects the current entry from a named GitHub
+marketplace rather than claiming an immutable plugin lock. Agent-native
+realization and the run-time snapshot boundary remain explicit; exact plugin
+pins, remote MCP bindings, and private repository authentication need separately
+designed follow-ups.
 
 ## Lifecycle
 
@@ -243,8 +247,9 @@ The resulting execution order is:
 7. Resolve only explicitly required credentials.
 8. Prepare the runtime and coding agent.
 9. Apply the prepared case setup followed by prepared treatment setup.
-10. Open the agent session with agent-scoped credentials.
-11. Preserve the existing interaction, quiescence, evidence, evaluation,
+10. Finalize setup and seal state which must be immutable during interaction.
+11. Open the agent session with agent-scoped credentials.
+12. Preserve the existing interaction, quiescence, evidence, evaluation,
     staging, cleanup, and atomic commit lifecycle.
 
 ## Compatibility and release
@@ -289,8 +294,8 @@ The foundation must prove:
 1. Complete versioned setup-action bundles and engine-bound lifecycle tests.
 2. Add a plan-visible runtime network-policy identity and digest for hosts which
    require explicit proxy behavior.
-3. Add `forge/plugin@1` with immutable coordinates and setup-only marketplace
-   credentials where required.
+3. Add an explicit private-source authentication contract if a public use case
+   requires it; `forge/plugin@1` currently accepts credential-free sources.
 4. Add generic agent skill-snapshot and writable tools-path capabilities needed
    by bundle-owned actions without adding those actions to the default registry.
 5. Add Codex realizations and run the shared cross-adapter conformance suite.

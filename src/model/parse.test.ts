@@ -102,6 +102,65 @@ initial_prompt: Two
     ).toThrow(/namespaced/);
   });
 
+  it('parses only latest-marketplace forge/plugin@1 selections', () => {
+    expect(
+      parseSetupStep({
+        uses: 'forge/plugin@1',
+        with: {
+          agents: {
+            'claude-code': {
+              plugin: 'stripe@claude-plugins-official',
+              marketplace: 'anthropics/claude-plugins-official',
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      uses: 'forge/plugin@1',
+      with: {
+        agents: {
+          'claude-code': {
+            plugin: 'stripe@claude-plugins-official',
+            marketplace: 'anthropics/claude-plugins-official',
+          },
+        },
+      },
+    });
+
+    for (const withValue of [
+      {agents: {}},
+      {
+        agents: {
+          'claude-code': {
+            plugin: 'stripe',
+            marketplace: 'example/catalog',
+          },
+        },
+      },
+      {
+        agents: {
+          'claude-code': {
+            plugin: 'stripe@example',
+            marketplace: 'https://github.com/example/catalog.git',
+          },
+        },
+      },
+      {
+        agents: {
+          'claude-code': {
+            plugin: 'stripe@example',
+            version: '0.9.2',
+            marketplace: 'example/catalog',
+          },
+        },
+      },
+    ]) {
+      expect(() =>
+        parseSetupStep({uses: 'forge/plugin@1', with: withValue}),
+      ).toThrow(BenchmarkModelError);
+    }
+  });
+
   it('rejects unsafe paths, unknown keys, malformed regex, and duplicate YAML keys', () => {
     expect(() =>
       parseEvalCaseYaml(`

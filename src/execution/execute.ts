@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import * as path from 'node:path';
 
 import {
   ATIF_NORMALIZATION_VERSION,
@@ -39,6 +40,8 @@ import type {
   MutableWorkspace,
   PreparedRuntime,
   ReadonlyWorkspace,
+  RuntimeRequirements,
+  RuntimeStateDirectoryRequirement,
   SealedRuntime,
   WorkspaceListOptions,
   WorkspaceWriteOptions,
@@ -153,7 +156,7 @@ interface EvalPreflight {
   readonly agent: AgentAdapter;
   readonly agentEvidenceIdentity: AgentEvidenceIdentity;
   readonly setup: PreparedSetup;
-  readonly requirements: AgentRuntimeRequirements;
+  readonly requirements: RuntimeRequirements;
   readonly environmentSpecification: ScopedEnvironmentSpecification;
   readonly completionBindings: readonly CompletionBinding[];
 }
@@ -308,6 +311,7 @@ export async function executeEvalWithTestHooks(
         runId: input.runId,
         paths: prepared!.paths,
         workspace: prepared!.workspace,
+        stateDirectories: prepared!.stateDirectories,
         commands: Object.freeze({
           uncredentialed: prepared!.commands.uncredentialed,
           setup: (credentialEnvironmentNames: readonly string[]) =>
@@ -316,6 +320,8 @@ export async function executeEvalWithTestHooks(
         inputs: input.composition.inputProvider,
         signal,
       });
+      throwIfAborted(signal, phase);
+      await prepared!.finalizeSetup();
     });
 
     const interaction = await events.phase('interaction', async () => {
@@ -832,12 +838,25 @@ function buildEvalPreflight(
   const setup = setupExecutor.preflight(plan.setup, {
     selection: plan.agent,
     runtime: plan.runtime,
+    ...(agent.pluginInstaller === undefined
+      ? {}
+      : {pluginInstaller: agent.pluginInstaller}),
   });
-  const requirements = normalizeAgentRequirements(
+  const agentRequirements = normalizeAgentRequirements(
     agent.requirements(plan.agent),
   );
+  const requirements = mergeRuntimeRequirements(
+    {
+      executables: agentRequirements.executables,
+      stateDirectories: agentRequirements.stateDirectories,
+    },
+    {
+      executables: setup.requirements.executables ?? [],
+      stateDirectories: setup.requirements.stateDirectories ?? [],
+    },
+  );
   const environmentSpecification = mergeEnvironmentSpecifications([
-    {scope: 'agent', specification: requirements.environment},
+    {scope: 'agent', specification: agentRequirements.environment},
     {
       scope: 'setup',
       specification: {
@@ -977,7 +996,11 @@ function mergeEnvironmentSpecifications(
 function normalizeAgentRequirements(
   requirements: AgentRuntimeRequirements,
 ): AgentRuntimeRequirements {
-  if (!requirements || !Array.isArray(requirements.executables)) {
+  if (
+    !isPlainRecord(requirements) ||
+    !hasExactKeys(requirements, ['executables', 'environment', 'stateDirectories']) ||
+    !Array.isArray(requirements.executables)
+  ) {
     throw new TypeError('Agent executable requirements must be an array.');
   }
   if (!Array.isArray(requirements.stateDirectories)) {
@@ -1000,14 +1023,145 @@ function normalizeAgentRequirements(
     return executable;
   });
   return Object.freeze({
-    executables: Object.freeze(executables),
+    executables: Object.freeze(executables.sort(compareCodeUnits)),
     environment: normalizeEnvironmentSpecification(requirements.environment),
+    stateDirectories: normalizeRuntimeStateDirectories(
+      requirements.stateDirectories,
+      'Agent',
+    ),
+  });
+}
+
+function mergeRuntimeRequirements(
+  ...requirements: readonly RuntimeRequirements[]
+): RuntimeRequirements {
+  const executables = new Set<string>();
+  const stateDirectories = new Map<string, RuntimeStateDirectoryRequirement>();
+  const statePaths = new Map<string, string>();
+  for (const requirement of requirements) {
+    for (const executable of requirement.executables) executables.add(executable);
+    for (const state of normalizeRuntimeStateDirectories(
+      requirement.stateDirectories,
+      'Runtime',
+    )) {
+      const previous = stateDirectories.get(state.id);
+      if (
+        previous !== undefined &&
+        (previous.containerPath !== state.containerPath ||
+          (previous.sealAfterSetup ?? false) !== (state.sealAfterSetup ?? false))
+      ) {
+        throw new TypeError(
+          `Runtime state directory ${state.id} has conflicting requirements.`,
+        );
+      }
+      for (const [existingPath, existingId] of statePaths) {
+        if (
+          existingId !== state.id &&
+          pathsOverlap(existingPath, state.containerPath)
+        ) {
+          throw new TypeError('Runtime state directory requirements may not overlap.');
+        }
+      }
+      if (previous === undefined) {
+        stateDirectories.set(state.id, state);
+        statePaths.set(state.containerPath, state.id);
+      }
+    }
+  }
+  return Object.freeze({
+    executables: Object.freeze([...executables].sort(compareCodeUnits)),
     stateDirectories: Object.freeze(
-      requirements.stateDirectories.map(({id, containerPath}) =>
-        Object.freeze({id, containerPath}),
+      [...stateDirectories.values()].sort((left, right) =>
+        compareCodeUnits(left.id, right.id),
       ),
     ),
   });
+}
+
+function normalizeRuntimeStateDirectories(
+  input: readonly RuntimeStateDirectoryRequirement[],
+  owner: string,
+): readonly RuntimeStateDirectoryRequirement[] {
+  if (!Array.isArray(input)) {
+    throw new TypeError(`${owner} state-directory requirements must be an array.`);
+  }
+  const ids = new Set<string>();
+  const paths: string[] = [];
+  const normalized = input.map((requirement) => {
+    if (
+      !isPlainRecord(requirement) ||
+      !hasOnlyKeys(requirement, ['id', 'containerPath', 'sealAfterSetup']) ||
+      !Object.hasOwn(requirement, 'id') ||
+      !Object.hasOwn(requirement, 'containerPath') ||
+      typeof requirement.id !== 'string' ||
+      !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(requirement.id) ||
+      typeof requirement.containerPath !== 'string' ||
+      !requirement.containerPath.startsWith('/') ||
+      requirement.containerPath.includes('\0') ||
+      path.posix.normalize(requirement.containerPath) !== requirement.containerPath ||
+      (Object.hasOwn(requirement, 'sealAfterSetup') &&
+        typeof requirement.sealAfterSetup !== 'boolean') ||
+      ids.has(requirement.id) ||
+      paths.some((existing) =>
+        pathsOverlap(existing, requirement.containerPath as string),
+      )
+    ) {
+      throw new TypeError(`${owner} returned an invalid state-directory requirement.`);
+    }
+    const id = requirement.id as string;
+    const containerPath = requirement.containerPath as string;
+    const sealAfterSetup = requirement.sealAfterSetup as boolean | undefined;
+    ids.add(id);
+    paths.push(containerPath);
+    return Object.freeze({
+      id,
+      containerPath,
+      ...(sealAfterSetup === undefined
+        ? {}
+        : {sealAfterSetup}),
+    });
+  });
+  return Object.freeze(normalized);
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return (
+    left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+  );
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Reflect.ownKeys(value);
+  const allowed = new Set(expected);
+  return (
+    keys.length === expected.length &&
+    keys.every((key) => typeof key === 'string' && allowed.has(key))
+  );
+}
+
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const allowed = new Set(expected);
+  return Reflect.ownKeys(value).every(
+    (key) => typeof key === 'string' && allowed.has(key),
+  );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function orderedCredentialScopes(

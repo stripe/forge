@@ -77,10 +77,29 @@ export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
   with: CommandSetupWithV1;
 }
 
+/** One agent's marketplace-backed native plugin selection. */
+export interface PluginSelectionV1 extends JsonObject {
+  /** Agent-native qualified identity, such as `stripe@claude-plugins-official`. */
+  plugin: string;
+  /** GitHub owner/repository whose current default-branch entry is installed. */
+  marketplace: string;
+}
+
+export interface PluginSetupWithV1 extends JsonObject {
+  /** Adapter ID to native selection. Only the selected branch is realized. */
+  agents: Record<string, PluginSelectionV1>;
+}
+
+export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
+  uses: 'forge/plugin@1';
+  with: PluginSetupWithV1;
+}
+
 /** Closed union for consumers which intentionally handle only package built-ins. */
 export type BuiltInSetupStepV1 =
   | WriteSetupStepV1
-  | CommandSetupStepV1;
+  | CommandSetupStepV1
+  | PluginSetupStepV1;
 
 export interface FilesystemCheckV1 {
   description?: string;

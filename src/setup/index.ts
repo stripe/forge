@@ -3,6 +3,7 @@ export {
   firstPartySetupHandlers,
 } from './executor.js';
 export {commandSetupHandler} from './forgeCommand.js';
+export {pluginSetupHandler} from './forgePlugin.js';
 export {writeSetupHandler} from './forgeWrite.js';
 export {
   SetupActionError,

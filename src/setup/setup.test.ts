@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 import type {CommandResult} from '../contracts/command.js';
 import {credentialReference} from '../contracts/credentials.js';
+import type {AgentPluginInstaller} from '../contracts/plugin.js';
 import type {MutableWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
 import type {SetupStepV1} from '../model/types.js';
+import {parseSetupStep} from '../model/parse.js';
 import {
   createSetupExecutor,
   createSetupExecutorWithHandlers,
@@ -79,6 +81,7 @@ describe('portable setup actions', () => {
       runId: 'run-1',
       paths: {workspace: '/workspace', home: '/home/forge'},
       workspace,
+      stateDirectories: new Map(),
       commands: {
         uncredentialed: {
           async run(argv, options) {
@@ -113,6 +116,104 @@ describe('portable setup actions', () => {
       'command:node --version',
     ]);
     assert.equal(Buffer.from(writes.get('notes/fixture.txt')!).toString(), 'fixture');
+  });
+
+  it('routes forge/plugin@1 through only the selected agent capability', async () => {
+    const events: string[] = [];
+    const pluginState = emptyWorkspace();
+    const installer: AgentPluginInstaller = {
+      preflight(distribution, context) {
+        events.push(
+          `preflight:${context.selection.adapter}:${distribution.plugin}`,
+        );
+        return {
+          requirements: {
+            executables: ['git'],
+            stateDirectories: [
+              {
+                id: 'plugin-state',
+                containerPath: '/home/forge/plugin-state',
+                sealAfterSetup: true,
+              },
+            ],
+          },
+          async install(installContext) {
+            assert.deepEqual([...installContext.stateDirectories.keys()], [
+              'plugin-state',
+            ]);
+            assert.equal(
+              installContext.stateDirectories.get('plugin-state'),
+              pluginState,
+            );
+            events.push('install');
+          },
+        };
+      },
+    };
+    const step = parseSetupStep({
+      uses: 'forge/plugin@1',
+      with: {
+        agents: {
+          'test-agent': {
+            plugin: 'formatter@example-marketplace',
+            marketplace: 'example/marketplace',
+          },
+          'other-agent': {
+            plugin: 'other@other-marketplace',
+            marketplace: 'other/marketplace',
+          },
+        },
+      },
+    });
+    const prepared = createSetupExecutor().preflight([step], {
+      ...setupTarget,
+      pluginInstaller: installer,
+    });
+    assert.deepEqual(prepared.requirements, {
+      executables: ['git'],
+      stateDirectories: [
+        {
+          id: 'plugin-state',
+          containerPath: '/home/forge/plugin-state',
+          sealAfterSetup: true,
+        },
+      ],
+    });
+
+    await prepared.apply({
+      runId: 'run-plugin',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: emptyWorkspace(),
+      stateDirectories: new Map([
+        ['plugin-state', pluginState],
+        ['unrelated-state', emptyWorkspace()],
+      ]),
+      commands: inertCommandProjections(),
+      inputs: emptyInputs(),
+      signal: new AbortController().signal,
+    });
+    assert.deepEqual(events, [
+      'preflight:test-agent:formatter@example-marketplace',
+      'install',
+    ]);
+  });
+
+  it('rejects an unsupported or missing selected plugin realization in preflight', () => {
+    const step = parseSetupStep({
+      uses: 'forge/plugin@1',
+      with: {
+        agents: {
+          'other-agent': {
+            plugin: 'formatter@example-marketplace',
+            marketplace: 'example/marketplace',
+          },
+        },
+      },
+    });
+    assert.throws(
+      () => createSetupExecutor().preflight([step], setupTarget),
+      /does not define a distribution/,
+    );
   });
 
   it('preflights all handlers before performing mutations', async () => {
@@ -202,6 +303,7 @@ describe('portable setup actions', () => {
       runId: 'run-requirements',
       paths: {workspace: '/workspace', home: '/home/forge'},
       workspace: emptyWorkspace(),
+      stateDirectories: new Map(),
       commands: {
         uncredentialed: {
           async run() {
@@ -232,6 +334,7 @@ describe('portable setup actions', () => {
         runId: 'run-requirements-repeated',
         paths: {workspace: '/workspace', home: '/home/forge'},
         workspace: emptyWorkspace(),
+        stateDirectories: new Map(),
         commands: inertCommandProjections(),
         inputs: emptyInputs(),
         signal: new AbortController().signal,
@@ -328,6 +431,7 @@ describe('portable setup actions', () => {
       runId: 'run-projected-credentials',
       paths: {workspace: '/workspace', home: '/home/forge'},
       workspace: emptyWorkspace(),
+      stateDirectories: new Map(),
       commands: {
         uncredentialed: {
           async run() {
@@ -387,6 +491,7 @@ describe('portable setup actions', () => {
       runId: 'run-immutable-step',
       paths: {workspace: '/workspace', home: '/home/forge'},
       workspace: emptyWorkspace(),
+      stateDirectories: new Map(),
       commands: inertCommandProjections(),
       inputs: emptyInputs(),
       signal: new AbortController().signal,
@@ -433,6 +538,25 @@ describe('portable setup actions', () => {
       {variables: null},
       {variables: []},
       {variables: new Date()},
+      {executables: 'git'},
+      {executables: ['git', 'git']},
+      {stateDirectories: {}},
+      {stateDirectories: [{id: 'state', containerPath: 'relative'}]},
+      {
+        stateDirectories: [
+          {
+            id: 'state',
+            containerPath: '/home/forge/state',
+            sealAfterSetup: 'yes',
+          },
+        ],
+      },
+      {
+        stateDirectories: [
+          {id: 'one', containerPath: '/home/forge/state'},
+          {id: 'two', containerPath: '/home/forge/state/nested'},
+        ],
+      },
       {credentials: null},
       {credentials: []},
       {credentials: {setup: null}},
@@ -532,6 +656,7 @@ describe('portable setup actions', () => {
           async listFiles() { return []; },
           async writeFile() {},
         },
+        stateDirectories: new Map(),
         commands: {
           uncredentialed: {
             async run() {

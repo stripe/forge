@@ -8,7 +8,8 @@ guidelines, and atomically commits a neutral local result.
 
 > **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
 > Ava multi-turn Claude Code runs, with file checks, model-judged success
-> guidelines, ATIF v1.8 evidence, and local results. The public CLI supports
+> guidelines, latest-marketplace Claude plugin treatments, ATIF v1.8 evidence,
+> and local results. The public CLI supports
 > direct Anthropic or an explicitly configured Anthropic Messages-compatible
 > endpoint. See [Current limitations](#current-limitations) before authoring a
 > benchmark.
@@ -19,6 +20,8 @@ guidelines, and atomically commits a neutral local result.
 - A running Docker daemon and Docker CLI capable of building Linux images.
 - `linux/amd64` or `linux/arm64`, selected explicitly by the experiment config.
 - Network access to Docker Hub and npm when Forge first builds its runtime image.
+- A `forge/plugin@1` treatment additionally needs HTTPS access to its GitHub
+  marketplace and the source selected by the marketplace's current entry.
 - The runtime image obtains Claude Code from npm; its use remains subject to
   Anthropic's applicable terms.
 - Provider credentials for `forge run`: either `ANTHROPIC_API_KEY` for direct
@@ -562,6 +565,46 @@ credentials. The command action itself declares no credentials and runs with
 Forge's uncredentialed command projection; use a typed setup action for an
 operation that requires a credential.
 
+`forge/plugin@1` installs the selected agent's complete native plugin from the
+marketplace's current default-branch entry. Each agent branch states the native
+identity and GitHub marketplace repository slug:
+
+```yaml
+treatments:
+  baseline:
+    setup: []
+  stripe-plugin:
+    setup:
+      - uses: forge/plugin@1
+        with:
+          agents:
+            claude-code:
+              plugin: stripe@claude-plugins-official
+              marketplace: anthropics/claude-plugins-official
+```
+
+Forge fetches marketplace `HEAD` once per run, validates the selected entry,
+and then uses Claude's native marketplace installer. The marketplace decides
+the plugin source and resolved version. The action rejects authored `version`,
+`marketplace.commit`, and `source` fields: identical plans can intentionally
+install different releases on different dates.
+
+Claude reserves some marketplace names and refuses to register their local
+checkouts. Forge therefore gives the verified snapshot a deterministic local
+alias and installs the unchanged selected entry through that alias. This native
+alias is an implementation detail; the plan retains the authored plugin and
+marketplace. Only the selected agent branch is fetched.
+
+Plugin installation writes a run-owned Claude plugin seed. After all setup
+finishes, the Docker runtime restarts with that state mounted read-only. Claude
+receives the same directory as its seed and cache, with background nonessential
+traffic disabled, so later turns cannot update the marketplace or replace the
+plugin during that run. Forge installs the whole plugin—including skills,
+commands, hooks, and MCP configuration—not only its skills. A remote endpoint
+such as `mcp.stripe.com` remains a rolling external dependency. See
+[Marketplace plugin treatments](docs/plugin-action.md) for the exact “latest”
+semantics, verification, and current limitations.
+
 ### Setup action bundles
 
 Embedding hosts may supply trusted setup actions without adding their names or
@@ -934,6 +977,15 @@ not enter experiment configs, plans, events, or result records. Runtimes expose
 distinct mutable and sealed capabilities; evidence collection receives only the
 sealed workspace and run-owned agent state.
 
+An adapter may expose the narrow `AgentPluginInstaller` capability used by the
+public `forge/plugin@1` action. Its preflight is pure: it binds one selected
+distribution and declares executables plus state directories. Installation then
+receives only that step's state and command projection. A state requirement can
+set `sealAfterSetup`; Forge calls `PreparedRuntime.finalizeSetup()` after every
+setup operation and before opening the agent session. The Docker adapter
+enforces that boundary by replacing the setup container with an interaction
+container whose selected state mounts are read-only.
+
 Forge assigns concrete credential scope from the declaration surface. Handlers
 identify lifecycle purpose through fixed setup and agent collections; they
 cannot attach raw scope metadata. Environment declarations are strict,
@@ -1025,6 +1077,10 @@ host-owned semantics and capabilities.
   capabilities dropped, `no-new-privileges`, bounded memory/CPU/processes,
   bounded commands, and run-owned workspace/home/state mounts.
 - Forge never mounts the Docker socket into the evaluation container.
+- Plugin installation uses an uncredentialed command projection, snapshots the
+  current marketplace once per run, rejects unexpected dependencies and unsafe
+  filesystem entries, and seals the resulting Claude seed read-only before
+  interaction. The action is intentionally mutable across runs.
 - Credentials require explicit opaque-reference-to-host-environment mappings.
   Forge assigns secret values to setup or agent commands from the declaration
   source. Uncredentialed preparation commands receive neither scope. Docker
@@ -1079,7 +1135,12 @@ proxy, or an offline execution mode.
   selectable entries and experiment-level `retries` is not acted on by the v0.1
   CLI. Ava and guideline completion attempts have their own fixed retry policy
   and do not implement the experiment config's campaign retry field.
-- Built-in setup is limited to `forge/write@1` and `forge/command@1`.
+- Built-in setup includes `forge/write@1`, `forge/command@1`, and Claude-backed
+  `forge/plugin@1`. Plugin v1 installs the current entry from a public GitHub
+  marketplace named as `owner/repository`. Exact plugin-version pins, remote
+  MCP-service pins, private repository authentication, npm and command sources,
+  plugin configuration, transitive plugin dependencies, and non-Claude native
+  realizations are not included.
 - Results are local. There is no remote publisher, worker/control plane, hosted
   execution service, or human-result policy in the public package.
 - Each CLI process asks Docker to build and verify the Forge image; Docker's
@@ -1125,12 +1186,14 @@ One invocation builds once and runs the following checks in order:
 
 1. The real Docker adapter conformance probe, including sealing, cleanup, and
    idempotent disposal.
-2. The checked-in one-shot quickstart, which must pass its deterministic checks
+2. A credential-free install of the latest Stripe Claude plugin through the
+   current marketplace, followed by read-only-state verification.
+3. The checked-in one-shot quickstart, which must pass its deterministic checks
    without calling a host completion provider.
-3. The checked-in multi-turn example, which must exercise at least two turns in
+4. The checked-in multi-turn example, which must exercise at least two turns in
    one persistent Claude session and pass both deterministic checks and model
    judging.
-4. Full `verifyCompletedRun` integrity verification plus targeted checks of the
+5. Full `verifyCompletedRun` integrity verification plus targeted checks of the
    interaction, trajectory, judge evidence, completion calls, and session
    provenance, including the exact restricted Claude source artifact.
 
@@ -1146,7 +1209,7 @@ loopback bridge requires a Docker implementation which provides
 preflight before making model calls when that route is unavailable.
 
 Results remain under `results/live` by default. `FORGE_LIVE_RUN_ID` selects the
-suite ID used as the prefix for its three run IDs,
+suite ID used as the prefix for its four run IDs,
 `FORGE_LIVE_RESULTS_ROOT` selects another results directory,
 `FORGE_LIVE_TIMEOUT_MS` sets the overall positive millisecond timeout (30
 minutes by default), and `FORGE_DOCKER_EXECUTABLE` selects another Docker CLI.
