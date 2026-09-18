@@ -152,6 +152,7 @@ describe('Forge Docker runtime', () => {
     await prepared.commands.uncredentialed.run(['probe-tool']);
     const setupCommands = prepared.commands.setup(['SETUP_SECRET']);
     await setupCommands.run(['setup-tool'], {timeoutMs: 999_999});
+    await prepared.finalizeSetup();
     await prepared.commands.agent.run(['claude', '--version']);
     assert.throws(
       () => prepared.commands.setup(['AGENT_SECRET']),
@@ -255,6 +256,75 @@ describe('Forge Docker runtime', () => {
       /canonical child/,
     );
     assert.equal(docker.calls.length, 0);
+  });
+
+  it('restarts with setup-sealed state read-only before agent commands', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
+    roots.push(temporaryRoot);
+    const docker = fakeDocker();
+    const adapter = createDockerRuntimeAdapter({
+      dockerExecutable: '/opt/test-docker',
+      hostCommands: docker.runner,
+      temporaryRoot,
+    });
+    const prepared = await adapter.prepare(
+      preparation({
+        requirements: {
+          executables: ['claude'],
+          stateDirectories: [
+            {
+              id: 'claude-plugin-seed',
+              containerPath: '/home/forge/.forge/claude-plugin-state',
+              sealAfterSetup: true,
+            },
+            {
+              id: 'claude-projects',
+              containerPath: '/home/forge/.claude/projects',
+            },
+          ],
+        },
+      }),
+    );
+    const setupCommands = prepared.commands.setup(['SETUP_SECRET']);
+    await prepared.stateDirectories
+      .get('claude-plugin-seed')!
+      .writeFile('seed/plugin.txt', Buffer.from('pinned'));
+    await prepared.finalizeSetup();
+
+    const runs = docker.calls.filter((call) => call.argv[1] === 'run');
+    assert.equal(runs.length, 2);
+    const initialPluginMount = runs[0]!.argv.find((argument) =>
+      argument.includes('target=/home/forge/.forge/claude-plugin-state'),
+    )!;
+    const sealedPluginMount = runs[1]!.argv.find((argument) =>
+      argument.includes('target=/home/forge/.forge/claude-plugin-state'),
+    )!;
+    const interactionProjectsMount = runs[1]!.argv.find((argument) =>
+      argument.includes('target=/home/forge/.claude/projects'),
+    )!;
+    assert.doesNotMatch(initialPluginMount, /,readonly$/);
+    assert.match(sealedPluginMount, /,readonly$/);
+    assert.doesNotMatch(interactionProjectsMount, /,readonly$/);
+    assert.equal(
+      docker.calls.filter((call) => call.argv[1] === 'stop').length,
+      1,
+    );
+    await assert.rejects(
+      prepared.stateDirectories
+        .get('claude-plugin-seed')!
+        .writeFile('late.txt', Buffer.from('late')),
+      /quiesced/,
+    );
+    await prepared.stateDirectories
+      .get('claude-projects')!
+      .writeFile('session.jsonl', Buffer.from('mutable'));
+    await assert.rejects(prepared.commands.uncredentialed.run(['true']), /finalized/);
+    await assert.rejects(setupCommands.run(['true']), /finalized/);
+    await prepared.commands.agent.run(['claude', '--version']);
+    await assert.rejects(prepared.finalizeSetup(), /already been finalized/);
+
+    await prepared.quiesce();
+    await prepared.dispose();
   });
 
   it('rejects missing executable requirements and disposes the runtime', async () => {

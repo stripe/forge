@@ -53,6 +53,11 @@ describe('@stripe/forge/testing', () => {
         executables: [],
         stateDirectories: [
           {id: 'agent-state', containerPath: '/home/forge/.agent'},
+          {
+            id: 'setup-state',
+            containerPath: '/home/forge/.setup',
+            sealAfterSetup: true,
+          },
         ],
       },
       signal,
@@ -60,9 +65,14 @@ describe('@stripe/forge/testing', () => {
 
     expect(report).toEqual({
       runtimeId: 'conformance-1',
-      stateDirectoryIds: ['agent-state'],
+      stateDirectoryIds: ['agent-state', 'setup-state'],
     });
-    expect(runtime.runs[0]?.events).toEqual(['prepare', 'quiesce', 'dispose']);
+    expect(runtime.runs[0]?.events).toEqual([
+      'prepare',
+      'finalizeSetup',
+      'quiesce',
+      'dispose',
+    ]);
   });
 
   it('supports a complete executeEval unit test without host resources', async () => {

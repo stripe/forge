@@ -95,6 +95,7 @@ describe('executeEval', () => {
       'credential:anthropic.api-key',
       'runtime:prepare',
       'agent:prepare',
+      'runtime:finalize-setup',
       'agent:open',
       'agent:send',
       'runtime:quiesce',
@@ -674,6 +675,9 @@ async function executionFixture(
       uncredentialed: inertCommandRunner(),
       setup: () => inertCommandRunner(),
       agent: inertCommandRunner(),
+    },
+    async finalizeSetup() {
+      calls.push('runtime:finalize-setup');
     },
     async quiesce() {
       calls.push('runtime:quiesce');

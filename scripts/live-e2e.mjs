@@ -14,7 +14,11 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {runCli} from '../dist/cli.js';
-import {createClaudeCodeAdapter} from '../dist/agents/claude-code/index.js';
+import {
+  CLAUDE_PLUGIN_STATE_ID,
+  CLAUDE_PLUGIN_STATE_PATH,
+  createClaudeCodeAdapter,
+} from '../dist/agents/claude-code/index.js';
 import {parseAtifTrajectory} from '../dist/atif/index.js';
 import {
   GUIDELINE_JUDGE_PROMPT_VERSION,
@@ -92,6 +96,7 @@ const resultsRoot = path.resolve(
 const suiteId = liveSuiteId(optionalEnvironment('FORGE_LIVE_RUN_ID'));
 const runIds = Object.freeze({
   docker: `${suiteId}-docker`,
+  plugin: `${suiteId}-plugin`,
   oneShot: `${suiteId}-one-shot`,
   multiTurn: `${suiteId}-multi-turn`,
 });
@@ -170,6 +175,13 @@ try {
 
   progress('checking the real Docker runtime lifecycle');
   const dockerReport = await runDockerConformance(runtime, runIds.docker, signal);
+  progress('checking latest Claude plugin installation');
+  const pluginReport = await runClaudePluginConformance({
+    agent,
+    runtime,
+    runId: runIds.plugin,
+    signal,
+  });
   if (bridge !== undefined) {
     progress('checking the container-to-loopback gateway bridge');
     await assertDockerCanReachBridge({
@@ -213,6 +225,7 @@ try {
             : 'direct_anthropic'
           : 'loopback_gateway_bridge',
         docker: dockerReport,
+        plugin: pluginReport,
         runs: {
           one_shot: oneShotReport,
           multi_turn: multiTurnReport,
@@ -226,6 +239,152 @@ try {
   process.removeListener('SIGINT', abort);
   process.removeListener('SIGTERM', abort);
   await bridge?.close().catch(() => undefined);
+}
+
+async function runClaudePluginConformance({
+  agent,
+  runtime,
+  runId,
+  signal: executionSignal,
+}) {
+  const [dataset, experiment] = await Promise.all([
+    loadDataset(path.join(repositoryRoot, 'examples', 'quickstart', 'dataset')),
+    loadExperimentConfig(
+      path.join(repositoryRoot, 'examples', 'quickstart', 'experiment.yaml'),
+    ),
+  ]);
+  const selection = expandExperiment(experiment)[0];
+  if (selection === undefined) {
+    throw new Error('The quickstart experiment config contains no run selection.');
+  }
+  const plan = resolveRunPlan({dataset, experiment, selection});
+  const installer = agent.pluginInstaller;
+  if (installer === undefined) {
+    throw new Error('The live Claude adapter does not expose plugin installation.');
+  }
+  const installation = installer.preflight(
+    {
+      plugin: 'stripe@claude-plugins-official',
+      marketplace: 'anthropics/claude-plugins-official',
+    },
+    {selection: plan.agent, runtime: plan.runtime},
+  );
+  const agentRequirements = agent.requirements(plan.agent);
+  let prepared;
+  try {
+    prepared = await runtime.prepare({
+      runId,
+      plan,
+      environment: {variables: {}, credentials: {}},
+      requirements: {
+        executables: [
+          ...new Set([
+            ...agentRequirements.executables,
+            ...installation.requirements.executables,
+            'touch',
+          ]),
+        ].sort(),
+        stateDirectories: [
+          ...agentRequirements.stateDirectories,
+          ...installation.requirements.stateDirectories,
+        ],
+      },
+      signal: executionSignal,
+    });
+    await agent.prepare({
+      runId,
+      plan,
+      selection: plan.agent,
+      runtime: {
+        runtimeId: prepared.runtimeId,
+        workspace: prepared.workspace,
+        paths: prepared.paths,
+        stateDirectories: prepared.stateDirectories,
+        commands: {uncredentialed: prepared.commands.uncredentialed},
+      },
+      inputs: {},
+      signal: executionSignal,
+    });
+    const pluginState = prepared.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
+    if (pluginState === undefined) {
+      throw new Error('The live runtime omitted Claude plugin state.');
+    }
+    await installation.install({
+      runId,
+      paths: prepared.paths,
+      stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, pluginState]]),
+      commands: prepared.commands.uncredentialed,
+      signal: executionSignal,
+    });
+    await prepared.finalizeSetup();
+
+    const listed = await prepared.commands.agent.run(
+      [
+        'env',
+        `CLAUDE_CODE_PLUGIN_SEED_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
+        `CLAUDE_CODE_PLUGIN_CACHE_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
+        'claude',
+        '--settings',
+        `${CLAUDE_PLUGIN_STATE_PATH}/session-settings.json`,
+        'plugin',
+        'list',
+        '--json',
+      ],
+      {
+        signal: executionSignal,
+        timeoutMs: 60_000,
+        maxOutputBytes: 1024 * 1024,
+      },
+    );
+    if (listed.exitCode !== 0) {
+      throw new Error('Claude could not list the installed plugin after sealing.');
+    }
+    let plugins;
+    try {
+      plugins = JSON.parse(listed.stdout);
+    } catch (error) {
+      throw new Error('Claude returned invalid plugin-list JSON.', {cause: error});
+    }
+    const installed = Array.isArray(plugins)
+      ? plugins.find(
+          (plugin) =>
+            plugin !== null &&
+            typeof plugin === 'object' &&
+            typeof plugin.id === 'string' &&
+            plugin.id.startsWith('stripe@forge-'),
+        )
+      : undefined;
+    if (
+      !Array.isArray(plugins) ||
+      plugins.length !== 1 ||
+      typeof installed?.version !== 'string' ||
+      installed.version.length === 0 ||
+      installed.enabled !== true
+    ) {
+      throw new Error('Claude did not load the latest plugin from sealed state.');
+    }
+    const mutation = await prepared.commands.agent.run(
+      ['touch', `${CLAUDE_PLUGIN_STATE_PATH}/mutation-must-fail`],
+      {
+        signal: executionSignal,
+        timeoutMs: 30_000,
+        maxOutputBytes: 64 * 1024,
+      },
+    );
+    if (mutation.exitCode === 0) {
+      throw new Error('The live Claude plugin state remained writable.');
+    }
+    return Object.freeze({
+      valid: true,
+      run_id: runId,
+      plugin: 'stripe@claude-plugins-official',
+      version: installed.version,
+      setup_state_readonly: true,
+    });
+  } finally {
+    await prepared?.dispose();
+  }
 }
 
 async function runDockerConformance(runtime, runId, executionSignal) {

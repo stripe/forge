@@ -52,6 +52,14 @@ export function isSafeVersion(value: string): boolean {
   );
 }
 
+export function isSafeGitHubRepository(value: string): boolean {
+  if (value.length > 512 || CONTROL_CHARACTER.test(value)) return false;
+  const match = /^([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(
+    value,
+  );
+  return match !== null && !match[2]!.toLowerCase().endsWith('.git');
+}
+
 export function isSafeMetadata(value: string, maxBytes = 1024): boolean {
   return (
     value.length > 0 &&

@@ -8,6 +8,7 @@ import type {
   RuntimeStateDirectoryRequirement,
 } from './runtime.js';
 import type {CommandRunner} from './command.js';
+import type {AgentPluginInstaller} from './plugin.js';
 
 export interface AgentToolCall {
   readonly id?: string;
@@ -172,6 +173,8 @@ export interface AgentEvidenceContext {
 export interface AgentAdapter {
   readonly id: string;
   readonly version: string;
+  /** Native realization for the public `forge/plugin@1` action, when supported. */
+  readonly pluginInstaller?: AgentPluginInstaller;
   /** Pure declaration used before credentials resolve or a runtime allocates. */
   requirements(selection: AgentSelectionV1): AgentRuntimeRequirements;
   /** Pure coding-agent identity used when Forge must construct fallback ATIF. */

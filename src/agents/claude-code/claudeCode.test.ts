@@ -3,8 +3,15 @@ import {describe, it} from 'node:test';
 import {expect} from '../../../test/support/expect.js';
 import {parseAtifTrajectory} from '../../atif/index.js';
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
+import {createMemoryRunInputProvider} from '../../testing/memoryInputs.js';
+import {createTestResolvedRunPlan} from '../../testing/plans.js';
 
-import {createClaudeCodeAdapter, loadClaudeEvidence} from './index.js';
+import {
+  CLAUDE_PLUGIN_STATE_ID,
+  CLAUDE_PLUGIN_STATE_PATH,
+  createClaudeCodeAdapter,
+  loadClaudeEvidence,
+} from './index.js';
 import {loadClaudeNativeArtifact} from './evidence.js';
 import {parseClaudeStream} from './stream.js';
 
@@ -127,6 +134,65 @@ describe('Claude Code adapter', () => {
         credentialEnvironmentName: 'ANTHROPIC_BASE_URL',
       }),
     ).toThrow(/different environment variables/);
+  });
+
+  it('loads finalized plugin seed state for every native session invocation', async () => {
+    const argvCalls: string[][] = [];
+    const workspace = createMemoryWorkspace();
+    const pluginState = createMemoryWorkspace();
+    const plan = createTestResolvedRunPlan({
+      agent: {
+        adapter: 'claude-code',
+        provider: 'anthropic',
+        model: 'claude-test',
+      },
+    });
+    const adapter = createClaudeCodeAdapter({
+      sessionIdFactory: () => 'session-1',
+    });
+    const session = await adapter.openSession({
+      runId: 'run-plugin-session',
+      plan,
+      selection: plan.agent,
+      runtime: {
+        runtimeId: 'run-plugin-session',
+        workspace: workspace.mutable,
+        paths: {workspace: '/workspace', home: '/home/forge'},
+        stateDirectories: new Map([
+          [CLAUDE_PLUGIN_STATE_ID, pluginState.mutable],
+        ]),
+        commands: {
+          agent: {
+            async run(argv) {
+              argvCalls.push([...argv]);
+              return {
+                stdout: JSON.stringify({
+                  type: 'result',
+                  result: 'done',
+                  session_id: 'session-1',
+                }),
+                stderr: '',
+                exitCode: 0,
+                durationMs: 1,
+              };
+            },
+          },
+        },
+      },
+      inputs: createMemoryRunInputProvider(),
+      signal: new AbortController().signal,
+    });
+    await session.send('Do the work', {signal: new AbortController().signal});
+
+    expect(argvCalls[0]?.slice(0, 7)).toEqual([
+      'env',
+      `CLAUDE_CODE_PLUGIN_SEED_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
+      `CLAUDE_CODE_PLUGIN_CACHE_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
+      'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
+      'claude',
+      '--settings',
+      `${CLAUDE_PLUGIN_STATE_PATH}/session-settings.json`,
+    ]);
   });
 
   it('returns unavailable native evidence without constructing fallback', async () => {

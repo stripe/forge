@@ -63,6 +63,33 @@ export async function assertRuntimeAdapterConforms(
       fail('Prepared workspace did not preserve probe bytes.');
     }
     const setupCommands = prepared.commands.setup([]);
+    for (const requirement of input.requirements.stateDirectories) {
+      await prepared.stateDirectories
+        .get(requirement.id)!
+        .writeFile('.forge-conformance/setup-state.bin', probeBody);
+    }
+    await prepared.finalizeSetup();
+
+    for (const commands of [
+      prepared.commands.uncredentialed,
+      setupCommands,
+    ]) {
+      await expectRejection(
+        () => commands.run(['true']),
+        'Setup command runner still accepted work after finalization.',
+      );
+    }
+    for (const requirement of input.requirements.stateDirectories) {
+      const state = prepared.stateDirectories.get(requirement.id)!;
+      if (requirement.sealAfterSetup) {
+        await expectRejection(
+          () => state.writeFile('.forge-conformance/late-state.bin', probeBody),
+          `Setup-sealed state ${requirement.id} remained mutable after finalization.`,
+        );
+      } else {
+        await state.writeFile('.forge-conformance/interaction-state.bin', probeBody);
+      }
+    }
 
     const sealed = await prepared.quiesce();
     if (sealed.runtimeId !== prepared.runtimeId) {

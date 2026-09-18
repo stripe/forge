@@ -87,15 +87,16 @@ The required lifecycle order is:
    run optional completion-provider preflight.
 3. Prepare the runtime and coding agent.
 4. Apply case setup, followed by treatment setup.
-5. Run the interaction.
-6. Quiesce all mutation and obtain a sealed runtime.
-7. Select exact run-owned evidence and normalize it to the pinned ATIF version.
-8. Evaluate sealed workspace and transcript evidence, including guideline
+5. Finalize setup and seal state declared immutable for interaction.
+6. Run the interaction.
+7. Quiesce all mutation and obtain a sealed runtime.
+8. Select exact run-owned evidence and normalize it to the pinned ATIF version.
+9. Evaluate sealed workspace and transcript evidence, including guideline
    judging when configured.
-9. Stage deterministic artifacts.
-10. Dispose runtime resources.
-11. Commit the completed result atomically.
-12. Verify before any caller-owned publication.
+10. Stage deterministic artifacts.
+11. Dispose runtime resources.
+12. Commit the completed result atomically.
+13. Verify before any caller-owned publication.
 
 Do not read mutable workspace or session evidence before quiescence. Evidence
 code receives sealed, read-only capabilities. If exact native evidence is

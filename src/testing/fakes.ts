@@ -303,6 +303,7 @@ export function createFakeRuntimeAdapter(
       }
       const commands: RecordedTestCommand[] = [];
       const events: string[] = ['prepare'];
+      let setupFinalized = false;
       let quiesced = false;
       let disposed = false;
       let sealedRuntime: SealedRuntime | undefined;
@@ -319,6 +320,12 @@ export function createFakeRuntimeAdapter(
             if (quiesced || disposed) {
               throw new CommandExecutionError(
                 'Fake runtime command runner is closed.',
+                'command_runner_closed',
+              );
+            }
+            if (setupFinalized && scope !== 'agent') {
+              throw new CommandExecutionError(
+                'Fake runtime setup command runner is finalized.',
                 'command_runner_closed',
               );
             }
@@ -376,6 +383,16 @@ export function createFakeRuntimeAdapter(
             credentialEnvironmentNamesForScope(input.environment, 'agent'),
           ),
         }),
+        async finalizeSetup(): Promise<void> {
+          if (quiesced || disposed || setupFinalized) {
+            throw new Error('Fake runtime setup cannot be finalized.');
+          }
+          setupFinalized = true;
+          for (const requirement of input.requirements.stateDirectories) {
+            if (requirement.sealAfterSetup) states.get(requirement.id)?.seal();
+          }
+          events.push('finalizeSetup');
+        },
         async quiesce(): Promise<SealedRuntime> {
           if (disposed && sealedRuntime === undefined) {
             throw new Error('Fake runtime was disposed before quiescence.');

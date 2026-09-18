@@ -6,9 +6,11 @@ import type {
 import type {CommandRunner} from '../contracts/command.js';
 import type {CredentialRequirement} from '../contracts/credentials.js';
 import type {RunInputProvider} from '../contracts/inputs.js';
+import type {AgentPluginInstaller} from '../contracts/plugin.js';
 import type {
   MutableWorkspace,
   RuntimeLogicalPaths,
+  RuntimeStateDirectoryRequirement,
 } from '../contracts/runtime.js';
 
 export type SetupCredentialRequirements = Readonly<
@@ -17,6 +19,8 @@ export type SetupCredentialRequirements = Readonly<
 
 /** Pure capability declarations contributed by one prepared setup step. */
 export interface SetupStepRequirements {
+  readonly executables?: readonly string[];
+  readonly stateDirectories?: readonly RuntimeStateDirectoryRequirement[];
   /** Explicit non-secret values remain available to every runtime command scope. */
   readonly variables?: Readonly<Record<string, string>>;
   /** Forge, rather than the handler, assigns concrete credential scopes. */
@@ -31,6 +35,8 @@ export interface SetupPreflightContext {
   readonly stepIndex: number;
   readonly selection: AgentSelectionV1;
   readonly runtime: ResolvedRunPlanV1['runtime'];
+  /** Selected adapter's narrow native plugin mechanism, when available. */
+  readonly pluginInstaller?: AgentPluginInstaller;
 }
 
 /** Runtime capabilities shared by all steps in one already-preflighted setup. */
@@ -38,6 +44,8 @@ export interface SetupApplyContext {
   readonly runId: string;
   readonly paths: RuntimeLogicalPaths;
   readonly workspace: MutableWorkspace;
+  /** All state directories aggregated during pure setup preflight. */
+  readonly stateDirectories: ReadonlyMap<string, MutableWorkspace>;
   /** Forge selects the least-privileged projection for each prepared step. */
   readonly commands: Readonly<{
     /** Explicit non-secret variables only. */
@@ -55,6 +63,8 @@ export interface SetupExecutionContext
   readonly stepIndex: number;
   readonly selection: AgentSelectionV1;
   readonly runtime: ResolvedRunPlanV1['runtime'];
+  /** Contains only state directories declared by this prepared step. */
+  readonly stateDirectories: ReadonlyMap<string, MutableWorkspace>;
   /**
    * Uses the setup projection only when this step declared a setup credential;
    * that projection contains exactly this step's declarations. Otherwise it

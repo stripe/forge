@@ -202,7 +202,8 @@ Tests must prove:
 
 1. Add the generic bundle, registry, engine, and provenance contracts.
 2. Move built-in actions behind the same internal registry representation.
-3. Add the first public plugin action and `stripe/cli@1` as built-ins.
+3. Extend the implemented public plugin action and add `stripe/cli@1` as a
+   built-in when its portable contract is ready.
 4. Let embedding repositories define private action bundles alongside their
    existing integration code.
 5. Require public release projection to succeed with the built-in-only engine.

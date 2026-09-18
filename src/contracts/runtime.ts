@@ -40,6 +40,11 @@ export interface RuntimeStateDirectoryRequirement {
   readonly id: string;
   /** Absolute container path which the runtime must persist and seal. */
   readonly containerPath: string;
+  /**
+   * When true, setup may populate this directory but interaction receives an
+   * immutable view. Runtimes must enforce the transition in finalizeSetup().
+   */
+  readonly sealAfterSetup?: boolean;
 }
 
 export interface RuntimeRequirements {
@@ -97,6 +102,11 @@ export interface PreparedRuntime {
     /** Plain variables and agent-scoped credentials. */
     agent: CommandRunner;
   }>;
+  /**
+   * End setup command authority and seal every state directory which requested
+   * sealAfterSetup before the coding agent can run.
+   */
+  finalizeSetup(): Promise<void>;
   /** Stop all mutation, await active commands, then expose stable evidence. */
   quiesce(): Promise<SealedRuntime>;
   /** Idempotent cleanup for failures before or after quiescence. */

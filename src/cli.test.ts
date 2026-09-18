@@ -59,6 +59,50 @@ describe('Forge CLI', () => {
     });
   });
 
+  it('purely validates a latest Claude plugin treatment without fetching it', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment
+        .replace(
+          'treatments:\n  baseline:\n    setup: []',
+          `treatments:
+  baseline:
+    setup: []
+  stripe-plugin:
+    setup:
+      - uses: forge/plugin@1
+        with:
+          agents:
+            claude-code:
+              plugin: stripe@claude-plugins-official
+              marketplace: anthropics/claude-plugins-official`,
+        )
+        .replace('treatments: [baseline]', 'treatments: [stripe-plugin]'),
+    );
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+      ],
+      {
+        stdout: (text) => { stdout += text; },
+        stderr: (text) => { stderr += text; },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({valid: true, run_count: 1});
+  });
+
   it('prints the canonical resolved plan for one matrix selection', async () => {
     const fixture = await createBenchmarkFixture();
     let stdout = '';

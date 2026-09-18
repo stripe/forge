@@ -28,6 +28,7 @@ interface DockerCommandControllerOptions {
 /** Coordinates scoped docker-exec runners and the quiescence barrier. */
 export class DockerCommandController {
   private closed = false;
+  private setupFinalized = false;
   private readonly active = new Set<Promise<unknown>>();
 
   constructor(private readonly options: DockerCommandControllerOptions) {}
@@ -66,6 +67,33 @@ export class DockerCommandController {
     }
   }
 
+  /** Close preparation/setup projections while retaining the agent projection. */
+  async finalizeSetupAndWait(): Promise<void> {
+    if (this.closed) {
+      throw new CommandExecutionError(
+        'Runtime command runner has been quiesced.',
+        'command_runner_closed',
+      );
+    }
+    if (this.setupFinalized) {
+      throw new CommandExecutionError(
+        'Runtime setup has already been finalized.',
+        'command_runner_closed',
+      );
+    }
+    this.setupFinalized = true;
+    const settled = await Promise.allSettled([...this.active]);
+    const failures = settled
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason as unknown);
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        'Active runtime commands failed while finalizing setup.',
+      );
+    }
+  }
+
   private run(
     scope: CredentialScope | undefined,
     allowedCredentialEnvironmentNames: ReadonlySet<string> | undefined,
@@ -75,6 +103,12 @@ export class DockerCommandController {
     if (this.closed) {
       throw new CommandExecutionError(
         'Runtime command runner has been quiesced.',
+        'command_runner_closed',
+      );
+    }
+    if (this.setupFinalized && scope !== 'agent') {
+      throw new CommandExecutionError(
+        'Runtime setup command runner has been finalized.',
         'command_runner_closed',
       );
     }
