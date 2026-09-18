@@ -250,11 +250,12 @@ The resulting execution order is:
 ## Compatibility and release
 
 The setup handler, executor, execution context, and composition contracts are
-public, so this is an intentional `0.2.0` change rather than a compatibility
-shim which would preserve ambiguous behavior. Experiment and case
+being finalized as part of the initial `0.1.0` release; there is no earlier
+published contract to preserve with a compatibility shim. Experiment and case
 `schema_version` remain `1`: no existing wire field changes meaning, and each
 future action has an independent `@N` semantic version. Experiment configs pin
-the exact compatible Forge package version.
+the exact compatible Forge package version. After `0.1.0` is released, a future
+breaking public-contract change must advance the package compatibility version.
 
 ## Verification
 

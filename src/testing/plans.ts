@@ -74,7 +74,7 @@ export function createTestResolvedRunPlan(
         path: `cases/${caseId}/eval.yaml`,
         sha256: CASE_DIGEST,
       },
-      forge: {version: options.forgeVersion ?? '0.2.0'},
+      forge: {version: options.forgeVersion ?? '0.1.0'},
     },
     case: {
       schema_version: 1,

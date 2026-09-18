@@ -6,7 +6,7 @@ an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session i
 Docker, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
 
-> **v0.2 status:** the implemented end-to-end paths are one-shot and engine-owned
+> **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
 > Ava multi-turn Claude Code runs, with file checks, model-judged success
 > guidelines, ATIF v1.8 evidence, and local results. The public CLI supports
 > direct Anthropic or an explicitly configured Anthropic Messages-compatible
@@ -34,7 +34,7 @@ guidelines, and atomically commits a neutral local result.
 Forge is ESM-only. Install the exact harness version named by the benchmark:
 
 ```sh
-npm install --save-dev --save-exact @stripe/forge@0.2.0
+npm install --save-dev --save-exact @stripe/forge@0.1.0
 ```
 
 From a source checkout, use the pinned package manager:
@@ -138,7 +138,7 @@ dataset:
   version: 0.1.0
   manifest_sha256: sha256:2d75e3a65ff5c3b6c9612a572f078e6dd496c0b63007cf3c6e6da94c62fcd4e0
 forge:
-  version: 0.2.0
+  version: 0.1.0
 runtime:
   adapter: docker
   image:
@@ -170,7 +170,7 @@ limits:
 
 The experiment config independently pins the dataset identity and SHA-256 digest
 of the raw `manifest.json` bytes. `forge.version` is an execution compatibility
-pin, not a range: v0.2 refuses to run a plan for another harness version.
+pin, not a range: v0.1 refuses to run a plan for another harness version.
 
 `models: {}` is intentional for this one-shot, checks-only case. An experiment
 config must set `models.role_player` for every selected `multi_turn` case and
@@ -187,7 +187,7 @@ experiment config field creates a different experiment.
 From `quickstart/`:
 
 ```sh
-npx @stripe/forge@0.2.0 validate \
+npx @stripe/forge@0.1.0 validate \
   --experiment ./experiment.yaml \
   --dataset ./dataset
 ```
@@ -202,7 +202,7 @@ preflight or completions, build or allocate Docker, or run setup.
 Inspect the canonical resolved plan:
 
 ```sh
-npx @stripe/forge@0.2.0 plan \
+npx @stripe/forge@0.1.0 plan \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -213,7 +213,7 @@ Run the single selection:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
-npx @stripe/forge@0.2.0 run \
+npx @stripe/forge@0.1.0 run \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -229,7 +229,7 @@ but set a valid endpoint URL and its token instead:
 ```sh
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
-npx @stripe/forge@0.2.0 run \
+npx @stripe/forge@0.1.0 run \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -249,7 +249,7 @@ run; pass the variable name, never its value:
 
 ```sh
 STRIPE_MCP_TOKEN=your-restricted-token \
-npx @stripe/forge@0.2.0 run \
+npx @stripe/forge@0.1.0 run \
   --experiment ./experiment.yaml \
   --dataset ./dataset \
   --credential-env stripe.mcp-token=STRIPE_MCP_TOKEN
@@ -1030,7 +1030,7 @@ providers also receive benchmark prompts and the explicitly documented evidence
 needed for their purpose. Use providers appropriate for the data, plus a
 dedicated, restricted, short-lived key with appropriate account limits.
 Exact-value redaction does not detect transformed, encoded, encrypted, or
-partially leaked secrets. v0.2 does not provide domain allowlisting, a network
+partially leaked secrets. v0.1 does not provide domain allowlisting, a network
 proxy, or an offline execution mode.
 
 ## Current limitations
@@ -1054,7 +1054,7 @@ proxy, or an offline execution mode.
   direct-process runtimes, interactive/human runs, and custom mounts are absent.
 - `run` executes one selected matrix entry. There is no campaign scheduler,
   concurrency manager, or automatic run retry loop; `repetitions` create
-  selectable entries and experiment-level `retries` is not acted on by the v0.2
+  selectable entries and experiment-level `retries` is not acted on by the v0.1
   CLI. Ava and guideline completion attempts have their own fixed retry policy
   and do not implement the experiment config's campaign retry field.
 - Built-in setup is limited to `forge/write@1` and `forge/command@1`.

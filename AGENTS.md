@@ -14,7 +14,7 @@ integrate through documented public contracts rather than being imported or
 discovered by the core.
 
 Read `README.md` and `package.json` before changing behavior or public exports.
-The README describes the currently implemented v0.2 capabilities; do not imply
+The README describes the currently implemented v0.1 capabilities; do not imply
 that a reserved schema concept is executable until its implementation and tests
 exist.
 

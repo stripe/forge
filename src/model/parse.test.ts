@@ -212,7 +212,7 @@ dataset:
   version: 2026.09.0
   manifest_sha256: sha256:${HASH}
 forge:
-  version: 0.2.0
+  version: 0.1.0
 runtime:
   adapter: docker
   image: {kind: forge}

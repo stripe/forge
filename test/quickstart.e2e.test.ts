@@ -105,7 +105,7 @@ describe('checked-in quickstart', () => {
       result: {evaluation: {score: number; status: string}};
     };
     expect(summary.run_id).toBe('quickstart-e2e');
-    // v0.2 check-only cases use status as the pass/fail signal. The numeric
+    // v0.1 check-only cases use status as the pass/fail signal. The numeric
     // score remains the guideline ratio and is therefore zero with no judge.
     expect(summary.result.evaluation).toMatchObject({score: 0, status: 'passed'});
 

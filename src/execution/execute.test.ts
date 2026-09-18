@@ -829,7 +829,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       dataset: {id: 'sample', version: '1', manifest_sha256: DIGEST_A},
       experiment: {id: 'local', version: '1', sha256: DIGEST_B},
       case: {id: 'sample/case', path: 'cases/case.yaml', sha256: DIGEST_C},
-      forge: {version: '0.2.0'},
+      forge: {version: '0.1.0'},
     },
     case: {
       schema_version: 1,
