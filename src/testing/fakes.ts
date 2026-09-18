@@ -18,8 +18,10 @@ import {
   type CommandRunner,
 } from '../contracts/command.js';
 import type {
+  CredentialScope,
   CredentialReference,
   CredentialResolver,
+  ResolvedEnvironment,
 } from '../contracts/credentials.js';
 import type {
   PreparedRuntime,
@@ -239,6 +241,7 @@ export type TestCommandScope = 'uncredentialed' | 'setup' | 'agent';
 
 export interface RecordedTestCommand {
   readonly scope: TestCommandScope;
+  readonly credentialEnvironmentNames: readonly string[];
   readonly argv: readonly string[];
   readonly options: CommandOptions;
 }
@@ -304,7 +307,13 @@ export function createFakeRuntimeAdapter(
       let disposed = false;
       let sealedRuntime: SealedRuntime | undefined;
 
-      const commandRunner = (scope: TestCommandScope): CommandRunner => {
+      const commandRunner = (
+        scope: TestCommandScope,
+        credentialEnvironmentNames: readonly string[] = [],
+      ): CommandRunner => {
+        const selectedCredentialEnvironmentNames = Object.freeze([
+          ...credentialEnvironmentNames,
+        ]);
         const runner: CommandRunner = {
           async run(argv, commandOptions = {}) {
             if (quiesced || disposed) {
@@ -316,6 +325,7 @@ export function createFakeRuntimeAdapter(
             commandOptions.signal?.throwIfAborted();
             const command: RecordedTestCommand = Object.freeze({
               scope,
+              credentialEnvironmentNames: selectedCredentialEnvironmentNames,
               argv: Object.freeze([...argv]),
               options: Object.freeze({...commandOptions}),
             });
@@ -352,8 +362,19 @@ export function createFakeRuntimeAdapter(
         ),
         commands: Object.freeze({
           uncredentialed: commandRunner('uncredentialed'),
-          setup: commandRunner('setup'),
-          agent: commandRunner('agent'),
+          setup: (credentialEnvironmentNames: readonly string[]) =>
+            commandRunner(
+              'setup',
+              validateCredentialProjection(
+                input.environment,
+                'setup',
+                credentialEnvironmentNames,
+              ),
+            ),
+          agent: commandRunner(
+            'agent',
+            credentialEnvironmentNamesForScope(input.environment, 'agent'),
+          ),
         }),
         async quiesce(): Promise<SealedRuntime> {
           if (disposed && sealedRuntime === undefined) {
@@ -395,6 +416,48 @@ export function createFakeRuntimeAdapter(
   };
 
   return Object.freeze({adapter: Object.freeze(adapter), runs});
+}
+
+function validateCredentialProjection(
+  environment: ResolvedEnvironment,
+  scope: CredentialScope,
+  input: readonly string[],
+): readonly string[] {
+  if (!Array.isArray(input)) {
+    throw new TypeError('Credential environment names must be an array.');
+  }
+  const names = new Set<string>();
+  for (const name of input) {
+    if (typeof name !== 'string' || names.has(name)) {
+      throw new TypeError('Credential environment names must be unique strings.');
+    }
+    const binding = Object.hasOwn(environment.credentials, name)
+      ? environment.credentials[name]
+      : undefined;
+    if (!binding?.scopes.includes(scope)) {
+      throw new TypeError(
+        `Credential environment variable ${JSON.stringify(name)} is not available in ${scope} scope.`,
+      );
+    }
+    names.add(name);
+  }
+  return Object.freeze([...names]);
+}
+
+function credentialEnvironmentNamesForScope(
+  environment: ResolvedEnvironment,
+  scope: CredentialScope,
+): readonly string[] {
+  return Object.freeze(
+    Object.entries(environment.credentials)
+      .filter(([, binding]) => binding.scopes.includes(scope))
+      .map(([name]) => name)
+      .sort(compareCodeUnits),
+  );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function copyAgentTurn(turn: AgentTurn): AgentTurn {

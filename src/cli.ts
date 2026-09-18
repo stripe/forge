@@ -29,7 +29,6 @@ import {createArtifactStore} from './results/index.js';
 import {createDockerRuntimeAdapter} from './runtime/docker/index.js';
 import {createAnthropicCompletionProvider} from './providers/anthropic/index.js';
 import {serializeCanonicalJson} from './serialization.js';
-import {forgeSetupHandlers} from './setup/index.js';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
@@ -50,6 +49,7 @@ const CLI_OPTIONS = {
   repetition: {type: 'string'},
   output: {type: 'string', short: 'o'},
   'run-id': {type: 'string'},
+  'credential-env': {type: 'string', multiple: true},
   help: {type: 'boolean', short: 'h'},
   version: {type: 'boolean'},
 } as const;
@@ -70,8 +70,8 @@ const USAGE = `Usage:
   forge validate --experiment <file> --dataset <directory>
   forge plan --experiment <file> --dataset <directory> [selection options]
   forge plan --experiment <file> --case-file <file> [selection options]
-  forge run --experiment <file> --dataset <directory> [selection options] [--output <directory>] [--run-id <id>]
-  forge run --experiment <file> --case-file <file> [selection options] [--output <directory>] [--run-id <id>]
+  forge run --experiment <file> --dataset <directory> [selection options] [run options]
+  forge run --experiment <file> --case-file <file> [selection options] [run options]
 
 Selection options:
   --case <id>          Select an eval case
@@ -82,6 +82,12 @@ Selection options:
   --model <id>         Select a model
   --repetition <index> Select a zero-based repetition
 
+Run options:
+  --output <directory> Write results below this directory
+  --run-id <id>        Use an explicit run identifier
+  --credential-env <reference>=<environment-name>
+                        Bind an opaque credential reference for this run
+
 If selection options match more than one matrix entry, narrow the selection.
 The run command writes atomic results below ./results by default.
 `;
@@ -90,6 +96,7 @@ export interface DefaultCliCompositionOptions {
   readonly datasetRoot: string;
   readonly resultsRoot: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly credentialBindings?: Readonly<Record<string, string>>;
 }
 
 export interface RunCliOptions {
@@ -129,17 +136,18 @@ export async function createDefaultCliComposition(
     auth: gatewaySelected ? 'bearer' : 'api-key',
     ...(baseUrl === undefined ? {} : {baseUrl}),
   });
+  const bindings = new Map<string, string>([
+    [credential, credentialEnvironmentName],
+    ...Object.entries(options.credentialBindings ?? {}),
+  ]);
   const credentialResolver = createEnvironmentCredentialResolver({
-    bindings: {
-      [credential]: credentialEnvironmentName,
-    },
+    bindings: Object.fromEntries(bindings),
     environment,
   });
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
     agents: new Map([[claude.id, claude]]),
-    setupHandlers: forgeSetupHandlers,
     completionProviders: new Map([
       [completionProvider.id, completionProvider],
     ]),
@@ -182,7 +190,9 @@ export async function runCli(
       'experiment',
       'dataset',
       ...(command === 'validate' ? [] : SELECTOR_OPTIONS),
-      ...(command === 'run' ? (['output', 'run-id'] as const) : []),
+      ...(command === 'run'
+        ? (['output', 'run-id', 'credential-env'] as const)
+        : []),
     ];
     assertAllowedOptions(parsed.values, allowed);
 
@@ -274,6 +284,9 @@ export async function runCli(
     const runId = parsed.values['run-id'] ??
       (options.runIdFactory ?? randomUUID)();
     assertRunId(runId);
+    const credentialBindings = parseCredentialEnvironmentBindings(
+      parsed.values['credential-env'],
+    );
     const compositionFactory =
       options.compositionFactory ?? createDefaultCliComposition;
     const composition = await compositionFactory({
@@ -282,6 +295,9 @@ export async function runCli(
       ...(options.environment === undefined
         ? {}
         : {environment: options.environment}),
+      ...(Object.keys(credentialBindings).length === 0
+        ? {}
+        : {credentialBindings}),
     });
     const completed = await (options.execute ?? executeEval)({
       runId,
@@ -399,7 +415,9 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 function assertAllowedOptions(
-  values: Readonly<Record<string, string | boolean | undefined>>,
+  values: Readonly<
+    Record<string, string | readonly string[] | boolean | undefined>
+  >,
   allowed: readonly CliOptionName[],
 ): void {
   const accepted = new Set<CliOptionName>([
@@ -412,6 +430,35 @@ function assertAllowedOptions(
       throw new CliUsageError(`--${option} is not valid for this command.`);
     }
   }
+}
+
+function parseCredentialEnvironmentBindings(
+  values: readonly string[] | undefined,
+): Readonly<Record<string, string>> {
+  const bindings = new Map<string, string>();
+  for (const value of values ?? []) {
+    const separator = value.indexOf('=');
+    const reference = separator < 1 ? '' : value.slice(0, separator);
+    const environmentName = separator < 0 ? '' : value.slice(separator + 1);
+    if (
+      reference.length === 0 ||
+      Buffer.byteLength(reference, 'utf8') > 1024 ||
+      /[\u0000-\u001f\u007f]/.test(reference) ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName)
+    ) {
+      throw new CliUsageError(
+        '--credential-env must be an opaque reference followed by a valid environment variable name.',
+      );
+    }
+    const previous = bindings.get(reference);
+    if (previous !== undefined && previous !== environmentName) {
+      throw new CliUsageError(
+        `Credential reference ${JSON.stringify(reference)} has conflicting environment bindings.`,
+      );
+    }
+    bindings.set(reference, environmentName);
+  }
+  return Object.freeze(Object.fromEntries(bindings));
 }
 
 function assertRunId(value: string): void {

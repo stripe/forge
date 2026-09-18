@@ -35,14 +35,23 @@ export class DockerCommandController {
   withoutCredentials(): CommandRunner {
     return Object.freeze({
       run: async (argv: readonly string[], options?: CommandOptions) =>
-        this.run(undefined, argv, options),
+        this.run(undefined, undefined, argv, options),
     });
   }
 
-  forScope(scope: CredentialScope): CommandRunner {
+  forScope(
+    scope: CredentialScope,
+    credentialEnvironmentNames: readonly string[],
+  ): CommandRunner {
+    const allowedCredentialEnvironmentNames =
+      normalizeCredentialEnvironmentNames(
+        this.options.environment,
+        scope,
+        credentialEnvironmentNames,
+      );
     return Object.freeze({
       run: async (argv: readonly string[], options?: CommandOptions) =>
-        this.run(scope, argv, options),
+        this.run(scope, allowedCredentialEnvironmentNames, argv, options),
     });
   }
 
@@ -59,6 +68,7 @@ export class DockerCommandController {
 
   private run(
     scope: CredentialScope | undefined,
+    allowedCredentialEnvironmentNames: ReadonlySet<string> | undefined,
     argv: readonly string[],
     options: CommandOptions = {},
   ): Promise<CommandResult> {
@@ -90,7 +100,11 @@ export class DockerCommandController {
     for (const [name, binding] of Object.entries(
       this.options.environment.credentials,
     )) {
-      if (scope !== undefined && binding.scopes.includes(scope)) {
+      if (
+        scope !== undefined &&
+        allowedCredentialEnvironmentNames?.has(name) &&
+        binding.scopes.includes(scope)
+      ) {
         environment[name] = binding.value;
       }
     }
@@ -162,6 +176,32 @@ export class DockerCommandController {
       await fs.rm(environmentFile, {force: true}).catch(() => undefined);
     }
   }
+}
+
+function normalizeCredentialEnvironmentNames(
+  environment: ResolvedEnvironment,
+  scope: CredentialScope,
+  input: readonly string[],
+): ReadonlySet<string> {
+  if (!Array.isArray(input)) {
+    throw new TypeError('Credential environment names must be an array.');
+  }
+  const names = new Set<string>();
+  for (const name of input) {
+    if (typeof name !== 'string' || names.has(name)) {
+      throw new TypeError('Credential environment names must be unique strings.');
+    }
+    const binding = Object.hasOwn(environment.credentials, name)
+      ? environment.credentials[name]
+      : undefined;
+    if (!binding?.scopes.includes(scope)) {
+      throw new TypeError(
+        `Credential environment variable ${JSON.stringify(name)} is not available in ${scope} scope.`,
+      );
+    }
+    names.add(name);
+  }
+  return names;
 }
 
 function assertArgv(argv: readonly string[]): void {

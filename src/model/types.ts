@@ -60,19 +60,9 @@ export interface CommandSetupStepV1 {
   };
 }
 
-/**
- * Extension payloads remain JSON so resolved plans can be hashed and stored.
- * A registered setup handler owns the payload's domain-specific validation.
- */
-export interface ExtensionSetupStepV1 {
-  uses: string;
-  with: JsonObject;
-}
-
 export type SetupStepV1 =
   | WriteSetupStepV1
-  | CommandSetupStepV1
-  | ExtensionSetupStepV1;
+  | CommandSetupStepV1;
 
 export interface FilesystemCheckV1 {
   description?: string;

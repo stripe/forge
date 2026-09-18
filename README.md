@@ -243,6 +243,23 @@ When `ANTHROPIC_BASE_URL` is set, the CLI requires
 the endpoint remain execution configuration; they do not belong in the case,
 dataset manifest, or experiment config.
 
+First-party setup actions may declare additional opaque credential references.
+Bind each required reference to a host environment variable explicitly for the
+run; pass the variable name, never its value:
+
+```sh
+STRIPE_MCP_TOKEN=your-restricted-token \
+npx @stripe/forge@0.1.0 run \
+  --experiment ./experiment.yaml \
+  --dataset ./dataset \
+  --credential-env stripe.mcp-token=STRIPE_MCP_TOKEN
+```
+
+The experiment and resolved plan contain only `stripe.mcp-token`. Forge resolves
+only references required by the selected run, and the declaring capability
+determines whether each value is exposed to setup commands or agent commands.
+Unrelated host environment variables are never copied into the runtime.
+
 `--case-file` discovers the nearest ancestor `manifest.json`, verifies the
 dataset, and maps the exact regular file back to its declared case ID. The case
 must still be present in the selected experiment config's matrix; this option
@@ -541,7 +558,9 @@ setup:
 To request shell semantics, select the shell explicitly, for example
 `argv: [sh, -lc, "printf ready > status.txt"]`. Setup failures stop the run.
 Captured command output is not attached to setup errors because it may contain
-credentials.
+credentials. The command action itself declares no credentials and runs with
+Forge's uncredentialed command projection; use a typed setup action for an
+operation that requires a credential.
 
 ## Programmatic API
 
@@ -554,7 +573,6 @@ import {
   createEnvironmentCredentialResolver,
   executeEval,
   expandExperiment,
-  forgeSetupHandlers,
   loadExperimentConfig,
   loadDataset,
   resolveRunPlan,
@@ -577,7 +595,6 @@ const completed = await executeEval({
   composition: {
     runtime: createDockerRuntimeAdapter(),
     agents: new Map([[claude.id, claude]]),
-    setupHandlers: forgeSetupHandlers,
     credentialResolver: createEnvironmentCredentialResolver({
       bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
     }),
@@ -731,7 +748,7 @@ async function loadForge() {
 
 | Entry point | Purpose |
 | --- | --- |
-| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and extension contracts |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
@@ -830,15 +847,17 @@ import {
 } from '@stripe/forge/atif/v1.8';
 ```
 
-## Extensions and private compositions
+## Adapters and private compositions
 
 `executeEval` owns lifecycle semantics. A host supplies mechanisms through one
 `ForgeComposition`; Forge never discovers plugins or private services globally.
+The setup preflight, first-party action, and credential-lifecycle design is
+documented in
+[Agent-aware setup and credential contracts](docs/agent-aware-setup-and-credentials.md).
 The composition contains:
 
 - a `RuntimeAdapter`;
 - an ID-to-`AgentAdapter` map;
-- an action-ID-to-`SetupStepHandler` map;
 - a `CredentialResolver` and read-only `RunInputProvider`;
 - a transactional `RunArtifactStore`;
 - optional completion providers, one observer, and artifact contributors.
@@ -857,9 +876,12 @@ not enter experiment configs, plans, events, or result records. Runtimes expose
 distinct mutable and sealed capabilities; evidence collection receives only the
 sealed workspace and run-owned agent state.
 
-Forge assigns credential scope from the capability which declares a reference;
-extensions do not select their own scope. For example, an agent requirement is
-automatically agent-scoped:
+Forge assigns concrete credential scope from the declaration surface. Handlers
+identify lifecycle purpose through fixed setup and agent collections; they
+cannot attach raw scope metadata. Environment declarations are strict,
+JSON-like objects: arrays, explicit `null`, unknown fields, and extra credential
+binding fields fail pure preflight rather than being discarded. For example,
+an agent requirement is automatically assigned agent scope:
 
 ```ts
 requirements() {
@@ -895,41 +917,28 @@ evidence themselves. An adapter must translate failure to read or normalize its
 native source into an explicit unavailable reason. Malformed data labeled
 `available` is an adapter contract violation and fails the run.
 
-Custom setup action IDs must use `owner/action@<positive-version>`, for example
-`acme/install-tool@1`. The `forge/` namespace is reserved, and built-in handlers
-cannot be replaced. A handler may declare credential references in its pure
-`requirements` method and receives only the selected workspace, setup command
-runner, dataset inputs, run ID, and abort signal when executed.
+Setup action schemas and handlers are always shipped by the exact installed
+Forge version and do not belong in a host composition. Unknown action IDs fail
+validation. A host cannot register a new action or replace the meaning of a
+first-party `forge/` or `stripe/` action.
 
-```ts
-import {
-  credentialReference,
-  type SetupStepHandler,
-} from '@stripe/forge';
+A first-party handler's pure `preflight` method validates its step once and
+returns the exact operation later applied by the engine. Its requirements
+distinguish setup-only and agent-only credential references; handlers never
+assign raw credential scopes or receive resolved values directly. A prepared
+operation which declares no setup credential receives only the uncredentialed
+command projection. A credentialed operation receives exactly the setup
+environment names it declared, never credentials required only by another
+operation.
 
-const installHandler: SetupStepHandler = {
-  uses: 'acme/install@1',
-  requirements() {
-    return {
-      credentials: {
-        PACKAGE_TOKEN: {
-          reference: credentialReference('acme.package-token'),
-        },
-      },
-    };
-  },
-  async execute(step, context) {
-    await context.commands.run(['acme-install', '--locked'], {
-      signal: context.signal,
-    });
-  },
-};
-```
-
-Here `PACKAGE_TOKEN` is available to the setup command but not to agent or
-uncredentialed commands. If setup and an agent both need the same reference,
-both capabilities must declare it independently; Forge validates that the
-bindings agree before resolving the value.
+Future `forge/mcp@1` and `forge/skill@1` actions will use typed resource inputs
+without making their handlers replaceable. The public action owns validation
+and portable semantics. Devbox network proxying is a runtime concern: the MCP
+action keeps its canonical server URL while an internal runtime adapter may
+route that host to a devbox service. The selected network policy must be
+identified and digested in run-plan provenance. A local skill override must be
+captured and hashed as an immutable input rather than read later from an
+ambient path.
 
 Artifact contributors may add files only below
 `extensions/<contributor-id>/`. They cannot replace canonical artifacts, and
@@ -981,10 +990,10 @@ selecting host-owned capabilities.
   staged and claimed by digest before atomic commit.
 
 Docker itself is a privileged host service. Anyone who can replace the Docker
-binary, control the daemon, or modify Forge extension code is already outside
-the container trust boundary. Extension handlers and artifact contributors are
-ordinary host JavaScript and must be trusted even though the capabilities Forge
-passes to them are narrow.
+binary, control the daemon, or modify the installed Forge code is already
+outside the container trust boundary. Artifact contributors are ordinary host
+JavaScript and must be trusted even though the capabilities Forge passes to
+them are narrow.
 
 The evaluated agent receives its selected provider credential and has outbound
 network access. It can intentionally disclose that credential. Ava and judge

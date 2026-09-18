@@ -89,8 +89,11 @@ export interface PreparedRuntime {
   readonly commands: Readonly<{
     /** Explicit plain variables only; resolved credentials are never exposed. */
     uncredentialed: CommandRunner;
-    /** Plain variables and setup-scoped credentials. */
-    setup: CommandRunner;
+    /**
+     * Create a runner containing plain variables and exactly the named
+     * setup-scoped credentials. Unknown or non-setup names must be rejected.
+     */
+    setup(credentialEnvironmentNames: readonly string[]): CommandRunner;
     /** Plain variables and agent-scoped credentials. */
     agent: CommandRunner;
   }>;

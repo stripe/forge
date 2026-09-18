@@ -29,7 +29,6 @@ import {
   createDirectoryRunInputProvider,
   credentialReference,
   expandExperiment,
-  forgeSetupHandlers,
   loadExperimentConfig,
   loadDataset,
   parseInteractionArtifact,
@@ -152,7 +151,6 @@ try {
     Object.freeze({
       runtime,
       agents: new Map([[agent.id, agent]]),
-      setupHandlers: forgeSetupHandlers,
       completionProviders: new Map([
         [completionProvider.id, completionProvider],
       ]),

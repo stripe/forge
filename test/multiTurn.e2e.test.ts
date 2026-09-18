@@ -8,7 +8,6 @@ import {runCli} from '../src/cli.js';
 import {createDirectoryRunInputProvider} from '../src/contracts/inputs.js';
 import {sha256Digest, sha256Hex} from '../src/model/index.js';
 import {createArtifactStore, verifyCompletedRun} from '../src/results/index.js';
-import {forgeSetupHandlers} from '../src/setup/index.js';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
@@ -62,7 +61,6 @@ describe('multi-turn CLI end to end', () => {
     }) => ({
       runtime: runtime.adapter,
       agents: new Map([[agent.adapter.id, agent.adapter]]),
-      setupHandlers: forgeSetupHandlers,
       completionProviders: new Map([
         [completion.provider.id, completion.provider],
       ]),

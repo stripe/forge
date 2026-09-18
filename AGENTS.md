@@ -8,10 +8,11 @@ by every host: dataset verification, planning, automated execution, evidence
 normalization, one-shot and Ava-driven multi-turn interaction, deterministic
 checks, guideline judging, and atomic local results.
 
-The package is also an extension framework. Environment-specific runtimes,
-credentials, setup actions, agents, storage, observation, and publication must
-integrate through documented public contracts rather than being imported or
-discovered by the core.
+The package is also an adapter framework. Environment-specific runtimes,
+credentials, setup-resource resolution, agents, storage, observation, and
+publication must integrate through documented public contracts rather than
+being imported or discovered by the core. Setup action schemas and handlers
+themselves are first-party and ship in this repository.
 
 Read `README.md` and `package.json` before changing behavior or public exports.
 The README describes the currently implemented v0.1 capabilities; do not imply
@@ -53,8 +54,8 @@ independent feature flags.
   of host-private implementations.
 - Prefer narrow capability interfaces and composition over subclassing or
   environment checks in the shared engine.
-- Setup, agent, and completion-provider `requirements()` methods are pure
-  preflight declarations. They must not resolve credentials, allocate
+- Setup-handler `preflight()`, agent `requirements()`, and completion-provider
+  `requirements()` methods are pure declarations. They must not resolve credentials, allocate
   resources, mutate workspaces, perform provider calls, or inspect ambient
   state. A completion provider's optional credential-aware `preflight()` runs
   only during execution, after resolution and before runtime allocation.
@@ -164,7 +165,12 @@ Observers are non-authoritative and may not affect the run result.
 - Experiment configs, plans, events, and results contain opaque credential
   references, never secret values.
 - Never copy the ambient host environment wholesale into a runtime.
-- Keep setup and agent credential scopes separate.
+- Keep setup and agent credential scopes separate. Setup preflight declarations
+  identify lifecycle purpose, while Forge assigns concrete scopes and rejects
+  bindings which attempt to attach raw scope metadata.
+- Give credential-free setup actions the uncredentialed command projection.
+  Give credentialed setup actions exactly the environment names they declare,
+  never a phase-wide collection of setup credentials.
 - Keep completion-provider credentials host-side and purpose-specific. They do
   not become runtime environment values unless a runtime capability separately
   declares the same opaque reference.
@@ -179,8 +185,13 @@ Observers are non-authoritative and may not affect the run result.
   files. Do not weaken traversal, symlink, special-file, or extra-file checks.
 - Commands use argv vectors. Shell semantics must be requested explicitly by
   invoking a shell.
-- Custom setup action IDs are versioned as `owner/action@N`; the `forge/`
-  namespace is reserved for built-in actions.
+- Setup action IDs are versioned as `forge/action@N` or `stripe/action@N` and
+  identify first-party actions implemented in this repository. Unknown actions
+  fail validation, and hosts cannot register or replace handlers. Environment-
+  specific resource selection belongs behind typed action-specific resolver
+  contracts and must retain explicit, digestible provenance. Network routing
+  and proxying belong to the runtime boundary, with the selected policy
+  identified in the plan rather than hidden in an action or ambient host state.
 
 ### Keep results deterministic and atomic
 
@@ -191,8 +202,8 @@ Observers are non-authoritative and may not affect the run result.
 - A cleanup warning learned after staging belongs in the final result.
 - Publication is downstream of a successful, verified local commit. The public
   execution engine must not call a host-specific remote publisher.
-- Extensions must not overwrite canonical artifacts or bypass path, size,
-  collision, digest, or secret validation.
+- Artifact contributors must not overwrite canonical artifacts or bypass path,
+  size, collision, digest, or secret validation.
 - Preserve scoring semantics unless a versioned format change explicitly alters
   them: score is the guideline pass ratio, while a checks-only passing run has
   `status: passed` and numeric `score: 0`.

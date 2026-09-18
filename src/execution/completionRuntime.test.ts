@@ -157,7 +157,6 @@ function composition(provider: ReturnType<typeof createScriptedCompletionProvide
   return {
     runtime: runtime.adapter,
     agents: new Map([[agent.adapter.id, agent.adapter]]),
-    setupHandlers: new Map(),
     completionProviders: new Map([[provider.id, provider]]),
     credentialResolver: createStaticCredentialResolver(),
     inputProvider: createMemoryRunInputProvider(),

@@ -11,7 +11,6 @@ import type {CredentialResolver} from './credentials.js';
 import type {RunInputProvider} from './inputs.js';
 import type {RunObserver} from './observability.js';
 import type {RuntimeAdapter} from './runtime.js';
-import type {SetupStepHandler} from '../setup/types.js';
 
 export type CompletionProviderCollection =
   | ReadonlyMap<string, CompletionProvider>
@@ -24,7 +23,6 @@ export type CompletionProviderCollection =
 export interface ForgeComposition {
   readonly runtime: RuntimeAdapter;
   readonly agents: ReadonlyMap<string, AgentAdapter>;
-  readonly setupHandlers: ReadonlyMap<string, SetupStepHandler>;
   readonly completionProviders?: CompletionProviderCollection;
   readonly credentialResolver: CredentialResolver;
   readonly inputProvider: RunInputProvider;

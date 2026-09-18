@@ -62,6 +62,7 @@ export async function assertRuntimeAdapterConforms(
     if (!bytesEqual(mutableRead, probeBody)) {
       fail('Prepared workspace did not preserve probe bytes.');
     }
+    const setupCommands = prepared.commands.setup([]);
 
     const sealed = await prepared.quiesce();
     if (sealed.runtimeId !== prepared.runtimeId) {
@@ -84,7 +85,11 @@ export async function assertRuntimeAdapterConforms(
       () => prepared!.workspace.writeFile(probePath, probeBody),
       'Prepared workspace still allowed mutation after quiescence.',
     );
-    for (const [scope, commands] of Object.entries(prepared.commands)) {
+    for (const [scope, commands] of [
+      ['uncredentialed', prepared.commands.uncredentialed],
+      ['setup', setupCommands],
+      ['agent', prepared.commands.agent],
+    ] as const) {
       await expectRejection(
         () => commands.run(['true']),
         `${scope} command runner still accepted work after quiescence.`,

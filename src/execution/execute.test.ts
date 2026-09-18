@@ -24,9 +24,17 @@ import type {
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../results/index.js';
 import {createOwnedWorkspace} from '../runtime/workspace.js';
-import type {SetupStepHandler} from '../setup/types.js';
+import {createSetupExecutorWithHandlers} from '../setup/executor.js';
+import type {
+  SetupExecutionContext,
+  SetupStepHandler,
+} from '../setup/types.js';
 import {ForgeExecutionError} from './errors.js';
-import {executeEval} from './execute.js';
+import {
+  executeEval,
+  executeEvalWithTestHooks,
+  preflightEval,
+} from './execute.js';
 
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
@@ -318,9 +326,12 @@ describe('executeEval', () => {
     expect(fixture.calls.at(-1)).toBe('runtime:dispose');
   });
 
-  it('assigns credential scope from the declaring capability', async () => {
+  it('assigns credential scope from a first-party setup capability', async () => {
     const fixture = await executionFixture();
-    const step = {uses: 'acme/use-token@1', with: {}} as const;
+    const step: ResolvedRunPlanV1['setup'][number] = {
+      uses: 'forge/command@1',
+      with: {argv: ['true']},
+    };
     const plan: ResolvedRunPlanV1 = {
       ...fixture.plan,
       treatment: {id: fixture.plan.treatment.id, setup: [step]},
@@ -328,16 +339,35 @@ describe('executeEval', () => {
     };
     const handler: SetupStepHandler = {
       uses: step.uses,
-      requirements() {
-        return {
-          credentials: {
-            SETUP_TOKEN: {
-              reference: credentialReference('setup.token'),
-            },
+      preflight() {
+        return Object.freeze({
+          requirements: Object.freeze({
+            credentials: Object.freeze({
+              setup: Object.freeze({
+                SETUP_TOKEN: Object.freeze({
+                  reference: credentialReference('setup.token'),
+                }),
+                SHARED_TOKEN: Object.freeze({
+                  reference: credentialReference('shared.token'),
+                }),
+              }),
+              agent: Object.freeze({
+                SERVICE_TOKEN: Object.freeze({
+                  reference: credentialReference('service.token'),
+                }),
+                SHARED_TOKEN: Object.freeze({
+                  reference: credentialReference('shared.token'),
+                }),
+              }),
+            }),
+          }),
+          async apply(context: SetupExecutionContext) {
+            expect(context.stepIndex).toBe(0);
+            expect(context.selection.adapter).toBe('claude-code');
+            expect(context.paths.workspace).toBe('/workspace');
           },
-        };
+        });
       },
-      async execute() {},
     };
     const localStore = createArtifactStore({
       root: path.join(fixture.root, 'scoped-artifacts'),
@@ -345,30 +375,173 @@ describe('executeEval', () => {
     const composition = fixture.composition(localStore);
     const runtime = composition.runtime;
 
-    await executeEval({
-      runId: 'run-scoped-credentials',
-      plan,
-      composition: {
-        ...composition,
-        runtime: {
-          ...runtime,
-          async prepare(input) {
-            expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
-              'agent',
-            ]);
-            expect(input.environment.credentials.SETUP_TOKEN?.scopes).toEqual([
-              'setup',
-            ]);
-            return runtime.prepare(input);
+    await executeEvalWithTestHooks(
+      {
+        runId: 'run-scoped-credentials',
+        plan,
+        composition: {
+          ...composition,
+          runtime: {
+            ...runtime,
+            async prepare(input) {
+              expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
+                'agent',
+              ]);
+              expect(input.environment.credentials.SETUP_TOKEN?.scopes).toEqual([
+                'setup',
+              ]);
+              expect(input.environment.credentials.SERVICE_TOKEN?.scopes).toEqual([
+                'agent',
+              ]);
+              expect(input.environment.credentials.SHARED_TOKEN?.scopes).toEqual([
+                'setup',
+                'agent',
+              ]);
+              return runtime.prepare(input);
+            },
           },
         },
-        setupHandlers: new Map([[handler.uses, handler]]),
+        now: monotonicClock(),
       },
-      now: monotonicClock(),
-    });
+      {
+        setupExecutor: createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ),
+      },
+    );
   });
 
-  it('rejects extension-assigned credential scopes before resolving authority', async () => {
+  it('preflights every first-party setup operation before resolving credentials or allocating', async () => {
+    const fixture = await executionFixture();
+    const step: ResolvedRunPlanV1['setup'][number] = {
+      uses: 'forge/command@1',
+      with: {argv: ['true']},
+    };
+    const plan: ResolvedRunPlanV1 = {
+      ...fixture.plan,
+      treatment: {id: fixture.plan.treatment.id, setup: [step]},
+      setup: [step],
+    };
+    const handler: SetupStepHandler = {
+      uses: step.uses,
+      preflight() {
+        throw new TypeError('invalid first-party payload');
+      },
+    };
+    const composition = fixture.composition(inertStore());
+    let credentialResolved = false;
+    let runtimePrepared = false;
+
+    await expect(
+      executeEvalWithTestHooks(
+        {
+          runId: 'run-invalid-setup-preflight',
+          plan,
+          composition: {
+            ...composition,
+            credentialResolver: {
+              async resolve() {
+                credentialResolved = true;
+                return 'must-not-resolve';
+              },
+            },
+            runtime: {
+              ...composition.runtime,
+              async prepare(input) {
+                runtimePrepared = true;
+                return composition.runtime.prepare(input);
+              },
+            },
+          },
+        },
+        {
+          setupExecutor: createSetupExecutorWithHandlers(
+            new Map([[handler.uses, handler]]),
+          ),
+        },
+      ),
+    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
+    expect(credentialResolved).toBe(false);
+    expect(runtimePrepared).toBe(false);
+  });
+
+  it('rejects malformed agent environment declarations during pure preflight', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const selected = composition.agents.get('claude-code')!;
+
+    for (const environment of [
+      [],
+      {credential: {TOKEN: {reference: 'unsafe.token'}}},
+      {variables: []},
+      {variables: null},
+      {variables: {'BAD-NAME': 'value'}},
+      {variables: {VALID_NAME: 'line-one\nline-two'}},
+      {credentials: []},
+      {credentials: null},
+      {credentials: {TOKEN: {reference: 'unsafe.token', extra: true}}},
+    ]) {
+      const unsafeAgent: AgentAdapter = {
+        ...selected,
+        requirements(selection) {
+          return {
+            ...selected.requirements(selection),
+            environment,
+          } as unknown as ReturnType<AgentAdapter['requirements']>;
+        },
+      };
+      expect(() =>
+        preflightEval({
+          plan: fixture.plan,
+          composition: {
+            ...composition,
+            agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+          },
+        }),
+      ).toThrow(ForgeExecutionError);
+    }
+
+    let credentialResolved = false;
+    let runtimePrepared = false;
+    const unsafeAgent: AgentAdapter = {
+      ...selected,
+      requirements(selection) {
+        return {
+          ...selected.requirements(selection),
+          environment: {
+            credential: {TOKEN: {reference: 'unsafe.token'}},
+          },
+        } as unknown as ReturnType<AgentAdapter['requirements']>;
+      },
+    };
+    await expect(
+      executeEval({
+        runId: 'run-invalid-agent-environment',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+          credentialResolver: {
+            async resolve() {
+              credentialResolved = true;
+              return 'must-not-resolve';
+            },
+          },
+          runtime: {
+            ...composition.runtime,
+            async prepare(input) {
+              runtimePrepared = true;
+              return composition.runtime.prepare(input);
+            },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
+    expect(credentialResolved).toBe(false);
+    expect(runtimePrepared).toBe(false);
+  });
+
+  it('rejects capability-assigned credential scopes before resolving authority', async () => {
     const fixture = await executionFixture();
     const composition = fixture.composition(inertStore());
     const selected = composition.agents.get('claude-code')!;
@@ -499,7 +672,7 @@ async function executionFixture(
     stateDirectories: new Map(),
     commands: {
       uncredentialed: inertCommandRunner(),
-      setup: inertCommandRunner(),
+      setup: () => inertCommandRunner(),
       agent: inertCommandRunner(),
     },
     async quiesce() {
@@ -623,7 +796,6 @@ async function executionFixture(
     composition: (artifactStore) => ({
       runtime,
       agents: new Map([[agent.id, agent]]),
-      setupHandlers: new Map(),
       credentialResolver: {
         async resolve(reference) {
           calls.push(`credential:${reference}`);

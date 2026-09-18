@@ -18,6 +18,8 @@ import {
   credentialReference,
   evaluateRunEvidence,
   executeEval,
+  firstPartySetupHandlers,
+  normalizeEnvironmentSpecification,
   parseInteractionArtifact,
   parseJudgeTranscriptProjection,
   preflightEval,
@@ -30,7 +32,7 @@ import {
 } from './index.js';
 
 describe('@stripe/forge package root', () => {
-  it('exports the engine, wire model, persistence, and extension contracts', () => {
+  it('exports the engine, wire model, persistence, and composition contracts', () => {
     expect(executeEval).toBeTypeOf('function');
     expect(preflightEval).toBeTypeOf('function');
     expect(parseInteractionArtifact).toBeTypeOf('function');
@@ -40,7 +42,12 @@ describe('@stripe/forge package root', () => {
     expect(resolveManifestCaseIdFromFile).toBeTypeOf('function');
     expect(createArtifactStore).toBeTypeOf('function');
     expect(createSetupExecutor).toBeTypeOf('function');
+    expect([...firstPartySetupHandlers.keys()].sort()).toEqual([
+      'forge/command@1',
+      'forge/write@1',
+    ]);
     expect(credentialReference).toBeTypeOf('function');
+    expect(normalizeEnvironmentSpecification).toBeTypeOf('function');
     expect(createJudgeTranscriptProjection).toBeTypeOf('function');
     expect(parseJudgeTranscriptProjection).toBeTypeOf('function');
     expect(JUDGE_TRANSCRIPT_SOURCE).toBe('trajectory.json');

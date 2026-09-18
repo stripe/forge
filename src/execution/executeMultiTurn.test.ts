@@ -148,7 +148,6 @@ describe('executeEval multi-turn and judging integration', () => {
       composition: {
         runtime: runtime.adapter,
         agents: new Map([[agent.adapter.id, agent.adapter]]),
-        setupHandlers: new Map(),
         completionProviders: new Map([[provider.provider.id, provider.provider]]),
         credentialResolver: createStaticCredentialResolver(
           {
@@ -343,7 +342,6 @@ describe('executeEval multi-turn and judging integration', () => {
       composition: {
         runtime: runtime.adapter,
         agents: new Map([[agent.adapter.id, agent.adapter]]),
-        setupHandlers: new Map(),
         completionProviders: new Map([[provider.provider.id, provider.provider]]),
         credentialResolver: createStaticCredentialResolver(),
         inputProvider: createMemoryRunInputProvider(),
@@ -566,7 +564,6 @@ describe('executeEval multi-turn and judging integration', () => {
       composition: {
         runtime: runtime.adapter,
         agents: new Map([[agent.adapter.id, agent.adapter]]),
-        setupHandlers: new Map(),
         completionProviders: new Map([[provider.provider.id, provider.provider]]),
         credentialResolver: createStaticCredentialResolver({
           'agent.token': AGENT_SECRET,
@@ -684,7 +681,6 @@ describe('executeEval multi-turn and judging integration', () => {
           composition: {
             runtime: runtime.adapter,
             agents: new Map([[agent.adapter.id, agent.adapter]]),
-            setupHandlers: new Map(),
             completionProviders: new Map([
               [provider.provider.id, provider.provider],
             ]),
@@ -746,7 +742,6 @@ describe('executeEval multi-turn and judging integration', () => {
         composition: {
           runtime: runtime.adapter,
           agents: new Map([[preallocatedSessionAgent.id, preallocatedSessionAgent]]),
-          setupHandlers: new Map(),
           completionProviders: new Map([[provider.provider.id, provider.provider]]),
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: createMemoryRunInputProvider(),
@@ -817,7 +812,6 @@ describe('executeEval multi-turn and judging integration', () => {
         composition: {
           runtime: runtime.adapter,
           agents: new Map([[agent.adapter.id, agent.adapter]]),
-          setupHandlers: new Map(),
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: createMemoryRunInputProvider(),
           artifactStore: artifacts.store,
@@ -864,7 +858,6 @@ describe('executeEval multi-turn and judging integration', () => {
       composition: {
         runtime: runtime.adapter,
         agents: new Map([[snapshottingAgent.id, snapshottingAgent]]),
-        setupHandlers: new Map(),
         credentialResolver: createStaticCredentialResolver(),
         inputProvider: createMemoryRunInputProvider(),
         artifactStore: artifacts.store,
@@ -922,7 +915,6 @@ describe('executeEval multi-turn and judging integration', () => {
         composition: {
           runtime: runtime.adapter,
           agents: new Map([[changingSessionAgent.id, changingSessionAgent]]),
-          setupHandlers: new Map(),
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: createMemoryRunInputProvider(),
           artifactStore: artifacts.store,
@@ -971,7 +963,6 @@ describe('executeEval multi-turn and judging integration', () => {
         composition: {
           runtime: runtime.adapter,
           agents: new Map([[agent.adapter.id, agent.adapter]]),
-          setupHandlers: new Map(),
           completionProviders: new Map([[provider.provider.id, provider.provider]]),
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: createMemoryRunInputProvider(),
