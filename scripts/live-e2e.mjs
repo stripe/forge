@@ -15,7 +15,6 @@ import {fileURLToPath} from 'node:url';
 
 import {runCli} from '../dist/cli.js';
 import {
-  CLAUDE_PLUGIN_DATA_STATE_ID,
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudeCodeAdapter,
@@ -282,7 +281,7 @@ async function runClaudePluginConformance({
           ...new Set([
             ...agentRequirements.executables,
             ...installation.requirements.executables,
-            'touch',
+            'node',
           ]),
         ].sort(),
         stateDirectories: [
@@ -307,8 +306,7 @@ async function runClaudePluginConformance({
       signal: executionSignal,
     });
     const pluginState = prepared.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
-    const pluginData = prepared.stateDirectories.get(CLAUDE_PLUGIN_DATA_STATE_ID);
-    if (pluginState === undefined || pluginData === undefined) {
+    if (pluginState === undefined) {
       throw new Error('The live runtime omitted Claude plugin state.');
     }
     const receipt = await installation.install({
@@ -316,26 +314,31 @@ async function runClaudePluginConformance({
       paths: prepared.paths,
       stateDirectories: new Map([
         [CLAUDE_PLUGIN_STATE_ID, pluginState],
-        [CLAUDE_PLUGIN_DATA_STATE_ID, pluginData],
       ]),
       commands: prepared.commands.uncredentialed,
       signal: executionSignal,
     });
+    const containerIdentity = ['node', '-e', 'process.stdout.write(require("node:os").hostname())'];
+    const beforeFinalization = await prepared.commands.uncredentialed.run(
+      containerIdentity,
+      {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+    );
     await prepared.finalizeSetup();
+    const afterFinalization = await prepared.commands.agent.run(
+      containerIdentity,
+      {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+    );
+    if (
+      beforeFinalization.exitCode !== 0 ||
+      afterFinalization.exitCode !== 0 ||
+      !beforeFinalization.stdout.trim() ||
+      beforeFinalization.stdout !== afterFinalization.stdout
+    ) {
+      throw new Error('Writable plugin setup replaced the live container.');
+    }
 
     const listed = await prepared.commands.agent.run(
-      [
-        'env',
-        `CLAUDE_CODE_PLUGIN_SEED_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
-        `CLAUDE_CODE_PLUGIN_CACHE_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
-        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
-        'claude',
-        '--settings',
-        `${CLAUDE_PLUGIN_STATE_PATH}/session-settings.json`,
-        'plugin',
-        'list',
-        '--json',
-      ],
+      ['claude', 'plugin', 'list', '--json'],
       {
         signal: executionSignal,
         timeoutMs: 60_000,
@@ -343,7 +346,7 @@ async function runClaudePluginConformance({
       },
     );
     if (listed.exitCode !== 0) {
-      throw new Error('Claude could not list the installed plugin after sealing.');
+      throw new Error('Claude could not list the installed plugin after setup.');
     }
     let plugins;
     try {
@@ -357,7 +360,7 @@ async function runClaudePluginConformance({
             plugin !== null &&
             typeof plugin === 'object' &&
             typeof plugin.id === 'string' &&
-            plugin.id.startsWith('stripe@forge-'),
+            plugin.id === 'stripe@claude-plugins-official',
         )
       : undefined;
     if (
@@ -371,37 +374,62 @@ async function runClaudePluginConformance({
       receipt.marketplace_commit.length !== 40 ||
       receipt.native_plugin_id !== installed.id ||
       receipt.version !== installed.version ||
+      installed.installPath !== `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}` ||
       !/^sha256:[a-f0-9]{64}$/.test(receipt.installed_tree.sha256)
     ) {
-      throw new Error('Claude did not load the latest plugin from sealed state.');
+      throw new Error('Claude did not load the latest plugin from native user settings.');
     }
     const mutation = await prepared.commands.agent.run(
-      ['touch', `${CLAUDE_PLUGIN_STATE_PATH}/mutation-must-fail`],
+      [
+        'node', '-e', `
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const [root, settingsPath, dataRoot, pluginId] = process.argv.slice(1);
+          const pluginFile = path.join(root, '.claude-plugin', 'plugin.json');
+          const original = fs.readFileSync(pluginFile, 'utf8');
+          fs.appendFileSync(pluginFile, '\\n');
+          if (fs.readFileSync(pluginFile, 'utf8') !== original + '\\n') {
+            throw new Error('Plugin file mutation was not retained.');
+          }
+          const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+          if (settings.enabledPlugins[pluginId] !== true) {
+            throw new Error('Native installation did not enable the plugin.');
+          }
+          settings.enabledPlugins[pluginId] = false;
+          fs.writeFileSync(settingsPath, JSON.stringify(settings));
+          fs.mkdirSync(dataRoot, {recursive: true});
+          fs.writeFileSync(path.join(dataRoot, 'conformance-data-write'), 'writable');
+        `,
+        installed.installPath,
+        `${prepared.paths.home}/.claude/settings.json`,
+        `${CLAUDE_PLUGIN_STATE_PATH}/data`,
+        installed.id,
+      ],
       {
         signal: executionSignal,
         timeoutMs: 30_000,
         maxOutputBytes: 64 * 1024,
       },
     );
-    if (mutation.exitCode === 0) {
-      throw new Error('The live Claude plugin state remained writable.');
+    if (mutation.exitCode !== 0) {
+      throw new Error('Claude plugin files, settings, or hook data were not writable.');
     }
-    const dataWrite = await prepared.commands.agent.run(
-      ['touch', `${CLAUDE_PLUGIN_STATE_PATH}/seed/data/conformance-data-write`],
-      {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+    const changedList = await prepared.commands.agent.run(
+      ['claude', 'plugin', 'list', '--json'],
+      {signal: executionSignal, timeoutMs: 60_000, maxOutputBytes: 1024 * 1024},
     );
     if (
-      dataWrite.exitCode !== 0 ||
-      (await pluginData.inspect('conformance-data-write')).kind !== 'file'
+      changedList.exitCode !== 0 ||
+      !JSON.parse(changedList.stdout).some((plugin) =>
+        plugin.id === installed.id && plugin.enabled === false)
     ) {
-      throw new Error('Claude plugin data was not writable through its separate state mount.');
+      throw new Error('Claude did not honor the changed native plugin settings.');
     }
-    const dataRedirect = await prepared.commands.agent.run(
-      ['ln', '-sfn', '/workspace', `${CLAUDE_PLUGIN_STATE_PATH}/seed/data`],
-      {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
-    );
-    if (dataRedirect.exitCode === 0) {
-      throw new Error('The sealed Claude plugin data link could be redirected.');
+    const sealed = await prepared.quiesce();
+    const dataFile = await sealed.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID)
+      ?.readFile('data/conformance-data-write', {maxBytes: 64});
+    if (dataFile === undefined || Buffer.from(dataFile).toString('utf8') !== 'writable') {
+      throw new Error('Claude plugin hook data was not retained until quiescence.');
     }
     return Object.freeze({
       valid: true,
@@ -409,9 +437,11 @@ async function runClaudePluginConformance({
       plugin: 'stripe@claude-plugins-official',
       version: installed.version,
       marketplace_commit: receipt.marketplace_commit,
-      installed_tree_sha256: receipt.installed_tree.sha256,
-      setup_state_readonly: true,
+      initial_installed_tree_sha256: receipt.installed_tree.sha256,
+      plugin_files_writable: true,
+      native_settings_writable: true,
       plugin_data_writable: true,
+      container_preserved_after_setup: true,
     });
   } finally {
     await prepared?.dispose();

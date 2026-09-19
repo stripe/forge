@@ -8,7 +8,6 @@ import {createTestResolvedRunPlan} from '../../testing/plans.js';
 
 import {
   CLAUDE_PLUGIN_STATE_ID,
-  CLAUDE_PLUGIN_STATE_PATH,
   createClaudeCodeAdapter,
   loadClaudeEvidence,
 } from './index.js';
@@ -18,7 +17,7 @@ import {parseClaudeStream} from './stream.js';
 describe('Claude Code adapter', () => {
   it('declares authentication and exact session state for engine-assigned scope', () => {
     const adapter = createClaudeCodeAdapter({sessionIdFactory: () => 'session-1'});
-    expect(adapter.version).toBe('1');
+    expect(adapter.version).toBe('2');
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',
@@ -42,7 +41,7 @@ describe('Claude Code adapter', () => {
       credential: 'gateway.routing-token',
       credentialEnvironmentName: 'ANTHROPIC_AUTH_TOKEN',
     });
-    expect(adapter.version).toBe('1+gateway');
+    expect(adapter.version).toBe('2+gateway');
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic-compatible',
@@ -136,7 +135,7 @@ describe('Claude Code adapter', () => {
     ).toThrow(/different environment variables/);
   });
 
-  it('loads finalized plugin seed state for every native session invocation', async () => {
+  it('uses native writable plugin settings for initial and resumed sessions', async () => {
     const argvCalls: string[][] = [];
     const workspace = createMemoryWorkspace();
     const pluginState = createMemoryWorkspace();
@@ -183,16 +182,14 @@ describe('Claude Code adapter', () => {
       signal: new AbortController().signal,
     });
     await session.send('Do the work', {signal: new AbortController().signal});
+    await session.send('Continue', {signal: new AbortController().signal});
 
-    expect(argvCalls[0]?.slice(0, 7)).toEqual([
-      'env',
-      `CLAUDE_CODE_PLUGIN_SEED_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
-      `CLAUDE_CODE_PLUGIN_CACHE_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
-      'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
-      'claude',
-      '--settings',
-      `${CLAUDE_PLUGIN_STATE_PATH}/session-settings.json`,
-    ]);
+    for (const argv of argvCalls) {
+      expect(argv[0]).toBe('claude');
+      expect(argv.includes('--settings')).toBe(false);
+      expect(argv.some((arg) => arg.startsWith('CLAUDE_CODE_'))).toBe(false);
+    }
+    expect(argvCalls[1]?.slice(1, 5)).toEqual(['-p', 'Continue', '--resume', 'session-1']);
   });
 
   it('returns unavailable native evidence without constructing fallback', async () => {

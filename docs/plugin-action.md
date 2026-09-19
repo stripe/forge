@@ -4,10 +4,10 @@
 
 `forge/plugin@1` installs the plugin currently published by an agent-native
 marketplace. The experiment names the qualified plugin and its GitHub
-`owner/repository` marketplace. During each run, Forge snapshots that
-repository's current default-branch `HEAD`, selects the named entry, installs
-the complete plugin through the selected adapter, and seals the resulting
-plugin state before interaction.
+`owner/repository` marketplace. During each run, Forge registers that repository
+through the native CLI, selects the named entry, and installs the complete
+plugin. Claude's plugin files, settings, and hook data remain writable during
+interaction, as they do for a user installing and using a plugin.
 
 The first realization is Claude Code. The action and its wire format are public
 Forge behavior; Claude-specific marketplace commands remain behind the narrow
@@ -43,12 +43,14 @@ exactly one entry.
 
 Version 1 deliberately follows the marketplace's current default branch:
 
-1. Forge fetches `HEAD` once into run-owned state.
-2. Every plugin selected from the same marketplace during that run uses that
-   one snapshot.
-3. The marketplace entry chooses the plugin source and installed version.
-4. A later run may fetch a different marketplace commit, source commit, or
-   plugin version.
+1. Claude fetches the current marketplace into a fresh, run-owned home.
+2. Later setup actions reuse an already registered marketplace after verifying
+   its repository and path. Forge does not explicitly update it between actions.
+3. The selected entry chooses the plugin source and installed version. Each
+   installation records the checkout commit and installed contents.
+4. Native plugin commands, file edits, and Claude's normal update behavior may
+   change plugin state during interaction. Forge does not lock it.
+5. A later run starts with fresh state and may install another release.
 
 The experiment therefore does not contain `version`, `marketplace.commit`, or
 `source` fields. Those fields are rejected rather than accepted and ignored.
@@ -76,8 +78,8 @@ derived from the plugin's package version.
 
 ## Accepted marketplace sources
 
-Forge validates the selected current marketplace entry before giving it to
-Claude. Version 1 accepts credential-free forms supported by the native
+Forge validates the selected current marketplace entry before invoking native
+plugin installation. Version 1 accepts credential-free forms supported by the native
 installer:
 
 - a canonical `./relative/path` inside the fetched marketplace;
@@ -101,52 +103,59 @@ pure setup preflight
   - select agent branch
   - bind AgentPluginInstaller
   - declare git/claude executables
-  - declare setup-sealed plugin state
-  - declare separate writable plugin data
+  - declare writable ~/.claude/plugins state
       |
       v
 prepare runtime and verify Claude version
       |
       v
 apply forge/plugin@1 (uncredentialed)
-  - fetch the marketplace's current default-branch HEAD
+  - register the GitHub marketplace with Claude's native CLI
   - validate catalog name, selected entry, and source shape
-  - replace a reserved catalog name with a deterministic local alias
-  - install through `claude plugin install ... --json`
+  - install through `claude plugin install ... --scope user --json`
   - verify native ID, resolved version, path, source commit when present,
     load status, dependencies, and filesystem shape
-  - write exact enabled-plugin session settings
-  - link the seed's data directory to the run-owned writable data mount
+  - retain an installation-time provenance receipt
       |
       v
 PreparedRuntime.finalizeSetup()
   - close preparation and setup command projections
-  - restart Docker with plugin state mounted read-only
+  - keep plugin state writable and retain the container
       |
       v
 open Claude session
-  - use the sealed directory as plugin seed and cache
-  - force the selected plugin enabled through sealed settings
-  - disable nonessential background traffic
+  - discover installed plugins through native user settings
+  - allow ordinary plugin file edits and native plugin management
+      |
+      v
+quiesce runtime before evidence selection
 ```
 
-Case setup still precedes treatment setup. Finalization occurs once after both,
-so several plugin actions can populate one run-owned seed before it becomes
-immutable.
+Case setup still precedes treatment setup. Finalization occurs once after both
+and closes preparation and setup command projections. Agent commands continue
+to have normal access to the writable home and plugin state. A separate state
+directory declared immutable by another capability can still require Docker
+to replace the setup container; this plugin installer does not declare one.
 
-## Reserved marketplace names
+## Native installation
 
-Claude rejects some local directory marketplaces whose catalog uses a reserved
-name, including `claude-plugins-official`. Forge must use a local directory so
-it can keep one consistent snapshot for the run.
+For the example above, setup uses the equivalent of:
 
-After validating the original catalog, Forge derives a local alias from the
-marketplace name and repository. It rewrites only the local catalog name and
-retains the selected entry. The agent may therefore load a native ID such as
-`stripe@forge-4bce...`; the experiment and plan continue to identify
-`stripe@claude-plugins-official`. The alias is an adapter implementation detail.
+```sh
+claude plugin marketplace add anthropics/claude-plugins-official --scope user
+claude plugin install stripe@claude-plugins-official --scope user --json
+claude plugin list --json
+```
 
-## Native verification and state sealing
+The original marketplace name and plugin ID are preserved. Claude writes its
+normal `~/.claude/settings.json` and `~/.claude/plugins` state, including cached
+plugin files and the native plugin data directory. Forge supplies no alternate
+installer home, seed/cache environment variables, or forced `--settings` file.
+Native settings can disable or enable the plugin, and plugin files and hook
+data can be modified under normal tool and OS permissions. When an edit becomes
+visible to an active session depends on Claude's own loading and reload behavior.
+
+## Verification and initial provenance
 
 Claude Code 2.1.273 supports machine-readable plugin installation and listing.
 Forge checks the final `plugin install --json` result, `plugin list --json`, and
@@ -156,53 +165,37 @@ commits, and symbolic links or other unsupported filesystem entries.
 
 Every successful run retains the resolution under the corresponding step in
 `setup.json`. It records the authored plugin and marketplace, the exact
-marketplace commit fetched for the run, Claude's native aliased ID, the
+marketplace checkout commit at installation, Claude's native ID, the
 installed version, an archive digest or resolved Git commit when available,
 and an installed-tree digest. This is an execution receipt rather than a plan
-pin: a later execution of the same plan still resolves the then-current
-marketplace `HEAD`.
+pin or a final-state inventory. Later setup steps, agent actions, hooks, or
+native updates may change the installed files and settings.
 
 The `forge-plugin-tree-v1` digest covers every regular file and directory below
 the installed plugin root using root-relative paths, file sizes, and SHA-256
 content digests in stable lexical order. Symlinks and special entries are
 rejected. The receipt also records entry count, file count, and total regular
-file bytes. It therefore identifies the exact plugin contents presented to the
-agent even when a marketplace archive omitted its own digest.
+file bytes. It identifies the contents at the end of that installation even
+when a marketplace archive omitted its own digest. It does not establish that
+the agent used unchanged files throughout the interaction. Forge does not
+currently record a separate final plugin digest or filesystem mutation log.
 
-The isolated installer home and cache contain only plugins selected by earlier
-steps in the same setup. Forge never runs `marketplace update` or `plugin
-update` after taking the run snapshot.
+Each run starts with its own home and plugin state; neither is reused by another
+run. Plugin state is declared with `sealAfterSetup: false`. The runtime still
+quiesces all processes before collecting evidence, so allowing interaction-time
+writes does not change the evidence collection boundary.
 
-An installer can declare a runtime state directory with `sealAfterSetup: true`.
-After setup, `PreparedRuntime.finalizeSetup()` permanently closes the
-uncredentialed and setup command projections. The Docker runtime replaces its
-setup container with an interaction container whose plugin state is mounted
-read-only.
-
-Claude receives both `CLAUDE_CODE_PLUGIN_SEED_DIR` and
-`CLAUDE_CODE_PLUGIN_CACHE_DIR` pointing at that sealed directory. Supplying the
-cache variable as well is required for command-mode discovery in the pinned
-Claude Code 2.1.273 runtime.
-
-That Claude version also derives each plugin's `CLAUDE_PLUGIN_DATA` directory
-from the cache root. Forge creates one `seed/data` symlink during setup whose
-target is a separate, declared, run-owned writable state mount. The symlink
-itself, installed plugin files, marketplace snapshot, and session settings are
-sealed read-only. Hooks can persist run-local data without changing installed
-code. This Forge-owned link is outside every installed plugin tree; symlinks
-inside those trees remain rejected. Neither the data nor the plugin seed is
-reused by another run.
-
-Docker Desktop can expose host ownership on the marketplace bind mount. Each
-Forge Git command sets `safe.directory` only for its exact run-owned snapshot,
-without trusting arbitrary repositories or modifying global Git configuration.
+Forge uses Git to read marketplace provenance. Each such command trusts only
+the exact run-owned checkout through a command-scoped `safe.directory`, without
+modifying global Git configuration. The native CLI performs registration and
+installation with its ordinary writable state.
 
 ## Credentials and current limitations
 
 The current action declares no credentials and receives Forge's uncredentialed
 setup command runner. It never receives the Anthropic credential used by the
-later coding-agent session. Forge expands a marketplace slug to
-`https://github.com/<owner>/<repository>.git`; source URLs selected by that
+later coding-agent session. The native CLI fetches GitHub marketplaces over
+HTTPS; source URLs selected by that
 catalog may not embed credentials, query parameters, or fragments.
 
 Version 1 additionally has these limitations:
@@ -210,8 +203,12 @@ Version 1 additionally has these limitations:
 - Claude Code is the only built-in adapter with `AgentPluginInstaller`.
 - Marketplace and plugin versions are resolved at execution time, so identical
   plans can install different releases on different dates.
+- Installed state remains writable during interaction. The receipt is an
+  installation snapshot and does not attest to later contents or settings.
 - Remote MCP services and other network dependencies are not pinned.
 - Dependencies declared by the selected plugin are not part of the v1 model;
   if Claude installs another plugin ID, Forge aborts before interaction.
 - User-configurable plugin options, private repositories, and authenticated
   archives are not represented.
+- A typed local skill-override action is not part of `forge/plugin@1`; writable
+  state alone does not add that authoring contract.

@@ -16,14 +16,10 @@ import {
   loadClaudeNativeArtifact,
 } from './evidence.js';
 import {isSafeSessionId, parseClaudeStream} from './stream.js';
-import {
-  CLAUDE_PLUGIN_STATE_ID,
-  CLAUDE_PLUGIN_STATE_PATH,
-  createClaudePluginInstaller,
-} from './plugins.js';
+import {createClaudePluginInstaller} from './plugins.js';
 
-export const CLAUDE_CODE_ADAPTER_VERSION = '1' as const;
-export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '1+gateway' as const;
+export const CLAUDE_CODE_ADAPTER_VERSION = '2' as const;
+export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '2+gateway' as const;
 export const CLAUDE_PROJECTS_STATE_ID = 'claude-projects' as const;
 
 export interface ClaudeCodeAdapterOptions {
@@ -131,21 +127,7 @@ export function createClaudeCodeAdapter(
             : ['--session-id', initialSessionId];
           const result = await context.runtime.commands.agent.run(
             [
-              ...(context.runtime.stateDirectories.has(CLAUDE_PLUGIN_STATE_ID)
-                ? [
-                    'env',
-                    `CLAUDE_CODE_PLUGIN_SEED_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
-                    `CLAUDE_CODE_PLUGIN_CACHE_DIR=${CLAUDE_PLUGIN_STATE_PATH}/seed`,
-                    'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
-                  ]
-                : []),
               executable,
-              ...(context.runtime.stateDirectories.has(CLAUDE_PLUGIN_STATE_ID)
-                ? [
-                    '--settings',
-                    `${CLAUDE_PLUGIN_STATE_PATH}/session-settings.json`,
-                  ]
-                : []),
               '-p',
               message,
               ...sessionArguments,
@@ -227,8 +209,6 @@ function validateBaseUrl(value: string): string {
 export {loadClaudeEvidence} from './evidence.js';
 export {ClaudeStreamError, parseClaudeStream} from './stream.js';
 export {
-  CLAUDE_PLUGIN_DATA_STATE_ID,
-  CLAUDE_PLUGIN_DATA_STATE_PATH,
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
 } from './plugins.js';

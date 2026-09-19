@@ -589,24 +589,24 @@ treatments:
               marketplace: anthropics/claude-plugins-official
 ```
 
-Forge fetches marketplace `HEAD` once per run, validates the selected entry,
-and then uses Claude's native marketplace installer. The marketplace decides
+Forge registers the current marketplace through Claude's native CLI, validates
+the selected entry, and installs it with user scope in the isolated run home.
+The marketplace decides
 the plugin source and resolved version. The action rejects authored `version`,
 `marketplace.commit`, and `source` fields: identical plans can intentionally
 install different releases on different dates.
 
-Claude reserves some marketplace names and refuses to register their local
-checkouts. Forge therefore gives the verified snapshot a deterministic local
-alias and installs the unchanged selected entry through that alias. This native
-alias is an implementation detail; the plan retains the authored plugin and
-marketplace. Only the selected agent branch is fetched.
+Claude uses its normal `~/.claude/plugins` directory, original marketplace and
+plugin identities, and native user settings. Plugin files, settings, and hook
+data remain writable during interaction, matching normal plugin use. Each run
+has its own home and plugin state. Plugin setup does not require a container
+restart or forced session settings. The `setup.json` receipt identifies the
+contents at installation time; it does not attest that those contents remained
+unchanged during the run. Claude or the agent may edit, disable, update, or
+install plugins under the runtime's ordinary permissions and network policy.
 
-Plugin installation writes a run-owned Claude plugin seed. After all setup
-finishes, the Docker runtime restarts with that state mounted read-only. Claude
-receives the same directory as its seed and cache, with background nonessential
-traffic disabled, so later turns cannot update the marketplace or replace the
-plugin during that run. Forge installs the whole plugin—including skills,
-commands, hooks, and MCP configuration—not only its skills. A remote endpoint
+Forge installs the whole plugin—including skills, commands, hooks, and MCP
+configuration—not only its skills. A remote endpoint
 such as `mcp.stripe.com` remains a rolling external dependency. See
 [Marketplace plugin treatments](docs/plugin-action.md) for the exact “latest”
 semantics, verification, retained `setup.json` resolution, and current
@@ -773,10 +773,13 @@ The public CLI selects its authentication mode from the environment. With no
 `ANTHROPIC_BASE_URL`, Claude Code and host-side completions use direct Anthropic
 and resolve `ANTHROPIC_API_KEY`. With `ANTHROPIC_BASE_URL`, both use that URL and
 resolve `ANTHROPIC_AUTH_TOKEN` instead. Completed result metadata records the
-gateway variant as Claude adapter version `1+gateway` and completion-provider
+gateway variant as Claude adapter version `2+gateway` and completion-provider
 version `1+messages-compatible`, without adding endpoint or token fields;
-direct runs record Claude adapter version `1` and completion-provider version
+direct runs record Claude adapter version `2` and completion-provider version
 `1`.
+
+Claude adapter version `2` uses native writable plugin installation and user
+settings. Version `1` used a custom plugin seed and setup-sealed state.
 
 A programmatic host makes the same choice explicitly on its agent adapter.
 Declare the non-secret base URL and bind the token through an opaque credential
@@ -1086,12 +1089,12 @@ host-owned semantics and capabilities.
   capabilities dropped, `no-new-privileges`, bounded memory/CPU/processes,
   bounded commands, and run-owned workspace/home/state mounts.
 - Forge never mounts the Docker socket into the evaluation container.
-- Plugin installation uses an uncredentialed command projection, snapshots the
-  current marketplace once per run, rejects unexpected dependencies and unsafe
-  filesystem entries, and seals the resulting Claude seed read-only before
-  interaction. Hook data uses a separate writable run-owned directory, reached
-  through a sealed link outside the installed plugin trees. The action is
-  intentionally mutable across runs.
+- Plugin installation uses an uncredentialed command projection and verifies
+  the selected marketplace, native installation, dependencies, and filesystem
+  entries before interaction. Plugin files, native settings, and hook data stay
+  writable within the isolated run home. The receipt records installation-time
+  provenance; plugin mutations during interaction are permitted and are not
+  separately inventoried. All mutation is quiesced before evidence selection.
 - Credentials require explicit opaque-reference-to-host-environment mappings.
   Forge assigns secret values to setup or agent commands from the declaration
   source. Uncredentialed preparation commands receive neither scope. Docker
@@ -1198,8 +1201,8 @@ One invocation builds once and runs the following checks in order:
 1. The real Docker adapter conformance probe, including sealing, cleanup, and
    idempotent disposal.
 2. A credential-free install of the latest Stripe Claude plugin through the
-   current marketplace, followed by verification of immutable plugin state,
-   writable hook data, and a data link that the agent cannot redirect.
+   current marketplace, followed by verification of writable plugin files,
+   native settings, and hook data, with the same container retained after setup.
 3. The checked-in one-shot quickstart, which must pass its deterministic checks
    without calling a host completion provider.
 4. The checked-in multi-turn example, which must exercise at least two turns in
