@@ -309,7 +309,7 @@ async function runClaudePluginConformance({
     if (pluginState === undefined) {
       throw new Error('The live runtime omitted Claude plugin state.');
     }
-    await installation.install({
+    const receipt = await installation.install({
       runId,
       paths: prepared.paths,
       stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, pluginState]]),
@@ -360,7 +360,13 @@ async function runClaudePluginConformance({
       plugins.length !== 1 ||
       typeof installed?.version !== 'string' ||
       installed.version.length === 0 ||
-      installed.enabled !== true
+      installed.enabled !== true ||
+      receipt.plugin !== 'stripe@claude-plugins-official' ||
+      receipt.marketplace !== 'anthropics/claude-plugins-official' ||
+      receipt.marketplace_commit.length !== 40 ||
+      receipt.native_plugin_id !== installed.id ||
+      receipt.version !== installed.version ||
+      !/^sha256:[a-f0-9]{64}$/.test(receipt.installed_tree.sha256)
     ) {
       throw new Error('Claude did not load the latest plugin from sealed state.');
     }
@@ -380,6 +386,8 @@ async function runClaudePluginConformance({
       run_id: runId,
       plugin: 'stripe@claude-plugins-official',
       version: installed.version,
+      marketplace_commit: receipt.marketplace_commit,
+      installed_tree_sha256: receipt.installed_tree.sha256,
       setup_state_readonly: true,
     });
   } finally {
@@ -525,6 +533,7 @@ async function verifyOneShotRun(completed) {
     result,
     [
       'plan.json',
+      'setup.json',
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',
@@ -589,6 +598,7 @@ async function verifyMultiTurnRun(completed) {
     result,
     [
       'plan.json',
+      'setup.json',
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',

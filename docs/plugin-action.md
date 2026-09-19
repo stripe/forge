@@ -152,6 +152,21 @@ the native `installed_plugins.json` record. It rejects unexpected installed
 IDs, load errors, inconsistent versions or paths, malformed resolved Git
 commits, and symbolic links or other unsupported filesystem entries.
 
+Every successful run retains the resolution under the corresponding step in
+`setup.json`. It records the authored plugin and marketplace, the exact
+marketplace commit fetched for the run, Claude's native aliased ID, the
+installed version, an archive digest or resolved Git commit when available,
+and an installed-tree digest. This is an execution receipt rather than a plan
+pin: a later execution of the same plan still resolves the then-current
+marketplace `HEAD`.
+
+The `forge-plugin-tree-v1` digest covers every regular file and directory below
+the installed plugin root using root-relative paths, file sizes, and SHA-256
+content digests in stable lexical order. Symlinks and special entries are
+rejected. The receipt also records entry count, file count, and total regular
+file bytes. It therefore identifies the exact plugin contents presented to the
+agent even when a marketplace archive omitted its own digest.
+
 The isolated installer home and cache contain only plugins selected by earlier
 steps in the same setup. Forge never runs `marketplace update` or `plugin
 update` after taking the run snapshot.

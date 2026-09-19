@@ -121,6 +121,7 @@ describe('checked-in quickstart', () => {
     });
     expect(completed.result.artifacts.map(({path: artifactPath}) => artifactPath)).toEqual([
       'plan.json',
+      'setup.json',
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',

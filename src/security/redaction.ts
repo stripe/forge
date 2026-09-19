@@ -58,6 +58,17 @@ export function redactSecrets<T>(value: T, secrets: readonly string[]): Redactio
   return {value: visit(value, new Set()) as T, replacements};
 }
 
+/** Fail closed when a logical JSON value contains a resolved credential. */
+export function assertNoSecretsInJsonValue(
+  value: unknown,
+  secrets: readonly string[],
+  label: string,
+): void {
+  if (redactSecrets(value, secrets).replacements > 0) {
+    throw new SecretLeakError(label);
+  }
+}
+
 /** Fail closed before canonical bytes containing a resolved credential are staged. */
 export function assertNoSecrets(
   body: string | Uint8Array,

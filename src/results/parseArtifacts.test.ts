@@ -9,11 +9,37 @@ import {
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
 } from '../evaluation/judgeTranscript.js';
-import {parseInteractionArtifact, parseJudgeEvidence} from './parse.js';
+import {
+  parseInteractionArtifact,
+  parseJudgeEvidence,
+  parseSetupArtifact,
+} from './parse.js';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 
 describe('canonical interaction and judge evidence parsing', () => {
+  it('strictly parses ordered setup resolutions', () => {
+    const artifact = {
+      schema_version: 1,
+      steps: [
+        {index: 0, uses: 'forge/write@1'},
+        {
+          index: 1,
+          uses: 'acme/resolve@1',
+          resolution: {commit: 'a'.repeat(40)},
+        },
+      ],
+    };
+    assert.deepEqual(parseSetupArtifact(artifact), artifact);
+    assert.throws(() =>
+      parseSetupArtifact({
+        ...artifact,
+        steps: [{index: 1, uses: 'forge/write@1'}],
+      }),
+    );
+    assert.throws(() => parseSetupArtifact({...artifact, unknown: true}));
+  });
+
   it('strictly parses one-shot and multi-turn interaction audits', () => {
     assert.deepEqual(
       parseInteractionArtifact({

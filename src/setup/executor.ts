@@ -20,9 +20,11 @@ import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from './registry.js';
+import {normalizeSetupStepResolution} from './resolution.js';
 import {
   SetupActionError,
   UnsupportedSetupActionError,
+  type AppliedSetupStep,
   type PreparedSetup,
   type PreparedSetupStep,
   type SetupApplyContext,
@@ -118,36 +120,48 @@ export function createSetupExecutorWithHandlers(
       let applied = false;
       const preparedSetup: PreparedSetup = {
         requirements,
-        async apply(applyContext: SetupApplyContext): Promise<void> {
+        async apply(applyContext: SetupApplyContext) {
           if (applied) {
             throw new Error('Prepared setup has already been applied.');
           }
           applied = true;
+          const appliedSteps: AppliedSetupStep[] = [];
           for (const step of preparedSteps) {
             applyContext.signal.throwIfAborted();
             try {
-              await step.prepared.apply({
-                ...applyContext,
-                stateDirectories: selectStateDirectories(
-                  applyContext.stateDirectories,
-                  step.stateDirectoryIds,
-                ),
-                commands:
-                  step.setupCredentialEnvironmentNames.length === 0
-                    ? applyContext.commands.uncredentialed
-                    : applyContext.commands.setup(
-                        step.setupCredentialEnvironmentNames,
-                      ),
-                stepIndex: step.index,
-                selection,
-                runtime,
-              });
+              const resolution = normalizeSetupStepResolution(
+                await step.prepared.apply({
+                  ...applyContext,
+                  stateDirectories: selectStateDirectories(
+                    applyContext.stateDirectories,
+                    step.stateDirectoryIds,
+                  ),
+                  commands:
+                    step.setupCredentialEnvironmentNames.length === 0
+                      ? applyContext.commands.uncredentialed
+                      : applyContext.commands.setup(
+                          step.setupCredentialEnvironmentNames,
+                        ),
+                  stepIndex: step.index,
+                  selection,
+                  runtime,
+                }),
+                step.uses,
+              );
+              appliedSteps.push(
+                Object.freeze({
+                  index: step.index,
+                  uses: step.uses,
+                  ...(resolution === undefined ? {} : {resolution}),
+                }),
+              );
             } catch (error) {
               if (applyContext.signal.aborted) applyContext.signal.throwIfAborted();
               if (error instanceof SetupActionError) throw error;
               throw new SetupActionError(step.uses, step.index, {cause: error});
             }
           }
+          return Object.freeze({steps: Object.freeze(appliedSteps)});
         },
       };
       return Object.freeze(preparedSetup);

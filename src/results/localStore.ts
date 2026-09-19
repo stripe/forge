@@ -7,6 +7,7 @@ import type {
   RunArtifactStore,
   RunArtifactTransaction,
 } from '../contracts/artifacts.js';
+import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
 import {parseAtifTrajectory} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
@@ -14,6 +15,7 @@ import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {sha256Digest} from '../model/hashes.js';
 import {
   parseResolvedRunPlan,
+  type PluginSetupStepV1,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
@@ -26,12 +28,14 @@ import {
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
+  parseSetupArtifact,
 } from './parse.js';
-import type {
-  ArtifactDescriptorV1,
-  CompletedRun,
-  InteractionArtifactV1,
-  RunResult,
+import {
+  MAX_SETUP_ARTIFACT_BYTES,
+  type ArtifactDescriptorV1,
+  type CompletedRun,
+  type InteractionArtifactV1,
+  type RunResult,
 } from './types.js';
 
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -40,6 +44,7 @@ const VERIFIED_ARTIFACT_PATHS = new Set([
   'interaction.json',
   'judge-evidence.json',
   'plan.json',
+  'setup.json',
   'trajectory.json',
 ]);
 
@@ -210,7 +215,9 @@ export async function verifyCompletedRunWithPlanParser(
     expectedPaths.add(descriptor.path);
     const body = await readBoundedFile(
       path.join(runDir, ...descriptor.path.split('/')),
-      descriptor.size_bytes,
+      descriptor.path === 'setup.json'
+        ? Math.min(descriptor.size_bytes, MAX_SETUP_ARTIFACT_BYTES)
+        : descriptor.size_bytes,
     );
     if (
       body.byteLength !== descriptor.size_bytes ||
@@ -234,6 +241,7 @@ export async function verifyCompletedRunWithPlanParser(
     artifactBodies,
     parsePlan,
   );
+  verifySetupArtifact(result, plan, artifactBodies);
   const interaction = verifyInteractionArtifact(result, artifactBodies);
   verifyTrajectoryArtifact(
     result,
@@ -337,6 +345,7 @@ function verifyCanonicalArtifactInventory(
 ): void {
   const expectedPaths = [
     'plan.json',
+    'setup.json',
     'trajectory.json',
     'interaction.json',
     ...(hasDeterministicWorkspaceChecks(plan.evaluation.checks)
@@ -394,6 +403,81 @@ function verifyCanonicalArtifactInventory(
     if (nativeArtifacts > 1) {
       throw new ArtifactStoreError(
         'Completed result contains more than one root native artifact.',
+      );
+    }
+  }
+}
+
+function verifySetupArtifact(
+  result: RunResult,
+  plan: ResolvedRunPlanV1,
+  artifactBodies: ReadonlyMap<string, Buffer>,
+): void {
+  const artifactPath = 'setup.json';
+  const body = requireCoreArtifact(result, artifactBodies, artifactPath);
+  const setup = parseJsonArtifact(
+    artifactPath,
+    body,
+    parseSetupArtifact,
+  );
+  if (body.toString('utf8') !== serializeCanonicalJson(setup)) {
+    throw new ArtifactStoreError('Completed setup.json is not canonical.');
+  }
+  if (
+    setup.steps.length !== plan.setup.length ||
+    setup.steps.some(
+      (step, index) =>
+        step.index !== index || step.uses !== plan.setup[index]?.uses,
+    )
+  ) {
+    throw new ArtifactStoreError(
+      'setup.json does not match the completed run plan.',
+    );
+  }
+
+  for (const [index, step] of setup.steps.entries()) {
+    if (step.uses === 'forge/plugin@1') {
+      if (step.resolution === undefined) {
+        throw new ArtifactStoreError(
+          'setup.json omitted a plugin installation resolution.',
+        );
+      }
+      let receipt;
+      try {
+        receipt = parseAgentPluginInstallationReceipt(step.resolution);
+      } catch (error) {
+        throw new ArtifactStoreError(
+          'setup.json contains an invalid plugin installation resolution.',
+          {cause: error},
+        );
+      }
+      const planned = plan.setup[index] as PluginSetupStepV1;
+      const distribution = planned.with.agents[plan.agent.adapter];
+      const requestedName =
+        distribution === undefined
+          ? undefined
+          : distribution.plugin.slice(0, distribution.plugin.indexOf('@'));
+      const nativeName = receipt.native_plugin_id.slice(
+        0,
+        receipt.native_plugin_id.indexOf('@'),
+      );
+      if (
+        distribution === undefined ||
+        receipt.adapter !== plan.agent.adapter ||
+        receipt.plugin !== distribution.plugin ||
+        receipt.marketplace !== distribution.marketplace ||
+        nativeName !== requestedName
+      ) {
+        throw new ArtifactStoreError(
+          'Plugin installation resolution does not match the completed run plan.',
+        );
+      }
+    } else if (
+      (step.uses === 'forge/write@1' || step.uses === 'forge/command@1') &&
+      step.resolution !== undefined
+    ) {
+      throw new ArtifactStoreError(
+        `Static setup action ${step.uses} cannot record a resolution.`,
       );
     }
   }

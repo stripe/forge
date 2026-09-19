@@ -22,8 +22,10 @@ import {
   executeEval,
   firstPartySetupHandlers,
   normalizeEnvironmentSpecification,
+  parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
   parseJudgeTranscriptProjection,
+  parseSetupArtifact,
   preflightEval,
   parseResolvedRunPlan,
   resolveManifestCaseIdFromFile,
@@ -38,6 +40,8 @@ describe('@stripe/forge package root', () => {
     expect(executeEval).toBeTypeOf('function');
     expect(preflightEval).toBeTypeOf('function');
     expect(parseInteractionArtifact).toBeTypeOf('function');
+    expect(parseSetupArtifact).toBeTypeOf('function');
+    expect(parseAgentPluginInstallationReceipt).toBeTypeOf('function');
     expect(evaluateRunEvidence).toBeTypeOf('function');
     expect(resolveRunPlan).toBeTypeOf('function');
     expect(parseResolvedRunPlan).toBeTypeOf('function');

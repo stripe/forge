@@ -1,5 +1,6 @@
 import type {
   AgentSelectionV1,
+  JsonObject,
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
@@ -76,7 +77,19 @@ export interface SetupExecutionContext
 /** One validated step bound to the exact operation selected during preflight. */
 export interface PreparedSetupStep {
   readonly requirements: SetupStepRequirements;
-  apply(context: SetupExecutionContext): Promise<void>;
+  /** Optional bounded, non-sensitive resolution retained in the completed run. */
+  apply(context: SetupExecutionContext): Promise<JsonObject | void>;
+}
+
+export interface AppliedSetupStep {
+  readonly index: number;
+  readonly uses: string;
+  readonly resolution?: JsonObject;
+}
+
+/** Immutable audit record returned only after every setup step succeeds. */
+export interface AppliedSetup {
+  readonly steps: readonly AppliedSetupStep[];
 }
 
 export interface SetupStepHandler {
@@ -96,7 +109,7 @@ export interface SetupStepHandler {
 export interface PreparedSetup {
   readonly requirements: SetupStepRequirements;
   /** Applies the preflighted operations in source order and stops on failure. */
-  apply(context: SetupApplyContext): Promise<void>;
+  apply(context: SetupApplyContext): Promise<AppliedSetup>;
 }
 
 export interface SetupExecutor {

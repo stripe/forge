@@ -58,7 +58,7 @@ describe('Claude plugin installer', () => {
         },
       ],
     });
-    await prepared.install(installContext(state, harness.commands));
+    const receipt = await prepared.install(installContext(state, harness.commands));
 
     const fetch = harness.calls.find((argv) => argv.includes('fetch'))!;
     assert.ok(fetch.includes('HEAD'));
@@ -91,6 +91,25 @@ describe('Claude plugin installer', () => {
     ) as {name: string; plugins: Array<{name: string}>};
     assert.equal(synthetic.name, nativeId.slice(nativeId.indexOf('@') + 1));
     assert.deepEqual(synthetic.plugins.map(({name}) => name), ['stripe']);
+    assert.deepEqual(receipt, {
+      adapter: 'claude-code',
+      plugin: distribution.plugin,
+      marketplace: distribution.marketplace,
+      marketplace_commit: CATALOG_COMMIT,
+      native_plugin_id: nativeId,
+      version: LATEST_VERSION,
+      source: {kind: 'git-subdir', commit: PLUGIN_COMMIT},
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: receipt.installed_tree.sha256,
+        entry_count: 2,
+        file_count: 1,
+        size_bytes: Buffer.byteLength(
+          JSON.stringify({name: 'stripe', version: LATEST_VERSION}),
+        ),
+      },
+    });
+    assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
   });
 
   it('rejects a catalog whose selected entry has an unsafe source', async () => {
@@ -132,8 +151,16 @@ describe('Claude plugin installer', () => {
         catalogSource: candidate.source,
         installedVersion: candidate.version,
       });
-      await installerPreflight().install(installContext(state, harness.commands));
+      const receipt = await installerPreflight().install(
+        installContext(state, harness.commands),
+      );
       assert.ok(state.snapshot().has('session-settings.json'));
+      assert.deepEqual(
+        receipt.source,
+        typeof candidate.source === 'string'
+          ? {kind: 'marketplace-path'}
+          : {kind: 'archive', sha256: `sha256:${'c'.repeat(64)}`},
+      );
     }
   });
 

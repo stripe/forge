@@ -147,10 +147,16 @@ describe('local artifact store', () => {
     const store = createArtifactStore({root});
     const transaction = await store.begin('run-1');
     const interactionBody = jsonBody(oneShotInteraction);
+    const setupBody = emptySetupBody(testPlan);
     const trajectoryBody = oneShotTrajectory;
     await transaction.write({
       path: 'plan.json',
       body: testPlanBody,
+      mediaType: 'application/json',
+    });
+    await transaction.write({
+      path: 'setup.json',
+      body: setupBody,
       mediaType: 'application/json',
     });
     await transaction.write({
@@ -165,6 +171,7 @@ describe('local artifact store', () => {
     });
     const artifacts: ArtifactDescriptorV1[] = [
       descriptorFor('plan.json', testPlanBody),
+      descriptorFor('setup.json', setupBody),
       descriptorFor('interaction.json', interactionBody),
       descriptorFor('trajectory.json', trajectoryBody),
     ];
@@ -300,6 +307,13 @@ describe('local artifact store', () => {
       'missing canonical artifact plan.json',
     );
 
+    const missingSetup = await commitArtifacts(canonical, (result) => result, {
+      includeSetup: false,
+    });
+    await expect(verifyCompletedRun(missingSetup)).rejects.toThrow(
+      'missing canonical artifact setup.json',
+    );
+
     const legacyEvaluation = await commitArtifacts([
       ...canonical,
       {path: 'evaluation.json', body: jsonBody({schema_version: 1})},
@@ -334,6 +348,90 @@ describe('local artifact store', () => {
     await expect(verifyCompletedRun(checkedRun)).resolves.toMatchObject({
       runId: 'run-1',
     });
+  });
+
+  it('strictly verifies plugin resolutions against the completed plan', async () => {
+    const pluginPlan = createTestResolvedRunPlan({
+      caseId: 'sample/case',
+      prompt: 'do it',
+      treatment: 'stripe-plugin',
+      treatmentSetup: [
+        {
+          uses: 'forge/plugin@1',
+          with: {
+            agents: {
+              'claude-code': {
+                plugin: 'stripe@claude-plugins-official',
+                marketplace: 'anthropics/claude-plugins-official',
+              },
+            },
+          },
+        },
+      ],
+      agent: {adapter: 'claude-code', provider: 'anthropic', model: 'test'},
+    });
+    const receipt = {
+      adapter: 'claude-code',
+      plugin: 'stripe@claude-plugins-official',
+      marketplace: 'anthropics/claude-plugins-official',
+      marketplace_commit: 'a'.repeat(40),
+      native_plugin_id: 'stripe@forge-test',
+      version: '0.9.2',
+      source: {kind: 'git-subdir', commit: 'b'.repeat(40)},
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: `sha256:${'c'.repeat(64)}`,
+        entry_count: 2,
+        file_count: 1,
+        size_bytes: 42,
+      },
+    } as const;
+    const core = [
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+    ];
+    const setup = (resolution: unknown) =>
+      jsonBody({
+        schema_version: 1,
+        steps: [{index: 0, uses: 'forge/plugin@1', resolution}],
+      });
+
+    const valid = await commitArtifacts(
+      [...core, {path: 'setup.json', body: setup(receipt)}],
+      (result) => result,
+      {plan: pluginPlan},
+    );
+    await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
+
+    const malformed = await commitArtifacts(
+      [
+        ...core,
+        {
+          path: 'setup.json',
+          body: setup({...receipt, marketplace_commit: 'not-a-commit'}),
+        },
+      ],
+      (result) => result,
+      {plan: pluginPlan},
+    );
+    await expect(verifyCompletedRun(malformed)).rejects.toThrow(
+      'invalid plugin installation resolution',
+    );
+
+    const mismatched = await commitArtifacts(
+      [
+        ...core,
+        {
+          path: 'setup.json',
+          body: setup({...receipt, marketplace: 'stripe/other-marketplace'}),
+        },
+      ],
+      (result) => result,
+      {plan: pluginPlan},
+    );
+    await expect(verifyCompletedRun(mismatched)).rejects.toThrow(
+      'does not match the completed run plan',
+    );
   });
 
   it('strictly parses interaction.json and verifies its result summary', async () => {
@@ -658,18 +756,31 @@ interface TestArtifact {
 async function commitArtifacts(
   artifacts: readonly TestArtifact[],
   transform: (result: RunResultV1) => RunResultV1 = (result) => result,
-  options: {readonly includePlan?: boolean} = {},
+  options: {
+    readonly includePlan?: boolean;
+    readonly includeSetup?: boolean;
+    readonly plan?: ResolvedRunPlanV1;
+  } = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
   roots.push(root);
   const transaction = await createArtifactStore({root}).begin('run-1');
-  const plan = testPlanForResult(transform(resultFor([])));
+  const plan =
+    options.plan ?? testPlanForResult(transform(resultFor([])));
   const planBody = Buffer.from(serializeResolvedRunPlan(plan), 'utf8');
-  const completeArtifacts =
-    options.includePlan === false ||
-    artifacts.some(({path: artifactPath}) => artifactPath === 'plan.json')
-      ? [...artifacts]
-      : [{path: 'plan.json', body: planBody}, ...artifacts];
+  const completeArtifacts = [...artifacts];
+  if (
+    options.includeSetup !== false &&
+    !completeArtifacts.some(({path: artifactPath}) => artifactPath === 'setup.json')
+  ) {
+    completeArtifacts.unshift({path: 'setup.json', body: emptySetupBody(plan)});
+  }
+  if (
+    options.includePlan !== false &&
+    !completeArtifacts.some(({path: artifactPath}) => artifactPath === 'plan.json')
+  ) {
+    completeArtifacts.unshift({path: 'plan.json', body: planBody});
+  }
   for (const artifact of completeArtifacts) {
     await transaction.write({...artifact, mediaType: 'application/json'});
   }
@@ -763,6 +874,13 @@ function judgeEvidenceBody(): Buffer {
 
 function emptyWorkspaceEvidenceBody(): Buffer {
   return jsonBody({schema_version: 1, entries: [], complete: true, warnings: []});
+}
+
+function emptySetupBody(plan: ResolvedRunPlanV1): Buffer {
+  return jsonBody({
+    schema_version: 1,
+    steps: plan.setup.map((step, index) => ({index, uses: step.uses})),
+  });
 }
 
 function withPassingGuideline(result: RunResultV1): RunResultV1 {

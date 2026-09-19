@@ -80,6 +80,13 @@ Each action definition contains:
   output unchanged on subsequent calls; and
 - the existing pure `preflight()` and constrained `apply()` behavior.
 
+After success, `apply()` may return a bounded JSON object describing values it
+resolved only at execution time, such as an artifact commit or service binding.
+Forge snapshots that non-sensitive object under the action's ordered entry in
+`setup.json`. Returning no value records only the action index and `uses` ID.
+The bundle owns the resolution object's semantics, while its pinned bundle
+version and digest identify the implementation which produced it.
+
 Forge snapshots and freezes the bundle registry when the engine is created.
 Mutating a supplied manifest, action list, or definition property later cannot
 change that registry. Action functions are trusted code, so their captured
@@ -196,6 +203,7 @@ Tests must prove:
 - a noncanonical resolved-plan payload is rejected rather than rewritten;
 - mutations to source bundle objects cannot affect a constructed engine;
 - setup credentials retain per-action least-privilege projection; and
+- action resolutions are bounded, immutable, ordered, and secret-scanned; and
 - completed-result verification uses the same engine registry.
 
 ## Rollout

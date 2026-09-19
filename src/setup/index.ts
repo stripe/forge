@@ -8,6 +8,8 @@ export {writeSetupHandler} from './forgeWrite.js';
 export {
   SetupActionError,
   UnsupportedSetupActionError,
+  type AppliedSetup,
+  type AppliedSetupStep,
   type PreparedSetup,
   type PreparedSetupStep,
   type SetupApplyContext,
