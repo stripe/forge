@@ -2,7 +2,9 @@ export {
   EVALUATION_SCHEMA_VERSION,
   INTERACTION_SCHEMA_VERSION,
   JUDGE_EVIDENCE_SCHEMA_VERSION,
+  MAX_SETUP_ARTIFACT_BYTES,
   RUN_RESULT_SCHEMA_VERSION,
+  SETUP_ARTIFACT_SCHEMA_VERSION,
   WORKSPACE_EVIDENCE_SCHEMA_VERSION,
   type AtifEvidenceProvenanceV1,
   type AtifEvidenceSourceV1,
@@ -29,6 +31,8 @@ export {
   type RunResultV1,
   type RunStopReasonV1,
   type RunWarningV1,
+  type SetupArtifactStepV1,
+  type SetupArtifactV1,
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
 } from './types.js';
@@ -37,6 +41,7 @@ export {
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
+  parseSetupArtifact,
 } from './parse.js';
 export {
   ArtifactStoreError,

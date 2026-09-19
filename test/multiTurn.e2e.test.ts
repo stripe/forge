@@ -146,6 +146,7 @@ describe('multi-turn CLI end to end', () => {
     const completed = await verifyCompletedRun(summary.location);
     assert.deepEqual(completed.result.artifacts.map(({path: artifactPath}) => artifactPath), [
       'plan.json',
+      'setup.json',
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',

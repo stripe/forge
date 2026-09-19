@@ -2,11 +2,12 @@ import {createHash} from 'node:crypto';
 
 import type {CommandResult, CommandRunner} from '../../contracts/command.js';
 import type {
+  AgentPluginInstallationReceipt,
   AgentPluginInstallContext,
   AgentPluginInstaller,
   AgentPluginPreflightContext,
 } from '../../contracts/plugin.js';
-import type {MutableWorkspace, WorkspaceEntry} from '../../contracts/runtime.js';
+import type {MutableWorkspace} from '../../contracts/runtime.js';
 import type {PluginSelectionV1} from '../../model/types.js';
 import {
   isSafeGitHubRepository,
@@ -14,6 +15,10 @@ import {
   isSafeVersion,
 } from '../../model/paths.js';
 import {serializeCanonicalJson} from '../../serialization.js';
+import {
+  inspectInstalledPluginTree,
+  pluginSourceReceipt,
+} from './pluginReceipt.js';
 
 export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugin-seed' as const;
 export const CLAUDE_PLUGIN_STATE_PATH =
@@ -23,7 +28,6 @@ const SEED_RELATIVE_PATH = 'seed';
 const INSTALLER_HOME_RELATIVE_PATH = 'installer-home';
 const SESSION_SETTINGS_RELATIVE_PATH = 'session-settings.json';
 const MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024;
-const MAX_PLUGIN_FILES = 100_000;
 const MAX_CATALOG_PLUGINS = 10_000;
 const MAX_JSON_NODES = 100_000;
 const MAX_JSON_DEPTH = 64;
@@ -82,7 +86,9 @@ export function createClaudePluginInstaller(
             }),
           ]),
         }),
-        async install(installContext: AgentPluginInstallContext): Promise<void> {
+        async install(
+          installContext: AgentPluginInstallContext,
+        ): Promise<AgentPluginInstallationReceipt> {
           const state = installContext.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
           if (!state || installContext.stateDirectories.size !== 1) {
             throw new TypeError('Claude plugin installation state is unavailable.');
@@ -95,7 +101,7 @@ export function createClaudePluginInstaller(
             `${SEED_RELATIVE_PATH}/marketplaces/${alias}`;
           const marketplacePath = `${CLAUDE_PLUGIN_STATE_PATH}/${marketplaceRelativePath}`;
 
-          await ensureMarketplaceCheckout({
+          const marketplaceCommit = await ensureMarketplaceCheckout({
             commands: installContext.commands,
             distribution: selected,
             marketplacePath,
@@ -180,7 +186,7 @@ export function createClaudePluginInstaller(
           if (installed.installPath !== installedLocation.absolute) {
             throw new Error('Claude plugin list returned an invalid installation path.');
           }
-          await assertInstalledPluginRecord(
+          const sourceCommit = await assertInstalledPluginRecord(
             state,
             expectedPluginIds,
             nativePluginId,
@@ -188,12 +194,22 @@ export function createClaudePluginInstaller(
             installedLocation.absolute,
             entry.source,
           );
-          await assertInstalledTreeSafe(
+          const installedTree = await inspectInstalledPluginTree(
             state,
             installedLocation.relative,
             installContext.signal,
           );
           await writeSessionSettings(state, expectedPluginIds);
+          return deepFreeze({
+            adapter: adapterId,
+            plugin: selected.plugin,
+            marketplace: selected.marketplace,
+            marketplace_commit: marketplaceCommit,
+            native_plugin_id: nativePluginId,
+            version: installed.version,
+            source: pluginSourceReceipt(entry.source, sourceCommit),
+            installed_tree: installedTree,
+          });
         },
       });
     },
@@ -207,7 +223,7 @@ async function ensureMarketplaceCheckout(input: {
   readonly marketplaceRelativePath: string;
   readonly signal: AbortSignal;
   readonly state: MutableWorkspace;
-}): Promise<void> {
+}): Promise<string> {
   const head = await input.state.inspect(`${input.marketplaceRelativePath}/.git/HEAD`);
   if (head.kind === 'absent') {
     await runChecked(
@@ -283,6 +299,7 @@ async function ensureMarketplaceCheckout(input: {
   if (remote.stdout.trim() !== marketplaceRepositoryUrl(input.distribution.marketplace)) {
     throw new Error('Plugin marketplace checkout does not match its repository.');
   }
+  return revision.stdout.trim();
 }
 
 async function readSelectedMarketplaceEntry(input: {
@@ -538,7 +555,7 @@ async function assertInstalledPluginRecord(
   expectedVersion: string,
   expectedInstallPath: string,
   marketplaceSource: unknown,
-): Promise<void> {
+): Promise<string | undefined> {
   const value = parseJson(
     Buffer.from(
       await state.readFile(`${SEED_RELATIVE_PATH}/installed_plugins.json`, {
@@ -577,6 +594,7 @@ async function assertInstalledPluginRecord(
   ) {
     throw new Error('Claude installed plugin state omitted its resolved Git commit.');
   }
+  return typeof record.gitCommitSha === 'string' ? record.gitCommitSha : undefined;
 }
 
 function installedPluginLocation(
@@ -593,35 +611,6 @@ function installedPluginLocation(
     relative,
     absolute: `${CLAUDE_PLUGIN_STATE_PATH}/${relative}`,
   });
-}
-
-async function assertInstalledTreeSafe(
-  state: MutableWorkspace,
-  relativePath: string,
-  signal: AbortSignal,
-): Promise<void> {
-  let entries: readonly WorkspaceEntry[];
-  try {
-    const root = await state.inspect(relativePath);
-    if (root.kind !== 'directory') {
-      throw new Error('Installed plugin root is not a directory.');
-    }
-    entries = await state.listFiles({
-      under: relativePath,
-      maxEntries: MAX_PLUGIN_FILES,
-      signal,
-    });
-  } catch (error) {
-    throw new Error('Forge could not inspect the installed plugin tree.', {
-      cause: error,
-    });
-  }
-  if (
-    entries.length === 0 ||
-    entries.some((entry) => entry.kind !== 'file' && entry.kind !== 'directory')
-  ) {
-    throw new Error('Installed plugin tree contains an unsupported filesystem entry.');
-  }
 }
 
 function assertSupportedMarketplaceSource(source: unknown): void {

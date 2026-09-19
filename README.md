@@ -287,6 +287,7 @@ needed selectors (`--case` and `--case-file` are mutually exclusive):
 ```text
 result.json
 plan.json
+setup.json
 trajectory.json
 interaction.json
 ```
@@ -312,7 +313,12 @@ completion boundary. Use
 `verifyCompletedRun(location)` to re-read and verify a committed result. Result
 schema version 1 records the evidence source and adapter provenance.
 
-`plan.json` is the exact resolved execution plan. `trajectory.json` is the full
+`plan.json` is the exact resolved execution plan. `setup.json` is the ordered
+audit of applied setup actions. Static actions repeat only their plan index and
+versioned `uses` ID; actions which resolve mutable inputs add a bounded
+non-sensitive resolution. For `forge/plugin@1`, that resolution records the
+marketplace commit, native plugin ID, resolved version and source identity, and
+a digest of the installed plugin tree. `trajectory.json` is the full
 selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
 post-run driver audit record, not an execution input: it contains the public
 agent turns, stop reason, and, for multi-turn runs, Ava's private need model and
@@ -603,7 +609,8 @@ plugin during that run. Forge installs the whole plugin—including skills,
 commands, hooks, and MCP configuration—not only its skills. A remote endpoint
 such as `mcp.stripe.com` remains a rolling external dependency. See
 [Marketplace plugin treatments](docs/plugin-action.md) for the exact “latest”
-semantics, verification, and current limitations.
+semantics, verification, retained `setup.json` resolution, and current
+limitations.
 
 ### Setup action bundles
 
@@ -657,7 +664,9 @@ but their `parseWith`, `preflight`, credential declarations, and `apply`
 operations retain the same validation and least-privilege lifecycle as built-in
 actions. `parseWith` must produce a stable canonical value: Forge proves its
 output is a fixed point during authoring and rejects any resolved plan that the
-parser would transform. See
+parser would transform. An `apply` implementation may return bounded,
+non-sensitive JSON describing execution-time resolution; Forge snapshots it in
+`setup.json`. See
 [Setup action bundles](docs/setup-action-bundles.md) for the full contract and
 release boundary.
 

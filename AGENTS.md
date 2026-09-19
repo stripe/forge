@@ -147,8 +147,11 @@ evidence.
 Collect judge workspace text only from the sealed runtime and preserve all
 truncation/unavailability warnings.
 
-Every completed run contains `result.json`, `plan.json`, `trajectory.json`, and
-`interaction.json`. Emit `workspace-evidence.json` only when at least one
+Every completed run contains `result.json`, `plan.json`, `setup.json`,
+`trajectory.json`, and `interaction.json`. `setup.json` must match the plan's
+ordered actions and retain strictly validated, bounded, non-sensitive dynamic
+resolutions such as the exact plugin marketplace commit and installed tree.
+Emit `workspace-evidence.json` only when at least one
 deterministic file check is configured, and `judge-evidence.json` only when at
 least one guideline is judged. Evaluation lives only in
 `result.json.evaluation`; do not reintroduce a duplicate `evaluation.json`.

@@ -13,6 +13,7 @@ import type {
 } from '../evaluation/judgeTranscript.js';
 import type {
   ModelRefV1,
+  JsonObject,
   JsonValue,
   RunSelection,
   SetupActionBundleReferenceV1,
@@ -23,6 +24,8 @@ export const RUN_RESULT_SCHEMA_VERSION = 1 as const;
 export const EVALUATION_SCHEMA_VERSION = 1 as const;
 export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const INTERACTION_SCHEMA_VERSION = 1 as const;
+export const SETUP_ARTIFACT_SCHEMA_VERSION = 1 as const;
+export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
 export const JUDGE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 
 export type EvalStatus = 'passed' | 'partial' | 'failed';
@@ -142,6 +145,18 @@ export interface InteractionArtifactV1 {
     readonly decisions: readonly AvaDecisionV1[];
   };
   readonly failure: RolePlayerErrorV1 | null;
+}
+
+export interface SetupArtifactStepV1 {
+  readonly index: number;
+  readonly uses: string;
+  readonly resolution?: JsonObject;
+}
+
+/** Ordered audit of the exact setup operations and execution-time resolutions. */
+export interface SetupArtifactV1 {
+  readonly schema_version: typeof SETUP_ARTIFACT_SCHEMA_VERSION;
+  readonly steps: readonly SetupArtifactStepV1[];
 }
 
 export interface JudgeWorkspaceEntryV1 {

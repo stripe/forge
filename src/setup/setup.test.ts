@@ -11,6 +11,7 @@ import {
   createSetupExecutorWithHandlers,
   firstPartySetupHandlers,
 } from './executor.js';
+import {SetupActionError} from './types.js';
 import type {
   PreparedSetupStep,
   SetupStepHandler,
@@ -77,7 +78,7 @@ describe('portable setup actions', () => {
     ];
 
     const prepared = createSetupExecutor().preflight(steps, setupTarget);
-    await prepared.apply({
+    const applied = await prepared.apply({
       runId: 'run-1',
       paths: {workspace: '/workspace', home: '/home/forge'},
       workspace,
@@ -115,6 +116,11 @@ describe('portable setup actions', () => {
       'write:notes/fixture.txt',
       'command:node --version',
     ]);
+    assert.deepEqual(applied.steps, [
+      {index: 0, uses: 'forge/write@1'},
+      {index: 1, uses: 'forge/write@1'},
+      {index: 2, uses: 'forge/command@1'},
+    ]);
     assert.equal(Buffer.from(writes.get('notes/fixture.txt')!).toString(), 'fixture');
   });
 
@@ -146,6 +152,22 @@ describe('portable setup actions', () => {
               pluginState,
             );
             events.push('install');
+            return {
+              adapter: context.selection.adapter,
+              plugin: distribution.plugin,
+              marketplace: distribution.marketplace,
+              marketplace_commit: 'a'.repeat(40),
+              native_plugin_id: 'formatter@forge-test',
+              version: '1.0.0',
+              source: {kind: 'marketplace-path'},
+              installed_tree: {
+                format: 'forge-plugin-tree-v1',
+                sha256: `sha256:${'b'.repeat(64)}`,
+                entry_count: 1,
+                file_count: 1,
+                size_bytes: 1,
+              },
+            };
           },
         };
       },
@@ -180,7 +202,7 @@ describe('portable setup actions', () => {
       ],
     });
 
-    await prepared.apply({
+    const applied = await prepared.apply({
       runId: 'run-plugin',
       paths: {workspace: '/workspace', home: '/home/forge'},
       workspace: emptyWorkspace(),
@@ -195,6 +217,28 @@ describe('portable setup actions', () => {
     assert.deepEqual(events, [
       'preflight:test-agent:formatter@example-marketplace',
       'install',
+    ]);
+    assert.deepEqual(applied.steps, [
+      {
+        index: 0,
+        uses: 'forge/plugin@1',
+        resolution: {
+          adapter: 'test-agent',
+          plugin: 'formatter@example-marketplace',
+          marketplace: 'example/marketplace',
+          marketplace_commit: 'a'.repeat(40),
+          native_plugin_id: 'formatter@forge-test',
+          version: '1.0.0',
+          source: {kind: 'marketplace-path'},
+          installed_tree: {
+            format: 'forge-plugin-tree-v1',
+            sha256: `sha256:${'b'.repeat(64)}`,
+            entry_count: 1,
+            file_count: 1,
+            size_bytes: 1,
+          },
+        },
+      },
     ]);
   });
 
@@ -614,6 +658,59 @@ describe('portable setup actions', () => {
           new Map([[handler.uses, handler]]),
         ).preflight([{uses: handler.uses, with: {}}], setupTarget),
       /invalid prepared step/,
+    );
+  });
+
+  it('snapshots bounded JSON resolutions and rejects invalid output', async () => {
+    const source = {nested: {value: 'before'}};
+    const valid: SetupStepHandler = {
+      uses: 'acme/resolution@1',
+      preflight() {
+        return {requirements: {}, async apply() { return source; }};
+      },
+    };
+    const context = {
+      runId: 'run-resolution',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: emptyWorkspace(),
+      stateDirectories: new Map(),
+      commands: inertCommandProjections(),
+      inputs: emptyInputs(),
+      signal: new AbortController().signal,
+    };
+    const applied = await createSetupExecutorWithHandlers(
+      new Map([[valid.uses, valid]]),
+    ).preflight([{uses: valid.uses, with: {}}], setupTarget).apply(context);
+    source.nested.value = 'after';
+    assert.deepEqual(applied.steps, [
+      {
+        index: 0,
+        uses: valid.uses,
+        resolution: {nested: {value: 'before'}},
+      },
+    ]);
+    assert.ok(Object.isFrozen(applied.steps[0]?.resolution));
+
+    const invalid: SetupStepHandler = {
+      uses: 'acme/invalid-resolution@1',
+      preflight() {
+        return {
+          requirements: {},
+          async apply() {
+            return new Date() as unknown as Record<string, never>;
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      createSetupExecutorWithHandlers(
+        new Map([[invalid.uses, invalid]]),
+      ).preflight([{uses: invalid.uses, with: {}}], setupTarget).apply(context),
+      (error: unknown) => {
+        assert.ok(error instanceof SetupActionError);
+        assert.match(String(error.cause), /invalid resolution/);
+        return true;
+      },
     );
   });
 

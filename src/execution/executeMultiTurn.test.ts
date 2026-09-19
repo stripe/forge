@@ -194,6 +194,7 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.ok(stored);
     assert.deepEqual([...stored.artifacts.keys()], [
       'plan.json',
+      'setup.json',
       'trajectory.json',
       'interaction.json',
       'workspace-evidence.json',
@@ -365,6 +366,7 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.ok(stored);
     assert.deepEqual([...stored.artifacts.keys()], [
       'plan.json',
+      'setup.json',
       'trajectory.json',
       'interaction.json',
       'judge-evidence.json',

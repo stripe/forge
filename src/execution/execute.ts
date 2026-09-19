@@ -77,10 +77,13 @@ import {
   serializeResolvedRunPlan,
 } from '../planning/index.js';
 import {
+  MAX_SETUP_ARTIFACT_BYTES,
   RUN_RESULT_SCHEMA_VERSION,
+  SETUP_ARTIFACT_SCHEMA_VERSION,
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
+  parseSetupArtifact,
   type AtifEvidenceProvenanceV1,
   type ArtifactDescriptorV1,
   type AvaDecisionV1,
@@ -93,11 +96,13 @@ import {
   type RunResultV1,
   type RunStopReasonV1,
   type RunWarningV1,
+  type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
 import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
+  type AppliedSetup,
   type PreparedSetup,
   type SetupExecutor,
 } from '../setup/index.js';
@@ -304,10 +309,10 @@ export async function executeEvalWithTestHooks(
       signal,
     });
 
-    await events.phase('setup', async () => {
+    const setupArtifact = await events.phase('setup', async () => {
       phase = 'setup';
       throwIfAborted(signal, phase);
-      await preflight.setup.apply({
+      const applied = await preflight.setup.apply({
         runId: input.runId,
         paths: prepared!.paths,
         workspace: prepared!.workspace,
@@ -320,8 +325,15 @@ export async function executeEvalWithTestHooks(
         inputs: input.composition.inputProvider,
         signal,
       });
+      const artifact = buildSetupArtifact(input.plan, applied);
+      assertNoSecrets(
+        serializeCanonicalJson(artifact),
+        secrets,
+        'setup.json',
+      );
       throwIfAborted(signal, phase);
       await prepared!.finalizeSetup();
+      return artifact;
     });
 
     const interaction = await events.phase('interaction', async () => {
@@ -493,6 +505,7 @@ export async function executeEvalWithTestHooks(
 
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
+      setupArtifact,
       trajectoryJson,
       interactionArtifact,
       evaluated.workspaceEvidence,
@@ -1524,13 +1537,16 @@ function buildNativeArtifact(
 
 function buildCoreArtifacts(
   plan: ResolvedRunPlanV1,
+  setup: SetupArtifactV1,
   trajectoryJson: string,
   interaction: InteractionArtifactV1,
   workspaceEvidence: WorkspaceEvidenceV1,
   judgeEvidence: JudgeEvidenceV1 | undefined,
 ): RunArtifact[] {
+  const setupJson = serializeCanonicalJson(setup);
   return [
     jsonArtifact('plan.json', serializeResolvedRunPlan(plan)),
+    jsonArtifact('setup.json', setupJson),
     jsonArtifact('trajectory.json', trajectoryJson),
     jsonArtifact('interaction.json', serializeCanonicalJson(interaction)),
     ...(hasDeterministicWorkspaceChecks(plan.evaluation.checks)
@@ -1545,6 +1561,35 @@ function buildCoreArtifacts(
       ? []
       : [jsonArtifact('judge-evidence.json', serializeCanonicalJson(judgeEvidence))]),
   ];
+}
+
+function buildSetupArtifact(
+  plan: ResolvedRunPlanV1,
+  applied: AppliedSetup,
+): SetupArtifactV1 {
+  if (
+    applied.steps.length !== plan.setup.length ||
+    applied.steps.some(
+      (step, index) => step.index !== index || step.uses !== plan.setup[index]?.uses,
+    )
+  ) {
+    throw new TypeError('Applied setup does not match the resolved run plan.');
+  }
+  const artifact = parseSetupArtifact({
+    schema_version: SETUP_ARTIFACT_SCHEMA_VERSION,
+    steps: applied.steps.map((step) => ({
+      index: step.index,
+      uses: step.uses,
+      ...(step.resolution === undefined ? {} : {resolution: step.resolution}),
+    })),
+  });
+  if (
+    Buffer.byteLength(serializeCanonicalJson(artifact), 'utf8') >
+    MAX_SETUP_ARTIFACT_BYTES
+  ) {
+    throw new TypeError('Canonical setup artifact exceeds its byte limit.');
+  }
+  return artifact;
 }
 
 async function buildSupplementalArtifacts(

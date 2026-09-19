@@ -103,6 +103,7 @@ describe('executeEval', () => {
       'agent:evidence:canonical-session',
       'artifact:begin',
       'artifact:write:plan.json',
+      'artifact:write:setup.json',
       'artifact:write:trajectory.json',
       'artifact:write:interaction.json',
       'artifact:write:workspace-evidence.json',
@@ -180,6 +181,7 @@ describe('executeEval', () => {
       expect(completed.result.evaluation).toMatchObject({status: 'passed', score: 0});
       expect(completed.result.artifacts.map(({path: artifactPath}) => artifactPath)).toEqual([
         'plan.json',
+        'setup.json',
         'trajectory.json',
         'interaction.json',
       ]);
@@ -410,6 +412,48 @@ describe('executeEval', () => {
         ),
       },
     );
+  });
+
+  it('rejects a credential-bearing setup resolution before interaction', async () => {
+    const fixture = await executionFixture();
+    const step: ResolvedRunPlanV1['setup'][number] = {
+      uses: 'forge/command@1',
+      with: {argv: ['true']},
+    };
+    const plan: ResolvedRunPlanV1 = {
+      ...fixture.plan,
+      treatment: {id: fixture.plan.treatment.id, setup: [step]},
+      setup: [step],
+    };
+    const handler: SetupStepHandler = {
+      uses: step.uses,
+      preflight() {
+        return {
+          requirements: {},
+          async apply() {
+            return {leaked: SECRET};
+          },
+        };
+      },
+    };
+
+    await expect(
+      executeEvalWithTestHooks(
+        {
+          runId: 'run-secret-setup-resolution',
+          plan,
+          composition: fixture.composition(inertStore()),
+          now: monotonicClock(),
+        },
+        {
+          setupExecutor: createSetupExecutorWithHandlers(
+            new Map([[handler.uses, handler]]),
+          ),
+        },
+      ),
+    ).rejects.toMatchObject({code: 'setup_failed', phase: 'setup'});
+    expect(fixture.calls).not.toContain('agent:open');
+    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
   });
 
   it('preflights every first-party setup operation before resolving credentials or allocating', async () => {

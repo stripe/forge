@@ -3,6 +3,7 @@ import type {
   SetupStepV1,
 } from '../model/types.js';
 import type {PreparedAgentPluginInstallation} from '../contracts/plugin.js';
+import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
 import type {
   PreparedSetupStep,
   SetupExecutionContext,
@@ -41,14 +42,16 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
         executables: prepared.requirements.executables,
         stateDirectories: prepared.requirements.stateDirectories,
       }),
-      async apply(applyContext: SetupExecutionContext): Promise<void> {
-        await prepared.install({
-          runId: applyContext.runId,
-          paths: applyContext.paths,
-          stateDirectories: applyContext.stateDirectories,
-          commands: applyContext.commands,
-          signal: applyContext.signal,
-        });
+      async apply(applyContext: SetupExecutionContext) {
+        return parseAgentPluginInstallationReceipt(
+          await prepared.install({
+            runId: applyContext.runId,
+            paths: applyContext.paths,
+            stateDirectories: applyContext.stateDirectories,
+            commands: applyContext.commands,
+            signal: applyContext.signal,
+          }),
+        );
       },
     });
   },

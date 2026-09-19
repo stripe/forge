@@ -11,6 +11,7 @@ import {
 } from '../evaluation/judgeTranscript.js';
 import {parseRunSelection} from '../model/index.js';
 import {
+  isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.js';
@@ -19,9 +20,11 @@ import {
   INTERACTION_SCHEMA_VERSION,
   JUDGE_EVIDENCE_SCHEMA_VERSION,
   RUN_RESULT_SCHEMA_VERSION,
+  SETUP_ARTIFACT_SCHEMA_VERSION,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RunResult,
+  type SetupArtifactV1,
 } from './types.js';
 
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -41,6 +44,31 @@ const jsonValue: z.ZodType<unknown> = z.lazy(() =>
     z.record(z.string(), jsonValue),
   ]),
 );
+
+const setupArtifactSchema = z.object({
+  schema_version: z.literal(SETUP_ARTIFACT_SCHEMA_VERSION),
+  steps: z
+    .array(
+      z
+        .object({
+          index: z.number().int().nonnegative(),
+          uses: z.string().refine(isSafeActionIdentifier),
+          resolution: z.record(z.string(), jsonValue).optional(),
+        })
+        .strict(),
+    )
+    .max(2_000),
+}).strict().superRefine((value, context) => {
+  for (const [index, step] of value.steps.entries()) {
+    if (step.index !== index) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['steps', index, 'index'],
+        message: 'Setup artifact step indices must be contiguous and zero-based.',
+      });
+    }
+  }
+});
 
 const checkResult = z.object({
   name: safeText,
@@ -513,6 +541,10 @@ export function parseEvaluationResult(input: unknown) {
 
 export function parseInteractionArtifact(input: unknown): InteractionArtifactV1 {
   return interactionArtifactSchema.parse(input) as InteractionArtifactV1;
+}
+
+export function parseSetupArtifact(input: unknown): SetupArtifactV1 {
+  return setupArtifactSchema.parse(input) as SetupArtifactV1;
 }
 
 export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {
