@@ -414,47 +414,52 @@ describe('executeEval', () => {
     );
   });
 
-  it('rejects a credential-bearing setup resolution before interaction', async () => {
-    const fixture = await executionFixture();
-    const step: ResolvedRunPlanV1['setup'][number] = {
-      uses: 'forge/command@1',
-      with: {argv: ['true']},
-    };
-    const plan: ResolvedRunPlanV1 = {
-      ...fixture.plan,
-      treatment: {id: fixture.plan.treatment.id, setup: [step]},
-      setup: [step],
-    };
-    const handler: SetupStepHandler = {
-      uses: step.uses,
-      preflight() {
-        return {
-          requirements: {},
-          async apply() {
-            return {leaked: SECRET};
-          },
-        };
-      },
-    };
+  for (const [description, credential] of [
+    ['an unescaped credential', SECRET],
+    ['a JSON-escaped credential', 'sk-ant-test-"quoted"\\value'],
+  ] as const) {
+    it(`rejects a setup resolution containing ${description} before interaction`, async () => {
+      const fixture = await executionFixture({credentialValue: credential});
+      const step: ResolvedRunPlanV1['setup'][number] = {
+        uses: 'forge/command@1',
+        with: {argv: ['true']},
+      };
+      const plan: ResolvedRunPlanV1 = {
+        ...fixture.plan,
+        treatment: {id: fixture.plan.treatment.id, setup: [step]},
+        setup: [step],
+      };
+      const handler: SetupStepHandler = {
+        uses: step.uses,
+        preflight() {
+          return {
+            requirements: {},
+            async apply() {
+              return {leaked: credential};
+            },
+          };
+        },
+      };
 
-    await expect(
-      executeEvalWithTestHooks(
-        {
-          runId: 'run-secret-setup-resolution',
-          plan,
-          composition: fixture.composition(inertStore()),
-          now: monotonicClock(),
-        },
-        {
-          setupExecutor: createSetupExecutorWithHandlers(
-            new Map([[handler.uses, handler]]),
-          ),
-        },
-      ),
-    ).rejects.toMatchObject({code: 'setup_failed', phase: 'setup'});
-    expect(fixture.calls).not.toContain('agent:open');
-    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
-  });
+      await expect(
+        executeEvalWithTestHooks(
+          {
+            runId: 'run-secret-setup-resolution',
+            plan,
+            composition: fixture.composition(inertStore()),
+            now: monotonicClock(),
+          },
+          {
+            setupExecutor: createSetupExecutorWithHandlers(
+              new Map([[handler.uses, handler]]),
+            ),
+          },
+        ),
+      ).rejects.toMatchObject({code: 'setup_failed', phase: 'setup'});
+      expect(fixture.calls).not.toContain('agent:open');
+      expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+    });
+  }
 
   it('preflights every first-party setup operation before resolving credentials or allocating', async () => {
     const fixture = await executionFixture();
@@ -686,6 +691,7 @@ async function executionFixture(
     nativeArtifact?: boolean;
     nativeArtifactSessionId?: string;
     nativeEvidenceUnavailable?: boolean;
+    credentialValue?: string;
   } = {},
 ): Promise<{
   root: string;
@@ -700,6 +706,7 @@ async function executionFixture(
   const workspace = await createOwnedWorkspace(workspaceRoot);
   await workspace.writeFile('greeting.txt', Buffer.from('hello from forge\n'));
   const calls: string[] = [];
+  const credentialValue = options.credentialValue ?? SECRET;
 
   const sealed: SealedRuntime = {
     runtimeId: 'runtime-1',
@@ -734,7 +741,9 @@ async function executionFixture(
     version: '1',
     async prepare(input) {
       calls.push('runtime:prepare');
-      expect(input.environment.credentials.ANTHROPIC_API_KEY?.value).toBe(SECRET);
+      expect(input.environment.credentials.ANTHROPIC_API_KEY?.value).toBe(
+        credentialValue,
+      );
       expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
         'agent',
       ]);
@@ -847,7 +856,7 @@ async function executionFixture(
       credentialResolver: {
         async resolve(reference) {
           calls.push(`credential:${reference}`);
-          return SECRET;
+          return credentialValue;
         },
       },
       inputProvider: inertInputProvider(),

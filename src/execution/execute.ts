@@ -99,7 +99,11 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
-import {assertNoSecrets, redactSecrets} from '../security/redaction.js';
+import {
+  assertNoSecrets,
+  assertNoSecretsInJsonValue,
+  redactSecrets,
+} from '../security/redaction.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
   type AppliedSetup,
@@ -326,6 +330,7 @@ export async function executeEvalWithTestHooks(
         signal,
       });
       const artifact = buildSetupArtifact(input.plan, applied);
+      assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(
         serializeCanonicalJson(artifact),
         secrets,

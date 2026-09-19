@@ -5,6 +5,7 @@ import {
   REDACTED_SECRET,
   SecretLeakError,
   assertNoSecrets,
+  assertNoSecretsInJsonValue,
   redactSecrets,
 } from './redaction.js';
 
@@ -34,6 +35,15 @@ describe('credential redaction', () => {
 
   it('rejects canonical bytes which still contain a credential', () => {
     expect(() => assertNoSecrets('before sk-secret after', ['sk-secret'], 'result.json'))
+      .toThrow(SecretLeakError);
+  });
+
+  it('rejects a credential in logical JSON even when serialization escapes it', () => {
+    const secret = 'quoted"credential\\suffix';
+    const value = {resolution: {message: `before ${secret} after`}};
+
+    expect(JSON.stringify(value)).not.toContain(secret);
+    expect(() => assertNoSecretsInJsonValue(value, [secret], 'setup.json'))
       .toThrow(SecretLeakError);
   });
 });
