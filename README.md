@@ -1089,7 +1089,9 @@ host-owned semantics and capabilities.
 - Plugin installation uses an uncredentialed command projection, snapshots the
   current marketplace once per run, rejects unexpected dependencies and unsafe
   filesystem entries, and seals the resulting Claude seed read-only before
-  interaction. The action is intentionally mutable across runs.
+  interaction. Hook data uses a separate writable run-owned directory, reached
+  through a sealed link outside the installed plugin trees. The action is
+  intentionally mutable across runs.
 - Credentials require explicit opaque-reference-to-host-environment mappings.
   Forge assigns secret values to setup or agent commands from the declaration
   source. Uncredentialed preparation commands receive neither scope. Docker
@@ -1196,7 +1198,8 @@ One invocation builds once and runs the following checks in order:
 1. The real Docker adapter conformance probe, including sealing, cleanup, and
    idempotent disposal.
 2. A credential-free install of the latest Stripe Claude plugin through the
-   current marketplace, followed by read-only-state verification.
+   current marketplace, followed by verification of immutable plugin state,
+   writable hook data, and a data link that the agent cannot redirect.
 3. The checked-in one-shot quickstart, which must pass its deterministic checks
    without calling a host completion provider.
 4. The checked-in multi-turn example, which must exercise at least two turns in

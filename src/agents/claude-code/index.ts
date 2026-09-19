@@ -227,6 +227,8 @@ function validateBaseUrl(value: string): string {
 export {loadClaudeEvidence} from './evidence.js';
 export {ClaudeStreamError, parseClaudeStream} from './stream.js';
 export {
+  CLAUDE_PLUGIN_DATA_STATE_ID,
+  CLAUDE_PLUGIN_DATA_STATE_PATH,
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
 } from './plugins.js';

@@ -23,6 +23,9 @@ import {
 export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugin-seed' as const;
 export const CLAUDE_PLUGIN_STATE_PATH =
   '/home/forge/.forge/claude-plugin-state' as const;
+export const CLAUDE_PLUGIN_DATA_STATE_ID = 'claude-plugin-data' as const;
+export const CLAUDE_PLUGIN_DATA_STATE_PATH =
+  '/home/forge/.forge/claude-plugin-data' as const;
 
 const SEED_RELATIVE_PATH = 'seed';
 const INSTALLER_HOME_RELATIVE_PATH = 'installer-home';
@@ -77,12 +80,17 @@ export function createClaudePluginInstaller(
 
       return Object.freeze({
         requirements: Object.freeze({
-          executables: Object.freeze([executable, 'env', 'git', 'mkdir']),
+          executables: Object.freeze([executable, 'env', 'git', 'mkdir', 'ln', 'readlink']),
           stateDirectories: Object.freeze([
             Object.freeze({
               id: CLAUDE_PLUGIN_STATE_ID,
               containerPath: CLAUDE_PLUGIN_STATE_PATH,
               sealAfterSetup: true,
+            }),
+            Object.freeze({
+              id: CLAUDE_PLUGIN_DATA_STATE_ID,
+              containerPath: CLAUDE_PLUGIN_DATA_STATE_PATH,
+              sealAfterSetup: false,
             }),
           ]),
         }),
@@ -90,7 +98,11 @@ export function createClaudePluginInstaller(
           installContext: AgentPluginInstallContext,
         ): Promise<AgentPluginInstallationReceipt> {
           const state = installContext.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
-          if (!state || installContext.stateDirectories.size !== 1) {
+          if (
+            !state ||
+            installContext.stateDirectories.get(CLAUDE_PLUGIN_DATA_STATE_ID) === undefined ||
+            installContext.stateDirectories.size !== 2
+          ) {
             throw new TypeError('Claude plugin installation state is unavailable.');
           }
           installContext.signal.throwIfAborted();
@@ -122,6 +134,7 @@ export function createClaudePluginInstaller(
             alias,
             entry,
           );
+          await ensurePluginDataLink(state, installContext.commands, installContext.signal);
 
           const knownBefore = await knownMarketplaceNames(state);
           if (!knownBefore.has(alias)) {
@@ -234,12 +247,14 @@ async function ensureMarketplaceCheckout(input: {
     );
     await runGit(
       input.commands,
+      input.marketplacePath,
       ['init', '--quiet', input.marketplacePath],
       input.signal,
       'Forge could not initialize the plugin marketplace snapshot.',
     );
     await runGit(
       input.commands,
+      input.marketplacePath,
       [
         '-C',
         input.marketplacePath,
@@ -253,6 +268,7 @@ async function ensureMarketplaceCheckout(input: {
     );
     await runGit(
       input.commands,
+      input.marketplacePath,
       [
         '-c',
         'protocol.file.allow=never',
@@ -273,6 +289,7 @@ async function ensureMarketplaceCheckout(input: {
     );
     await runGit(
       input.commands,
+      input.marketplacePath,
       ['-C', input.marketplacePath, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'],
       input.signal,
       'Forge could not check out the plugin marketplace snapshot.',
@@ -283,6 +300,7 @@ async function ensureMarketplaceCheckout(input: {
 
   const revision = await runGit(
     input.commands,
+    input.marketplacePath,
     ['-C', input.marketplacePath, 'rev-parse', 'HEAD'],
     input.signal,
     'Forge could not identify the plugin marketplace snapshot.',
@@ -292,6 +310,7 @@ async function ensureMarketplaceCheckout(input: {
   }
   const remote = await runGit(
     input.commands,
+    input.marketplacePath,
     ['-C', input.marketplacePath, 'remote', 'get-url', 'origin'],
     input.signal,
     'Forge could not verify the plugin marketplace source.',
@@ -311,6 +330,7 @@ async function readSelectedMarketplaceEntry(input: {
 }): Promise<MarketplaceEntry> {
   const shown = await runGit(
     input.commands,
+    input.marketplacePath,
     [
       '-C',
       input.marketplacePath,
@@ -693,8 +713,45 @@ function claudePluginCommand(
   ];
 }
 
+async function ensurePluginDataLink(
+  state: MutableWorkspace,
+  commands: CommandRunner,
+  signal: AbortSignal,
+): Promise<void> {
+  // Claude derives CLAUDE_PLUGIN_DATA from the plugin-cache root. Keep that
+  // root immutable while directing hook state to its own run-owned mount.
+  const relativePath = `${SEED_RELATIVE_PATH}/data`;
+  const linkPath = `${CLAUDE_PLUGIN_STATE_PATH}/${relativePath}`;
+  let link = await commands.run(['readlink', linkPath], {
+    signal,
+    timeoutMs: INSTALL_TIMEOUT_MS,
+    maxOutputBytes: MAX_COMMAND_OUTPUT_BYTES,
+  });
+  if (link.exitCode !== 0) {
+    if ((await state.inspect(relativePath)).kind !== 'absent') {
+      throw new Error('Claude plugin data path already contains unexpected state.');
+    }
+    await runChecked(
+      commands,
+      ['ln', '-s', CLAUDE_PLUGIN_DATA_STATE_PATH, linkPath],
+      signal,
+      'Forge could not prepare writable Claude plugin data.',
+    );
+    link = await runChecked(
+      commands,
+      ['readlink', linkPath],
+      signal,
+      'Forge could not verify the Claude plugin data link.',
+    );
+  }
+  if (link.stdout.replace(/\n$/, '') !== CLAUDE_PLUGIN_DATA_STATE_PATH) {
+    throw new Error('Claude plugin data link does not match its declared runtime state.');
+  }
+}
+
 function runGit(
   commands: CommandRunner,
+  repositoryPath: string,
   argv: readonly string[],
   signal: AbortSignal,
   message: string,
@@ -708,6 +765,10 @@ function runGit(
       'GIT_CONFIG_GLOBAL=/dev/null',
       'GIT_TERMINAL_PROMPT=0',
       'git',
+      // Docker Desktop bind mounts can report the host UID. Trust only this
+      // run-owned snapshot, without changing global Git configuration.
+      '-c',
+      `safe.directory=${repositoryPath}`,
       ...argv,
     ],
     signal,

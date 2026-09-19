@@ -102,6 +102,7 @@ pure setup preflight
   - bind AgentPluginInstaller
   - declare git/claude executables
   - declare setup-sealed plugin state
+  - declare separate writable plugin data
       |
       v
 prepare runtime and verify Claude version
@@ -115,6 +116,7 @@ apply forge/plugin@1 (uncredentialed)
   - verify native ID, resolved version, path, source commit when present,
     load status, dependencies, and filesystem shape
   - write exact enabled-plugin session settings
+  - link the seed's data directory to the run-owned writable data mount
       |
       v
 PreparedRuntime.finalizeSetup()
@@ -181,6 +183,19 @@ Claude receives both `CLAUDE_CODE_PLUGIN_SEED_DIR` and
 `CLAUDE_CODE_PLUGIN_CACHE_DIR` pointing at that sealed directory. Supplying the
 cache variable as well is required for command-mode discovery in the pinned
 Claude Code 2.1.273 runtime.
+
+That Claude version also derives each plugin's `CLAUDE_PLUGIN_DATA` directory
+from the cache root. Forge creates one `seed/data` symlink during setup whose
+target is a separate, declared, run-owned writable state mount. The symlink
+itself, installed plugin files, marketplace snapshot, and session settings are
+sealed read-only. Hooks can persist run-local data without changing installed
+code. This Forge-owned link is outside every installed plugin tree; symlinks
+inside those trees remain rejected. Neither the data nor the plugin seed is
+reused by another run.
+
+Docker Desktop can expose host ownership on the marketplace bind mount. Each
+Forge Git command sets `safe.directory` only for its exact run-owned snapshot,
+without trusting arbitrary repositories or modifying global Git configuration.
 
 ## Credentials and current limitations
 

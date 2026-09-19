@@ -15,6 +15,7 @@ import {fileURLToPath} from 'node:url';
 
 import {runCli} from '../dist/cli.js';
 import {
+  CLAUDE_PLUGIN_DATA_STATE_ID,
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudeCodeAdapter,
@@ -306,13 +307,17 @@ async function runClaudePluginConformance({
       signal: executionSignal,
     });
     const pluginState = prepared.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
-    if (pluginState === undefined) {
+    const pluginData = prepared.stateDirectories.get(CLAUDE_PLUGIN_DATA_STATE_ID);
+    if (pluginState === undefined || pluginData === undefined) {
       throw new Error('The live runtime omitted Claude plugin state.');
     }
     const receipt = await installation.install({
       runId,
       paths: prepared.paths,
-      stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, pluginState]]),
+      stateDirectories: new Map([
+        [CLAUDE_PLUGIN_STATE_ID, pluginState],
+        [CLAUDE_PLUGIN_DATA_STATE_ID, pluginData],
+      ]),
       commands: prepared.commands.uncredentialed,
       signal: executionSignal,
     });
@@ -381,6 +386,23 @@ async function runClaudePluginConformance({
     if (mutation.exitCode === 0) {
       throw new Error('The live Claude plugin state remained writable.');
     }
+    const dataWrite = await prepared.commands.agent.run(
+      ['touch', `${CLAUDE_PLUGIN_STATE_PATH}/seed/data/conformance-data-write`],
+      {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+    );
+    if (
+      dataWrite.exitCode !== 0 ||
+      (await pluginData.inspect('conformance-data-write')).kind !== 'file'
+    ) {
+      throw new Error('Claude plugin data was not writable through its separate state mount.');
+    }
+    const dataRedirect = await prepared.commands.agent.run(
+      ['ln', '-sfn', '/workspace', `${CLAUDE_PLUGIN_STATE_PATH}/seed/data`],
+      {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+    );
+    if (dataRedirect.exitCode === 0) {
+      throw new Error('The sealed Claude plugin data link could be redirected.');
+    }
     return Object.freeze({
       valid: true,
       run_id: runId,
@@ -389,6 +411,7 @@ async function runClaudePluginConformance({
       marketplace_commit: receipt.marketplace_commit,
       installed_tree_sha256: receipt.installed_tree.sha256,
       setup_state_readonly: true,
+      plugin_data_writable: true,
     });
   } finally {
     await prepared?.dispose();

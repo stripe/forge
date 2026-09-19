@@ -8,6 +8,8 @@ import {
   type MemoryWorkspaceFixture,
 } from '../../testing/memoryWorkspace.js';
 import {
+  CLAUDE_PLUGIN_DATA_STATE_ID,
+  CLAUDE_PLUGIN_DATA_STATE_PATH,
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudePluginInstaller,
@@ -35,7 +37,7 @@ const distribution: PluginSelectionV1 = {
 describe('Claude plugin installer', () => {
   it('installs the latest entry through an aliased marketplace and records sealed seed state', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state);
+    const harness = nativeCommandHarness(state, {requireSafeDirectory: true});
     const prepared = createClaudePluginInstaller({
       adapterId: 'claude-code',
       executable: 'claude',
@@ -49,12 +51,17 @@ describe('Claude plugin installer', () => {
     });
 
     assert.deepEqual(prepared.requirements, {
-      executables: ['claude', 'env', 'git', 'mkdir'],
+      executables: ['claude', 'env', 'git', 'mkdir', 'ln', 'readlink'],
       stateDirectories: [
         {
           id: CLAUDE_PLUGIN_STATE_ID,
           containerPath: CLAUDE_PLUGIN_STATE_PATH,
           sealAfterSetup: true,
+        },
+        {
+          id: CLAUDE_PLUGIN_DATA_STATE_ID,
+          containerPath: CLAUDE_PLUGIN_DATA_STATE_PATH,
+          sealAfterSetup: false,
         },
       ],
     });
@@ -70,6 +77,16 @@ describe('Claude plugin installer', () => {
     const addedPath = add[add.indexOf('add') + 1]!;
     assert.match(addedPath, /\/seed\/marketplaces\/forge-[a-f0-9]{32}$/);
     assert.doesNotMatch(addedPath, /claude-plugins-official$/);
+    for (const argv of harness.calls.filter((command) => command.includes('git'))) {
+      assert.deepEqual(
+        argv.filter((argument) => argument.startsWith('safe.directory=')),
+        [`safe.directory=${addedPath}`],
+      );
+    }
+    assert.deepEqual(harness.calls.find((argv) => argv[0] === 'ln'), [
+      'ln', '-s', CLAUDE_PLUGIN_DATA_STATE_PATH,
+      `${CLAUDE_PLUGIN_STATE_PATH}/seed/data`,
+    ]);
 
     const install = harness.calls.find(
       (argv) => argv.includes('plugin') && argv.includes('install'),
@@ -110,6 +127,48 @@ describe('Claude plugin installer', () => {
       },
     });
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
+  });
+
+  it('reuses the declared data link across repeated plugin setup', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    const context = installContext(state, harness.commands);
+    await installerPreflight().install(context);
+    await installerPreflight().install(context);
+    assert.equal(harness.calls.filter((argv) => argv[0] === 'ln').length, 1);
+    assert.equal(harness.calls.filter((argv) => argv.includes('fetch')).length, 1);
+  });
+
+  it('rejects a data link outside its declared state before native installation', async () => {
+    for (const initialDataLink of ['/workspace', `${CLAUDE_PLUGIN_DATA_STATE_PATH}\n`]) {
+      const state = createMemoryWorkspace();
+      const harness = nativeCommandHarness(state, {initialDataLink});
+      await assert.rejects(
+        installerPreflight().install(installContext(state, harness.commands)),
+        /data link does not match/,
+      );
+      assert.equal(harness.calls.some((argv) => argv.includes('install')), false);
+    }
+  });
+
+  it('does not overwrite an unexpected data file', async () => {
+    const state = createMemoryWorkspace({'seed/data': 'preserve me'});
+    const harness = nativeCommandHarness(state);
+    await assert.rejects(
+      installerPreflight().install(installContext(state, harness.commands)),
+      /data path already contains unexpected state/,
+    );
+    assert.equal(harness.calls.some((argv) => argv[0] === 'ln'), false);
+    assert.equal(Buffer.from(state.snapshot().get('seed/data')!).toString(), 'preserve me');
+  });
+
+  it('requires its separate data state before running commands', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    const context = installContext(state, harness.commands);
+    context.stateDirectories.delete(CLAUDE_PLUGIN_DATA_STATE_ID);
+    await assert.rejects(installerPreflight().install(context), /state is unavailable/);
+    assert.equal(harness.calls.length, 0);
   });
 
   it('rejects a catalog whose selected entry has an unsafe source', async () => {
@@ -259,7 +318,10 @@ function installContext(
   return {
     runId: 'run-plugin',
     paths: {workspace: '/workspace', home: '/home/forge'},
-    stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, state.mutable]]),
+    stateDirectories: new Map([
+      [CLAUDE_PLUGIN_STATE_ID, state.mutable],
+      [CLAUDE_PLUGIN_DATA_STATE_ID, createMemoryWorkspace().mutable],
+    ]),
     commands,
     signal: new AbortController().signal,
   };
@@ -271,6 +333,8 @@ function nativeCommandHarness(
     readonly catalogSource?: unknown;
     readonly installedVersion?: string;
     readonly extraPlugin?: boolean;
+    readonly initialDataLink?: string;
+    readonly requireSafeDirectory?: boolean;
   } = {},
 ): {readonly commands: CommandRunner; readonly calls: readonly string[][]} {
   const calls: string[][] = [];
@@ -287,11 +351,22 @@ function nativeCommandHarness(
   });
   let nativePluginId: string | undefined;
   let installPath: string | undefined;
+  let dataLink = options.initialDataLink;
 
   const commands: CommandRunner = {
     async run(argv): Promise<CommandResult> {
       const command = [...argv];
       calls.push(command);
+      if (command[0] === 'readlink') {
+        return dataLink === undefined
+          ? {...result(), exitCode: 1}
+          : result(`${dataLink}\n`);
+      }
+      if (command[0] === 'ln') {
+        assert.equal(dataLink, undefined);
+        dataLink = command[2];
+        return result();
+      }
       const gitIndex = command.indexOf('git');
       if (gitIndex >= 0) {
         const git = command.slice(gitIndex + 1);
@@ -307,7 +382,12 @@ function nativeCommandHarness(
           );
           return result();
         }
-        if (git.includes('rev-parse')) return result(CATALOG_COMMIT);
+        if (git.includes('rev-parse')) {
+          if (options.requireSafeDirectory && !git.includes(`safe.directory=${root}`)) {
+            return {...result(), exitCode: 128, stderr: 'fatal: detected dubious ownership'};
+          }
+          return result(CATALOG_COMMIT);
+        }
         if (git.includes('get-url')) return result(MARKETPLACE_REPOSITORY);
         if (git.includes('show')) return result(catalog);
         assert.ok(root === undefined || root.startsWith(CLAUDE_PLUGIN_STATE_PATH));
@@ -316,6 +396,7 @@ function nativeCommandHarness(
 
       const marketplaceIndex = command.indexOf('marketplace');
       if (marketplaceIndex >= 0 && command[marketplaceIndex + 1] === 'add') {
+        assert.equal(dataLink, CLAUDE_PLUGIN_DATA_STATE_PATH);
         const marketplacePath = command[marketplaceIndex + 2]!;
         const alias = marketplacePath.slice(marketplacePath.lastIndexOf('/') + 1);
         await state.mutable.writeFile(
