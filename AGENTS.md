@@ -132,9 +132,12 @@ or through separately selected workspace evidence. Image and audio content
 parts retain only their ATIF references; the text-only completion request does
 not attach the referenced media bytes. `judge-evidence.json` exists only when
 guidelines were judged and must record the prompt version, positive
-transcript-projection policy, and exact bounded workspace evidence made
-available to the judge. The canonical artifact descriptors in `result.json`
-already bind the stored trajectory bytes. Derive the projection only after
+transcript-projection policy, exact projected steps at `transcript.steps`, and
+exact bounded workspace evidence made available to the judge. New artifacts use
+schema version 2; the parser and verifier also accept policy-only version 1 for
+historical runs. Verify version 2 steps against the projection of the stored
+trajectory. The canonical artifact descriptors in `result.json` already bind
+the stored trajectory bytes. Derive the projection only after
 credential redaction. Public judging helpers must accept and validate the
 versioned projection rather than arbitrary transcript JSON. Apply transcript
 byte and bounded-JSON graph limits before recursive validation, and bound the

@@ -1,5 +1,6 @@
 import {z} from 'zod';
 
+import {assertBoundedJsonValue} from '../atif/parser.js';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -8,6 +9,7 @@ import {
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.js';
 import {parseRunSelection} from '../model/index.js';
 import {
@@ -15,6 +17,7 @@ import {
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.js';
+import {serializeCanonicalJson} from '../serialization.js';
 import {
   EVALUATION_SCHEMA_VERSION,
   INTERACTION_SCHEMA_VERSION,
@@ -22,7 +25,9 @@ import {
   RUN_RESULT_SCHEMA_VERSION,
   SETUP_ARTIFACT_SCHEMA_VERSION,
   type InteractionArtifactV1,
+  type JudgeEvidence,
   type JudgeEvidenceV1,
+  type JudgeEvidenceV2,
   type RunResult,
   type SetupArtifactV1,
 } from './types.js';
@@ -219,8 +224,8 @@ const interactionArtifactSchema = z.object({
   }
 });
 
-const judgeEvidenceSchema = z.object({
-  schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
+const judgeEvidenceV1Schema = z.object({
+  schema_version: z.literal(1),
   prompt_version: safeText,
   transcript: z.object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
@@ -258,6 +263,19 @@ const judgeEvidenceSchema = z.object({
     }).strict()).max(10_000),
   }).strict(),
 }).strict();
+
+const judgeEvidenceV2Schema = judgeEvidenceV1Schema.extend({
+  schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
+  transcript: judgeEvidenceV1Schema.shape.transcript.extend({
+    // The shared projection parser below validates the complete step schema.
+    steps: z.array(z.unknown()),
+  }),
+});
+
+const judgeEvidenceSchema = z.discriminatedUnion('schema_version', [
+  judgeEvidenceV1Schema,
+  judgeEvidenceV2Schema,
+]);
 
 const completionCallSummary = z.object({
   sequence: z.number().int().positive(),
@@ -547,6 +565,27 @@ export function parseSetupArtifact(input: unknown): SetupArtifactV1 {
   return setupArtifactSchema.parse(input) as SetupArtifactV1;
 }
 
-export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {
-  return judgeEvidenceSchema.parse(input) as JudgeEvidenceV1;
+export function parseJudgeEvidence(input: unknown): JudgeEvidence {
+  const evidence = judgeEvidenceSchema.parse(input);
+  if (evidence.schema_version === 1) return evidence as JudgeEvidenceV1;
+
+  const transcript = evidence.transcript;
+  assertBoundedJsonValue(transcript.steps);
+  const projection = parseJudgeTranscriptProjection({
+    source: transcript.source,
+    projectionId: transcript.projection_id,
+    projectionVersion: transcript.projection_version,
+    trajectoryScope: transcript.trajectory_scope,
+    includedStepSources: transcript.included_step_sources,
+    copiedContext: transcript.copied_context,
+    includedFields: transcript.included_fields,
+    transcriptJson: serializeCanonicalJson(transcript.steps),
+  });
+  return {
+    ...evidence,
+    transcript: {
+      ...transcript,
+      steps: JSON.parse(projection.transcriptJson),
+    },
+  } as JudgeEvidenceV2;
 }

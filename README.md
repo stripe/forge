@@ -326,10 +326,11 @@ decision history. It is not supplied to the guideline judge.
 
 `workspace-evidence.json` contains bounded evidence for the paths inspected by
 configured deterministic file checks; it is not a workspace snapshot.
-`judge-evidence.json` exists only when judging ran and records the judge prompt
-version and positive transcript-projection policy alongside the bounded
-workspace text and warnings made available to the judge. These two evidence
-artifacts have different scopes and are independently conditional.
+`judge-evidence.json` exists only when judging ran. Schema version 2 records the
+judge prompt version, positive transcript-projection policy, and the exact
+reduced, redacted steps supplied to the judge at `transcript.steps`, alongside
+the bounded workspace text and warnings. These two evidence artifacts have
+different scopes and are independently conditional.
 
 Files below `extensions/<contributor-id>/` are optional supplemental artifacts
 from registered `RunArtifactContributor`s. The `result.json` descriptors
@@ -498,7 +499,10 @@ are excluded from judging.
 Programmatic consumers can reproduce the exact judge transcript bytes and
 policy with `createJudgeTranscriptProjection` from `@stripe/forge`. The exported
 projection ID, version, source, and positive included-field policy describe the
-policy recorded in `judge-evidence.json`. The public `judgeGuidelines` helper
+policy recorded in `judge-evidence.json`. Its `transcript.steps` array is decoded
+directly from the same canonical transcript JSON passed to `judgeGuidelines`;
+canonical serialization of that array reproduces the transcript bytes in every
+guideline request. The public `judgeGuidelines` helper
 accepts this validated projection object rather than an arbitrary transcript
 string, so callers cannot accidentally bypass the projection policy.
 
@@ -516,12 +520,23 @@ directories, lockfiles, and common binary formats. Hard bounds are 10,000
 listed entries, depth 32, two seconds, 512,000 bytes read, 20,000 characters per
 file, and 80,000 rendered characters total. Truncation and unavailable files
 are explicit evidence warnings. `judge-evidence.json` records the redacted
-workspace subset and positive allowlist policy for the transcript projection
+workspace subset, positive allowlist policy, and projected transcript steps
 sent to the judge. It is an audit artifact, not an input to a later judge call.
-`verifyCompletedRun` verifies the existing artifact descriptors, strict ATIF
-trajectory, completed-turn coverage, and projection-policy declaration. Forge
-refuses to dispatch a judge request if its final defensive
+`verifyCompletedRun` verifies the artifact descriptors, strict ATIF trajectory,
+completed-turn coverage, projection-policy declaration, and equality of the
+embedded steps with the projection of `trajectory.json`. The parser and verifier
+also accept legacy schema version 1, which recorded only the transcript policy
+and workspace evidence; those historical artifacts contain no embedded steps.
+The judge prompt and projection versions remain unchanged. Forge refuses to
+dispatch a judge request if its final defensive
 credential-redaction pass would rewrite the selected prompt evidence.
+
+For a guideline-judged run named `judged-001`, inspect the actual reduced
+transcript with:
+
+```sh
+jq '.transcript.steps' results/runs/judged-001/judge-evidence.json
+```
 
 The numeric score remains the fraction of success guidelines that passed.
 Deterministic checks are evaluated as additional pass/fail constraints. A

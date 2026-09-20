@@ -10,6 +10,7 @@ import type {
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.js';
 import type {
   ModelRefV1,
@@ -26,7 +27,7 @@ export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const INTERACTION_SCHEMA_VERSION = 1 as const;
 export const SETUP_ARTIFACT_SCHEMA_VERSION = 1 as const;
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
-export const JUDGE_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const JUDGE_EVIDENCE_SCHEMA_VERSION = 2 as const;
 
 export type EvalStatus = 'passed' | 'partial' | 'failed';
 
@@ -165,8 +166,9 @@ export interface JudgeWorkspaceEntryV1 {
   readonly truncated: boolean;
 }
 
+/** Legacy audit containing projection policy without the projected steps. */
 export interface JudgeEvidenceV1 {
-  readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
+  readonly schema_version: 1;
   readonly prompt_version: string;
   readonly transcript: {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
@@ -187,6 +189,18 @@ export interface JudgeEvidenceV1 {
     }[];
   };
 }
+
+/** Judge audit with the exact reduced transcript supplied to every guideline. */
+export interface JudgeEvidenceV2
+  extends Omit<JudgeEvidenceV1, 'schema_version' | 'transcript'> {
+  readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
+  readonly transcript: JudgeEvidenceV1['transcript'] & {
+    /** Canonical serialization of these steps is the judge's transcript input. */
+    readonly steps: readonly JudgeVisibleStepV1[];
+  };
+}
+
+export type JudgeEvidence = JudgeEvidenceV1 | JudgeEvidenceV2;
 
 export interface ArtifactDescriptorV1 {
   readonly path: string;

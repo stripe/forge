@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {AtifValidationError} from '../atif/parser.js';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -8,6 +9,7 @@ import {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  MAX_JUDGE_TRANSCRIPT_BYTES,
 } from '../evaluation/judgeTranscript.js';
 import {
   parseInteractionArtifact,
@@ -127,7 +129,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
   });
 
-  it('strictly parses bounded judge evidence', () => {
+  it('still reads legacy policy-only judge evidence', () => {
     const evidence = {
       schema_version: 1,
       prompt_version: '1',
@@ -228,4 +230,77 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
     assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
   });
+
+  it('requires and snapshots the visible steps in version 2 judge evidence', () => {
+    const step = {step_id: 1, source: 'agent', message: 'done'};
+    const evidence = judgeEvidenceWithSteps([step]);
+    const parsed = parseJudgeEvidence(evidence);
+    assert.deepEqual(parsed, evidence);
+    step.message = 'changed after parsing';
+    assert.equal(parsed.schema_version, 2);
+    if (parsed.schema_version !== 2) throw new Error('Expected version 2.');
+    assert.equal(parsed.transcript.steps[0]?.message, 'done');
+    assert.deepEqual(
+      parseJudgeEvidence(judgeEvidenceWithSteps([])),
+      judgeEvidenceWithSteps([]),
+    );
+
+    const {steps: _steps, ...policy} = evidence.transcript;
+    assert.throws(() => parseJudgeEvidence({...evidence, transcript: policy}));
+    assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 1}));
+    assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 3}));
+    assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
+    assert.throws(() => parseJudgeEvidence({
+      ...evidence,
+      transcript: {...evidence.transcript, unknown: true},
+    }));
+  });
+
+  it('rejects private or unbounded content in embedded judge steps', () => {
+    assert.throws(() => parseJudgeEvidence(judgeEvidenceWithSteps([
+      {step_id: 1, source: 'system', message: 'private instructions'},
+    ])));
+    assert.throws(() => parseJudgeEvidence(judgeEvidenceWithSteps([
+      {
+        step_id: 1,
+        source: 'agent',
+        message: 'done',
+        reasoning_content: 'private reasoning',
+      },
+    ])));
+    assert.throws(() => parseJudgeEvidence(judgeEvidenceWithSteps([
+      {step_id: 1, source: 'agent', message: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES)},
+    ])), /Judge transcript projection exceeds the .*byte limit/);
+
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    assert.throws(
+      () => parseJudgeEvidence(judgeEvidenceWithSteps([cycle])),
+      AtifValidationError,
+    );
+    let nested: unknown = {};
+    for (let depth = 0; depth < 70; depth += 1) nested = {child: nested};
+    assert.throws(
+      () => parseJudgeEvidence(judgeEvidenceWithSteps([nested])),
+      AtifValidationError,
+    );
+  });
 });
+
+function judgeEvidenceWithSteps(steps: readonly unknown[]) {
+  return {
+    schema_version: 2,
+    prompt_version: '1',
+    transcript: {
+      source: 'trajectory.json',
+      projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
+      projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
+      trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+      included_step_sources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+      copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+      included_fields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+      steps,
+    },
+    workspace: {entries: [], complete: true, warnings: []},
+  };
+}

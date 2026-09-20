@@ -8,9 +8,10 @@ import type {
   RunArtifactTransaction,
 } from '../contracts/artifacts.js';
 import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
-import {parseAtifTrajectory} from '../atif/index.js';
+import {parseAtifTrajectory, type AtifTrajectoryV1_8} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
+import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {sha256Digest} from '../model/hashes.js';
 import {
@@ -243,12 +244,12 @@ export async function verifyCompletedRunWithPlanParser(
   );
   verifySetupArtifact(result, plan, artifactBodies);
   const interaction = verifyInteractionArtifact(result, artifactBodies);
-  verifyTrajectoryArtifact(
+  const trajectory = verifyTrajectoryArtifact(
     result,
     interaction,
     artifactBodies,
   );
-  verifyJudgeEvidence(result, plan, artifactBodies);
+  verifyJudgeEvidence(result, plan, artifactBodies, trajectory);
   verifyCanonicalArtifactInventory(result, plan);
   return {runId: result.run_id, location: runDir, result};
 }
@@ -511,7 +512,7 @@ function verifyTrajectoryArtifact(
   result: RunResult,
   interaction: InteractionArtifactV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
-): void {
+): AtifTrajectoryV1_8 {
   const path = 'trajectory.json';
   const body = requireCoreArtifact(result, artifactBodies, path);
   const trajectory = parseJsonArtifact(path, body, parseAtifTrajectory);
@@ -530,7 +531,7 @@ function verifyTrajectoryArtifact(
         'Zero-turn interaction requires the system-only role-player-error trajectory.',
       );
     }
-    return;
+    return trajectory;
   }
 
   const sessionId = result.agent.session_id;
@@ -561,12 +562,14 @@ function verifyTrajectoryArtifact(
       'trajectory.json does not cover every completed interaction turn.',
     );
   }
+  return trajectory;
 }
 
 function verifyJudgeEvidence(
   result: RunResult,
   plan: ResolvedRunPlanV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
+  trajectory: AtifTrajectoryV1_8,
 ): void {
   const path = 'judge-evidence.json';
   const body = artifactBodies.get(path);
@@ -588,6 +591,15 @@ function verifyJudgeEvidence(
   if (judgeEvidence.prompt_version !== GUIDELINE_JUDGE_PROMPT_VERSION) {
     throw new ArtifactStoreError(
       'judge-evidence.json prompt_version is not supported by this Forge build.',
+    );
+  }
+  if (
+    judgeEvidence.schema_version === 2 &&
+    serializeCanonicalJson(judgeEvidence.transcript.steps) !==
+      createJudgeTranscriptProjection(trajectory).transcriptJson
+  ) {
+    throw new ArtifactStoreError(
+      'judge-evidence.json transcript steps do not match the projection of trajectory.json.',
     );
   }
 }

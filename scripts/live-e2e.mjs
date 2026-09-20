@@ -22,6 +22,7 @@ import {
 import {parseAtifTrajectory} from '../dist/atif/index.js';
 import {
   GUIDELINE_JUDGE_PROMPT_VERSION,
+  JUDGE_EVIDENCE_SCHEMA_VERSION,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
@@ -695,7 +696,9 @@ async function verifyMultiTurnRun(completed) {
     ({path: evidencePath}) => evidencePath === 'release-summary.txt',
   );
   requireCondition(
-    judgeEvidence.prompt_version === GUIDELINE_JUDGE_PROMPT_VERSION &&
+    judgeEvidence.schema_version === JUDGE_EVIDENCE_SCHEMA_VERSION &&
+      judgeEvidence.transcript.steps.length > 0 &&
+      judgeEvidence.prompt_version === GUIDELINE_JUDGE_PROMPT_VERSION &&
       judgeEvidence.transcript.source === JUDGE_TRANSCRIPT_SOURCE &&
       judgeEvidence.transcript.projection_id ===
         JUDGE_TRANSCRIPT_PROJECTION_ID &&

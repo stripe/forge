@@ -21,6 +21,7 @@ import {
   RUN_RESULT_SCHEMA_VERSION,
   type ArtifactDescriptorV1,
   type JudgeEvidenceV1,
+  type JudgeEvidenceV2,
   type RunResultV1,
 } from './types.js';
 
@@ -648,7 +649,7 @@ describe('local artifact store', () => {
     );
   });
 
-  it('strictly parses judge evidence and its projection declaration', async () => {
+  it('still verifies legacy judge evidence and its projection declaration', async () => {
     const trajectory = trajectoryBody([
       {step_id: 1, source: 'user', message: 'do it'},
       {
@@ -745,6 +746,57 @@ describe('local artifact store', () => {
     await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
       'Completed judge-evidence.json does not match its schema.',
     );
+  });
+
+  it('binds embedded judge steps to the trajectory even if artifact hashes are valid', async () => {
+    const legacy = judgeEvidenceValue();
+    const judgeEvidence: JudgeEvidenceV2 = {
+      ...legacy,
+      schema_version: 2,
+      transcript: {
+        ...legacy.transcript,
+        steps: [
+          {step_id: 1, source: 'user', message: 'do it'},
+          {step_id: 2, source: 'agent', message: 'done'},
+        ],
+      },
+    };
+    const trajectory = trajectoryBody([
+      {step_id: 1, source: 'user', message: 'do it'},
+      {
+        step_id: 2,
+        source: 'agent',
+        message: 'done',
+        reasoning_content: 'private reasoning',
+      },
+    ]);
+    const commitEvidence = (evidence: JudgeEvidenceV2) => commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {path: 'judge-evidence.json', body: jsonBody(evidence)},
+      ],
+      withPassingGuideline,
+    );
+    const validLocation = await commitEvidence(judgeEvidence);
+    await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+
+    for (const steps of [
+      [],
+      judgeEvidence.transcript.steps.map((step) =>
+        step.source === 'agent' ? {...step, message: 'invented answer'} : step,
+      ),
+    ]) {
+      const location = await commitEvidence({
+        ...judgeEvidence,
+        transcript: {...judgeEvidence.transcript, steps},
+      });
+      await expect(verifyCompletedRun(location)).rejects.toThrow(
+        'judge-evidence.json transcript steps do not match the projection of trajectory.json.',
+      );
+    }
   });
 });
 
