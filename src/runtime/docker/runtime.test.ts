@@ -153,6 +153,8 @@ describe('Forge Docker runtime', () => {
     const setupCommands = prepared.commands.setup(['SETUP_SECRET']);
     await setupCommands.run(['setup-tool'], {timeoutMs: 999_999});
     await prepared.finalizeSetup();
+    assert.equal(docker.calls.filter((call) => call.argv[1] === 'run').length, 1);
+    assert.equal(docker.calls.some((call) => call.argv[1] === 'stop'), false);
     await prepared.commands.agent.run(['claude', '--version']);
     assert.throws(
       () => prepared.commands.setup(['AGENT_SECRET']),
@@ -273,8 +275,8 @@ describe('Forge Docker runtime', () => {
           executables: ['claude'],
           stateDirectories: [
             {
-              id: 'claude-plugin-seed',
-              containerPath: '/home/forge/.forge/claude-plugin-state',
+              id: 'immutable-fixture',
+              containerPath: '/home/forge/.forge/immutable-fixture',
               sealAfterSetup: true,
             },
             {
@@ -287,23 +289,23 @@ describe('Forge Docker runtime', () => {
     );
     const setupCommands = prepared.commands.setup(['SETUP_SECRET']);
     await prepared.stateDirectories
-      .get('claude-plugin-seed')!
-      .writeFile('seed/plugin.txt', Buffer.from('pinned'));
+      .get('immutable-fixture')!
+      .writeFile('fixture.txt', Buffer.from('pinned'));
     await prepared.finalizeSetup();
 
     const runs = docker.calls.filter((call) => call.argv[1] === 'run');
     assert.equal(runs.length, 2);
-    const initialPluginMount = runs[0]!.argv.find((argument) =>
-      argument.includes('target=/home/forge/.forge/claude-plugin-state'),
+    const initialFixtureMount = runs[0]!.argv.find((argument) =>
+      argument.includes('target=/home/forge/.forge/immutable-fixture'),
     )!;
-    const sealedPluginMount = runs[1]!.argv.find((argument) =>
-      argument.includes('target=/home/forge/.forge/claude-plugin-state'),
+    const sealedFixtureMount = runs[1]!.argv.find((argument) =>
+      argument.includes('target=/home/forge/.forge/immutable-fixture'),
     )!;
     const interactionProjectsMount = runs[1]!.argv.find((argument) =>
       argument.includes('target=/home/forge/.claude/projects'),
     )!;
-    assert.doesNotMatch(initialPluginMount, /,readonly$/);
-    assert.match(sealedPluginMount, /,readonly$/);
+    assert.doesNotMatch(initialFixtureMount, /,readonly$/);
+    assert.match(sealedFixtureMount, /,readonly$/);
     assert.doesNotMatch(interactionProjectsMount, /,readonly$/);
     assert.equal(
       docker.calls.filter((call) => call.argv[1] === 'stop').length,
@@ -311,7 +313,7 @@ describe('Forge Docker runtime', () => {
     );
     await assert.rejects(
       prepared.stateDirectories
-        .get('claude-plugin-seed')!
+        .get('immutable-fixture')!
         .writeFile('late.txt', Buffer.from('late')),
       /quiesced/,
     );

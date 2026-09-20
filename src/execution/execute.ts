@@ -481,6 +481,7 @@ export async function executeEvalWithTestHooks(
             included_step_sources: [...judgeTranscript.includedStepSources],
             copied_context: judgeTranscript.copiedContext,
             included_fields: [...judgeTranscript.includedFields],
+            steps: JSON.parse(judgeTranscript.transcriptJson),
           },
           workspace: {
             entries: safeWorkspace.entries.map((entry) => ({

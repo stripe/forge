@@ -1,5 +1,3 @@
-import {createHash} from 'node:crypto';
-
 import type {CommandResult, CommandRunner} from '../../contracts/command.js';
 import type {
   AgentPluginInstallationReceipt,
@@ -14,19 +12,15 @@ import {
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../../model/paths.js';
-import {serializeCanonicalJson} from '../../serialization.js';
 import {
   inspectInstalledPluginTree,
   pluginSourceReceipt,
 } from './pluginReceipt.js';
 
-export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugin-seed' as const;
+export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugins' as const;
 export const CLAUDE_PLUGIN_STATE_PATH =
-  '/home/forge/.forge/claude-plugin-state' as const;
+  '/home/forge/.claude/plugins' as const;
 
-const SEED_RELATIVE_PATH = 'seed';
-const INSTALLER_HOME_RELATIVE_PATH = 'installer-home';
-const SESSION_SETTINGS_RELATIVE_PATH = 'session-settings.json';
 const MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_CATALOG_PLUGINS = 10_000;
 const MAX_JSON_NODES = 100_000;
@@ -72,17 +66,16 @@ export function createClaudePluginInstaller(
       }
       const selected = freezeDistribution(distribution);
       const identity = parseQualifiedPluginId(selected.plugin);
-      const alias = marketplaceAlias(selected);
-      const nativePluginId = `${identity.name}@${alias}`;
+      const nativePluginId = selected.plugin;
 
       return Object.freeze({
         requirements: Object.freeze({
-          executables: Object.freeze([executable, 'env', 'git', 'mkdir']),
+          executables: Object.freeze([executable, 'env', 'git']),
           stateDirectories: Object.freeze([
             Object.freeze({
               id: CLAUDE_PLUGIN_STATE_ID,
               containerPath: CLAUDE_PLUGIN_STATE_PATH,
-              sealAfterSetup: true,
+              sealAfterSetup: false,
             }),
           ]),
         }),
@@ -94,16 +87,19 @@ export function createClaudePluginInstaller(
             throw new TypeError('Claude plugin installation state is unavailable.');
           }
           installContext.signal.throwIfAborted();
-          const seedPath = `${CLAUDE_PLUGIN_STATE_PATH}/${SEED_RELATIVE_PATH}`;
-          const installerHome =
-            `${CLAUDE_PLUGIN_STATE_PATH}/${INSTALLER_HOME_RELATIVE_PATH}`;
-          const marketplaceRelativePath =
-            `${SEED_RELATIVE_PATH}/marketplaces/${alias}`;
+          // Capture the pre-install inventory so native dependencies cannot
+          // silently become part of the declared treatment.
+          const expectedPluginIds = new Set(
+            Object.keys(await installedPluginRecords(state)),
+          );
+          const marketplaceRelativePath = `marketplaces/${identity.marketplace}`;
           const marketplacePath = `${CLAUDE_PLUGIN_STATE_PATH}/${marketplaceRelativePath}`;
 
           const marketplaceCommit = await ensureMarketplaceCheckout({
             commands: installContext.commands,
             distribution: selected,
+            executable,
+            identity,
             marketplacePath,
             marketplaceRelativePath,
             signal: installContext.signal,
@@ -111,43 +107,13 @@ export function createClaudePluginInstaller(
           });
           const entry = await readSelectedMarketplaceEntry({
             commands: installContext.commands,
-            distribution: selected,
             identity,
             marketplacePath,
             signal: installContext.signal,
           });
-          await materializeSyntheticMarketplace(
-            state,
-            marketplaceRelativePath,
-            alias,
-            entry,
-          );
-
-          const knownBefore = await knownMarketplaceNames(state);
-          if (!knownBefore.has(alias)) {
-            await runChecked(
-              installContext.commands,
-              claudePluginCommand(
-                executable,
-                installerHome,
-                seedPath,
-                [
-                  'plugin',
-                  'marketplace',
-                  'add',
-                  marketplacePath,
-                  '--scope',
-                  'user',
-                ],
-              ),
-              installContext.signal,
-              'Claude could not register the selected plugin marketplace.',
-            );
-          }
-
           const installResult = await runChecked(
             installContext.commands,
-            claudePluginCommand(executable, installerHome, seedPath, [
+            claudePluginCommand(executable, [
               'plugin',
               'install',
               nativePluginId,
@@ -160,11 +126,10 @@ export function createClaudePluginInstaller(
           );
           assertInstallResult(installResult.stdout, nativePluginId);
 
-          const expectedPluginIds = await enabledPluginIds(state);
           expectedPluginIds.add(nativePluginId);
           const listResult = await runChecked(
             installContext.commands,
-            claudePluginCommand(executable, installerHome, seedPath, [
+            claudePluginCommand(executable, [
               'plugin',
               'list',
               '--json',
@@ -178,8 +143,7 @@ export function createClaudePluginInstaller(
             nativePluginId,
           );
           const installedLocation = installedPluginLocation(
-            entry,
-            alias,
+            identity.marketplace,
             identity.name,
             installed.version,
           );
@@ -199,7 +163,6 @@ export function createClaudePluginInstaller(
             installedLocation.relative,
             installContext.signal,
           );
-          await writeSessionSettings(state, expectedPluginIds);
           return deepFreeze({
             adapter: adapterId,
             plugin: selected.plugin,
@@ -219,70 +182,48 @@ export function createClaudePluginInstaller(
 async function ensureMarketplaceCheckout(input: {
   readonly commands: CommandRunner;
   readonly distribution: PluginSelectionV1;
+  readonly executable: string;
+  readonly identity: QualifiedPluginId;
   readonly marketplacePath: string;
   readonly marketplaceRelativePath: string;
   readonly signal: AbortSignal;
   readonly state: MutableWorkspace;
 }): Promise<string> {
-  const head = await input.state.inspect(`${input.marketplaceRelativePath}/.git/HEAD`);
-  if (head.kind === 'absent') {
+  let known = await knownMarketplaces(input.state);
+  if (!Object.hasOwn(known, input.identity.marketplace)) {
     await runChecked(
       input.commands,
-      ['mkdir', '-p', `${CLAUDE_PLUGIN_STATE_PATH}/${SEED_RELATIVE_PATH}/marketplaces`],
-      input.signal,
-      'Forge could not prepare plugin marketplace state.',
-    );
-    await runGit(
-      input.commands,
-      ['init', '--quiet', input.marketplacePath],
-      input.signal,
-      'Forge could not initialize the plugin marketplace snapshot.',
-    );
-    await runGit(
-      input.commands,
-      [
-        '-C',
-        input.marketplacePath,
-        'remote',
+      claudePluginCommand(input.executable, [
+        'plugin',
+        'marketplace',
         'add',
-        'origin',
-        marketplaceRepositoryUrl(input.distribution.marketplace),
-      ],
+        input.distribution.marketplace,
+        '--scope',
+        'user',
+      ]),
       input.signal,
-      'Forge could not configure the plugin marketplace snapshot.',
+      'Claude could not register the selected plugin marketplace.',
     );
-    await runGit(
-      input.commands,
-      [
-        '-c',
-        'protocol.file.allow=never',
-        '-c',
-        'protocol.ext.allow=never',
-        '-C',
-        input.marketplacePath,
-        'fetch',
-        '--quiet',
-        '--no-tags',
-        '--depth',
-        '1',
-        'origin',
-        'HEAD',
-      ],
-      input.signal,
-      'Forge could not fetch the latest plugin marketplace entry.',
-    );
-    await runGit(
-      input.commands,
-      ['-C', input.marketplacePath, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'],
-      input.signal,
-      'Forge could not check out the plugin marketplace snapshot.',
-    );
-  } else if (head.kind !== 'file') {
-    throw new Error('Plugin marketplace snapshot state is malformed.');
+    known = await knownMarketplaces(input.state);
+  }
+  const registered = known[input.identity.marketplace];
+  if (
+    !isPlainRecord(registered) ||
+    registered.installLocation !== input.marketplacePath ||
+    !isPlainRecord(registered.source) ||
+    registered.source.source !== 'github' ||
+    registered.source.repo !== input.distribution.marketplace
+  ) {
+    throw new Error('Claude plugin marketplace state does not match its repository or path.');
+  }
+  const head = await input.state.inspect(`${input.marketplaceRelativePath}/.git/HEAD`);
+  if (head.kind !== 'file') {
+    throw new Error('Plugin marketplace checkout state is malformed.');
   }
 
   const revision = await runGit(
     input.commands,
+    input.marketplacePath,
     ['-C', input.marketplacePath, 'rev-parse', 'HEAD'],
     input.signal,
     'Forge could not identify the plugin marketplace snapshot.',
@@ -292,11 +233,15 @@ async function ensureMarketplaceCheckout(input: {
   }
   const remote = await runGit(
     input.commands,
+    input.marketplacePath,
     ['-C', input.marketplacePath, 'remote', 'get-url', 'origin'],
     input.signal,
     'Forge could not verify the plugin marketplace source.',
   );
-  if (remote.stdout.trim() !== marketplaceRepositoryUrl(input.distribution.marketplace)) {
+  if (
+    remote.stdout.trim().replace(/\.git$/, '') !==
+    marketplaceRepositoryUrl(input.distribution.marketplace).replace(/\.git$/, '')
+  ) {
     throw new Error('Plugin marketplace checkout does not match its repository.');
   }
   return revision.stdout.trim();
@@ -304,13 +249,13 @@ async function ensureMarketplaceCheckout(input: {
 
 async function readSelectedMarketplaceEntry(input: {
   readonly commands: CommandRunner;
-  readonly distribution: PluginSelectionV1;
   readonly identity: QualifiedPluginId;
   readonly marketplacePath: string;
   readonly signal: AbortSignal;
 }): Promise<MarketplaceEntry> {
   const shown = await runGit(
     input.commands,
+    input.marketplacePath,
     [
       '-C',
       input.marketplacePath,
@@ -323,7 +268,7 @@ async function readSelectedMarketplaceEntry(input: {
   const catalog = parseJson(shown.stdout, 'plugin marketplace catalog');
   assertBoundedJson(catalog, 'plugin marketplace catalog');
   if (!isPlainRecord(catalog) || catalog.name !== input.identity.marketplace) {
-    throw new Error('Pinned catalog does not match the plugin marketplace identity.');
+    throw new Error('Fetched catalog does not match the plugin marketplace identity.');
   }
   if (
     !Array.isArray(catalog.plugins) ||
@@ -358,52 +303,12 @@ async function readSelectedMarketplaceEntry(input: {
   return entry;
 }
 
-async function materializeSyntheticMarketplace(
+async function knownMarketplaces(
   state: MutableWorkspace,
-  marketplaceRelativePath: string,
-  alias: string,
-  entry: MarketplaceEntry,
-): Promise<void> {
-  const catalogPath = `${marketplaceRelativePath}/.claude-plugin/marketplace.json`;
-  const existingBytes = await state.readFile(catalogPath, {
-    maxBytes: MAX_COMMAND_OUTPUT_BYTES,
-  });
-  const existing = parseJson(
-    Buffer.from(existingBytes).toString('utf8'),
-    'materialized plugin marketplace',
-  );
-  let entries: unknown[] = [];
-  if (isPlainRecord(existing) && existing.name === alias) {
-    if (!Array.isArray(existing.plugins)) {
-      throw new Error('Materialized plugin marketplace is malformed.');
-    }
-    entries = [...existing.plugins];
-  }
-  const previous = entries.find(
-    (candidate) => isPlainRecord(candidate) && candidate.name === entry.name,
-  );
-  if (
-    previous !== undefined &&
-    serializeCanonicalJson(previous) !== serializeCanonicalJson(entry)
-  ) {
-    throw new Error('Materialized plugin marketplace contains a conflicting entry.');
-  }
-  if (previous === undefined) entries.push(entry);
-  entries.sort((left, right) =>
-    compareCodeUnits(entryName(left), entryName(right)),
-  );
-  const body = serializeCanonicalJson({
-    name: alias,
-    owner: {name: 'Stripe Forge'},
-    plugins: entries,
-  });
-  await state.writeFile(catalogPath, Buffer.from(body, 'utf8'), {mode: 0o644});
-}
-
-async function knownMarketplaceNames(state: MutableWorkspace): Promise<Set<string>> {
-  const path = `${SEED_RELATIVE_PATH}/known_marketplaces.json`;
+): Promise<Record<string, unknown>> {
+  const path = 'known_marketplaces.json';
   const inspected = await state.inspect(path);
-  if (inspected.kind === 'absent') return new Set();
+  if (inspected.kind === 'absent') return {};
   if (inspected.kind !== 'file') {
     throw new Error('Claude plugin marketplace state is malformed.');
   }
@@ -416,61 +321,31 @@ async function knownMarketplaceNames(state: MutableWorkspace): Promise<Set<strin
   if (!isPlainRecord(value)) {
     throw new Error('Claude known marketplaces state is malformed.');
   }
-  return new Set(Object.keys(value));
+  assertBoundedJson(value, 'Claude known marketplaces');
+  return value;
 }
 
-async function enabledPluginIds(state: MutableWorkspace): Promise<Set<string>> {
-  const inspected = await state.inspect(SESSION_SETTINGS_RELATIVE_PATH);
-  if (inspected.kind === 'absent') return new Set();
+async function installedPluginRecords(
+  state: MutableWorkspace,
+): Promise<Record<string, unknown>> {
+  const path = 'installed_plugins.json';
+  const inspected = await state.inspect(path);
+  if (inspected.kind === 'absent') return {};
   if (inspected.kind !== 'file') {
-    throw new Error('Claude plugin session settings are malformed.');
+    throw new Error('Claude installed plugin state is malformed.');
   }
   const value = parseJson(
     Buffer.from(
-      await state.readFile(SESSION_SETTINGS_RELATIVE_PATH, {
-        maxBytes: MAX_COMMAND_OUTPUT_BYTES,
-      }),
+      await state.readFile(path, {maxBytes: MAX_COMMAND_OUTPUT_BYTES}),
     ).toString('utf8'),
-    'Claude plugin session settings',
+    'Claude installed plugin state',
   );
-  if (
-    !isPlainRecord(value) ||
-    Reflect.ownKeys(value).some(
-      (key) => typeof key !== 'string' || key !== 'enabledPlugins',
-    ) ||
-    !isPlainRecord(value.enabledPlugins)
-  ) {
-    throw new Error('Claude plugin session settings are malformed.');
+  if (!isPlainRecord(value) || value.version !== 2 || !isPlainRecord(value.plugins)) {
+    throw new Error('Claude installed plugin state is malformed.');
   }
-  const output = new Set<string>();
-  for (const [id, enabled] of Object.entries(value.enabledPlugins)) {
-    parseQualifiedPluginId(id);
-    if (enabled !== true) {
-      throw new Error('Claude plugin session settings are malformed.');
-    }
-    output.add(id);
-  }
-  return output;
-}
-
-async function writeSessionSettings(
-  state: MutableWorkspace,
-  pluginIds: ReadonlySet<string>,
-): Promise<void> {
-  const enabledPlugins: Record<string, boolean> = {};
-  for (const id of [...pluginIds].sort(compareCodeUnits)) {
-    Object.defineProperty(enabledPlugins, id, {
-      configurable: true,
-      enumerable: true,
-      value: true,
-      writable: true,
-    });
-  }
-  await state.writeFile(
-    SESSION_SETTINGS_RELATIVE_PATH,
-    Buffer.from(serializeCanonicalJson({enabledPlugins}), 'utf8'),
-    {mode: 0o444},
-  );
+  assertBoundedJson(value, 'Claude installed plugin state');
+  for (const id of Object.keys(value.plugins)) parseQualifiedPluginId(id);
+  return value.plugins;
 }
 
 function assertInstallResult(output: string, pluginId: string): void {
@@ -510,9 +385,7 @@ function inspectPluginList(
       row.scope !== 'user' ||
       row.enabled !== true ||
       typeof row.installPath !== 'string' ||
-      !row.installPath.startsWith(
-        `${CLAUDE_PLUGIN_STATE_PATH}/${SEED_RELATIVE_PATH}/`,
-      )
+      !row.installPath.startsWith(`${CLAUDE_PLUGIN_STATE_PATH}/cache/`)
     ) {
       throw new Error('Claude plugin list returned an invalid installed plugin.');
     }
@@ -556,22 +429,12 @@ async function assertInstalledPluginRecord(
   expectedInstallPath: string,
   marketplaceSource: unknown,
 ): Promise<string | undefined> {
-  const value = parseJson(
-    Buffer.from(
-      await state.readFile(`${SEED_RELATIVE_PATH}/installed_plugins.json`, {
-        maxBytes: MAX_COMMAND_OUTPUT_BYTES,
-      }),
-    ).toString('utf8'),
-    'Claude installed plugin state',
-  );
-  if (!isPlainRecord(value) || value.version !== 2 || !isPlainRecord(value.plugins)) {
-    throw new Error('Claude installed plugin state is malformed.');
-  }
-  const actualIds = new Set(Object.keys(value.plugins));
+  const plugins = await installedPluginRecords(state);
+  const actualIds = new Set(Object.keys(plugins));
   if (!setsEqual(actualIds, expectedPluginIds)) {
     throw new Error('Claude installed plugin state contains an unexpected plugin.');
   }
-  const records = value.plugins[selectedPluginId];
+  const records = plugins[selectedPluginId];
   if (!Array.isArray(records) || records.length !== 1 || !isPlainRecord(records[0])) {
     throw new Error('Claude installed plugin state omitted the selected plugin.');
   }
@@ -598,15 +461,11 @@ async function assertInstalledPluginRecord(
 }
 
 function installedPluginLocation(
-  entry: MarketplaceEntry,
-  alias: string,
+  marketplace: string,
   pluginName: string,
   version: string,
 ): Readonly<{relative: string; absolute: string}> {
-  const relative =
-    typeof entry.source === 'string'
-      ? `${SEED_RELATIVE_PATH}/marketplaces/${alias}/${entry.source.slice(2)}`
-      : `${SEED_RELATIVE_PATH}/cache/${alias}/${pluginName}/${version}`;
+  const relative = `cache/${marketplace}/${pluginName}/${version}`;
   return Object.freeze({
     relative,
     absolute: `${CLAUDE_PLUGIN_STATE_PATH}/${relative}`,
@@ -675,15 +534,10 @@ function assertSupportedMarketplaceSource(source: unknown): void {
 
 function claudePluginCommand(
   executable: string,
-  installerHome: string,
-  seedPath: string,
   argv: readonly string[],
 ): readonly string[] {
   return [
     'env',
-    `HOME=${installerHome}`,
-    `CLAUDE_CODE_PLUGIN_CACHE_DIR=${seedPath}`,
-    'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
     'CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1',
     'GIT_CONFIG_NOSYSTEM=1',
     'GIT_CONFIG_GLOBAL=/dev/null',
@@ -695,6 +549,7 @@ function claudePluginCommand(
 
 function runGit(
   commands: CommandRunner,
+  repositoryPath: string,
   argv: readonly string[],
   signal: AbortSignal,
   message: string,
@@ -703,11 +558,14 @@ function runGit(
     commands,
     [
       'env',
-      `HOME=${CLAUDE_PLUGIN_STATE_PATH}/${INSTALLER_HOME_RELATIVE_PATH}`,
       'GIT_CONFIG_NOSYSTEM=1',
       'GIT_CONFIG_GLOBAL=/dev/null',
       'GIT_TERMINAL_PROMPT=0',
       'git',
+      // Trust only this run-owned checkout for provenance reads, without
+      // changing global Git configuration or the native installer's behavior.
+      '-c',
+      `safe.directory=${repositoryPath}`,
       ...argv,
     ],
     signal,
@@ -757,18 +615,6 @@ function parseQualifiedPluginId(value: string): QualifiedPluginId {
     throw new TypeError('Claude plugin ID must be plugin@marketplace.');
   }
   return Object.freeze({name, marketplace});
-}
-
-function marketplaceAlias(distribution: PluginSelectionV1): string {
-  const digest = createHash('sha256')
-    .update(
-      serializeCanonicalJson({
-        repository: distribution.marketplace,
-        marketplace: parseQualifiedPluginId(distribution.plugin).marketplace,
-      }),
-    )
-    .digest('hex');
-  return `forge-${digest.slice(0, 32)}`;
 }
 
 function isGitMarketplaceSource(value: unknown): value is Record<string, unknown> {
@@ -883,10 +729,6 @@ function assertBoundedJson(value: unknown, label: string): void {
   }
 }
 
-function entryName(value: unknown): string {
-  return isPlainRecord(value) && typeof value.name === 'string' ? value.name : '';
-}
-
 function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
   return left.size === right.size && [...left].every((value) => right.has(value));
 }
@@ -922,8 +764,4 @@ function deepFreeze<T>(value: T): T {
     for (const child of Object.values(value)) deepFreeze(child);
   }
   return value;
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

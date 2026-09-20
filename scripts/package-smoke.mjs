@@ -51,6 +51,8 @@ try {
       assert.equal(typeof forge.createForgeEngine, 'function');
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
+      assert.equal(typeof forge.parseJudgeEvidence, 'function');
+      assert.equal(forge.JUDGE_EVIDENCE_SCHEMA_VERSION, 1);
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
       assert.equal(forge.JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');
@@ -83,7 +85,7 @@ try {
       assert.equal(typeof cli.runCli, 'function');
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
-      assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '1+gateway');
+      assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '2+gateway');
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');

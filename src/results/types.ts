@@ -10,6 +10,7 @@ import type {
   JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.js';
 import type {
   ModelRefV1,
@@ -165,6 +166,7 @@ export interface JudgeWorkspaceEntryV1 {
   readonly truncated: boolean;
 }
 
+/** Judge audit with the exact reduced transcript supplied to every guideline. */
 export interface JudgeEvidenceV1 {
   readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
   readonly prompt_version: string;
@@ -176,6 +178,8 @@ export interface JudgeEvidenceV1 {
     readonly included_step_sources: typeof JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES;
     readonly copied_context: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
     readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
+    /** Canonical serialization of these steps is the judge's transcript input. */
+    readonly steps: readonly JudgeVisibleStepV1[];
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];

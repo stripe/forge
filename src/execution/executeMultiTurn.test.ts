@@ -18,6 +18,7 @@ import {
   type JudgeWorkspaceEvidenceV1,
   type JudgeWorkspaceWarningCode,
 } from '../evaluation/index.js';
+import {serializeCanonicalJson} from '../serialization.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
@@ -601,6 +602,7 @@ describe('executeEval multi-turn and judging integration', () => {
     }
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
+      schema_version: number;
       transcript: {
         source: string;
         projection_id: string;
@@ -609,8 +611,10 @@ describe('executeEval multi-turn and judging integration', () => {
         included_step_sources: string[];
         copied_context: string;
         included_fields: string[];
+        steps: unknown[];
       };
     };
+    assert.equal(judgeEvidence.schema_version, 1);
     assert.deepEqual(judgeEvidence.transcript, {
       source: JUDGE_TRANSCRIPT_SOURCE,
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
@@ -619,7 +623,13 @@ describe('executeEval multi-turn and judging integration', () => {
       included_step_sources: [...JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES],
       copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
       included_fields: [...JUDGE_TRANSCRIPT_INCLUDED_FIELDS],
+      steps: JSON.parse(projection.transcriptJson),
     });
+    const storedTranscript = serializeCanonicalJson(judgeEvidence.transcript.steps);
+    assert.equal(storedTranscript, projection.transcriptJson);
+    for (const prompt of judgePrompts) {
+      assert.ok(prompt.includes(storedTranscript));
+    }
   });
 
   it('fails closed when final prompt redaction would rewrite selected evidence bytes', async () => {

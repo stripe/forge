@@ -19,7 +19,7 @@ export type AgentPluginSourceKind =
   | 'url'
   | 'git-subdir';
 
-/** Agent-independent audit record for the native plugin Forge resolved and installed. */
+/** Installation-time audit record; plugins may change during interaction. */
 export interface AgentPluginInstallationReceipt extends JsonObject {
   readonly adapter: string;
   readonly plugin: string;
