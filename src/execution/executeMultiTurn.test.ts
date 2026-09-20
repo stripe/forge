@@ -614,7 +614,7 @@ describe('executeEval multi-turn and judging integration', () => {
         steps: unknown[];
       };
     };
-    assert.equal(judgeEvidence.schema_version, 2);
+    assert.equal(judgeEvidence.schema_version, 1);
     assert.deepEqual(judgeEvidence.transcript, {
       source: JUDGE_TRANSCRIPT_SOURCE,
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,

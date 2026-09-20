@@ -326,7 +326,7 @@ decision history. It is not supplied to the guideline judge.
 
 `workspace-evidence.json` contains bounded evidence for the paths inspected by
 configured deterministic file checks; it is not a workspace snapshot.
-`judge-evidence.json` exists only when judging ran. Schema version 2 records the
+`judge-evidence.json` exists only when judging ran. Schema version 1 records the
 judge prompt version, positive transcript-projection policy, and the exact
 reduced, redacted steps supplied to the judge at `transcript.steps`, alongside
 the bounded workspace text and warnings. These two evidence artifacts have
@@ -524,11 +524,10 @@ workspace subset, positive allowlist policy, and projected transcript steps
 sent to the judge. It is an audit artifact, not an input to a later judge call.
 `verifyCompletedRun` verifies the artifact descriptors, strict ATIF trajectory,
 completed-turn coverage, projection-policy declaration, and equality of the
-embedded steps with the projection of `trajectory.json`. The parser and verifier
-also accept legacy schema version 1, which recorded only the transcript policy
-and workspace evidence; those historical artifacts contain no embedded steps.
-The judge prompt and projection versions remain unchanged. Forge refuses to
-dispatch a judge request if its final defensive
+embedded steps with the projection of `trajectory.json`. Embedded steps are
+required; artifacts containing only the projection policy are rejected. The
+artifact schema, judge prompt, and projection versions remain at 1. Forge
+refuses to dispatch a judge request if its final defensive
 credential-redaction pass would rewrite the selected prompt evidence.
 
 For a guideline-judged run named `judged-001`, inspect the actual reduced

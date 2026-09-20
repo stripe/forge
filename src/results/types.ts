@@ -27,7 +27,7 @@ export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const INTERACTION_SCHEMA_VERSION = 1 as const;
 export const SETUP_ARTIFACT_SCHEMA_VERSION = 1 as const;
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
-export const JUDGE_EVIDENCE_SCHEMA_VERSION = 2 as const;
+export const JUDGE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 
 export type EvalStatus = 'passed' | 'partial' | 'failed';
 
@@ -166,9 +166,9 @@ export interface JudgeWorkspaceEntryV1 {
   readonly truncated: boolean;
 }
 
-/** Legacy audit containing projection policy without the projected steps. */
+/** Judge audit with the exact reduced transcript supplied to every guideline. */
 export interface JudgeEvidenceV1 {
-  readonly schema_version: 1;
+  readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
   readonly prompt_version: string;
   readonly transcript: {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
@@ -178,6 +178,8 @@ export interface JudgeEvidenceV1 {
     readonly included_step_sources: typeof JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES;
     readonly copied_context: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
     readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
+    /** Canonical serialization of these steps is the judge's transcript input. */
+    readonly steps: readonly JudgeVisibleStepV1[];
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];
@@ -189,18 +191,6 @@ export interface JudgeEvidenceV1 {
     }[];
   };
 }
-
-/** Judge audit with the exact reduced transcript supplied to every guideline. */
-export interface JudgeEvidenceV2
-  extends Omit<JudgeEvidenceV1, 'schema_version' | 'transcript'> {
-  readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
-  readonly transcript: JudgeEvidenceV1['transcript'] & {
-    /** Canonical serialization of these steps is the judge's transcript input. */
-    readonly steps: readonly JudgeVisibleStepV1[];
-  };
-}
-
-export type JudgeEvidence = JudgeEvidenceV1 | JudgeEvidenceV2;
 
 export interface ArtifactDescriptorV1 {
   readonly path: string;

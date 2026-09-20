@@ -129,7 +129,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
   });
 
-  it('still reads legacy policy-only judge evidence', () => {
+  it('strictly parses judge evidence and its projection declaration', () => {
     const evidence = {
       schema_version: 1,
       prompt_version: '1',
@@ -141,6 +141,10 @@ describe('canonical interaction and judge evidence parsing', () => {
         included_step_sources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
         copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
         included_fields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+        steps: [
+          {step_id: 1, source: 'user', message: 'do it'},
+          {step_id: 2, source: 'agent', message: 'done'},
+        ],
       },
       workspace: {
         entries: [
@@ -231,14 +235,13 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
   });
 
-  it('requires and snapshots the visible steps in version 2 judge evidence', () => {
+  it('requires and snapshots the visible judge steps', () => {
     const step = {step_id: 1, source: 'agent', message: 'done'};
     const evidence = judgeEvidenceWithSteps([step]);
     const parsed = parseJudgeEvidence(evidence);
     assert.deepEqual(parsed, evidence);
     step.message = 'changed after parsing';
-    assert.equal(parsed.schema_version, 2);
-    if (parsed.schema_version !== 2) throw new Error('Expected version 2.');
+    assert.equal(parsed.schema_version, 1);
     assert.equal(parsed.transcript.steps[0]?.message, 'done');
     assert.deepEqual(
       parseJudgeEvidence(judgeEvidenceWithSteps([])),
@@ -247,7 +250,7 @@ describe('canonical interaction and judge evidence parsing', () => {
 
     const {steps: _steps, ...policy} = evidence.transcript;
     assert.throws(() => parseJudgeEvidence({...evidence, transcript: policy}));
-    assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 1}));
+    assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 2}));
     assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 3}));
     assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
     assert.throws(() => parseJudgeEvidence({
@@ -289,7 +292,7 @@ describe('canonical interaction and judge evidence parsing', () => {
 
 function judgeEvidenceWithSteps(steps: readonly unknown[]) {
   return {
-    schema_version: 2,
+    schema_version: 1,
     prompt_version: '1',
     transcript: {
       source: 'trajectory.json',

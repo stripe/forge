@@ -21,7 +21,6 @@ import {
   RUN_RESULT_SCHEMA_VERSION,
   type ArtifactDescriptorV1,
   type JudgeEvidenceV1,
-  type JudgeEvidenceV2,
   type RunResultV1,
 } from './types.js';
 
@@ -649,7 +648,7 @@ describe('local artifact store', () => {
     );
   });
 
-  it('still verifies legacy judge evidence and its projection declaration', async () => {
+  it('verifies judge evidence and its projection declaration', async () => {
     const trajectory = trajectoryBody([
       {step_id: 1, source: 'user', message: 'do it'},
       {
@@ -749,18 +748,7 @@ describe('local artifact store', () => {
   });
 
   it('binds embedded judge steps to the trajectory even if artifact hashes are valid', async () => {
-    const legacy = judgeEvidenceValue();
-    const judgeEvidence: JudgeEvidenceV2 = {
-      ...legacy,
-      schema_version: 2,
-      transcript: {
-        ...legacy.transcript,
-        steps: [
-          {step_id: 1, source: 'user', message: 'do it'},
-          {step_id: 2, source: 'agent', message: 'done'},
-        ],
-      },
-    };
+    const judgeEvidence = judgeEvidenceValue();
     const trajectory = trajectoryBody([
       {step_id: 1, source: 'user', message: 'do it'},
       {
@@ -770,7 +758,7 @@ describe('local artifact store', () => {
         reasoning_content: 'private reasoning',
       },
     ]);
-    const commitEvidence = (evidence: JudgeEvidenceV2) => commitArtifacts(
+    const commitEvidence = (evidence: JudgeEvidenceV1) => commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
         {path: 'trajectory.json', body: trajectory},
@@ -782,6 +770,22 @@ describe('local artifact store', () => {
     await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
       runId: 'run-1',
     });
+
+    const {steps: _steps, ...policyOnly} = judgeEvidence.transcript;
+    const missingStepsLocation = await commitArtifacts(
+      [
+        {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+        {path: 'trajectory.json', body: trajectory},
+        {
+          path: 'judge-evidence.json',
+          body: jsonBody({...judgeEvidence, transcript: policyOnly}),
+        },
+      ],
+      withPassingGuideline,
+    );
+    await expect(verifyCompletedRun(missingStepsLocation)).rejects.toThrow(
+      'Completed judge-evidence.json does not match its schema.',
+    );
 
     for (const steps of [
       [],
@@ -914,6 +918,10 @@ function judgeEvidenceValue(): JudgeEvidenceV1 {
         'observation.results[].source_call_id',
         'observation.results[].content',
         'observation.results[].is_error',
+      ],
+      steps: [
+        {step_id: 1, source: 'user', message: 'do it'},
+        {step_id: 2, source: 'agent', message: 'done'},
       ],
     },
     workspace: {entries: [], complete: true, warnings: []},

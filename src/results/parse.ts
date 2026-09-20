@@ -25,9 +25,7 @@ import {
   RUN_RESULT_SCHEMA_VERSION,
   SETUP_ARTIFACT_SCHEMA_VERSION,
   type InteractionArtifactV1,
-  type JudgeEvidence,
   type JudgeEvidenceV1,
-  type JudgeEvidenceV2,
   type RunResult,
   type SetupArtifactV1,
 } from './types.js';
@@ -224,8 +222,8 @@ const interactionArtifactSchema = z.object({
   }
 });
 
-const judgeEvidenceV1Schema = z.object({
-  schema_version: z.literal(1),
+const judgeEvidenceSchema = z.object({
+  schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
   prompt_version: safeText,
   transcript: z.object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
@@ -248,6 +246,8 @@ const judgeEvidenceV1Schema = z.object({
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[7]),
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[8]),
     ]),
+    // The shared projection parser below validates the complete step schema.
+    steps: z.array(z.unknown()),
   }).strict(),
   workspace: z.object({
     entries: z.array(z.object({
@@ -263,19 +263,6 @@ const judgeEvidenceV1Schema = z.object({
     }).strict()).max(10_000),
   }).strict(),
 }).strict();
-
-const judgeEvidenceV2Schema = judgeEvidenceV1Schema.extend({
-  schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
-  transcript: judgeEvidenceV1Schema.shape.transcript.extend({
-    // The shared projection parser below validates the complete step schema.
-    steps: z.array(z.unknown()),
-  }),
-});
-
-const judgeEvidenceSchema = z.discriminatedUnion('schema_version', [
-  judgeEvidenceV1Schema,
-  judgeEvidenceV2Schema,
-]);
 
 const completionCallSummary = z.object({
   sequence: z.number().int().positive(),
@@ -565,9 +552,8 @@ export function parseSetupArtifact(input: unknown): SetupArtifactV1 {
   return setupArtifactSchema.parse(input) as SetupArtifactV1;
 }
 
-export function parseJudgeEvidence(input: unknown): JudgeEvidence {
+export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {
   const evidence = judgeEvidenceSchema.parse(input);
-  if (evidence.schema_version === 1) return evidence as JudgeEvidenceV1;
 
   const transcript = evidence.transcript;
   assertBoundedJsonValue(transcript.steps);
@@ -587,5 +573,5 @@ export function parseJudgeEvidence(input: unknown): JudgeEvidence {
       ...transcript,
       steps: JSON.parse(projection.transcriptJson),
     },
-  } as JudgeEvidenceV2;
+  } as JudgeEvidenceV1;
 }

@@ -52,7 +52,7 @@ try {
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseJudgeEvidence, 'function');
-      assert.equal(forge.JUDGE_EVIDENCE_SCHEMA_VERSION, 2);
+      assert.equal(forge.JUDGE_EVIDENCE_SCHEMA_VERSION, 1);
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
       assert.equal(forge.JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');

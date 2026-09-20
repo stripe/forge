@@ -34,9 +34,7 @@ import {
   resolveRunPlan,
   type AgentAdapter,
   type ForgeComposition,
-  type JudgeEvidence,
   type JudgeEvidenceV1,
-  type JudgeEvidenceV2,
   type RuntimeAdapter,
 } from './index.js';
 
@@ -46,7 +44,7 @@ describe('@stripe/forge package root', () => {
     expect(preflightEval).toBeTypeOf('function');
     expect(parseInteractionArtifact).toBeTypeOf('function');
     expect(parseJudgeEvidence).toBeTypeOf('function');
-    expect(JUDGE_EVIDENCE_SCHEMA_VERSION).toBe(2);
+    expect(JUDGE_EVIDENCE_SCHEMA_VERSION).toBe(1);
     expect(parseSetupArtifact).toBeTypeOf('function');
     expect(parseAgentPluginInstallationReceipt).toBeTypeOf('function');
     expect(evaluateRunEvidence).toBeTypeOf('function');
@@ -90,9 +88,7 @@ describe('@stripe/forge package root', () => {
       _agent: AgentAdapter,
       _runtime: RuntimeAdapter,
       _composition: ForgeComposition,
-      _judgeEvidence: JudgeEvidence,
-      _legacyJudgeEvidence: JudgeEvidenceV1,
-      _currentJudgeEvidence: JudgeEvidenceV2,
+      _judgeEvidence: JudgeEvidenceV1,
     ): void => undefined;
     expect(acceptsPublicContracts).toBeTypeOf('function');
   });

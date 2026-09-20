@@ -594,7 +594,6 @@ function verifyJudgeEvidence(
     );
   }
   if (
-    judgeEvidence.schema_version === 2 &&
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
       createJudgeTranscriptProjection(trajectory).transcriptJson
   ) {

@@ -91,7 +91,7 @@ import {
   type CompletionCallSummaryV1,
   type EvaluationResultV1,
   type InteractionArtifactV1,
-  type JudgeEvidence,
+  type JudgeEvidenceV1,
   type RolePlayerErrorV1,
   type RunResultV1,
   type RunStopReasonV1,
@@ -423,7 +423,7 @@ export async function executeEvalWithTestHooks(
       throwIfAborted(signal, phase);
       const guidelines = input.plan.evaluation.success_guidelines;
       let guidelineResults = undefined;
-      let judgeEvidence: JudgeEvidence | undefined;
+      let judgeEvidence: JudgeEvidenceV1 | undefined;
       if (guidelines.length > 0) {
         const collected = await collectJudgeWorkspaceEvidence(
           sealed!.workspace,
@@ -471,7 +471,7 @@ export async function executeEvalWithTestHooks(
               },
         );
         judgeEvidence = parseJudgeEvidence({
-          schema_version: 2,
+          schema_version: 1,
           prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
           transcript: {
             source: judgeTranscript.source,
@@ -1547,7 +1547,7 @@ function buildCoreArtifacts(
   trajectoryJson: string,
   interaction: InteractionArtifactV1,
   workspaceEvidence: WorkspaceEvidenceV1,
-  judgeEvidence: JudgeEvidence | undefined,
+  judgeEvidence: JudgeEvidenceV1 | undefined,
 ): RunArtifact[] {
   const setupJson = serializeCanonicalJson(setup);
   return [
