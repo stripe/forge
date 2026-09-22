@@ -2,6 +2,7 @@ import {parseResolvedRunPlan} from '../model/parse.js';
 import type {
   AgentSelectionV1,
   ChecksV1,
+  ForgeRuntimeV1,
   ModelRefV1,
   ResolvedRunPlanV1,
   SetupStepV1,
@@ -27,6 +28,7 @@ export interface TestResolvedRunPlanOptions {
   readonly treatment?: string;
   readonly treatmentSetup?: readonly SetupStepV1[];
   readonly checks?: ChecksV1;
+  readonly runtime?: ForgeRuntimeV1;
 }
 
 /** Create a strict, minimal one-shot plan for public contract tests. */
@@ -121,7 +123,7 @@ export function createTestResolvedRunPlan(
       ? {}
       : {role_player: {...options.rolePlayer}}),
     agent: {...agent},
-    runtime: {
+    runtime: options.runtime ?? {
       adapter: 'docker',
       image: {kind: 'forge'},
       platform: 'linux/amd64',

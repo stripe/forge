@@ -103,7 +103,7 @@ pure setup preflight
   - select agent branch
   - bind AgentPluginInstaller
   - declare git/claude executables
-  - declare writable ~/.claude/plugins state
+  - declare writable plugins state under the selected Claude configuration root
       |
       v
 prepare runtime and verify Claude version
@@ -148,9 +148,41 @@ claude plugin list --json
 ```
 
 The original marketplace name and plugin ID are preserved. Claude writes its
-normal `~/.claude/settings.json` and `~/.claude/plugins` state, including cached
-plugin files and the native plugin data directory. Forge supplies no alternate
-installer home, seed/cache environment variables, or forced `--settings` file.
+normal `~/.claude/settings.json` and `~/.claude/plugins` state by default,
+including cached plugin files and the native plugin data directory. A host
+using another runtime can explicitly supply its run-owned layout when creating
+the Claude adapter:
+
+```ts
+import {createClaudeCodeAdapter} from '@stripe/forge/agents/claude-code';
+
+const claude = createClaudeCodeAdapter({
+  layout: {
+    workspace: '/tmp/evaluation-123/workspace',
+    home: '/tmp/evaluation-123/home',
+    configDirectory: '/tmp/evaluation-123/session',
+  },
+});
+```
+
+The adapter snapshots these canonical absolute Linux paths before preflight.
+The host must pin the same effective layout in its runtime configuration and
+provide actual paths without symlink aliases; Forge does not resolve paths
+against the embedding process's filesystem. The runtime's declared workspace
+and HOME must match. Workspace must be separate from home and configuration
+state; configuration may be a child of home or a separate run-owned directory.
+The runtime must honor declared plain environment variables for setup and
+interaction. When the configuration root differs from `HOME/.claude`, the
+adapter declares `CLAUDE_CONFIG_DIR` for all command projections, including
+uncredentialed plugin installation. Native settings, plugin cache paths,
+marketplace verification, and exact-session evidence then use that same root.
+Native project directories use the pinned Claude version's workspace-path
+encoding, including its long-path hash suffix. The default layout retains
+adapter versions `2` and `2+gateway`; a custom layout records `2+layout` or
+`2+gateway.layout`.
+
+Forge supplies no separate installer home, plugin seed/cache environment
+variables, or forced `--settings` file.
 Native settings can disable or enable the plugin, and plugin files and hook
 data can be modified under normal tool and OS permissions. When an edit becomes
 visible to an active session depends on Claude's own loading and reload behavior.

@@ -314,7 +314,7 @@ const TreatmentSchema = z
   })
   .strict();
 
-const RuntimeSchema = z
+const DockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
     image: z.object({kind: z.literal('forge')}).strict(),
@@ -335,6 +335,67 @@ const RuntimeSchema = z
       .default({}),
   })
   .strict();
+
+// Provider-specific semantics are validated by the explicitly supplied runtime
+// during pure execution preflight. Parsing and offline verification need no
+// private implementation, and never transform this materialized configuration.
+const ExternalRuntimeSchema = z.object({
+  adapter: z.string().refine(
+    (value) => value.length <= 257 && value !== 'forge/docker' &&
+      value.split('/').length === 2 &&
+      value.split('/').every(isSafeSimpleIdentifier),
+    'must be a namespaced external runtime identifier',
+  ),
+  adapter_version: VersionSchema,
+  config_version: PositiveIntegerSchema,
+  platform: z.enum(['linux/amd64', 'linux/arm64']),
+  config: z.unknown().superRefine((value, context) => {
+    try {
+      assertBoundedDataGraph(value, 'runtime config', 'invalid_plan');
+      assertPlainJsonGraph(value, 'runtime config', 'invalid_plan');
+      assertRuntimeConfigBytes(value);
+    } catch {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Runtime config must be bounded plain JSON without unsafe object keys.',
+      });
+    }
+  }).pipe(JsonObjectSchema),
+}).strict();
+
+const RuntimeSchema = z.union([DockerRuntimeSchema, ExternalRuntimeSchema]);
+
+function assertRuntimeConfigBytes(value: unknown): void {
+  // Count every serialized occurrence, including repeated object references.
+  // Bound raw strings before escaping them and before Zod clones the graph.
+  const pending: unknown[] = [value];
+  let bytes = 0;
+  const textBytes = (text: string): number => {
+    if (Buffer.byteLength(text, 'utf8') > MAX_TEXT_BYTES) throw new TypeError('Oversized config.');
+    return Buffer.byteLength(JSON.stringify(text), 'utf8');
+  };
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === 'string') {
+      bytes += textBytes(current);
+    } else if (current !== null && typeof current === 'object') {
+      const keys = Object.keys(current);
+      bytes += 2 + Math.max(0, keys.length - 1);
+      for (const key of keys) {
+        if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+          throw new TypeError('Unsafe config key.');
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(current, key)!;
+        if (!('value' in descriptor)) throw new TypeError('Config accessors are unsupported.');
+        if (!Array.isArray(current)) bytes += textBytes(key) + 1;
+        pending.push(descriptor.value);
+      }
+    } else {
+      bytes += JSON.stringify(current)!.length;
+    }
+    if (bytes > MAX_TEXT_BYTES) throw new TypeError('Oversized config.');
+  }
+}
 
 const ExperimentConfigSchema = z
   .object({
@@ -440,7 +501,7 @@ const MaterializedEvalCaseSchema = z.intersection(
   EvalCaseSchema,
 );
 
-const ResolvedRuntimeSchema = z
+const ResolvedDockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
     image: z.object({kind: z.literal('forge')}).strict(),
@@ -454,6 +515,11 @@ const ResolvedRuntimeSchema = z
       .strict(),
   })
   .strict();
+
+const ResolvedRuntimeSchema = z.union([
+  ResolvedDockerRuntimeSchema,
+  ExternalRuntimeSchema,
+]);
 
 const ResolvedRunPlanSchema = z
   .object({

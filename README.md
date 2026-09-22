@@ -2,8 +2,8 @@
 
 Forge is a portable execution harness for reproducible coding-agent evaluations.
 It loads a versioned dataset and experiment config, resolves one selection into
-an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session in
-Docker, normalizes agent evidence to ATIF, evaluates checks and success
+an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session
+through a runtime adapter, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
 
 > **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
@@ -15,6 +15,9 @@ guidelines, and atomically commits a neutral local result.
 > benchmark.
 
 ## Requirements
+
+These requirements apply to the built-in Docker composition. Embedding hosts
+can supply an external runtime with its own explicit execution requirements.
 
 - Node.js 22 or newer.
 - A running Docker daemon and Docker CLI capable of building Linux images.
@@ -989,6 +992,108 @@ The composition contains:
 - a transactional `RunArtifactStore`;
 - optional completion providers, one observer, and artifact contributors.
 
+### External runtimes
+
+Docker remains the built-in runtime and the public executable's default. An
+embedding host can supply another `RuntimeAdapter` using a fully specified
+runtime descriptor in its experiment:
+
+```yaml
+runtime:
+  adapter: acme/process
+  adapter_version: '1'
+  config_version: 1
+  platform: linux/amd64
+  config:
+    profile: isolated-worker-v1
+    tool_build: immutable-build-123
+    network_policy: approved-egress-v1
+```
+
+The names and fields inside `config` belong to that adapter. The public parser
+validates the strict envelope and bounded plain JSON (at most 1 MiB serialized
+configuration, subject to the overall graph limits). It rejects unsafe object
+keys and does not add defaults or rewrite external configuration. Namespaced
+adapter IDs, implementation versions, configuration versions, and platform are
+required. `docker` and `forge/docker` are reserved for the built-in format.
+
+Supply one implementation through `ForgeComposition.runtime`; no registry,
+automatic imports, or runtime discovery is involved. An external adapter must
+implement synchronous, pure `preflight({plan, requirements, environment})`. Forge calls it
+after merging agent and setup requirements, before resolving any credentials
+or allocating resources. It must reject unsupported config versions, unknown
+fields, missing effective settings, unsupported requirements, and incompatible
+limits. It must not inspect ambient state, normalize defaults, allocate, or
+return a promise. Physical executable and environment checks belong in
+`prepare()`. The implementation ID and version must match the plan exactly.
+The preflight environment contains plain variables and opaque credential
+names, references, and scopes. Use it to reject incompatible environment policy
+before secret resolution; secret values are supplied only to `prepare()`.
+
+Parsing and planning validate the public envelope; execution and `validate`
+with a host composition additionally validate provider semantics. The public
+CLI cannot execute an external descriptor on its own. Wrappers using `runCli`
+receive the selected descriptor in the factory's `options.runtime` field and
+explicitly choose their implementation.
+
+The complete descriptor participates in the resolved plan digest. New results
+record `runtime.adapter_version`; verification binds runtime identity,
+version, and platform to the plan without loading the private adapter. Offline
+verification checks the recorded artifacts and descriptor, not the private
+adapter's configuration semantics or actual isolation enforcement. Historical
+Docker v1 results without `adapter_version` remain accepted, and their existing
+plan bytes and `docker`/`forge/docker` identity aliases are preserved.
+
+Keep settings that can affect evaluation behavior, such as immutable tool
+builds, resources, and network profiles, in the resolved configuration. Keep
+credentials and infrastructure clients in the composition. An adapter may
+record actual build and deployment identity in sealed runtime metadata. A
+worker deployment is distinct from its command-execution mechanism; hosts can
+reuse an adapter when moving a worker without changing that mechanism.
+
+See [the runnable external-runtime example](examples/external-runtime/README.md)
+for an offline demonstration using test adapters. It completes the ordinary
+execution and artifact-verification lifecycle without Docker or credentials.
+
+### Runtime layouts and conformance
+
+State requirements retain the field name `containerPath` for compatibility;
+its meaning is an absolute path visible to commands in the selected runtime.
+The runtime must expose exactly the declared state directories and enforce its
+mutable, setup-finalized, sealed, and disposed boundaries. An adapter which
+cannot enforce `sealAfterSetup: true` must reject that requirement in preflight.
+
+The public Claude adapter accepts a fixed, runtime-visible layout:
+
+```js
+const claude = createClaudeCodeAdapter({
+  layout: {
+    workspace: '/run/example/workspace',
+    home: '/run/example/home',
+    configDirectory: '/run/example/session',
+  },
+});
+```
+
+Choose the run-owned paths in trusted host code before constructing the adapter;
+the runtime creates them during preparation. `ClaudeCodeLayout` is exported as
+a type from `@stripe/forge/agents/claude-code`. The layout is validated and
+snapshotted without filesystem access. The runtime must report the same home
+and workspace paths. Claude config, plugin installation, and native project
+paths share the effective configuration root, including when it is separate
+from HOME. Custom layouts record adapter version `2+layout` or
+`2+gateway.layout`; default Docker paths and versions remain unchanged.
+
+Use `assertRuntimeAdapterConforms` from `@stripe/forge/testing` to exercise an
+adapter. Its optional `commandProbes` check scoped command results using
+synthetic credentials, and `cancellationProbe` uses an explicit ready line and
+a bounded abort deadline. The helper also checks state bytes and revocation of
+mutable and command handles. Each real implementation must additionally test
+its process cleanup, background-writer termination, filesystem boundaries, and
+isolation guarantees; a test-double probe does not establish those properties.
+
+### Credentials and lifecycle authority
+
 Completion providers may be a read-only ID map or a
 `CompletionProviderResolver`. Forge selects them from the explicit
 `models.role_player` and `models.judge` coordinates in the resolved plan.
@@ -1156,8 +1261,10 @@ proxy, or an offline execution mode.
   4.5-or-newer model identifiers for strict structured output. OpenAI,
   OpenRouter-native, and other provider protocols are not included, though a
   programmatic composition can implement the public provider contract.
-- Only the Forge-owned Docker image is accepted. Custom images, Dockerfiles,
-  direct-process runtimes, interactive/human runs, and custom mounts are absent.
+- The built-in Docker adapter accepts only the Forge-owned image. Custom
+  images, mounts, and other execution mechanisms require a host-supplied
+  runtime. No additional runtime implementations or interactive/human
+  controller ship in this package.
 - `run` executes one selected matrix entry. There is no campaign scheduler,
   concurrency manager, or automatic run retry loop; `repetitions` create
   selectable entries and experiment-level `retries` is not acted on by the v0.1

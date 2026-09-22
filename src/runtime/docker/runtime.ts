@@ -10,6 +10,7 @@ import type {
   ReadonlyWorkspace,
   RuntimeAdapter,
   RuntimePlatform,
+  RuntimePreflight,
   RuntimePreparation,
   SealedRuntime,
   WorkspaceWriteOptions,
@@ -19,7 +20,7 @@ import {
   type CredentialScope,
   type ResolvedEnvironment,
 } from '../../contracts/credentials.js';
-import type {ForgeDockerRuntimeV1} from '../../model/types.js';
+import type {ForgeDockerRuntimeV1, ForgeRuntimeV1} from '../../model/types.js';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
@@ -75,6 +76,11 @@ export function createDockerRuntimeAdapter(
   return Object.freeze({
     id: 'forge/docker',
     version: '1',
+    preflight({plan, requirements}: RuntimePreflight) {
+      validateRuntime(plan.runtime);
+      validateExecutableRequirements(requirements.executables);
+      validateStateRequirements(requirements.stateDirectories);
+    },
     async prepare(input: RuntimePreparation): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
       const runtime = validateRuntime(input.plan.runtime);
@@ -592,8 +598,9 @@ async function bestEffortRemoveContainer(
     .catch(() => undefined);
 }
 
-function validateRuntime(runtime: ForgeDockerRuntimeV1): ForgeDockerRuntimeV1 {
+function validateRuntime(runtime: ForgeRuntimeV1): ForgeDockerRuntimeV1 {
   if (
+    !('image' in runtime) ||
     runtime.adapter !== 'docker' ||
     runtime.image.kind !== 'forge' ||
     (runtime.platform !== 'linux/amd64' && runtime.platform !== 'linux/arm64')

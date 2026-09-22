@@ -279,13 +279,14 @@ export interface FakeRuntimeAdapterFixture {
 export function createFakeRuntimeAdapter(
   options: FakeRuntimeAdapterOptions = {},
 ): FakeRuntimeAdapterFixture {
-  const id = options.id ?? 'test-runtime';
+  const id = options.id ?? 'forge/docker';
   const version = options.version ?? '1';
   const runs: FakeRuntimeRun[] = [];
 
   const adapter: RuntimeAdapter = {
     id,
     version,
+    preflight() {},
     async prepare(input): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
       const workspace = createMemoryWorkspace(options.initialFiles);

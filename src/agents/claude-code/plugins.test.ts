@@ -3,6 +3,7 @@ import {describe, it} from 'node:test';
 
 import type {CommandResult, CommandRunner} from '../../contracts/command.js';
 import type {PluginSelectionV1} from '../../model/types.js';
+import type {ClaudeCodeLayout} from './layout.js';
 import {
   createMemoryWorkspace,
   type MemoryWorkspaceFixture,
@@ -33,6 +34,48 @@ const distribution: PluginSelectionV1 = {
 };
 
 describe('Claude plugin installer', () => {
+  it('installs and verifies receipts against the explicit separate configuration root', async () => {
+    const layout: ClaudeCodeLayout = {
+      workspace: '/tmp/run-123/workspace',
+      home: '/tmp/run-123/home',
+      configDirectory: '/tmp/run-123/session',
+    };
+    const pluginStatePath = `${layout.configDirectory}/plugins`;
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, {pluginStatePath});
+    const prepared = createClaudePluginInstaller({
+      adapterId: 'claude-code', executable: 'claude', layout,
+    }).preflight(distribution, {
+      selection: {adapter: 'claude-code', provider: 'anthropic', model: 'claude-test'},
+      runtime: runtimeSelection(),
+    });
+    assert.equal(prepared.requirements.stateDirectories[0]?.containerPath, pluginStatePath);
+    const receipt = await prepared.install({...installContext(state, harness.commands), paths: layout});
+    assert.equal(receipt.native_plugin_id, distribution.plugin);
+    assert.equal(readInstalledState(state)[distribution.plugin]?.[0]?.installPath,
+      `${pluginStatePath}/cache/claude-plugins-official/stripe/${LATEST_VERSION}`);
+
+    const otherState = createMemoryWorkspace();
+    const otherHarness = nativeCommandHarness(otherState, {
+      pluginStatePath,
+      listedInstallPath: `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${LATEST_VERSION}`,
+    });
+    await assert.rejects(prepared.install({
+      ...installContext(otherState, otherHarness.commands), paths: layout,
+    }), /invalid installed plugin/);
+  });
+
+  it('rejects a mismatched runtime layout before reading or installing plugin state', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    await assert.rejects(installerPreflight().install({
+      ...installContext(state, harness.commands),
+      paths: {workspace: '/another/workspace', home: '/home/forge'},
+    }), /do not match the declared layout/);
+    assert.equal(harness.calls.length, 0);
+    assert.equal(state.snapshot().size, 0);
+  });
+
   it('installs the native plugin in writable per-run state and records its initial contents', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, {requireSafeDirectory: true});
@@ -356,9 +399,12 @@ function nativeCommandHarness(
     readonly extraPlugin?: boolean;
     readonly origin?: string;
     readonly requireSafeDirectory?: boolean;
+    readonly pluginStatePath?: string;
+    readonly listedInstallPath?: string;
   } = {},
 ): {readonly commands: CommandRunner; readonly calls: readonly string[][]} {
   const calls: string[][] = [];
+  const pluginStatePath = options.pluginStatePath ?? CLAUDE_PLUGIN_STATE_PATH;
   const catalogSource = options.catalogSource ?? DEFAULT_CATALOG_SOURCE;
   const catalog = JSON.stringify({
     name: 'claude-plugins-official',
@@ -383,7 +429,7 @@ function nativeCommandHarness(
       if (gitIndex >= 0) {
         const git = command.slice(gitIndex + 1);
         const root = git.includes('-C') ? git[git.indexOf('-C') + 1] : undefined;
-        assert.equal(root, `${CLAUDE_PLUGIN_STATE_PATH}/marketplaces/claude-plugins-official`);
+        assert.equal(root, `${pluginStatePath}/marketplaces/claude-plugins-official`);
         if (git.includes('rev-parse')) {
           if (options.requireSafeDirectory && !git.includes(`safe.directory=${root}`)) {
             return {...result(), exitCode: 128, stderr: 'fatal: detected dubious ownership'};
@@ -410,7 +456,7 @@ function nativeCommandHarness(
             JSON.stringify({
               'claude-plugins-official': {
                 source: {source: 'github', repo: distribution.marketplace},
-                installLocation: `${CLAUDE_PLUGIN_STATE_PATH}/${relative}`,
+                installLocation: `${pluginStatePath}/${relative}`,
               },
             }),
           ),
@@ -423,8 +469,8 @@ function nativeCommandHarness(
         const nativePluginId = command[installIndex + 1]!;
         const [plugin, marketplace] = nativePluginId.split('@');
         const version = options.installedVersion ?? LATEST_VERSION;
-        const installPath = `${CLAUDE_PLUGIN_STATE_PATH}/cache/${marketplace}/${plugin}/${version}`;
-        const relativeInstallPath = stateRelativePath(installPath);
+        const installPath = `${pluginStatePath}/cache/${marketplace}/${plugin}/${version}`;
+        const relativeInstallPath = stateRelativePath(installPath, pluginStatePath);
         await state.mutable.writeFile(
           `${relativeInstallPath}/.claude-plugin/plugin.json`,
           Buffer.from(JSON.stringify({name: plugin, version})),
@@ -440,7 +486,7 @@ function nativeCommandHarness(
         if (options.extraPlugin) {
           plugins['dependency@unexpected'] = [{
             scope: 'user',
-            installPath: `${CLAUDE_PLUGIN_STATE_PATH}/cache/unexpected/dependency/1.0.0`,
+            installPath: `${pluginStatePath}/cache/unexpected/dependency/1.0.0`,
             version: '1.0.0',
           }];
         }
@@ -462,6 +508,7 @@ function nativeCommandHarness(
       if (command.includes('list')) {
         const rows = Object.entries(readInstalledState(state)).map(([id, records]) => ({
           ...records[0], id, enabled: true,
+          ...(options.listedInstallPath === undefined ? {} : {installPath: options.listedInstallPath}),
         }));
         return result(JSON.stringify(rows));
       }
@@ -486,9 +533,9 @@ function readInstalledState(state: MemoryWorkspaceFixture): Record<string, Nativ
   }).plugins;
 }
 
-function stateRelativePath(absolutePath: string): string {
-  assert.ok(absolutePath.startsWith(`${CLAUDE_PLUGIN_STATE_PATH}/`));
-  return absolutePath.slice(CLAUDE_PLUGIN_STATE_PATH.length + 1);
+function stateRelativePath(absolutePath: string, pluginStatePath: string): string {
+  assert.ok(absolutePath.startsWith(`${pluginStatePath}/`));
+  return absolutePath.slice(pluginStatePath.length + 1);
 }
 
 function catalogSourceCommit(source: unknown): string | undefined {

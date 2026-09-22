@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
 import {expect} from '../../../test/support/expect.js';
@@ -8,13 +9,135 @@ import {createTestResolvedRunPlan} from '../../testing/plans.js';
 
 import {
   CLAUDE_PLUGIN_STATE_ID,
+  CLAUDE_PROJECTS_STATE_ID,
   createClaudeCodeAdapter,
   loadClaudeEvidence,
+  type ClaudeCodeLayout,
 } from './index.js';
 import {loadClaudeNativeArtifact} from './evidence.js';
 import {parseClaudeStream} from './stream.js';
 
 describe('Claude Code adapter', () => {
+  const customLayout: ClaudeCodeLayout = {
+    workspace: '/tmp/run_123/project.name',
+    home: '/tmp/run_123/home',
+    configDirectory: '/tmp/run_123/session',
+  };
+
+  it('snapshots a separate configuration root for setup, sessions, and native evidence', async () => {
+    const layout = {...customLayout};
+    const adapter = createClaudeCodeAdapter({layout, sessionIdFactory: () => 'session-1'});
+    layout.workspace = '/changed/workspace';
+    layout.configDirectory = '/changed/session';
+    const plan = createTestResolvedRunPlan({
+      agent: {adapter: 'claude-code', provider: 'anthropic', model: 'claude-test'},
+    });
+    assert.equal(adapter.version, '2+layout');
+    assert.equal(createClaudeCodeAdapter({
+      layout: customLayout, baseUrl: 'https://gateway.example.test',
+    }).version, '2+gateway.layout');
+    const requirements = adapter.requirements(plan.agent);
+    assert.deepEqual(requirements.environment.variables, {
+      CLAUDE_CONFIG_DIR: customLayout.configDirectory,
+    });
+    assert.deepEqual(requirements.stateDirectories, [{
+      id: CLAUDE_PROJECTS_STATE_ID,
+      containerPath: '/tmp/run_123/session/projects/-tmp-run-123-project-name',
+    }]);
+    assert.equal(adapter.pluginInstaller?.preflight({
+      plugin: 'stripe@claude-plugins-official',
+      marketplace: 'anthropics/claude-plugins-official',
+    }, {selection: plan.agent, runtime: plan.runtime})
+      .requirements.stateDirectories[0]?.containerPath, '/tmp/run_123/session/plugins');
+
+    const calls: string[][] = [];
+    const workspace = createMemoryWorkspace();
+    const raw = ['First', 'Continue'].flatMap((prompt) => [
+      {type: 'user', sessionId: 'session-1', message: {content: prompt}},
+      {type: 'assistant', sessionId: 'session-1', message: {content: 'done'}},
+    ]).map((record) => JSON.stringify(record)).join('\n');
+    const state = createMemoryWorkspace({
+      'session-1.jsonl': raw,
+      'unrelated.jsonl': 'not the selected evidence',
+    });
+    const base = {
+      runId: 'custom-layout',
+      plan,
+      selection: plan.agent,
+      inputs: createMemoryRunInputProvider(),
+      signal: new AbortController().signal,
+    };
+    const runtime = {
+      runtimeId: base.runId,
+      paths: customLayout,
+      workspace: workspace.mutable,
+      stateDirectories: new Map([[CLAUDE_PROJECTS_STATE_ID, state.mutable]]),
+    };
+    await adapter.prepare({...base, runtime: {...runtime, commands: {
+      uncredentialed: {async run(argv) {
+        calls.push([...argv]);
+        return {exitCode: 0, stdout: '2.1.273 (Claude Code)', stderr: '', durationMs: 1};
+      }},
+    }}});
+    const session = await adapter.openSession({...base, runtime: {...runtime, commands: {
+      agent: {async run(argv) {
+        calls.push([...argv]);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({type: 'result', result: 'done', session_id: 'session-1'}),
+          stderr: '', durationMs: 1,
+        };
+      }},
+    }}});
+    await session.send('First', {signal: base.signal});
+    await session.send('Continue', {signal: base.signal});
+    assert.deepEqual(calls[1]?.slice(0, 5), ['claude', '-p', 'First', '--session-id', 'session-1']);
+    assert.deepEqual(calls[2]?.slice(0, 5), ['claude', '-p', 'Continue', '--resume', 'session-1']);
+    const evidenceContext = {...base, sessionId: 'session-1', runtime: {
+      ...runtime,
+      workspace: workspace.readonly,
+      stateDirectories: new Map([[CLAUDE_PROJECTS_STATE_ID, state.readonly]]),
+      metadata: {},
+    }};
+    const evidence = await adapter.collectEvidence(evidenceContext);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind === 'available') {
+      assert.equal(parseAtifTrajectory(evidence.trajectory).steps.length, 4);
+    }
+    const artifact = await adapter.collectNativeArtifact?.(evidenceContext);
+    assert.equal(Buffer.from(artifact?.body ?? []).toString('utf8'), raw);
+  });
+
+  it('rejects a mismatched runtime layout before invoking commands or opening a session', async () => {
+    const adapter = createClaudeCodeAdapter({layout: customLayout});
+    const plan = createTestResolvedRunPlan({
+      agent: {adapter: 'claude-code', provider: 'anthropic', model: 'claude-test'},
+    });
+    let calls = 0;
+    const commands = {async run() {
+      calls += 1;
+      return {exitCode: 0, stdout: '2.1.273', stderr: '', durationMs: 1};
+    }};
+    for (const paths of [
+      {...customLayout, home: '/other/home'},
+      {...customLayout, workspace: '/other/workspace'},
+    ]) {
+      const context = {
+        runId: 'wrong-layout', plan, selection: plan.agent,
+        inputs: createMemoryRunInputProvider(), signal: new AbortController().signal,
+        runtime: {
+          runtimeId: 'wrong-layout', paths,
+          workspace: createMemoryWorkspace().mutable,
+          stateDirectories: new Map(),
+          commands: {uncredentialed: commands, agent: commands},
+        },
+      };
+      await assert.rejects(adapter.prepare(context), /do not match the declared layout/);
+      await assert.rejects(adapter.openSession(context), /do not match the declared layout/);
+    }
+    assert.equal(calls, 0);
+  });
+
   it('declares authentication and exact session state for engine-assigned scope', () => {
     const adapter = createClaudeCodeAdapter({sessionIdFactory: () => 'session-1'});
     expect(adapter.version).toBe('2');
