@@ -521,6 +521,74 @@ describe('Codex engine integration', () => {
     });
   }
 
+  for (const nameForm of ['namespaced', 'qualified'] as const) {
+    for (const outputError of [undefined, true, false]) {
+      const errorLabel = outputError === undefined ? 'absent' : String(outputError);
+      it(`falls back for ${nameForm} MCP evidence without a completion snapshot even when output.is_error is ${errorLabel}`, async () => {
+        const marker = 'UNVERIFIED_NATIVE_MCP_FAILURE_OUTPUT';
+        const result = {content: [{type: 'text', text: `${marker}: ${AGENT_SECRET}`}], isError: true};
+        const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
+        const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
+          judge: JUDGE_MODEL, successGuidelines: ['The assistant reports the fixture failure.']});
+        const test = await fixture(plan, {
+          responses: ['The fixture tool reported a failure.'],
+          native(turns) {
+            let removedSnapshots = 0;
+            const records = mcpRollout(turns, output, result).trimEnd().split('\n').flatMap((line) => {
+              const record = JSON.parse(line) as {type: string; payload: Record<string, unknown>};
+              if (record.type === 'event_msg' && record.payload.type === 'item_completed') {
+                assert.equal((record.payload.item as {type: string}).type, 'McpToolCall');
+                removedSnapshots += 1;
+                return [];
+              }
+              if (record.payload.type === 'function_call' && nameForm === 'qualified') {
+                delete record.payload.namespace;
+                record.payload.name = 'mcp__fixture__probe';
+              }
+              if (record.payload.type === 'function_call_output' && outputError !== undefined) {
+                record.payload.is_error = outputError;
+              }
+              return [JSON.stringify(record)];
+            });
+            assert.equal(removedSnapshots, 1);
+            return records.join('\n') + '\n';
+          },
+          stdout: (response) => mcpStream(response, result),
+        });
+        const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
+          JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic incomplete-source evidence check.'}]}),
+        ]});
+        const completed = await executeEval({runId: `codex-mcp-no-snapshot-${nameForm}-${errorLabel}`, plan, composition: {
+          ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        }});
+        const verified = await verifyCompletedRun(completed.location);
+        assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
+        assert.equal(verified.result.evidence.completeness, 'fallback');
+        assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
+        const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'));
+        assert.deepEqual(interaction.turns[0]!.tool_calls, [{id: 'item_1', name: 'mcp__fixture__probe', input: {}}]);
+        const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
+        const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+        const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
+        assert.deepEqual(calls, [{tool_call_id: 'item_1', function_name: 'mcp__fixture__probe', arguments: {}}]);
+        for (const steps of [trajectory.steps, judge.transcript.steps]) {
+          const observations = steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
+          assert.deepEqual(observations, []);
+          assert.ok(!JSON.stringify(steps).includes('"is_error"'));
+          assert.ok(!JSON.stringify(steps).includes(marker));
+        }
+        assert.equal(provider.calls.length, 1);
+        const request = provider.calls[0]!.request;
+        assert.ok(request.systemPrompt?.includes(createJudgeTranscriptProjection(trajectory).transcriptJson));
+        assert.ok(!JSON.stringify(request).includes(marker));
+        assert.ok(!JSON.stringify(request).includes(AGENT_SECRET));
+        assert.ok(test.native()!.includes(marker));
+        assert.ok(test.native()!.includes(AGENT_SECRET));
+        await assertRestrictedNative(completed, test.native()!);
+      });
+    }
+  }
+
   for (const [field, value, label] of [
     ['annotations', null, 'null'], ['annotations', [], 'array'],
     ['_meta', null, 'null'], ['_meta', [], 'array'],

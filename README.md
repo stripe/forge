@@ -990,9 +990,11 @@ Forge persists the canonical agent trajectory as a standalone
   are distinguished from injected AGENTS.md and environment context, which
   become system steps. Function and custom-tool calls retain native call IDs,
   arguments, and correlated outputs. Native tool-search calls and their returned
-  tool definitions remain correlated tool behavior. Completed MCP snapshots are
-  checked against their matching call and result; a completed invocation does
-  not override an MCP `isError` result.
+  tool definitions remain correlated tool behavior. Each MCP call requires a
+  matching `McpToolCall` completion snapshot, checked against its call and result.
+  A missing snapshot triggers incomplete-source fallback even when the output
+  includes an `is_error` flag; a completion for another tool type is not a
+  substitute. A completed invocation does not override an MCP `isError` result.
   Supported MCP text and image blocks may include `annotations` and `_meta`
   objects. Forge treats their contents as opaque data under the existing JSON
   size and nesting limits, not as Forge control fields. Metadata

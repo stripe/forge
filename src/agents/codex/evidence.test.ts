@@ -176,6 +176,102 @@ async function loadToolSequence(sequence: readonly ReturnType<typeof capturedRes
 }
 
 describe('Codex exact rollout evidence', () => {
+  it('requires MCP completion snapshots regardless of naming form or explicit output error flags', async () => {
+    for (const server of ['fixture', '__fixture', 'fixture__nested']) {
+      for (const naming of ['namespaced', 'qualified', 'empty-namespace-qualified']) {
+        for (const isError of [undefined, true, false]) {
+          const sequence = capturedMcp({result: {content: [{type: 'text', text: 'Tool failed.'}], isError: true}});
+          const call = sequence[2]!.payload;
+          if (naming === 'namespaced') call.namespace = `mcp__${server}`;
+          else {
+            call.name = `mcp__${server}__probe`;
+            if (naming === 'qualified') delete call.namespace;
+            else call.namespace = '';
+          }
+          if (isError !== undefined) sequence[4]!.payload.is_error = isError;
+          const evidence = await loadToolSequence(sequence.filter((_, index) => index !== 3));
+          assert.equal(evidence.kind, 'unavailable', `${server}/${naming}/${String(isError)}`);
+          if (evidence.kind === 'unavailable') assert.equal(evidence.reason.code, 'source_incomplete');
+        }
+      }
+    }
+  });
+
+  it('requires a snapshot for successful MCP results and RPC errors too', async () => {
+    for (const options of [{}, {error: {message: 'Fixture RPC failed.'}}]) {
+      const sequence = capturedMcp(options);
+      const evidence = await loadToolSequence(sequence.filter((_, index) => index !== 3));
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable') assert.equal(evidence.reason.code, 'source_incomplete');
+    }
+  });
+
+  it('does not substitute a command completion for an MCP completion with the same call ID', async () => {
+    const command = capturedTools().find((entry) =>
+      (entry.payload.item as {type?: string} | undefined)?.type === 'CommandExecution')!;
+    for (const tool of ['exec_command', 'write_stdin']) {
+      const sequence = capturedMcp();
+      sequence[2]!.payload.name = tool;
+      sequence[3]!.payload.item = {...command.payload.item as object, id: 'mcp-call'};
+      const evidence = await loadToolSequence(sequence);
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable') assert.equal(evidence.reason.code, 'source_incomplete');
+    }
+  });
+
+  it('fails closed for MCP-shaped custom calls without a typed completion snapshot', async () => {
+    for (const naming of ['namespaced', 'qualified']) {
+      const sequence = capturedMcp();
+      const call = sequence[2]!.payload;
+      call.type = 'custom_tool_call';
+      call.input = '{}';
+      delete call.arguments;
+      if (naming === 'qualified') {delete call.namespace; call.name = 'mcp__fixture__probe';}
+      sequence[4]!.payload.type = 'custom_tool_call_output';
+      assert.equal((await loadToolSequence(sequence.filter((_, index) => index !== 3))).kind, 'unavailable');
+    }
+  });
+
+  it('accepts typed MCP completions in either record order and preserves verified error flags', async () => {
+    for (const server of ['fixture', '__fixture', 'fixture__nested']) {
+      for (const naming of ['namespaced', 'qualified', 'empty-namespace-qualified']) {
+        for (const failed of [true, false]) {
+          const sequence = capturedMcp({result: {content: [{type: 'text', text: MCP_TEXT}], isError: failed}});
+          const call = sequence[2]!.payload;
+          if (naming === 'namespaced') call.namespace = `mcp__${server}`;
+          else {
+            call.name = `mcp__${server}__probe`;
+            if (naming === 'qualified') delete call.namespace;
+            else call.namespace = '';
+          }
+          sequence[3]!.payload.item = {...sequence[3]!.payload.item as object, server};
+          for (const records of [sequence, [sequence[0]!, sequence[1]!, sequence[3]!, sequence[2]!, sequence[4]!]]) {
+            const evidence = await loadToolSequence(records);
+            assert.equal(evidence.kind, 'available');
+            if (evidence.kind !== 'available') throw new Error('Expected verified MCP evidence.');
+            assert.deepEqual(evidence.warnings, []);
+            const results = parseAtifTrajectory(evidence.trajectory).steps.flatMap((step) => step.observation?.results ?? []);
+            assert.deepEqual(results.find((result) => result.source_call_id === 'mcp-call')?.extra, {is_error: failed});
+          }
+        }
+      }
+    }
+  });
+
+  it('does not require MCP snapshots for discovery or ordinary function calls', async () => {
+    for (const sequence of [
+      capturedMcp().slice(0, 2),
+      [capturedResponse({type: 'function_call', call_id: 'plain-call', namespace: 'functions', name: 'exec_command', arguments: '{}'}),
+        capturedResponse({type: 'function_call_output', call_id: 'plain-call', output: 'Ordinary output.'})],
+      [capturedResponse({type: 'function_call', call_id: 'plain-call', namespace: 'mcp_helpers', name: 'not_mcp__tool', arguments: '{}'}),
+        capturedResponse({type: 'function_call_output', call_id: 'plain-call', output: 'Ordinary output.'})],
+    ]) {
+      const evidence = await loadToolSequence(sequence);
+      assert.equal(evidence.kind, 'available');
+      if (evidence.kind === 'available') assert.deepEqual(evidence.warnings, []);
+    }
+  });
+
   it('preserves MCP content metadata as opaque data without adding evidence warnings', async () => {
     for (const metadata of [
       {annotations: {}},
@@ -567,6 +663,7 @@ describe('Codex exact rollout evidence', () => {
       valid.filter((_, i) => i !== 0),
       valid.filter((_, i) => i !== 1),
       valid.filter((_, i) => i !== 2),
+      valid.filter((_, i) => i !== 3),
       valid.filter((_, i) => i !== 4),
       [valid[0]!, ...valid],
       [...valid, valid[1]!],

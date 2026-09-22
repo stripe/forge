@@ -424,6 +424,16 @@ function indexItemResponses(records: readonly RolloutRecord[]): ItemResponses {
     if (map.has(key)) throw new IncompleteRolloutError();
     map.set(key, {turn, payload, raw: record.raw});
   }
+  // Require the reverse association too: an MCP-shaped invocation cannot skip
+  // status/output validation by omitting its typed completion snapshot. An
+  // explicit output error flag or another completion kind is not a substitute.
+  // Check after indexing to allow either native record order, and inspect the
+  // reserved prefix without splitting server names that can themselves use __.
+  for (const [id, {payload}] of calls) {
+    const namespacedMcp = typeof payload.namespace === 'string' && payload.namespace.startsWith('mcp__');
+    const qualifiedMcp = typeof payload.name === 'string' && payload.name.startsWith('mcp__');
+    if ((namespacedMcp || qualifiedMcp) && !mcpSnapshots.has(id)) throw new IncompleteRolloutError();
+  }
   for (const [id, snapshot] of mcpSnapshots) {
     const call = calls.get(id);
     const output = outputs.get(id);
