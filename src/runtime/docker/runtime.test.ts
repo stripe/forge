@@ -12,6 +12,7 @@ import type {
 } from '../processCommandRunner.js';
 import {
   FORGE_CLAUDE_CODE_VERSION,
+  FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.js';
 import {createDockerRuntimeAdapter} from './runtime.js';
@@ -55,6 +56,11 @@ function fakeDocker(
             dockerfile,
             new RegExp(`@anthropic-ai/claude-code@${FORGE_CLAUDE_CODE_VERSION}`),
           );
+          assert.ok(dockerfile.includes(`@openai/codex@${FORGE_CODEX_VERSION} \\\n`));
+          for (const executable of ['claude', 'codex']) {
+            assert.ok(dockerfile.includes(`test -x /usr/local/bin/${executable}`));
+            assert.ok(dockerfile.includes(`/usr/local/bin/${executable} --version`));
+          }
           assert.match(dockerfile, /USER 10001:10001/);
         }
         calls.push(call);
@@ -205,6 +211,7 @@ describe('Forge Docker runtime', () => {
       `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
     );
     assert.equal(sealed.metadata.claudeCodeVersion, FORGE_CLAUDE_CODE_VERSION);
+    assert.equal(sealed.metadata.codexVersion, FORGE_CODEX_VERSION);
     for (const commands of [
       prepared.commands.uncredentialed,
       setupCommands,
@@ -258,6 +265,67 @@ describe('Forge Docker runtime', () => {
       /canonical child/,
     );
     assert.equal(docker.calls.length, 0);
+  });
+
+  it('supports writable Codex state without weakening Docker isolation', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
+    roots.push(temporaryRoot);
+    const docker = fakeDocker();
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: docker.runner,
+      temporaryRoot,
+    });
+    const prepared = await adapter.prepare(
+      preparation({
+        environment: {
+          variables: {CODEX_HOME: '/home/forge/.codex'},
+          credentials: {
+            CODEX_API_KEY: {value: 'codex-test-secret', scopes: ['agent']},
+          },
+        },
+        requirements: {
+          executables: ['codex'],
+          stateDirectories: [{id: 'codex-home', containerPath: '/home/forge/.codex'}],
+        },
+      }),
+    );
+    const run = docker.calls.find((call) => call.argv[1] === 'run')!;
+    assert.ok(run.argv.includes('--read-only'));
+    assert.ok(run.argv.includes('10001:10001'));
+    assert.ok(run.argv.includes('no-new-privileges:true'));
+    assert.equal(run.argv[run.argv.indexOf('--cap-drop') + 1], 'ALL');
+    assert.equal(
+      run.argv[run.argv.indexOf('--tmpfs') + 1],
+      '/tmp:rw,nosuid,nodev,noexec,size=268435456',
+    );
+    const codexMount = run.argv.find((argument) =>
+      argument.includes('target=/home/forge/.codex'),
+    )!;
+    assert.ok(codexMount);
+    assert.doesNotMatch(codexMount, /,readonly$/);
+    const executableCheck = docker.calls.find((call) =>
+      call.argv.includes('forge-executable-check'),
+    )!;
+    assert.equal(executableCheck.argv.at(-1), 'codex');
+    assert.match(executableCheck.environmentBody!, /CODEX_HOME=\/home\/forge\/\.codex/);
+    assert.doesNotMatch(executableCheck.environmentBody!, /CODEX_API_KEY/);
+
+    await prepared.finalizeSetup();
+    await prepared.commands.agent.run(['codex', '--version']);
+    const agent = docker.calls.find((call) => call.argv.includes('--version'))!;
+    assert.match(agent.environmentBody!, /CODEX_API_KEY=codex-test-secret/);
+    await prepared.stateDirectories
+      .get('codex-home')!
+      .writeFile('session.jsonl', Buffer.from('codex evidence'));
+    const sealed = await prepared.quiesce();
+    assert.equal(
+      Buffer.from(await sealed.stateDirectories.get('codex-home')!.readFile('session.jsonl'))
+        .toString(),
+      'codex evidence',
+    );
+    assert.equal(sealed.metadata.codexVersion, FORGE_CODEX_VERSION);
+    await assert.rejects(prepared.commands.agent.run(['codex', '--version']), /quiesced/);
+    await prepared.dispose();
   });
 
   it('restarts with setup-sealed state read-only before agent commands', async () => {

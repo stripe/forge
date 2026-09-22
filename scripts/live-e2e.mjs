@@ -19,6 +19,7 @@ import {
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudeCodeAdapter,
 } from '../dist/agents/claude-code/index.js';
+import {createCodexAdapter} from '../dist/agents/codex/index.js';
 import {parseAtifTrajectory} from '../dist/atif/index.js';
 import {
   GUIDELINE_JUDGE_PROMPT_VERSION,
@@ -45,11 +46,13 @@ import {createAnthropicCompletionProvider} from '../dist/providers/anthropic/ind
 import {
   createDockerRuntimeAdapter,
   FORGE_CLAUDE_CODE_VERSION,
+  FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from '../dist/runtime/docker/index.js';
 import {assertRuntimeAdapterConforms} from '../dist/testing/index.js';
 
 const MODEL = 'claude-sonnet-4-6';
+const CODEX_MODEL = 'gpt-5.4';
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000;
 const MAX_BRIDGE_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_BRIDGE_CONCURRENCY = 8;
@@ -79,11 +82,17 @@ if (process.env.FORGE_LIVE !== '1') {
   );
 }
 
-const gatewayBaseUrl = optionalEnvironment('ANTHROPIC_BASE_URL');
+const liveAgent = optionalEnvironment('FORGE_LIVE_AGENT') ?? 'claude-code';
+if (liveAgent !== 'claude-code' && liveAgent !== 'codex') {
+  throw new Error('FORGE_LIVE_AGENT must be claude-code or codex.');
+}
+const codexSelected = liveAgent === 'codex';
+const gatewayEnvironmentName = codexSelected ? 'OPENAI_BASE_URL' : 'ANTHROPIC_BASE_URL';
+const gatewayBaseUrl = optionalEnvironment(gatewayEnvironmentName);
 const gatewaySelected = gatewayBaseUrl !== undefined;
-const credentialEnvironmentName = gatewaySelected
-  ? 'ANTHROPIC_AUTH_TOKEN'
-  : 'ANTHROPIC_API_KEY';
+const credentialEnvironmentName = codexSelected
+  ? 'CODEX_API_KEY'
+  : gatewaySelected ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
 const upstreamCredential = requiredEnvironment(credentialEnvironmentName);
 const timeoutMs = positiveIntegerEnvironment(
   'FORGE_LIVE_TIMEOUT_MS',
@@ -116,13 +125,15 @@ process.once('SIGTERM', abort);
 
 let bridge;
 try {
-  const gatewayUrl = gatewayBaseUrl === undefined
+  const gatewayUrl = gatewayBaseUrl === undefined && !codexSelected
     ? undefined
-    : parseGatewayUrl(gatewayBaseUrl);
-  bridge = gatewayUrl !== undefined && isLoopbackHostname(gatewayUrl.hostname)
+    : parseGatewayUrl(gatewayBaseUrl ?? 'https://api.openai.com/v1', gatewayEnvironmentName);
+  // Codex always receives a one-run bridge token, never the upstream API key.
+  bridge = gatewayUrl !== undefined && (codexSelected || isLoopbackHostname(gatewayUrl.hostname))
     ? await startLoopbackGatewayBridge({
         upstream: gatewayUrl,
         upstreamCredential,
+        protocol: codexSelected ? 'responses' : 'messages',
       })
     : undefined;
 
@@ -136,14 +147,17 @@ try {
   );
   const agentCredential = bridge?.credential ?? upstreamCredential;
   const runtime = createDockerRuntimeAdapter({dockerExecutable});
-  const agent = createClaudeCodeAdapter({
+  const agentOptions = {
     credential: agentCredentialReference,
     credentialEnvironmentName,
-    ...(gatewayBaseUrl === undefined
+    ...(gatewayBaseUrl === undefined && bridge === undefined
       ? {}
       : {baseUrl: bridge?.agentBaseUrl ?? gatewayBaseUrl}),
-  });
-  const completionProvider = createAnthropicCompletionProvider({
+  };
+  const agent = codexSelected
+    ? createCodexAdapter(agentOptions)
+    : createClaudeCodeAdapter(agentOptions);
+  const completionProvider = codexSelected ? undefined : createAnthropicCompletionProvider({
     credential: completionCredentialReference,
     ...(gatewayBaseUrl === undefined
       ? {auth: 'api-key'}
@@ -151,15 +165,15 @@ try {
   });
   const credentialValues = new Map([
     [agentCredentialReference, agentCredential],
-    [completionCredentialReference, upstreamCredential],
+    ...(codexSelected ? [] : [[completionCredentialReference, upstreamCredential]]),
   ]);
   const compositionFactory = async ({datasetRoot, resultsRoot: selectedRoot}) =>
     Object.freeze({
       runtime,
       agents: new Map([[agent.id, agent]]),
-      completionProviders: new Map([
-        [completionProvider.id, completionProvider],
-      ]),
+      ...(completionProvider === undefined ? {} : {
+        completionProviders: new Map([[completionProvider.id, completionProvider]]),
+      }),
       credentialResolver: Object.freeze({
         async resolve(reference, context) {
           context.signal.throwIfAborted();
@@ -176,13 +190,16 @@ try {
 
   progress('checking the real Docker runtime lifecycle');
   const dockerReport = await runDockerConformance(runtime, runIds.docker, signal);
-  progress('checking latest Claude plugin installation');
-  const pluginReport = await runClaudePluginConformance({
-    agent,
-    runtime,
-    runId: runIds.plugin,
-    signal,
-  });
+  let pluginReport;
+  if (!codexSelected) {
+    progress('checking latest Claude plugin installation');
+    pluginReport = await runClaudePluginConformance({
+      agent,
+      runtime,
+      runId: runIds.plugin,
+      signal,
+    });
+  }
   if (bridge !== undefined) {
     progress('checking the container-to-loopback gateway bridge');
     await assertDockerCanReachBridge({
@@ -193,27 +210,35 @@ try {
     });
   }
 
-  progress('running the one-shot Claude Code evaluation');
+  progress(`running the one-shot ${codexSelected ? 'Codex' : 'Claude Code'} evaluation`);
   const oneShotCompleted = await runSelection({
     label: 'one-shot',
-    example: 'quickstart',
+    example: codexSelected ? 'codex' : 'quickstart',
+    datasetExample: 'quickstart',
+    agent: liveAgent,
+    model: codexSelected ? CODEX_MODEL : MODEL,
     casePath: ['cases', 'examples', 'hello-file.yaml'],
     runId: runIds.oneShot,
     compositionFactory,
     signal,
   });
-  const oneShotReport = await verifyOneShotRun(oneShotCompleted);
+  const oneShotReport = await verifyOneShotRun(oneShotCompleted, codexSelected ? {
+    format: 'codex-rollout-jsonl', version: FORGE_CODEX_VERSION,
+  } : undefined);
 
-  progress('running the multi-turn Ava and guideline evaluation');
-  const multiTurnCompleted = await runSelection({
-    label: 'multi-turn',
-    example: 'multi-turn',
-    casePath: ['cases', 'examples', 'release-summary.yaml'],
-    runId: runIds.multiTurn,
-    compositionFactory,
-    signal,
-  });
-  const multiTurnReport = await verifyMultiTurnRun(multiTurnCompleted);
+  let multiTurnReport;
+  if (!codexSelected) {
+    progress('running the multi-turn Ava and guideline evaluation');
+    const multiTurnCompleted = await runSelection({
+      label: 'multi-turn',
+      example: 'multi-turn',
+      casePath: ['cases', 'examples', 'release-summary.yaml'],
+      runId: runIds.multiTurn,
+      compositionFactory,
+      signal,
+    });
+    multiTurnReport = await verifyMultiTurnRun(multiTurnCompleted);
+  }
 
   process.stdout.write(
     `${JSON.stringify(
@@ -226,10 +251,10 @@ try {
             : 'direct_anthropic'
           : 'loopback_gateway_bridge',
         docker: dockerReport,
-        plugin: pluginReport,
+        ...(pluginReport === undefined ? {} : {plugin: pluginReport}),
         runs: {
           one_shot: oneShotReport,
-          multi_turn: multiTurnReport,
+          ...(multiTurnReport === undefined ? {} : {multi_turn: multiTurnReport}),
         },
       },
       null,
@@ -487,6 +512,9 @@ async function runDockerConformance(runtime, runId, executionSignal) {
 async function runSelection({
   label,
   example,
+  datasetExample = example,
+  agent = 'claude-code',
+  model = MODEL,
   casePath,
   runId,
   compositionFactory,
@@ -503,14 +531,14 @@ async function runSelection({
       path.join(
         repositoryRoot,
         'examples',
-        example,
+        datasetExample,
         'dataset',
         ...casePath,
       ),
       '--agent',
-      'claude-code',
+      agent,
       '--model',
-      MODEL,
+      model,
       '--output',
       resultsRoot,
       '--run-id',
@@ -556,7 +584,7 @@ async function runSelection({
   return verifyCompletedRun(summary.location);
 }
 
-async function verifyOneShotRun(completed) {
+async function verifyOneShotRun(completed, nativeIdentity) {
   const {result} = completed;
   requireCondition(
     result.stop_reason === 'task_complete' && result.failure === null,
@@ -607,7 +635,7 @@ async function verifyOneShotRun(completed) {
     'The live one-shot interaction audit is inconsistent.',
     completed.location,
   );
-  verifyNativeSession(result, trajectory, 1, completed.location);
+  verifyNativeSession(result, trajectory, 1, completed.location, nativeIdentity);
   verifyTrajectoryTurns(trajectory, interaction.turns, completed.location);
 
   return Object.freeze({
@@ -754,12 +782,13 @@ async function verifyMultiTurnRun(completed) {
   });
 }
 
-function verifyNativeSession(result, trajectory, minimumAgentSteps, location) {
+function verifyNativeSession(result, trajectory, minimumAgentSteps, location,
+  identity = {format: 'claude-code-jsonl', version: FORGE_CLAUDE_CODE_VERSION}) {
   const source = result.evidence.provenance.source;
   const sessionId = result.agent.session_id;
   requireCondition(
     source.kind === 'native_log' &&
-      source.format === 'claude-code-jsonl' &&
+      source.format === identity.format &&
       result.evidence.completeness !== 'fallback' &&
       sessionId !== null &&
       source.session_id === sessionId &&
@@ -768,11 +797,11 @@ function verifyNativeSession(result, trajectory, minimumAgentSteps, location) {
         result.agent.adapter_version &&
       trajectory.session_id === sessionId &&
       trajectory.agent.name === result.agent.adapter &&
-      trajectory.agent.version === FORGE_CLAUDE_CODE_VERSION &&
+      trajectory.agent.version === identity.version &&
       trajectory.agent.model_name === result.agent.model &&
       trajectory.steps.filter(({source: stepSource}) => stepSource === 'agent')
         .length >= minimumAgentSteps,
-    'The live run did not preserve exact native Claude session evidence.',
+    'The live run did not preserve exact native agent session evidence.',
     location,
   );
 }
@@ -913,10 +942,24 @@ function requireCondition(condition, message, location) {
   }
 }
 
-async function startLoopbackGatewayBridge({upstream, upstreamCredential}) {
+function gatewayBridgePaths(prefix, protocol) {
+  if (protocol === 'responses') return new Set([`/${prefix}/responses`]);
+  if (protocol === 'messages') return new Set([
+    `/${prefix}/v1/messages`, `/${prefix}/v1/messages/count_tokens`,
+  ]);
+  throw new TypeError('Unsupported live gateway protocol.');
+}
+
+function gatewayBridgeUpstreamPath(upstream, target, prefix) {
+  const suffix = target.pathname.slice(`/${prefix}`.length);
+  return `${upstream.pathname.replace(/\/+$/, '')}${suffix}${target.search}`;
+}
+
+async function startLoopbackGatewayBridge({upstream, upstreamCredential, protocol}) {
   const prefix = randomBytes(32).toString('hex');
   const bridgeCredential = randomBytes(32).toString('base64url');
   const expectedAuthorizationDigest = authorizationDigest(bridgeCredential);
+  const allowedPaths = gatewayBridgePaths(prefix, protocol);
   const upstreamTransport = upstream.protocol === 'https:' ? https : http;
   const sockets = new Set();
   const upstreamRequests = new Set();
@@ -954,10 +997,6 @@ async function startLoopbackGatewayBridge({upstream, upstreamCredential}) {
         rejectBridgeRequest(request, response, 400);
         return;
       }
-      const allowedPaths = new Set([
-        `/${prefix}/v1/messages`,
-        `/${prefix}/v1/messages/count_tokens`,
-      ]);
       if (
         request.method !== 'POST' ||
         !allowedPaths.has(parsedTarget.pathname) ||
@@ -989,15 +1028,12 @@ async function startLoopbackGatewayBridge({upstream, upstreamCredential}) {
       response.once('close', finish);
       response.once('finish', finish);
 
-      const suffix = parsedTarget.pathname.slice(`/${prefix}`.length);
-      const upstreamPath = `${upstream.pathname.replace(/\/+$/, '')}${suffix}${
-        parsedTarget.search
-      }`;
+      const upstreamPath = gatewayBridgeUpstreamPath(upstream, parsedTarget, prefix);
       const headers = sanitizedProxyHeaders(request.headers);
       headers.host = upstream.host;
       headers.authorization = `Bearer ${upstreamCredential}`;
       delete headers['x-api-key'];
-      filterAnthropicBetaHeader(headers);
+      if (protocol === 'messages') filterAnthropicBetaHeader(headers);
 
       const upstreamRequest = upstreamTransport.request(
         {
@@ -1236,12 +1272,12 @@ function runBoundedCommand(executable, argv, executionSignal) {
   });
 }
 
-function parseGatewayUrl(value) {
+function parseGatewayUrl(value, environmentName = 'ANTHROPIC_BASE_URL') {
   let parsed;
   try {
     parsed = new URL(value);
   } catch {
-    throw new TypeError('ANTHROPIC_BASE_URL must be a valid HTTP(S) URL.');
+    throw new TypeError(`${environmentName} must be a valid HTTP(S) URL.`);
   }
   if (
     (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
@@ -1251,7 +1287,7 @@ function parseGatewayUrl(value) {
     parsed.hash !== ''
   ) {
     throw new TypeError(
-      'ANTHROPIC_BASE_URL must be a credential-free HTTP(S) URL without a query or fragment.',
+      `${environmentName} must be a credential-free HTTP(S) URL without a query or fragment.`,
     );
   }
   return parsed;

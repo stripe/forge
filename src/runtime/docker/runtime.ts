@@ -28,6 +28,7 @@ import {
 import {createOwnedWorkspace} from '../workspace.js';
 import {
   FORGE_CLAUDE_CODE_VERSION,
+  FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.js';
 import {DockerCommandController} from './commandRunner.js';
@@ -240,6 +241,7 @@ export function createDockerRuntimeAdapter(
           metadata: Object.freeze({
             adapter: 'forge/docker@1',
             claudeCodeVersion: FORGE_CLAUDE_CODE_VERSION,
+            codexVersion: FORGE_CODEX_VERSION,
             imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
             imageId: image.id,
             imageTag: image.tag,

@@ -568,6 +568,7 @@ function verifyTrajectoryArtifact(
         assistant: turn.assistant,
         toolCalls: turn.tool_calls,
       })),
+      source,
     )
   ) {
     throw new ArtifactStoreError(
