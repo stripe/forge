@@ -7,6 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 
 import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
+import {createCodexAdapter} from './agents/codex/index.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
 import {createDirectoryRunInputProvider} from './contracts/inputs.js';
@@ -35,6 +36,9 @@ const ANTHROPIC_API_KEY_ENVIRONMENT = 'ANTHROPIC_API_KEY';
 const ANTHROPIC_AUTH_TOKEN_REFERENCE = 'anthropic.auth-token';
 const ANTHROPIC_AUTH_TOKEN_ENVIRONMENT = 'ANTHROPIC_AUTH_TOKEN';
 const ANTHROPIC_BASE_URL_ENVIRONMENT = 'ANTHROPIC_BASE_URL';
+const OPENAI_API_KEY_REFERENCE = 'openai.api-key';
+const CODEX_API_KEY_ENVIRONMENT = 'CODEX_API_KEY';
+const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
 
 const CLI_OPTIONS = {
   experiment: {type: 'string', short: 'e'},
@@ -142,8 +146,14 @@ export async function createDefaultCliComposition(
     auth: gatewaySelected ? 'bearer' : 'api-key',
     ...(baseUrl === undefined ? {} : {baseUrl}),
   });
+  const codexBaseUrl = environment[OPENAI_BASE_URL_ENVIRONMENT];
+  const codex = createCodexAdapter({
+    credential: OPENAI_API_KEY_REFERENCE,
+    ...(codexBaseUrl === undefined ? {} : {baseUrl: codexBaseUrl}),
+  });
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
+    [OPENAI_API_KEY_REFERENCE, CODEX_API_KEY_ENVIRONMENT],
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
   const credentialResolver = createEnvironmentCredentialResolver({
@@ -153,7 +163,7 @@ export async function createDefaultCliComposition(
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
-    agents: new Map([[claude.id, claude]]),
+    agents: new Map([[claude.id, claude], [codex.id, codex]]),
     completionProviders: new Map([
       [completionProvider.id, completionProvider],
     ]),

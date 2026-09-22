@@ -42,6 +42,7 @@ try {
       import * as atif from '@stripe/forge/atif/v1.8';
       import * as cli from '@stripe/forge/cli';
       import * as claude from '@stripe/forge/agents/claude-code';
+      import * as codex from '@stripe/forge/agents/codex';
       import * as anthropic from '@stripe/forge/providers/anthropic';
       import * as docker from '@stripe/forge/runtime/docker';
       import * as setup from '@stripe/forge/setup';
@@ -85,6 +86,11 @@ try {
       assert.equal(typeof cli.runCli, 'function');
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
+      assert.equal(typeof codex.createCodexAdapter, 'function');
+      assert.equal(typeof codex.parseCodexStream, 'function');
+      assert.equal(typeof codex.loadCodexEvidence, 'function');
+      assert.equal(codex.CODEX_ADAPTER_VERSION, '1');
+      assert.equal(docker.FORGE_CODEX_VERSION, '0.149.0');
       assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '2+gateway');
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
@@ -107,6 +113,17 @@ try {
       assert.equal(customRequirements.environment.variables.CLAUDE_CONFIG_DIR, '/tmp/example/session');
       assert.equal(customRequirements.stateDirectories[0].containerPath,
         '/tmp/example/session/projects/-tmp-example-workspace');
+
+      const customCodex = codex.createCodexAdapter({layout: {
+        workspace: '/tmp/example/workspace', home: '/tmp/example/home',
+        configDirectory: '/tmp/example/codex',
+      }});
+      const codexRequirements = customCodex.requirements({
+        adapter: 'codex', provider: 'openai', model: 'test-model',
+      });
+      assert.equal(codexRequirements.environment.variables.CODEX_HOME, '/tmp/example/codex');
+      assert.equal(codexRequirements.environment.credentials.CODEX_API_KEY.reference, 'openai.api-key');
+      assert.equal(codexRequirements.stateDirectories[0].containerPath, '/tmp/example/codex');
 
       const bundle = setup.defineSetupActionBundle({
         manifest: {

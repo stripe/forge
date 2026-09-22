@@ -544,7 +544,7 @@ describe('Forge CLI', () => {
     expect(stderr).toContain('Selection does not match the benchmark matrix');
   });
 
-  it('assembles the public Docker/Claude defaults with explicit credentials', async () => {
+  it('assembles the public Docker/Claude/Codex defaults with explicit credentials', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
@@ -553,8 +553,9 @@ describe('Forge CLI', () => {
     });
 
     expect(composition.runtime.id).toBe('forge/docker');
-    expect([...composition.agents.keys()]).toEqual(['claude-code']);
+    expect([...composition.agents.keys()]).toEqual(['claude-code', 'codex']);
     expect(composition.agents.get('claude-code')?.version).toBe('2');
+    expect(composition.agents.get('codex')?.version).toBe('1');
     expect([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()])
       .toEqual(['anthropic']);
     expect(
@@ -572,6 +573,61 @@ describe('Forge CLI', () => {
         },
       ),
     ).resolves.toBe('test-api-key');
+  });
+
+  it('validates and plans the checked-in Codex example without credentials or Docker', async () => {
+    for (const command of ['validate', 'plan']) {
+      let stdout = '';
+      let stderr = '';
+      const code = await runCli([
+        command, '--experiment', 'examples/codex/experiment.yaml',
+        '--dataset', 'examples/quickstart/dataset',
+      ], {
+        environment: {},
+        stdout: (value) => {stdout += value;},
+        stderr: (value) => {stderr += value;},
+      });
+      expect(stderr).toBe('');
+      expect(code).toBe(0);
+      if (command === 'validate') expect(JSON.parse(stdout).valid).toBe(true);
+      else expect(JSON.parse(stdout).selection.agent).toEqual({
+        adapter: 'codex', provider: 'openai', model: 'gpt-5.4',
+      });
+    }
+  });
+
+  it('binds Codex credentials independently from harness completion credentials', async () => {
+    const fixture = await createBenchmarkFixture();
+    for (const compatible of [false, true]) {
+      const composition = await createDefaultCliComposition({
+        datasetRoot: fixture.datasetRoot,
+        resultsRoot: path.join(fixture.root, 'results'),
+        environment: {
+          CODEX_API_KEY: 'codex-test-key',
+          OPENAI_API_KEY: 'must-not-be-inferred',
+          ...(compatible ? {OPENAI_BASE_URL: 'https://gateway.example.test/v1'} : {}),
+        },
+      });
+      const codex = composition.agents.get('codex')!;
+      expect(codex.version).toBe(compatible ? '1+responses-compatible' : '1');
+      expect(codex.requirements({adapter: 'codex', provider: 'openai', model: 'gpt-5.4'}))
+        .toMatchObject({environment: {
+          variables: {CODEX_HOME: '/home/forge/.codex'},
+          credentials: {CODEX_API_KEY: {reference: 'openai.api-key'}},
+        }});
+      await expect(composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
+        runId: 'codex-cli', purpose: 'agent', signal: new AbortController().signal,
+      })).resolves.toBe('codex-test-key');
+    }
+    const composition = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      credentialBindings: {'openai.api-key': 'MY_CODEX_KEY'},
+      environment: {MY_CODEX_KEY: 'explicit-key'},
+    });
+    await expect(composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
+      runId: 'codex-cli', purpose: 'agent', signal: new AbortController().signal,
+    })).resolves.toBe('explicit-key');
   });
 
   it('selects standard gateway authentication when ANTHROPIC_BASE_URL is set', async () => {

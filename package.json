@@ -50,6 +50,10 @@
       "types": "./dist/agents/claude-code/index.d.ts",
       "import": "./dist/agents/claude-code/index.js"
     },
+    "./agents/codex": {
+      "types": "./dist/agents/codex/index.d.ts",
+      "import": "./dist/agents/codex/index.js"
+    },
     "./providers/anthropic": {
       "types": "./dist/providers/anthropic/index.d.ts",
       "import": "./dist/providers/anthropic/index.js"

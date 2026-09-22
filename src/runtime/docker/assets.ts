@@ -5,6 +5,9 @@ export const FORGE_BASE_IMAGE =
 /** Exact direct dependency installed in the Forge v1 runtime image. */
 export const FORGE_CLAUDE_CODE_VERSION = '2.1.273';
 
+/** Exact direct dependency installed in the Forge v1 runtime image. */
+export const FORGE_CODEX_VERSION = '0.149.0';
+
 /** Hash of Dockerfile, a NUL separator, and entrypoint.sh. */
 export const FORGE_RUNTIME_ASSET_DIGEST =
-  'c3094293a71f8d95063fde84e9ae75656e33d3e9858ffbb54e3f26f2e799fa30';
+  '6a087813223515e7e491e78aef72f74f434411b50b0e536cec4c387d36268233';

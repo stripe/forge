@@ -5,7 +5,9 @@ import {afterEach, describe, it} from 'node:test';
 
 import {expect} from '../../test/support/expect.js';
 
+import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
+import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {
@@ -20,6 +22,7 @@ import {
   EVALUATION_SCHEMA_VERSION,
   RUN_RESULT_SCHEMA_VERSION,
   type ArtifactDescriptorV1,
+  type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RunResultV1,
 } from './types.js';
@@ -583,6 +586,145 @@ describe('local artifact store', () => {
     }
   });
 
+  it('verifies complete Codex evidence with mapped tool categories and different protocol details', async () => {
+    const location = await commitCodexEvidence(
+      codexInteraction(),
+      codexNativeSteps(),
+    );
+    await expect(verifyCompletedRun(location)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+  });
+
+  for (const [nativeName, liveName] of [
+    ['mcp__my__server.probe', 'mcp__my__server__probe'],
+    ['mcp__my__server__probe', 'mcp__my__server__probe'],
+    ['mcp__my__server.probe.v1', 'mcp__my__server__probe.v1'],
+  ] as const) {
+    it(`verifies MCP server names containing __ in ${nativeName}`, async () => {
+      const interaction: InteractionArtifactV1 = {
+        ...oneShotInteraction,
+        turns: [{
+          ...oneShotInteraction.turns[0],
+          tool_calls: [{name: liveName}],
+        }],
+      };
+      const location = await commitCodexEvidence(interaction, [
+        {step_id: 1, source: 'user', message: 'do it'},
+        {
+          step_id: 2, source: 'agent', message: 'done',
+          tool_calls: [{tool_call_id: 'native-mcp', function_name: nativeName, arguments: {}}],
+          observation: {results: [{source_call_id: 'native-mcp', content: 'success'}]},
+        },
+      ]);
+      await expect(verifyCompletedRun(location)).resolves.toMatchObject({runId: 'run-1'});
+    });
+  }
+
+  it('verifies complete Codex evidence for a genuinely tool-free turn', async () => {
+    const location = await commitCodexEvidence(oneShotInteraction, [
+      {step_id: 1, source: 'user', message: 'do it'},
+      {step_id: 2, source: 'agent', message: 'different native response'},
+    ]);
+    await expect(verifyCompletedRun(location)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+  });
+
+  for (const missing of ['command pair', 'assistant text'] as const) {
+    it(`rejects complete Codex evidence missing ${missing} even after rebinding hashes and judge projection`, async () => {
+      const steps = codexNativeSteps();
+      const location = await commitCodexEvidence(codexInteraction(), steps);
+      await expect(verifyCompletedRun(location)).resolves.toMatchObject({
+        runId: 'run-1',
+      });
+
+      // Removing a command's whole step drops both its call and output, leaving
+      // valid ATIF. The unrelated tool_search remains, so raw total counts are
+      // still sufficient; only the mapped command category exposes the loss.
+      const tampered = steps
+        .filter((step) => missing === 'command pair'
+          ? !step.tool_calls?.some(({function_name}) =>
+              function_name === 'functions.exec_command')
+          : step.source !== 'agent' || step.message === '')
+        .map((step, index) => ({...step, step_id: index + 1}));
+      await rebindCodexEvidence(location, tampered);
+
+      await expect(verifyCompletedRun(location)).rejects.toThrow(
+        'trajectory.json does not cover every completed interaction turn.',
+      );
+    });
+  }
+
+  it('rejects a different Codex MCP server or tool despite matching call counts', async () => {
+    for (const replacement of ['mcp__other.search', 'mcp__docs.fetch']) {
+      const steps = codexNativeSteps().map((step) =>
+        step.source !== 'agent' || step.tool_calls == null
+          ? step
+          : {
+              ...step,
+              tool_calls: step.tool_calls.map((call) => ({
+                ...call,
+                function_name: call.function_name === 'mcp__docs.search'
+                  ? replacement
+                  : call.function_name,
+              })),
+            },
+      );
+      const location = await commitCodexEvidence(codexInteraction(), steps);
+      await expect(verifyCompletedRun(location)).rejects.toThrow(
+        'trajectory.json does not cover every completed interaction turn.',
+      );
+    }
+  });
+
+  it('preserves bounded, lossy Codex driver fallback verification', async () => {
+    const toolCalls = Array.from({length: 300}, (_, index) => ({
+      id: `driver-call-${index}`,
+      name: 'command_execution',
+      input: {command: 'x'.repeat(300)},
+    }));
+    const interaction: InteractionArtifactV1 = {
+      ...oneShotInteraction,
+      turns: [{...oneShotInteraction.turns[0], tool_calls: toolCalls}],
+    };
+    const location = await commitCodexEvidence(interaction, [
+      {step_id: 1, source: 'user', message: 'do it'},
+      {
+        step_id: 2,
+        source: 'agent',
+        message: 'done',
+        tool_calls: toolCalls.slice(0, 256).map((call) => ({
+          tool_call_id: call.id,
+          function_name: call.name,
+          arguments: {command: call.input.command.slice(0, 256)},
+        })),
+      },
+    ], (result) => ({
+      ...result,
+      evidence: {
+        ...result.evidence,
+        provenance: {
+          ...result.evidence.provenance,
+          source: {
+            kind: 'driver_fallback',
+            format: 'forge-driver-turns',
+            session_id: 'session',
+          },
+        },
+        completeness: 'fallback',
+        warnings: [
+          {code: 'source_incomplete', message: 'Native tools were incomplete.'},
+          {code: 'fallback_used', message: 'Using completed driver turns.'},
+          {code: 'value_omitted', message: 'Tool details exceeded fallback bounds.'},
+        ],
+      },
+    }));
+    await expect(verifyCompletedRun(location)).resolves.toMatchObject({
+      runId: 'run-1',
+    });
+  });
+
   it('accepts only the system fallback for a zero-turn role-player failure', async () => {
     const systemTrajectory = jsonBody({
       schema_version: 'ATIF-v1.8',
@@ -807,6 +949,117 @@ describe('local artifact store', () => {
 interface TestArtifact {
   readonly path: string;
   readonly body: Buffer;
+}
+
+function codexInteraction(): InteractionArtifactV1 {
+  return {
+    ...oneShotInteraction,
+    turns: [{
+      ...oneShotInteraction.turns[0],
+      tool_calls: [
+        {id: 'stream-command-1', name: 'command_execution', input: {command: 'pwd'}},
+        {id: 'stream-command-2', name: 'command_execution', input: {command: 'pwd'}},
+        {id: 'stream-file', name: 'file_change', input: {changes: [{path: 'a.txt', kind: 'add'}]}},
+        {id: 'stream-plan', name: 'todo_list', input: {items: [{text: 'Finish', completed: true}]}},
+        {id: 'stream-mcp', name: 'mcp__docs__search', input: {query: 'forge'}},
+      ],
+    }],
+  };
+}
+
+function codexNativeSteps(): AtifStep[] {
+  const tools = [
+    {name: 'functions.exec_command', input: {cmd: 'pwd'}},
+    {name: 'functions.write_stdin', input: {session_id: 1, chars: ''}},
+    {name: 'functions.apply_patch', input: {input: '*** Begin Patch\n*** End Patch'}},
+    {name: 'functions.update_plan', input: {plan: [{step: 'Finish', status: 'completed'}]}},
+    {name: 'mcp__docs.search', input: {query: 'forge', limit: 1}},
+    {name: 'tool_search', input: {query: 'docs search'}},
+  ];
+  return [
+    {step_id: 1, source: 'user', message: 'do it'},
+    ...tools.map((tool, index): AtifStep => ({
+      step_id: index + 2,
+      source: 'agent',
+      message: '',
+      tool_calls: [{
+        tool_call_id: `native-call-${index}`,
+        function_name: tool.name,
+        arguments: tool.input,
+      }],
+      observation: {results: [{
+        source_call_id: `native-call-${index}`,
+        content: 'native tool output',
+      }]},
+    })),
+    {step_id: tools.length + 2, source: 'agent', message: 'different native response'},
+  ];
+}
+
+function codexEvidenceArtifacts(steps: readonly AtifStep[]): TestArtifact[] {
+  const body = trajectoryBody(steps);
+  const trajectory = parseAtifTrajectory(JSON.parse(body.toString('utf8')));
+  const evidence = judgeEvidenceValue();
+  return [
+    {path: 'trajectory.json', body},
+    {
+      path: 'judge-evidence.json',
+      body: jsonBody({
+        ...evidence,
+        transcript: {
+          ...evidence.transcript,
+          steps: JSON.parse(createJudgeTranscriptProjection(trajectory).transcriptJson),
+        },
+      }),
+    },
+  ];
+}
+
+async function commitCodexEvidence(
+  interaction: InteractionArtifactV1,
+  steps: readonly AtifStep[],
+  transform: (result: RunResultV1) => RunResultV1 = (result) => result,
+): Promise<string> {
+  const plan = createTestResolvedRunPlan({
+    caseId: 'sample/case',
+    prompt: 'do it',
+    agent: {adapter: 'codex', provider: 'openai', model: 'test'},
+    successGuidelines: ['The task is complete.'],
+    judge: {provider: 'test-provider', model: 'judge-model'},
+  });
+  return commitArtifacts([
+    {path: 'interaction.json', body: jsonBody(interaction)},
+    ...codexEvidenceArtifacts(steps),
+  ], (result) => transform({
+    ...withPassingGuideline(result),
+    agent: {...result.agent, adapter: 'codex'},
+    evidence: {
+      ...result.evidence,
+      provenance: {
+        source: {kind: 'native_log', format: 'codex-rollout-jsonl', session_id: 'session'},
+        adapter: {id: 'codex', version: '1'},
+      },
+    },
+  }), {plan});
+}
+
+async function rebindCodexEvidence(
+  location: string,
+  steps: readonly AtifStep[],
+): Promise<void> {
+  const artifacts = codexEvidenceArtifacts(steps);
+  const resultPath = path.join(location, 'result.json');
+  const result = parseRunResult(JSON.parse(await fs.readFile(resultPath, 'utf8')));
+  await Promise.all(artifacts.map((artifact) =>
+    fs.writeFile(path.join(location, artifact.path), artifact.body),
+  ));
+  await fs.writeFile(resultPath, jsonBody({
+    ...result,
+    artifacts: result.artifacts.map((descriptor) => {
+      const artifact = artifacts.find(({path: artifactPath}) => artifactPath === descriptor.path);
+      return artifact === undefined ? descriptor : descriptorFor(artifact.path, artifact.body);
+    }),
+  }));
 }
 
 async function commitArtifacts(

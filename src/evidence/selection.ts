@@ -2,6 +2,7 @@ import {
   ATIF_SCHEMA_VERSION,
   createNormalizedTrajectory,
   type AtifAgentStep,
+  type AtifNormalizationSource,
   type AtifNormalizationWarning,
   type AtifTrajectoryV1_8,
   type AtifToolCall,
@@ -114,7 +115,7 @@ export function selectAgentEvidence(
       'Available native evidence contained a source-state or fallback warning.',
     );
   }
-  if (!trajectoryCoversCompletedTurns(candidate.trajectory, input.completedTurns)) {
+  if (!trajectoryCoversCompletedTurns(candidate.trajectory, input.completedTurns, source)) {
     return driverFallback(input, {
       code: 'source_incomplete',
       message: 'Native evidence did not cover every completed agent turn.',
@@ -123,23 +124,27 @@ export function selectAgentEvidence(
   return candidate;
 }
 
-/** Structural coverage only; native and live protocols may be lossy projections. */
+interface NativeTurnCoverage {
+  user: string;
+  hasAgentStep: boolean;
+  hasResponseEvidence: boolean;
+  hasAssistantText: boolean;
+  toolCounts: Map<string, number>;
+}
+
+/**
+ * Shared selection/verification policy. Native Codex evidence must preserve
+ * separately observed text and comparable tool activity in each turn. Other
+ * native formats and bounded driver fallback retain structural coverage only.
+ */
 export function trajectoryCoversCompletedTurns(
   trajectory: AtifTrajectoryV1_8,
   completedTurns: readonly CompletedEvidenceTurn[],
+  source: Pick<AtifNormalizationSource, 'kind' | 'format'>,
 ): boolean {
-  const nativeTurns: Array<{
-    user: string;
-    hasAgentStep: boolean;
-    hasResponseEvidence: boolean;
-  }> = [];
-  let current:
-    | {
-        user: string;
-        hasAgentStep: boolean;
-        hasResponseEvidence: boolean;
-      }
-    | undefined;
+  const reconcileCodex = source.kind === 'native_log' && source.format === 'codex-rollout-jsonl';
+  const nativeTurns: NativeTurnCoverage[] = [];
+  let current: NativeTurnCoverage | undefined;
 
   for (const step of trajectory.steps) {
     if (step.is_copied_context === true || step.source === 'system') continue;
@@ -149,6 +154,8 @@ export function trajectoryCoversCompletedTurns(
         user: step.message,
         hasAgentStep: false,
         hasResponseEvidence: false,
+        hasAssistantText: false,
+        toolCounts: new Map(),
       };
       nativeTurns.push(current);
       continue;
@@ -156,6 +163,13 @@ export function trajectoryCoversCompletedTurns(
     if (current === undefined) return false;
     current.hasAgentStep = true;
     if (hasVisibleAgentEvidence(step)) current.hasResponseEvidence = true;
+    if (hasAssistantText(step)) current.hasAssistantText = true;
+    if (reconcileCodex) {
+      for (const call of step.tool_calls ?? []) {
+        const category = codexToolCategory(call.function_name, 'native');
+        if (category !== undefined) incrementCount(current.toolCounts, category);
+      }
+    }
   }
 
   if (nativeTurns.length !== completedTurns.length) return false;
@@ -163,10 +177,77 @@ export function trajectoryCoversCompletedTurns(
     const native = nativeTurns[index];
     if (native === undefined || native.user !== completed.user) return false;
     if (!native.hasAgentStep) return false;
+    if (reconcileCodex) {
+      if (completed.assistant.length > 0 && !native.hasAssistantText) return false;
+      const driverToolCounts = new Map<string, number>();
+      for (const call of completed.toolCalls) {
+        const category = codexToolCategory(call.name, 'live');
+        // A new live tool kind needs a deliberate native mapping; unrelated
+        // native activity must not make unsupported coverage look complete.
+        if (category === undefined) return false;
+        incrementCount(driverToolCounts, category);
+      }
+      for (const [category, count] of driverToolCounts) {
+        if ((native.toolCounts.get(category) ?? 0) < count) return false;
+      }
+    }
     const driverHasResponse =
       completed.assistant.length > 0 || completed.toolCalls.length > 0;
     return !driverHasResponse || native.hasResponseEvidence;
   });
+}
+
+function hasAssistantText(step: AtifAgentStep): boolean {
+  return typeof step.message === 'string'
+    ? step.message.length > 0
+    : step.message.some((part) => part.type === 'text' && part.text.length > 0);
+}
+
+function incrementCount(counts: Map<string, number>, category: string): void {
+  counts.set(category, (counts.get(category) ?? 0) + 1);
+}
+
+/**
+ * Compare protocol categories, never tool IDs or argument bytes. Command
+ * snapshots use command_execution while rollout calls use exec_command or
+ * write_stdin; several native polling calls may describe one live command.
+ * Discovery-only tool_search has no live counterpart and cannot cover a
+ * missing execution/MCP call. Preserve tool-name case and only strip the
+ * built-in functions namespace, not arbitrary user-defined namespaces.
+ */
+function codexToolCategory(name: string, protocol: 'live' | 'native'): string | undefined {
+  if (protocol === 'native' && name.startsWith('functions.')) {
+    name = name.slice('functions.'.length);
+  }
+  if (name.startsWith('mcp__')) {
+    if (protocol === 'native') {
+      const namespaceEnd = name.indexOf('.', 'mcp__'.length);
+      // Pinned Codex server IDs permit __ but not dots. The first dot is the
+      // native namespace separator; preserve any dots in the tool-name suffix.
+      if (namespaceEnd > 'mcp__'.length) {
+        name = `${name.slice(0, namespaceEnd)}__${name.slice(namespaceEnd + 1)}`;
+      }
+    }
+    const separator = name.indexOf('__', 'mcp__'.length);
+    return separator > 'mcp__'.length && separator + 2 < name.length ? name : undefined;
+  }
+  if (protocol === 'live') {
+    return ['command_execution', 'file_change', 'todo_list', 'web_search'].includes(name)
+      ? name : undefined;
+  }
+  switch (name) {
+    case 'exec_command':
+    case 'write_stdin':
+      return 'command_execution';
+    case 'apply_patch':
+      return 'file_change';
+    case 'update_plan':
+      return 'todo_list';
+    case 'web_search':
+      return 'web_search';
+    default:
+      return undefined;
+  }
 }
 
 function hasVisibleAgentEvidence(step: AtifAgentStep): boolean {

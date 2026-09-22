@@ -7,11 +7,12 @@ through a runtime adapter, normalizes agent evidence to ATIF, evaluates checks a
 guidelines, and atomically commits a neutral local result.
 
 > **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
-> Ava multi-turn Claude Code runs, with file checks, model-judged success
+> Ava multi-turn Claude Code and Codex runs, with file checks, model-judged success
 > guidelines, latest-marketplace Claude plugin treatments, ATIF v1.8 evidence,
 > and local results. The public CLI supports
-> direct Anthropic or an explicitly configured Anthropic Messages-compatible
-> endpoint. See [Current limitations](#current-limitations) before authoring a
+> direct Anthropic and OpenAI, or explicitly configured compatible endpoints.
+> Host-side Ava and judging currently use Anthropic, independently of the coding
+> agent. See [Current limitations](#current-limitations) before authoring a
 > benchmark.
 
 ## Requirements
@@ -25,13 +26,17 @@ can supply an external runtime with its own explicit execution requirements.
 - Network access to Docker Hub and npm when Forge first builds its runtime image.
 - A `forge/plugin@1` treatment additionally needs HTTPS access to its GitHub
   marketplace and the source selected by the marketplace's current entry.
-- The runtime image obtains Claude Code from npm; its use remains subject to
-  Anthropic's applicable terms.
+- The runtime image obtains Claude Code and Codex from npm; their use remains
+  subject to the respective providers' applicable terms.
 - Provider credentials for `forge run`: either `ANTHROPIC_API_KEY` for direct
   Anthropic, or `ANTHROPIC_BASE_URL` plus `ANTHROPIC_AUTH_TOKEN` for an
   Anthropic Messages-compatible endpoint. The public CLI uses the selected
   credential for Claude Code and, when required by the plan, host-side Ava and
   judge completions. Validation and planning do not resolve it.
+- Codex runs require `CODEX_API_KEY`. Optional `OPENAI_BASE_URL` selects a
+  Responses-compatible API root. A checks-only, one-shot Codex run needs no
+  Anthropic credential; Codex runs using Ava or judging additionally need the
+  independently configured host completion provider's credential.
 - Ava and guideline judging use strict structured outputs. The built-in
   Anthropic completion provider accepts Claude 4.5 or newer model identifiers.
 - Enough Docker capacity for the experiment config's limits. Defaults are 4 GiB
@@ -301,6 +306,7 @@ Additional artifacts are emitted only when their capability is used:
 workspace-evidence.json            # one or more deterministic file checks
 judge-evidence.json                # one or more guidelines judged
 native/claude-code/session.jsonl   # exact selected Claude source session
+native/codex/session.jsonl         # exact selected Codex rollout, for Codex runs
 extensions/<contributor-id>/...    # optional host-contributed artifacts
 ```
 
@@ -339,8 +345,8 @@ Files below `extensions/<contributor-id>/` are optional supplemental artifacts
 from registered `RunArtifactContributor`s. The `result.json` descriptors
 independently identify all stored companion bytes.
 
-The built-in Claude adapter retains only the exact root-session project JSONL
-selected for the run. Forge copies those bytes without redaction, filtering,
+The built-in agents retain only the exact root-session JSONL selected for the
+run: Claude's project log or Codex's rollout. Forge copies those bytes without redaction, filtering,
 normalization, or reserialization to
 `native/<adapter-id>/session.jsonl`, including when ATIF normalization falls
 back. This restricted supplemental artifact may contain credentials, prompts,
@@ -371,6 +377,81 @@ For native Claude evidence, the result contains an evidence descriptor like:
   "redaction_count": 0
 }
 ```
+
+## Running Codex
+
+Codex uses the same cases, runtime contracts, checks, Ava controller, and result
+verification as Claude Code. Select it in the experiment's agent matrix:
+
+```yaml
+matrix:
+  agents:
+    - adapter: codex
+      provider: openai
+      model: gpt-5.4
+```
+
+The [checked-in Codex example](examples/codex/README.md) is a complete runnable
+experiment using the quickstart dataset. From a source checkout:
+
+```sh
+pnpm build
+node dist/cli.js validate \
+  --experiment examples/codex/experiment.yaml \
+  --dataset examples/quickstart/dataset
+
+CODEX_API_KEY=your-restricted-key \
+node dist/cli.js run \
+  --experiment examples/codex/experiment.yaml \
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml \
+  --agent codex --model gpt-5.4 \
+  --output ./results --run-id codex-001
+```
+
+The model is an explicit experiment choice, subject to provider availability.
+Change it in the experiment when using another Codex-supported model.
+Validation and planning require neither credentials nor Docker allocation;
+`run` requires Docker and makes potentially billable model calls.
+
+Forge pins Codex CLI `0.149.0` and checks the binary version before setup. Each
+run receives an isolated `CODEX_HOME`. Forge uses `codex exec --json` for the
+first turn and `codex exec resume <exact-session-id>` for later Ava turns; it
+never resumes the newest ambient session. The adapter explicitly chooses its
+provider, endpoint, and credential environment name, ignores user config, and
+does not mount a developer's Codex state or login. Codex's own approvals and
+sandbox are disabled inside the externally isolated runtime; a custom runtime
+must provide suitable isolation itself. A prompt consisting solely of `-` is
+rejected because Codex treats it as its stdin sentinel.
+
+The CLI maps `openai.api-key` to host `CODEX_API_KEY`. Override the host binding
+with `--credential-env openai.api-key=MY_KEY_VARIABLE` if needed. It does not
+implicitly read `OPENAI_API_KEY`. Optional `OPENAI_BASE_URL` is the complete API
+root (for example, `https://gateway.example.com/v1`), not a Chat Completions
+endpoint; the service must support the Responses protocol used by Codex. Use
+HTTPS for remote services. Endpoints must be reachable from inside the runtime.
+The adapter records version `1`, or `1+responses-compatible` for an explicitly
+configured endpoint; endpoint URLs and credentials are not added to results.
+
+Programmatic hosts import `createCodexAdapter` from
+`@stripe/forge/agents/codex` and register it in `composition.agents`. Options
+include explicit `id`, `provider`, `executable`, `expectedVersion`, `credential`,
+`credentialEnvironmentName`, `baseUrl`, and `layout`. Changing the CLI version
+requires validating its stream and rollout formats against the adapter. A
+custom layout specifies `workspace`, `home`, and `configDirectory` (the
+run-owned `CODEX_HOME`) just like the Claude layout below, and records version
+`1+layout` or `1+responses-compatible.layout`. No Docker-specific mechanism is
+required by the agent contract.
+
+Codex is a coding-agent adapter, not a host completion provider. For a
+multi-turn Codex experiment, still declare `models.role_player`; for success
+guidelines, declare `models.judge`. The CLI currently supplies Anthropic for
+those roles, or embedding hosts can supply their own `CompletionProvider`.
+Codex plugin installation is not implemented; `forge/plugin@1` remains
+Claude-only and unsupported Codex treatments fail before allocation.
+
+See the official Codex [non-interactive guide](https://developers.openai.com/codex/noninteractive/)
+and [CLI reference](https://developers.openai.com/codex/cli/reference/) for the
+underlying CLI behavior.
 
 ## Dataset, experiment config, and plan boundaries
 
@@ -881,6 +962,7 @@ async function loadForge() {
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
+| `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
@@ -901,8 +983,37 @@ Forge persists the canonical agent trajectory as a standalone
   treats null and omission equivalently. Conditional multimodal fields still
   obey the RFC's requirement to be omitted when inapplicable.
 - Agent-native evidence is read only after runtime quiescence.
-- The Claude adapter selects the exact run-owned session JSONL. It does not use
-  a newest-session heuristic.
+- The Claude and Codex adapters select the exact run-owned session JSONL. They
+  do not use a newest-session heuristic. Codex selects one matching root UUID
+  rollout below its isolated `CODEX_HOME/sessions` and checks session metadata.
+- Codex native evidence uses format `codex-rollout-jsonl`. Actual user turns
+  are distinguished from injected AGENTS.md and environment context, which
+  become system steps. Function and custom-tool calls retain native call IDs,
+  arguments, and correlated outputs. Native tool-search calls and their returned
+  tool definitions remain correlated tool behavior. Completed MCP snapshots are
+  checked against their matching call and result; a completed invocation does
+  not override an MCP `isError` result.
+  Supported MCP text and image blocks may include `annotations` and `_meta`
+  objects. Forge treats their contents as opaque data under the existing JSON
+  size and nesting limits, not as Forge control fields. Metadata
+  present in the recorded rendered output is preserved after credential
+  redaction; metadata present only in the full snapshot is not added to judge
+  evidence. Metadata alone does not add a warning or reduce completeness.
+  Recognized Codex MCP truncation preserves exactly the shortened text recorded
+  in the native output (after credential redaction), including truncation and
+  omitted-item markers. Forge validates the retained text and omission counts
+  against the full snapshot; it never restores hidden text into judge evidence. A
+  `value_omitted` warning marks the native trajectory as `partial`. Unknown or
+  mismatched truncation, including a clipped timing header that cannot be
+  reconstructed from the snapshot, still triggers driver fallback.
+  Tool results may be strings or supported content-block arrays. Text blocks
+  remain judge-visible. Image bytes and URL references remain only in the restricted native
+  artifact; the normalized result contains an explicit omission marker and a
+  `value_omitted` warning, making that native trajectory `partial` instead of
+  discarding its text and falling back. Forge does not fabricate image-file
+  references, fetch image URLs, or attach native image bytes to text-only judges.
+  Incomplete, compacted, ambiguous, or
+  unsupported conversational records trigger whole-trajectory driver fallback.
 - The same exact selected root JSONL is retained byte-for-byte as a restricted
   supplemental artifact under `native/`. Forge does not crawl or retain sibling
   sessions or subagent traces.
@@ -919,7 +1030,14 @@ Forge persists the canonical agent trajectory as a standalone
   of logical turns, the same ordered user prompts, and visible response or tool
   activity for each completed response. Native assistant text and tool payloads
   need not be byte-identical because live and persisted protocols are lossy
-  projections of the same turn.
+  projections of the same turn. For native Codex evidence, each turn must also
+  retain assistant text when the live turn had text and at least the observed
+  count of each comparable tool kind (including each named MCP tool). Native-only
+  tool discovery cannot compensate for a missing executed tool. This rule uses
+  native-format provenance, not the configured adapter ID; custom Codex adapter
+  IDs receive the same checks. These are lower-bound coverage checks, not exact
+  one-to-one execution matching. Claude's projection-tolerant coverage and explicit
+  bounded driver fallback retain their existing rules.
 - If native evidence is absent, invalid, oversized, incomplete, or compacted,
   or fails that structural reconciliation, Forge discards the entire native
   candidate, constructs ATIF from every completed driver turn, and records
@@ -1195,9 +1313,9 @@ host-owned semantics and capabilities.
 - Datasets are exact-manifest, hash-verified trees. Forge rejects symbolic
   links, special files, traversal, undeclared payloads, and unsafe roots.
 - The Docker build context contains only Forge's packaged Dockerfile and
-  entrypoint. The Node base image is pinned by OCI digest and Claude Code is
-  installed at exact version `2.1.273`.
-- Debian packages and the Claude Code tarball are resolved from the configured
+  entrypoint. The Node base image is pinned by OCI digest; Claude Code is
+  installed at exact version `2.1.273` and Codex at `0.149.0`.
+- Debian packages and the coding-agent packages are resolved from the configured
   registries when the image is built. Forge records the resulting immutable
   image ID; a future release should add stronger dependency-level integrity
   pins if byte-for-byte rebuilds are required across registry state changes.
@@ -1254,11 +1372,12 @@ proxy, or an offline execution mode.
   built-in evaluator remains limited to file creation, file existence, and
   regular-expression content checks; there are no built-in test-command,
   static-analysis, or custom deterministic check plugins.
-- Claude Code is the only built-in agent. Codex and Cursor adapters are not
-  included.
+- Claude Code and Codex are built-in agents. Cursor is not included. Codex
+  supports non-interactive API-key execution, not ChatGPT login or plugin
+  installation.
 - Anthropic is the only built-in completion provider. It supports direct
   Anthropic and Anthropic Messages-compatible endpoints and requires Claude
-  4.5-or-newer model identifiers for strict structured output. OpenAI,
+  4.5-or-newer model identifiers for strict structured output. OpenAI host completions,
   OpenRouter-native, and other provider protocols are not included, though a
   programmatic composition can implement the public provider contract.
 - The built-in Docker adapter accepts only the Forge-owned image. Custom
@@ -1332,6 +1451,29 @@ One invocation builds once and runs the following checks in order:
 5. Full `verifyCompletedRun` integrity verification plus targeted checks of the
    interaction, trajectory, judge evidence, completion calls, and session
    provenance, including the exact restricted Claude source artifact.
+
+To test only Codex, select its mode in the same live suite:
+
+```sh
+FORGE_LIVE=1 \
+FORGE_LIVE_AGENT=codex \
+CODEX_API_KEY=your-restricted-key \
+OPENAI_BASE_URL=https://gateway.example.com/v1 \
+pnpm test:live
+```
+
+Omit `OPENAI_BASE_URL` for direct OpenAI. Codex mode runs Docker conformance,
+the checked-in Codex one-shot experiment, and full artifact verification,
+including native rollout evidence. It does not run Claude plugins, Ava, or
+guideline judging and needs no Anthropic credential. The selected model is
+`gpt-5.4`, as pinned by the example experiment.
+
+For this live-suite mode, a temporary authenticated host bridge forwards only
+Responses API requests to the configured endpoint. The real upstream key stays
+host-side; Codex receives only a per-run bridge credential. This requires
+`host.docker.internal` support, such as Docker Desktop; the suite checks
+container reachability before making model calls. The public CLI itself does
+not create this test-only bridge.
 
 When `ANTHROPIC_BASE_URL` names a host-loopback endpoint, the live suite creates
 an ephemeral authenticated bridge for Claude Code in Docker. The container sees
