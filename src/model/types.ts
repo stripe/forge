@@ -158,6 +158,19 @@ export interface ForgeDockerRuntimeV1 {
   resources: DockerResourcesV1;
 }
 
+/** Explicit, fully materialized configuration for a host-supplied runtime. */
+export interface ForgeExternalRuntimeV1 {
+  /** Namespaced adapter identity. Built-in Docker identities are reserved. */
+  adapter: string;
+  adapter_version: string;
+  config_version: number;
+  platform: 'linux/amd64' | 'linux/arm64';
+  /** Public, bounded JSON only; credentials remain composition capabilities. */
+  config: JsonObject;
+}
+
+export type ForgeRuntimeV1 = ForgeDockerRuntimeV1 | ForgeExternalRuntimeV1;
+
 export interface ExperimentConfigV1 {
   schema_version: typeof BENCHMARK_SCHEMA_VERSION;
   id: string;
@@ -167,7 +180,7 @@ export interface ExperimentConfigV1 {
     version: string;
     action_bundles?: SetupActionBundleReferenceV1[];
   };
-  runtime: ForgeDockerRuntimeV1;
+  runtime: ForgeRuntimeV1;
   models: {
     role_player?: ModelRefV1;
     judge?: ModelRefV1;
@@ -263,6 +276,6 @@ export interface ResolvedRunPlanV1 {
   };
   role_player?: ModelRefV1;
   agent: AgentSelectionV1;
-  runtime: ForgeDockerRuntimeV1;
+  runtime: ForgeRuntimeV1;
   limits: {run_timeout_ms: number};
 }

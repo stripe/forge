@@ -203,7 +203,7 @@ task: safe
     expect(config.models).toEqual({});
     expect(config.treatments).toEqual({baseline: {setup: []}});
     expect(config.matrix).toMatchObject({repetitions: 1, retries: 0});
-    expect(config.runtime.resources).toMatchObject({
+    expect('resources' in config.runtime && config.runtime.resources).toMatchObject({
       memory_bytes: 4 * 1024 * 1024 * 1024,
       cpu_count: 2,
       process_count: 512,

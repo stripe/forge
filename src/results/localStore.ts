@@ -323,6 +323,18 @@ function verifyPlanArtifact(
       'plan.json does not match the completed result summary.',
     );
   }
+  const plannedRuntime = plan.runtime;
+  const externalRuntime = 'config' in plannedRuntime;
+  // Old Docker v1 artifacts omitted adapter_version. Preserve their bytes and
+  // alias while binding every external runtime to its explicit version pin.
+  const runtimeMatches = externalRuntime
+    ? result.runtime.adapter === plannedRuntime.adapter &&
+      result.runtime.adapter_version === plannedRuntime.adapter_version
+    : (result.runtime.adapter === 'docker' || result.runtime.adapter === 'forge/docker') &&
+      (result.runtime.adapter_version === undefined || result.runtime.adapter_version === '1');
+  if (!runtimeMatches || result.runtime.platform !== plannedRuntime.platform) {
+    throw new ArtifactStoreError('plan.json runtime does not match the completed result.');
+  }
   const plannedGuidelines = plan.evaluation.success_guidelines;
   const recordedGuidelines = result.evaluation.guidelines.map(
     ({guideline}) => guideline,

@@ -294,6 +294,7 @@ describe('portable setup actions', () => {
       preflight(_step, context) {
         assert.equal(Object.isFrozen(context.selection), true);
         assert.equal(Object.isFrozen(context.runtime), true);
+        assert('resources' in context.runtime);
         assert.equal(Object.isFrozen(context.runtime.resources), true);
         events.push(
           `preflight:${context.stepIndex}:${context.selection.adapter}:${context.runtime.platform}`,

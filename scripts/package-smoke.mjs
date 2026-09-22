@@ -92,6 +92,22 @@ try {
       assert.equal(typeof setup.defineSetupActionBundle, 'function');
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
 
+      const externalPlan = testing.createTestResolvedRunPlan({runtime: {
+        adapter: 'package-smoke/process', adapter_version: '1', config_version: 1,
+        platform: 'linux/amd64', config: {profile: 'offline'},
+      }});
+      assert.equal(forge.parseResolvedRunPlan(externalPlan).runtime.adapter, 'package-smoke/process');
+      const customClaude = claude.createClaudeCodeAdapter({layout: {
+        workspace: '/tmp/example/workspace', home: '/tmp/example/home',
+        configDirectory: '/tmp/example/session',
+      }});
+      const customRequirements = customClaude.requirements({
+        adapter: 'claude-code', provider: 'anthropic', model: 'test',
+      });
+      assert.equal(customRequirements.environment.variables.CLAUDE_CONFIG_DIR, '/tmp/example/session');
+      assert.equal(customRequirements.stateDirectories[0].containerPath,
+        '/tmp/example/session/projects/-tmp-example-workspace');
+
       const bundle = setup.defineSetupActionBundle({
         manifest: {
           namespace: 'package-smoke',

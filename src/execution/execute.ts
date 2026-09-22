@@ -897,6 +897,7 @@ function buildEvalPreflight(
     },
   ]);
   const completionBindings = completionBindingsForPlan(plan, composition);
+  preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
     agent,
     agentEvidenceIdentity,
@@ -918,11 +919,38 @@ function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
       `Run plan requires Forge ${plan.provenance.forge.version}; this build is ${FORGE_VERSION}.`,
     );
   }
-  if (plan.runtime.image.kind !== 'forge') {
-    throw new ForgeExecutionError('invalid_plan', 'preflight', 'Only Forge-owned images are supported.');
-  }
   // Defensive JSON/canonicalization check before any credential or runtime use.
   serializeResolvedRunPlan(plan);
+}
+
+function preflightRuntime(
+  plan: ResolvedRunPlanV1,
+  composition: ForgeComposition,
+  requirements: RuntimeRequirements,
+  environment: ScopedEnvironmentSpecification,
+): void {
+  const runtime = composition.runtime;
+  const selected = plan.runtime;
+  const external = 'config' in selected;
+  const matches = external
+    ? runtime.id === selected.adapter && runtime.version === selected.adapter_version
+    : (runtime.id === 'forge/docker' || runtime.id === 'docker') && runtime.version === '1';
+  if (!matches || (external && typeof runtime.preflight !== 'function')) {
+    throw new ForgeExecutionError(
+      'unsupported_capability',
+      'preflight',
+      'The supplied runtime must match the planned adapter and version and validate its configuration.',
+    );
+  }
+  if (runtime.preflight) {
+    const result: unknown = runtime.preflight(Object.freeze({plan, requirements, environment}));
+    if (result !== undefined) {
+      // A mistakenly async validator must fail before authority is resolved,
+      // without leaving its rejected promise unhandled in the host process.
+      if (result instanceof Promise) void result.catch(() => undefined);
+      throw new TypeError('Runtime preflight must synchronously validate without returning a value.');
+    }
+  }
 }
 
 function selectedAgent(
@@ -1663,6 +1691,7 @@ function buildResult(input: {
     },
     runtime: {
       adapter: input.input.composition.runtime.id,
+      adapter_version: input.input.composition.runtime.version,
       runtime_id: input.runtime.runtimeId,
       platform: input.input.plan.runtime.platform,
       metadata: input.runtime.metadata,

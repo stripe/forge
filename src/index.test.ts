@@ -34,8 +34,10 @@ import {
   resolveRunPlan,
   type AgentAdapter,
   type ForgeComposition,
+  type ForgeExternalRuntimeV1,
   type JudgeEvidenceV1,
   type RuntimeAdapter,
+  type RuntimePreflight,
 } from './index.js';
 
 describe('@stripe/forge package root', () => {
@@ -89,6 +91,8 @@ describe('@stripe/forge package root', () => {
       _runtime: RuntimeAdapter,
       _composition: ForgeComposition,
       _judgeEvidence: JudgeEvidenceV1,
+      _externalRuntime: ForgeExternalRuntimeV1,
+      _runtimePreflight: RuntimePreflight,
     ): void => undefined;
     expect(acceptsPublicContracts).toBeTypeOf('function');
   });

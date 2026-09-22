@@ -15,6 +15,7 @@ import {defaultForgeEngine, type ForgeEngine} from './engine.js';
 import {
   parseRunSelection,
   type ExperimentConfigV1,
+  type ForgeRuntimeV1,
   type RunSelection,
 } from './model/index.js';
 import {
@@ -93,6 +94,8 @@ The run command writes atomic results below ./results by default.
 export interface DefaultCliCompositionOptions {
   readonly datasetRoot: string;
   readonly resultsRoot: string;
+  /** Resolved runtime selection supplied by runCli to embedding hosts. */
+  readonly runtime?: ForgeRuntimeV1;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly credentialBindings?: Readonly<Record<string, string>>;
 }
@@ -117,6 +120,9 @@ export interface RunCliOptions {
 export async function createDefaultCliComposition(
   options: DefaultCliCompositionOptions,
 ): Promise<ForgeComposition> {
+  if (options.runtime && 'config' in options.runtime) {
+    throw new CliUsageError('External runtimes require a host-supplied compositionFactory.');
+  }
   const environment = options.environment ?? process.env;
   const baseUrl = environment[ANTHROPIC_BASE_URL_ENVIRONMENT];
   const gatewaySelected = baseUrl !== undefined;
@@ -230,6 +236,7 @@ export async function runCli(
         options.compositionFactory ?? createDefaultCliComposition;
       const composition = await compositionFactory({
         datasetRoot: dataset.root,
+        runtime: experiment.config.runtime,
         resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
         ...(options.environment === undefined
           ? {}
@@ -292,6 +299,7 @@ export async function runCli(
       options.compositionFactory ?? createDefaultCliComposition;
     const composition = await compositionFactory({
       datasetRoot: dataset.root,
+      runtime: plan.runtime,
       resultsRoot,
       ...(options.environment === undefined
         ? {}

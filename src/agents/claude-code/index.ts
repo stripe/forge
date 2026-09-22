@@ -17,6 +17,13 @@ import {
 } from './evidence.js';
 import {isSafeSessionId, parseClaudeStream} from './stream.js';
 import {createClaudePluginInstaller} from './plugins.js';
+import {
+  assertClaudeRuntimeLayout,
+  claudeProjectDirectory,
+  resolveClaudeCodeLayout,
+  usesDefaultClaudeCodeLayout,
+  type ClaudeCodeLayout,
+} from './layout.js';
 
 export const CLAUDE_CODE_ADAPTER_VERSION = '2' as const;
 export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '2+gateway' as const;
@@ -27,6 +34,8 @@ export interface ClaudeCodeAdapterOptions {
   readonly provider?: string;
   readonly executable?: string;
   readonly expectedVersion?: string;
+  /** Explicit run-owned paths, matching the selected runtime's pinned layout. */
+  readonly layout?: ClaudeCodeLayout;
   /** Optional credential-free HTTP(S) endpoint for Anthropic-compatible APIs. */
   readonly baseUrl?: string;
   readonly credential?: string | CredentialReference;
@@ -47,9 +56,13 @@ export function createClaudeCodeAdapter(
   const expectedVersion = options.expectedVersion ?? FORGE_CLAUDE_CODE_VERSION;
   const baseUrl =
     options.baseUrl === undefined ? undefined : validateBaseUrl(options.baseUrl);
-  const adapterVersion = baseUrl === undefined
+  const layout = resolveClaudeCodeLayout(options.layout);
+  const defaultAdapterVersion = baseUrl === undefined
     ? CLAUDE_CODE_ADAPTER_VERSION
     : CLAUDE_CODE_GATEWAY_ADAPTER_VERSION;
+  const adapterVersion = usesDefaultClaudeCodeLayout(layout)
+    ? defaultAdapterVersion
+    : `${defaultAdapterVersion}${baseUrl === undefined ? '+' : '.'}layout`;
   const credential = typeof options.credential === 'string'
     ? credentialReference(options.credential)
     : (options.credential ?? credentialReference('anthropic.api-key'));
@@ -57,7 +70,13 @@ export function createClaudeCodeAdapter(
     options.credentialEnvironmentName ?? 'ANTHROPIC_API_KEY';
   const disallowedTools = [...(options.disallowedTools ?? [])];
   const sessionIdFactory = options.sessionIdFactory ?? randomUUID;
-  const pluginInstaller = createClaudePluginInstaller({adapterId: id, executable});
+  const pluginInstaller = createClaudePluginInstaller({adapterId: id, executable, layout});
+  const variables = {
+    ...(baseUrl === undefined ? {} : {ANTHROPIC_BASE_URL: baseUrl}),
+    ...(layout.configDirectory === `${layout.home}/.claude`
+      ? {}
+      : {CLAUDE_CONFIG_DIR: layout.configDirectory}),
+  };
 
   if (!id || !provider || !executable || !expectedVersion) {
     throw new TypeError('Claude adapter identifiers and versions must be non-empty.');
@@ -67,6 +86,9 @@ export function createClaudeCodeAdapter(
       'Claude base URL and credential must use different environment variables.',
     );
   }
+  if (credentialEnvironmentName === 'CLAUDE_CONFIG_DIR') {
+    throw new TypeError('Claude configuration directory cannot be supplied as a credential.');
+  }
   const requirements = (selection: {adapter: string; provider: string}): AgentRuntimeRequirements => {
     if (selection.adapter !== id || selection.provider !== provider) {
       throw new TypeError('Claude adapter does not match the selected adapter/provider.');
@@ -74,9 +96,7 @@ export function createClaudeCodeAdapter(
     return {
       executables: [executable],
       environment: {
-        ...(baseUrl === undefined
-          ? {}
-          : {variables: {ANTHROPIC_BASE_URL: baseUrl}}),
+        ...(Object.keys(variables).length === 0 ? {} : {variables: {...variables}}),
         credentials: {
           [credentialEnvironmentName]: {
             reference: credential,
@@ -86,7 +106,7 @@ export function createClaudeCodeAdapter(
       stateDirectories: [
         {
           id: CLAUDE_PROJECTS_STATE_ID,
-          containerPath: '/home/forge/.claude/projects/-workspace',
+          containerPath: claudeProjectDirectory(layout),
         },
       ],
     };
@@ -103,6 +123,7 @@ export function createClaudeCodeAdapter(
     },
     async prepare(context) {
       requirements(context.selection);
+      assertClaudeRuntimeLayout(layout, context.runtime.paths);
       const result = await context.runtime.commands.uncredentialed.run(
         [executable, '--version'],
         {signal: context.signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
@@ -113,6 +134,7 @@ export function createClaudeCodeAdapter(
     },
     async openSession(context): Promise<AgentSession> {
       requirements(context.selection);
+      assertClaudeRuntimeLayout(layout, context.runtime.paths);
       const initialSessionId = sessionIdFactory();
       if (!isSafeSessionId(initialSessionId)) {
         throw new TypeError('Claude session ID factory returned an unsafe value.');
@@ -158,6 +180,7 @@ export function createClaudeCodeAdapter(
       };
     },
     collectEvidence(context) {
+      assertClaudeRuntimeLayout(layout, context.runtime.paths);
       return loadClaudeEvidence({
         project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
         sessionId: context.sessionId,
@@ -167,6 +190,7 @@ export function createClaudeCodeAdapter(
       });
     },
     collectNativeArtifact(context) {
+      assertClaudeRuntimeLayout(layout, context.runtime.paths);
       return loadClaudeNativeArtifact({
         project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
         sessionId: context.sessionId,
@@ -207,6 +231,7 @@ function validateBaseUrl(value: string): string {
 }
 
 export {loadClaudeEvidence} from './evidence.js';
+export type {ClaudeCodeLayout} from './layout.js';
 export {ClaudeStreamError, parseClaudeStream} from './stream.js';
 export {
   CLAUDE_PLUGIN_STATE_ID,

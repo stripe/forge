@@ -91,7 +91,7 @@ describe('parseResolvedRunPlan', () => {
     expect(Object.isFrozen(parsed)).toBe(true);
     expect(Object.isFrozen(parsed.setup)).toBe(true);
     expect(Object.isFrozen(parsed.case)).toBe(true);
-    expect(Object.isFrozen(parsed.runtime.resources)).toBe(true);
+    expect('resources' in parsed.runtime && Object.isFrozen(parsed.runtime.resources)).toBe(true);
     expect(Object.isFrozen(input)).toBe(false);
   });
 

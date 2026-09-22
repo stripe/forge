@@ -438,6 +438,7 @@ const runResultFields = {
   }).strict(),
   runtime: z.object({
     adapter: safeText,
+    adapter_version: safeVersion.optional(),
     runtime_id: safeText,
     platform: safeText,
     metadata: z.record(z.string().max(64 * 1024)),

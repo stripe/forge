@@ -16,6 +16,11 @@ import {
   inspectInstalledPluginTree,
   pluginSourceReceipt,
 } from './pluginReceipt.js';
+import {
+  assertClaudeRuntimeLayout,
+  resolveClaudeCodeLayout,
+  type ClaudeCodeLayout,
+} from './layout.js';
 
 export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugins' as const;
 export const CLAUDE_PLUGIN_STATE_PATH =
@@ -31,6 +36,7 @@ const FULL_GIT_COMMIT = /^[a-f0-9]{40}$/;
 interface ClaudePluginInstallerOptions {
   readonly adapterId: string;
   readonly executable: string;
+  readonly layout?: ClaudeCodeLayout;
 }
 
 interface QualifiedPluginId {
@@ -55,6 +61,8 @@ export function createClaudePluginInstaller(
 ): AgentPluginInstaller {
   const adapterId = options.adapterId;
   const executable = options.executable;
+  const layout = resolveClaudeCodeLayout(options.layout);
+  const pluginStatePath = `${layout.configDirectory}/plugins`;
 
   return Object.freeze({
     preflight(
@@ -74,7 +82,7 @@ export function createClaudePluginInstaller(
           stateDirectories: Object.freeze([
             Object.freeze({
               id: CLAUDE_PLUGIN_STATE_ID,
-              containerPath: CLAUDE_PLUGIN_STATE_PATH,
+              containerPath: pluginStatePath,
               sealAfterSetup: false,
             }),
           ]),
@@ -82,6 +90,7 @@ export function createClaudePluginInstaller(
         async install(
           installContext: AgentPluginInstallContext,
         ): Promise<AgentPluginInstallationReceipt> {
+          assertClaudeRuntimeLayout(layout, installContext.paths);
           const state = installContext.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
           if (!state || installContext.stateDirectories.size !== 1) {
             throw new TypeError('Claude plugin installation state is unavailable.');
@@ -93,7 +102,7 @@ export function createClaudePluginInstaller(
             Object.keys(await installedPluginRecords(state)),
           );
           const marketplaceRelativePath = `marketplaces/${identity.marketplace}`;
-          const marketplacePath = `${CLAUDE_PLUGIN_STATE_PATH}/${marketplaceRelativePath}`;
+          const marketplacePath = `${pluginStatePath}/${marketplaceRelativePath}`;
 
           const marketplaceCommit = await ensureMarketplaceCheckout({
             commands: installContext.commands,
@@ -141,8 +150,10 @@ export function createClaudePluginInstaller(
             listResult.stdout,
             expectedPluginIds,
             nativePluginId,
+            pluginStatePath,
           );
           const installedLocation = installedPluginLocation(
+            pluginStatePath,
             identity.marketplace,
             identity.name,
             installed.version,
@@ -370,6 +381,7 @@ function inspectPluginList(
   output: string,
   expectedPluginIds: ReadonlySet<string>,
   selectedPluginId: string,
+  pluginStatePath: string,
 ): InstalledPlugin {
   const value = parseJson(output, 'Claude plugin list');
   if (!Array.isArray(value)) {
@@ -385,7 +397,7 @@ function inspectPluginList(
       row.scope !== 'user' ||
       row.enabled !== true ||
       typeof row.installPath !== 'string' ||
-      !row.installPath.startsWith(`${CLAUDE_PLUGIN_STATE_PATH}/cache/`)
+      !row.installPath.startsWith(`${pluginStatePath}/cache/`)
     ) {
       throw new Error('Claude plugin list returned an invalid installed plugin.');
     }
@@ -461,6 +473,7 @@ async function assertInstalledPluginRecord(
 }
 
 function installedPluginLocation(
+  pluginStatePath: string,
   marketplace: string,
   pluginName: string,
   version: string,
@@ -468,7 +481,7 @@ function installedPluginLocation(
   const relative = `cache/${marketplace}/${pluginName}/${version}`;
   return Object.freeze({
     relative,
-    absolute: `${CLAUDE_PLUGIN_STATE_PATH}/${relative}`,
+    absolute: `${pluginStatePath}/${relative}`,
   });
 }
 

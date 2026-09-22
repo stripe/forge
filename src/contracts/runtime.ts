@@ -1,6 +1,6 @@
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import type {CommandRunner} from './command.js';
-import type {ResolvedEnvironment} from './credentials.js';
+import type {ResolvedEnvironment, ScopedEnvironmentSpecification} from './credentials.js';
 
 export type RuntimePlatform = 'linux/amd64' | 'linux/arm64';
 
@@ -30,7 +30,7 @@ export interface WorkspaceListOptions {
 }
 
 export interface RuntimeLogicalPaths {
-  /** Container-visible paths; never host filesystem paths. */
+  /** Absolute paths visible to evaluated commands, within their runtime. */
   readonly workspace: string;
   readonly home: string;
 }
@@ -38,7 +38,7 @@ export interface RuntimeLogicalPaths {
 export interface RuntimeStateDirectoryRequirement {
   /** Stable adapter-owned logical name, such as `claude-projects`. */
   readonly id: string;
-  /** Absolute container path which the runtime must persist and seal. */
+  /** Absolute runtime-visible path to persist and seal; name retained for compatibility. */
   readonly containerPath: string;
   /**
    * When true, setup may populate this directory but interaction receives an
@@ -74,6 +74,13 @@ export interface RuntimePreparation {
   readonly environment: ResolvedEnvironment;
   readonly requirements: RuntimeRequirements;
   readonly signal: AbortSignal;
+}
+
+export interface RuntimePreflight {
+  readonly plan: ResolvedRunPlanV1;
+  readonly requirements: RuntimeRequirements;
+  /** Plain variables plus opaque credential names/references/scopes; never secret values. */
+  readonly environment: ScopedEnvironmentSpecification;
 }
 
 /** Runtime after mutation has stopped and evidence is stable. */
@@ -117,5 +124,12 @@ export interface PreparedRuntime {
 export interface RuntimeAdapter {
   readonly id: string;
   readonly version: string;
+  /**
+   * Pure, synchronous validation of the exact configuration and combined
+   * agent/setup requirements. Never normalize defaults, resolve credentials,
+   * inspect ambient state, allocate, or execute commands. Required for external
+   * runtime descriptors; optional for legacy Docker implementations.
+   */
+  preflight?(input: RuntimePreflight): void;
   prepare(input: RuntimePreparation): Promise<PreparedRuntime>;
 }

@@ -8,7 +8,7 @@ import {expect} from '../test/support/expect.js';
 import {createDefaultCliComposition, runCli} from './cli.js';
 import {credentialReference} from './contracts/credentials.js';
 import {createForgeEngine} from './engine.js';
-import {sha256Digest, sha256Hex} from './model/index.js';
+import {parseExperimentConfigYaml, sha256Digest, sha256Hex} from './model/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
 import {
   createFakeRuntimeAdapter,
@@ -29,6 +29,49 @@ afterEach(async () => {
 });
 
 describe('Forge CLI', () => {
+  it('supplies the selected external runtime to the host factory for validation and execution', async () => {
+    const fixture = await createBenchmarkFixture();
+    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    const descriptor = {
+      adapter: 'acme/process', adapter_version: '1', config_version: 1,
+      platform: 'linux/amd64' as const, config: {profile: 'test-worker'},
+    };
+    await fs.writeFile(fixture.experimentPath, JSON.stringify({...config, runtime: descriptor}));
+    const runtime = createFakeRuntimeAdapter({id: descriptor.adapter});
+    const agent = createScriptedAgentAdapter({id: 'claude-code'});
+    let factoryCalls = 0;
+    for (const command of ['validate', 'run']) {
+      let stderr = '';
+      const exitCode = await runCli([
+        command, '--experiment', fixture.experimentPath, '--dataset', fixture.datasetRoot,
+      ], {
+        compositionFactory: async (options) => {
+          factoryCalls += 1;
+          expect(options.runtime).toEqual(descriptor);
+          return {
+            runtime: runtime.adapter,
+            agents: new Map([[agent.adapter.id, agent.adapter]]),
+            credentialResolver: createStaticCredentialResolver(),
+            inputProvider: createMemoryRunInputProvider(),
+            artifactStore: createMemoryArtifactStore().store,
+          };
+        },
+        stdout: () => undefined,
+        stderr: (text) => {stderr += text;},
+      });
+      expect(stderr).toBe('');
+      expect(exitCode).toBe(0);
+    }
+    expect(factoryCalls).toBe(2);
+    expect(runtime.runs.length).toBe(1);
+    let stderr = '';
+    const exitCode = await runCli([
+      'validate', '--experiment', fixture.experimentPath, '--dataset', fixture.datasetRoot,
+    ], {stdout: () => undefined, stderr: (text) => {stderr += text;}});
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain('host-supplied compositionFactory');
+  });
+
   it('validates a dataset/experiment pair and emits its resolved run count', async () => {
     const fixture = await createBenchmarkFixture();
     let stdout = '';
