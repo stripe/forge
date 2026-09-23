@@ -83,36 +83,36 @@ flowchart LR
 
 For a first pass through the codebase, read these files in order:
 
-1. [`src/model/types.ts`](../src/model/types.ts) — the benchmark and plan data
+1. [`src/model/types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts) — the benchmark and plan data
    model.
-2. [`src/contracts/composition.ts`](../src/contracts/composition.ts) — the host
+2. [`src/contracts/composition.ts`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) — the host
    capabilities supplied to a run.
-3. [`src/engine.ts`](../src/engine.ts) — how one immutable action registry binds
+3. [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) — how one immutable action registry binds
    parsing, planning, execution, and verification.
-4. [`src/planning/planner.ts`](../src/planning/planner.ts) — how authored inputs
+4. [`src/planning/planner.ts`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) — how authored inputs
    become one resolved plan.
-5. [`src/execution/execute.ts`](../src/execution/execute.ts) — the end-to-end run
+5. [`src/execution/execute.ts`](https://github.com/stripe/forge/blob/main/src/execution/execute.ts) — the end-to-end run
    controller.
-6. [`src/contracts/runtime.ts`](../src/contracts/runtime.ts) and
-   [`src/contracts/agent.ts`](../src/contracts/agent.ts) — the two most important
+6. [`src/contracts/runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) and
+   [`src/contracts/agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) — the two most important
    adapter boundaries.
-7. [`src/evidence/selection.ts`](../src/evidence/selection.ts) — how agent output
+7. [`src/evidence/selection.ts`](https://github.com/stripe/forge/blob/main/src/evidence/selection.ts) — how agent output
    becomes score-bearing evidence.
-8. [`src/results/localStore.ts`](../src/results/localStore.ts) — how a result is
+8. [`src/results/localStore.ts`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) — how a result is
    committed and later verified.
 
 If you are following the public executable, start instead at
-[`runCli`](../src/cli.ts), then move to `ForgeEngine.resolveRunPlan` and
+[`runCli`](https://github.com/stripe/forge/blob/main/src/cli.ts), then move to `ForgeEngine.resolveRunPlan` and
 `ForgeEngine.executeEval`.
 
 ## Top-level source files
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`src/index.ts`](../src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
-| [`src/engine.ts`](../src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
-| [`src/cli.ts`](../src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, selects a matrix entry, creates the default adapters, and calls the engine. It is composition code, not benchmark semantics. |
-| [`src/serialization.ts`](../src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
+| [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
+| [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
+| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, selects a matrix entry, creates the default adapters, and calls the engine. It is composition code, not benchmark semantics. |
+| [`src/serialization.ts`](https://github.com/stripe/forge/blob/main/src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
 
 ### `ForgeEngine` as the semantic facade
 
@@ -248,14 +248,14 @@ is selected.
 
 | File | Main responsibility | Interacts with |
 | --- | --- | --- |
-| [`types.ts`](../src/model/types.ts) | TypeScript wire types for manifests, cases, experiments, selections, setup steps, runtimes, and resolved plans | Imported across nearly every directory; contains data only |
-| [`parse.ts`](../src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
-| [`loaders.ts`](../src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
-| [`paths.ts`](../src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
-| [`hashes.ts`](../src/model/hashes.ts) | SHA-256 validation and helpers | Used by loaders, planner, receipts, evaluation, and results |
-| [`checks.ts`](../src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
-| [`errors.ts`](../src/model/errors.ts) | `BenchmarkModelError` and stable model/loading error codes | Thrown by safe loaders and exposed through `model/index.ts` |
-| [`index.ts`](../src/model/index.ts) | Public model barrel | Re-exported by the package root |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts) | TypeScript wire types for manifests, cases, experiments, selections, setup steps, runtimes, and resolved plans | Imported across nearly every directory; contains data only |
+| [`parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
+| [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
+| [`paths.ts`](https://github.com/stripe/forge/blob/main/src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
+| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used by loaders, planner, receipts, evaluation, and results |
+| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
+| [`errors.ts`](https://github.com/stripe/forge/blob/main/src/model/errors.ts) | `BenchmarkModelError` and stable model/loading error codes | Thrown by safe loaders and exposed through `model/index.ts` |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/model/index.ts) | Public model barrel | Re-exported by the package root |
 
 ### Important model objects
 
@@ -282,9 +282,9 @@ composition.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`planner.ts`](../src/planning/planner.ts) | `expandExperiment`, `resolveRunPlan`, `serializeResolvedRunPlan`, `resolvedRunPlanSha256`, `PlanningError` | Combines loaded model objects and one selection. Uses the action registry to validate bundle pins and returns a deeply frozen plan. |
-| [`caseFile.ts`](../src/planning/caseFile.ts) | `resolveManifestCaseIdFromFile`, `ManifestCaseFileError` | Maps a user-selected case file to an exact manifest entry while defending against symlink, identity, and containment mistakes. Called only by the CLI/file-selection path. |
-| [`index.ts`](../src/planning/index.ts) | Public planning barrel | Re-exported by the package root |
+| [`planner.ts`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) | `expandExperiment`, `resolveRunPlan`, `serializeResolvedRunPlan`, `resolvedRunPlanSha256`, `PlanningError` | Combines loaded model objects and one selection. Uses the action registry to validate bundle pins and returns a deeply frozen plan. |
+| [`caseFile.ts`](https://github.com/stripe/forge/blob/main/src/planning/caseFile.ts) | `resolveManifestCaseIdFromFile`, `ManifestCaseFileError` | Maps a user-selected case file to an exact manifest entry while defending against symlink, identity, and containment mistakes. Called only by the CLI/file-selection path. |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/planning/index.ts) | Public planning barrel | Re-exported by the package root |
 
 `planner.ts` is intentionally pure after loading. It does not resolve
 credentials, inspect the runtime, or select a composition adapter. Its setup
@@ -299,18 +299,18 @@ implementations.
 
 | File | Key interfaces/functions | Consumers and implementations |
 | --- | --- | --- |
-| [`composition.ts`](../src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
-| [`runtime.ts`](../src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
-| [`agent.ts`](../src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
-| [`completion.ts`](../src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
-| [`credentials.ts`](../src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
-| [`command.ts`](../src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
-| [`inputs.ts`](../src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; default implementation safely roots access in a dataset directory |
-| [`artifacts.ts`](../src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
-| [`observability.ts`](../src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
-| [`plugin.ts`](../src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented only by the Claude adapter; selected by `setup/forgePlugin.ts` |
-| [`pluginReceipt.ts`](../src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
-| [`index.ts`](../src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
+| [`composition.ts`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
+| [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
+| [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
+| [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
+| [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
+| [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
+| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; default implementation safely roots access in a dataset directory |
+| [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
+| [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
+| [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented only by the Claude adapter; selected by `setup/forgePlugin.ts` |
+| [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
 
 ### Capability narrowing
 
@@ -344,15 +344,15 @@ application across several files.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`registry.ts`](../src/setup/registry.ts) | `SetupActionDefinition`, `SetupActionBundle`, `SetupActionRegistry`, `defineSetupActionBundle`, `createSetupActionRegistry` | Owns namespaces, bundle identities, immutable registration, and exact-reference checks. Used by model parsing, planning, engine, and execution. |
-| [`builtins.ts`](../src/setup/builtins.ts) | `builtInSetupActions` | Defines strict `with` parsers for built-in actions and pairs each parser with its handler from `forge*.ts`. Loaded by the registry. |
-| [`types.ts`](../src/setup/types.ts) | `SetupStepHandler`, `PreparedSetupStep`, `SetupExecutor`, setup contexts and requirements | Shared contract between action definitions, executor, and execution controller |
-| [`executor.ts`](../src/setup/executor.ts) | `createSetupExecutorForRegistry`, `PreparedSetup` implementation | Calls each action's pure `preflight`, merges requirements, freezes prepared operations, and later applies them in order with least-privileged projections. Called by `execute.ts`. |
-| [`forgeWrite.ts`](../src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
-| [`forgeCommand.ts`](../src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
-| [`forgePlugin.ts`](../src/setup/forgePlugin.ts) | `pluginSetupHandler` | Selects the current agent's `AgentPluginInstaller`, incorporates its requirements, installs, and validates its receipt. |
-| [`resolution.ts`](../src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
-| [`index.ts`](../src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
+| [`registry.ts`](https://github.com/stripe/forge/blob/main/src/setup/registry.ts) | `SetupActionDefinition`, `SetupActionBundle`, `SetupActionRegistry`, `defineSetupActionBundle`, `createSetupActionRegistry` | Owns namespaces, bundle identities, immutable registration, and exact-reference checks. Used by model parsing, planning, engine, and execution. |
+| [`builtins.ts`](https://github.com/stripe/forge/blob/main/src/setup/builtins.ts) | `builtInSetupActions` | Defines strict `with` parsers for built-in actions and pairs each parser with its handler from `forge*.ts`. Loaded by the registry. |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/setup/types.ts) | `SetupStepHandler`, `PreparedSetupStep`, `SetupExecutor`, setup contexts and requirements | Shared contract between action definitions, executor, and execution controller |
+| [`executor.ts`](https://github.com/stripe/forge/blob/main/src/setup/executor.ts) | `createSetupExecutorForRegistry`, `PreparedSetup` implementation | Calls each action's pure `preflight`, merges requirements, freezes prepared operations, and later applies them in order with least-privileged projections. Called by `execute.ts`. |
+| [`forgeWrite.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
+| [`forgeCommand.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
+| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Selects the current agent's `AgentPluginInstaller`, incorporates its requirements, installs, and validates its receipt. |
+| [`resolution.ts`](https://github.com/stripe/forge/blob/main/src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
 
 The interaction between registry and executor is important:
 
@@ -371,11 +371,11 @@ the action up again at execution time.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`execute.ts`](../src/execution/execute.ts) | `preflightEval`, `executeEval`, lifecycle helpers | Owns the full lifecycle and imports every score-affecting subsystem. This is the main integration file. |
-| [`completionRuntime.ts`](../src/execution/completionRuntime.ts) | `completionBindingsForPlan`, `prepareCompletionRuntime`, `PreparedCompletionRuntime` | Resolves purpose-specific providers and credentials, performs provider preflight, invokes/redacts/validates completions, and records safe call summaries. Used by Ava and guideline judging through `execute.ts`. |
-| [`events.ts`](../src/execution/events.ts) | `createRunEventEmitter` | Wraps lifecycle phases in start/completion events and uses `Promise.allSettled` so observers cannot control execution. |
-| [`errors.ts`](../src/execution/errors.ts) | `ForgeExecutionError`, `executionError`, `throwIfAborted` | Stable secret-safe phase/error surface used by the controller. |
-| [`index.ts`](../src/execution/index.ts) | Public execution barrel | Re-exports execution entry points and stable errors |
+| [`execute.ts`](https://github.com/stripe/forge/blob/main/src/execution/execute.ts) | `preflightEval`, `executeEval`, lifecycle helpers | Owns the full lifecycle and imports every score-affecting subsystem. This is the main integration file. |
+| [`completionRuntime.ts`](https://github.com/stripe/forge/blob/main/src/execution/completionRuntime.ts) | `completionBindingsForPlan`, `prepareCompletionRuntime`, `PreparedCompletionRuntime` | Resolves purpose-specific providers and credentials, performs provider preflight, invokes/redacts/validates completions, and records safe call summaries. Used by Ava and guideline judging through `execute.ts`. |
+| [`events.ts`](https://github.com/stripe/forge/blob/main/src/execution/events.ts) | `createRunEventEmitter` | Wraps lifecycle phases in start/completion events and uses `Promise.allSettled` so observers cannot control execution. |
+| [`errors.ts`](https://github.com/stripe/forge/blob/main/src/execution/errors.ts) | `ForgeExecutionError`, `executionError`, `throwIfAborted` | Stable secret-safe phase/error surface used by the controller. |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/execution/index.ts) | Public execution barrel | Re-exports execution entry points and stable errors |
 
 ### How to read `execute.ts`
 
@@ -394,11 +394,11 @@ the main `try/catch`.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`prompt.ts`](../src/interaction/prompt.ts) | Ava prompt builders, prompt version, stop sentinel | Pure rendering of initialization and continuation system prompts |
-| [`completion.ts`](../src/interaction/completion.ts) | Provider-neutral interaction request/invoker types | Connects Ava to `PreparedCompletionRuntime.invoke` without exposing provider or credentials |
-| [`ava.ts`](../src/interaction/ava.ts) | `AvaRolePlayer`, `AvaTurn`, need/error types | Maintains private needs/history, requests strict structured completions, validates messages, and implements retry/terminal decisions |
-| [`conversation.ts`](../src/interaction/conversation.ts) | `runConversation`, audit/result types, `snapshotAgentToolCalls` | Alternates Ava decisions with one persistent `AgentSession`, enforces max-turn semantics, aggregates cost, and produces the driver ledger/audit |
-| [`index.ts`](../src/interaction/index.ts) | Internal interaction barrel | Imported by `execution/execute.ts`; interaction is not a package subpath |
+| [`prompt.ts`](https://github.com/stripe/forge/blob/main/src/interaction/prompt.ts) | Ava prompt builders, prompt version, stop sentinel | Pure rendering of initialization and continuation system prompts |
+| [`completion.ts`](https://github.com/stripe/forge/blob/main/src/interaction/completion.ts) | Provider-neutral interaction request/invoker types | Connects Ava to `PreparedCompletionRuntime.invoke` without exposing provider or credentials |
+| [`ava.ts`](https://github.com/stripe/forge/blob/main/src/interaction/ava.ts) | `AvaRolePlayer`, `AvaTurn`, need/error types | Maintains private needs/history, requests strict structured completions, validates messages, and implements retry/terminal decisions |
+| [`conversation.ts`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) | `runConversation`, audit/result types, `snapshotAgentToolCalls` | Alternates Ava decisions with one persistent `AgentSession`, enforces max-turn semantics, aggregates cost, and produces the driver ledger/audit |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/interaction/index.ts) | Internal interaction barrel | Imported by `execution/execute.ts`; interaction is not a package subpath |
 
 The central relationship is:
 
@@ -421,19 +421,19 @@ those two sides.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`workspace.ts`](../src/runtime/workspace.ts) | `createOwnedWorkspace` | Safe host-backed mutable workspace: canonical root, no symlink traversal, stable listing, bounded reads, and atomic writes. Used by Docker. |
-| [`processCommandRunner.ts`](../src/runtime/processCommandRunner.ts) | `createHostCommandRunner` | Shell-free host subprocess runner with timeout, output cap, abort, and process-tree termination. Used by Docker CLI operations. |
+| [`workspace.ts`](https://github.com/stripe/forge/blob/main/src/runtime/workspace.ts) | `createOwnedWorkspace` | Safe host-backed mutable workspace: canonical root, no symlink traversal, stable listing, bounded reads, and atomic writes. Used by Docker. |
+| [`processCommandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/processCommandRunner.ts) | `createHostCommandRunner` | Shell-free host subprocess runner with timeout, output cap, abort, and process-tree termination. Used by Docker CLI operations. |
 
 ### `src/runtime/docker`
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`runtime.ts`](../src/runtime/docker/runtime.ts) | `createDockerRuntimeAdapter` | Implements `RuntimeAdapter`: validates runtime config, builds the image, creates run-owned directories, starts/restarts/stops the container, projects workspaces and commands, quiesces, and disposes. |
-| [`commandRunner.ts`](../src/runtime/docker/commandRunner.ts) | `DockerCommandController` | Implements scoped `CommandRunner`s over `docker exec`, creates temporary env files, tracks active commands, and closes setup/all command authority at lifecycle barriers. |
-| [`assets.ts`](../src/runtime/docker/assets.ts) | Base image, CLI version, and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |
-| [`assets/Dockerfile`](../src/runtime/docker/assets/Dockerfile) | Forge-owned image | Installs the pinned CLIs and runtime dependencies. Copied into the package at build time. |
-| [`assets/entrypoint.sh`](../src/runtime/docker/assets/entrypoint.sh) | Container entrypoint | Keeps the prepared container available for `docker exec`. |
-| [`index.ts`](../src/runtime/docker/index.ts) | Public Docker subpath | Exports adapter factory and pin metadata |
+| [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/runtime.ts) | `createDockerRuntimeAdapter` | Implements `RuntimeAdapter`: validates runtime config, builds the image, creates run-owned directories, starts/restarts/stops the container, projects workspaces and commands, quiesces, and disposes. |
+| [`commandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/commandRunner.ts) | `DockerCommandController` | Implements scoped `CommandRunner`s over `docker exec`, creates temporary env files, tracks active commands, and closes setup/all command authority at lifecycle barriers. |
+| [`assets.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets.ts) | Base image, CLI version, and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |
+| [`assets/Dockerfile`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets/Dockerfile) | Forge-owned image | Installs the pinned CLIs and runtime dependencies. Copied into the package at build time. |
+| [`assets/entrypoint.sh`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets/entrypoint.sh) | Container entrypoint | Keeps the prepared container available for `docker exec`. |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/index.ts) | Public Docker subpath | Exports adapter factory and pin metadata |
 
 `DockerCommandController` receives the fully resolved environment, but each
 runner created from it exposes only one scope. `runtime.ts` owns the controller
@@ -457,12 +457,12 @@ index.ts
 
 | File | Main responsibility | Called by / calls into |
 | --- | --- | --- |
-| [`index.ts`](../src/agents/claude-code/index.ts) | `createClaudeCodeAdapter`; wires requirements, CLI version check, session start/resume, evidence, and plugin installer | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
-| [`layout.ts`](../src/agents/claude-code/layout.ts) | Normalize and validate workspace/home/config paths; derive Claude project directory | Called by adapter construction, prepare, session, evidence, and plugin code |
-| [`stream.ts`](../src/agents/claude-code/stream.ts) | Parse Claude `stream-json` stdout into bounded `AgentTurn` | Called by `AgentSession.send` in `index.ts` |
-| [`evidence.ts`](../src/agents/claude-code/evidence.ts) | Read the exact session JSONL, classify native records, render context/tool behavior, and build ATIF or an unavailable result | Called after quiescence by adapter methods; returns contract types to `evidence/selection.ts` |
-| [`plugins.ts`](../src/agents/claude-code/plugins.ts) | Implement `AgentPluginInstaller`: register marketplace, validate source, install through native CLI, verify installed state | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
-| [`pluginReceipt.ts`](../src/agents/claude-code/pluginReceipt.ts) | Inspect installed plugin tree, reject unsafe entries, compute tree/source receipt | Called by `plugins.ts` while constructing the setup resolution |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/index.ts) | `createClaudeCodeAdapter`; wires requirements, CLI version check, session start/resume, evidence, and plugin installer | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
+| [`layout.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/layout.ts) | Normalize and validate workspace/home/config paths; derive Claude project directory | Called by adapter construction, prepare, session, evidence, and plugin code |
+| [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/stream.ts) | Parse Claude `stream-json` stdout into bounded `AgentTurn` | Called by `AgentSession.send` in `index.ts` |
+| [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/evidence.ts) | Read the exact session JSONL, classify native records, render context/tool behavior, and build ATIF or an unavailable result | Called after quiescence by adapter methods; returns contract types to `evidence/selection.ts` |
+| [`plugins.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/plugins.ts) | Implement `AgentPluginInstaller`: register marketplace, validate source, install through native CLI, verify installed state | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
+| [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/pluginReceipt.ts) | Inspect installed plugin tree, reject unsafe entries, compute tree/source receipt | Called by `plugins.ts` while constructing the setup resolution |
 
 Claude's live stream and persisted JSONL are parsed independently. The live
 stream produces the driver turn immediately; the JSONL parser runs only after
@@ -473,13 +473,13 @@ selector.
 
 | File | Main responsibility | Called by / calls into |
 | --- | --- | --- |
-| [`index.ts`](../src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, explicit Responses provider configuration, CLI verification, exec/resume, and evidence | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
-| [`layout.ts`](../src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
-| [`stream.ts`](../src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
-| [`evidence.ts`](../src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
-| [`toolEvidence.ts`](../src/agents/codex/toolEvidence.ts) | Normalize command/file/MCP/search outputs and validate native MCP snapshots | Used only by `evidence.ts` |
-| [`nativeJson.ts`](../src/agents/codex/nativeJson.ts) | Extract bounded compact JSON fragments from native source without a broad reserialization | Low-level helper for evidence validation |
-| [`truncation.ts`](../src/agents/codex/truncation.ts) | Relate original and observed UTF-8 text when Codex reports truncated output | Used by native tool evidence parsing |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, explicit Responses provider configuration, CLI verification, exec/resume, and evidence | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
+| [`layout.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
+| [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
+| [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
+| [`toolEvidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/toolEvidence.ts) | Normalize command/file/MCP/search outputs and validate native MCP snapshots | Used only by `evidence.ts` |
+| [`nativeJson.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/nativeJson.ts) | Extract bounded compact JSON fragments from native source without a broad reserialization | Low-level helper for evidence validation |
+| [`truncation.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/truncation.ts) | Relate original and observed UTF-8 text when Codex reports truncated output | Used by native tool evidence parsing |
 
 Codex has extra evidence helpers because its rollout protocol contains several
 representations of tool activity. `evidence.ts` is the coordinator; the helper
@@ -487,7 +487,7 @@ files should remain unaware of Forge lifecycle or result storage.
 
 ## `src/providers`: host-side model transport
 
-[`src/providers/anthropic/index.ts`](../src/providers/anthropic/index.ts) is the
+[`src/providers/anthropic/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/anthropic/index.ts) is the
 current built-in `CompletionProvider`. It contains construction, model
 capability validation, request validation and schema projection, fetch,
 bounded-response reading, provider-response parsing, usage normalization, and
@@ -502,21 +502,21 @@ changing `interaction` or `evaluation`.
 
 | File | Main responsibility | Interacts with |
 | --- | --- | --- |
-| [`types.ts`](../src/atif/types.ts) | Exact ATIF v1.8 TypeScript wire types | Used by agent evidence, selection, evaluation, and result provenance |
-| [`schema.ts`](../src/atif/schema.ts) | Recursive Zod implementation of ATIF v1.8 invariants | Called by `parser.ts` |
-| [`parser.ts`](../src/atif/parser.ts) | Bounded-JSON graph preflight plus schema parsing and structured errors | Called by normalization, judge projection, results, and adapter helpers |
-| [`normalization.ts`](../src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness, warnings, normalization version | Constructed by `evidence/selection.ts`; summarized in `result.json` |
-| [`serializer.ts`](../src/atif/serializer.ts) | Canonical trajectory serialization | Called before writing `trajectory.json` |
-| [`timestamp.ts`](../src/atif/timestamp.ts) | ATIF timestamp validation | Used by the schema and adapter normalization |
-| [`upstream.ts`](../src/atif/upstream.ts) | Pinned upstream provenance metadata | Exported for consumers and conformance |
-| [`index.ts`](../src/atif/index.ts) | Public ATIF subpath barrel | Imported throughout internal evidence/evaluation code |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/atif/types.ts) | Exact ATIF v1.8 TypeScript wire types | Used by agent evidence, selection, evaluation, and result provenance |
+| [`schema.ts`](https://github.com/stripe/forge/blob/main/src/atif/schema.ts) | Recursive Zod implementation of ATIF v1.8 invariants | Called by `parser.ts` |
+| [`parser.ts`](https://github.com/stripe/forge/blob/main/src/atif/parser.ts) | Bounded-JSON graph preflight plus schema parsing and structured errors | Called by normalization, judge projection, results, and adapter helpers |
+| [`normalization.ts`](https://github.com/stripe/forge/blob/main/src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness, warnings, normalization version | Constructed by `evidence/selection.ts`; summarized in `result.json` |
+| [`serializer.ts`](https://github.com/stripe/forge/blob/main/src/atif/serializer.ts) | Canonical trajectory serialization | Called before writing `trajectory.json` |
+| [`timestamp.ts`](https://github.com/stripe/forge/blob/main/src/atif/timestamp.ts) | ATIF timestamp validation | Used by the schema and adapter normalization |
+| [`upstream.ts`](https://github.com/stripe/forge/blob/main/src/atif/upstream.ts) | Pinned upstream provenance metadata | Exported for consumers and conformance |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/atif/index.ts) | Public ATIF subpath barrel | Imported throughout internal evidence/evaluation code |
 
 Adapter `evidence.ts` files produce JSON-shaped ATIF candidates. The shared ATIF
 parser, not an adapter, is the authoritative schema boundary.
 
 ## `src/evidence`: native-versus-fallback selection
 
-[`src/evidence/selection.ts`](../src/evidence/selection.ts) is a single-file
+[`src/evidence/selection.ts`](https://github.com/stripe/forge/blob/main/src/evidence/selection.ts) is a single-file
 subsystem because selection policy must stay centralized. Its important symbols
 are:
 
@@ -538,12 +538,12 @@ one originally selected.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`checks.ts`](../src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates guideline-result alignment, then calls `scoreEvaluation`. |
-| [`judgeWorkspace.ts`](../src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
-| [`judgeTranscript.ts`](../src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
-| [`guidelineJudge.ts`](../src/evaluation/guidelineJudge.ts) | `judgeGuidelines`, prompt/response helpers | Renders one prompt per guideline, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
-| [`score.ts`](../src/evaluation/score.ts) | `scoreEvaluation` | Purely combines guideline and check results into score/status. |
-| [`index.ts`](../src/evaluation/index.ts) | Public evaluation barrel | Re-exported at package root |
+| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates guideline-result alignment, then calls `scoreEvaluation`. |
+| [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
+| [`judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
+| [`guidelineJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/guidelineJudge.ts) | `judgeGuidelines`, prompt/response helpers | Renders one prompt per guideline, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
+| [`score.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/score.ts) | `scoreEvaluation` | Purely combines guideline and check results into score/status. |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/index.ts) | Public evaluation barrel | Re-exported at package root |
 
 There are two workspace evidence paths with different purposes:
 
@@ -559,10 +559,10 @@ different.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`types.ts`](../src/results/types.ts) | Result/artifact/evaluation/audit wire types and schema versions | Used by execution, evaluation, storage, and consumers |
-| [`parse.ts`](../src/results/parse.ts) | Strict Zod parsers for result and audit artifacts | Called before commit and during verification; imports judge projection constants to bind schema policy |
-| [`localStore.ts`](../src/results/localStore.ts) | `createArtifactStore`, `verifyCompletedRun`, store errors | Implements two-phase local commit and independent cross-artifact verification |
-| [`index.ts`](../src/results/index.ts) | Public results barrel | Re-exported by package root |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/evaluation/audit wire types and schema versions | Used by execution, evaluation, storage, and consumers |
+| [`parse.ts`](https://github.com/stripe/forge/blob/main/src/results/parse.ts) | Strict Zod parsers for result and audit artifacts | Called before commit and during verification; imports judge projection constants to bind schema policy |
+| [`localStore.ts`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) | `createArtifactStore`, `verifyCompletedRun`, store errors | Implements two-phase local commit and independent cross-artifact verification |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/results/index.ts) | Public results barrel | Re-exported by package root |
 
 `localStore.ts` has two distinct halves:
 
@@ -585,7 +585,7 @@ generic checksum utility.
 
 ## `src/security`: secret handling
 
-[`src/security/redaction.ts`](../src/security/redaction.ts) contains exact-value
+[`src/security/redaction.ts`](https://github.com/stripe/forge/blob/main/src/security/redaction.ts) contains exact-value
 redaction and secret assertions:
 
 - `redactSecrets` recursively clones JSON-compatible content, redacts string
@@ -604,16 +604,16 @@ that classification.
 
 | File | Main symbols | Use |
 | --- | --- | --- |
-| [`plans.ts`](../src/testing/plans.ts) | `createTestResolvedRunPlan` | Produces a valid parsed plan with focused overrides |
-| [`memoryWorkspace.ts`](../src/testing/memoryWorkspace.ts) | `createMemoryWorkspace` | In-memory mutable/read-only workspace fixture |
-| [`memoryInputs.ts`](../src/testing/memoryInputs.ts) | `createMemoryRunInputProvider` | In-memory dataset input fixture |
-| [`fakes.ts`](../src/testing/fakes.ts) | Static credentials, memory artifact store, scripted agent, fake runtime | Builds full compositions without Docker or network and exposes recorded calls/state |
-| [`completionProvider.ts`](../src/testing/completionProvider.ts) | `createScriptedCompletionProvider` | Scripts strict completion responses/failures and records provider calls |
-| [`conformance.ts`](../src/testing/conformance.ts) | `assertRuntimeAdapterConforms` | Reusable external runtime lifecycle/capability conformance suite |
-| [`index.ts`](../src/testing/index.ts) | Public testing subpath | Exposes supported fixtures to adapter authors |
+| [`plans.ts`](https://github.com/stripe/forge/blob/main/src/testing/plans.ts) | `createTestResolvedRunPlan` | Produces a valid parsed plan with focused overrides |
+| [`memoryWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/testing/memoryWorkspace.ts) | `createMemoryWorkspace` | In-memory mutable/read-only workspace fixture |
+| [`memoryInputs.ts`](https://github.com/stripe/forge/blob/main/src/testing/memoryInputs.ts) | `createMemoryRunInputProvider` | In-memory dataset input fixture |
+| [`fakes.ts`](https://github.com/stripe/forge/blob/main/src/testing/fakes.ts) | Static credentials, memory artifact store, scripted agent, fake runtime | Builds full compositions without Docker or network and exposes recorded calls/state |
+| [`completionProvider.ts`](https://github.com/stripe/forge/blob/main/src/testing/completionProvider.ts) | `createScriptedCompletionProvider` | Scripts strict completion responses/failures and records provider calls |
+| [`conformance.ts`](https://github.com/stripe/forge/blob/main/src/testing/conformance.ts) | `assertRuntimeAdapterConforms` | Reusable external runtime lifecycle/capability conformance suite |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/testing/index.ts) | Public testing subpath | Exposes supported fixtures to adapter authors |
 
 Production unit tests sit beside their source as `*.test.ts`. Cross-module,
-CLI, package, and runnable-example tests live under [`test`](../test):
+CLI, package, and runnable-example tests live under [`test`](https://github.com/stripe/forge/tree/main/test):
 
 - `quickstart.e2e.test.ts`: checked-in one-shot example;
 - `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava and example flow;
@@ -623,23 +623,23 @@ CLI, package, and runnable-example tests live under [`test`](../test):
 - `support/expect.ts`: shared assertions.
 
 The normal unit suite uses fakes and does not require Docker, credentials, or
-network access. The live script under [`scripts/live-e2e.mjs`](../scripts/live-e2e.mjs)
+network access. The live script under [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
 is explicitly opt-in.
 
 ## Other top-level directories and files
 
 | Path | Role |
 | --- | --- |
-| [`examples`](../examples) | Checked-in quickstart, multi-turn, Codex, and external-runtime examples. Their manifest sizes/hashes are part of the tests. |
+| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Checked-in quickstart, multi-turn, Codex, and external-runtime examples. Their manifest sizes/hashes are part of the tests. |
 | [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
-| [`scripts/run-tests.mjs`](../scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
-| [`scripts/copy-assets.mjs`](../scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
-| [`scripts/package-smoke.mjs`](../scripts/package-smoke.mjs) | Verifies published package entry points and assets. |
-| [`scripts/live-e2e.mjs`](../scripts/live-e2e.mjs) | Opt-in real Docker/agent/provider suite. |
+| [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
+| [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
+| [`scripts/package-smoke.mjs`](https://github.com/stripe/forge/blob/main/scripts/package-smoke.mjs) | Verifies published package entry points and assets. |
+| [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs) | Opt-in real Docker/agent/provider suite. |
 | [`package.json`](../package.json) | Public exports, binary, Node/package-manager pins, scripts, and package file inventory. |
-| [`tsconfig.json`](../tsconfig.json) | Strict NodeNext development/test typechecking. |
-| [`tsconfig.build.json`](../tsconfig.build.json) | Production declaration/JavaScript build. |
-| [`tsconfig.test.json`](../tsconfig.test.json) | Compiles source and repository tests into the temporary test build. |
+| [`tsconfig.json`](https://github.com/stripe/forge/blob/main/tsconfig.json) | Strict NodeNext development/test typechecking. |
+| [`tsconfig.build.json`](https://github.com/stripe/forge/blob/main/tsconfig.build.json) | Production declaration/JavaScript build. |
+| [`tsconfig.test.json`](https://github.com/stripe/forge/blob/main/tsconfig.test.json) | Compiles source and repository tests into the temporary test build. |
 
 ## Public versus internal imports
 

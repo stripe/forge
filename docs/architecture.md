@@ -34,7 +34,7 @@ Runtime code does not infer omitted settings from ambient state.
 
 **Portable mechanisms.** Runtime, coding-agent, credential, completion,
 storage, input, and observation behavior enters through public contracts in
-[`src/contracts`](../src/contracts). The core does not discover private
+[`src/contracts`](https://github.com/stripe/forge/tree/main/src/contracts). The core does not discover private
 implementations or branch on a host environment.
 
 **Authority after validation.** Parsing, planning, setup preflight, agent
@@ -121,12 +121,12 @@ Forge keeps four related objects distinct.
 | Experiment config | How cases run | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
 | Resolved run plan | Complete input to one run | One case/treatment/agent/repetition, merged setup, materialized defaults, runtime and model selections, provenance |
 
-The wire types live in [`src/model/types.ts`](../src/model/types.ts); strict
-parsing lives in [`src/model/parse.ts`](../src/model/parse.ts).
+The wire types live in [`src/model/types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts); strict
+parsing lives in [`src/model/parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts).
 
 ### Dataset loading and integrity
 
-[`loadDataset`](../src/model/loaders.ts) treats the manifest as an exact
+[`loadDataset`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) treats the manifest as an exact
 inventory, not a best-effort index:
 
 - `manifest.json` identifies the dataset and every case and payload file;
@@ -157,7 +157,7 @@ treatment may have an empty setup list; it is still an explicit matrix choice.
 
 ### Matrix expansion and selection
 
-[`expandExperiment`](../src/planning/planner.ts) expands in stable authored
+[`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands in stable authored
 order:
 
 ```text
@@ -174,7 +174,7 @@ entry before `plan` or `run` proceeds.
 
 ### Plan resolution
 
-[`resolveRunPlan`](../src/planning/planner.ts) validates all references and
+[`resolveRunPlan`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) validates all references and
 produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 - checks dataset and experiment compatibility;
@@ -194,7 +194,7 @@ order. Their digest binds the semantics later summarized by `result.json`.
 
 ### `ForgeEngine`: immutable semantics
 
-[`createForgeEngine`](../src/engine.ts) constructs one immutable setup action
+[`createForgeEngine`](https://github.com/stripe/forge/blob/main/src/engine.ts) constructs one immutable setup action
 registry and closes over it for every operation:
 
 - parse cases, experiment configs, setup steps, and resolved plans;
@@ -211,7 +211,7 @@ boundaries. See [setup action bundles](setup-action-bundles.md).
 
 ### `ForgeComposition`: explicit mechanisms and authority
 
-[`ForgeComposition`](../src/contracts/composition.ts) is supplied per host and
+[`ForgeComposition`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) is supplied per host and
 contains:
 
 | Capability | Role | Authority |
@@ -230,7 +230,7 @@ setup registry does not provide runtime authority.
 
 ## Execution lifecycle
 
-[`executeEval`](../src/execution/execute.ts) is the public automated
+[`executeEval`](https://github.com/stripe/forge/blob/main/src/execution/execute.ts) is the public automated
 controller. It owns the following phase order.
 
 ```mermaid
@@ -392,7 +392,7 @@ runtime.
 
 ## Runtime architecture
 
-The core runtime contract in [`src/contracts/runtime.ts`](../src/contracts/runtime.ts)
+The core runtime contract in [`src/contracts/runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts)
 is implementation-neutral. It models capabilities by lifecycle state:
 
 ```text
@@ -419,7 +419,7 @@ in runtime config.
 
 ### Built-in Docker runtime
 
-[`src/runtime/docker`](../src/runtime/docker) implements `forge/docker@1` using
+[`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker@1` using
 the Docker CLI and a Forge-owned image. It:
 
 - verifies packaged Docker assets against a compiled digest;
@@ -449,7 +449,7 @@ must provide equivalent isolation appropriate to its environment.
 
 ## Setup architecture
 
-Setup has two stages implemented by [`src/setup`](../src/setup):
+Setup has two stages implemented by [`src/setup`](https://github.com/stripe/forge/tree/main/src/setup):
 
 1. `preflight()` validates an action, declares requirements, and binds the
    exact later operation without authority.
@@ -485,7 +485,7 @@ documented mutable-treatment semantic, not general plan reproducibility; see
 
 ### Coding-agent adapters
 
-An [`AgentAdapter`](../src/contracts/agent.ts) owns four mechanisms:
+An [`AgentAdapter`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) owns four mechanisms:
 
 1. pure runtime requirements and evidence identity;
 2. pre-session initialization;
@@ -518,7 +518,7 @@ require a judge.
 
 ### Ava multi-turn mode
 
-[`AvaRolePlayer`](../src/interaction/ava.ts) is an engine-owned state machine,
+[`AvaRolePlayer`](https://github.com/stripe/forge/blob/main/src/interaction/ava.ts) is an engine-owned state machine,
 not an adapter or completion-provider feature. The provider supplies only
 structured completions.
 
@@ -528,7 +528,7 @@ messages. Its private need model is never sent to the coding agent. A configured
 initial prompt is sent verbatim before Ava initializes; otherwise Ava generates
 the opening turn.
 
-[`runConversation`](../src/interaction/conversation.ts) alternates Ava decisions
+[`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
 and sends through one agent session. Ava assesses every completed response,
 including the final allowed turn. The loop stops with:
 
@@ -547,7 +547,7 @@ guideline judge.
 
 ### Host-side completion providers
 
-[`CompletionProvider`](../src/contracts/completion.ts) is deliberately less
+[`CompletionProvider`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) is deliberately less
 powerful than an agent adapter. It receives a provider-neutral prompt, explicit
 model and purpose, strict response schema, resolved provider-owned credentials,
 and an abort signal. It receives no workspace, command runner, agent session,
@@ -584,7 +584,7 @@ newest session by directory scan is forbidden. Native artifact metadata must
 match the selected session and, when normalized native evidence is available,
 its source format.
 
-[`selectAgentEvidence`](../src/evidence/selection.ts) parses the adapter's ATIF
+[`selectAgentEvidence`](https://github.com/stripe/forge/blob/main/src/evidence/selection.ts) parses the adapter's ATIF
 candidate and proves that it covers every completed driver turn. Coverage
 requires ordered user messages and an agent step with visible response
 evidence. Codex receives additional reconciliation between live tool categories
@@ -634,7 +634,7 @@ even when a nested key is named `reasoning_content`. Image and audio references
 remain, but their bytes are not loaded into the text-only judge request.
 
 The projection policy is versioned in
-[`src/evaluation/judgeTranscript.ts`](../src/evaluation/judgeTranscript.ts).
+[`src/evaluation/judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts).
 `judge-evidence.json` stores both that policy and the exact projected steps. The
 verifier recreates the projection from `trajectory.json` and requires bytewise
 canonical equivalence.
@@ -645,7 +645,7 @@ Evaluation consumes only sealed, redacted evidence.
 
 ### Deterministic checks
 
-[`src/evaluation/checks.ts`](../src/evaluation/checks.ts) supports file-created,
+[`src/evaluation/checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) supports file-created,
 file-exists/absent, and bounded content-regex checks. It reads only requested
 workspace paths, does not follow symbolic links, records hashes and exact bytes
 in `workspace-evidence.json`, and executes regular expressions in a bounded VM
@@ -730,7 +730,7 @@ array.
 
 ### Transactional local store
 
-[`createArtifactStore`](../src/results/localStore.ts) implements a two-phase
+[`createArtifactStore`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) implements a two-phase
 local transaction:
 
 1. create a private `.staging/<run-id>-*` directory;
@@ -747,7 +747,7 @@ mode `0600`; ordinary artifacts are mode `0644`.
 
 ### Completed-run verification
 
-[`verifyCompletedRun`](../src/results/localStore.ts) does more than verify
+[`verifyCompletedRun`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) does more than verify
 hashes. It also requires:
 
 - the directory name to match `run_id`;
@@ -821,8 +821,9 @@ be committed; failures before that point remain fatal.
 
 ## Public entry points and default CLI composition
 
-The ESM package root exports the engine, contracts, model, planning, execution,
-evaluation, setup, and result APIs through [`src/index.ts`](../src/index.ts).
+The `@stripe/forge` ESM package root exports the engine, contracts, model,
+planning, execution, evaluation, setup, and result APIs through
+[`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts).
 Specialized subpaths expose:
 
 - `@stripe/forge/agents/claude-code`;
@@ -830,10 +831,12 @@ Specialized subpaths expose:
 - `@stripe/forge/providers/anthropic`;
 - `@stripe/forge/runtime/docker`;
 - `@stripe/forge/atif` and `@stripe/forge/atif/v1.8`;
-- `@stripe/forge/testing`; and
-- `@stripe/forge/cli`.
+- `@stripe/forge/setup`;
+- `@stripe/forge/testing`;
+- `@stripe/forge/cli`; and
+- `@stripe/forge/package.json`.
 
-The public CLI in [`src/cli.ts`](../src/cli.ts) is a thin host around the same
+The public CLI in [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) is a thin host around the same
 engine APIs:
 
 - `validate` loads inputs, expands every selection, resolves plans, constructs
@@ -851,23 +854,23 @@ external runtime without changing core lifecycle semantics.
 
 | Path | Responsibility |
 | --- | --- |
-| [`src/model`](../src/model) | Versioned wire types, strict parsing, hashes, path policy, and safe loaders |
-| [`src/planning`](../src/planning) | Matrix expansion, case-file selection, resolved plans, and plan digests |
-| [`src/contracts`](../src/contracts) | Public capability interfaces and authority boundaries |
-| [`src/setup`](../src/setup) | Built-in actions, immutable registries, requirement aggregation, and ordered execution |
-| [`src/execution`](../src/execution) | Lifecycle controller, completion runtime, phase events, and stable errors |
-| [`src/interaction`](../src/interaction) | Engine-owned Ava prompts/state machine and persistent conversation loop |
-| [`src/agents`](../src/agents) | Claude Code and Codex execution/evidence adapters |
-| [`src/providers`](../src/providers) | Host-side completion transports |
-| [`src/runtime`](../src/runtime) | Workspace/command mechanics and built-in Docker runtime |
-| [`src/evidence`](../src/evidence) | Native evidence validation, coverage, and driver fallback |
-| [`src/atif`](../src/atif) | Pinned ATIF v1.8 schema, parser, serializer, and normalization envelope |
-| [`src/evaluation`](../src/evaluation) | Workspace checks, judge projection/evidence, guideline judging, and scoring |
-| [`src/results`](../src/results) | Result schemas, two-phase local store, and cross-artifact verification |
-| [`src/security`](../src/security) | Credential redaction and secret scanning |
-| [`src/testing`](../src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`test`](../test) | Package-level and end-to-end orchestration tests |
-| [`examples`](../examples) | Runnable datasets and experiments |
+| [`src/model`](https://github.com/stripe/forge/tree/main/src/model) | Versioned wire types, strict parsing, hashes, path policy, and safe loaders |
+| [`src/planning`](https://github.com/stripe/forge/tree/main/src/planning) | Matrix expansion, case-file selection, resolved plans, and plan digests |
+| [`src/contracts`](https://github.com/stripe/forge/tree/main/src/contracts) | Public capability interfaces and authority boundaries |
+| [`src/setup`](https://github.com/stripe/forge/tree/main/src/setup) | Built-in actions, immutable registries, requirement aggregation, and ordered execution |
+| [`src/execution`](https://github.com/stripe/forge/tree/main/src/execution) | Lifecycle controller, completion runtime, phase events, and stable errors |
+| [`src/interaction`](https://github.com/stripe/forge/tree/main/src/interaction) | Engine-owned Ava prompts/state machine and persistent conversation loop |
+| [`src/agents`](https://github.com/stripe/forge/tree/main/src/agents) | Claude Code and Codex execution/evidence adapters |
+| [`src/providers`](https://github.com/stripe/forge/tree/main/src/providers) | Host-side completion transports |
+| [`src/runtime`](https://github.com/stripe/forge/tree/main/src/runtime) | Workspace/command mechanics and built-in Docker runtime |
+| [`src/evidence`](https://github.com/stripe/forge/tree/main/src/evidence) | Native evidence validation, coverage, and driver fallback |
+| [`src/atif`](https://github.com/stripe/forge/tree/main/src/atif) | Pinned ATIF v1.8 schema, parser, serializer, and normalization envelope |
+| [`src/evaluation`](https://github.com/stripe/forge/tree/main/src/evaluation) | Workspace checks, judge projection/evidence, guideline judging, and scoring |
+| [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
+| [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
+| [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
+| [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests |
+| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Runnable datasets and experiments |
 
 ## What Forge intentionally does not own
 
@@ -908,5 +911,5 @@ Changes that cross module boundaries should preserve these properties:
     semantics.
 
 The tests adjacent to each module cover its local contract. Cross-module and
-end-to-end tests under [`test`](../test) exercise the complete orchestration,
+end-to-end tests under [`test`](https://github.com/stripe/forge/tree/main/test) exercise the complete orchestration,
 artifact inventory, and public package boundaries.

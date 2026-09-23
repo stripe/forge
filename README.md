@@ -264,14 +264,14 @@ Bind each required reference to a host environment variable explicitly for the
 run; pass the variable name, never its value:
 
 ```sh
-STRIPE_MCP_TOKEN=your-restricted-token \
+MY_MCP_TOKEN=your-restricted-token \
 npx @stripe/forge@0.1.0 run \
   --experiment ./experiment.yaml \
   --dataset ./dataset \
-  --credential-env stripe.mcp-token=STRIPE_MCP_TOKEN
+  --credential-env example.mcp-token=MY_MCP_TOKEN
 ```
 
-The experiment and resolved plan contain only `stripe.mcp-token`. Forge resolves
+The experiment and resolved plan contain only `example.mcp-token`. Forge resolves
 only references required by the selected run, and the declaring capability
 determines whether each value is exposed to setup commands or agent commands.
 Unrelated host environment variables are never copied into the runtime.
@@ -396,7 +396,7 @@ matrix:
       model: gpt-5.4
 ```
 
-The [checked-in Codex example](examples/codex/README.md) is a complete runnable
+The [checked-in Codex example](https://github.com/stripe/forge/blob/main/examples/codex/README.md) is a complete runnable
 experiment using the quickstart dataset. From a source checkout:
 
 ```sh
@@ -682,15 +682,18 @@ identity and GitHub marketplace repository slug:
 treatments:
   baseline:
     setup: []
-  stripe-plugin:
+  marketplace-plugin:
     setup:
       - uses: forge/plugin@1
         with:
           agents:
             claude-code:
-              plugin: stripe@claude-plugins-official
-              marketplace: anthropics/claude-plugins-official
+              plugin: example-plugin@example-marketplace
+              marketplace: example-org/example-marketplace
 ```
+
+The marketplace and plugin names above are illustrative and must be replaced
+with real identifiers.
 
 Forge registers the current marketplace through Claude's native CLI, validates
 the selected entry, and installs it with user scope in the isolated run home.
@@ -710,7 +713,7 @@ install plugins under the runtime's ordinary permissions and network policy.
 
 Forge installs the whole plugin—including skills, commands, hooks, and MCP
 configuration—not only its skills. A remote endpoint
-such as `mcp.stripe.com` remains a rolling external dependency. See
+such as `mcp.example.com` remains a rolling external dependency. See
 [Marketplace plugin treatments](docs/plugin-action.md) for the exact “latest”
 semantics, verification, retained `setup.json` resolution, and current
 limitations.
@@ -724,7 +727,7 @@ names a JavaScript package to download or import. The bundle may be an ordinary
 module colocated with the embedding eval runner; it does not need to be
 published as a separate package.
 
-```js
+```js check
 import {
   createForgeEngine,
   defineSetupActionBundle,
@@ -739,14 +742,26 @@ const actions = defineSetupActionBundle({
   actions: [{
     uses: 'acme-evals/tool@1',
     parseWith(input) {
-      if (typeof input?.name !== 'string') throw new TypeError('invalid tool');
+      if (
+        input === null ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        Object.keys(input).length !== 1 ||
+        typeof input.name !== 'string'
+      ) {
+        throw new TypeError('invalid tool');
+      }
       return {name: input.name};
     },
     preflight(step) {
       return {
-        requirements: {},
+        requirements: {executables: ['install-tool']},
         async apply(context) {
-          await context.commands.run(['install-tool', step.with.name]);
+          const result = await context.commands.run(
+            ['install-tool', step.with.name],
+            {signal: context.signal},
+          );
+          if (result.exitCode !== 0) throw new Error('tool installation failed');
         },
       };
     },
@@ -771,7 +786,7 @@ parser would transform. An `apply` implementation may return bounded,
 non-sensitive JSON describing execution-time resolution; Forge snapshots it in
 `setup.json`. See
 [Setup action bundles](docs/setup-action-bundles.md) for the full contract and
-release boundary.
+security model.
 
 ## Programmatic API
 
@@ -972,6 +987,7 @@ async function loadForge() {
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
 | `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
+| `@stripe/forge/package.json` | Package metadata |
 
 Only documented package exports are public. Do not import `dist/` files or
 undeclared internal paths.
@@ -1106,9 +1122,9 @@ import {
 through one `ForgeComposition`; Forge never discovers plugins or private
 services globally. Setup semantics are selected separately when a host creates
 an immutable `ForgeEngine` with explicitly imported action bundles.
-The setup preflight, first-party action, and credential-lifecycle design is
-documented in
-[Agent-aware setup and credential contracts](docs/agent-aware-setup-and-credentials.md).
+The [architecture guide](docs/architecture.md#setup-architecture) documents
+setup preflight and credential scoping. Embedding hosts that add setup semantics
+should also read [Setup action bundles](docs/setup-action-bundles.md).
 The composition contains:
 
 - a `RuntimeAdapter`;
@@ -1176,7 +1192,7 @@ record actual build and deployment identity in sealed runtime metadata. A
 worker deployment is distinct from its command-execution mechanism; hosts can
 reuse an adapter when moving a worker without changing that mechanism.
 
-See [the runnable external-runtime example](examples/external-runtime/README.md)
+See [the runnable external-runtime example](https://github.com/stripe/forge/blob/main/examples/external-runtime/README.md)
 for an offline demonstration using test adapters. It completes the ordinary
 execution and artifact-verification lifecycle without Docker or credentials.
 
@@ -1249,7 +1265,7 @@ JSON-like objects: arrays, explicit `null`, unknown fields, and extra credential
 binding fields fail pure preflight rather than being discarded. For example,
 an agent requirement is automatically assigned agent scope:
 
-```ts
+```ts fragment
 requirements() {
   return {
     executables: ['acme-agent'],
@@ -1418,7 +1434,9 @@ test runner.
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm check:docs
 pnpm test:package
+pnpm check
 ```
 
 ### Opt-in live tests
