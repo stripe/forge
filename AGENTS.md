@@ -10,8 +10,10 @@ behavior can affect downstream internal consumers.
 Keep the public package free of dependencies on Stripe-internal infrastructure,
 services, credentials, paths, packages, and unpublished behavior. Public
 Stripe-owned names or integrations are acceptable only when they are portable,
-documented, and usable outside Stripe. Environment-specific behavior must enter
-through documented public contracts; do not import or discover private host
+documented, and usable outside Stripe. Keep runtime dependencies small,
+portable, and suitable for an Apache-2.0 public package; record required
+attribution and provenance. Environment-specific behavior must enter through
+documented public contracts; do not import or discover private host
 implementations from the core.
 
 Before changing behavior or public exports, read `README.md`, `package.json`,
@@ -25,6 +27,8 @@ truth for feature details; do not duplicate their full specifications here.
   environment configuration out of case definitions.
 - A resolved run plan is complete, canonical, immutable, and free of ambient
   inference.
+- Wire formats are strict and versioned; unknown authored fields remain errors.
+  Do not mutate parsed inputs, and keep resolved plans cloned and deeply frozen.
 - Complete parsing and pure capability preflight before resolving credentials,
   allocating resources, invoking providers, or mutating a workspace.
 - `executeEval` owns score-affecting lifecycle ordering. Adapters provide
@@ -44,23 +48,6 @@ truth for feature details; do not duplicate their full specifications here.
 
 See `docs/architecture.md` for the complete lifecycle, trust model, evidence
 policy, artifact format, and scoring semantics.
-
-## Public API and TypeScript conventions
-
-- The package requires Node.js 22 or newer and is ESM-only.
-- TypeScript uses `NodeNext`. Relative source imports include their emitted
-  `.js` suffix, and type-only imports use `import type`.
-- Preserve strict typing. Prefer `unknown` plus validation over `any`.
-- Wire formats are strict and versioned. Unknown authored fields remain errors
-  rather than being discarded.
-- Do not mutate parsed inputs. Resolved plans remain cloned and deeply frozen.
-- Root exports come from `src/index.ts`; specialized implementations use
-  documented package subpaths. Consumers must not depend on undeclared `dist/`
-  paths.
-- The package builds with `tsc`; `dist/` is generated and must not be edited by
-  hand. Do not add a bundler without a demonstrated public-package need.
-- Keep runtime dependencies small, portable, and suitable for an Apache-2.0
-  public package. Record required attribution and provenance.
 
 ## Testing and verification
 
