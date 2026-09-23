@@ -6,6 +6,11 @@ an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session
 through a runtime adapter, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
 
+For a conceptual explanation of its boundaries, lifecycle, trust model, and
+extension points, see [Forge architecture](docs/architecture.md). For a
+file-by-file map and concrete call paths, see the
+[Forge codebase guide](docs/codebase-guide.md).
+
 > **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
 > Ava multi-turn Claude Code and Codex runs, with file checks, model-judged success
 > guidelines, latest-marketplace Claude plugin treatments, ATIF v1.8 evidence,
