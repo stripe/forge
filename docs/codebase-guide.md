@@ -1,0 +1,802 @@
+# Forge codebase guide
+
+This guide explains how the Forge source tree fits together at the file and
+symbol level. Read [Forge architecture](architecture.md) first for the design
+and lifecycle invariants; use this document when you are navigating code,
+tracing a request, or deciding where a change belongs.
+
+Forge is mostly organized by responsibility rather than by feature. A run moves
+through several directories:
+
+```text
+model → planning → execution → interaction → evidence → evaluation → results
+                     │              │             │
+                     └──── contracts and host-provided adapters ────┘
+```
+
+The arrows are a useful reading order, not a strict acyclic layering rule.
+`execution` coordinates almost every subsystem, and `results` imports selected
+evidence and evaluation policies so it can independently verify a committed
+run.
+
+## Directory interaction map
+
+The solid arrows below point from a caller/dependent to code it uses. The dotted
+verification arrows show policies that `results` reuses when it audits stored
+output.
+
+```mermaid
+flowchart LR
+    CLI[cli / engine]
+    MODEL[model]
+    PLAN[planning]
+    CONTRACTS[contracts]
+    SETUP[setup]
+    EXEC[execution]
+    INTERACTION[interaction]
+    RUNTIME[runtime]
+    AGENTS[agents]
+    PROVIDERS[providers]
+    ATIF[atif]
+    EVIDENCE[evidence]
+    EVAL[evaluation]
+    RESULTS[results]
+    SECURITY[security / serialization]
+
+    CLI --> MODEL
+    CLI --> PLAN
+    CLI --> EXEC
+    CLI --> RESULTS
+    PLAN --> MODEL
+    PLAN --> SETUP
+    MODEL --> SETUP
+    SETUP --> CONTRACTS
+    SETUP --> MODEL
+    RUNTIME --> CONTRACTS
+    AGENTS --> CONTRACTS
+    AGENTS --> ATIF
+    PROVIDERS --> CONTRACTS
+    EXEC --> CONTRACTS
+    EXEC --> SETUP
+    EXEC --> RUNTIME
+    EXEC --> AGENTS
+    EXEC --> PROVIDERS
+    EXEC --> INTERACTION
+    EXEC --> EVIDENCE
+    EXEC --> EVAL
+    EXEC --> RESULTS
+    EXEC --> SECURITY
+    EXEC --> PLAN
+    EXEC --> MODEL
+    INTERACTION --> CONTRACTS
+    EVIDENCE --> CONTRACTS
+    EVIDENCE --> ATIF
+    EVAL --> CONTRACTS
+    EVAL --> ATIF
+    EVAL --> RESULTS
+    RESULTS -. turn coverage .-> EVIDENCE
+    RESULTS -. plan policy .-> PLAN
+    RESULTS -. judge policy .-> EVAL
+```
+
+## Start here
+
+For a first pass through the codebase, read these files in order:
+
+1. [`src/model/types.ts`](../src/model/types.ts) — the benchmark and plan data
+   model.
+2. [`src/contracts/composition.ts`](../src/contracts/composition.ts) — the host
+   capabilities supplied to a run.
+3. [`src/engine.ts`](../src/engine.ts) — how one immutable action registry binds
+   parsing, planning, execution, and verification.
+4. [`src/planning/planner.ts`](../src/planning/planner.ts) — how authored inputs
+   become one resolved plan.
+5. [`src/execution/execute.ts`](../src/execution/execute.ts) — the end-to-end run
+   controller.
+6. [`src/contracts/runtime.ts`](../src/contracts/runtime.ts) and
+   [`src/contracts/agent.ts`](../src/contracts/agent.ts) — the two most important
+   adapter boundaries.
+7. [`src/evidence/selection.ts`](../src/evidence/selection.ts) — how agent output
+   becomes score-bearing evidence.
+8. [`src/results/localStore.ts`](../src/results/localStore.ts) — how a result is
+   committed and later verified.
+
+If you are following the public executable, start instead at
+[`runCli`](../src/cli.ts), then move to `ForgeEngine.resolveRunPlan` and
+`ForgeEngine.executeEval`.
+
+## Top-level source files
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`src/index.ts`](../src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
+| [`src/engine.ts`](../src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
+| [`src/cli.ts`](../src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, selects a matrix entry, creates the default adapters, and calls the engine. It is composition code, not benchmark semantics. |
+| [`src/serialization.ts`](../src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
+
+### `ForgeEngine` as the semantic facade
+
+`createForgeEngine({setupActionBundles})` calls
+`createSetupActionRegistry`, then closes over the returned immutable registry.
+Each engine method is a small adapter around a registry-aware implementation:
+
+```text
+ForgeEngine method                 Delegates to
+──────────────────────────────────────────────────────────────────────
+parseEvalCase/Yaml             →  model/parse.ts
+parseExperimentConfig/Yaml     →  model/parse.ts
+parseResolvedRunPlan           →  model/parse.ts
+loadDataset/config             →  model/loaders.ts
+resolveRunPlan                 →  planning/planner.ts, then reparses
+preflightEval/executeEval      →  execution/execute.ts
+verifyCompletedRun             →  results/localStore.ts
+```
+
+That closure is why setup action semantics cannot change between parsing and
+execution. Package-level convenience functions use the same built-in-only
+default registry.
+
+## The main call paths
+
+### CLI to resolved plan
+
+```mermaid
+flowchart TD
+    CLI[cli.ts: runCli]
+    LD[model/loaders.ts: loadDataset]
+    LE[model/loaders.ts: loadExperimentConfig]
+    PM[model/parse.ts]
+    EX[planning/planner.ts: expandExperiment]
+    SEL[cli.ts: selectOne]
+    RP[planning/planner.ts: resolveRunPlan]
+    PLAN[ResolvedRunPlanV1]
+
+    CLI --> LD --> PM
+    CLI --> LE --> PM
+    CLI --> EX --> SEL --> RP
+    LD --> RP
+    LE --> RP
+    RP --> PLAN
+```
+
+For `--case-file`, `runCli` additionally calls
+`planning/caseFile.ts:resolveManifestCaseIdFromFile`, which discovers and
+verifies the dataset before mapping the exact file back to a manifest case ID.
+
+### Resolved plan to committed run
+
+The orchestration in `execute.ts` can be read as this call tree:
+
+```text
+executeEvalWithTestHooks
+├── parseResolvedRunPlanWithSetupActions
+├── createRunEventEmitter
+├── buildEvalPreflight
+│   ├── selectedAgent
+│   ├── agent.evidenceIdentity
+│   ├── setupExecutor.preflight
+│   ├── agent.requirements
+│   ├── completionBindingsForPlan
+│   └── runtime.preflight
+├── resolveEnvironment
+├── prepareCompletionRuntime
+│   ├── credentialResolver.resolve
+│   └── completionProvider.preflight
+├── runtime.prepare
+├── agent.prepare
+├── preparedSetup.apply
+│   └── each PreparedSetupStep.apply in plan order
+├── preparedRuntime.finalizeSetup
+├── agent.openSession
+├── executeInteraction
+│   ├── one-shot: AgentSession.send
+│   └── multi-turn: AvaRolePlayer + runConversation + AgentSession.send
+├── preparedRuntime.quiesce
+├── agent.collectNativeArtifact / collectEvidence
+├── selectAgentEvidence
+├── redactNormalizedTrajectory
+├── evaluation
+│   ├── collectJudgeWorkspaceEvidence
+│   ├── createJudgeTranscriptProjection
+│   ├── judgeGuidelines
+│   └── evaluateRunEvidence
+├── buildCoreArtifacts / buildResult
+├── contributors[].contribute
+├── artifactStore.begin / transaction.write
+├── preparedRuntime.dispose
+└── transaction.commit
+```
+
+`verifyCompletedRun` is a separate post-commit path; `executeEval` does not call
+it automatically.
+
+### Evidence to score and artifacts
+
+```mermaid
+flowchart LR
+    T[Completed interaction turns]
+    N[Adapter-native session]
+    S[evidence/selection.ts]
+    A[Canonical ATIF trajectory]
+    W[Sealed workspace]
+    JP[Judge transcript projection]
+    JW[Judge workspace evidence]
+    G[Guideline results]
+    C[Deterministic check results]
+    SC[evaluation/score.ts]
+    R[result.json evaluation]
+
+    T --> S
+    N --> S
+    S --> A
+    A --> JP --> G
+    W --> JW --> G
+    W --> C
+    G --> SC
+    C --> SC
+    SC --> R
+```
+
+When an adapter supplies exact native source bytes, they are copied separately
+as a restricted supplemental artifact. That copy does not feed the scoring
+branch.
+
+## `src/model`: wire formats and trusted loading
+
+This directory defines the data Forge accepts before any execution capability
+is selected.
+
+| File | Main responsibility | Interacts with |
+| --- | --- | --- |
+| [`types.ts`](../src/model/types.ts) | TypeScript wire types for manifests, cases, experiments, selections, setup steps, runtimes, and resolved plans | Imported across nearly every directory; contains data only |
+| [`parse.ts`](../src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
+| [`loaders.ts`](../src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
+| [`paths.ts`](../src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
+| [`hashes.ts`](../src/model/hashes.ts) | SHA-256 validation and helpers | Used by loaders, planner, receipts, evaluation, and results |
+| [`checks.ts`](../src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
+| [`errors.ts`](../src/model/errors.ts) | `BenchmarkModelError` and stable model/loading error codes | Thrown by safe loaders and exposed through `model/index.ts` |
+| [`index.ts`](../src/model/index.ts) | Public model barrel | Re-exported by the package root |
+
+### Important model objects
+
+The object progression is:
+
+```text
+raw YAML/JSON
+   │ parse.ts
+   ▼
+EvalCaseV1 / ExperimentConfigV1 / DatasetManifestV1
+   │ loaders.ts adds paths and byte digests
+   ▼
+LoadedDatasetV1 + LoadedExperimentConfigV1
+   │ planning/planner.ts
+   ▼
+ResolvedRunPlanV1
+```
+
+Do not add runtime behavior to these types. A resolved plan is plain,
+canonicalizable data that can be persisted and parsed again without a host
+composition.
+
+## `src/planning`: matrix selection and plan construction
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`planner.ts`](../src/planning/planner.ts) | `expandExperiment`, `resolveRunPlan`, `serializeResolvedRunPlan`, `resolvedRunPlanSha256`, `PlanningError` | Combines loaded model objects and one selection. Uses the action registry to validate bundle pins and returns a deeply frozen plan. |
+| [`caseFile.ts`](../src/planning/caseFile.ts) | `resolveManifestCaseIdFromFile`, `ManifestCaseFileError` | Maps a user-selected case file to an exact manifest entry while defending against symlink, identity, and containment mistakes. Called only by the CLI/file-selection path. |
+| [`index.ts`](../src/planning/index.ts) | Public planning barrel | Re-exported by the package root |
+
+`planner.ts` is intentionally pure after loading. It does not resolve
+credentials, inspect the runtime, or select a composition adapter. Its setup
+registry dependency exists only to bind the plan to registered action
+implementations and their bundle identities.
+
+## `src/contracts`: host capability boundaries
+
+The contracts directory is the best place to understand what host code can do.
+Most files define interfaces, while a few also provide safe default
+implementations.
+
+| File | Key interfaces/functions | Consumers and implementations |
+| --- | --- | --- |
+| [`composition.ts`](../src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
+| [`runtime.ts`](../src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
+| [`agent.ts`](../src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
+| [`completion.ts`](../src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
+| [`credentials.ts`](../src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
+| [`command.ts`](../src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
+| [`inputs.ts`](../src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; default implementation safely roots access in a dataset directory |
+| [`artifacts.ts`](../src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
+| [`observability.ts`](../src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
+| [`plugin.ts`](../src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented only by the Claude adapter; selected by `setup/forgePlugin.ts` |
+| [`pluginReceipt.ts`](../src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
+| [`index.ts`](../src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
+
+### Capability narrowing
+
+The runtime contract deliberately changes shape over time:
+
+```text
+PreparedRuntime
+├── workspace: MutableWorkspace
+├── stateDirectories: MutableWorkspace map
+├── commands.uncredentialed
+├── commands.setup(exact names)
+└── commands.agent
+
+execution projects it to:
+├── AgentPrepareRuntime   → uncredentialed commands only
+├── SetupApplyContext     → per-step state and credential projection
+└── AgentSessionRuntime   → agent-scoped commands only
+
+after quiesce:
+└── AgentEvidenceRuntime  → read-only workspace/state, no commands
+```
+
+When adding a capability, put it on the narrowest lifecycle interface that
+actually needs it rather than expanding `ForgeComposition` or `PreparedRuntime`
+globally.
+
+## `src/setup`: action registration, preflight, and execution
+
+Setup splits parsing semantics, pure requirement declaration, and authorized
+application across several files.
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`registry.ts`](../src/setup/registry.ts) | `SetupActionDefinition`, `SetupActionBundle`, `SetupActionRegistry`, `defineSetupActionBundle`, `createSetupActionRegistry` | Owns namespaces, bundle identities, immutable registration, and exact-reference checks. Used by model parsing, planning, engine, and execution. |
+| [`builtins.ts`](../src/setup/builtins.ts) | `builtInSetupActions` | Defines strict `with` parsers for built-in actions and pairs each parser with its handler from `forge*.ts`. Loaded by the registry. |
+| [`types.ts`](../src/setup/types.ts) | `SetupStepHandler`, `PreparedSetupStep`, `SetupExecutor`, setup contexts and requirements | Shared contract between action definitions, executor, and execution controller |
+| [`executor.ts`](../src/setup/executor.ts) | `createSetupExecutorForRegistry`, `PreparedSetup` implementation | Calls each action's pure `preflight`, merges requirements, freezes prepared operations, and later applies them in order with least-privileged projections. Called by `execute.ts`. |
+| [`forgeWrite.ts`](../src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
+| [`forgeCommand.ts`](../src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
+| [`forgePlugin.ts`](../src/setup/forgePlugin.ts) | `pluginSetupHandler` | Selects the current agent's `AgentPluginInstaller`, incorporates its requirements, installs, and validates its receipt. |
+| [`resolution.ts`](../src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
+| [`index.ts`](../src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
+
+The interaction between registry and executor is important:
+
+```text
+SetupActionDefinition
+├── parseWith()     called while parsing authored/setup plan data
+└── preflight()     called by SetupExecutor before authority
+       └── returns PreparedSetupStep.apply()
+               called later during the setup phase
+```
+
+The executor binds `PreparedSetupStep.apply` during preflight. It does not look
+the action up again at execution time.
+
+## `src/execution`: the orchestration hub
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`execute.ts`](../src/execution/execute.ts) | `preflightEval`, `executeEval`, lifecycle helpers | Owns the full lifecycle and imports every score-affecting subsystem. This is the main integration file. |
+| [`completionRuntime.ts`](../src/execution/completionRuntime.ts) | `completionBindingsForPlan`, `prepareCompletionRuntime`, `PreparedCompletionRuntime` | Resolves purpose-specific providers and credentials, performs provider preflight, invokes/redacts/validates completions, and records safe call summaries. Used by Ava and guideline judging through `execute.ts`. |
+| [`events.ts`](../src/execution/events.ts) | `createRunEventEmitter` | Wraps lifecycle phases in start/completion events and uses `Promise.allSettled` so observers cannot control execution. |
+| [`errors.ts`](../src/execution/errors.ts) | `ForgeExecutionError`, `executionError`, `throwIfAborted` | Stable secret-safe phase/error surface used by the controller. |
+| [`index.ts`](../src/execution/index.ts) | Public execution barrel | Re-exports execution entry points and stable errors |
+
+### How to read `execute.ts`
+
+The top third contains the public entry points and lifecycle. Start with
+`executeEvalWithTestHooks`; it is the implementation behind public
+`executeEval`. The middle contains `executeInteraction` and preflight/
+requirement merging. The lower half contains capability projection, redaction,
+artifact construction, result construction, and error mapping helpers.
+
+The local `phase` variable is not just logging. It determines the stable error
+code returned when an implementation throws. The `prepared`, `sealed`,
+`transaction`, and `runtimeDisposed` variables track cleanup ownership across
+the main `try/catch`.
+
+## `src/interaction`: engine-owned multi-turn behavior
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`prompt.ts`](../src/interaction/prompt.ts) | Ava prompt builders, prompt version, stop sentinel | Pure rendering of initialization and continuation system prompts |
+| [`completion.ts`](../src/interaction/completion.ts) | Provider-neutral interaction request/invoker types | Connects Ava to `PreparedCompletionRuntime.invoke` without exposing provider or credentials |
+| [`ava.ts`](../src/interaction/ava.ts) | `AvaRolePlayer`, `AvaTurn`, need/error types | Maintains private needs/history, requests strict structured completions, validates messages, and implements retry/terminal decisions |
+| [`conversation.ts`](../src/interaction/conversation.ts) | `runConversation`, audit/result types, `snapshotAgentToolCalls` | Alternates Ava decisions with one persistent `AgentSession`, enforces max-turn semantics, aggregates cost, and produces the driver ledger/audit |
+| [`index.ts`](../src/interaction/index.ts) | Internal interaction barrel | Imported by `execution/execute.ts`; interaction is not a package subpath |
+
+The central relationship is:
+
+```text
+executeInteraction
+  └── new AvaRolePlayer(prompt inputs, completion invoker)
+        └── runConversation({session, ava})
+              ├── ava.nextTurn(last agent response)
+              │     └── PreparedCompletionRuntime.invoke('role_player')
+              └── AgentSession.send(ava message)
+```
+
+`AvaRolePlayer` never receives an agent session or workspace. `runConversation`
+never receives provider credentials. `execute.ts` is the only layer that binds
+those two sides.
+
+## `src/runtime`: portable mechanics and Docker
+
+### Shared runtime helpers
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`workspace.ts`](../src/runtime/workspace.ts) | `createOwnedWorkspace` | Safe host-backed mutable workspace: canonical root, no symlink traversal, stable listing, bounded reads, and atomic writes. Used by Docker. |
+| [`processCommandRunner.ts`](../src/runtime/processCommandRunner.ts) | `createHostCommandRunner` | Shell-free host subprocess runner with timeout, output cap, abort, and process-tree termination. Used by Docker CLI operations. |
+
+### `src/runtime/docker`
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`runtime.ts`](../src/runtime/docker/runtime.ts) | `createDockerRuntimeAdapter` | Implements `RuntimeAdapter`: validates runtime config, builds the image, creates run-owned directories, starts/restarts/stops the container, projects workspaces and commands, quiesces, and disposes. |
+| [`commandRunner.ts`](../src/runtime/docker/commandRunner.ts) | `DockerCommandController` | Implements scoped `CommandRunner`s over `docker exec`, creates temporary env files, tracks active commands, and closes setup/all command authority at lifecycle barriers. |
+| [`assets.ts`](../src/runtime/docker/assets.ts) | Base image, CLI version, and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |
+| [`assets/Dockerfile`](../src/runtime/docker/assets/Dockerfile) | Forge-owned image | Installs the pinned CLIs and runtime dependencies. Copied into the package at build time. |
+| [`assets/entrypoint.sh`](../src/runtime/docker/assets/entrypoint.sh) | Container entrypoint | Keeps the prepared container available for `docker exec`. |
+| [`index.ts`](../src/runtime/docker/index.ts) | Public Docker subpath | Exports adapter factory and pin metadata |
+
+`DockerCommandController` receives the fully resolved environment, but each
+runner created from it exposes only one scope. `runtime.ts` owns the controller
+and hands projected runners to `PreparedRuntime`; execution narrows those again
+before an action or agent sees them.
+
+## `src/agents`: coding-agent adapters
+
+Each adapter has the same broad shape:
+
+```text
+index.ts
+├── requirements and version/layout validation
+├── prepare() verifies CLI
+├── openSession() invokes CLI and parses live turn output
+├── collectEvidence() normalizes exact native session to ATIF
+└── collectNativeArtifact() returns exact source bytes
+```
+
+### `src/agents/claude-code`
+
+| File | Main responsibility | Called by / calls into |
+| --- | --- | --- |
+| [`index.ts`](../src/agents/claude-code/index.ts) | `createClaudeCodeAdapter`; wires requirements, CLI version check, session start/resume, evidence, and plugin installer | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
+| [`layout.ts`](../src/agents/claude-code/layout.ts) | Normalize and validate workspace/home/config paths; derive Claude project directory | Called by adapter construction, prepare, session, evidence, and plugin code |
+| [`stream.ts`](../src/agents/claude-code/stream.ts) | Parse Claude `stream-json` stdout into bounded `AgentTurn` | Called by `AgentSession.send` in `index.ts` |
+| [`evidence.ts`](../src/agents/claude-code/evidence.ts) | Read the exact session JSONL, classify native records, render context/tool behavior, and build ATIF or an unavailable result | Called after quiescence by adapter methods; returns contract types to `evidence/selection.ts` |
+| [`plugins.ts`](../src/agents/claude-code/plugins.ts) | Implement `AgentPluginInstaller`: register marketplace, validate source, install through native CLI, verify installed state | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
+| [`pluginReceipt.ts`](../src/agents/claude-code/pluginReceipt.ts) | Inspect installed plugin tree, reject unsafe entries, compute tree/source receipt | Called by `plugins.ts` while constructing the setup resolution |
+
+Claude's live stream and persisted JSONL are parsed independently. The live
+stream produces the driver turn immediately; the JSONL parser runs only after
+quiescence and must reconcile with that ledger through the shared evidence
+selector.
+
+### `src/agents/codex`
+
+| File | Main responsibility | Called by / calls into |
+| --- | --- | --- |
+| [`index.ts`](../src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, explicit Responses provider configuration, CLI verification, exec/resume, and evidence | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
+| [`layout.ts`](../src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
+| [`stream.ts`](../src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
+| [`evidence.ts`](../src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
+| [`toolEvidence.ts`](../src/agents/codex/toolEvidence.ts) | Normalize command/file/MCP/search outputs and validate native MCP snapshots | Used only by `evidence.ts` |
+| [`nativeJson.ts`](../src/agents/codex/nativeJson.ts) | Extract bounded compact JSON fragments from native source without a broad reserialization | Low-level helper for evidence validation |
+| [`truncation.ts`](../src/agents/codex/truncation.ts) | Relate original and observed UTF-8 text when Codex reports truncated output | Used by native tool evidence parsing |
+
+Codex has extra evidence helpers because its rollout protocol contains several
+representations of tool activity. `evidence.ts` is the coordinator; the helper
+files should remain unaware of Forge lifecycle or result storage.
+
+## `src/providers`: host-side model transport
+
+[`src/providers/anthropic/index.ts`](../src/providers/anthropic/index.ts) is the
+current built-in `CompletionProvider`. It contains construction, model
+capability validation, request validation and schema projection, fetch,
+bounded-response reading, provider-response parsing, usage normalization, and
+safe error classes in one file.
+
+It is used only through `execution/completionRuntime.ts`. Ava and guideline
+judging depend on the provider-neutral completion contract, not this provider.
+That distinction lets an embedding host register another provider without
+changing `interaction` or `evaluation`.
+
+## `src/atif`: canonical trajectory format
+
+| File | Main responsibility | Interacts with |
+| --- | --- | --- |
+| [`types.ts`](../src/atif/types.ts) | Exact ATIF v1.8 TypeScript wire types | Used by agent evidence, selection, evaluation, and result provenance |
+| [`schema.ts`](../src/atif/schema.ts) | Recursive Zod implementation of ATIF v1.8 invariants | Called by `parser.ts` |
+| [`parser.ts`](../src/atif/parser.ts) | Bounded-JSON graph preflight plus schema parsing and structured errors | Called by normalization, judge projection, results, and adapter helpers |
+| [`normalization.ts`](../src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness, warnings, normalization version | Constructed by `evidence/selection.ts`; summarized in `result.json` |
+| [`serializer.ts`](../src/atif/serializer.ts) | Canonical trajectory serialization | Called before writing `trajectory.json` |
+| [`timestamp.ts`](../src/atif/timestamp.ts) | ATIF timestamp validation | Used by the schema and adapter normalization |
+| [`upstream.ts`](../src/atif/upstream.ts) | Pinned upstream provenance metadata | Exported for consumers and conformance |
+| [`index.ts`](../src/atif/index.ts) | Public ATIF subpath barrel | Imported throughout internal evidence/evaluation code |
+
+Adapter `evidence.ts` files produce JSON-shaped ATIF candidates. The shared ATIF
+parser, not an adapter, is the authoritative schema boundary.
+
+## `src/evidence`: native-versus-fallback selection
+
+[`src/evidence/selection.ts`](../src/evidence/selection.ts) is a single-file
+subsystem because selection policy must stay centralized. Its important symbols
+are:
+
+- `parseAgentEvidenceIdentity`: validates the pure identity declared before
+  allocation;
+- `selectAgentEvidence`: validates an adapter candidate, checks exact session
+  identity and completed-turn coverage, and chooses native or driver fallback;
+- `trajectoryCoversCompletedTurns`: shared structural reconciliation used both
+  during execution and completed-run verification; and
+- private fallback builders that bound assistant text, tool counts, and tool
+  arguments before constructing ATIF.
+
+This directory depends on `contracts/agent` and `atif`, but not on runtime,
+storage, or a specific adapter. Both execution and result verification call the
+same coverage policy so a stored trajectory cannot pass weaker checks than the
+one originally selected.
+
+## `src/evaluation`: checks, judge evidence, and scoring
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`checks.ts`](../src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates guideline-result alignment, then calls `scoreEvaluation`. |
+| [`judgeWorkspace.ts`](../src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
+| [`judgeTranscript.ts`](../src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
+| [`guidelineJudge.ts`](../src/evaluation/guidelineJudge.ts) | `judgeGuidelines`, prompt/response helpers | Renders one prompt per guideline, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
+| [`score.ts`](../src/evaluation/score.ts) | `scoreEvaluation` | Purely combines guideline and check results into score/status. |
+| [`index.ts`](../src/evaluation/index.ts) | Public evaluation barrel | Re-exported at package root |
+
+There are two workspace evidence paths with different purposes:
+
+```text
+checks.ts             → exact bytes for explicitly configured deterministic paths
+judgeWorkspace.ts     → bounded eligible text from a broader workspace scan
+```
+
+Do not merge them. Their artifact schemas, selection rules, and consumers are
+different.
+
+## `src/results`: wire schemas, local transactions, and verification
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`types.ts`](../src/results/types.ts) | Result/artifact/evaluation/audit wire types and schema versions | Used by execution, evaluation, storage, and consumers |
+| [`parse.ts`](../src/results/parse.ts) | Strict Zod parsers for result and audit artifacts | Called before commit and during verification; imports judge projection constants to bind schema policy |
+| [`localStore.ts`](../src/results/localStore.ts) | `createArtifactStore`, `verifyCompletedRun`, store errors | Implements two-phase local commit and independent cross-artifact verification |
+| [`index.ts`](../src/results/index.ts) | Public results barrel | Re-exported by package root |
+
+`localStore.ts` has two distinct halves:
+
+1. `createArtifactStore` implements `RunArtifactStore` and knows only staged
+   bytes, descriptors, and the final parsed result at commit time.
+2. `verifyCompletedRunWithPlanParser` reopens a completed directory and checks
+   files plus semantic relationships between result, plan, setup, interaction,
+   trajectory, and judge evidence.
+
+The verifier deliberately imports:
+
+- plan parsing/digest policy from `model` and `planning`;
+- turn coverage from `evidence/selection.ts`;
+- ATIF parsing from `atif`;
+- judge projection/prompt versions from `evaluation`; and
+- plugin receipt validation from `contracts`.
+
+Those dependencies make verification a second semantic boundary rather than a
+generic checksum utility.
+
+## `src/security`: secret handling
+
+[`src/security/redaction.ts`](../src/security/redaction.ts) contains exact-value
+redaction and secret assertions:
+
+- `redactSecrets` recursively clones JSON-compatible content, redacts string
+  values and object keys, and reports replacement count;
+- `assertNoSecretsInJsonValue` validates JSON-shaped structures; and
+- `assertNoSecrets` scans text/bytes and throws `SecretLeakError`.
+
+`execution/completionRuntime.ts` redacts provider prompts/responses.
+`execution/execute.ts` redacts canonical evidence and interaction artifacts,
+redacts judge workspace evidence, and scans setup/core/result/contributed
+artifacts. Exact agent-native artifacts intentionally bypass redaction;
+execution classifies them as `restricted`, and the artifact store preserves
+that classification.
+
+## `src/testing`: public test fixtures and conformance
+
+| File | Main symbols | Use |
+| --- | --- | --- |
+| [`plans.ts`](../src/testing/plans.ts) | `createTestResolvedRunPlan` | Produces a valid parsed plan with focused overrides |
+| [`memoryWorkspace.ts`](../src/testing/memoryWorkspace.ts) | `createMemoryWorkspace` | In-memory mutable/read-only workspace fixture |
+| [`memoryInputs.ts`](../src/testing/memoryInputs.ts) | `createMemoryRunInputProvider` | In-memory dataset input fixture |
+| [`fakes.ts`](../src/testing/fakes.ts) | Static credentials, memory artifact store, scripted agent, fake runtime | Builds full compositions without Docker or network and exposes recorded calls/state |
+| [`completionProvider.ts`](../src/testing/completionProvider.ts) | `createScriptedCompletionProvider` | Scripts strict completion responses/failures and records provider calls |
+| [`conformance.ts`](../src/testing/conformance.ts) | `assertRuntimeAdapterConforms` | Reusable external runtime lifecycle/capability conformance suite |
+| [`index.ts`](../src/testing/index.ts) | Public testing subpath | Exposes supported fixtures to adapter authors |
+
+Production unit tests sit beside their source as `*.test.ts`. Cross-module,
+CLI, package, and runnable-example tests live under [`test`](../test):
+
+- `quickstart.e2e.test.ts`: checked-in one-shot example;
+- `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava and example flow;
+- `externalRuntime.e2e.test.ts`: external runtime composition;
+- `codex.e2e.test.ts`: Codex adapter integration through a fake runtime;
+- `liveE2eScript.test.ts`: live-suite command behavior; and
+- `support/expect.ts`: shared assertions.
+
+The normal unit suite uses fakes and does not require Docker, credentials, or
+network access. The live script under [`scripts/live-e2e.mjs`](../scripts/live-e2e.mjs)
+is explicitly opt-in.
+
+## Other top-level directories and files
+
+| Path | Role |
+| --- | --- |
+| [`examples`](../examples) | Checked-in quickstart, multi-turn, Codex, and external-runtime examples. Their manifest sizes/hashes are part of the tests. |
+| [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
+| [`scripts/run-tests.mjs`](../scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
+| [`scripts/copy-assets.mjs`](../scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
+| [`scripts/package-smoke.mjs`](../scripts/package-smoke.mjs) | Verifies published package entry points and assets. |
+| [`scripts/live-e2e.mjs`](../scripts/live-e2e.mjs) | Opt-in real Docker/agent/provider suite. |
+| [`package.json`](../package.json) | Public exports, binary, Node/package-manager pins, scripts, and package file inventory. |
+| [`tsconfig.json`](../tsconfig.json) | Strict NodeNext development/test typechecking. |
+| [`tsconfig.build.json`](../tsconfig.build.json) | Production declaration/JavaScript build. |
+| [`tsconfig.test.json`](../tsconfig.test.json) | Compiles source and repository tests into the temporary test build. |
+
+## Public versus internal imports
+
+Inside the package, source files often import a concrete sibling file to avoid
+barrel cycles. External consumers must use only exports declared in
+[`package.json`](../package.json):
+
+```text
+@stripe/forge
+@stripe/forge/atif
+@stripe/forge/atif/v1.8
+@stripe/forge/cli
+@stripe/forge/agents/claude-code
+@stripe/forge/agents/codex
+@stripe/forge/providers/anthropic
+@stripe/forge/runtime/docker
+@stripe/forge/setup
+@stripe/forge/testing
+@stripe/forge/package.json
+```
+
+Do not make consumers import `dist/...` or an internal source path. Adding a
+public file is not sufficient: update `package.json` exports, barrel/export
+tests, package smoke tests, and README documentation together.
+
+## Where a change should go
+
+### Add or change a benchmark field
+
+Usually touch:
+
+1. `model/types.ts` for the TypeScript wire shape;
+2. `model/parse.ts` for strict parsing, defaults, and invariants;
+3. `planning/planner.ts` if the field affects a resolved plan;
+4. `execution` or the relevant subsystem that consumes it;
+5. `results/types.ts` and `results/parse.ts` if persisted output changes;
+6. verifier logic in `results/localStore.ts` when artifacts must agree; and
+7. adjacent tests, examples, manifest sizes/hashes, and README docs.
+
+Do not let runtime code infer a new default. Materialize it during parsing or
+planning.
+
+### Add a built-in setup action
+
+Usually touch:
+
+1. `model/types.ts` for a typed built-in shape, if it belongs in the closed
+   built-in union;
+2. a new or existing `setup/<action>.ts` handler;
+3. `setup/builtins.ts` for strict `with` parsing and registration;
+4. `setup/index.ts` if the handler is public;
+5. result verification if the action records a dynamic receipt; and
+6. parser/setup/execution tests plus public documentation.
+
+Keep `parseWith` and `preflight` pure. Declare every executable, state path,
+plain variable, and credential before `apply` runs.
+
+### Add an agent adapter
+
+Implement `contracts/agent.ts:AgentAdapter`, then:
+
+1. declare pure requirements and evidence identity;
+2. verify binary/layout in `prepare` using the uncredentialed projection;
+3. keep one stable session ID across `AgentSession.send` calls;
+4. return bounded completed turns from the live protocol;
+5. read exact-session evidence only from `AgentEvidenceRuntime` after quiescence;
+6. normalize native evidence to ATIF or return an explicit unavailable reason;
+7. optionally return exact source bytes as a restricted native artifact; and
+8. add a package subpath only if it is intended as a supported implementation.
+
+Use `testing` fakes and conformance helpers; do not add adapter-specific cases
+to the lifecycle controller.
+
+### Add a runtime adapter
+
+Implement `RuntimeAdapter` and run `assertRuntimeAdapterConforms`. Pay special
+attention to:
+
+- pure synchronous preflight;
+- exact plan adapter/version/config validation;
+- command scope isolation;
+- workspace and state-directory path safety;
+- finalization of setup authority;
+- a real mutation barrier in `quiesce`;
+- read-only sealed capabilities; and
+- idempotent cleanup that does not depend on an aborted run signal.
+
+External runtime-specific configuration stays in the plan's public bounded
+`config`; credentials remain capabilities.
+
+### Add a completion provider
+
+Implement `contracts/completion.ts:CompletionProvider`. The provider should
+declare credential references in `requirements`, optionally validate resolved
+credentials in `preflight`, and implement a bounded `complete`. Register it in
+the host composition by `ModelRefV1.provider` ID. Do not modify Ava or guideline
+judging to add transport-specific behavior.
+
+### Change evidence or judging
+
+Treat these changes as cross-cutting and score-affecting. Review together:
+
+- adapter native parsing;
+- `evidence/selection.ts` coverage/fallback;
+- `atif` schema and normalization version;
+- `evaluation/judgeTranscript.ts` projection version;
+- `evaluation/guidelineJudge.ts` prompt version;
+- result wire schemas and conditional artifacts;
+- `results/localStore.ts` verification; and
+- README/architecture documentation and end-to-end tests.
+
+Changing what the judge sees without versioning the projection is not a local
+refactor.
+
+### Add or change an artifact
+
+Update the producer in `execution/execute.ts`, types and parser in `results`,
+canonical inventory and semantic verification in `results/localStore.ts`, and
+README/architecture inventory. Keep host-owned files below
+`extensions/<contributor-id>/`; keep agent-native bytes below
+`native/<adapter-id>/` and restricted.
+
+## Debugging by phase
+
+`ForgeExecutionError.phase` identifies the part of the controller that failed:
+
+| Phase | Start reading | Common collaborating files |
+| --- | --- | --- |
+| `preflight` | `execution/execute.ts:buildEvalPreflight` | model parser, setup executor, agent requirements, completion runtime, runtime preflight |
+| `runtime_prepare` | selected `RuntimeAdapter.prepare` | Docker runtime/controller, credentials, workspace helpers |
+| `setup` | `setup/executor.ts:PreparedSetup.apply` | selected handler, input provider, workspace, command projection |
+| `interaction` | `execution/execute.ts:executeInteraction` | selected agent `index.ts`, stream parser, Ava/conversation, completion runtime |
+| `quiesce` | selected runtime `quiesce` | active command controller and sealed workspace/state |
+| `evidence` | adapter `collectEvidence`, then `evidence/selection.ts` | adapter evidence parser, ATIF parser/normalization |
+| `evaluation` | `evaluation/checks.ts` and `guidelineJudge.ts` | judge transcript/workspace projection, completion runtime |
+| `artifact_stage` | artifact store transaction and `buildSupplementalArtifacts` | result descriptors, contributors, secret scans |
+| `runtime_dispose` | selected runtime `dispose` | container/process cleanup; late failures become warnings |
+| `result_commit` | `results/localStore.ts:commit` | result parser, descriptor equality, directory rename |
+
+For a verification-only failure, start in
+`results/localStore.ts:verifyCompletedRunWithPlanParser`; it is intentionally
+independent of the execution phase mapping.
+
+## Dependency rules worth preserving
+
+- `model` contains data and parsing, not runtime authority.
+- `planning` resolves semantics, not capabilities.
+- `contracts` stay provider/runtime-neutral.
+- `execution` owns lifecycle ordering; adapters do not call back into it.
+- `interaction` owns Ava behavior but knows nothing about provider credentials.
+- `evaluation` accepts sealed evidence and does not mutate runtime state.
+- `evidence` decides fallback centrally; adapters report candidates.
+- `results` revalidates cross-artifact semantics rather than trusting the
+  producer.
+- setup extension code is selected at engine construction, never discovered
+  from YAML.
+- package subpaths are explicit API commitments; internal barrel files are not.
+
+Keeping those directions makes it possible to replace a runtime, agent, or
+completion transport without changing what an evaluation means.
