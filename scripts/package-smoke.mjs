@@ -5,6 +5,12 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
+const packageManager = JSON.parse(
+  await fs.readFile(path.join(projectRoot, 'package.json'), 'utf8'),
+).packageManager;
+if (typeof packageManager !== 'string' || packageManager.length === 0) {
+  throw new Error('package.json must declare a packageManager.');
+}
 const temporaryRoot = await fs.mkdtemp(
   path.join(os.tmpdir(), 'stripe-forge-package-smoke-'),
 );
@@ -26,7 +32,16 @@ try {
 
   await fs.writeFile(
     path.join(consumerRoot, 'package.json'),
-    `${JSON.stringify({name: 'forge-package-smoke', private: true, type: 'module'}, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        name: 'forge-package-smoke',
+        private: true,
+        type: 'module',
+        packageManager,
+      },
+      null,
+      2,
+    )}\n`,
   );
   run(
     'pnpm',
