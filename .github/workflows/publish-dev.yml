@@ -34,7 +34,16 @@ jobs:
         run: pnpm check
 
       - name: Set snapshot version
-        run: npm version "0.1.1-dev.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+        run: |
+          BASE_VERSION="$(node -p "require('./package.json').version")"
+          case "${BASE_VERSION}" in
+            *-dev.0) ;;
+            *)
+              echo "Expected package version to end in -dev.0, found ${BASE_VERSION}" >&2
+              exit 1
+              ;;
+          esac
+          npm version "${BASE_VERSION%.0}.${GITHUB_RUN_NUMBER}" --no-git-tag-version
 
       - name: Publish snapshot
         run: npm publish --tag dev
