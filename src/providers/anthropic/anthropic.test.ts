@@ -359,12 +359,19 @@ describe('Anthropic completion provider', () => {
       timeoutMs: 5,
       fetch: (async (_input, init) => {
         receivedSignal = init?.signal ?? undefined;
-        return await new Promise<Response>((_resolve, reject) => {
-          receivedSignal?.addEventListener(
-            'abort',
-            () => reject(new DOMException('aborted', 'AbortError')),
-            {once: true},
-          );
+        return await new Promise<Response>((resolve, reject) => {
+          const fallback = setTimeout(() => resolve(messageResponse()), 1_000);
+          const rejectOnAbort = (): void => {
+            clearTimeout(fallback);
+            reject(new DOMException('aborted', 'AbortError'));
+          };
+          if (receivedSignal?.aborted) {
+            rejectOnAbort();
+          } else {
+            receivedSignal?.addEventListener('abort', rejectOnAbort, {
+              once: true,
+            });
+          }
         });
       }) as typeof fetch,
     });
