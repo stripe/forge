@@ -12,7 +12,7 @@
     "url": "https://github.com/stripe/forge/issues"
   },
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   },
   "type": "module",
   "engines": {
