@@ -257,10 +257,9 @@ export async function runCli(
       const selections = expandExperiment(experiment);
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
-      let host:
+      let hostSelection:
         | {
             docker_platform: RuntimePlatform;
-            image_id: string;
             runtime_platform: RuntimePlatform;
           }
         | undefined;
@@ -277,23 +276,16 @@ export async function runCli(
           experiment.config.runtime.platform === 'native'
             ? dockerPlatform
             : experiment.config.runtime.platform;
-        const validated = await (
-          options.validateDockerHost ?? validateDockerRuntimeHost
-        )({
-          platform: runtimePlatform,
-          ...(options.signal === undefined ? {} : {signal: options.signal}),
-        });
-        host = {
+        hostSelection = {
           docker_platform: dockerPlatform,
-          image_id: validated.imageId,
-          runtime_platform: validated.platform,
+          runtime_platform: runtimePlatform,
         };
       }
       const validationPlatforms: readonly (RuntimePlatform | undefined)[] =
         nativeDocker
-          ? host === undefined
+          ? hostSelection === undefined
             ? ['linux/amd64', 'linux/arm64']
-            : [host.runtime_platform]
+            : [hostSelection.runtime_platform]
           : [undefined];
       for (const runtimePlatform of validationPlatforms) {
         const plans = selections.map((selection) =>
@@ -316,6 +308,23 @@ export async function runCli(
           engine.preflightEval({plan, composition});
         }
       }
+      const host =
+        hostSelection === undefined
+          ? undefined
+          : await (async () => {
+              const validated = await (
+                options.validateDockerHost ?? validateDockerRuntimeHost
+              )({
+                platform: hostSelection.runtime_platform,
+                ...(options.signal === undefined
+                  ? {}
+                  : {signal: options.signal}),
+              });
+              return {
+                ...hostSelection,
+                image_id: validated.imageId,
+              };
+            })();
       stdout(
         serializeCanonicalJson({
           dataset: dataset.manifest.dataset,

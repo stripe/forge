@@ -50,8 +50,11 @@ export interface DockerRuntimeAdapterOptions {
   readonly maximumCommandOutputBytes?: number;
 }
 
-export interface ValidateDockerRuntimeHostOptions
-  extends DockerRuntimeAdapterOptions {
+export interface ValidateDockerRuntimeHostOptions {
+  readonly dockerExecutable?: string;
+  readonly temporaryRoot?: string;
+  readonly hostCommands?: HostCommandRunner;
+  readonly buildTimeoutMs?: number;
   readonly platform: RuntimePlatform;
   readonly signal?: AbortSignal;
 }

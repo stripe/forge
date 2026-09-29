@@ -190,6 +190,45 @@ describe('Forge CLI', () => {
     });
   });
 
+  it('does not build the host image when pure preflight fails', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment
+        .replace('platform: linux/amd64', 'platform: native')
+        .replace('adapter: claude-code', 'adapter: missing-agent'),
+    );
+    let hostValidationCalled = false;
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--host',
+      ],
+      {
+        detectDockerPlatform: async () => 'linux/arm64',
+        validateDockerHost: async ({platform}) => {
+          hostValidationCalled = true;
+          return {platform, imageId: `sha256:${'a'.repeat(64)}`};
+        },
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('agent adapter');
+    expect(hostValidationCalled).toBe(false);
+  });
+
   it('purely validates a latest Claude plugin treatment without fetching it', async () => {
     const fixture = await createBenchmarkFixture();
     const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
