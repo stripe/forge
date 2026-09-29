@@ -38,6 +38,7 @@ function fakeDocker(
   fixtureOptions: {
     missingExecutable?: string;
     hostProbeExitCode?: number;
+    hostProbeError?: Error;
   } = {},
 ): {runner: HostCommandRunner; calls: RecordedCall[]} {
   const calls: RecordedCall[] = [];
@@ -75,6 +76,9 @@ function fakeDocker(
           argv.at(-1) === fixtureOptions.missingExecutable;
         const hostProbe =
           argv[1] === 'run' && argv.includes('--entrypoint');
+        if (hostProbe && fixtureOptions.hostProbeError) {
+          throw fixtureOptions.hostProbeError;
+        }
         return {
           stdout: argv[1] === 'image' ? `${IMAGE_ID}\n` : 'ok\n',
           stderr: '',
@@ -159,10 +163,15 @@ describe('Forge Docker runtime', () => {
     const probe = docker.calls.find(
       (call) => call.argv[1] === 'run' && call.argv.includes('--entrypoint'),
     )!;
-    assert.deepEqual(probe.argv, [
+    assert.deepEqual(probe.argv.slice(0, 4), [
       '/opt/test-docker',
       'run',
       '--rm',
+      '--name',
+    ]);
+    const probeName = probe.argv[4]!;
+    assert.match(probeName, /^stripe-forge-host-probe-[0-9a-f-]+$/);
+    assert.deepEqual(probe.argv.slice(5), [
       '--platform',
       'linux/arm64',
       '--network',
@@ -178,6 +187,14 @@ describe('Forge Docker runtime', () => {
       '-c',
       'exit 0',
     ]);
+    assert.ok(
+      docker.calls.some(
+        (call) =>
+          call.argv[1] === 'rm' &&
+          call.argv.includes('--force') &&
+          call.argv.at(-1) === probeName,
+      ),
+    );
   });
 
   it('rejects a built image that the Docker host cannot execute', async () => {
@@ -195,6 +212,36 @@ describe('Forge Docker runtime', () => {
         temporaryRoot,
       }),
       /could not execute/,
+    );
+  });
+
+  it('force-removes the probe container when its command is interrupted', async () => {
+    const temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-docker-host-interrupted-test-'),
+    );
+    roots.push(temporaryRoot);
+    const docker = fakeDocker({hostProbeError: new Error('interrupted')});
+
+    await assert.rejects(
+      validateDockerRuntimeHost({
+        platform: 'linux/arm64',
+        dockerExecutable: '/opt/test-docker',
+        hostCommands: docker.runner,
+        temporaryRoot,
+      }),
+      /interrupted/,
+    );
+    const probe = docker.calls.find(
+      (call) => call.argv[1] === 'run' && call.argv.includes('--entrypoint'),
+    )!;
+    const probeName = probe.argv[probe.argv.indexOf('--name') + 1]!;
+    assert.ok(
+      docker.calls.some(
+        (call) =>
+          call.argv[1] === 'rm' &&
+          call.argv.includes('--force') &&
+          call.argv.at(-1) === probeName,
+      ),
     );
   });
 

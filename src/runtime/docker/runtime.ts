@@ -65,7 +65,7 @@ export interface ValidatedDockerRuntimeHost {
   readonly imageId: string;
 }
 
-/** Build and inspect the selected Forge image without allocating a run. */
+/** Build, inspect, and execute-probe the selected image without allocating a run. */
 export async function validateDockerRuntimeHost(
   options: ValidateDockerRuntimeHostOptions,
 ): Promise<ValidatedDockerRuntimeHost> {
@@ -92,35 +92,50 @@ export async function validateDockerRuntimeHost(
     signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
   });
-  const probe = await hostCommands.run(
-    [
-      dockerExecutable,
-      'run',
-      '--rm',
-      '--platform',
-      options.platform,
-      '--network',
-      'none',
-      '--read-only',
-      '--cap-drop',
-      'ALL',
-      '--security-opt',
-      'no-new-privileges:true',
-      '--entrypoint',
-      '/bin/sh',
-      image.id,
-      '-c',
-      'exit 0',
-    ],
-    {
-      maxOutputBytes: 1024 * 1024,
-      signal,
-      timeoutMs: positive(
-        options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
-        'operationTimeoutMs',
-      ),
-    },
+  const operationTimeoutMs = positive(
+    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
+    'operationTimeoutMs',
   );
+  const probeName = `stripe-forge-host-probe-${randomUUID()}`;
+  let probe;
+  try {
+    probe = await hostCommands.run(
+      [
+        dockerExecutable,
+        'run',
+        '--rm',
+        '--name',
+        probeName,
+        '--platform',
+        options.platform,
+        '--network',
+        'none',
+        '--read-only',
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges:true',
+        '--entrypoint',
+        '/bin/sh',
+        image.id,
+        '-c',
+        'exit 0',
+      ],
+      {
+        maxOutputBytes: 1024 * 1024,
+        signal,
+        timeoutMs: operationTimeoutMs,
+      },
+    );
+  } finally {
+    await bestEffortRemoveContainer(
+      dockerExecutable,
+      probeName,
+      hostCommands,
+      operationTimeoutMs,
+      1024 * 1024,
+    );
+  }
   if (probe.exitCode !== 0) {
     throw new Error('Docker could not execute the selected Forge runtime image.');
   }
