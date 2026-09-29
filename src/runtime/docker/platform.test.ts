@@ -75,4 +75,22 @@ describe('detectDockerRuntimePlatform', () => {
       /unsupported/,
     );
   });
+
+  it('forwards cancellation to Docker discovery', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const runner: HostCommandRunner = {
+      async run(_argv, options): Promise<CommandResult> {
+        options.signal?.throwIfAborted();
+        throw new Error('unreachable');
+      },
+    };
+    await assert.rejects(
+      detectDockerRuntimePlatform({
+        hostCommands: runner,
+        signal: controller.signal,
+      }),
+      {name: 'AbortError'},
+    );
+  });
 });

@@ -35,7 +35,10 @@ interface RecordedCall {
 }
 
 function fakeDocker(
-  fixtureOptions: {missingExecutable?: string} = {},
+  fixtureOptions: {
+    missingExecutable?: string;
+    hostProbeExitCode?: number;
+  } = {},
 ): {runner: HostCommandRunner; calls: RecordedCall[]} {
   const calls: RecordedCall[] = [];
   return {
@@ -70,10 +73,16 @@ function fakeDocker(
         const missingExecutable =
           argv.includes('forge-executable-check') &&
           argv.at(-1) === fixtureOptions.missingExecutable;
+        const hostProbe =
+          argv[1] === 'run' && argv.includes('--entrypoint');
         return {
           stdout: argv[1] === 'image' ? `${IMAGE_ID}\n` : 'ok\n',
           stderr: '',
-          exitCode: missingExecutable ? 127 : 0,
+          exitCode: missingExecutable
+            ? 127
+            : hostProbe
+              ? (fixtureOptions.hostProbeExitCode ?? 0)
+              : 0,
           durationMs: 1,
         };
       },
@@ -146,6 +155,46 @@ describe('Forge Docker runtime', () => {
         (call) =>
           call.argv[1] === 'image' && call.argv[2] === 'inspect',
       ),
+    );
+    const probe = docker.calls.find(
+      (call) => call.argv[1] === 'run' && call.argv.includes('--entrypoint'),
+    )!;
+    assert.deepEqual(probe.argv, [
+      '/opt/test-docker',
+      'run',
+      '--rm',
+      '--platform',
+      'linux/arm64',
+      '--network',
+      'none',
+      '--read-only',
+      '--cap-drop',
+      'ALL',
+      '--security-opt',
+      'no-new-privileges:true',
+      '--entrypoint',
+      '/bin/sh',
+      IMAGE_ID,
+      '-c',
+      'exit 0',
+    ]);
+  });
+
+  it('rejects a built image that the Docker host cannot execute', async () => {
+    const temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-docker-host-failure-test-'),
+    );
+    roots.push(temporaryRoot);
+    const docker = fakeDocker({hostProbeExitCode: 125});
+
+    await assert.rejects(
+      validateDockerRuntimeHost({
+        platform: 'linux/amd64',
+        dockerExecutable: '/opt/test-docker',
+        hostCommands: docker.runner,
+        temporaryRoot,
+      }),
+      /could not execute/,
     );
   });
 

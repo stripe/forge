@@ -231,11 +231,11 @@ npx @stripe/forge@0.1.0 validate \
 ```
 
 `--host` requires a reachable Linux Docker server, detects its architecture,
-builds the selected Forge runtime image, and verifies Docker returns an
-immutable image ID. A native experiment checks the detected platform; a pinned
-experiment builds its requested platform, thereby also testing any required
-cross-architecture emulation. It does not resolve credentials, run setup, or
-make model calls.
+builds the selected Forge runtime image, verifies Docker returns an immutable
+image ID, and executes a network-disabled disposable shell probe from that
+image. A native experiment checks the detected platform; a pinned experiment
+thereby also tests any required cross-architecture emulation. It does not
+resolve credentials, run setup, or make model calls.
 
 Inspect the canonical resolved plan:
 

@@ -55,6 +55,7 @@ export interface ValidateDockerRuntimeHostOptions {
   readonly temporaryRoot?: string;
   readonly hostCommands?: HostCommandRunner;
   readonly buildTimeoutMs?: number;
+  readonly operationTimeoutMs?: number;
   readonly platform: RuntimePlatform;
   readonly signal?: AbortSignal;
 }
@@ -78,17 +79,51 @@ export async function validateDockerRuntimeHost(
   ) {
     throw new TypeError('platform must be linux/amd64 or linux/arm64.');
   }
+  const hostCommands = options.hostCommands ?? createHostCommandRunner();
+  const signal = options.signal ?? new AbortController().signal;
   const image = await buildForgeImage({
     buildTimeoutMs: positive(
       options.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
       'buildTimeoutMs',
     ),
     dockerExecutable,
-    hostCommands: options.hostCommands ?? createHostCommandRunner(),
+    hostCommands,
     platform: options.platform,
-    signal: options.signal ?? new AbortController().signal,
+    signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
   });
+  const probe = await hostCommands.run(
+    [
+      dockerExecutable,
+      'run',
+      '--rm',
+      '--platform',
+      options.platform,
+      '--network',
+      'none',
+      '--read-only',
+      '--cap-drop',
+      'ALL',
+      '--security-opt',
+      'no-new-privileges:true',
+      '--entrypoint',
+      '/bin/sh',
+      image.id,
+      '-c',
+      'exit 0',
+    ],
+    {
+      maxOutputBytes: 1024 * 1024,
+      signal,
+      timeoutMs: positive(
+        options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
+        'operationTimeoutMs',
+      ),
+    },
+  );
+  if (probe.exitCode !== 0) {
+    throw new Error('Docker could not execute the selected Forge runtime image.');
+  }
   return Object.freeze({platform: options.platform, imageId: image.id});
 }
 

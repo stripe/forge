@@ -271,7 +271,9 @@ export async function runCli(
         }
         const dockerPlatform = await (
           options.detectDockerPlatform ?? detectDockerRuntimePlatform
-        )();
+        )(
+          options.signal === undefined ? {} : {signal: options.signal},
+        );
         const runtimePlatform =
           experiment.config.runtime.platform === 'native'
             ? dockerPlatform
@@ -344,7 +346,9 @@ export async function runCli(
       ? (options.runtimePlatform ??
         (await (
           options.detectDockerPlatform ?? detectDockerRuntimePlatform
-        )()))
+        )(
+          options.signal === undefined ? {} : {signal: options.signal},
+        )))
       : undefined;
 
     let caseId = parsed.values.case;
