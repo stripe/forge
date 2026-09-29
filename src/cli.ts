@@ -30,6 +30,7 @@ import {createArtifactStore} from './results/index.js';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
+  validateDockerRuntimeHost,
 } from './runtime/docker/index.js';
 import {createAnthropicCompletionProvider} from './providers/anthropic/index.js';
 import {serializeCanonicalJson} from './serialization.js';
@@ -57,6 +58,7 @@ const CLI_OPTIONS = {
   output: {type: 'string', short: 'o'},
   'run-id': {type: 'string'},
   'credential-env': {type: 'string', multiple: true},
+  host: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
   version: {type: 'boolean'},
 } as const;
@@ -74,7 +76,7 @@ const SELECTOR_OPTIONS: readonly CliOptionName[] = [
 ];
 
 const USAGE = `Usage:
-  forge validate --experiment <file> --dataset <directory>
+  forge validate --experiment <file> --dataset <directory> [--host]
   forge plan --experiment <file> --dataset <directory> [selection options]
   forge plan --experiment <file> --case-file <file> [selection options]
   forge run --experiment <file> --dataset <directory> [selection options] [run options]
@@ -94,6 +96,9 @@ Run options:
   --run-id <id>        Use an explicit run identifier
   --credential-env <reference>=<environment-name>
                         Bind an opaque credential reference for this run
+
+Validation options:
+  --host                Build and inspect the selected Docker runtime image
 
 If selection options match more than one matrix entry, narrow the selection.
 The run command writes atomic results below ./results by default.
@@ -124,6 +129,8 @@ export interface RunCliOptions {
   readonly runIdFactory?: () => string;
   /** Concrete target for authored `platform: native`; defaults to Docker detection. */
   readonly runtimePlatform?: RuntimePlatform;
+  readonly detectDockerPlatform?: typeof detectDockerRuntimePlatform;
+  readonly validateDockerHost?: typeof validateDockerRuntimeHost;
 }
 
 /** The portable composition used by the public executable. */
@@ -212,7 +219,7 @@ export async function runCli(
     const allowed: CliOptionName[] = [
       'experiment',
       'dataset',
-      ...(command === 'validate' ? [] : SELECTOR_OPTIONS),
+      ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
         ? (['output', 'run-id', 'credential-env'] as const)
         : []),
@@ -242,34 +249,72 @@ export async function runCli(
       engine.loadDataset(datasetPath),
       engine.loadExperimentConfig(experimentPath),
     ]);
-    const runtimePlatform =
+    const nativeDocker =
       experiment.config.runtime.adapter === 'docker' &&
-      experiment.config.runtime.platform === 'native'
-        ? (options.runtimePlatform ?? (await detectDockerRuntimePlatform()))
-        : undefined;
+      experiment.config.runtime.platform === 'native';
 
     if (command === 'validate') {
       const selections = expandExperiment(experiment);
-      const plans = selections.map((selection) =>
-        engine.resolveRunPlan({
-          dataset,
-          experiment,
-          selection,
-          ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
-        }),
-      );
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
-      const composition = await compositionFactory({
-        datasetRoot: dataset.root,
-        ...(plans[0] === undefined ? {} : {runtime: plans[0].runtime}),
-        resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
-        ...(options.environment === undefined
-          ? {}
-          : {environment: options.environment}),
-      });
-      for (const plan of plans) {
-        engine.preflightEval({plan, composition});
+      let host:
+        | {
+            docker_platform: RuntimePlatform;
+            image_id: string;
+            runtime_platform: RuntimePlatform;
+          }
+        | undefined;
+      if (parsed.values.host === true) {
+        if (experiment.config.runtime.adapter !== 'docker') {
+          throw new CliUsageError(
+            '--host supports only the built-in Docker runtime.',
+          );
+        }
+        const dockerPlatform = await (
+          options.detectDockerPlatform ?? detectDockerRuntimePlatform
+        )();
+        const runtimePlatform =
+          experiment.config.runtime.platform === 'native'
+            ? dockerPlatform
+            : experiment.config.runtime.platform;
+        const validated = await (
+          options.validateDockerHost ?? validateDockerRuntimeHost
+        )({
+          platform: runtimePlatform,
+          ...(options.signal === undefined ? {} : {signal: options.signal}),
+        });
+        host = {
+          docker_platform: dockerPlatform,
+          image_id: validated.imageId,
+          runtime_platform: validated.platform,
+        };
+      }
+      const validationPlatforms: readonly (RuntimePlatform | undefined)[] =
+        nativeDocker
+          ? host === undefined
+            ? ['linux/amd64', 'linux/arm64']
+            : [host.runtime_platform]
+          : [undefined];
+      for (const runtimePlatform of validationPlatforms) {
+        const plans = selections.map((selection) =>
+          engine.resolveRunPlan({
+            dataset,
+            experiment,
+            selection,
+            ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+          }),
+        );
+        const composition = await compositionFactory({
+          datasetRoot: dataset.root,
+          ...(plans[0] === undefined ? {} : {runtime: plans[0].runtime}),
+          resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
+          ...(options.environment === undefined
+            ? {}
+            : {environment: options.environment}),
+        });
+        for (const plan of plans) {
+          engine.preflightEval({plan, composition});
+        }
       }
       stdout(
         serializeCanonicalJson({
@@ -278,12 +323,20 @@ export async function runCli(
             id: experiment.config.id,
             version: experiment.config.version,
           },
+          ...(host === undefined ? {} : {host}),
           run_count: selections.length,
           valid: true,
         }),
       );
       return 0;
     }
+
+    const runtimePlatform = nativeDocker
+      ? (options.runtimePlatform ??
+        (await (
+          options.detectDockerPlatform ?? detectDockerRuntimePlatform
+        )()))
+      : undefined;
 
     let caseId = parsed.values.case;
     if (caseFilePath !== undefined) {

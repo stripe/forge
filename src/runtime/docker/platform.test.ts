@@ -6,10 +6,10 @@ import {detectDockerRuntimePlatform} from './platform.js';
 
 describe('detectDockerRuntimePlatform', () => {
   for (const [architecture, expected] of [
-    ['amd64', 'linux/amd64'],
-    ['x86_64', 'linux/amd64'],
-    ['arm64', 'linux/arm64'],
-    ['aarch64', 'linux/arm64'],
+    ['linux/amd64', 'linux/amd64'],
+    ['linux/x86_64', 'linux/amd64'],
+    ['linux/arm64', 'linux/arm64'],
+    ['linux/aarch64', 'linux/arm64'],
   ] as const) {
     it(`maps ${architecture} to ${expected}`, async () => {
       const calls: string[][] = [];
@@ -32,7 +32,12 @@ describe('detectDockerRuntimePlatform', () => {
         expected,
       );
       assert.deepEqual(calls, [
-        ['/test/docker', 'info', '--format', '{{.Architecture}}'],
+        [
+          '/test/docker',
+          'info',
+          '--format',
+          '{{.OSType}}/{{.Architecture}}',
+        ],
       ]);
     });
   }
@@ -41,7 +46,24 @@ describe('detectDockerRuntimePlatform', () => {
     const runner: HostCommandRunner = {
       async run(): Promise<CommandResult> {
         return {
-          stdout: 'riscv64\n',
+          stdout: 'linux/riscv64\n',
+          stderr: '',
+          exitCode: 0,
+          durationMs: 1,
+        };
+      },
+    };
+    await assert.rejects(
+      detectDockerRuntimePlatform({hostCommands: runner}),
+      /unsupported/,
+    );
+  });
+
+  it('rejects non-Linux Docker servers', async () => {
+    const runner: HostCommandRunner = {
+      async run(): Promise<CommandResult> {
+        return {
+          stdout: 'windows/amd64\n',
           stderr: '',
           exitCode: 0,
           durationMs: 1,

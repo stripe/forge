@@ -50,6 +50,45 @@ export interface DockerRuntimeAdapterOptions {
   readonly maximumCommandOutputBytes?: number;
 }
 
+export interface ValidateDockerRuntimeHostOptions
+  extends DockerRuntimeAdapterOptions {
+  readonly platform: RuntimePlatform;
+  readonly signal?: AbortSignal;
+}
+
+export interface ValidatedDockerRuntimeHost {
+  readonly platform: RuntimePlatform;
+  readonly imageId: string;
+}
+
+/** Build and inspect the selected Forge image without allocating a run. */
+export async function validateDockerRuntimeHost(
+  options: ValidateDockerRuntimeHostOptions,
+): Promise<ValidatedDockerRuntimeHost> {
+  const dockerExecutable = options.dockerExecutable ?? 'docker';
+  if (!dockerExecutable || dockerExecutable.includes('\0')) {
+    throw new TypeError('dockerExecutable must be a non-empty command path.');
+  }
+  if (
+    options.platform !== 'linux/amd64' &&
+    options.platform !== 'linux/arm64'
+  ) {
+    throw new TypeError('platform must be linux/amd64 or linux/arm64.');
+  }
+  const image = await buildForgeImage({
+    buildTimeoutMs: positive(
+      options.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+      'buildTimeoutMs',
+    ),
+    dockerExecutable,
+    hostCommands: options.hostCommands ?? createHostCommandRunner(),
+    platform: options.platform,
+    signal: options.signal ?? new AbortController().signal,
+    temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
+  });
+  return Object.freeze({platform: options.platform, imageId: image.id});
+}
+
 /** Forge-owned, Docker CLI based runtime. It accepts no host Dockerfile. */
 export function createDockerRuntimeAdapter(
   options: DockerRuntimeAdapterOptions = {},

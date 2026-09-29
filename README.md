@@ -196,8 +196,8 @@ Those model coordinates select host-side completion providers; the agent model
 remains independently selected in `matrix.agents`.
 
 Use `platform: native` for portable local smoke tests. Forge asks the Docker
-server for its architecture before planning and records the resulting concrete
-`linux/amd64` or `linux/arm64` value in the resolved plan. Pin a concrete
+server for its architecture before `plan` or `run` and records the resulting
+concrete `linux/amd64` or `linux/arm64` value in the resolved plan. Pin a concrete
 platform when architecture is part of the benchmark definition. Changing a
 pinned platform, model, setup, resources, or any other experiment config field
 creates a different experiment.
@@ -218,6 +218,24 @@ resolvable matrix selection. It also constructs the selected composition and
 runs pure agent, setup, and completion-provider compatibility preflight for
 every resolved plan. It does not resolve credentials, invoke provider
 preflight or completions, build or allocate Docker, or run setup.
+
+For an authored `platform: native`, ordinary validation preflights both
+supported concrete interpretations without contacting Docker. To additionally
+check the current execution host, opt into host validation:
+
+```sh
+npx @stripe/forge@0.1.0 validate \
+  --experiment ./experiment.yaml \
+  --dataset ./dataset \
+  --host
+```
+
+`--host` requires a reachable Linux Docker server, detects its architecture,
+builds the selected Forge runtime image, and verifies Docker returns an
+immutable image ID. A native experiment checks the detected platform; a pinned
+experiment builds its requested platform, thereby also testing any required
+cross-architecture emulation. It does not resolve credentials, run setup, or
+make model calls.
 
 Inspect the canonical resolved plan:
 

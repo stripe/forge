@@ -15,7 +15,10 @@ import {
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.js';
-import {createDockerRuntimeAdapter} from './runtime.js';
+import {
+  createDockerRuntimeAdapter,
+  validateDockerRuntimeHost,
+} from './runtime.js';
 
 const roots: string[] = [];
 const IMAGE_ID = `sha256:${'a'.repeat(64)}`;
@@ -118,6 +121,34 @@ function preparation(overrides: Partial<RuntimePreparation> = {}): RuntimePrepar
 }
 
 describe('Forge Docker runtime', () => {
+  it('validates a host by building and inspecting the selected image', async () => {
+    const temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-docker-host-test-'),
+    );
+    roots.push(temporaryRoot);
+    const docker = fakeDocker();
+
+    const validated = await validateDockerRuntimeHost({
+      platform: 'linux/arm64',
+      dockerExecutable: '/opt/test-docker',
+      hostCommands: docker.runner,
+      temporaryRoot,
+    });
+
+    assert.deepEqual(validated, {
+      platform: 'linux/arm64',
+      imageId: IMAGE_ID,
+    });
+    const build = docker.calls.find((call) => call.argv[1] === 'build')!;
+    assert.ok(build.argv.includes('linux/arm64'));
+    assert.ok(
+      docker.calls.some(
+        (call) =>
+          call.argv[1] === 'image' && call.argv[2] === 'inspect',
+      ),
+    );
+  });
+
   it('builds isolated Forge assets and enforces non-root, bounded, sealed execution', async () => {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
     roots.push(temporaryRoot);

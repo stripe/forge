@@ -287,8 +287,12 @@ checks the exact Forge version pin, and reserializes it canonically. It then:
   requirements.
 
 No credentials are resolved, providers called, runtime allocated, commands
-run, or workspaces inspected during this phase. `forge validate` uses this same
-boundary for every matrix selection.
+run, or workspaces inspected during this phase. Ordinary `forge validate` uses
+this same boundary for every matrix selection; a `native` Docker experiment is
+preflighted as both supported concrete platforms without host discovery. The
+explicit `forge validate --host` readiness check additionally queries the
+Docker server and builds the selected image, but does not alter preflight or
+execute an evaluation.
 
 ### 2. Resolve credentials and completion transports
 

@@ -19,7 +19,7 @@ export async function detectDockerRuntimePlatform(
     throw new TypeError('dockerExecutable must be a non-empty command path.');
   }
   const result = await (options.hostCommands ?? createHostCommandRunner()).run(
-    [dockerExecutable, 'info', '--format', '{{.Architecture}}'],
+    [dockerExecutable, 'info', '--format', '{{.OSType}}/{{.Architecture}}'],
     {
       timeoutMs: options.timeoutMs ?? 30_000,
       maxOutputBytes: 64 * 1024,
@@ -29,11 +29,11 @@ export async function detectDockerRuntimePlatform(
     throw new Error('Docker server architecture could not be detected.');
   }
   switch (result.stdout.trim()) {
-    case 'amd64':
-    case 'x86_64':
+    case 'linux/amd64':
+    case 'linux/x86_64':
       return 'linux/amd64';
-    case 'arm64':
-    case 'aarch64':
+    case 'linux/arm64':
+    case 'linux/aarch64':
       return 'linux/arm64';
     default:
       throw new Error('Docker server architecture is unsupported by Forge.');
