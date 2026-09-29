@@ -191,6 +191,40 @@ describe('Forge CLI', () => {
     });
   });
 
+  it('materializes a native Docker platform before printing a plan', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment.replace('platform: linux/amd64', 'platform: native'),
+    );
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'plan',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+      ],
+      {
+        runtimePlatform: 'linux/arm64',
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout).runtime.platform).toBe('linux/arm64');
+  });
+
   it('uses an explicitly supplied engine for host action bundles', async () => {
     const fixture = await createBenchmarkFixture();
     const experiment = await fs.readFile(fixture.experimentPath, 'utf8');

@@ -184,7 +184,9 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - concatenates case and treatment setup;
 - validates referenced dataset inputs and action-bundle pins;
 - chooses the effective prompt and records its source;
-- materializes the turn limit and other defaults; and
+- materializes the turn limit and other defaults;
+- materializes an authored Docker `native` platform from an explicit
+  host-supplied platform selection; and
 - records exact dataset, experiment, case, Forge, and action-bundle provenance.
 
 Plans use canonical JSON with recursively sorted object keys and retained array

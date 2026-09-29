@@ -18,6 +18,7 @@ import {
 import type {
   EvalCaseV1,
   ExperimentConfigV1,
+  ForgeDockerRuntimeV1,
   LoadedDatasetV1,
   LoadedExperimentConfigV1,
   ResolvedRunPlanV1,
@@ -54,6 +55,7 @@ export interface ForgeEngine {
     readonly dataset: LoadedDatasetV1;
     readonly experiment: LoadedExperimentConfigV1;
     readonly selection: RunSelection;
+    readonly runtimePlatform?: ForgeDockerRuntimeV1['platform'];
   }): ResolvedRunPlanV1;
   preflightEval(request: PreflightEvalInput): void;
   executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1>;

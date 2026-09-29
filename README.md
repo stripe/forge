@@ -27,7 +27,8 @@ can supply an external runtime with its own explicit execution requirements.
 
 - Node.js 22 or newer.
 - A running Docker daemon and Docker CLI capable of building Linux images.
-- `linux/amd64` or `linux/arm64`, selected explicitly by the experiment config.
+- A Docker server using `linux/amd64` or `linux/arm64`. Experiments may select
+  either explicitly or use `native` to target the Docker server architecture.
 - Network access to Docker Hub and npm when Forge first builds its runtime image.
 - A `forge/plugin@1` treatment additionally needs HTTPS access to its GitHub
   marketplace and the source selected by the marketplace's current entry.
@@ -194,9 +195,12 @@ config must set `models.role_player` for every selected `multi_turn` case and
 Those model coordinates select host-side completion providers; the agent model
 remains independently selected in `matrix.agents`.
 
-Use `linux/arm64` only when that is the benchmark's intentional, released
-platform. Changing the platform, model, setup, resources, or any other
-experiment config field creates a different experiment.
+Use `platform: native` for portable local smoke tests. Forge asks the Docker
+server for its architecture before planning and records the resulting concrete
+`linux/amd64` or `linux/arm64` value in the resolved plan. Pin a concrete
+platform when architecture is part of the benchmark definition. Changing a
+pinned platform, model, setup, resources, or any other experiment config field
+creates a different experiment.
 
 ### 4. Validate, plan, and run
 
@@ -832,6 +836,25 @@ const completed = await executeEval({
 console.log(completed.location);
 ```
 
+When a programmatic host loads an experiment with `platform: native`, it must
+materialize the Docker server platform before resolving the plan. The public
+CLI does this automatically:
+
+```js
+import {detectDockerRuntimePlatform} from '@stripe/forge/runtime/docker';
+
+const runtimePlatform = await detectDockerRuntimePlatform();
+const plan = resolveRunPlan({
+  dataset,
+  experiment,
+  selection: selections[0],
+  runtimePlatform,
+});
+```
+
+Hosts using a remote or wrapped Docker executable can pass the same executable
+or an explicit host command runner to `detectDockerRuntimePlatform`.
+
 ### Completion providers
 
 An `AgentAdapter` and a `CompletionProvider` have intentionally different
@@ -1342,9 +1365,10 @@ host-owned semantics and capabilities.
   registries when the image is built. Forge records the resulting immutable
   image ID; a future release should add stronger dependency-level integrity
   pins if byte-for-byte rebuilds are required across registry state changes.
-- The experiment config selects an explicit Linux platform. Forge records both
-  its runtime asset digest and Docker's immutable built image ID in the result
-  metadata.
+- The resolved plan always selects a concrete Linux platform. An authored
+  Docker experiment may request `native`; planning then materializes the Docker
+  server's architecture before execution. Forge records both its runtime asset
+  digest and Docker's immutable built image ID in the result metadata.
 - Containers run as UID/GID `10001`, with a read-only root filesystem, all Linux
   capabilities dropped, `no-new-privileges`, bounded memory/CPU/processes,
   bounded commands, and run-owned workspace/home/state mounts.

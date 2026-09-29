@@ -429,11 +429,12 @@ those two sides.
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/runtime.ts) | `createDockerRuntimeAdapter` | Implements `RuntimeAdapter`: validates runtime config, builds the image, creates run-owned directories, starts/restarts/stops the container, projects workspaces and commands, quiesces, and disposes. |
+| [`platform.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/platform.ts) | `detectDockerRuntimePlatform` | Queries the selected Docker server and maps its architecture to the concrete platform used when planning an authored `native` experiment. |
 | [`commandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/commandRunner.ts) | `DockerCommandController` | Implements scoped `CommandRunner`s over `docker exec`, creates temporary env files, tracks active commands, and closes setup/all command authority at lifecycle barriers. |
 | [`assets.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets.ts) | Base image, CLI version, and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |
 | [`assets/Dockerfile`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets/Dockerfile) | Forge-owned image | Installs the pinned CLIs and runtime dependencies. Copied into the package at build time. |
 | [`assets/entrypoint.sh`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets/entrypoint.sh) | Container entrypoint | Keeps the prepared container available for `docker exec`. |
-| [`index.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/index.ts) | Public Docker subpath | Exports adapter factory and pin metadata |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/index.ts) | Public Docker subpath | Exports adapter and platform helpers plus pin metadata |
 
 `DockerCommandController` receives the fully resolved environment, but each
 runner created from it exposes only one scope. `runtime.ts` owns the controller

@@ -158,6 +158,14 @@ export interface ForgeDockerRuntimeV1 {
   resources: DockerResourcesV1;
 }
 
+/** Docker authoring form; `native` is materialized before a run plan exists. */
+export interface ForgeDockerRuntimeConfigV1 {
+  adapter: 'docker';
+  image: {kind: 'forge'};
+  platform: ForgeDockerRuntimeV1['platform'] | 'native';
+  resources: DockerResourcesV1;
+}
+
 /** Explicit, fully materialized configuration for a host-supplied runtime. */
 export interface ForgeExternalRuntimeV1 {
   /** Namespaced adapter identity. Built-in Docker identities are reserved. */
@@ -170,6 +178,9 @@ export interface ForgeExternalRuntimeV1 {
 }
 
 export type ForgeRuntimeV1 = ForgeDockerRuntimeV1 | ForgeExternalRuntimeV1;
+export type ForgeRuntimeConfigV1 =
+  | ForgeDockerRuntimeConfigV1
+  | ForgeExternalRuntimeV1;
 
 export interface ExperimentConfigV1 {
   schema_version: typeof BENCHMARK_SCHEMA_VERSION;
@@ -180,7 +191,7 @@ export interface ExperimentConfigV1 {
     version: string;
     action_bundles?: SetupActionBundleReferenceV1[];
   };
-  runtime: ForgeRuntimeV1;
+  runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;
     judge?: ModelRefV1;

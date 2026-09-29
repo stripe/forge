@@ -8,3 +8,7 @@ export {
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.js';
+export {
+  detectDockerRuntimePlatform,
+  type DetectDockerRuntimePlatformOptions,
+} from './platform.js';

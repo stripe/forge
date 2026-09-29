@@ -9,6 +9,7 @@ import {parseArgs} from 'node:util';
 import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import {createCodexAdapter} from './agents/codex/index.js';
 import type {ForgeComposition} from './contracts/composition.js';
+import type {RuntimePlatform} from './contracts/runtime.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
 import {createDirectoryRunInputProvider} from './contracts/inputs.js';
 import {executeEval, FORGE_VERSION} from './execution/index.js';
@@ -26,7 +27,10 @@ import {
   serializeResolvedRunPlan,
 } from './planning/index.js';
 import {createArtifactStore} from './results/index.js';
-import {createDockerRuntimeAdapter} from './runtime/docker/index.js';
+import {
+  createDockerRuntimeAdapter,
+  detectDockerRuntimePlatform,
+} from './runtime/docker/index.js';
 import {createAnthropicCompletionProvider} from './providers/anthropic/index.js';
 import {serializeCanonicalJson} from './serialization.js';
 
@@ -118,6 +122,8 @@ export interface RunCliOptions {
   ) => Promise<ForgeComposition>;
   readonly execute?: typeof executeEval;
   readonly runIdFactory?: () => string;
+  /** Concrete target for authored `platform: native`; defaults to Docker detection. */
+  readonly runtimePlatform?: RuntimePlatform;
 }
 
 /** The portable composition used by the public executable. */
@@ -236,17 +242,27 @@ export async function runCli(
       engine.loadDataset(datasetPath),
       engine.loadExperimentConfig(experimentPath),
     ]);
+    const runtimePlatform =
+      experiment.config.runtime.adapter === 'docker' &&
+      experiment.config.runtime.platform === 'native'
+        ? (options.runtimePlatform ?? (await detectDockerRuntimePlatform()))
+        : undefined;
 
     if (command === 'validate') {
       const selections = expandExperiment(experiment);
       const plans = selections.map((selection) =>
-        engine.resolveRunPlan({dataset, experiment, selection}),
+        engine.resolveRunPlan({
+          dataset,
+          experiment,
+          selection,
+          ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+        }),
       );
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
       const composition = await compositionFactory({
         datasetRoot: dataset.root,
-        runtime: experiment.config.runtime,
+        ...(plans[0] === undefined ? {} : {runtime: plans[0].runtime}),
         resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
         ...(options.environment === undefined
           ? {}
@@ -288,7 +304,12 @@ export async function runCli(
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
     });
-    const plan = engine.resolveRunPlan({dataset, experiment, selection});
+    const plan = engine.resolveRunPlan({
+      dataset,
+      experiment,
+      selection,
+      ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+    });
 
     if (command === 'plan') {
       stdout(serializeResolvedRunPlan(plan));
