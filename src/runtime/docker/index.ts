@@ -1,6 +1,9 @@
 export {
   createDockerRuntimeAdapter,
+  validateDockerRuntimeHost,
   type DockerRuntimeAdapterOptions,
+  type ValidateDockerRuntimeHostOptions,
+  type ValidatedDockerRuntimeHost,
 } from './runtime.js';
 export {
   FORGE_BASE_IMAGE,
@@ -8,3 +11,7 @@ export {
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.js';
+export {
+  detectDockerRuntimePlatform,
+  type DetectDockerRuntimePlatformOptions,
+} from './platform.js';

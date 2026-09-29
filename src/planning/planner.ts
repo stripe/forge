@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
   type ExperimentConfigV1,
+  type ForgeDockerRuntimeV1,
   type LoadedExperimentConfigV1,
   type LoadedDatasetV1,
   type ResolvedRunPlanV1,
@@ -25,7 +26,8 @@ export type PlanningErrorCode =
   | 'missing_role_player'
   | 'missing_judge'
   | 'missing_dataset_input'
-  | 'action_bundle_mismatch';
+  | 'action_bundle_mismatch'
+  | 'missing_runtime_platform';
 
 export class PlanningError extends Error {
   readonly code: PlanningErrorCode;
@@ -72,6 +74,7 @@ export function resolveRunPlan(input: {
   dataset: LoadedDatasetV1;
   experiment: LoadedExperimentConfigV1;
   selection: RunSelection;
+  runtimePlatform?: ForgeDockerRuntimeV1['platform'];
 }): ResolvedRunPlanV1 {
   return resolveRunPlanWithSetupActions(input, defaultSetupActionRegistry);
 }
@@ -82,6 +85,7 @@ export function resolveRunPlanWithSetupActions(
     dataset: LoadedDatasetV1;
     experiment: LoadedExperimentConfigV1;
     selection: RunSelection;
+    runtimePlatform?: ForgeDockerRuntimeV1['platform'];
   },
   setupActions: SetupActionRegistry,
 ): ResolvedRunPlanV1 {
@@ -226,10 +230,35 @@ export function resolveRunPlanWithSetupActions(
       ? {}
       : {role_player: cloneJson(config.models.role_player)}),
     agent: cloneJson(selection.agent),
-    runtime: cloneJson(config.runtime),
+    runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),
   };
   return deepFreeze(plan);
+}
+
+function resolveRuntime(
+  runtime: ExperimentConfigV1['runtime'],
+  runtimePlatform: ForgeDockerRuntimeV1['platform'] | undefined,
+): ResolvedRunPlanV1['runtime'] {
+  if (runtime.adapter !== 'docker' || runtime.platform !== 'native') {
+    return cloneJson(runtime) as ResolvedRunPlanV1['runtime'];
+  }
+  if (runtimePlatform === undefined) {
+    throw new PlanningError(
+      'missing_runtime_platform',
+      'A native Docker experiment requires a concrete runtimePlatform during plan resolution.',
+    );
+  }
+  if (
+    runtimePlatform !== 'linux/amd64' &&
+    runtimePlatform !== 'linux/arm64'
+  ) {
+    throw new PlanningError(
+      'missing_runtime_platform',
+      'runtimePlatform must be linux/amd64 or linux/arm64.',
+    );
+  }
+  return cloneJson({...runtime, platform: runtimePlatform});
 }
 
 /** Canonical JSON used when a caller needs a stable resolved-plan digest. */

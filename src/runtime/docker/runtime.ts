@@ -50,6 +50,98 @@ export interface DockerRuntimeAdapterOptions {
   readonly maximumCommandOutputBytes?: number;
 }
 
+export interface ValidateDockerRuntimeHostOptions {
+  readonly dockerExecutable?: string;
+  readonly temporaryRoot?: string;
+  readonly hostCommands?: HostCommandRunner;
+  readonly buildTimeoutMs?: number;
+  readonly operationTimeoutMs?: number;
+  readonly platform: RuntimePlatform;
+  readonly signal?: AbortSignal;
+}
+
+export interface ValidatedDockerRuntimeHost {
+  readonly platform: RuntimePlatform;
+  readonly imageId: string;
+}
+
+/** Build, inspect, and execute-probe the selected image without allocating a run. */
+export async function validateDockerRuntimeHost(
+  options: ValidateDockerRuntimeHostOptions,
+): Promise<ValidatedDockerRuntimeHost> {
+  const dockerExecutable = options.dockerExecutable ?? 'docker';
+  if (!dockerExecutable || dockerExecutable.includes('\0')) {
+    throw new TypeError('dockerExecutable must be a non-empty command path.');
+  }
+  if (
+    options.platform !== 'linux/amd64' &&
+    options.platform !== 'linux/arm64'
+  ) {
+    throw new TypeError('platform must be linux/amd64 or linux/arm64.');
+  }
+  const hostCommands = options.hostCommands ?? createHostCommandRunner();
+  const signal = options.signal ?? new AbortController().signal;
+  const image = await buildForgeImage({
+    buildTimeoutMs: positive(
+      options.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+      'buildTimeoutMs',
+    ),
+    dockerExecutable,
+    hostCommands,
+    platform: options.platform,
+    signal,
+    temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
+  });
+  const operationTimeoutMs = positive(
+    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
+    'operationTimeoutMs',
+  );
+  const probeName = `stripe-forge-host-probe-${randomUUID()}`;
+  let probe;
+  try {
+    probe = await hostCommands.run(
+      [
+        dockerExecutable,
+        'run',
+        '--rm',
+        '--name',
+        probeName,
+        '--platform',
+        options.platform,
+        '--network',
+        'none',
+        '--read-only',
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges:true',
+        '--entrypoint',
+        '/bin/sh',
+        image.id,
+        '-c',
+        'exit 0',
+      ],
+      {
+        maxOutputBytes: 1024 * 1024,
+        signal,
+        timeoutMs: operationTimeoutMs,
+      },
+    );
+  } finally {
+    await bestEffortRemoveContainer(
+      dockerExecutable,
+      probeName,
+      hostCommands,
+      operationTimeoutMs,
+      1024 * 1024,
+    );
+  }
+  if (probe.exitCode !== 0) {
+    throw new Error('Docker could not execute the selected Forge runtime image.');
+  }
+  return Object.freeze({platform: options.platform, imageId: image.id});
+}
+
 /** Forge-owned, Docker CLI based runtime. It accepts no host Dockerfile. */
 export function createDockerRuntimeAdapter(
   options: DockerRuntimeAdapterOptions = {},

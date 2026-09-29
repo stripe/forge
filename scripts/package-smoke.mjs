@@ -70,6 +70,8 @@ try {
       assert.equal(typeof forge.parseJudgeEvidence, 'function');
       assert.equal(forge.JUDGE_EVIDENCE_SCHEMA_VERSION, 1);
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
+      assert.equal(typeof docker.detectDockerRuntimePlatform, 'function');
+      assert.equal(typeof docker.validateDockerRuntimeHost, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
       assert.equal(forge.JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');
       assert.equal(forge.JUDGE_TRANSCRIPT_PROJECTION_ID, 'forge-visible-atif-steps');

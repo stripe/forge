@@ -102,6 +102,133 @@ describe('Forge CLI', () => {
     });
   });
 
+  it('validates both native platforms without contacting Docker', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment.replace('platform: linux/amd64', 'platform: native'),
+    );
+    const platforms: string[] = [];
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+      ],
+      {
+        detectDockerPlatform: async () => {
+          throw new Error('Docker must not be contacted');
+        },
+        compositionFactory: async (options) => {
+          if (options.runtime !== undefined) {
+            platforms.push(options.runtime.platform);
+          }
+          return createDefaultCliComposition(options);
+        },
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(platforms).toEqual(['linux/amd64', 'linux/arm64']);
+  });
+
+  it('validates Docker host readiness only when requested', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment.replace('platform: linux/amd64', 'platform: native'),
+    );
+    const validatedPlatforms: string[] = [];
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--host',
+      ],
+      {
+        detectDockerPlatform: async () => 'linux/arm64',
+        validateDockerHost: async ({platform}) => {
+          validatedPlatforms.push(platform);
+          return {
+            platform,
+            imageId: `sha256:${'a'.repeat(64)}`,
+          };
+        },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(validatedPlatforms).toEqual(['linux/arm64']);
+    expect(JSON.parse(stdout).host).toEqual({
+      docker_platform: 'linux/arm64',
+      image_id: `sha256:${'a'.repeat(64)}`,
+      runtime_platform: 'linux/arm64',
+    });
+  });
+
+  it('does not build the host image when pure preflight fails', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment
+        .replace('platform: linux/amd64', 'platform: native')
+        .replace('adapter: claude-code', 'adapter: missing-agent'),
+    );
+    let hostValidationCalled = false;
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+        '--host',
+      ],
+      {
+        detectDockerPlatform: async () => 'linux/arm64',
+        validateDockerHost: async ({platform}) => {
+          hostValidationCalled = true;
+          return {platform, imageId: `sha256:${'a'.repeat(64)}`};
+        },
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('agent adapter');
+    expect(hostValidationCalled).toBe(false);
+  });
+
   it('purely validates a latest Claude plugin treatment without fetching it', async () => {
     const fixture = await createBenchmarkFixture();
     const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
@@ -189,6 +316,40 @@ describe('Forge CLI', () => {
       },
       interaction: {mode: 'one_shot', effective_prompt: 'Do the thing'},
     });
+  });
+
+  it('materializes a native Docker platform before printing a plan', async () => {
+    const fixture = await createBenchmarkFixture();
+    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+    await fs.writeFile(
+      fixture.experimentPath,
+      experiment.replace('platform: linux/amd64', 'platform: native'),
+    );
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'plan',
+        '--experiment',
+        fixture.experimentPath,
+        '--dataset',
+        fixture.datasetRoot,
+      ],
+      {
+        runtimePlatform: 'linux/arm64',
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout).runtime.platform).toBe('linux/arm64');
   });
 
   it('uses an explicitly supplied engine for host action bundles', async () => {

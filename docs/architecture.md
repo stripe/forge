@@ -184,7 +184,9 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - concatenates case and treatment setup;
 - validates referenced dataset inputs and action-bundle pins;
 - chooses the effective prompt and records its source;
-- materializes the turn limit and other defaults; and
+- materializes the turn limit and other defaults;
+- materializes an authored Docker `native` platform from an explicit
+  host-supplied platform selection; and
 - records exact dataset, experiment, case, Forge, and action-bundle provenance.
 
 Plans use canonical JSON with recursively sorted object keys and retained array
@@ -285,8 +287,13 @@ checks the exact Forge version pin, and reserializes it canonically. It then:
   requirements.
 
 No credentials are resolved, providers called, runtime allocated, commands
-run, or workspaces inspected during this phase. `forge validate` uses this same
-boundary for every matrix selection.
+run, or workspaces inspected during this phase. Ordinary `forge validate` uses
+this same boundary for every matrix selection; a `native` Docker experiment is
+preflighted as both supported concrete platforms without host discovery. The
+explicit `forge validate --host` readiness check additionally queries the
+Docker server, builds the selected image, and executes a network-disabled
+disposable probe from its immutable image ID, but does not alter preflight or
+execute an evaluation.
 
 ### 2. Resolve credentials and completion transports
 

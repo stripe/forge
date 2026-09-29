@@ -210,6 +210,13 @@ task: safe
     });
   });
 
+  it('accepts native Docker platform authoring', () => {
+    const config = parseExperimentConfigYaml(
+      experimentConfigYaml().replace('platform: linux/amd64', 'platform: native'),
+    );
+    expect(config.runtime.platform).toBe('native');
+  });
+
   it('rejects mutable baseline setup and undefined matrix treatments', () => {
     expect(() =>
       parseExperimentConfigYaml(

@@ -318,7 +318,7 @@ const DockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
     image: z.object({kind: z.literal('forge')}).strict(),
-    platform: z.enum(['linux/amd64', 'linux/arm64']),
+    platform: z.enum(['linux/amd64', 'linux/arm64', 'native']),
     resources: z
       .object({
         memory_bytes: PositiveIntegerSchema.max(1024 ** 4).default(

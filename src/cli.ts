@@ -9,6 +9,7 @@ import {parseArgs} from 'node:util';
 import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import {createCodexAdapter} from './agents/codex/index.js';
 import type {ForgeComposition} from './contracts/composition.js';
+import type {RuntimePlatform} from './contracts/runtime.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
 import {createDirectoryRunInputProvider} from './contracts/inputs.js';
 import {executeEval, FORGE_VERSION} from './execution/index.js';
@@ -26,7 +27,11 @@ import {
   serializeResolvedRunPlan,
 } from './planning/index.js';
 import {createArtifactStore} from './results/index.js';
-import {createDockerRuntimeAdapter} from './runtime/docker/index.js';
+import {
+  createDockerRuntimeAdapter,
+  detectDockerRuntimePlatform,
+  validateDockerRuntimeHost,
+} from './runtime/docker/index.js';
 import {createAnthropicCompletionProvider} from './providers/anthropic/index.js';
 import {serializeCanonicalJson} from './serialization.js';
 
@@ -53,6 +58,7 @@ const CLI_OPTIONS = {
   output: {type: 'string', short: 'o'},
   'run-id': {type: 'string'},
   'credential-env': {type: 'string', multiple: true},
+  host: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
   version: {type: 'boolean'},
 } as const;
@@ -70,7 +76,7 @@ const SELECTOR_OPTIONS: readonly CliOptionName[] = [
 ];
 
 const USAGE = `Usage:
-  forge validate --experiment <file> --dataset <directory>
+  forge validate --experiment <file> --dataset <directory> [--host]
   forge plan --experiment <file> --dataset <directory> [selection options]
   forge plan --experiment <file> --case-file <file> [selection options]
   forge run --experiment <file> --dataset <directory> [selection options] [run options]
@@ -90,6 +96,9 @@ Run options:
   --run-id <id>        Use an explicit run identifier
   --credential-env <reference>=<environment-name>
                         Bind an opaque credential reference for this run
+
+Validation options:
+  --host                Build and inspect the selected Docker runtime image
 
 If selection options match more than one matrix entry, narrow the selection.
 The run command writes atomic results below ./results by default.
@@ -118,6 +127,10 @@ export interface RunCliOptions {
   ) => Promise<ForgeComposition>;
   readonly execute?: typeof executeEval;
   readonly runIdFactory?: () => string;
+  /** Concrete target for authored `platform: native`; defaults to Docker detection. */
+  readonly runtimePlatform?: RuntimePlatform;
+  readonly detectDockerPlatform?: typeof detectDockerRuntimePlatform;
+  readonly validateDockerHost?: typeof validateDockerRuntimeHost;
 }
 
 /** The portable composition used by the public executable. */
@@ -206,7 +219,7 @@ export async function runCli(
     const allowed: CliOptionName[] = [
       'experiment',
       'dataset',
-      ...(command === 'validate' ? [] : SELECTOR_OPTIONS),
+      ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
         ? (['output', 'run-id', 'credential-env'] as const)
         : []),
@@ -236,25 +249,84 @@ export async function runCli(
       engine.loadDataset(datasetPath),
       engine.loadExperimentConfig(experimentPath),
     ]);
+    const nativeDocker =
+      experiment.config.runtime.adapter === 'docker' &&
+      experiment.config.runtime.platform === 'native';
 
     if (command === 'validate') {
       const selections = expandExperiment(experiment);
-      const plans = selections.map((selection) =>
-        engine.resolveRunPlan({dataset, experiment, selection}),
-      );
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
-      const composition = await compositionFactory({
-        datasetRoot: dataset.root,
-        runtime: experiment.config.runtime,
-        resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
-        ...(options.environment === undefined
-          ? {}
-          : {environment: options.environment}),
-      });
-      for (const plan of plans) {
-        engine.preflightEval({plan, composition});
+      let hostSelection:
+        | {
+            docker_platform: RuntimePlatform;
+            runtime_platform: RuntimePlatform;
+          }
+        | undefined;
+      if (parsed.values.host === true) {
+        if (experiment.config.runtime.adapter !== 'docker') {
+          throw new CliUsageError(
+            '--host supports only the built-in Docker runtime.',
+          );
+        }
+        const dockerPlatform = await (
+          options.detectDockerPlatform ?? detectDockerRuntimePlatform
+        )(
+          options.signal === undefined ? {} : {signal: options.signal},
+        );
+        const runtimePlatform =
+          experiment.config.runtime.platform === 'native'
+            ? dockerPlatform
+            : experiment.config.runtime.platform;
+        hostSelection = {
+          docker_platform: dockerPlatform,
+          runtime_platform: runtimePlatform,
+        };
       }
+      const validationPlatforms: readonly (RuntimePlatform | undefined)[] =
+        nativeDocker
+          ? hostSelection === undefined
+            ? ['linux/amd64', 'linux/arm64']
+            : [hostSelection.runtime_platform]
+          : [undefined];
+      for (const runtimePlatform of validationPlatforms) {
+        const plans = selections.map((selection) =>
+          engine.resolveRunPlan({
+            dataset,
+            experiment,
+            selection,
+            ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+          }),
+        );
+        const composition = await compositionFactory({
+          datasetRoot: dataset.root,
+          ...(plans[0] === undefined ? {} : {runtime: plans[0].runtime}),
+          resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
+          ...(options.environment === undefined
+            ? {}
+            : {environment: options.environment}),
+        });
+        for (const plan of plans) {
+          engine.preflightEval({plan, composition});
+        }
+      }
+      const host =
+        hostSelection === undefined
+          ? undefined
+          : await (async () => {
+              const validated = await (
+                options.validateDockerHost ?? validateDockerRuntimeHost
+              )({
+                platform: hostSelection.runtime_platform,
+                ...(options.signal === undefined
+                  ? {}
+                  : {signal: options.signal}),
+              });
+              return {
+                ...hostSelection,
+                image_id: validated.imageId,
+              };
+            })();
       stdout(
         serializeCanonicalJson({
           dataset: dataset.manifest.dataset,
@@ -262,12 +334,22 @@ export async function runCli(
             id: experiment.config.id,
             version: experiment.config.version,
           },
+          ...(host === undefined ? {} : {host}),
           run_count: selections.length,
           valid: true,
         }),
       );
       return 0;
     }
+
+    const runtimePlatform = nativeDocker
+      ? (options.runtimePlatform ??
+        (await (
+          options.detectDockerPlatform ?? detectDockerRuntimePlatform
+        )(
+          options.signal === undefined ? {} : {signal: options.signal},
+        )))
+      : undefined;
 
     let caseId = parsed.values.case;
     if (caseFilePath !== undefined) {
@@ -288,7 +370,12 @@ export async function runCli(
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
     });
-    const plan = engine.resolveRunPlan({dataset, experiment, selection});
+    const plan = engine.resolveRunPlan({
+      dataset,
+      experiment,
+      selection,
+      ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+    });
 
     if (command === 'plan') {
       stdout(serializeResolvedRunPlan(plan));

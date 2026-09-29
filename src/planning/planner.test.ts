@@ -129,6 +129,42 @@ describe('experiment expansion and run planning', () => {
     expect(plan.evaluation.judge).toBeUndefined();
   });
 
+  it('materializes an authored native Docker platform in the resolved plan', () => {
+    const loaded = inputs({
+      experiment: experimentConfig({
+        runtime: {
+          adapter: 'docker',
+          image: {kind: 'forge'},
+          platform: 'native',
+          resources: {
+            memory_bytes: 4 * 1024 * 1024 * 1024,
+            cpu_count: 2,
+            process_count: 512,
+          },
+        },
+      }),
+    });
+    const selected = selection(
+      'case/a',
+      'baseline',
+      'claude-code',
+      'anthropic',
+      'sonnet',
+      0,
+    );
+
+    expect(
+      resolveRunPlan({
+        ...loaded,
+        selection: selected,
+        runtimePlatform: 'linux/arm64',
+      }).runtime.platform,
+    ).toBe('linux/arm64');
+    expect(() =>
+      resolveRunPlan({...loaded, selection: selected}),
+    ).toThrow(/requires a concrete runtimePlatform/);
+  });
+
   it('requires harness models only when their behavior is selected', () => {
     const noModels = inputs({experiment: experimentConfig({models: {}})});
     expect(() =>
