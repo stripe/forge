@@ -360,7 +360,7 @@ describe('local artifact store', () => {
       treatment: 'stripe-plugin',
       treatmentSetup: [
         {
-          uses: 'forge/plugin@1',
+          uses: 'forge/plugin',
           with: {
             agents: {
               'claude-code': {
@@ -396,7 +396,7 @@ describe('local artifact store', () => {
     const setup = (resolution: unknown) =>
       jsonBody({
         schema_version: 1,
-        steps: [{index: 0, uses: 'forge/plugin@1', resolution}],
+        steps: [{index: 0, uses: 'forge/plugin', resolution}],
       });
 
     const valid = await commitArtifacts(

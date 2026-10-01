@@ -30,7 +30,7 @@ can supply an external runtime with its own explicit execution requirements.
 - A Docker server using `linux/amd64` or `linux/arm64`. Experiments may select
   either explicitly or use `native` to target the Docker server architecture.
 - Network access to Docker Hub and npm when Forge first builds its runtime image.
-- A `forge/plugin@1` treatment additionally needs HTTPS access to its GitHub
+- A `forge/plugin` treatment additionally needs HTTPS access to its GitHub
   marketplace and the source selected by the marketplace's current entry.
 - The runtime image obtains Claude Code and Codex from npm; their use remains
   subject to the respective providers' applicable terms.
@@ -351,8 +351,8 @@ schema version 1 records the evidence source and adapter provenance.
 
 `plan.json` is the exact resolved execution plan. `setup.json` is the ordered
 audit of applied setup actions. Static actions repeat only their plan index and
-versioned `uses` ID; actions which resolve mutable inputs add a bounded
-non-sensitive resolution. For `forge/plugin@1`, that resolution records the
+namespaced `uses` ID; actions which resolve mutable inputs add a bounded
+non-sensitive resolution. For `forge/plugin`, that resolution records the
 marketplace commit, native plugin ID, resolved version and source identity, and
 a digest of the installed plugin tree. `trajectory.json` is the full
 selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
@@ -473,7 +473,7 @@ Codex is a coding-agent adapter, not a host completion provider. For a
 multi-turn Codex experiment, still declare `models.role_player`; for success
 guidelines, declare `models.judge`. The CLI currently supplies Anthropic for
 those roles, or embedding hosts can supply their own `CompletionProvider`.
-Codex plugin installation is not implemented; `forge/plugin@1` remains
+Codex plugin installation is not implemented; `forge/plugin` remains
 Claude-only and unsupported Codex treatments fail before allocation.
 
 See the official Codex [non-interactive guide](https://developers.openai.com/codex/noninteractive/)
@@ -495,9 +495,9 @@ Forge deliberately separates what is evaluated from how it is run:
   provenance.
 
 YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
-non-canonical paths, unsupported Forge action versions, and oversized values are
-rejected. YAML parsing additionally rejects duplicate keys. Defaults are
-materialized in the resolved plan rather than inferred by the runtime.
+non-canonical paths, unknown or version-suffixed setup actions, and oversized
+values are rejected. YAML parsing additionally rejects duplicate keys.
+Defaults are materialized in the resolved plan rather than inferred by the runtime.
 
 ## Multi-turn Ava and guideline judging
 
@@ -659,30 +659,33 @@ the quickstart.
 ### Built-in setup actions
 
 Case setup runs first, followed by the selected treatment setup. Actions execute
-in source order.
+in source order. Action IDs use `namespace/name` without an individual version.
+The exact installed Forge package or pinned host action bundle supplies their
+meaning. An incompatible action change requires updating affected case files
+and dataset manifests, or treatment setup and experiment configs.
 
-`forge/write@1` writes inline UTF-8 content or a manifest-listed dataset file to
+`forge/write` writes inline UTF-8 content or a manifest-listed dataset file to
 a workspace-relative target:
 
 ```yaml
 setup:
-  - uses: forge/write@1
+  - uses: forge/write
     with:
       target: seed.txt
       source:
         content: "seed data\n"
-  - uses: forge/write@1
+  - uses: forge/write
     with:
       target: config/example.json
       source:
         dataset_path: fixtures/example.json
 ```
 
-`forge/command@1` executes an argv vector without implicit shell parsing:
+`forge/command` executes an argv vector without implicit shell parsing:
 
 ```yaml
 setup:
-  - uses: forge/command@1
+  - uses: forge/command
     with:
       argv: [npm, test]
       cwd: .
@@ -696,7 +699,7 @@ credentials. The command action itself declares no credentials and runs with
 Forge's uncredentialed command projection; use a typed setup action for an
 operation that requires a credential.
 
-`forge/plugin@1` installs the selected agent's complete native plugin from the
+`forge/plugin` installs the selected agent's complete native plugin from the
 marketplace's current default-branch entry. Each agent branch states the native
 identity and GitHub marketplace repository slug:
 
@@ -706,7 +709,7 @@ treatments:
     setup: []
   marketplace-plugin:
     setup:
-      - uses: forge/plugin@1
+      - uses: forge/plugin
         with:
           agents:
             claude-code:
@@ -762,7 +765,7 @@ const actions = defineSetupActionBundle({
     sha256: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   },
   actions: [{
-    uses: 'acme-evals/tool@1',
+    uses: 'acme-evals/tool',
     parseWith(input) {
       if (
         input === null ||
@@ -1291,7 +1294,7 @@ distinct mutable and sealed capabilities; evidence collection receives only the
 sealed workspace and run-owned agent state.
 
 An adapter may expose the narrow `AgentPluginInstaller` capability used by the
-public `forge/plugin@1` action. Its preflight is pure: it binds one selected
+public `forge/plugin` action. Its preflight is pure: it binds one selected
 distribution and declares executables plus state directories. Installation then
 receives only that step's state and command projection. A state requirement can
 set `sealAfterSetup`; Forge calls `PreparedRuntime.finalizeSetup()` after every
@@ -1454,12 +1457,12 @@ proxy, or an offline execution mode.
   selectable entries and experiment-level `retries` is not acted on by the v0.1
   CLI. Ava and guideline completion attempts have their own fixed retry policy
   and do not implement the experiment config's campaign retry field.
-- Built-in setup includes `forge/write@1`, `forge/command@1`, and Claude-backed
-  `forge/plugin@1`. Plugin v1 installs the current entry from a public GitHub
-  marketplace named as `owner/repository`. Exact plugin-version pins, remote
-  MCP-service pins, private repository authentication, npm and command sources,
-  plugin configuration, transitive plugin dependencies, and non-Claude native
-  realizations are not included.
+- Built-in setup includes `forge/write`, `forge/command`, and Claude-backed
+  `forge/plugin`. The plugin action installs the current entry from a public
+  GitHub marketplace named as `owner/repository`. Exact plugin-version pins,
+  remote MCP-service pins, private repository authentication, npm and command
+  sources, plugin configuration, transitive plugin dependencies, and non-Claude
+  native realizations are not included.
 - Results are local. There is no remote publisher, worker/control plane, hosted
   execution service, or human-result policy in the public package.
 - Each CLI process asks Docker to build and verify the Forge image; Docker's

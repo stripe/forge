@@ -308,7 +308,7 @@ async function readSelectedMarketplaceEntry(input: {
     Object.hasOwn(entry, 'dependencies') &&
     (!Array.isArray(entry.dependencies) || entry.dependencies.length > 0)
   ) {
-    throw new Error('Plugin dependencies are not supported by forge/plugin@1.');
+    throw new Error('Plugin dependencies are not supported by forge/plugin.');
   }
   assertSupportedMarketplaceSource(entry.source);
   return entry;

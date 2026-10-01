@@ -103,7 +103,7 @@ const SetupStepEnvelopeSchema = z
       .string()
       .refine(
         isSafeActionIdentifier,
-        'uses must be a namespaced, positive-version action ID',
+        'uses must be a namespaced action ID without a version suffix',
       ),
     with: JsonObjectSchema,
   })

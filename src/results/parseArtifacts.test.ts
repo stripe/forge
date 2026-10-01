@@ -24,10 +24,10 @@ describe('canonical interaction and judge evidence parsing', () => {
     const artifact = {
       schema_version: 1,
       steps: [
-        {index: 0, uses: 'forge/write@1'},
+        {index: 0, uses: 'forge/write'},
         {
           index: 1,
-          uses: 'acme/resolve@1',
+          uses: 'acme/resolve',
           resolution: {commit: 'a'.repeat(40)},
         },
       ],
@@ -36,7 +36,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(() =>
       parseSetupArtifact({
         ...artifact,
-        steps: [{index: 1, uses: 'forge/write@1'}],
+        steps: [{index: 1, uses: 'forge/write'}],
       }),
     );
     assert.throws(() => parseSetupArtifact({...artifact, unknown: true}));

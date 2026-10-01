@@ -12,10 +12,10 @@ const NO_REQUIREMENTS = Object.freeze({});
 
 export const writeSetupHandler: SetupStepHandler =
   Object.freeze({
-    uses: 'forge/write@1',
+    uses: 'forge/write',
     preflight(step: SetupStepV1): PreparedSetupStep {
-      if (step.uses !== 'forge/write@1') {
-        throw new TypeError(`forge/write@1 cannot handle ${JSON.stringify(step.uses)}.`);
+      if (step.uses !== 'forge/write') {
+        throw new TypeError(`forge/write cannot handle ${JSON.stringify(step.uses)}.`);
       }
       // Runtime schema validation guarantees this wire shape before setup; the
       // handler remains defensive about its identity.

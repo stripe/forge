@@ -76,7 +76,7 @@ schema_version: 1
 id: smoke/write
 task: Create greeting.txt
 setup:
-  - uses: forge/write@1
+  - uses: forge/write
     with:
       target: seed.txt
       source: {dataset_path: fixtures/seed.txt}

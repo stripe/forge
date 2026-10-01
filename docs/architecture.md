@@ -469,19 +469,21 @@ handler during application.
 
 The v0.1 built-ins are:
 
-- `forge/write@1`: copy inline bytes or a manifest-listed dataset file to a
+- `forge/write`: copy inline bytes or a manifest-listed dataset file to a
   safe workspace-relative path;
-- `forge/command@1`: execute an explicit argv vector from a safe
+- `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials; and
-- `forge/plugin@1`: delegate native plugin installation to the selected agent
+- `forge/plugin`: delegate native plugin installation to the selected agent
   adapter, currently Claude Code, and retain a verified installation receipt.
 
-Action IDs are positively versioned. Built-ins own the reserved `forge` and
-`stripe` namespaces. Trusted extension bundles own exactly one other namespace,
-cannot replace built-ins, and must produce canonical `with` payloads that are
-fixed points under their parser.
+Action IDs are namespaced but have no individual version suffix. Breaking
+changes to their payload or behavior require updating affected benchmark
+inputs. Built-ins own the reserved `forge` and `stripe` namespaces. Trusted
+extension bundles own exactly one other namespace, cannot replace built-ins,
+and must produce canonical `with` payloads that are fixed points under their
+parser. Bundle manifests still pin the host implementation by version and digest.
 
-`forge/plugin@1` intentionally resolves the current marketplace entry at
+`forge/plugin` intentionally resolves the current marketplace entry at
 execution time. Its `setup.json` receipt records the marketplace commit,
 installed version and source, and installed-tree digest, but the plan does not
 pin those bytes and plugin state remains writable during interaction. This is a

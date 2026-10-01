@@ -72,8 +72,8 @@ describe('experiment expansion and run planning', () => {
       max_turns: 7,
     });
     expect(plan.setup.map(({uses}) => uses)).toEqual([
-      'forge/command@1',
-      'forge/write@1',
+      'forge/command',
+      'forge/write',
     ]);
     expect(plan.role_player).toEqual({provider: 'anthropic', model: 'role-model'});
     expect(plan.evaluation.judge).toEqual({
@@ -254,7 +254,7 @@ describe('experiment expansion and run planning', () => {
           directory: {
             setup: [
               {
-                uses: 'forge/write@1',
+                uses: 'forge/write',
                 with: {
                   target: 'seed.txt',
                   source: {dataset_path: 'fixtures'},
@@ -330,7 +330,7 @@ function evalCase(): EvalCaseV1 {
     execution_mode: 'multi_turn',
     max_turns: 7,
     setup: [
-      {uses: 'forge/command@1', with: {argv: ['git', 'init']}},
+      {uses: 'forge/command', with: {argv: ['git', 'init']}},
     ],
     success_guidelines: ['The task is complete'],
   };
@@ -368,7 +368,7 @@ function experimentConfig(
       'with-seed': {
         setup: [
           {
-            uses: 'forge/write@1',
+            uses: 'forge/write',
             with: {
               target: 'seed.txt',
               source: {dataset_path: 'fixtures/seed.txt'},

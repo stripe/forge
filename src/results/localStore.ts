@@ -449,7 +449,7 @@ function verifySetupArtifact(
   }
 
   for (const [index, step] of setup.steps.entries()) {
-    if (step.uses === 'forge/plugin@1') {
+    if (step.uses === 'forge/plugin') {
       if (step.resolution === undefined) {
         throw new ArtifactStoreError(
           'setup.json omitted a plugin installation resolution.',
@@ -486,7 +486,7 @@ function verifySetupArtifact(
         );
       }
     } else if (
-      (step.uses === 'forge/write@1' || step.uses === 'forge/command@1') &&
+      (step.uses === 'forge/write' || step.uses === 'forge/command') &&
       step.resolution !== undefined
     ) {
       throw new ArtifactStoreError(

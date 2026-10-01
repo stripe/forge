@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`forge/plugin@1` is a built-in setup action for installing a complete
+`forge/plugin` is a built-in setup action for installing a complete
 agent-native plugin from a GitHub marketplace. It is intended for experiments
 that deliberately evaluate the plugin currently published by that marketplace.
 
@@ -11,7 +11,7 @@ commands stay behind the narrow `AgentPluginInstaller` capability; Claude Code
 is currently the only built-in adapter that implements it.
 
 This action is distinct from a [setup action bundle](setup-action-bundles.md):
-`forge/plugin@1` ships with Forge, while bundles let an embedding host add its
+`forge/plugin` ships with Forge, while bundles let an embedding host add its
 own setup semantics.
 
 ## Experiment configuration
@@ -22,7 +22,7 @@ treatments:
     setup: []
   marketplace-plugin:
     setup:
-      - uses: forge/plugin@1
+      - uses: forge/plugin
         with:
           agents:
             claude-code:
@@ -44,7 +44,7 @@ entry.
 
 ## “Latest” and reproducibility
 
-Version 1 intentionally follows the marketplace's current default branch:
+The plugin action intentionally follows the marketplace's current default branch:
 
 1. Each run starts with fresh, run-owned agent state.
 2. Forge registers the authored marketplace through the agent's native CLI.
@@ -56,9 +56,9 @@ The experiment therefore has no plugin-version, marketplace-commit, or source
 pin. Those fields are rejected rather than accepted and ignored. Identical
 plans executed on different dates may install different plugin bytes.
 
-Use `forge/plugin@1` only when that rolling behavior is part of the treatment.
-A reproducibly pinned plugin would require a separately versioned action and
-lock contract.
+Use `forge/plugin` only when that rolling behavior is part of the treatment.
+A reproducibly pinned plugin would require a distinct lock contract and updates
+to affected experiment configs.
 
 ## Installed behavior and external dependencies
 
@@ -84,7 +84,7 @@ installed-state record to contain that commit. An archive SHA is validated and
 retained as marketplace-supplied provenance; Forge does not independently
 rehash the downloaded archive. Authenticated archives, npm or command sources,
 embedded URL credentials, URL query parameters or fragments, and transitive
-plugin dependencies are not part of version 1.
+plugin dependencies are not supported by this action.
 
 ## Execution and receipt
 
@@ -117,7 +117,7 @@ quiesces all mutation before evidence selection.
 
 ## Credentials and limitations
 
-`forge/plugin@1` declares no credentials and receives an uncredentialed setup
+`forge/plugin` declares no credentials and receives an uncredentialed setup
 command runner. It never receives the coding agent's model credential. Fetches
 therefore work only for credential-free HTTPS sources accepted by the action.
 

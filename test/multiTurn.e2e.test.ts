@@ -174,7 +174,7 @@ context: A developer checking an answer.
 execution_mode: multi_turn
 max_turns: 3
 setup:
-  - uses: forge/write@1
+  - uses: forge/write
     with:
       target: answer.txt
       source:

@@ -58,9 +58,9 @@ describe('@stripe/forge package root', () => {
     expect(createSetupExecutor).toBeTypeOf('function');
     expect(defineSetupActionBundle).toBeTypeOf('function');
     expect([...firstPartySetupHandlers.keys()].sort()).toEqual([
-      'forge/command@1',
-      'forge/plugin@1',
-      'forge/write@1',
+      'forge/command',
+      'forge/plugin',
+      'forge/write',
     ]);
     expect(credentialReference).toBeTypeOf('function');
     expect(normalizeEnvironmentSpecification).toBeTypeOf('function');

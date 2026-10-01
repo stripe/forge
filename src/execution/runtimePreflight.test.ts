@@ -63,7 +63,7 @@ describe('runtime composition preflight', () => {
       ]);
     }});
     const plan = createTestResolvedRunPlan({runtime: selected, caseSetup: [{
-      uses: 'forge/plugin@1', with: {agents: {
+      uses: 'forge/plugin', with: {agents: {
         'test-agent': {plugin: 'example@marketplace', marketplace: 'acme/plugins'},
       }},
     }]});

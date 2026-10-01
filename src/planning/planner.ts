@@ -351,7 +351,7 @@ function assertDatasetInputsExist(
 }
 
 function isWriteSetupStep(step: SetupStepV1): step is WriteSetupStepV1 {
-  return step.uses === 'forge/write@1';
+  return step.uses === 'forge/write';
 }
 
 function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {

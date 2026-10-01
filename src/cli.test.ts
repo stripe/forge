@@ -242,7 +242,7 @@ describe('Forge CLI', () => {
     setup: []
   stripe-plugin:
     setup:
-      - uses: forge/plugin@1
+      - uses: forge/plugin
         with:
           agents:
             claude-code:
@@ -364,7 +364,7 @@ describe('Forge CLI', () => {
         )
         .replace(
           'treatments:\n  baseline:\n    setup: []',
-          'treatments:\n  baseline:\n    setup: []\n  with-tool:\n    setup:\n      - uses: acme-evals/tool@1\n        with: {name: formatter}',
+          'treatments:\n  baseline:\n    setup: []\n  with-tool:\n    setup:\n      - uses: acme-evals/tool\n        with: {name: formatter}',
         )
         .replace('treatments: [baseline]', 'treatments: [with-tool]'),
     );
@@ -378,7 +378,7 @@ describe('Forge CLI', () => {
           },
           actions: [
             {
-              uses: 'acme-evals/tool@1',
+              uses: 'acme-evals/tool',
               parseWith(input) {
                 if (
                   input === null ||
@@ -418,7 +418,7 @@ describe('Forge CLI', () => {
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
     expect(JSON.parse(stdout)).toMatchObject({
-      setup: [{uses: 'acme-evals/tool@1', with: {name: 'formatter'}}],
+      setup: [{uses: 'acme-evals/tool', with: {name: 'formatter'}}],
       provenance: {
         forge: {
           action_bundles: [
@@ -441,7 +441,7 @@ describe('Forge CLI', () => {
         )
         .replace(
           'treatments:\n  baseline:\n    setup: []',
-          'treatments:\n  baseline:\n    setup: []\n  with-tool:\n    setup:\n      - uses: acme-evals/tool@1\n        with: {name: formatter}',
+          'treatments:\n  baseline:\n    setup: []\n  with-tool:\n    setup:\n      - uses: acme-evals/tool\n        with: {name: formatter}',
         )
         .replace('treatments: [baseline]', 'treatments: [with-tool]'),
     );
@@ -456,7 +456,7 @@ describe('Forge CLI', () => {
           },
           actions: [
             {
-              uses: 'acme-evals/tool@1',
+              uses: 'acme-evals/tool',
               parseWith(input) {
                 if (
                   input === null ||

@@ -149,7 +149,7 @@ try {
           sha256: 'sha256:${'a'.repeat(64)}',
         },
         actions: [{
-          uses: 'package-smoke/tool@1',
+          uses: 'package-smoke/tool',
           parseWith(input) {
             if (typeof input.name !== 'string') throw new TypeError('invalid');
             return {name: input.name};
@@ -162,10 +162,10 @@ try {
       const engine = forge.createForgeEngine({setupActionBundles: [bundle]});
       assert.deepEqual(
         engine.parseSetupStep({
-          uses: 'package-smoke/tool@1',
+          uses: 'package-smoke/tool',
           with: {name: 'formatter'},
         }),
-        {uses: 'package-smoke/tool@1', with: {name: 'formatter'}},
+        {uses: 'package-smoke/tool', with: {name: 'formatter'}},
       );
     `,
   );

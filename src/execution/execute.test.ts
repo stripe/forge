@@ -332,7 +332,7 @@ describe('executeEval', () => {
   it('assigns credential scope from a first-party setup capability', async () => {
     const fixture = await executionFixture();
     const step: ResolvedRunPlanV1['setup'][number] = {
-      uses: 'forge/command@1',
+      uses: 'forge/command',
       with: {argv: ['true']},
     };
     const plan: ResolvedRunPlanV1 = {
@@ -421,7 +421,7 @@ describe('executeEval', () => {
     it(`rejects a setup resolution containing ${description} before interaction`, async () => {
       const fixture = await executionFixture({credentialValue: credential});
       const step: ResolvedRunPlanV1['setup'][number] = {
-        uses: 'forge/command@1',
+        uses: 'forge/command',
         with: {argv: ['true']},
       };
       const plan: ResolvedRunPlanV1 = {
@@ -464,7 +464,7 @@ describe('executeEval', () => {
   it('preflights every first-party setup operation before resolving credentials or allocating', async () => {
     const fixture = await executionFixture();
     const step: ResolvedRunPlanV1['setup'][number] = {
-      uses: 'forge/command@1',
+      uses: 'forge/command',
       with: {argv: ['true']},
     };
     const plan: ResolvedRunPlanV1 = {
