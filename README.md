@@ -1093,7 +1093,11 @@ Forge persists the canonical agent trajectory as a standalone
   in native order. The exact rendered text and timestamp are retained, while
   `extra` identifies the
   native record and attachment types. These system steps remain excluded from
-  guideline judging. Empty session-context bookkeeping is ignored; prompt
+  guideline judging. A `hook_success` record is treated as bookkeeping only
+  when its validated output contains a single nonempty `additionalContext` that
+  is repeated in the immediately following, rendered `hook_additional_context`
+  record. The latter supplies the ATIF system step; a missing or mismatched pair
+  still triggers fallback. Empty session-context bookkeeping is ignored; prompt
   snapshots remain in the restricted native source and produce a partial-detail
   warning until their per-call semantics can be normalized faithfully.
 - Forge accepts that native candidate only when it identifies the selected
@@ -1126,6 +1130,8 @@ Forge persists the canonical agent trajectory as a standalone
   unknown content blocks, sidechains, and compaction make the native candidate
   incomplete and trigger whole-trajectory fallback. Loss of optional detail
   such as an invalid timestamp remains an explicit partial-evidence warning.
+  Unsupported-record fallback diagnostics identify a safe record category and
+  line number, never native payload values.
 - Result schema v1 records the normalization source kind, native format, source
   session, and adapter identity for every completed agent interaction. Forge
   rejects adapter evidence which omits or contradicts the selected session.

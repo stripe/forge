@@ -25,6 +25,21 @@ const MAX_SESSION_LINES = 100_000;
 const MAX_SESSION_LINE_BYTES = 1024 * 1024;
 const MAX_RENDERED_ATTACHMENT_PARTS = 64;
 const SAFE_ATTACHMENT_TYPE = /^[a-z][a-z0-9_-]{0,127}$/;
+const HOOK_ATTACHMENT_RECORD_KEYS = new Set([
+  'attachment',
+  'cwd',
+  'entrypoint',
+  'gitBranch',
+  'isSidechain',
+  'parentUuid',
+  'rendered',
+  'sessionId',
+  'timestamp',
+  'type',
+  'userType',
+  'uuid',
+  'version',
+]);
 const IGNORED_RECORD_TYPES = new Set([
   'agent-name',
   'ai-title',
@@ -80,6 +95,11 @@ interface SessionRecord {
   rendered?: unknown;
   atis?: unknown;
   message?: {content?: string | SessionBlock[]};
+}
+
+interface LocatedSessionRecord {
+  record: SessionRecord;
+  line: number;
 }
 
 export interface LoadClaudeEvidenceInput {
@@ -180,7 +200,7 @@ async function readExactSessionBytes(
 }
 
 function recordsToAtif(
-  records: readonly SessionRecord[],
+  records: readonly LocatedSessionRecord[],
   input: LoadClaudeEvidenceInput,
 ): {trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[]} {
   const steps: AtifStep[] = [];
@@ -205,7 +225,8 @@ function recordsToAtif(
     }
   };
 
-  for (const [recordIndex, record] of records.entries()) {
+  for (const [position, {record, line}] of records.entries()) {
+    const recordIndex = line - 1;
     input.signal.throwIfAborted();
     if (record.isCompactSummary === true || record.subtype === 'compact_boundary') {
       throw new ClaudeSessionIncompleteError(
@@ -314,7 +335,13 @@ function recordsToAtif(
         ...timestampField(record.timestamp, warnings, recordIndex),
       });
     } else if (record.type !== undefined) {
-      handleNonConversationRecord(record, warnings, recordIndex, addStep);
+      handleNonConversationRecord(
+        record,
+        records[position + 1]?.record,
+        warnings,
+        recordIndex,
+        addStep,
+      );
     } else {
       throw new ClaudeSessionIncompleteError(
         'A Claude session record did not identify its type.',
@@ -433,8 +460,8 @@ function attachToolResults(
   }
 }
 
-function parseJsonl(raw: string, signal: AbortSignal): SessionRecord[] {
-  const records: SessionRecord[] = [];
+function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
+  const records: LocatedSessionRecord[] = [];
   let lineStart = 0;
   let lineCount = 0;
   for (let end = 0; end <= raw.length; end += 1) {
@@ -459,13 +486,20 @@ function parseJsonl(raw: string, signal: AbortSignal): SessionRecord[] {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       throw new Error('Claude session contains a non-object record.');
     }
-    records.push(value as SessionRecord);
+    records.push({record: value as SessionRecord, line: lineCount});
   }
   return records;
 }
 
 class ClaudeSessionLimitError extends Error {}
-class ClaudeSessionIncompleteError extends Error {}
+class ClaudeSessionIncompleteError extends Error {
+  constructor(
+    message: string,
+    readonly location?: {line: number; kind: string},
+  ) {
+    super(message);
+  }
+}
 
 function jsonObject(
   value: unknown,
@@ -518,6 +552,7 @@ function timestampField(
 
 function handleNonConversationRecord(
   record: SessionRecord,
+  nextRecord: SessionRecord | undefined,
   warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
   addStep: (step: Omit<AtifStep, 'step_id'>) => void,
@@ -535,7 +570,9 @@ function handleNonConversationRecord(
     ) {
       return;
     }
-    throw new ClaudeSessionIncompleteError(
+    throw incompleteRecord(
+      record,
+      recordIndex,
       'A Claude ATIS latch record had an unsupported shape.',
     );
   }
@@ -548,7 +585,9 @@ function handleNonConversationRecord(
   if (record.type === 'attachment') {
     const attachment = plainRecord(record.attachment);
     if (attachment === undefined) {
-      throw new ClaudeSessionIncompleteError(
+      throw incompleteRecord(
+        record,
+        recordIndex,
         'A Claude attachment did not identify a supported type.',
       );
     }
@@ -557,17 +596,37 @@ function handleNonConversationRecord(
       typeof attachmentType !== 'string' ||
       !SAFE_ATTACHMENT_TYPE.test(attachmentType)
     ) {
-      throw new ClaudeSessionIncompleteError(
+      throw incompleteRecord(
+        record,
+        recordIndex,
         'A Claude attachment did not identify a supported type.',
       );
     }
     if (attachmentType === 'queued_command') {
-      throw new ClaudeSessionIncompleteError(
+      throw incompleteRecord(
+        record,
+        recordIndex,
         'A Claude queued-command attachment may contain an unrepresented user turn.',
       );
     }
+    if (attachmentType === 'hook_success') {
+      if (hasPairedHookContext(record, nextRecord)) return;
+      throw incompleteRecord(
+        record,
+        recordIndex,
+        'A Claude hook-success attachment had unrepresented content.',
+      );
+    }
 
-    const rendered = renderedAttachmentContent(record.rendered);
+    let rendered: string[];
+    try {
+      rendered = renderedAttachmentContent(record.rendered);
+    } catch (error) {
+      if (error instanceof ClaudeSessionIncompleteError) {
+        throw incompleteRecord(record, recordIndex, error.message);
+      }
+      throw error;
+    }
     if (rendered.length > 0) {
       const timestamp = timestampField(record.timestamp, warnings, recordIndex);
       for (const message of rendered) {
@@ -594,14 +653,18 @@ function handleNonConversationRecord(
       ) {
         return;
       }
-      throw new ClaudeSessionIncompleteError(
+      throw incompleteRecord(
+        record,
+        recordIndex,
         'A Claude session-context attachment had unrepresented content.',
       );
     }
 
     if (attachmentType === 'prompt_snapshot') {
       if (!isPromptSnapshot(attachment)) {
-        throw new ClaudeSessionIncompleteError(
+        throw incompleteRecord(
+          record,
+          recordIndex,
           'A Claude prompt snapshot had an unsupported shape.',
         );
       }
@@ -624,9 +687,145 @@ function handleNonConversationRecord(
       return;
     }
   }
-  throw new ClaudeSessionIncompleteError(
+  throw incompleteRecord(
+    record,
+    recordIndex,
     'A Claude session contained an unsupported conversation record.',
   );
+}
+
+/** Accept a hook outcome only when its entire context is in the next rendered record. */
+function hasPairedHookContext(
+  record: SessionRecord,
+  nextRecord: SessionRecord | undefined,
+): boolean {
+  const envelope = plainRecord(record);
+  const attachment = plainRecord(record.attachment);
+  const nextEnvelope = plainRecord(nextRecord);
+  const nextAttachment = plainRecord(nextRecord?.attachment);
+  if (
+    envelope === undefined ||
+    nextEnvelope === undefined ||
+    !hasOnlyKeys(envelope, HOOK_ATTACHMENT_RECORD_KEYS) ||
+    !hasOnlyKeys(nextEnvelope, HOOK_ATTACHMENT_RECORD_KEYS) ||
+    record.rendered !== undefined ||
+    nextRecord?.type !== 'attachment' ||
+    typeof record.sessionId !== 'string' ||
+    nextRecord.sessionId !== record.sessionId ||
+    attachment === undefined ||
+    nextAttachment === undefined ||
+    !hasExactKeys(attachment, [
+      'type',
+      'command',
+      'content',
+      'durationMs',
+      'exitCode',
+      'hookEvent',
+      'hookName',
+      'stderr',
+      'stdout',
+      'toolUseID',
+    ]) ||
+    !hasExactKeys(nextAttachment, [
+      'type', 'content', 'hookEvent', 'hookName', 'toolUseID',
+    ]) ||
+    nextAttachment.type !== 'hook_additional_context' ||
+    typeof attachment.command !== 'string' ||
+    attachment.content !== '' ||
+    typeof attachment.durationMs !== 'number' ||
+    !Number.isFinite(attachment.durationMs) ||
+    attachment.durationMs < 0 ||
+    attachment.exitCode !== 0 ||
+    typeof attachment.hookEvent !== 'string' ||
+    attachment.hookEvent.length === 0 ||
+    typeof attachment.hookName !== 'string' ||
+    attachment.stderr !== '' ||
+    typeof attachment.stdout !== 'string' ||
+    typeof attachment.toolUseID !== 'string' ||
+    nextAttachment.hookEvent !== attachment.hookEvent ||
+    typeof nextAttachment.hookName !== 'string' ||
+    typeof nextAttachment.toolUseID !== 'string'
+  ) {
+    return false;
+  }
+
+  let stdout: unknown;
+  try {
+    stdout = JSON.parse(attachment.stdout);
+  } catch {
+    return false;
+  }
+  const output = plainRecord(stdout);
+  const hookOutput = plainRecord(output?.hookSpecificOutput);
+  // Captured Claude sessions use different hook names and tool-use IDs for
+  // these records. Match the event and exact context instead of those labels.
+  if (
+    output === undefined ||
+    !hasExactKeys(output, ['hookSpecificOutput']) ||
+    hookOutput === undefined ||
+    !hasExactKeys(hookOutput, ['hookEventName', 'additionalContext']) ||
+    hookOutput.hookEventName !== attachment.hookEvent ||
+    typeof hookOutput.additionalContext !== 'string' ||
+    hookOutput.additionalContext.length === 0 ||
+    !Array.isArray(nextAttachment.content) ||
+    nextAttachment.content.length !== 1 ||
+    nextAttachment.content[0] !== hookOutput.additionalContext
+  ) {
+    return false;
+  }
+
+  const rendered = nextRecord.rendered;
+  if (!Array.isArray(rendered) || rendered.length !== 1) return false;
+  const renderedPart = plainRecord(rendered[0]);
+  return (
+    renderedPart !== undefined &&
+    hasExactKeys(renderedPart, ['content']) &&
+    typeof renderedPart.content === 'string' &&
+    renderedPart.content.includes(hookOutput.additionalContext)
+  );
+}
+
+function hasOnlyKeys(
+  value: Readonly<Record<string, unknown>>,
+  allowed: ReadonlySet<string>,
+): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function incompleteRecord(
+  record: SessionRecord,
+  recordIndex: number,
+  message: string,
+): ClaudeSessionIncompleteError {
+  return new ClaudeSessionIncompleteError(message, {
+    line: recordIndex + 1,
+    kind: safeRecordKind(record),
+  });
+}
+
+/** Diagnostic labels are literals, never untrusted native field values. */
+function safeRecordKind(record: SessionRecord): string {
+  if (record.type === 'attachment') {
+    const attachmentType = plainRecord(record.attachment)?.type;
+    switch (attachmentType) {
+      case 'hook_success':
+      case 'queued_command':
+      case 'session_context':
+      case 'prompt_snapshot':
+        return `attachment/${attachmentType}`;
+      default:
+        return 'attachment';
+    }
+  }
+  switch (record.type) {
+    case 'user':
+    case 'assistant':
+    case 'system':
+    case 'atis-latch':
+      return record.type;
+    default:
+      return 'unrecognized record';
+  }
 }
 
 function renderedAttachmentContent(value: unknown): string[] {
@@ -686,6 +885,9 @@ function plainRecord(value: unknown): Record<string, unknown> | undefined {
 function safeSessionFailure(error: unknown): string {
   if (error instanceof ClaudeSessionLimitError) {
     return 'Claude session evidence exceeded a safety limit.';
+  }
+  if (error instanceof ClaudeSessionIncompleteError && error.location) {
+    return `Claude session evidence could not be normalized safely (${error.location.kind} at line ${error.location.line}).`;
   }
   return 'Claude session evidence could not be normalized safely.';
 }

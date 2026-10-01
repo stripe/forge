@@ -17,6 +17,45 @@ import {
 import {loadClaudeNativeArtifact} from './evidence.js';
 import {parseClaudeStream} from './stream.js';
 
+function hookSuccessRecord(context: string) {
+  return {
+    type: 'attachment',
+    sessionId: 'session-1',
+    attachment: {
+      type: 'hook_success',
+      command: 'example-hook',
+      content: '',
+      durationMs: 12,
+      exitCode: 0,
+      hookEvent: 'SessionStart',
+      hookName: 'hook-command',
+      stderr: '',
+      stdout: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: context,
+        },
+      }),
+      toolUseID: 'success-id',
+    },
+  };
+}
+
+function hookAdditionalContextRecord(context: string) {
+  return {
+    type: 'attachment',
+    sessionId: 'session-1',
+    attachment: {
+      type: 'hook_additional_context',
+      content: [context],
+      hookEvent: 'SessionStart',
+      hookName: 'context-renderer',
+      toolUseID: 'context-id',
+    },
+    rendered: [{content: `<system-reminder>\n${context}\n</system-reminder>`}],
+  };
+}
+
 describe('Claude Code adapter', () => {
   const customLayout: ClaudeCodeLayout = {
     workspace: '/tmp/run_123/project.name',
@@ -447,6 +486,7 @@ describe('Claude Code adapter', () => {
           sessionId: 'session-1',
           message: {content: 'Do the task'},
         }),
+        '',
         JSON.stringify({type: 'future-conversation-record'}),
         JSON.stringify({
           type: 'assistant',
@@ -468,7 +508,7 @@ describe('Claude Code adapter', () => {
       kind: 'unavailable',
       reason: {
         code: 'source_incomplete',
-        message: 'Claude session evidence could not be normalized safely.',
+        message: 'Claude session evidence could not be normalized safely (unrecognized record at line 3).',
       },
     });
   });
@@ -644,6 +684,120 @@ describe('Claude Code adapter', () => {
     expect(evidence.warnings).toEqual([]);
   });
 
+  it('accepts a hook success only when its context is in the next rendered attachment', async () => {
+    const context = 'Use the installed plugin for this task.';
+    const project = createMemoryWorkspace({
+      'session-1.jsonl': [
+        hookSuccessRecord(context),
+        hookAdditionalContextRecord(context),
+        {type: 'user', sessionId: 'session-1', message: {content: 'Do the task'}},
+        {type: 'assistant', sessionId: 'session-1', message: {content: 'Done'}},
+      ].map((record) => JSON.stringify(record)).join('\n'),
+    });
+
+    const evidence = await loadClaudeEvidence({
+      project: project.readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    expect(parseAtifTrajectory(evidence.trajectory).steps.map(({source, message}) => ({
+      source,
+      message,
+    }))).toEqual([
+      {source: 'system', message: `<system-reminder>\n${context}\n</system-reminder>`},
+      {source: 'user', message: 'Do the task'},
+      {source: 'agent', message: 'Done'},
+    ]);
+    expect(evidence.warnings).toEqual([]);
+  });
+
+  for (const {description, hookRecords} of [
+    {
+      description: 'missing context attachment',
+      hookRecords: [hookSuccessRecord('plugin context')],
+    },
+    {
+      description: 'nonmatching context attachment',
+      hookRecords: [
+        hookSuccessRecord('plugin context'),
+        hookAdditionalContextRecord('different context'),
+      ],
+    },
+    {
+      description: 'unrendered context attachment',
+      hookRecords: [
+        hookSuccessRecord('plugin context'),
+        {...hookAdditionalContextRecord('plugin context'), rendered: []},
+      ],
+    },
+    {
+      description: 'intervening metadata record',
+      hookRecords: [
+        hookSuccessRecord('plugin context'),
+        {type: 'summary'},
+        hookAdditionalContextRecord('plugin context'),
+      ],
+    },
+    {
+      description: 'new hook-success payload field',
+      hookRecords: [
+        {
+          ...hookSuccessRecord('plugin context'),
+          attachment: {
+            ...hookSuccessRecord('plugin context').attachment,
+            futureContent: 'unrepresented context',
+          },
+        },
+        hookAdditionalContextRecord('plugin context'),
+      ],
+    },
+    {
+      description: 'nonempty hook-success stderr',
+      hookRecords: [
+        {
+          ...hookSuccessRecord('plugin context'),
+          attachment: {
+            ...hookSuccessRecord('plugin context').attachment,
+            stderr: 'unrepresented error',
+          },
+        },
+        hookAdditionalContextRecord('plugin context'),
+      ],
+    },
+  ]) {
+    it(`falls back for ${description}`, async () => {
+      const project = createMemoryWorkspace({
+        'session-1.jsonl': [
+          ...hookRecords,
+          {type: 'user', sessionId: 'session-1', message: {content: 'Do the task'}},
+          {type: 'assistant', sessionId: 'session-1', message: {content: 'Done'}},
+        ].map((record) => JSON.stringify(record)).join('\n'),
+      });
+
+      const evidence = await loadClaudeEvidence({
+        project: project.readonly,
+        sessionId: 'session-1',
+        agentVersion: '2.1.273',
+        model: 'claude-test',
+        signal: new AbortController().signal,
+      });
+
+      expect(evidence).toEqual({
+        kind: 'unavailable',
+        reason: {
+          code: 'source_incomplete',
+          message: 'Claude session evidence could not be normalized safely (attachment/hook_success at line 1).',
+        },
+      });
+    });
+  }
+
   it('drops empty session context and retains prompt snapshots as partial native detail', async () => {
     const project = createMemoryWorkspace({
       'session-1.jsonl': [
@@ -745,9 +899,10 @@ describe('Claude Code adapter', () => {
     ]);
   });
 
-  for (const {description, record} of [
+  for (const {description, record, diagnosticKind} of [
     {
       description: 'queued command attachment',
+      diagnosticKind: 'attachment/queued_command',
       record: {
         type: 'attachment',
         attachment: {type: 'queued_command'},
@@ -756,6 +911,7 @@ describe('Claude Code adapter', () => {
     },
     {
       description: 'malformed rendered attachment',
+      diagnosticKind: 'attachment',
       record: {
         type: 'attachment',
         attachment: {type: 'environment'},
@@ -764,6 +920,7 @@ describe('Claude Code adapter', () => {
     },
     {
       description: 'nonempty session context attachment',
+      diagnosticKind: 'attachment/session_context',
       record: {
         type: 'attachment',
         attachment: {type: 'session_context', context: {mode: 'future'}},
@@ -771,21 +928,33 @@ describe('Claude Code adapter', () => {
     },
     {
       description: 'malformed prompt snapshot attachment',
+      diagnosticKind: 'attachment/prompt_snapshot',
       record: {
         type: 'attachment',
         attachment: {type: 'prompt_snapshot', systemPrompt: 'not-an-array'},
       },
     },
     {
+      description: 'unclassified unrendered attachment',
+      diagnosticKind: 'attachment',
+      record: {
+        type: 'attachment',
+        attachment: {type: 'future_attachment', content: 'unknown content'},
+      },
+    },
+    {
       description: 'nonempty ATIS latch',
+      diagnosticKind: 'atis-latch',
       record: {type: 'atis-latch', atis: 'future-state', sessionId: 'session-1'},
     },
     {
       description: 'conversation-bearing system event',
+      diagnosticKind: 'system',
       record: {type: 'system', subtype: 'local_command'},
     },
     {
       description: 'unclassified progress event',
+      diagnosticKind: 'unrecognized record',
       record: {type: 'progress'},
     },
   ]) {
@@ -818,7 +987,7 @@ describe('Claude Code adapter', () => {
         kind: 'unavailable',
         reason: {
           code: 'source_incomplete',
-          message: 'Claude session evidence could not be normalized safely.',
+          message: `Claude session evidence could not be normalized safely (${diagnosticKind} at line 1).`,
         },
       });
     });
