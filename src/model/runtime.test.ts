@@ -19,7 +19,6 @@ function experiment(selectedRuntime: unknown): unknown {
     id: 'example/external',
     version: '1',
     dataset: {id: 'test', version: '1', manifest_sha256: `sha256:${'a'.repeat(64)}`},
-    forge: {version: '0.1.0'},
     runtime: selectedRuntime,
     matrix: {
       cases: ['testing/example'],

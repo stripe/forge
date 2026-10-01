@@ -1,4 +1,5 @@
 import {parseResolvedRunPlan} from '../model/parse.js';
+import {FORGE_VERSION} from '../version.js';
 import type {
   AgentSelectionV1,
   ChecksV1,
@@ -76,7 +77,7 @@ export function createTestResolvedRunPlan(
         path: `cases/${caseId}/eval.yaml`,
         sha256: CASE_DIGEST,
       },
-      forge: {version: options.forgeVersion ?? '0.1.0'},
+      forge: {version: options.forgeVersion ?? FORGE_VERSION},
     },
     case: {
       schema_version: 1,

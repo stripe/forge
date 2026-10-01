@@ -16,6 +16,7 @@ import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from '../setup/registry.js';
+import {FORGE_VERSION} from '../version.js';
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'
@@ -144,7 +145,7 @@ export function resolveRunPlanWithSetupActions(
     ...cloneJson(definition.setup),
     ...cloneJson(treatment.setup),
   ];
-  const configuredActionBundles = config.forge.action_bundles ?? [];
+  const configuredActionBundles = config.forge?.action_bundles ?? [];
   try {
     setupActions.assertStepsDeclared(setup, configuredActionBundles);
   } catch (error) {
@@ -186,7 +187,7 @@ export function resolveRunPlanWithSetupActions(
         sha256: loadedCase.sha256,
       },
       forge: {
-        version: config.forge.version,
+        version: FORGE_VERSION,
         ...(requiredActionBundles.length === 0
           ? {}
           : {action_bundles: cloneJson([...requiredActionBundles])}),

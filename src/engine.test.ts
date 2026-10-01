@@ -248,9 +248,8 @@ describe('ForgeEngine setup action bundles', () => {
 
   it('rejects absent or mismatched experiment bundle pins', () => {
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
-    const value = experimentValue();
-    delete (value.forge as {action_bundles?: unknown}).action_bundles;
-    expect(() => engine.parseExperimentConfig(value)).toThrow(
+    const {forge: _forge, ...missingPin} = experimentValue();
+    expect(() => engine.parseExperimentConfig(missingPin)).toThrow(
       /bundle references do not match/,
     );
 
@@ -712,7 +711,6 @@ function experimentValue() {
       manifest_sha256: DIGEST,
     },
     forge: {
-      version: '0.1.0',
       action_bundles: [{...BUNDLE_REFERENCE}],
     },
     runtime: {

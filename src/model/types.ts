@@ -187,10 +187,8 @@ export interface ExperimentConfigV1 {
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
-  forge: {
-    version: string;
-    action_bundles?: SetupActionBundleReferenceV1[];
-  };
+  /** Required only when the experiment uses host-supplied setup actions. */
+  forge?: {action_bundles: SetupActionBundleReferenceV1[]};
   runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;

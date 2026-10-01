@@ -203,6 +203,7 @@ task: safe
 
   it('parses a checks-only experiment config without harness completion models', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
+    expect(config.forge).toBeUndefined();
     expect(config.models).toEqual({});
     expect(config.treatments).toEqual({baseline: {setup: []}});
     expect(config.matrix).toMatchObject({repetitions: 1, retries: 0});
@@ -211,6 +212,15 @@ task: safe
       cpu_count: 2,
       process_count: 512,
     });
+  });
+
+  it('rejects an authored Forge package version', () => {
+    expect(() => parseExperimentConfigYaml(
+      experimentConfigYaml().replace(
+        'runtime:',
+        'forge:\n  version: 0.1.0\nruntime:',
+      ),
+    )).toThrow(BenchmarkModelError);
   });
 
   it('accepts native Docker platform authoring', () => {
@@ -277,8 +287,6 @@ dataset:
   id: forge-smoke
   version: 2026.09.0
   manifest_sha256: sha256:${HASH}
-forge:
-  version: 0.1.0
 runtime:
   adapter: docker
   image: {kind: forge}

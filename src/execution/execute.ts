@@ -99,6 +99,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
+import {FORGE_VERSION} from '../version.js';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
@@ -128,8 +129,6 @@ import {
   type CompletionBinding,
   type PreparedCompletionRuntime,
 } from './completionRuntime.js';
-
-export const FORGE_VERSION = '0.1.0' as const;
 
 const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;

@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -5,11 +6,15 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-const packageManager = JSON.parse(
+const packageMetadata = JSON.parse(
   await fs.readFile(path.join(projectRoot, 'package.json'), 'utf8'),
-).packageManager;
+);
+const {packageManager, version: packageVersion} = packageMetadata;
 if (typeof packageManager !== 'string' || packageManager.length === 0) {
   throw new Error('package.json must declare a packageManager.');
+}
+if (typeof packageVersion !== 'string' || packageVersion.length === 0) {
+  throw new Error('package.json must declare a version.');
 }
 const temporaryRoot = await fs.mkdtemp(
   path.join(os.tmpdir(), 'stripe-forge-package-smoke-'),
@@ -62,8 +67,10 @@ try {
       import * as docker from '@stripe/forge/runtime/docker';
       import * as setup from '@stripe/forge/setup';
       import * as testing from '@stripe/forge/testing';
+      import packageMetadata from '@stripe/forge/package.json' with {type: 'json'};
 
       assert.equal(typeof forge.executeEval, 'function');
+      assert.equal(forge.FORGE_VERSION, packageMetadata.version);
       assert.equal(typeof forge.createForgeEngine, 'function');
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
@@ -170,10 +177,13 @@ try {
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);
-  run(
-    path.join(consumerRoot, 'node_modules', '.bin', 'forge'),
-    ['--version'],
-    consumerRoot,
+  assert.equal(
+    execFileSync(
+      path.join(consumerRoot, 'node_modules', '.bin', 'forge'),
+      ['--version'],
+      {cwd: consumerRoot, encoding: 'utf8', env: {...process.env, CI: '1'}},
+    ),
+    `${packageVersion}\n`,
   );
 
   // @stripe/forge is ESM-only. Existing CommonJS hosts interoperate through

@@ -17,6 +17,7 @@ import {
   resolvedRunPlanSha256,
   serializeResolvedRunPlan,
 } from './planner.js';
+import {FORGE_VERSION} from '../version.js';
 
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const CASE_DIGEST = `sha256:${'b'.repeat(64)}` as const;
@@ -84,6 +85,7 @@ describe('experiment expansion and run planning', () => {
       dataset: {manifest_sha256: MANIFEST_DIGEST},
       experiment: {sha256: EXPERIMENT_DIGEST},
       case: {sha256: CASE_DIGEST},
+      forge: {version: FORGE_VERSION},
     });
     expect(Object.isFrozen(plan)).toBe(true);
     expect(Object.isFrozen(plan.setup)).toBe(true);
@@ -348,7 +350,6 @@ function experimentConfig(
       version: '2026.09.0',
       manifest_sha256: MANIFEST_DIGEST,
     },
-    forge: {version: '0.1.0'},
     runtime: {
       adapter: 'docker',
       image: {kind: 'forge'},

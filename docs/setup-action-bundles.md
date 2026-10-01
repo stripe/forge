@@ -109,17 +109,17 @@ An experiment that may select a bundled action pins the matching manifest:
 
 ```yaml
 forge:
-  version: 0.1.0
   action_bundles:
     - namespace: acme-evals
       version: 1.0.0
       sha256: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-The configured reference must exactly match the bundle registered on the
-engine. Missing bundles, digest mismatches, undeclared namespaces, unknown
-actions, and noncanonical payloads fail before credentials are resolved or a
-runtime is allocated.
+The `forge` block is omitted when no host action bundle is used. A configured
+reference must exactly match the bundle registered on the engine. Missing
+bundles, digest mismatches, undeclared namespaces, unknown actions, and
+noncanonical payloads fail before credentials are resolved or a runtime is
+allocated.
 
 A resolved plan records only the extension bundles used by that selection.
 `result.json` repeats those identities, while canonical `plan.json` remains the

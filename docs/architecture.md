@@ -187,7 +187,8 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
   host-supplied platform selection; and
-- records exact dataset, experiment, case, Forge, and action-bundle provenance.
+- records exact dataset, experiment, case, installed Forge package, and
+  action-bundle provenance.
 
 Plans use canonical JSON with recursively sorted object keys and retained array
 order. Their digest binds the semantics later summarized by `result.json`.
@@ -274,7 +275,10 @@ sequenceDiagram
 ### 1. Parse and pure preflight
 
 Forge reparses the supplied resolved plan against the engine's action registry,
-checks the exact Forge version pin, and reserializes it canonically. It then:
+checks that its recorded Forge package version matches the installed package,
+and reserializes it canonically. The authored experiment does not pin a Forge
+version; a newer package can resolve a fresh plan for an older dataset. Forge
+then:
 
 - selects the agent adapter by exact ID;
 - obtains and validates the agent's pure evidence identity;

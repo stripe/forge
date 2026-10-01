@@ -48,8 +48,9 @@ can supply an external runtime with its own explicit execution requirements.
 - Enough Docker capacity for the experiment config's limits. Defaults are 4 GiB
   memory, 2 CPUs, and 512 processes.
 
-Forge is ESM-only. Install the current development snapshot with an exact
-dependency pin, then use the locally installed CLI for the commands below:
+Forge is ESM-only. From the directory that will contain `quickstart/`, install
+the current development snapshot with an exact dependency pin. The commands
+below use this locally installed CLI:
 
 ```sh
 npm install --save-dev --save-exact @stripe/forge@dev
@@ -155,8 +156,6 @@ dataset:
   id: forge-quickstart
   version: 0.1.0
   manifest_sha256: sha256:2d75e3a65ff5c3b6c9612a572f078e6dd496c0b63007cf3c6e6da94c62fcd4e0
-forge:
-  version: 0.1.0
 runtime:
   adapter: docker
   image:
@@ -187,8 +186,12 @@ limits:
 <!-- quickstart-experiment:end -->
 
 The experiment config independently pins the dataset identity and SHA-256 digest
-of the raw `manifest.json` bytes. `forge.version` is an execution compatibility
-pin, not a range: v0.1 refuses to run a plan for another harness version.
+of the raw `manifest.json` bytes. The installed Forge package version is not an
+authored experiment field. Forge records it in each resolved plan and result;
+execution rejects a serialized plan made by a different package version. To
+run an older dataset with a newer Forge release, resolve a fresh plan with that
+release. The dataset and experiment versions identify those inputs independently
+of the Forge package version.
 
 `models: {}` is intentional for this one-shot, checks-only case. An experiment
 config must set `models.role_player` for every selected `multi_turn` case and

@@ -8,6 +8,7 @@ import {expect} from '../test/support/expect.js';
 import {createDefaultCliComposition, runCli} from './cli.js';
 import {credentialReference} from './contracts/credentials.js';
 import {createForgeEngine} from './engine.js';
+import {FORGE_VERSION} from './execution/index.js';
 import {parseExperimentConfigYaml, sha256Digest, sha256Hex} from './model/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
 import {
@@ -29,6 +30,16 @@ afterEach(async () => {
 });
 
 describe('Forge CLI', () => {
+  it('reports the installed package version', async () => {
+    let stdout = '';
+    const exitCode = await runCli(['--version'], {
+      stdout: (text) => { stdout += text; },
+      stderr: () => undefined,
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe(`${FORGE_VERSION}\n`);
+  });
+
   it('supplies the selected external runtime to the host factory for validation and execution', async () => {
     const fixture = await createBenchmarkFixture();
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
@@ -359,8 +370,8 @@ describe('Forge CLI', () => {
       fixture.experimentPath,
       experiment
         .replace(
-          'forge:\n  version: 0.1.0',
-          `forge:\n  version: 0.1.0\n  action_bundles:\n    - namespace: acme-evals\n      version: 1.0.0\n      sha256: sha256:${'a'.repeat(64)}`,
+          'runtime:',
+          `forge:\n  action_bundles:\n    - namespace: acme-evals\n      version: 1.0.0\n      sha256: sha256:${'a'.repeat(64)}\nruntime:`,
         )
         .replace(
           'treatments:\n  baseline:\n    setup: []',
@@ -436,8 +447,8 @@ describe('Forge CLI', () => {
       fixture.experimentPath,
       experiment
         .replace(
-          'forge:\n  version: 0.1.0',
-          `forge:\n  version: 0.1.0\n  action_bundles:\n    - namespace: acme-evals\n      version: 1.0.0\n      sha256: sha256:${'a'.repeat(64)}`,
+          'runtime:',
+          `forge:\n  action_bundles:\n    - namespace: acme-evals\n      version: 1.0.0\n      sha256: sha256:${'a'.repeat(64)}\nruntime:`,
         )
         .replace(
           'treatments:\n  baseline:\n    setup: []',
@@ -1082,8 +1093,6 @@ dataset:
   id: example-dataset
   version: 2026.09.0
   manifest_sha256: ${sha256Digest(manifestRaw)}
-forge:
-  version: 0.1.0
 runtime:
   adapter: docker
   image: {kind: forge}

@@ -23,6 +23,7 @@ import type {
 } from '../contracts/runtime.js';
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../results/index.js';
+import {FORGE_VERSION} from '../version.js';
 import {createOwnedWorkspace} from '../runtime/workspace.js';
 import {createSetupExecutorWithHandlers} from '../setup/executor.js';
 import type {
@@ -69,6 +70,7 @@ describe('executeEval', () => {
     expect(completed.result).toMatchObject({
       schema_version: 1,
       run_id: 'run-1',
+      forge: {version: FORGE_VERSION},
       agent: {session_id: 'canonical-session'},
       evidence: {
         redaction_count: 1,
@@ -515,6 +517,19 @@ describe('executeEval', () => {
     expect(runtimePrepared).toBe(false);
   });
 
+  it('rejects a plan stamped by another package version', async () => {
+    const fixture = await executionFixture();
+    const plan: ResolvedRunPlanV1 = {
+      ...fixture.plan,
+      provenance: {
+        ...fixture.plan.provenance,
+        forge: {...fixture.plan.provenance.forge, version: '0.0.0'},
+      },
+    };
+    expect(() => preflightEval({plan, composition: fixture.composition(inertStore())}))
+      .toThrow(`Run plan requires Forge 0.0.0; this build is ${FORGE_VERSION}.`);
+  });
+
   it('rejects malformed agent environment declarations during pure preflight', async () => {
     const fixture = await executionFixture();
     const composition = fixture.composition(inertStore());
@@ -917,7 +932,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       dataset: {id: 'sample', version: '1', manifest_sha256: DIGEST_A},
       experiment: {id: 'local', version: '1', sha256: DIGEST_B},
       case: {id: 'sample/case', path: 'cases/case.yaml', sha256: DIGEST_C},
-      forge: {version: '0.1.0'},
+      forge: {version: FORGE_VERSION},
     },
     case: {
       schema_version: 1,

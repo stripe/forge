@@ -122,7 +122,6 @@ dataset:
   id: forge-smoke
   version: 2026.09.0
   manifest_sha256: sha256:${manifestHash}
-forge: {version: 0.1.0}
 runtime:
   adapter: docker
   image: {kind: forge}
