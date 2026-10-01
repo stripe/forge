@@ -48,10 +48,11 @@ can supply an external runtime with its own explicit execution requirements.
 - Enough Docker capacity for the experiment config's limits. Defaults are 4 GiB
   memory, 2 CPUs, and 512 processes.
 
-Forge is ESM-only. Install the exact harness version named by the benchmark:
+Forge is ESM-only. Install the current development snapshot with an exact
+dependency pin, then use the locally installed CLI for the commands below:
 
 ```sh
-npm install --save-dev --save-exact @stripe/forge@0.1.0
+npm install --save-dev --save-exact @stripe/forge@dev
 ```
 
 From a source checkout, use the pinned package manager:
@@ -207,7 +208,7 @@ creates a different experiment.
 From `quickstart/`:
 
 ```sh
-npx @stripe/forge@0.1.0 validate \
+npx --no-install forge validate \
   --experiment ./experiment.yaml \
   --dataset ./dataset
 ```
@@ -224,7 +225,7 @@ supported concrete interpretations without contacting Docker. To additionally
 check the current execution host, opt into host validation:
 
 ```sh
-npx @stripe/forge@0.1.0 validate \
+npx --no-install forge validate \
   --experiment ./experiment.yaml \
   --dataset ./dataset \
   --host
@@ -240,7 +241,7 @@ resolve credentials, run setup, or make model calls.
 Inspect the canonical resolved plan:
 
 ```sh
-npx @stripe/forge@0.1.0 plan \
+npx --no-install forge plan \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -251,7 +252,7 @@ Run the single selection:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
-npx @stripe/forge@0.1.0 run \
+npx --no-install forge run \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -267,7 +268,7 @@ but set a valid endpoint URL and its token instead:
 ```sh
 ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
-npx @stripe/forge@0.1.0 run \
+npx --no-install forge run \
   --experiment ./experiment.yaml \
   --case-file ./dataset/cases/examples/hello-file.yaml \
   --agent claude-code \
@@ -287,7 +288,7 @@ run; pass the variable name, never its value:
 
 ```sh
 MY_MCP_TOKEN=your-restricted-token \
-npx @stripe/forge@0.1.0 run \
+npx --no-install forge run \
   --experiment ./experiment.yaml \
   --dataset ./dataset \
   --credential-env example.mcp-token=MY_MCP_TOKEN
