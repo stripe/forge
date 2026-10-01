@@ -174,7 +174,7 @@ context: A developer checking an answer.
 execution_mode: multi_turn
 max_turns: 3
 setup:
-  - uses: forge/write@1
+  - uses: forge/write
     with:
       target: answer.txt
       source:
@@ -213,8 +213,6 @@ dataset:
   id: multi-e2e
   version: 1.0.0
   manifest_sha256: ${sha256Digest(manifestRaw)}
-forge:
-  version: 0.1.0
 runtime:
   adapter: docker
   image: {kind: forge}

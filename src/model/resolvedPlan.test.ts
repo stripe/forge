@@ -11,7 +11,7 @@ const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 function validPlan(): ResolvedRunPlanV1 {
   const setup = [
     {
-      uses: 'forge/write@1' as const,
+      uses: 'forge/write' as const,
       with: {target: 'prompt.txt', source: {content: 'hello'}},
     },
   ];

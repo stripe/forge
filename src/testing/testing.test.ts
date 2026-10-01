@@ -84,7 +84,7 @@ describe('@stripe/forge/testing', () => {
     const plan = createTestResolvedRunPlan({
       caseSetup: [
         {
-          uses: 'forge/write@1',
+          uses: 'forge/write',
           with: {target: 'answer.txt', source: {content: 'done'}},
         },
       ],

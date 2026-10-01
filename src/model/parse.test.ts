@@ -75,37 +75,40 @@ initial_prompt: Two
   it('strictly validates built-in setup payloads and rejects unknown actions', () => {
     expect(
       parseSetupStep({
-        uses: 'forge/write@1',
+        uses: 'forge/write',
         with: {target: 'src/config.json', source: {dataset_path: 'fixtures/a.json'}},
       }),
-    ).toMatchObject({uses: 'forge/write@1'});
+    ).toMatchObject({uses: 'forge/write'});
     expect(() =>
       parseSetupStep({
-        uses: 'acme/link-cli@1',
+        uses: 'acme/link-cli',
         with: {channel: 'stable'},
       }),
     ).toThrow(/unknown setup action/);
     expect(() =>
       parseSetupStep({
-        uses: 'forge/command@1',
+        uses: 'forge/command',
         with: {command: 'echo unsafe implicit shell'},
       }),
     ).toThrow(BenchmarkModelError);
     expect(() =>
-      parseSetupStep({uses: 'forge/future@2', with: {}}),
+      parseSetupStep({uses: 'forge/future', with: {}}),
     ).toThrow(/unknown setup action/);
     expect(() =>
-      parseSetupStep({uses: 'stripe/future@1', with: {}}),
+      parseSetupStep({uses: 'stripe/future', with: {}}),
     ).toThrow(/unknown setup action/);
     expect(() =>
-      parseSetupStep({uses: 'not-versioned', with: {}}),
+      parseSetupStep({uses: 'not-namespaced', with: {}}),
     ).toThrow(/namespaced/);
+    expect(() =>
+      parseSetupStep({uses: 'forge/write@1', with: {}}),
+    ).toThrow(/without a version suffix/);
   });
 
-  it('parses only latest-marketplace forge/plugin@1 selections', () => {
+  it('parses only latest-marketplace forge/plugin selections', () => {
     expect(
       parseSetupStep({
-        uses: 'forge/plugin@1',
+        uses: 'forge/plugin',
         with: {
           agents: {
             'claude-code': {
@@ -116,7 +119,7 @@ initial_prompt: Two
         },
       }),
     ).toMatchObject({
-      uses: 'forge/plugin@1',
+      uses: 'forge/plugin',
       with: {
         agents: {
           'claude-code': {
@@ -156,7 +159,7 @@ initial_prompt: Two
       },
     ]) {
       expect(() =>
-        parseSetupStep({uses: 'forge/plugin@1', with: withValue}),
+        parseSetupStep({uses: 'forge/plugin', with: withValue}),
       ).toThrow(BenchmarkModelError);
     }
   });
@@ -200,6 +203,7 @@ task: safe
 
   it('parses a checks-only experiment config without harness completion models', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
+    expect(config.forge).toBeUndefined();
     expect(config.models).toEqual({});
     expect(config.treatments).toEqual({baseline: {setup: []}});
     expect(config.matrix).toMatchObject({repetitions: 1, retries: 0});
@@ -208,6 +212,15 @@ task: safe
       cpu_count: 2,
       process_count: 512,
     });
+  });
+
+  it('rejects an authored Forge package version', () => {
+    expect(() => parseExperimentConfigYaml(
+      experimentConfigYaml().replace(
+        'runtime:',
+        'forge:\n  version: 0.1.0\nruntime:',
+      ),
+    )).toThrow(BenchmarkModelError);
   });
 
   it('accepts native Docker platform authoring', () => {
@@ -224,7 +237,7 @@ task: safe
 treatments:
   baseline:
     setup:
-      - uses: forge/command@1
+      - uses: forge/command
         with: {argv: [echo, changed]}
 `),
       ),
@@ -274,8 +287,6 @@ dataset:
   id: forge-smoke
   version: 2026.09.0
   manifest_sha256: sha256:${HASH}
-forge:
-  version: 0.1.0
 runtime:
   adapter: docker
   image: {kind: forge}

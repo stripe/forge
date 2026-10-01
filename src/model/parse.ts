@@ -103,7 +103,7 @@ const SetupStepEnvelopeSchema = z
       .string()
       .refine(
         isSafeActionIdentifier,
-        'uses must be a namespaced, positive-version action ID',
+        'uses must be a namespaced action ID without a version suffix',
       ),
     with: JsonObjectSchema,
   })
@@ -119,24 +119,27 @@ const SetupActionBundleReferenceSchema = z
   })
   .strict();
 
-const ForgeDependencySchema = z
-  .object({
-    version: VersionSchema,
-    action_bundles: z
-      .array(SetupActionBundleReferenceSchema)
-      .min(1)
-      .max(MAX_ACTION_BUNDLES)
-      .optional(),
-  })
-  .strict()
-  .superRefine((forge, context) => {
+const ActionBundleReferencesSchema = z
+  .array(SetupActionBundleReferenceSchema)
+  .min(1)
+  .max(MAX_ACTION_BUNDLES)
+  .superRefine((references, context) => {
     addDuplicateIssues(
-      (forge.action_bundles ?? []).map(({namespace}) => namespace),
+      references.map(({namespace}) => namespace),
       context,
-      ['action_bundles'],
+      [],
       'namespace',
     );
   });
+
+const AuthoredForgeSchema = z.object({
+  action_bundles: ActionBundleReferencesSchema,
+}).strict();
+
+const ForgeProvenanceSchema = z.object({
+  version: VersionSchema,
+  action_bundles: ActionBundleReferencesSchema.optional(),
+}).strict();
 
 const FilesystemCheckSchema = z
   .object({
@@ -407,7 +410,7 @@ const ExperimentConfigSchema = z
         .string()
         .refine(isSha256Digest, 'must be a sha256: digest'),
     }).strict(),
-    forge: ForgeDependencySchema,
+    forge: AuthoredForgeSchema.optional(),
     runtime: RuntimeSchema,
     models: z
       .object({
@@ -550,7 +553,7 @@ const ResolvedRunPlanSchema = z
               .refine(isSha256Digest, 'must be a sha256: digest'),
           })
           .strict(),
-        forge: ForgeDependencySchema,
+        forge: ForgeProvenanceSchema,
       })
       .strict(),
     case: MaterializedEvalCaseSchema,
@@ -846,7 +849,7 @@ export function parseExperimentConfigWithSetupActions(
     },
   };
   try {
-    const references = config.forge.action_bundles ?? [];
+    const references = config.forge?.action_bundles ?? [];
     setupActions.assertReferencesMatch(references);
     for (const treatment of Object.values(config.treatments)) {
       setupActions.assertStepsDeclared(treatment.setup, references);

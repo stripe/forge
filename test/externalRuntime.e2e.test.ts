@@ -57,7 +57,7 @@ describe('external runtime composition', () => {
       treatments: {
         seeded: {
           setup: [{
-            uses: 'forge/write@1',
+            uses: 'forge/write',
             with: {target: 'seed.txt', source: {content: 'prepared by setup'}},
           }],
         },

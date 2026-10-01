@@ -8,12 +8,12 @@ package.
 
 Bundles are explicit host dependencies, not plugins discovered at runtime. Host
 code imports a bundle and supplies it when constructing an immutable
-`ForgeEngine`. Benchmark YAML names only the versioned action; it never names a
+`ForgeEngine`. Benchmark YAML names only the setup action; it never names a
 JavaScript package to download or import.
 
 Use a bundle when an action belongs to an embedding environment rather than to
-portable Forge. Built-in actions such as `forge/write@1`, `forge/command@1`, and
-`forge/plugin@1` continue to ship with the installed Forge version.
+portable Forge. Built-in actions such as `forge/write`, `forge/command`, and
+`forge/plugin` continue to ship with the installed Forge version.
 
 ## Defining and registering a bundle
 
@@ -30,7 +30,7 @@ const tools = defineSetupActionBundle({
     sha256: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   },
   actions: [{
-    uses: 'acme-evals/tool@1',
+    uses: 'acme-evals/tool',
     parseWith(input) {
       if (
         input === null ||
@@ -80,11 +80,15 @@ replace a built-in action or another bundle's action.
 
 Each action contains:
 
-- a positively versioned `uses` identifier such as `acme-evals/tool@1`;
+- a namespaced, unversioned `uses` identifier such as `acme-evals/tool`;
 - `parseWith(input)`, which strictly validates and normalizes the JSON-shaped
   `with` payload; and
 - `preflight(step, context)`, which declares requirements and binds the exact
   operation that will later run.
+
+The action ID has no `@version` suffix. The bundle manifest's version and
+digest identify its implementation; incompatible action changes require an
+updated bundle pin and affected benchmark inputs.
 
 `parseWith` must produce a canonical fixed point: parsing its output again must
 return the same JSON value. Forge proves that property for authored input. At
@@ -105,17 +109,17 @@ An experiment that may select a bundled action pins the matching manifest:
 
 ```yaml
 forge:
-  version: 0.1.0
   action_bundles:
     - namespace: acme-evals
       version: 1.0.0
       sha256: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-The configured reference must exactly match the bundle registered on the
-engine. Missing bundles, digest mismatches, undeclared namespaces, unknown
-actions, and noncanonical payloads fail before credentials are resolved or a
-runtime is allocated.
+The `forge` block is omitted when no host action bundle is used. A configured
+reference must exactly match the bundle registered on the engine. Missing
+bundles, digest mismatches, undeclared namespaces, unknown actions, and
+noncanonical payloads fail before credentials are resolved or a runtime is
+allocated.
 
 A resolved plan records only the extension bundles used by that selection.
 `result.json` repeats those identities, while canonical `plan.json` remains the

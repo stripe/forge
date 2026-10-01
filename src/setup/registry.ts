@@ -19,7 +19,7 @@ const RESERVED_NAMESPACES = new Set(['forge', 'stripe']);
 const MAX_ACTION_BUNDLES = 100;
 const MAX_ACTIONS_PER_BUNDLE = 1_000;
 
-/** One versioned setup action supplied by Forge or an explicitly imported bundle. */
+/** One namespaced setup action supplied by Forge or an explicitly imported bundle. */
 export interface SetupActionDefinition<
   TWith extends JsonObject = JsonObject,
 > {
@@ -242,7 +242,7 @@ export const defaultSetupActionRegistry = createSetupActionRegistry();
 
 export function actionNamespace(uses: string): string {
   if (!isSafeActionIdentifier(uses)) {
-    throw new TypeError('Setup action ID must be namespaced and positively versioned.');
+    throw new TypeError('Setup action ID must be namespaced and unversioned.');
   }
   return uses.slice(0, uses.indexOf('/'));
 }

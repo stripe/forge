@@ -12,23 +12,23 @@ import type {
 } from './types.js';
 
 export const pluginSetupHandler: SetupStepHandler = Object.freeze({
-  uses: 'forge/plugin@1',
+  uses: 'forge/plugin',
   preflight(step: SetupStepV1, context: SetupPreflightContext): PreparedSetupStep {
-    if (step.uses !== 'forge/plugin@1') {
+    if (step.uses !== 'forge/plugin') {
       throw new TypeError(
-        `forge/plugin@1 cannot handle ${JSON.stringify(step.uses)}.`,
+        `forge/plugin cannot handle ${JSON.stringify(step.uses)}.`,
       );
     }
     const pluginStep = step as PluginSetupStepV1;
     const distribution = pluginStep.with.agents[context.selection.adapter];
     if (!distribution) {
       throw new TypeError(
-        `forge/plugin@1 does not define a distribution for agent ${JSON.stringify(context.selection.adapter)}.`,
+        `forge/plugin does not define a distribution for agent ${JSON.stringify(context.selection.adapter)}.`,
       );
     }
     if (!context.pluginInstaller) {
       throw new TypeError(
-        `Agent ${JSON.stringify(context.selection.adapter)} does not support forge/plugin@1.`,
+        `Agent ${JSON.stringify(context.selection.adapter)} does not support forge/plugin.`,
       );
     }
     const prepared = context.pluginInstaller.preflight(distribution, {

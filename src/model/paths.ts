@@ -23,17 +23,9 @@ export function isSafeWorkspaceRelativePath(
 
 export function isSafeActionIdentifier(value: string): boolean {
   if (value.length > 384 || CONTROL_CHARACTER.test(value)) return false;
-  const match = /^([a-z0-9][a-z0-9._-]*)\/([a-z0-9][a-z0-9._-]*)@([1-9][0-9]*)$/.exec(
-    value,
-  );
+  const match = /^([a-z0-9][a-z0-9._-]*)\/([a-z0-9][a-z0-9._-]*)$/.exec(value);
   if (!match) return false;
-  const version = Number(match[3]);
-  return (
-    isSafeSimpleIdentifier(match[1]!) &&
-    isSafeSimpleIdentifier(match[2]!) &&
-    Number.isSafeInteger(version) &&
-    version > 0
-  );
+  return isSafeSimpleIdentifier(match[1]!) && isSafeSimpleIdentifier(match[2]!);
 }
 
 export function isSafeSimpleIdentifier(value: string): boolean {

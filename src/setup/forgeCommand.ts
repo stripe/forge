@@ -11,10 +11,10 @@ const NO_REQUIREMENTS = Object.freeze({});
 
 export const commandSetupHandler: SetupStepHandler =
   Object.freeze({
-    uses: 'forge/command@1',
+    uses: 'forge/command',
     preflight(step: SetupStepV1): PreparedSetupStep {
-      if (step.uses !== 'forge/command@1') {
-        throw new TypeError(`forge/command@1 cannot handle ${JSON.stringify(step.uses)}.`);
+      if (step.uses !== 'forge/command') {
+        throw new TypeError(`forge/command cannot handle ${JSON.stringify(step.uses)}.`);
       }
       const commandStep = step as CommandSetupStepV1;
       assertArgv(commandStep.with.argv);

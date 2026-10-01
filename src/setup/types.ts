@@ -95,7 +95,7 @@ export interface AppliedSetup {
 export interface SetupStepHandler {
   readonly uses: string;
   /**
-   * Pure validation and binding for exactly one versioned action. It must not
+   * Pure validation and binding for exactly one named action. It must not
    * resolve credentials, inspect ambient state, allocate, run commands, or
    * mutate a workspace.
    */

@@ -112,6 +112,7 @@ If you are following the public executable, start instead at
 | [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
 | [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
 | [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, selects a matrix entry, creates the default adapters, and calls the engine. It is composition code, not benchmark semantics. |
+| [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION` | Reads the exact installed package version from its exported `package.json` for CLI output and plan/result provenance. |
 | [`src/serialization.ts`](https://github.com/stripe/forge/blob/main/src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
 
 ### `ForgeEngine` as the semantic facade
@@ -289,7 +290,8 @@ composition.
 `planner.ts` is intentionally pure after loading. It does not resolve
 credentials, inspect the runtime, or select a composition adapter. Its setup
 registry dependency exists only to bind the plan to registered action
-implementations and their bundle identities.
+implementations and their bundle identities. It stamps the resolved plan with
+the installed Forge package version; experiments do not author that version.
 
 ## `src/contracts`: host capability boundaries
 

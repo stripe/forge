@@ -17,6 +17,7 @@ import {
   resolvedRunPlanSha256,
   serializeResolvedRunPlan,
 } from './planner.js';
+import {FORGE_VERSION} from '../version.js';
 
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const CASE_DIGEST = `sha256:${'b'.repeat(64)}` as const;
@@ -72,8 +73,8 @@ describe('experiment expansion and run planning', () => {
       max_turns: 7,
     });
     expect(plan.setup.map(({uses}) => uses)).toEqual([
-      'forge/command@1',
-      'forge/write@1',
+      'forge/command',
+      'forge/write',
     ]);
     expect(plan.role_player).toEqual({provider: 'anthropic', model: 'role-model'});
     expect(plan.evaluation.judge).toEqual({
@@ -84,6 +85,7 @@ describe('experiment expansion and run planning', () => {
       dataset: {manifest_sha256: MANIFEST_DIGEST},
       experiment: {sha256: EXPERIMENT_DIGEST},
       case: {sha256: CASE_DIGEST},
+      forge: {version: FORGE_VERSION},
     });
     expect(Object.isFrozen(plan)).toBe(true);
     expect(Object.isFrozen(plan.setup)).toBe(true);
@@ -254,7 +256,7 @@ describe('experiment expansion and run planning', () => {
           directory: {
             setup: [
               {
-                uses: 'forge/write@1',
+                uses: 'forge/write',
                 with: {
                   target: 'seed.txt',
                   source: {dataset_path: 'fixtures'},
@@ -330,7 +332,7 @@ function evalCase(): EvalCaseV1 {
     execution_mode: 'multi_turn',
     max_turns: 7,
     setup: [
-      {uses: 'forge/command@1', with: {argv: ['git', 'init']}},
+      {uses: 'forge/command', with: {argv: ['git', 'init']}},
     ],
     success_guidelines: ['The task is complete'],
   };
@@ -348,7 +350,6 @@ function experimentConfig(
       version: '2026.09.0',
       manifest_sha256: MANIFEST_DIGEST,
     },
-    forge: {version: '0.1.0'},
     runtime: {
       adapter: 'docker',
       image: {kind: 'forge'},
@@ -368,7 +369,7 @@ function experimentConfig(
       'with-seed': {
         setup: [
           {
-            uses: 'forge/write@1',
+            uses: 'forge/write',
             with: {
               target: 'seed.txt',
               source: {dataset_path: 'fixtures/seed.txt'},

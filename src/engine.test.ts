@@ -60,13 +60,13 @@ afterEach(async () => {
 describe('ForgeEngine setup action bundles', () => {
   it('keeps extension names absent from and unavailable to the default engine', () => {
     expect(defaultForgeEngine.setupActionIds).toEqual([
-      'forge/command@1',
-      'forge/plugin@1',
-      'forge/write@1',
+      'forge/command',
+      'forge/plugin',
+      'forge/write',
     ]);
     expect(() =>
       defaultForgeEngine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'example'},
       }),
     ).toThrow(/unknown setup action/);
@@ -76,12 +76,12 @@ describe('ForgeEngine setup action bundles', () => {
     const input = {name: ' example-skill '};
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
     const parsed = engine.parseSetupStep({
-      uses: 'acme-evals/skill@1',
+      uses: 'acme-evals/skill',
       with: input,
     });
 
     expect(parsed).toEqual({
-      uses: 'acme-evals/skill@1',
+      uses: 'acme-evals/skill',
       with: {name: 'example-skill'},
     });
     expect(parsed.with).not.toBe(input);
@@ -114,7 +114,7 @@ describe('ForgeEngine setup action bundles', () => {
 
     expect(() =>
       engine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'example-skill'},
       }),
     ).toThrow(/did not produce a stable canonical with payload/);
@@ -146,7 +146,7 @@ describe('ForgeEngine setup action bundles', () => {
 
     expect(() =>
       engine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'example-skill'},
       }),
     ).toThrow(/did not produce a stable canonical with payload/);
@@ -189,7 +189,7 @@ describe('ForgeEngine setup action bundles', () => {
               ...loadedCase.definition,
               setup: [
                 engine.parseSetupStep({
-                  uses: 'acme-evals/skill@1',
+                  uses: 'acme-evals/skill',
                   with: {name: 'case-skill'},
                 }),
               ],
@@ -206,7 +206,7 @@ describe('ForgeEngine setup action bundles', () => {
     });
 
     expect(plan.setup).toEqual([
-      {uses: 'acme-evals/skill@1', with: {name: 'case-skill'}},
+      {uses: 'acme-evals/skill', with: {name: 'case-skill'}},
     ]);
     expect(plan.provenance.forge.action_bundles).toEqual([
       BUNDLE_REFERENCE,
@@ -218,7 +218,7 @@ describe('ForgeEngine setup action bundles', () => {
     const inputs = planningInputs(engine);
     const experiment = structuredClone(inputs.experiment);
     experiment.config.treatments['with-skill']!.setup = [
-      {uses: 'other-evals/skill@1', with: {name: 'example-skill'}},
+      {uses: 'other-evals/skill', with: {name: 'example-skill'}},
     ];
 
     expect(() =>
@@ -248,9 +248,8 @@ describe('ForgeEngine setup action bundles', () => {
 
   it('rejects absent or mismatched experiment bundle pins', () => {
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
-    const value = experimentValue();
-    delete (value.forge as {action_bundles?: unknown}).action_bundles;
-    expect(() => engine.parseExperimentConfig(value)).toThrow(
+    const {forge: _forge, ...missingPin} = experimentValue();
+    expect(() => engine.parseExperimentConfig(missingPin)).toThrow(
       /bundle references do not match/,
     );
 
@@ -298,8 +297,8 @@ describe('ForgeEngine setup action bundles', () => {
         ...base.treatments,
         'with-two-actions': {
           setup: [
-            {uses: 'zeta-evals/tool@1', with: {name: 'tool'}},
-            {uses: 'acme-evals/skill@1', with: {name: 'example-skill'}},
+            {uses: 'zeta-evals/tool', with: {name: 'tool'}},
+            {uses: 'acme-evals/skill', with: {name: 'example-skill'}},
           ],
         },
       },
@@ -461,7 +460,7 @@ describe('ForgeEngine setup action bundles', () => {
     expect(engine.setupActionBundles).toEqual([BUNDLE_REFERENCE]);
     expect(
       engine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'original'},
       }).with.name,
     ).toBe('original');
@@ -470,16 +469,22 @@ describe('ForgeEngine setup action bundles', () => {
       defineSetupActionBundle({
         manifest: {...BUNDLE_REFERENCE, namespace: 'forge'},
         actions: [
-          {...skillAction(), uses: 'forge/private@1'},
+          {...skillAction(), uses: 'forge/private'},
         ],
       }),
     ).toThrow(/reserved namespace/);
     expect(() =>
       defineSetupActionBundle({
         manifest: BUNDLE_REFERENCE,
-        actions: [{...skillAction(), uses: 'other/skill@1'}],
+        actions: [{...skillAction(), uses: 'other/skill'}],
       }),
     ).toThrow(/outside bundle namespace/);
+    expect(() =>
+      defineSetupActionBundle({
+        manifest: BUNDLE_REFERENCE,
+        actions: [{...skillAction(), uses: 'acme-evals/skill@1'}],
+      }),
+    ).toThrow(/invalid/);
   });
 
   it('rejects duplicate bundle namespaces and action IDs', () => {
@@ -508,7 +513,7 @@ describe('ForgeEngine setup action bundles', () => {
 
     expect(() =>
       engine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'example'},
       }),
     ).toThrow(/plain JSON objects/);
@@ -532,7 +537,7 @@ describe('ForgeEngine setup action bundles', () => {
     });
     expect(() =>
       inputEngine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'x'.repeat(1024 * 1024)},
       }),
     ).toThrow(/byte limit/);
@@ -550,7 +555,7 @@ describe('ForgeEngine setup action bundles', () => {
     });
     expect(() =>
       outputEngine.parseSetupStep({
-        uses: 'acme-evals/skill@1',
+        uses: 'acme-evals/skill',
         with: {name: 'small'},
       }),
     ).toThrow(/byte limit/);
@@ -577,7 +582,7 @@ interface SkillWith extends JsonObject {
 
 function skillAction(): SetupActionDefinition<SkillWith> {
   return {
-    uses: 'acme-evals/skill@1',
+    uses: 'acme-evals/skill',
     parseWith(input) {
       if (
         input === null ||
@@ -616,7 +621,7 @@ function skillAction(): SetupActionDefinition<SkillWith> {
 
 function toolAction(): SetupActionDefinition<SkillWith> {
   return {
-    uses: 'zeta-evals/tool@1',
+    uses: 'zeta-evals/tool',
     parseWith(input) {
       if (
         input === null ||
@@ -706,7 +711,6 @@ function experimentValue() {
       manifest_sha256: DIGEST,
     },
     forge: {
-      version: '0.1.0',
       action_bundles: [{...BUNDLE_REFERENCE}],
     },
     runtime: {
@@ -724,7 +728,7 @@ function experimentValue() {
       'with-skill': {
         setup: [
           {
-            uses: 'acme-evals/skill@1',
+            uses: 'acme-evals/skill',
             with: {name: 'example-skill'},
           },
         ],

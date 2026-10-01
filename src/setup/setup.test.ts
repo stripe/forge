@@ -41,7 +41,7 @@ function result(exitCode = 0): CommandResult {
 }
 
 describe('portable setup actions', () => {
-  it('applies forge/write@1 and forge/command@1 in source order', async () => {
+  it('applies forge/write and forge/command in source order', async () => {
     const events: string[] = [];
     const writes = new Map<string, Uint8Array>();
     const workspace: MutableWorkspace = {
@@ -61,18 +61,18 @@ describe('portable setup actions', () => {
     };
     const steps: SetupStepV1[] = [
       {
-        uses: 'forge/write@1',
+        uses: 'forge/write',
         with: {target: 'notes/inline.txt', source: {content: 'inline'}},
       },
       {
-        uses: 'forge/write@1',
+        uses: 'forge/write',
         with: {
           target: 'notes/fixture.txt',
           source: {dataset_path: 'fixtures/source.txt'},
         },
       },
       {
-        uses: 'forge/command@1',
+        uses: 'forge/command',
         with: {argv: ['node', '--version'], cwd: '.', timeout_ms: 1234},
       },
     ];
@@ -117,14 +117,14 @@ describe('portable setup actions', () => {
       'command:node --version',
     ]);
     assert.deepEqual(applied.steps, [
-      {index: 0, uses: 'forge/write@1'},
-      {index: 1, uses: 'forge/write@1'},
-      {index: 2, uses: 'forge/command@1'},
+      {index: 0, uses: 'forge/write'},
+      {index: 1, uses: 'forge/write'},
+      {index: 2, uses: 'forge/command'},
     ]);
     assert.equal(Buffer.from(writes.get('notes/fixture.txt')!).toString(), 'fixture');
   });
 
-  it('routes forge/plugin@1 through only the selected agent capability', async () => {
+  it('routes forge/plugin through only the selected agent capability', async () => {
     const events: string[] = [];
     const pluginState = emptyWorkspace();
     const installer: AgentPluginInstaller = {
@@ -173,7 +173,7 @@ describe('portable setup actions', () => {
       },
     };
     const step = parseSetupStep({
-      uses: 'forge/plugin@1',
+      uses: 'forge/plugin',
       with: {
         agents: {
           'test-agent': {
@@ -221,7 +221,7 @@ describe('portable setup actions', () => {
     assert.deepEqual(applied.steps, [
       {
         index: 0,
-        uses: 'forge/plugin@1',
+        uses: 'forge/plugin',
         resolution: {
           adapter: 'test-agent',
           plugin: 'formatter@example-marketplace',
@@ -244,7 +244,7 @@ describe('portable setup actions', () => {
 
   it('rejects an unsupported or missing selected plugin realization in preflight', () => {
     const step = parseSetupStep({
-      uses: 'forge/plugin@1',
+      uses: 'forge/plugin',
       with: {
         agents: {
           'other-agent': {
@@ -263,7 +263,7 @@ describe('portable setup actions', () => {
   it('preflights all handlers before performing mutations', async () => {
     let mutated = false;
     const mutatingHandler: SetupStepHandler = {
-      uses: 'acme/mutate@1',
+      uses: 'acme/mutate',
       preflight() {
         return {
           requirements: {},
@@ -278,7 +278,7 @@ describe('portable setup actions', () => {
     );
     const steps: SetupStepV1[] = [
       {uses: mutatingHandler.uses, with: {}} as unknown as SetupStepV1,
-      {uses: 'example/missing@1', with: {}} as unknown as SetupStepV1,
+      {uses: 'example/missing', with: {}} as unknown as SetupStepV1,
     ];
     assert.throws(
       () => executor.preflight(steps, setupTarget),
@@ -290,7 +290,7 @@ describe('portable setup actions', () => {
   it('binds setup and agent requirements during one pure preflight', async () => {
     const events: string[] = [];
     const handler: SetupStepHandler = {
-      uses: 'acme/configure@1',
+      uses: 'acme/configure',
       preflight(_step, context) {
         assert.equal(Object.isFrozen(context.selection), true);
         assert.equal(Object.isFrozen(context.runtime), true);
@@ -390,7 +390,7 @@ describe('portable setup actions', () => {
 
   it('rejects conflicting setup and agent credential references during preflight', () => {
     const handler: SetupStepHandler = {
-      uses: 'acme/conflict@1',
+      uses: 'acme/conflict',
       preflight() {
         return {
           requirements: {
@@ -425,7 +425,7 @@ describe('portable setup actions', () => {
       argv: readonly string[];
     }> = [];
     const handler: SetupStepHandler = {
-      uses: 'acme/install@1',
+      uses: 'acme/install',
       preflight(step) {
         const payload = step.with as unknown as Readonly<{
           credential_name: string;
@@ -508,7 +508,7 @@ describe('portable setup actions', () => {
 
   it('binds prepared operations to an immutable setup-step snapshot', async () => {
     const inputStep = {
-      uses: 'acme/capture@1',
+      uses: 'acme/capture',
       with: {value: 'before'},
     };
     let frozenDuringPreflight = false;
@@ -548,7 +548,7 @@ describe('portable setup actions', () => {
 
   it('rejects handler-assigned raw credential scopes', () => {
     const handler: SetupStepHandler = {
-      uses: 'acme/unsafe-scope@1',
+      uses: 'acme/unsafe-scope',
       preflight() {
         return {
           requirements: {
@@ -622,7 +622,7 @@ describe('portable setup actions', () => {
 
     for (const requirements of malformed) {
       const handler: SetupStepHandler = {
-        uses: 'acme/malformed@1',
+        uses: 'acme/malformed',
         preflight() {
           return {
             requirements: requirements as SetupStepRequirements,
@@ -643,7 +643,7 @@ describe('portable setup actions', () => {
 
   it('rejects unknown prepared-step fields instead of discarding them', () => {
     const handler: SetupStepHandler = {
-      uses: 'acme/malformed-prepared@1',
+      uses: 'acme/malformed-prepared',
       preflight() {
         return {
           requirements: {},
@@ -665,7 +665,7 @@ describe('portable setup actions', () => {
   it('snapshots bounded JSON resolutions and rejects invalid output', async () => {
     const source = {nested: {value: 'before'}};
     const valid: SetupStepHandler = {
-      uses: 'acme/resolution@1',
+      uses: 'acme/resolution',
       preflight() {
         return {requirements: {}, async apply() { return source; }};
       },
@@ -693,7 +693,7 @@ describe('portable setup actions', () => {
     assert.ok(Object.isFrozen(applied.steps[0]?.resolution));
 
     const invalid: SetupStepHandler = {
-      uses: 'acme/invalid-resolution@1',
+      uses: 'acme/invalid-resolution',
       preflight() {
         return {
           requirements: {},
@@ -726,7 +726,7 @@ describe('portable setup actions', () => {
       assert.doesNotThrow(() => createSetupExecutor().preflight(
         [
           {
-            uses: 'forge/write@1',
+            uses: 'forge/write',
             with: {target: 'ready.txt', source: {content: 'ready'}},
           },
         ],
@@ -739,7 +739,7 @@ describe('portable setup actions', () => {
 
   it('does not attach potentially sensitive command output to setup errors', async () => {
     const prepared = createSetupExecutor().preflight(
-      [{uses: 'forge/command@1', with: {argv: ['false']}}],
+      [{uses: 'forge/command', with: {argv: ['false']}}],
       setupTarget,
     );
     await assert.rejects(
@@ -767,7 +767,7 @@ describe('portable setup actions', () => {
             },
           },
           setup() {
-            throw new Error('forge/command@1 must run uncredentialed');
+            throw new Error('forge/command must run uncredentialed');
           },
         },
         inputs: {

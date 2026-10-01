@@ -62,7 +62,7 @@ export interface WriteSetupWithV1 extends JsonObject {
 }
 
 export interface WriteSetupStepV1 extends SetupStepV1<WriteSetupWithV1> {
-  uses: 'forge/write@1';
+  uses: 'forge/write';
   with: WriteSetupWithV1;
 }
 
@@ -73,7 +73,7 @@ export interface CommandSetupWithV1 extends JsonObject {
 }
 
 export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
-  uses: 'forge/command@1';
+  uses: 'forge/command';
   with: CommandSetupWithV1;
 }
 
@@ -91,7 +91,7 @@ export interface PluginSetupWithV1 extends JsonObject {
 }
 
 export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
-  uses: 'forge/plugin@1';
+  uses: 'forge/plugin';
   with: PluginSetupWithV1;
 }
 
@@ -187,10 +187,8 @@ export interface ExperimentConfigV1 {
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
-  forge: {
-    version: string;
-    action_bundles?: SetupActionBundleReferenceV1[];
-  };
+  /** Required only when the experiment uses host-supplied setup actions. */
+  forge?: {action_bundles: SetupActionBundleReferenceV1[]};
   runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;

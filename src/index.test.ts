@@ -3,6 +3,7 @@ import {describe, it} from 'node:test';
 import {expect} from '../test/support/expect.js';
 
 import {
+  FORGE_VERSION,
   JUDGE_EVIDENCE_SCHEMA_VERSION,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -42,6 +43,7 @@ import {
 
 describe('@stripe/forge package root', () => {
   it('exports the engine, wire model, persistence, and composition contracts', () => {
+    expect(FORGE_VERSION).toBeTypeOf('string');
     expect(executeEval).toBeTypeOf('function');
     expect(preflightEval).toBeTypeOf('function');
     expect(parseInteractionArtifact).toBeTypeOf('function');
@@ -58,9 +60,9 @@ describe('@stripe/forge package root', () => {
     expect(createSetupExecutor).toBeTypeOf('function');
     expect(defineSetupActionBundle).toBeTypeOf('function');
     expect([...firstPartySetupHandlers.keys()].sort()).toEqual([
-      'forge/command@1',
-      'forge/plugin@1',
-      'forge/write@1',
+      'forge/command',
+      'forge/plugin',
+      'forge/write',
     ]);
     expect(credentialReference).toBeTypeOf('function');
     expect(normalizeEnvironmentSpecification).toBeTypeOf('function');

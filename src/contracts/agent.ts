@@ -173,7 +173,7 @@ export interface AgentEvidenceContext {
 export interface AgentAdapter {
   readonly id: string;
   readonly version: string;
-  /** Native realization for the public `forge/plugin@1` action, when supported. */
+  /** Native realization for the public `forge/plugin` action, when supported. */
   readonly pluginInstaller?: AgentPluginInstaller;
   /** Pure declaration used before credentials resolve or a runtime allocates. */
   requirements(selection: AgentSelectionV1): AgentRuntimeRequirements;
