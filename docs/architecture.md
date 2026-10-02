@@ -6,6 +6,12 @@ explains how to author and run an evaluation, while this document explains the
 boundaries, control flow, trust model, and extension points that make a run
 reproducible.
 
+Reproducible here means auditable semantics and provenance, not guaranteed
+byte-for-byte replay. Forge records declared intent, material setup-time
+resolutions, selected evidence, and the resulting evaluation. Models, network
+resources, registries, and other external systems can still change between
+runs.
+
 For a file-by-file tour and concrete call graphs, see the
 [Forge codebase guide](codebase-guide.md).
 
@@ -29,8 +35,10 @@ contracts, but they do not own benchmark semantics or lifecycle control.
 Forge is designed around five properties.
 
 **Reproducible semantics.** Cases say what is evaluated; experiments say how
-cases run; resolved plans materialize all defaults and provenance for one run.
-Runtime code does not infer omitted settings from ambient state.
+cases run; resolved plans materialize declared defaults and planning provenance
+for one run. `setup.json` records bounded non-sensitive choices resolved while
+realizing that plan. Runtime code does not infer omitted settings from ambient
+state.
 
 **Portable mechanisms.** Runtime, coding-agent, credential, completion,
 storage, input, and observation behavior enters through public contracts in
@@ -348,7 +356,11 @@ Setup actions execute strictly in plan order. Each prepared action receives:
 - the already-fixed agent and runtime selections.
 
 An action may return bounded, non-sensitive JSON for `setup.json`, such as a
-plugin installation receipt. Static built-ins return no dynamic resolution.
+plugin installation receipt. A resolution records every material setup-time
+choice not already fixed by the plan that could explain different realized
+behavior, such as an actual version, commit, artifact identity, or content
+digest. It does not include credentials or private host paths. Static built-ins
+return no dynamic resolution.
 After every action succeeds, Forge calls `finalizeSetup()`. This closes setup
 command authority and asks the runtime to seal any state directory declared
 immutable for interaction.
@@ -506,7 +518,9 @@ read-only to the container even though its host directory remains `0777`.
 Trusted host code can use `PreparedRuntime.importHostFile` during setup to copy
 a SHA-256-verified file into declared state. Setup actions and agents cannot
 call it. See [Runtime layouts and conformance](../README.md#runtime-layouts-and-conformance)
-for its exact contract.
+for its exact contract. This low-level capability currently verifies the copy
+but does not add an import receipt to `setup.json`; that is a provenance gap for
+integrations where the imported contents can affect evaluation behavior.
 
 The built-in agents disable their own approval and sandbox mechanisms because
 Docker provides the isolation boundary. A custom runtime must provide
@@ -780,8 +794,8 @@ extensions/<contributor-id>/...     # optional host contribution
 `result.json.evaluation` is the sole canonical evaluation result. The other
 core files serve distinct audit roles:
 
-- `plan.json`: exact canonical execution input;
-- `setup.json`: ordered action audit and bounded runtime resolutions;
+- `plan.json`: exact canonical declared execution input;
+- `setup.json`: ordered action audit and bounded material setup resolutions;
 - `trajectory.json`: full selected, normalized, redacted ATIF trajectory;
 - `interaction.json`: driver turns, stop reason, and Ava audit;
 - `workspace-evidence.json`: exact requested bytes used by deterministic
@@ -963,18 +977,21 @@ as the stable core.
 Changes that cross module boundaries should preserve these properties:
 
 1. Cases remain independent of experiments and environments.
-2. A resolved plan is complete, canonical, deeply immutable, and free of
-   ambient inference.
-3. All pure validation finishes before credential resolution or allocation.
-4. Setup actions run in case-then-treatment order and receive least privilege.
-5. One persistent, exactly identified coding-agent session backs a run.
-6. Mutation stops before evidence selection or evaluation.
-7. Native evidence must cover the driver ledger or explicitly fall back.
-8. Judge-visible transcript data is a positive, versioned projection of the
+2. A resolved plan completely captures declared semantics, is canonical and
+   deeply immutable, and is free of ambient inference.
+3. Material non-sensitive setup-time resolutions not fixed by the plan are
+   recorded in `setup.json`; changing external state is explicit rather than
+   mistaken for deterministic replay.
+4. All pure validation finishes before credential resolution or allocation.
+5. Setup actions run in case-then-treatment order and receive least privilege.
+6. One persistent, exactly identified coding-agent session backs a run.
+7. Mutation stops before evidence selection or evaluation.
+8. Native evidence must cover the driver ledger or explicitly fall back.
+9. Judge-visible transcript data is a positive, versioned projection of the
    redacted canonical trajectory.
-9. Every persisted companion file is described, path-validated, and committed
+10. Every persisted companion file is described, path-validated, and committed
    atomically; core and native artifacts retain their explicit size bounds.
-10. Cleanup, observation, and publication cannot reorder or redefine scoring
+11. Cleanup, observation, and publication cannot reorder or redefine scoring
     semantics.
 
 The tests adjacent to each module cover its local contract. Cross-module and

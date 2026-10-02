@@ -7,6 +7,13 @@ coding-agent evaluations. The internal Forge implementation builds on this
 package, so changes to its contracts, schemas, lifecycle, exports, or observable
 behavior can affect downstream internal consumers.
 
+Here, reproducible means that declared semantics and material execution-time
+resolutions are explicit and auditable. It does not promise byte-for-byte replay
+when models, network resources, registries, or other external systems can
+change. Preserve that distinction: `plan.json` records declared intent,
+`setup.json` records bounded non-sensitive setup resolutions, and the result
+binds those records to the selected evidence and outcome.
+
 Keep the public package free of dependencies on Stripe-internal infrastructure,
 services, credentials, paths, packages, and unpublished behavior. Public
 Stripe-owned names or integrations are acceptable only when they are portable,
@@ -25,8 +32,11 @@ truth for feature details; do not duplicate their full specifications here.
 
 - Cases define what is evaluated; experiments define how cases run. Keep
   environment configuration out of case definitions.
-- A resolved run plan is complete, canonical, immutable, and free of ambient
-  inference.
+- A resolved run plan completely captures declared semantics, is canonical and
+  immutable, and is free of ambient inference.
+- Record every material, non-sensitive setup-time resolution not fixed by the
+  plan in `setup.json`. Changing external state may prevent exact replay, but it
+  must not silently change the realized setup.
 - Wire formats are strict and versioned; unknown authored fields remain errors.
   Do not mutate parsed inputs, and keep resolved plans cloned and deeply frozen.
 - Complete parsing and pure capability preflight before resolving credentials,
@@ -40,8 +50,9 @@ truth for feature details; do not duplicate their full specifications here.
 - Treat credentials as scoped capabilities. Keep secret values out of authored
   inputs, plans, events, errors, transcripts, and ordinary artifacts; never
   copy the ambient host environment wholesale into a runtime.
-- Keep results deterministic, bounded, verifiable, and atomically committed.
-  Cleanup, observation, and publication must not alter scoring semantics.
+- Keep result serialization deterministic, bounded, verifiable, and atomically
+  committed. Cleanup, observation, and publication must not alter scoring
+  semantics.
 - Add host-specific capabilities through narrow public interfaces or explicit,
   immutable action bundles. Do not add global discovery, YAML-driven imports,
   or hidden process-environment fallbacks.
