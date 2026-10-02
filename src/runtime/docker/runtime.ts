@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import type {CommandRunner} from '../../contracts/command.js';
 import type {
+  HostFileImport,
   MutableWorkspace,
   PreparedRuntime,
   ReadonlyWorkspace,
@@ -26,6 +27,7 @@ import {
   type HostCommandRunner,
 } from '../processCommandRunner.js';
 import {createOwnedWorkspace} from '../workspace.js';
+import {hashStateFile, importHostFileIntoState} from '../hostFileImport.js';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
@@ -206,11 +208,13 @@ export function createDockerRuntimeAdapter(
       const workspaceRoot = path.join(runRoot, 'workspace');
       const homeRoot = path.join(runRoot, 'home');
       const stateRoot = path.join(runRoot, 'state');
+      const importRoot = path.join(runRoot, 'imports');
       const environmentFileRoot = path.join(runRoot, 'environment');
       const cidFile = path.join(runRoot, 'container-id');
       await fs.mkdir(workspaceRoot, {mode: 0o777});
       await fs.mkdir(homeRoot, {mode: 0o777});
       await fs.mkdir(stateRoot, {mode: 0o700});
+      await fs.mkdir(importRoot, {mode: 0o700});
       await fs.mkdir(environmentFileRoot, {mode: 0o700});
       // The unpredictable parent remains 0700; the Docker VM's non-root user
       // needs write access only to these two run-owned mount leaves.
@@ -298,14 +302,27 @@ export function createDockerRuntimeAdapter(
         maximumTimeoutMs: input.plan.limits.run_timeout_ms,
       });
       let setupFinalized = false;
+      let importsOpen = true;
+      const activeImports = new Set<Promise<void>>();
+      const activeImportTargets = new Set<string>();
+      const importedFiles = new Map<string, HostFileImport>();
+      const importFailures: unknown[] = [];
+      const waitForImports = async (): Promise<void> => {
+        await Promise.allSettled([...activeImports]);
+        if (importFailures.length > 0) {
+          throw new AggregateError(importFailures, 'Host file imports failed.');
+        }
+      };
       let sealedPromise: Promise<SealedRuntime> | undefined;
       let disposePromise: Promise<void> | undefined;
 
       const dispose = (): Promise<void> => {
         mutationOpen = false;
+        importsOpen = false;
         disposePromise ??= (async () => {
           // A started quiesce owns the stop barrier. Cleanup never races it.
           await sealedPromise?.catch(() => undefined);
+          await waitForImports().catch(() => undefined);
           await disposeRuntime({
             containerName,
             controller,
@@ -367,6 +384,51 @@ export function createDockerRuntimeAdapter(
           home: CONTAINER_HOME,
         }),
         stateDirectories,
+        importHostFile(request: HostFileImport, signal?: AbortSignal): Promise<void> {
+          if (!importsOpen || !mutationOpen || disposePromise || sealedPromise) {
+            throw new Error('Docker runtime host imports are no longer available.');
+          }
+          const snapshot = Object.freeze({...request});
+          const requirement = stateRequirements.find(
+            ({id}) => id === snapshot.stateDirectoryId,
+          );
+          if (!requirement) {
+            throw new Error('Host import requires a declared state directory.');
+          }
+          if (snapshot.verifyAfterSetup && !requirement.sealAfterSetup) {
+            throw new Error('Post-setup host import verification requires a sealed state directory.');
+          }
+          const key = `${requirement.id}/${snapshot.relativePath}`;
+          if (importedFiles.has(key) || activeImportTargets.has(key)) {
+            throw new Error('A host import already targets this state file.');
+          }
+          activeImportTargets.add(key);
+          const importSignal = signal === undefined
+            ? input.signal
+            : AbortSignal.any([input.signal, signal]);
+          const importing = (async () => {
+            await importHostFileIntoState(
+              path.join(stateRoot, requirement.id),
+              importRoot,
+              snapshot,
+              importSignal,
+            );
+            importedFiles.set(key, snapshot);
+          })();
+          activeImports.add(importing);
+          void importing.then(
+            () => {
+              activeImports.delete(importing);
+              activeImportTargets.delete(key);
+            },
+            (error: unknown) => {
+              importFailures.push(error);
+              activeImports.delete(importing);
+              activeImportTargets.delete(key);
+            },
+          );
+          return importing;
+        },
         commands: Object.freeze({
           uncredentialed: uncredentialedCommands,
           setup: (credentialEnvironmentNames: readonly string[]) =>
@@ -380,6 +442,8 @@ export function createDockerRuntimeAdapter(
           if (disposePromise || sealedPromise) {
             throw new Error('Docker runtime cannot finalize setup after shutdown.');
           }
+          importsOpen = false;
+          await waitForImports();
           await controller.finalizeSetupAndWait();
           setupFinalized = true;
           if (!stateMounts.some(({sealAfterSetup}) => sealAfterSetup)) return;
@@ -405,6 +469,18 @@ export function createDockerRuntimeAdapter(
             throw new Error('Docker could not replace the Forge setup container.');
           }
           containerExists = false;
+          for (const imported of importedFiles.values()) {
+            if (!imported.verifyAfterSetup) continue;
+            const digest = await hashStateFile(
+              path.join(stateRoot, imported.stateDirectoryId),
+              imported.relativePath,
+              imported.maxBytes,
+              input.signal,
+            );
+            if (digest !== imported.sha256) {
+              throw new Error('Sealed host-imported file differs from its expected SHA-256.');
+            }
+          }
           await fs.rm(cidFile, {force: true});
           try {
             const restarted = await hostCommands.run(startArgv(true), {
@@ -433,7 +509,9 @@ export function createDockerRuntimeAdapter(
             return Promise.reject(new Error('Docker runtime is already disposing.'));
           }
           mutationOpen = false;
+          importsOpen = false;
           sealedPromise ??= (async () => {
+            await waitForImports();
             await controller.closeAndWait();
             const stopped = await hostCommands.run(
               [dockerExecutable, 'stop', '--time', '10', containerName],
@@ -804,12 +882,16 @@ function validateStateRequirements(
       throw new TypeError(`Duplicate runtime state directory id: ${requirement.id}`);
     }
     if (
-      !requirement.containerPath.startsWith(`${CONTAINER_HOME}/`) ||
+      !(
+        requirement.containerPath.startsWith(`${CONTAINER_HOME}/`) ||
+        (requirement.sealAfterSetup === true &&
+          requirement.containerPath.startsWith('/opt/'))
+      ) ||
       requirement.containerPath.includes('\0') ||
       path.posix.normalize(requirement.containerPath) !== requirement.containerPath
     ) {
       throw new TypeError(
-        `Runtime state directory must be a canonical child of ${CONTAINER_HOME}: ${requirement.containerPath}`,
+        `Runtime state directory must be a canonical child of ${CONTAINER_HOME}, or a sealed child of /opt: ${requirement.containerPath}`,
       );
     }
     if (

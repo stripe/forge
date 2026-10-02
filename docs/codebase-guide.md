@@ -322,6 +322,7 @@ The runtime contract deliberately changes shape over time:
 PreparedRuntime
 ├── workspace: MutableWorkspace
 ├── stateDirectories: MutableWorkspace map
+├── importHostFile?: host-only bounded file transfer
 ├── commands.uncredentialed
 ├── commands.setup(exact names)
 └── commands.agent
@@ -431,6 +432,7 @@ those two sides.
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/runtime.ts) | `createDockerRuntimeAdapter` | Implements `RuntimeAdapter`: validates runtime config, builds the image, creates run-owned directories, starts/restarts/stops the container, projects workspaces and commands, quiesces, and disposes. |
+| [`hostFileImport.ts`](https://github.com/stripe/forge/blob/main/src/runtime/hostFileImport.ts) | `importHostFileIntoState` | Streams and verifies trusted host file imports into declared run-owned state. |
 | [`platform.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/platform.ts) | `detectDockerRuntimePlatform` | Queries the selected Docker server and maps its architecture to the concrete platform used when planning an authored `native` experiment. |
 | [`commandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/commandRunner.ts) | `DockerCommandController` | Implements scoped `CommandRunner`s over `docker exec`, creates temporary env files, tracks active commands, and closes setup/all command authority at lifecycle barriers. |
 | [`assets.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets.ts) | Base image, CLI version, and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |

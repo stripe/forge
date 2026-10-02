@@ -329,6 +329,7 @@ The runtime receives the resolved environment and the combined executable and
 state-directory requirements. It returns a `PreparedRuntime` with:
 
 - mutable workspace and declared state directories;
+- an optional host-only bounded file import into declared state;
 - logical runtime paths;
 - uncredentialed, setup-scoped, and agent-scoped command projections;
 - `finalizeSetup`, `quiesce`, and idempotent `dispose` lifecycle methods.
@@ -437,22 +438,89 @@ the Docker CLI and a Forge-owned image. It:
 - builds one cached image per selected platform and records the immutable image
   ID;
 - pins the installed Claude Code and Codex CLI versions;
-- creates fresh host-backed workspace, home, state, and environment-file
-  directories for every run;
 - runs as a non-root user with a read-only root filesystem, all capabilities
   dropped, `no-new-privileges`, explicit CPU/memory/process limits, and a
   bounded temporary filesystem;
-- bind-mounts only run-owned workspace, home, and declared state directories;
 - passes commands as argv vectors through `docker exec`, never an implicit
   shell;
-- writes a short-lived mode-`0600` env file containing only the variables
-  allowed for that command projection;
 - waits for active commands before setup finalization and quiescence; and
 - removes the container and all run-owned temporary files during disposal.
 
-If a state directory requests `sealAfterSetup`, Docker replaces the setup
-container and remounts that directory read-only before interaction. Otherwise
-the same container remains active until quiescence.
+#### Run-owned paths and mounts
+
+For one run, let `R` be the fresh host directory
+`<temporaryRoot>/stripe-forge-run-<random>`. Forge uses bind mounts, not named
+Docker volumes. The paths under `R` are on the host; the paths on the right are
+what processes inside the container see:
+
+```mermaid
+flowchart LR
+    subgraph Host["Host filesystem: R is mode 0700"]
+        W["R/workspace - 0777"]
+        H["R/home - 0777"]
+        S["R/state/{id} - 0777"]
+        I["R/imports - 0700"]
+        E["R/environment - 0700"]
+        C["R/container-id - host only"]
+    end
+    CLI["Forge host process / Docker CLI"]
+    subgraph Container["Container processes: UID:GID 10001:10001"]
+        CW["/workspace"]
+        CH["/home/forge"]
+        CS["declared state path"]
+        T["/tmp - 256 MiB tmpfs"]
+        ROOT["image root - read-only"]
+    end
+
+    W -->|RW bind in both phases| CW
+    H -->|RW bind in both phases| CH
+    S -->|RW setup, RO interaction if sealed| CS
+    I -.->|verified host-side rename| S
+    E -.->|temporary docker exec env-file| CLI
+    C -.->|read for cleanup| CLI
+    CLI -->|docker run / exec / stop / rm| Container
+```
+
+| Host path or Docker filesystem | Host-side mode | Container access |
+| --- | --- | --- |
+| `R` | `0700`, created by `mkdtemp` | Not mounted. As the private parent, it prevents other host users from traversing to the world-writable mount leaves. |
+| `R/workspace` | `0777` | Read-write bind at `/workspace` during setup and interaction. |
+| `R/home` | `0777` | Read-write bind at `/home/forge` during setup and interaction. |
+| `R/state` and `R/state/{id}` | Parent `0700`; each declared leaf `0777` | Only each leaf is bind-mounted at its declared `containerPath`. It is read-write during setup; an unsealed leaf stays read-write during interaction, while a sealed leaf is remounted read-only. State paths must be below `/home/forge`, or below `/opt` when sealed. |
+| `R/imports` | `0700`; staged files start `0600` | Never mounted. A trusted host import streams here, verifies the staged SHA-256, applies the requested file mode (default `0644`, or for example `0755` for an executable), then renames the file into a declared state leaf. |
+| `R/environment` | `0700`; each command's env file is `0600` | Never mounted. The Docker CLI reads it via `docker exec --env-file`; Forge deletes it after that command. Only the variables and credential scope allowed for that command are included. |
+| `R/container-id` | Created by Docker's `--cidfile`; Forge does not set its mode | Never mounted; used by the host for cleanup if container startup only partly succeeds. |
+| `/tmp` | No host path | A separate read-write tmpfs with `nosuid,nodev,noexec` and a 256 MiB size limit. |
+| Image root filesystem | Not a run-owned host directory | `--read-only`; writable bind mounts and `/tmp` are independent exceptions. The Docker socket is not mounted. |
+
+The `0777` bind-mount leaves allow the container's non-root UID `10001` to
+write even when it differs from the host owner's UID. Sealing changes the
+*Docker mount mode*, not the host directory's `0777` permissions. A declared
+state mount nested under `/home/forge` overlays that path in the home bind
+mount; its host source is still the separate `R/state/{id}` directory. These
+directory modes do not set every file's mode: host `writeFile` defaults to
+`0644`, while container-created files follow the container process's own mode
+and umask.
+
+Forge also creates a separate, short-lived `stripe-forge-build-*` host directory
+for the Dockerfile and entrypoint while building the image. It is not mounted
+into an evaluation container and is removed after the build. The built image
+may remain cached by Docker across runs.
+
+At `prepare`, Forge starts a setup container with all declared state mounts
+read-write. At `finalizeSetup`, it closes import and setup-command authority and
+waits for active work. If any state directory requests `sealAfterSetup`, Forge
+stops and removes the setup container, optionally rechecks imported file hashes,
+then starts an interaction container using the **same host directories** but
+read-only mounts for those selected state leaves. Without a sealed state
+directory, it keeps the original container. `quiesce` stops commands and the
+container before evidence is read; `dispose` removes the container and `R`.
+
+The optional `PreparedRuntime.importHostFile` capability is deliberately absent
+from agent and setup projections. Docker opens a host source without following
+its final symlink and accepts only a single safe filename at the state root, so
+container-created symlink parents cannot redirect an import. Imports cannot
+start after setup finalization, quiescence, or disposal.
 
 The built-in coding-agent CLIs run with their own approval/sandbox mechanisms
 disabled because the Docker runtime is the isolation boundary. A custom runtime

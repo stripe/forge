@@ -1258,6 +1258,18 @@ The runtime must expose exactly the declared state directories and enforce its
 mutable, setup-finalized, sealed, and disposed boundaries. An adapter which
 cannot enforce `sealAfterSetup: true` must reject that requirement in preflight.
 
+Trusted embedding hosts can use the optional `PreparedRuntime.importHostFile`
+capability to install a large local file into a declared state directory without
+holding it all in Node memory. The host supplies an absolute source path, a
+single safe filename at the state root, a byte limit, and the expected SHA-256.
+The Docker runtime streams the copy, verifies the staged bytes, and publishes them
+atomically. `verifyAfterSetup: true` checks the file again as setup ends and
+requires a sealed state directory. This capability is available only to the
+host holding `PreparedRuntime`; it is not exposed to authored YAML, setup
+actions, or agents. A custom runtime may omit it; hosts that need imports must
+check for support. Docker state mounts may be under `/home/forge`, or under
+`/opt` when `sealAfterSetup: true` protects a system-managed tool.
+
 The public Claude adapter accepts a fixed, runtime-visible layout:
 
 ```js

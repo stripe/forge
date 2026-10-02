@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -521,6 +522,139 @@ describe('Forge Docker runtime', () => {
     await assert.rejects(prepared.finalizeSetup(), /already been finalized/);
 
     await prepared.quiesce();
+    await prepared.dispose();
+  });
+
+  it('streams a host file into sealed state and checks the installed bytes', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-import-test-'));
+    roots.push(temporaryRoot);
+    const source = path.join(temporaryRoot, 'source-tool');
+    const bytes = Buffer.alloc(129 * 1024, 0x5a);
+    await fs.writeFile(source, bytes);
+    const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const docker = fakeDocker();
+    const temporaryAlias = path.join(temporaryRoot, 'alias');
+    await fs.symlink(temporaryRoot, temporaryAlias);
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: docker.runner,
+      temporaryRoot: temporaryAlias,
+    });
+    const prepareTool = () => adapter.prepare(preparation({
+      requirements: {
+        executables: [],
+        stateDirectories: [{
+          id: 'tool-bin',
+          containerPath: '/opt/example-tool/bin',
+          sealAfterSetup: true,
+        }],
+      },
+    }));
+    const prepared = await prepareTool();
+    assert.equal('importHostFile' in prepared, true);
+    const request = {
+      sourcePath: source,
+      stateDirectoryId: 'tool-bin',
+      relativePath: 'tool',
+      maxBytes: bytes.byteLength,
+      sha256,
+      mode: 0o755,
+      verifyAfterSetup: true,
+    } as const;
+    await prepared.importHostFile!(request);
+    const mount = docker.calls.find((call) => call.argv[1] === 'run')!.argv.find(
+      (argument) => argument.includes('target=/opt/example-tool/bin'),
+    )!;
+    const mountedRoot = mount.match(/source=([^,]+)/)![1]!;
+    assert.equal((await fs.stat(path.join(mountedRoot, 'tool'))).mode & 0o777, 0o755);
+    assert.deepEqual(
+      Buffer.from(await prepared.stateDirectories.get('tool-bin')!.readFile('tool')),
+      bytes,
+    );
+    await prepared.finalizeSetup();
+    await assert.rejects(async () => prepared.importHostFile!(request), /no longer available/);
+    const runs = docker.calls.filter((call) => call.argv[1] === 'run');
+    assert.match(
+      runs[1]!.argv.find((argument) => argument.includes('target=/opt/example-tool/bin'))!,
+      /,readonly$/,
+    );
+    await prepared.dispose();
+
+    const changed = await prepareTool();
+    await changed.importHostFile!(request);
+    await changed.stateDirectories.get('tool-bin')!.writeFile('tool', Buffer.from('changed'));
+    await assert.rejects(changed.finalizeSetup(), /differs from its expected SHA-256/);
+    await changed.dispose();
+  });
+
+  it('rejects unsafe, undeclared, oversized, and unsealed host imports', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-import-test-'));
+    roots.push(temporaryRoot);
+    const source = path.join(temporaryRoot, 'source');
+    await fs.writeFile(source, 'safe');
+    const linkedSource = path.join(temporaryRoot, 'linked-source');
+    await fs.symlink(source, linkedSource);
+    const sha256 = `sha256:${createHash('sha256').update('safe').digest('hex')}`;
+    const docker = fakeDocker();
+    const adapter = createDockerRuntimeAdapter({hostCommands: docker.runner, temporaryRoot});
+    const prepared = await adapter.prepare(preparation({
+      requirements: {
+        executables: [],
+        stateDirectories: [
+          {id: 'sealed', containerPath: '/opt/example-tool/bin', sealAfterSetup: true},
+          {id: 'writable', containerPath: '/home/forge/writable'},
+        ],
+      },
+    }));
+    const request = {
+      sourcePath: source,
+      stateDirectoryId: 'sealed',
+      relativePath: 'tool',
+      maxBytes: 4,
+      sha256,
+      verifyAfterSetup: true,
+    } as const;
+    await assert.rejects(async () => prepared.importHostFile!({...request, sourcePath: linkedSource}));
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, stateDirectoryId: 'missing'}),
+      /declared state directory/,
+    );
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, stateDirectoryId: 'writable'}),
+      /requires a sealed state directory/,
+    );
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, relativePath: '../escape'}),
+      /Invalid host file import/,
+    );
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, maxBytes: 3}),
+      /bounded regular file/,
+    );
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, sha256: `sha256:${'0'.repeat(64)}`}),
+      /does not match/,
+    );
+    const run = docker.calls.find((call) => call.argv[1] === 'run')!;
+    const mount = run.argv.find((argument) => argument.includes('target=/opt/example-tool/bin'))!;
+    const mountedRoot = mount.match(/source=([^,]+)/)![1]!;
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, relativePath: 'nested/tool'}),
+      /Invalid host file import/,
+    );
+    await fs.symlink(source, path.join(mountedRoot, 'linked-target'));
+    await assert.rejects(
+      async () => prepared.importHostFile!({...request, relativePath: 'linked-target'}),
+      /unsafe destination/,
+    );
+    const abort = new AbortController();
+    abort.abort();
+    await assert.rejects(
+      async () => prepared.importHostFile!(request, abort.signal),
+      /aborted/i,
+    );
+    await prepared.stateDirectories.get('sealed')!.writeFile('existing', Buffer.from('file'));
+    const entry = await prepared.stateDirectories.get('sealed')!.inspect('existing');
+    assert.equal(entry.kind, 'file');
     await prepared.dispose();
   });
 
