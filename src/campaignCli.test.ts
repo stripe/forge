@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
-import {inspectCampaign} from './campaign.js';
+import {inspectCampaign, parseCampaignReport} from './campaign.js';
 import {
   CAMPAIGN_CLI_OPTIONS,
   CampaignCommandError,
@@ -250,6 +250,10 @@ describe('shared campaign command', () => {
     });
     assert.equal(result.completed, 1);
     assert.equal(result.outcomes[0]!.artifact!.evaluation.status, 'passed');
+    assert.equal(result.report, path.join(result.location, 'report.json'));
+    const report = parseCampaignReport(JSON.parse(await fs.readFile(result.report, 'utf8')));
+    assert.equal(report.summary.completed, 1);
+    assert.equal(report.cases[0]!.case_id, plan.selection.case_id);
     const inspected = await inspectCampaign({root: result.location, engine});
     assert.deepEqual(inspected.outcomes, result.outcomes);
     const wrongEngine = await inspectCampaign({root: result.location, engine: defaultForgeEngine});
@@ -315,6 +319,13 @@ describe('shared campaign command', () => {
     assert.equal(first.errored, 1);
     assert.equal(first.outcomes[0]!.error_code, 'role_player_error');
     assert.equal(first.outcomes[0]!.artifact!.failure, 'role_player_error');
+    const report = parseCampaignReport(JSON.parse(await fs.readFile(first.report, 'utf8')));
+    assert.equal(report.summary.completed, 0);
+    assert.equal(report.summary.errored, 1);
+    assert.equal(report.summary.pass_rate, null);
+    assert.equal(report.runs[0]!.evaluation, null);
+    assert.equal(report.runs[0]!.error_code, 'role_player_error');
+    assert.equal(report.runs[0]!.result_path, `runs/${first.outcomes[0]!.run_id}/result.json`);
     const inspected = await inspectCampaign({root: first.location, engine: defaultForgeEngine});
     assert.deepEqual(inspected.outcomes, first.outcomes);
     const resumed = await fixture.run(['--resume', 'exp-1'], options);
@@ -336,6 +347,11 @@ describe('shared campaign command', () => {
     assert.equal(first.outcomes[0]!.error_code, 'execution_error');
     assert.equal(first.outcomes[0]!.artifact!.evaluation.status, 'passed');
     assert.equal(JSON.stringify(first).includes('private cleanup error'), false);
+    // The report uses the same committed-result recovery as the next resume.
+    const report = parseCampaignReport(JSON.parse(await fs.readFile(first.report, 'utf8')));
+    assert.equal(report.summary.completed, 1);
+    assert.equal(report.summary.errored, 0);
+    assert.equal(report.runs[0]!.evaluation!.status, 'passed');
     const resumed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(resumed.executed, 0);
     assert.equal(resumed.outcomes[0]!.run_id, first.outcomes[0]!.run_id);

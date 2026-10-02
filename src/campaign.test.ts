@@ -5,12 +5,16 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {
+  CAMPAIGN_REPORT_SCHEMA_VERSION,
+  CampaignReportError,
   inspectCampaign,
+  parseCampaignReport,
   readCampaignSelections,
   runCampaign,
   type CampaignOptions,
   type CampaignProgressEvent,
   type CampaignSummary,
+  type CampaignReportV1,
 } from './campaign.js';
 import {createForgeEngine, defaultForgeEngine} from './engine.js';
 import * as rootExports from './index.js';
@@ -35,9 +39,13 @@ describe('public campaign API', () => {
     assert.equal(typeof runCampaign, 'function');
     assert.equal(typeof readCampaignSelections, 'function');
     assert.equal(typeof inspectCampaign, 'function');
+    assert.equal(typeof parseCampaignReport, 'function');
+    assert.equal(typeof CampaignReportError, 'function');
+    assert.equal(CAMPAIGN_REPORT_SCHEMA_VERSION, 1);
     assert.equal('runCampaign' in rootExports, false);
     const optionsType = (_options: CampaignOptions): void => undefined;
     const summaryType = (_summary: CampaignSummary): void => undefined;
+    const reportType = (_report: CampaignReportV1): void => undefined;
     const eventType = (event: CampaignProgressEvent): string => {
       if ('location' in event) return event.location;
       if (event.state === 'errored') return event.error_code;
@@ -45,6 +53,7 @@ describe('public campaign API', () => {
     };
     assert.equal(typeof optionsType, 'function');
     assert.equal(typeof summaryType, 'function');
+    assert.equal(typeof reportType, 'function');
     assert.equal(typeof eventType, 'function');
   });
 
@@ -147,7 +156,8 @@ describe('public campaign API', () => {
       },
     };
     assert.deepEqual(await runCampaign(options), {
-      campaign: path.join(root, 'campaign.json'), total: 2, executed: 2, skipped: 0, completed: 1, errored: 1,
+      campaign: path.join(root, 'campaign.json'), report: path.join(root, 'report.json'),
+      total: 2, executed: 2, skipped: 0, completed: 1, errored: 1,
     });
     assert.deepEqual(await readCampaignSelections(root), plans.map((plan) => plan.selection));
     assert.deepEqual(await readCampaignSelections(`${root}/.`), plans.map((plan) => plan.selection));

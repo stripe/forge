@@ -456,11 +456,12 @@ for the host's memory/CPU capacity and provider rate limits; `--jobs` limits
 evals, not individual provider requests. Each eval may also judge up to four
 guidelines concurrently. Completion and progress records can arrive in any order.
 
-Each execution has an independent checkpoint and eval artifacts:
+Each execution has an independent checkpoint, scorecard, and eval artifacts:
 
 ```text
 results/experiments/<experiment-run-id>/
 ├── campaign.json
+├── report.json
 └── runs/
     ├── <eval-run-id>/
     └── <another-eval-run-id>/
@@ -497,8 +498,9 @@ IDs and preserve all earlier artifacts and attempt records.
 
 Progress records go to stderr. The final JSON summary on stdout contains the
 experiment execution ID, directory, checkpoint path, and total, executed,
-skipped, completed, and errored counts. Exit code 1 means execution errors
-remain; code 0 means every entry completed, regardless of evaluation scores.
+skipped, completed, and errored counts, plus the `report` path. Exit code 1 means
+execution errors remain or report generation failed; code 0 means every entry
+completed and the report was saved, regardless of evaluation scores.
 Each invocation attempts pending entries once; `matrix.retries` does not add
 automatic attempts. Campaigns use the local artifact store and permit one
 active process per execution. Cancellation stops new work, signals active evals,
@@ -506,6 +508,56 @@ and waits for their cleanup before releasing the checkpoint lock. A checkpoint
 failure also cancels and drains active work; resume verifies any results committed
 before interruption. `--run-id` can name an eval only when exactly one
 combination is selected; it cannot be combined with resume.
+
+`report.json` is the experiment's scorecard, automatically refreshed after each
+run or resume invocation settles. `campaign.json` remains the execution
+checkpoint with plan identities and attempt history; reports are derived from
+verified eval artifacts and are never used to decide what to resume.
+To view scores by case and configuration:
+
+```sh
+jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, guideline_score}' \
+  results/experiments/EXPERIMENT_RUN_ID/report.json
+```
+
+The strict, schema-version-1 report contains:
+
+| Field | Meaning |
+| --- | --- |
+| `experiment_run_id`, `generated_at`, `checkpoint_sha256` | Execution ID, UTC snapshot time, and SHA-256 of the exact checkpoint bytes used for this report. |
+| `summary` | Statistics across every saved selection. |
+| `cases` | Statistics grouped by case ID, treatment, and exact adapter/provider/model, combining repetitions. Groups appear in first-selection order. |
+| `runs` | One row per saved selection in original order: zero-based `selection_index`, full `selection`, latest `run_id`, effective `state`, stable `error_code`, `attempt_count`, relative `result_path`, and `evaluation`. |
+
+Each statistics object counts `selections`, `completed`, `errored`, `pending`,
+and completed evaluation statuses (`passed`, `partial`, `failed`).
+`attempts_total` counts all attempts; `retry_attempts` counts attempts after the
+first for each selection. Retries never add another selection or another score.
+`coverage` is completed selections divided by all selections. `pass_rate` is
+passed evaluations divided by completed evaluations, or `null` when none
+completed. `guideline_score` contains the mean score and number of completed
+evaluations with guidelines; its mean is `null` when that count is zero. Ratios
+and scores range from 0 to 1. A checks-only evaluation can pass with raw score
+0; it contributes to pass rate, but not the guideline mean.
+
+Only the latest verified effective outcome for each selection contributes to
+scores, using the same committed-result recovery as resume. Completed failed
+or partial evaluations keep their scores. Execution errors, including committed
+role-player failures, and pending entries have `evaluation: null`. Completed
+rows retain status, score, guideline passed/total counts, and check passed/total
+counts. `result_path` points to `runs/<eval-run-id>/result.json` relative to the
+experiment directory when verified artifacts exist, including an errored
+role-player result; otherwise it is `null`.
+
+Execution errors still produce a partial scorecard. Graceful cancellation or a
+coordinator failure attempts to save one after active evals drain. Reports are
+atomically replaced while the campaign lock is held. They are snapshots, so an
+active resume or a hard process kill can leave the previous report stale or
+missing. A report write failure preserves committed evals and is surfaced on
+normal completion; an existing execution or cancellation failure remains the
+primary error. Rerun with `--resume EXPERIMENT_RUN_ID` to refresh a missing or
+corrupt report while skipping valid completed evals. Report generation does not
+make additional model calls.
 
 ## Running Codex
 
@@ -1040,6 +1092,16 @@ throwing from this callback stops scheduling. `CampaignOptions`,
 `CampaignProgressEvent`, `CampaignSummary`, and `CampaignOutcome` are exported
 types from the same subpath.
 
+Both `runCampaign` and `runCampaignCommand` automatically write the
+[experiment scorecard](#running-and-resuming-an-experiment) under their selected
+root and return its path as `summary.report`. `parseCampaignReport` validates
+loaded report JSON, including agreement between run rows and aggregate
+statistics. `CAMPAIGN_REPORT_SCHEMA_VERSION`, `CampaignReportV1`, and its
+evaluation, run, statistics, and case types are exported from
+`@stripe/forge/campaign`. A reporting failure after normal execution rejects
+with `CampaignReportError`, which carries the report path and original cause;
+saved evaluations remain resumable.
+
 For command hosts, `@stripe/forge/campaign/cli` adds a shared run/resume stage.
 `runCampaignCommand` parses `--jobs`/`-j`, `--resume <id>`, `--output`/`-o`, and
 `--run-id`, selects the execution ID/root, restores saved selections before
@@ -1279,7 +1341,7 @@ async function loadForge() {
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
-| `@stripe/forge/campaign` | Shared local scheduling, checkpoints, resume, verified outcomes, and read-only inspection |
+| `@stripe/forge/campaign` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
 | `@stripe/forge/campaign/cli` | Extensible shared run/resume command stage and operational option definitions |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |

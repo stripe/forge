@@ -215,6 +215,20 @@ kept. One errored entry does not stop other entries. Cancellation or coordinator
 failure stops new scheduling and signals active callbacks; the controller waits
 for every callback to finish cleanup before releasing its lock.
 
+The controller also writes a derived, versioned `report.json` after workers
+drain, while still holding the campaign lock. It reads the last durable
+checkpoint and uses the same verified latest-attempt recovery as resume,
+reusing bounded inspection metadata from the invocation. The scorecard groups
+repetitions by case/treatment/agent and separates execution coverage from
+completed evaluation scores. Its checkpoint digest and generation time bind it
+to that snapshot. Atomic replacement preserves the previous report if writing
+fails. Reporting errors surface on normal completion; after cancellation or
+coordinator failure, reporting is best effort and preserves the primary error.
+Resume does not read the report, so it can regenerate a missing or corrupt
+scorecard without rerunning valid completed evaluations. Report fields and
+denominators are documented in the README's
+[campaign workflow](../README.md#running-and-resuming-an-experiment).
+
 Embedding hosts supply resolved plans, an engine, a pure preflight composition,
 and an execution callback. The callback may construct per-run host resources
 and composition around execution by that same engine, honoring cancellation and
