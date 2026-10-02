@@ -89,6 +89,16 @@ describe('experiment expansion and run planning', () => {
     expect(Object.isFrozen(plan.setup)).toBe(true);
   });
 
+  it('keeps dataset locations out of resolved plans and their checksums', () => {
+    const loaded = inputs();
+    const selected = expandExperiment(loaded.experiment)[0]!;
+    const before = resolveRunPlan({...loaded, selection: selected});
+    loaded.experiment.config.dataset.path = '../relocated-dataset';
+    const after = resolveRunPlan({...loaded, selection: selected});
+    expect(serializeResolvedRunPlan(after)).toBe(serializeResolvedRunPlan(before));
+    expect(resolvedRunPlanSha256(after)).toBe(resolvedRunPlanSha256(before));
+  });
+
   it('supports one-shot checks-only plans without role-player or judge models', () => {
     const {
       task: _task,

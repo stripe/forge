@@ -223,6 +223,16 @@ task: safe
     )).toThrow(BenchmarkModelError);
   });
 
+  it('accepts a dataset location and rejects empty or unsafe locations', () => {
+    const source = experimentConfigYaml();
+    const config = parseExperimentConfigYaml(source.replace('dataset:', 'dataset:\n  path: ../dataset'));
+    expect(config.dataset.path).toBe('../dataset');
+    for (const location of ['""', '" "', '"bad\\0path"']) {
+      expect(() => parseExperimentConfigYaml(source.replace('dataset:', `dataset:\n  path: ${location}`)))
+        .toThrow(BenchmarkModelError);
+    }
+  });
+
   it('accepts native Docker platform authoring', () => {
     const config = parseExperimentConfigYaml(
       experimentConfigYaml().replace('platform: linux/amd64', 'platform: native'),

@@ -118,7 +118,7 @@ describe('unified live end-to-end suite', () => {
     assert.match(source, /datasetExample: 'quickstart'/);
     assert.match(source, /const CODEX_MODEL = 'gpt-5\.4'/);
     assert.match(source, /format: 'codex-rollout-jsonl', version: FORGE_CODEX_VERSION/);
-    assert.match(source, /return verifyCompletedRun\(summary\.location\)/);
+    assert.match(source, /return verifyCompletedRun\(path\.join\(summary\.location, 'runs', runId\)\)/);
   });
 
   it('requires pinned native Codex evidence rather than accepting a fallback live result', async () => {

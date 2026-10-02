@@ -186,7 +186,11 @@ export interface ExperimentConfigV1 {
   schema_version: typeof BENCHMARK_SCHEMA_VERSION;
   id: string;
   version: string;
-  dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
+  dataset: DatasetIdentityV1 & {
+    manifest_sha256: Sha256Digest;
+    /** CLI dataset location, relative to the experiment file; not run semantics. */
+    path?: string;
+  };
   /** Required only when the experiment uses host-supplied setup actions. */
   forge?: {action_bundles: SetupActionBundleReferenceV1[]};
   runtime: ForgeRuntimeConfigV1;

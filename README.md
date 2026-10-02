@@ -161,6 +161,7 @@ schema_version: 1
 id: examples/quickstart
 version: 0.1.0
 dataset:
+  path: ./dataset
   id: forge-quickstart
   version: 0.1.0
   manifest_sha256: sha256:2d75e3a65ff5c3b6c9612a572f078e6dd496c0b63007cf3c6e6da94c62fcd4e0
@@ -199,7 +200,9 @@ authored experiment field. Forge records it in each resolved plan and result;
 execution rejects a serialized plan made by a different package version. To
 run an older dataset with a newer Forge release, resolve a fresh plan with that
 release. The dataset and experiment versions identify those inputs independently
-of the Forge package version.
+of the Forge package version. `dataset.path` is a CLI location hint, resolved
+relative to the experiment file; it is excluded from resolved plans and their
+checksums. Programmatic hosts may omit it and supply a loaded dataset directly.
 
 `models: {}` is intentional for this one-shot, checks-only case. An experiment
 config must set `models.role_player` for every selected `multi_turn` case and
@@ -220,8 +223,7 @@ From `quickstart/`:
 
 ```sh
 npx --no-install forge validate \
-  --experiment ./experiment.yaml \
-  --dataset ./dataset
+  --experiment ./experiment.yaml
 ```
 
 `validate` verifies schemas, the complete manifest inventory and hashes,
@@ -238,7 +240,6 @@ check the current execution host, opt into host validation:
 ```sh
 npx --no-install forge validate \
   --experiment ./experiment.yaml \
-  --dataset ./dataset \
   --host
 ```
 
@@ -301,7 +302,6 @@ run; pass the variable name, never its value:
 MY_MCP_TOKEN=your-restricted-token \
 npx --no-install forge run \
   --experiment ./experiment.yaml \
-  --dataset ./dataset \
   --credential-env example.mcp-token=MY_MCP_TOKEN
 ```
 
@@ -310,14 +310,15 @@ only references required by the selected run, and the declaring capability
 determines whether each value is exposed to setup commands or agent commands.
 Unrelated host environment variables are never copied into the runtime.
 
-`--case-file` discovers the nearest ancestor `manifest.json`, verifies the
-dataset, and maps the exact regular file back to its declared case ID. The case
-must still be present in the selected experiment config's matrix; this option
-does not create a combined case/experiment format. Pass `--dataset` explicitly
-when the manifest cannot be discovered.
+The CLI locates the dataset through `dataset.path` in the experiment config,
+resolved relative to the experiment file. It verifies the pinned identity and
+manifest digest. `--case-file` maps an exact regular file within that configured
+dataset to its declared case ID; the case must be in the experiment matrix.
+`--case` and `--case-file` are mutually exclusive.
 
-The CLI requires one unambiguous matrix entry. For a larger matrix, add any
-needed selectors (`--case` and `--case-file` are mutually exclusive):
+`run` executes every matching matrix combination. Selection options restrict
+which cases, treatments, agents, and repetitions run. `plan` requires exactly
+one matching combination:
 
 ```text
 --case <case-id>
@@ -328,8 +329,9 @@ needed selectors (`--case` and `--case-file` are mutually exclusive):
 --repetition <zero-based-index>
 ```
 
-`run` prints a JSON summary after commit. The completed run is stored at
-`results/runs/hello-001/`. Every completed run contains:
+`run` prints its experiment execution ID in progress records and a final JSON
+summary. The quickstart eval is stored at
+`results/experiments/<experiment-run-id>/runs/hello-001/`. Every completed eval contains:
 
 ```text
 result.json
@@ -428,6 +430,61 @@ For native Claude evidence, the result contains an evidence descriptor like:
 }
 ```
 
+### Running and resuming an experiment
+
+Run the matrix declared by an experiment with:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml
+```
+
+Every invocation without `--resume` starts a new experiment execution and
+prints a generated `experiment_run_id`. The dataset location comes from
+`dataset.path`; there is no `--dataset` or `--all` flag. Use `--case <case-id>` or
+the other selection options to run a subset of the matrix.
+
+Each execution has an independent checkpoint and eval artifacts:
+
+```text
+results/experiments/<experiment-run-id>/
+├── campaign.json
+└── runs/
+    ├── <eval-run-id>/
+    └── <another-eval-run-id>/
+```
+
+If an execution errors, Forge records the attempt and continues with the other
+entries. To resume a specific execution, replace `EXPERIMENT_RUN_ID` below with
+its printed ID:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml --resume EXPERIMENT_RUN_ID
+```
+
+An ID is required: bare `--resume` is a usage error. If the same experiment was
+run three times, each execution has a different ID and any of them can be
+resumed independently. `--output <directory>` changes the base output directory;
+resume must use the same underlying base directory, which may be accessed
+through a symlink. Resume uses the saved selections,
+including an original `--case` filter, so omit selection options on resume.
+
+Resume verifies each completed run before skipping it and requires the same
+resolved plans, including dataset pins, setup, models, runtime, and Forge
+version. Missing or invalid artifacts are retried. Completed evaluations with
+failed or partial scores remain completed; execution errors, including committed
+`role_player_error` results, are retried. A run whose artifacts committed just
+before interruption is recovered without rerunning it. Retries get fresh eval
+IDs and preserve all earlier artifacts and attempt records.
+
+Progress records go to stderr. The final JSON summary on stdout contains the
+experiment execution ID, directory, checkpoint path, and total, executed,
+skipped, completed, and errored counts. Exit code 1 means execution errors
+remain; code 0 means every entry completed, regardless of evaluation scores.
+Each invocation attempts pending entries once; `matrix.retries` does not add
+automatic attempts. Campaigns use the local artifact store and permit one
+active process per execution. `--run-id` can name an eval only when exactly one
+combination is selected; it cannot be combined with resume.
+
 ## Running Codex
 
 Codex uses the same cases, runtime contracts, checks, Ava controller, and result
@@ -447,8 +504,7 @@ experiment using the quickstart dataset. From a source checkout:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --experiment examples/codex/experiment.yaml \
-  --dataset examples/quickstart/dataset
+  --experiment examples/codex/experiment.yaml
 
 CODEX_API_KEY=your-restricted-key \
 node dist/cli.js run \
@@ -510,7 +566,8 @@ Forge deliberately separates what is evaluated from how it is run:
 - The dataset contains cases and fixture bytes. Stable case IDs are independent
   of the dataset's location on disk.
 - A case owns the prompt, invariant setup, checks, and success guidelines.
-- An experiment config pins one dataset and defines treatments, agents, models,
+- An experiment config pins one dataset, locates it with `dataset.path` for CLI
+  execution, and defines treatments, agents, models,
   resources, limits, repetitions, retries, and the experiment matrix.
 - A run selection chooses one case, treatment, agent, and repetition.
 - `resolveRunPlan` applies defaults and emits the complete immutable input for
@@ -668,7 +725,7 @@ For a guideline-judged run named `judged-001`, inspect the actual reduced
 transcript with:
 
 ```sh
-jq '.transcript.steps' results/runs/judged-001/judge-evidence.json
+jq '.transcript.steps' results/experiments/EXPERIMENT_RUN_ID/runs/judged-001/judge-evidence.json
 ```
 
 The numeric score remains the fraction of success guidelines that passed.
@@ -1532,11 +1589,11 @@ proxy, or an offline execution mode.
   images, mounts, and other execution mechanisms require a host-supplied
   runtime. No additional runtime implementations or interactive/human
   controller ship in this package.
-- `run` executes one selected matrix entry. There is no campaign scheduler,
-  concurrency manager, or automatic run retry loop; `repetitions` create
-  selectable entries and experiment-level `retries` is not acted on by the v0.1
-  CLI. Ava and guideline completion attempts have their own fixed retry policy
-  and do not implement the experiment config's campaign retry field.
+- `run` executes selected entries sequentially and supports explicit
+  `--resume <experiment-run-id>`. There is no parallel campaign scheduler or automatic run retry
+  loop; experiment-level `retries` is not acted on by the CLI. Ava and guideline
+  completion attempts have their own fixed retry policy and do not implement
+  the experiment config's campaign retry field.
 - Built-in setup includes `forge/write`, `forge/command`, and Claude-backed
   `forge/plugin`. The plugin action installs the current entry from a public
   GitHub marketplace named as `owner/repository`. Exact plugin-version pins,

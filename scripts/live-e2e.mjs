@@ -606,12 +606,13 @@ async function runSelection({
   if (
     summary === null ||
     typeof summary !== 'object' ||
-    summary.run_id !== runId ||
+    summary.completed !== 1 ||
+    typeof summary.experiment_run_id !== 'string' ||
     typeof summary.location !== 'string'
   ) {
     throw new Error(`The live ${label} run returned an invalid summary.`);
   }
-  return verifyCompletedRun(summary.location);
+  return verifyCompletedRun(path.join(summary.location, 'runs', runId));
 }
 
 async function verifyOneShotRun(completed, nativeIdentity) {

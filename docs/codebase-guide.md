@@ -111,7 +111,8 @@ If you are following the public executable, start instead at
 | --- | --- | --- |
 | [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
 | [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
-| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, selects a matrix entry, creates the default adapters, and calls the engine. It is composition code, not benchmark semantics. |
+| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, filters matrix entries, creates adapters, and calls the engine or campaign controller. It is composition code, not benchmark semantics. |
+| [`src/campaign.ts`](https://github.com/stripe/forge/blob/main/src/campaign.ts) | `runCampaign` | Internal sequential CLI campaign controller. Preflights plans, checkpoints attempts outside run artifacts, verifies completed runs on resume, and retries execution errors with new run IDs. |
 | [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION` | Reads the exact installed package version from its exported `package.json` for CLI output and plan/result provenance. |
 | [`src/serialization.ts`](https://github.com/stripe/forge/blob/main/src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
 
@@ -148,21 +149,29 @@ flowchart TD
     LE[model/loaders.ts: loadExperimentConfig]
     PM[model/parse.ts]
     EX[planning/planner.ts: expandExperiment]
-    SEL[cli.ts: selectOne]
+    ONE[cli.ts: selectOne]
+    MANY[cli.ts: selectMatching]
+    SAVED[campaign.ts: readCampaignSelections]
     RP[planning/planner.ts: resolveRunPlan]
     PLAN[ResolvedRunPlanV1]
 
-    CLI --> LD --> PM
     CLI --> LE --> PM
-    CLI --> EX --> SEL --> RP
+    LE -->|dataset.path| LD --> PM
+    CLI --> EX
+    EX -->|plan| ONE --> RP
+    EX -->|run| MANY --> RP
+    EX -->|validate| RP
+    CLI -->|resume| SAVED --> RP
     LD --> RP
     LE --> RP
     RP --> PLAN
 ```
 
 For `--case-file`, `runCli` additionally calls
-`planning/caseFile.ts:resolveManifestCaseIdFromFile`, which discovers and
-verifies the dataset before mapping the exact file back to a manifest case ID.
+`planning/caseFile.ts:resolveManifestCaseIdFromFile`, which maps the exact file within the configured dataset back to a manifest
+case ID. `run` executes all matching selections through `campaign.ts`; `plan`
+requires one. The experiment's `dataset.path` is resolved relative to its file.
+Campaign resume selects a saved experiment execution by its explicit ID.
 
 ### Resolved plan to committed run
 
