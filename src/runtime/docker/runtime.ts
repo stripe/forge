@@ -170,7 +170,6 @@ export function createDockerRuntimeAdapter(
 
   return Object.freeze({
     id: 'forge/docker',
-    version: '1',
     preflight({plan, requirements}: RuntimePreflight) {
       validateRuntime(plan.runtime);
       validateExecutableRequirements(requirements.executables);
@@ -350,7 +349,7 @@ export function createDockerRuntimeAdapter(
           }),
           stateDirectories: sealedStateDirectories,
           metadata: Object.freeze({
-            adapter: 'forge/docker@1',
+            adapter: 'forge/docker',
             claudeCodeVersion: FORGE_CLAUDE_CODE_VERSION,
             codexVersion: FORGE_CODEX_VERSION,
             imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,

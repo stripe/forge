@@ -110,6 +110,8 @@ describe('checked-in quickstart', () => {
     expect(summary.result.evaluation).toMatchObject({score: 0, status: 'passed'});
 
     const completed = await verifyCompletedRun(summary.location);
+    expect(completed.result.runtime.adapter).toBe('forge/docker');
+    expect(Object.hasOwn(completed.result.runtime, 'adapter_version')).toBe(false);
     expect(completed.result.selection).toMatchObject({
       case_id: 'examples/hello-file',
       treatment: 'baseline',

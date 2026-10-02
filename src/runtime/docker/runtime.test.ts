@@ -135,6 +135,12 @@ function preparation(overrides: Partial<RuntimePreparation> = {}): RuntimePrepar
 }
 
 describe('Forge Docker runtime', () => {
+  it('uses an unversioned built-in adapter identity', () => {
+    const adapter = createDockerRuntimeAdapter();
+    assert.equal(adapter.id, 'forge/docker');
+    assert.equal(Object.hasOwn(adapter, 'version'), false);
+  });
+
   it('validates a host by building and inspecting the selected image', async () => {
     const temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-docker-host-test-'),
@@ -334,6 +340,7 @@ describe('Forge Docker runtime', () => {
       'evidence',
     );
     assert.equal(sealed.metadata.imageId, IMAGE_ID);
+    assert.equal(sealed.metadata.adapter, 'forge/docker');
     assert.equal(
       sealed.metadata.imageAssetDigest,
       `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,

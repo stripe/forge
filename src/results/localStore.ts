@@ -325,8 +325,8 @@ function verifyPlanArtifact(
   }
   const plannedRuntime = plan.runtime;
   const externalRuntime = 'config' in plannedRuntime;
-  // Old Docker v1 artifacts omitted adapter_version. Preserve their bytes and
-  // alias while binding every external runtime to its explicit version pin.
+  // Docker results may omit adapter_version; older ones recorded version 1.
+  // Preserve both forms while binding external runtimes to their version pin.
   const runtimeMatches = externalRuntime
     ? result.runtime.adapter === plannedRuntime.adapter &&
       result.runtime.adapter_version === plannedRuntime.adapter_version

@@ -1231,13 +1231,14 @@ CLI cannot execute an external descriptor on its own. Wrappers using `runCli`
 receive the selected descriptor in the factory's `options.runtime` field and
 explicitly choose their implementation.
 
-The complete descriptor participates in the resolved plan digest. New results
-record `runtime.adapter_version`; verification binds runtime identity,
-version, and platform to the plan without loading the private adapter. Offline
-verification checks the recorded artifacts and descriptor, not the private
-adapter's configuration semantics or actual isolation enforcement. Historical
-Docker v1 results without `adapter_version` remain accepted, and their existing
-plan bytes and `docker`/`forge/docker` identity aliases are preserved.
+The complete descriptor participates in the resolved plan digest. External
+runtime results record `runtime.adapter_version`; verification binds runtime
+identity, version, and platform to the plan without loading the private
+adapter. The built-in Docker runtime is unversioned; its behavior comes from
+the installed Forge package, whose version is recorded separately. Older
+Docker results with or without `adapter_version: '1'` remain verifiable.
+Offline verification checks the recorded artifacts and descriptor, not the
+private adapter's configuration semantics or actual isolation enforcement.
 
 Keep settings that can affect evaluation behavior, such as immutable tool
 builds, resources, and network profiles, in the resolved configuration. Keep

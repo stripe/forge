@@ -145,7 +145,8 @@ export interface PreparedRuntime {
 /** Forge owns lifecycle ordering; adapters own only runtime mechanics. */
 export interface RuntimeAdapter {
   readonly id: string;
-  readonly version: string;
+  /** Required for external runtimes; the built-in Docker runtime is unversioned. */
+  readonly version?: string;
   /**
    * Pure, synchronous validation of the exact configuration and combined
    * agent/setup requirements. Never normalize defaults, resolve credentials,

@@ -933,12 +933,14 @@ function preflightRuntime(
   const external = 'config' in selected;
   const matches = external
     ? runtime.id === selected.adapter && runtime.version === selected.adapter_version
-    : (runtime.id === 'forge/docker' || runtime.id === 'docker') && runtime.version === '1';
+    : runtime.id === 'forge/docker' || runtime.id === 'docker';
   if (!matches || (external && typeof runtime.preflight !== 'function')) {
     throw new ForgeExecutionError(
       'unsupported_capability',
       'preflight',
-      'The supplied runtime must match the planned adapter and version and validate its configuration.',
+      external
+        ? 'The supplied runtime must match the planned adapter and version and validate its configuration.'
+        : 'The supplied runtime must match the built-in Docker identity.',
     );
   }
   if (runtime.preflight) {
@@ -1690,7 +1692,10 @@ function buildResult(input: {
     },
     runtime: {
       adapter: input.input.composition.runtime.id,
-      adapter_version: input.input.composition.runtime.version,
+      ...('config' in input.input.plan.runtime &&
+      input.input.composition.runtime.version !== undefined
+        ? {adapter_version: input.input.composition.runtime.version}
+        : {}),
       runtime_id: input.runtime.runtimeId,
       platform: input.input.plan.runtime.platform,
       metadata: input.runtime.metadata,

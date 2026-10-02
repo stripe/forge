@@ -95,7 +95,8 @@ describe('runtime composition preflight', () => {
     const variants: RuntimeAdapter[] = [
       {...fake.adapter, id: 'acme/other'},
       {...fake.adapter, version: '2'},
-      {id: fake.adapter.id, version: fake.adapter.version, prepare: fake.adapter.prepare},
+      {id: fake.adapter.id, prepare: fake.adapter.prepare, preflight() {}},
+      {id: fake.adapter.id, version: selected.adapter_version, prepare: fake.adapter.prepare},
       {...fake.adapter, preflight() {throw new TypeError('Unknown execution profile.');}},
       {...fake.adapter, async preflight() {throw new TypeError('Async validation is unsupported.');}},
     ];
@@ -119,9 +120,10 @@ describe('runtime composition preflight', () => {
     assert.deepEqual(current.resolutions, []);
   });
 
-  it('accepts both historical Docker identifiers without rewriting the plan', () => {
+  it('accepts both Docker identifiers without a separate adapter version', () => {
     for (const id of ['docker', 'forge/docker']) {
       const runtime = createFakeRuntimeAdapter({id}).adapter;
+      assert.equal(runtime.version, undefined);
       const current = fixture(runtime);
       const plan = createTestResolvedRunPlan();
       const before = JSON.stringify(plan);

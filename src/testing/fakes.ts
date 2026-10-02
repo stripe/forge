@@ -280,12 +280,14 @@ export function createFakeRuntimeAdapter(
   options: FakeRuntimeAdapterOptions = {},
 ): FakeRuntimeAdapterFixture {
   const id = options.id ?? 'forge/docker';
-  const version = options.version ?? '1';
+  const version = options.version ?? (
+    id === 'forge/docker' || id === 'docker' ? undefined : '1'
+  );
   const runs: FakeRuntimeRun[] = [];
 
   const adapter: RuntimeAdapter = {
     id,
-    version,
+    ...(version === undefined ? {} : {version}),
     preflight() {},
     async prepare(input): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
@@ -412,7 +414,7 @@ export function createFakeRuntimeAdapter(
             ),
             metadata: Object.freeze({
               adapter: id,
-              adapter_version: version,
+              ...(version === undefined ? {} : {adapter_version: version}),
               ...(options.metadata ?? {}),
             }),
           });
