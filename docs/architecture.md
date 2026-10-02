@@ -431,68 +431,96 @@ or inferred host settings do not belong in runtime config.
 ### Built-in Docker runtime
 
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
-with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
-builds an image with pinned Claude Code and Codex versions, and records the
-built image ID. Docker can reuse the image across runs.
+with the Docker CLI. Before building, Forge hashes its packaged Dockerfile and
+entrypoint and compares them with the digest compiled into the package. The
+image pins the Node base image by OCI digest and installs exact Claude Code and
+Codex versions. Forge inspects and records Docker's immutable image ID. One
+adapter instance caches the build by platform for later runs, while Docker's
+own build cache can reuse layers across adapter instances.
 
-Each run uses a non-root container with a read-only image filesystem. Forge
-limits its CPU, memory, processes, and writable `/tmp`; drops Linux
-capabilities; blocks privilege escalation; and does not mount the Docker
-socket. Commands go through `docker exec` as argument lists, without an
-implicit shell.
+A run has one active container at a time. The container runs as UID/GID
+`10001:10001`, and Docker mounts its root filesystem read-only. The only
+explicit writable application-data locations are the bounded `/tmp` tmpfs and
+the bind mounts described below. Forge limits CPU, memory, and process count;
+drops all Linux capabilities; sets `no-new-privileges`; and does not mount the
+Docker socket. Commands go through `docker exec` as argument lists, without an
+implicit shell. The `/tmp` tmpfs is limited to 256 MiB and is mounted `nosuid`,
+`nodev`, and `noexec`.
 
 #### Run-owned paths and mounts
 
 For one run, `R` is the temporary host directory
 `<temporaryRoot>/stripe-forge-run-<random>`. Forge uses bind mounts, not named
-Docker volumes. The Docker daemon must be able to access `R`.
+Docker volumes. The Docker daemon must be able to access `R`. A bind mount gives
+the same file two path names: for example, when the agent creates
+`/workspace/hello.txt`, the host sees the same bytes at
+`R/workspace/hello.txt`. This is not a second copy.
 
-| Bind mount (host → container) | Purpose | Typical contents | Container access |
+| Host source → container target | Purpose | Concrete examples | Setup access | Interaction access |
+| --- | --- | --- | --- | --- |
+| `R/workspace` → `/workspace` | Working directory for the case | The quickstart agent creates `/workspace/hello.txt`, which is `R/workspace/hello.txt` on the host. A `forge/write` step may similarly place source files below `/workspace`. | Read/write | Read/write |
+| `R/home` → `/home/forge` | Run-specific home for UID `10001` | A tool writing `/home/forge/.cache/acme/index` produces `R/home/.cache/acme/index`. Built-in agent session paths listed below are separate nested state mounts rather than files in `R/home`. | Read/write | Read/write |
+| `R/state/{id}` → the requirement's `containerPath` | Dedicated state requested by an agent or setup action; one mount per ID | Exact Claude session JSONL, Codex configuration and rollouts, Claude plugin installation state, or a host-imported tool. Concrete layouts follow this table. | Read/write | Read-only if `sealAfterSetup` is true; otherwise read/write |
+
+The built-in adapters produce these representative state mounts. Only the
+mounts required by the selected agent and setup actions are created.
+
+| State ID and host source | Container target | Example contents | Sealed for interaction? |
 | --- | --- | --- | --- |
-| `R/workspace` → `/workspace` | Working directory for the case | Files placed by setup; files created or edited by the agent | Read/write during setup and interaction |
-| `R/home` → `/home/forge` | Run-specific agent home | Agent settings and caches outside dedicated state mounts | Read/write during setup and interaction |
-| `R/state/{id}` → declared `containerPath` | Dedicated state requested by an agent or setup action; one mount per ID | Session logs, plugin files, or imported tools, depending on the request | Read/write during setup; read-only during interaction if sealed, otherwise read/write |
+| `claude-projects`: `R/state/claude-projects` | `/home/forge/.claude/projects/-workspace` | `<session-id>.jsonl`, the exact Claude project session later selected as native evidence | No; Claude writes it during interaction |
+| `codex-home`: `R/state/codex-home` | `/home/forge/.codex` | `sessions/YYYY/MM/DD/rollout-...-<session-id>.jsonl` and other Codex-owned configuration or state | No; Codex writes it during interaction |
+| `claude-plugins`: `R/state/claude-plugins` | `/home/forge/.claude/plugins` | `installed_plugins.json`, `marketplaces/<name>/...`, and `cache/<marketplace>/<plugin>/<version>/...` | No; native plugin state remains writable during interaction |
+| Host-defined example `tool-bin`: `R/state/tool-bin` | `/opt/example-tool/bin` | An imported executable such as `/opt/example-tool/bin/tool`, commonly mode `0755` | Yes; `/opt` state is accepted only when sealed |
 
-The access column describes the **container**, running as UID `10001`. The
-Forge host process can separately read and write the host source directories.
-The diagram shows the path mappings:
+The state targets below `/home/forge` are nested bind mounts. For example,
+although `R/home` supplies `/home/forge`, the contents visible at
+`/home/forge/.codex` come from `R/state/codex-home`, not
+`R/home/.codex`. Docker overlays the more-specific mount at that path.
 
-```mermaid
-flowchart LR
-    subgraph Host["Host: per-run directory R"]
-        W["R/workspace"]
-        H["R/home"]
-        S["R/state/{id}"]
-    end
-    subgraph Container["Container: UID:GID 10001:10001"]
-        CW["/workspace"]
-        CH["/home/forge"]
-        CS["declared containerPath"]
-    end
+#### Host directory permissions
 
-    W --> CW
-    H --> CH
-    S --> CS
-```
+An octal mode has one digit each for the owner, group, and everyone else.
+Within a digit, read is `4`, write is `2`, and execute is `1`; for a directory,
+execute means permission to traverse it. The leading `d` in the `ls -ld` form
+means that the entry is a directory.
 
-Forge sets these directory modes on the host:
+| Host directory | Octal mode | Owner \| group \| others | `ls -ld` permissions | Why |
+| --- | --- | --- | --- | --- |
+| `R` | `0700` | `rwx \| --- \| ---` | `drwx------` | An unpredictable, private boundary prevents unprivileged host users from traversing into the run. |
+| `R/workspace` | `0777` | `rwx \| rwx \| rwx` | `drwxrwxrwx` | Container UID `10001` must be able to create and edit workspace files even when the Forge host process has a different UID. |
+| `R/home` | `0777` | `rwx \| rwx \| rwx` | `drwxrwxrwx` | The non-root container user needs a writable home. |
+| `R/state` | `0700` | `rwx \| --- \| ---` | `drwx------` | This host-only parent inventories state mounts and remains private. |
+| Each `R/state/{id}` | `0777` | `rwx \| rwx \| rwx` | `drwxrwxrwx` | Container UID `10001` needs write access during setup and, for unsealed state, interaction. |
+| `R/imports` | `0700` | `rwx \| --- \| ---` | `drwx------` | Host-file imports are staged here while incomplete; this directory is never mounted into the container. |
+| `R/environment` | `0700` | `rwx \| --- \| ---` | `drwx------` | Forge creates short-lived, mode-`0600` environment files here for scoped `docker exec` calls; this directory is never mounted. |
 
-| Host directories | Mode | Why |
-| --- | --- | --- |
-| `R`, `R/state` | `0700` | Other host users cannot reach the run's files. |
-| `R/workspace`, `R/home`, each `R/state/{id}` | `0777` | Container UID `10001` can write even when the host owner has a different UID. |
+The private `0700` parent is why the writable `0777` mount leaves do not let
+other unprivileged host users discover or traverse into a run. The Docker
+daemon and host root remain privileged. File modes are separate from directory
+modes: an imported data file defaults to `0644` (`rw- | r-- | r--`), while an
+imported executable may request `0755` (`rwx | r-x | r-x`).
 
-The container sees the mounted directories' modes. A sealed state mount becomes
-read-only to the container even though its host directory remains `0777`.
+Docker read-only mount policy is separate from these Unix mode bits. A sealed
+state directory still reports mode `0777`, but a write through its container
+path fails because Docker mounted that filesystem view read-only. The Forge
+host path is not made read-only; host access remains governed by its ordinary
+ownership and mode checks.
 
-- **Setup:** All bind mounts are writable. A state mount goes under
-  `/home/forge`, or under `/opt` when it will be sealed.
-- **Agent interaction:** `finalizeSetup` closes imports and setup commands. If
-  state must be sealed, Forge starts a new container with the same host files
-  and makes only those state mounts read-only. Otherwise it keeps the setup
-  container. No files are copied.
-- **Finish:** `quiesce` stops commands and the container before Forge reads
-  evidence; `dispose` removes the container and `R`.
+- **Setup:** The workspace, home, and every state bind mount are writable. A
+  state target must be a canonical child of `/home/forge`, or a canonical child
+  of `/opt` with `sealAfterSetup: true`.
+- **Agent interaction without sealed state:** `finalizeSetup` closes imports
+  and setup commands, then keeps the existing container. Workspace, home, and
+  state remain mounted read/write.
+- **Agent interaction with sealed state:** `finalizeSetup` closes imports and
+  setup commands, stops and removes the setup container, optionally rechecks
+  imported-file hashes, and starts a replacement container over the same host
+  directories. Only state mounts marked `sealAfterSetup` become read-only; the
+  workspace, home, and unsealed state stay read/write. No files are copied
+  between containers because both see the same host directories.
+- **Finish:** `quiesce` closes command authority, waits for active commands, and
+  stops the container before Forge reads evidence. `dispose` removes the
+  container and `R`.
 
 Trusted host code can use `PreparedRuntime.importHostFile` during setup to copy
 a SHA-256-verified file into declared state. Setup actions and agents cannot
