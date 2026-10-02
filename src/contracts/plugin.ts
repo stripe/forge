@@ -29,8 +29,8 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
   readonly version: string;
   readonly source: JsonObject & {
     readonly kind: AgentPluginSourceKind;
+    /** Git revision reported by the native installer, when available. */
     readonly commit?: string;
-    readonly sha256?: Sha256Digest;
   };
   readonly installed_tree: JsonObject & {
     readonly format: 'forge-plugin-tree-v1';

@@ -49,7 +49,8 @@ The plugin action intentionally follows the marketplace's current default branch
 1. Each run starts with fresh, run-owned agent state.
 2. Forge registers the authored marketplace through the agent's native CLI.
 3. The marketplace entry selects the plugin source and installed version.
-4. Forge records the resolved checkout and installed contents at installation.
+4. Forge validates the native installation and records its IDs, version,
+   catalog commit, reported source commit, and installed-content fingerprint.
 5. Plugin state remains writable during interaction.
 
 The experiment therefore has no plugin-version, marketplace-commit, or source
@@ -66,10 +67,9 @@ Forge installs the complete native plugin, not only its skills. A plugin may
 contain commands, agents, hooks, language servers, or MCP configuration in
 addition to skills.
 
-Marketplace provenance covers the plugin files selected during installation.
-It does not pin remote services named by those files. A rolling remote endpoint
-therefore remains a separate mutable dependency governed by the runtime's
-network policy.
+Plugin files may name remote services that change independently of the installed
+plugin version. These services remain mutable dependencies governed by the
+runtime's network policy.
 
 The action accepts credential-free marketplace source forms supported by the
 native installer:
@@ -80,9 +80,10 @@ native installer:
 - an HTTPS archive, optionally accompanied by a 64-hex SHA-256 digest.
 
 When a Git-backed entry supplies a commit SHA, Forge requires the native
-installed-state record to contain that commit. An archive SHA is validated and
-retained as marketplace-supplied provenance; Forge does not independently
-rehash the downloaded archive. Authenticated archives, npm or command sources,
+installed-state record to contain that commit. An archive SHA is accepted as
+native marketplace metadata; Forge does not independently rehash the downloaded
+archive or mirror its checksum into the installation receipt. Authenticated
+archives, npm or command sources,
 embedded URL credentials, URL query parameters or fragments, and transitive
 plugin dependencies are not supported by this action.
 
@@ -102,15 +103,24 @@ setup, the prepared operation:
 The receipt includes:
 
 - the authored marketplace and plugin IDs;
-- the exact marketplace checkout commit;
+- the exact catalog commit used to read the marketplace entry;
 - the native plugin ID and installed version;
-- a resolved Git commit or archive digest when available; and
-- a deterministic digest and size summary of the installed tree.
+- the selected source kind and installer-reported Git commit when available; and
+- a deterministic digest and size/count summary of the installed tree.
 
-The installed-tree digest covers regular files and directories in stable path
-order. Forge rejects symbolic links and special entries while producing it.
+Forge bounds and validates the installed tree, rejecting symbolic links and
+special entries. The tree fingerprint covers relative paths, directories, and
+the exact regular-file bytes read after installation in stable path order,
+independent of the adapter's listing order. It lets runs compare installed
+contents even when the plugin version or reported source commit is unchanged.
 
-This receipt is an installation-time snapshot, not a final-state attestation.
+Git commits identify the catalog snapshot and the source revision reported by
+the native installer. A source commit is optional for an unpinned Git source;
+when the catalog supplies an expected commit, the installer must report that
+same commit. The tree fingerprint identifies observed installation-time
+contents separately from those source identities.
+
+The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may
 change plugin files and settings before the run ends. The runtime still
 quiesces all mutation before evidence selection.

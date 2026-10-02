@@ -22,6 +22,7 @@ import {
 } from '../setup/registry.js';
 import {
   BENCHMARK_SCHEMA_VERSION,
+  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
   DEFAULT_DOCKER_PROCESS_COUNT,
@@ -524,7 +525,7 @@ const ResolvedRuntimeSchema = z.union([
 
 const ResolvedRunPlanSchema = z
   .object({
-    schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
+    schema_version: z.literal(RESOLVED_RUN_PLAN_SCHEMA_VERSION),
     selection: RunSelectionSchema,
     provenance: z
       .object({
@@ -537,18 +538,12 @@ const ResolvedRunPlanSchema = z
           .object({
             id: CaseIdSchema,
             version: VersionSchema,
-            sha256: z
-              .string()
-              .refine(isSha256Digest, 'must be a sha256: digest'),
           })
           .strict(),
         case: z
           .object({
             id: CaseIdSchema,
             path: DatasetPathSchema,
-            sha256: z
-              .string()
-              .refine(isSha256Digest, 'must be a sha256: digest'),
           })
           .strict(),
         forge: ForgeProvenanceSchema,

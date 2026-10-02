@@ -1,6 +1,6 @@
 # Forge architecture
 
-This document describes the implemented architecture of Forge v0.1. It is a
+This document describes the implemented architecture of Forge. It is a
 conceptual companion to the user-facing [README](../README.md): the README
 explains how to author and run an evaluation, while this document explains the
 boundaries, control flow, trust model, and extension points that make a run
@@ -147,8 +147,11 @@ inventory, not a best-effort index:
 The experiment pins the dataset ID, version, and digest of the raw manifest
 bytes. Planning refuses to combine a loaded dataset with a different pin.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
-access to the same dataset payloads without exposing an arbitrary host
-filesystem.
+access to dataset payloads. The directory provider accepts the verified
+manifest, checks each returned buffer against its declared size and hash, and
+requires directory listings to match the pinned inventory. The public CLI
+supplies that manifest automatically. This closes the gap between initial
+verification and later setup reads.
 
 ### Cases, treatments, and setup ordering
 
@@ -195,11 +198,11 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
   host-supplied platform selection; and
-- records exact dataset, experiment, case, installed Forge package, and
-  action-bundle provenance.
+- records the dataset manifest pin, experiment and case identities, installed
+  Forge package, and action-bundle implementation pins.
 
 Plans use canonical JSON with recursively sorted object keys and retained array
-order. Their digest binds the semantics later summarized by `result.json`.
+order. The `plan.json` artifact descriptor binds these bytes to `result.json`.
 
 ## Engines, action registries, and compositions
 
@@ -358,8 +361,10 @@ Setup actions execute strictly in plan order. Each prepared action receives:
 An action may return bounded, non-sensitive JSON for `setup.json`, such as a
 plugin installation receipt. A resolution records every material setup-time
 choice not already fixed by the plan that could explain different realized
-behavior, such as an actual version, commit, artifact identity, or content
-digest. It does not include credentials or private host paths. Static built-ins
+behavior, such as the installed plugin version and source revision. Digest
+fields serve an expected-content check, artifact verification, or a documented
+content-identity workflow such as comparing installed plugin snapshots.
+Resolutions do not include credentials or private host paths. Static built-ins
 return no dynamic resolution.
 After every action succeeds, Forge calls `finalizeSetup()`. This closes setup
 command authority and asks the runtime to seal any state directory declared
@@ -539,7 +544,7 @@ executables, paths, variables, credential bindings, and state-directory
 semantics, and freezes the prepared steps. It never looks up a different
 handler during application.
 
-The v0.1 built-ins are:
+The built-ins are:
 
 - `forge/write`: copy inline bytes or a manifest-listed dataset file to a
   safe workspace-relative path;
@@ -556,10 +561,12 @@ and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
 `forge/plugin` intentionally resolves the current marketplace entry at
-execution time. Its `setup.json` receipt records the marketplace commit,
-installed version and source, and installed-tree digest, but the plan does not
-pin those bytes and plugin state remains writable during interaction. This is a
-documented mutable-treatment semantic, not general plan reproducibility; see
+execution time. Its `setup.json` receipt records the selected IDs, catalog
+commit, installed version, reported source commit when available, and an
+installation-time tree fingerprint. These identify the catalog snapshot and
+observed installed contents; plugin state remains writable during interaction.
+This is a documented mutable-treatment semantic, not general plan
+reproducibility; see
 [Marketplace plugin treatments](plugin-action.md).
 
 ## Interaction architecture
@@ -728,10 +735,11 @@ Evaluation consumes only sealed, redacted evidence.
 
 [`src/evaluation/checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) supports file-created,
 file-exists/absent, and bounded content-regex checks. It reads only requested
-workspace paths, does not follow symbolic links, records hashes and exact bytes
-in `workspace-evidence.json`, and executes regular expressions in a bounded VM
-context. This artifact is emitted only when at least one deterministic file
-check exists; it is not a workspace snapshot.
+workspace paths, does not follow symbolic links, records exact base64-encoded
+bytes in `workspace-evidence.json`, and executes regular expressions in a
+bounded VM context. The containing artifact checksum protects this evidence;
+individual entries have no digest. This artifact is emitted only when at least
+one deterministic file check exists; it is not a workspace snapshot.
 
 ### Guideline judging
 
@@ -791,6 +799,10 @@ native/<adapter-id>/session.<ext>    # exact restricted root-session source
 extensions/<contributor-id>/...     # optional host contribution
 ```
 
+Core plans, results, setup receipts, interaction, evaluation, and evidence
+artifacts use schema version 1. The trajectory uses ATIF v1.8. Parsers accept
+only the current version of each format.
+
 `result.json.evaluation` is the sole canonical evaluation result. The other
 core files serve distinct audit roles:
 
@@ -803,7 +815,7 @@ core files serve distinct audit roles:
 - `judge-evidence.json`: exact reduced transcript and workspace evidence made
   available to guideline judges.
 
-`result.json` summarizes run identity, selection, plan digest, Forge and bundle
+`result.json` summarizes run identity, selection, Forge and bundle
 versions, runtime and agent provenance, completion calls, interaction, evidence,
 evaluation, timing, stop reason, warnings, and descriptors for every companion
 file. It is the commit marker and therefore is not listed in its own artifact
@@ -834,7 +846,8 @@ hashes. It also requires:
 - the directory name to match `run_id`;
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
-- the plan bytes and digest to match the result;
+- canonical plan bytes to match their artifact descriptor and result summary;
+- schema-version-1 workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
 - trajectory session identity and completed-turn coverage to match the
@@ -936,7 +949,7 @@ external runtime without changing core lifecycle semantics.
 | Path | Responsibility |
 | --- | --- |
 | [`src/model`](https://github.com/stripe/forge/tree/main/src/model) | Versioned wire types, strict parsing, hashes, path policy, and safe loaders |
-| [`src/planning`](https://github.com/stripe/forge/tree/main/src/planning) | Matrix expansion, case-file selection, resolved plans, and plan digests |
+| [`src/planning`](https://github.com/stripe/forge/tree/main/src/planning) | Matrix expansion, case-file selection, and canonical resolved plans |
 | [`src/contracts`](https://github.com/stripe/forge/tree/main/src/contracts) | Public capability interfaces and authority boundaries |
 | [`src/setup`](https://github.com/stripe/forge/tree/main/src/setup) | Built-in actions, immutable registries, requirement aggregation, and ordered execution |
 | [`src/execution`](https://github.com/stripe/forge/tree/main/src/execution) | Lifecycle controller, completion runtime, phase events, and stable errors |

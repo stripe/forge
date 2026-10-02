@@ -20,8 +20,6 @@ import {
 import {FORGE_VERSION} from '../version.js';
 
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
-const CASE_DIGEST = `sha256:${'b'.repeat(64)}` as const;
-const EXPERIMENT_DIGEST = `sha256:${'c'.repeat(64)}` as const;
 
 describe('experiment expansion and run planning', () => {
   it('expands deterministically in case/treatment/agent/repetition order', () => {
@@ -83,8 +81,8 @@ describe('experiment expansion and run planning', () => {
     });
     expect(plan.provenance).toMatchObject({
       dataset: {manifest_sha256: MANIFEST_DIGEST},
-      experiment: {sha256: EXPERIMENT_DIGEST},
-      case: {sha256: CASE_DIGEST},
+      experiment: {id: 'experiment/default', version: '2026.09.0'},
+      case: {id: 'case/a', path: 'cases/case/a/eval.yaml'},
       forge: {version: FORGE_VERSION},
     });
     expect(Object.isFrozen(plan)).toBe(true);
@@ -420,7 +418,7 @@ function inputs(
       cases: new Map([
         [
           'case/a',
-          {definition, path: '/dataset/cases/case/a/eval.yaml', sha256: CASE_DIGEST},
+          {definition, path: '/dataset/cases/case/a/eval.yaml'},
         ],
       ]),
     },
@@ -428,7 +426,6 @@ function inputs(
       path: '/experiment/default.yaml',
       root: '/experiment',
       raw: '',
-      sha256: EXPERIMENT_DIGEST,
       config,
     },
   };

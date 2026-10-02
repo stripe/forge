@@ -20,16 +20,14 @@ import {
   type ResolvedRunPlanV1,
 } from '../model/index.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
-import {
-  resolvedRunPlanSha256,
-  serializeResolvedRunPlan,
-} from '../planning/index.js';
+import {serializeResolvedRunPlan} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
   parseSetupArtifact,
+  parseWorkspaceEvidence,
 } from './parse.js';
 import {
   MAX_SETUP_ARTIFACT_BYTES,
@@ -47,6 +45,7 @@ const VERIFIED_ARTIFACT_PATHS = new Set([
   'plan.json',
   'setup.json',
   'trajectory.json',
+  'workspace-evidence.json',
 ]);
 
 export interface CreateArtifactStoreOptions {
@@ -250,6 +249,10 @@ export async function verifyCompletedRunWithPlanParser(
     artifactBodies,
   );
   verifyJudgeEvidence(result, plan, artifactBodies, trajectory);
+  const workspaceBody = artifactBodies.get('workspace-evidence.json');
+  if (workspaceBody !== undefined) {
+    parseJsonArtifact('workspace-evidence.json', workspaceBody, parseWorkspaceEvidence);
+  }
   verifyCanonicalArtifactInventory(result, plan);
   return {runId: result.run_id, location: runDir, result};
 }
@@ -307,11 +310,6 @@ function verifyPlanArtifact(
   const plan = parseJsonArtifact(path, body, parsePlan);
   if (body.toString('utf8') !== serializeResolvedRunPlan(plan)) {
     throw new ArtifactStoreError('Completed plan.json is not canonical.');
-  }
-  if (resolvedRunPlanSha256(plan) !== result.plan_sha256) {
-    throw new ArtifactStoreError(
-      'plan.json does not match the completed result plan digest.',
-    );
   }
   if (
     serializeCanonicalJson(plan.selection) !==

@@ -58,7 +58,6 @@ export interface WorkspaceEvidenceEntryV1 {
   readonly exists: boolean;
   readonly kind: 'file' | 'directory' | 'other' | 'missing';
   readonly size_bytes?: number;
-  readonly sha256?: Sha256Digest;
   /** Exact inspected bytes. Base64 avoids lossy UTF-8 decoding. */
   readonly content_base64?: string;
   readonly issue?: string;
@@ -254,7 +253,6 @@ export interface RunEvidenceV1 {
 interface RunResultCommon {
   readonly run_id: string;
   readonly selection: RunSelection;
-  readonly plan_sha256: Sha256Digest;
   readonly forge: {
     version: string;
     action_bundles?: readonly SetupActionBundleReferenceV1[];

@@ -1,6 +1,6 @@
 import {sha256Digest} from '../model/hashes.js';
 import {
-  BENCHMARK_SCHEMA_VERSION,
+  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
   type ExperimentConfigV1,
@@ -169,7 +169,7 @@ export function resolveRunPlanWithSetupActions(
   }
 
   const plan: ResolvedRunPlanV1 = {
-    schema_version: BENCHMARK_SCHEMA_VERSION,
+    schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
     selection: cloneJson(selection),
     provenance: {
       dataset: {
@@ -179,12 +179,10 @@ export function resolveRunPlanWithSetupActions(
       experiment: {
         id: config.id,
         version: config.version,
-        sha256: input.experiment.sha256,
       },
       case: {
         id: definition.id,
         path: manifestCase.path,
-        sha256: loadedCase.sha256,
       },
       forge: {
         version: FORGE_VERSION,

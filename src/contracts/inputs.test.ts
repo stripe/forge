@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {PassThrough} from 'node:stream';
 import {afterEach, describe, it} from 'node:test';
 import {createDirectoryRunInputProvider} from './inputs.js';
+import {loadDataset} from '../model/loaders.js';
+import {sha256Hex} from '../model/hashes.js';
+import {writeSetupHandler} from '../setup/forgeWrite.js';
+import {createMemoryWorkspace} from '../testing/memoryWorkspace.js';
+import {createTestResolvedRunPlan} from '../testing/plans.js';
 
 const temporaryRoots: string[] = [];
 
@@ -14,6 +20,100 @@ afterEach(async () => {
 });
 
 describe('createDirectoryRunInputProvider', () => {
+  it('rejects a manifest file replaced by an empty directory without rejecting subtrees', async () => {
+    const {root, inputs} = await verifiedDatasetInputs();
+    assert.equal((await inputs.inspect('fixtures')).kind, 'directory');
+    assert.deepEqual(await inputs.listFiles('fixtures'), [
+      {path: 'fixtures/hello.txt', kind: 'file', size: 5},
+    ]);
+    const source = path.join(root, 'fixtures/hello.txt');
+    await fs.rm(source);
+    await fs.mkdir(source);
+    await assert.rejects(inputs.inspect('fixtures/hello.txt'), /manifest file type/);
+    await assert.rejects(inputs.listFiles('fixtures/hello.txt'), /manifest file type/);
+    await assert.rejects(inputs.listFiles('fixtures'), /manifest file type/);
+
+    const plain = await createDirectoryRunInputProvider(root);
+    assert.equal((await plain.inspect('fixtures/hello.txt')).kind, 'directory');
+    assert.deepEqual(await plain.listFiles('fixtures/hello.txt'), []);
+  });
+
+  it('fails forge/write instead of skipping a source file replaced by an empty directory', async () => {
+    const {root, inputs} = await verifiedDatasetInputs();
+    const source = path.join(root, 'fixtures/hello.txt');
+    await fs.rm(source);
+    await fs.mkdir(source);
+    const workspace = createMemoryWorkspace();
+    const plan = createTestResolvedRunPlan();
+    const prepared = writeSetupHandler.preflight({
+      uses: 'forge/write',
+      with: {target: 'hello.txt', source: {dataset_path: 'fixtures/hello.txt'}},
+    }, {stepIndex: 0, selection: plan.agent, runtime: plan.runtime});
+    await assert.rejects(prepared.apply({
+      runId: 'changed-input-type',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: workspace.mutable,
+      stateDirectories: new Map(),
+      commands: {async run() {throw new Error('No commands expected.');}},
+      inputs,
+      signal: new AbortController().signal,
+      stepIndex: 0,
+      selection: plan.agent,
+      runtime: plan.runtime,
+    }), /manifest file type/);
+    assert.equal(workspace.snapshot().size, 0);
+  });
+
+  it('aborts an active read while it waits for input bytes', {timeout: 1_000}, async (t) => {
+    const {root, inputs} = await verifiedDatasetInputs();
+    const probe = await fs.open(path.join(root, 'fixtures/hello.txt'), 'r');
+    const fileHandlePrototype = Object.getPrototypeOf(probe);
+    await probe.close();
+    let announceStarted!: () => void;
+    const started = new Promise<void>((resolve) => {announceStarted = resolve;});
+    let stalled: PassThrough | undefined;
+    t.mock.method(fileHandlePrototype, 'createReadStream', (
+      options: Parameters<fs.FileHandle['createReadStream']>[0],
+    ) => {
+      stalled = new PassThrough({
+        ...(options?.signal === undefined ? {} : {signal: options.signal}),
+      });
+      announceStarted();
+      return stalled;
+    });
+    t.after(() => {stalled?.destroy();});
+    const controller = new AbortController();
+    const reading = inputs.read('fixtures/hello.txt', {signal: controller.signal});
+    const rejected = assert.rejects(reading, {name: 'AbortError'});
+    await started;
+    controller.abort();
+    await rejected;
+  });
+
+  it('verifies consumed bytes against a snapshot of the loaded manifest', async () => {
+    const {root, dataset, inputs} = await verifiedDatasetInputs();
+    assert.equal(Buffer.from(await inputs.read('fixtures/hello.txt')).toString(), 'hello');
+    await fs.writeFile(path.join(root, 'fixtures/hello.txt'), 'other');
+    await assert.rejects(inputs.read('fixtures/hello.txt'), /manifest.*SHA-256/);
+    dataset.manifest.files.find((file) => file.path === 'fixtures/hello.txt')!.sha256 = sha256Hex('other');
+    await assert.rejects(inputs.read('fixtures/hello.txt'), /manifest.*SHA-256/);
+  });
+
+  it('rejects undeclared and missing files after dataset verification', async () => {
+    const {root, inputs} = await verifiedDatasetInputs();
+    assert.deepEqual(await inputs.listFiles('fixtures'), [
+      {path: 'fixtures/hello.txt', kind: 'file', size: 5},
+    ]);
+    const extra = path.join(root, 'fixtures/extra.txt');
+    await fs.writeFile(extra, 'extra');
+    await assert.rejects(inputs.inspect('fixtures/extra.txt'), /manifest inventory/);
+    await assert.rejects(inputs.read('fixtures/extra.txt'), /manifest inventory/);
+    await assert.rejects(inputs.listFiles('fixtures'), /manifest inventory/);
+    await fs.rm(extra);
+    await fs.rm(path.join(root, 'fixtures/hello.txt'));
+    await assert.rejects(inputs.listFiles('fixtures'), /manifest inventory/);
+  });
+
   it('reads bounded dataset files and rejects traversal and escaping symlinks', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-input-test-'));
     temporaryRoots.push(root);
@@ -37,3 +137,29 @@ describe('createDirectoryRunInputProvider', () => {
     await assert.rejects(inputs.read('fixtures/hello.txt', {maxBytes: 2}), /byte limit/);
   });
 });
+
+async function verifiedDatasetInputs() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-verified-input-test-'));
+  temporaryRoots.push(root);
+  const caseBody = 'schema_version: 1\nid: test/example\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
+  const payloads = [
+    {path: 'cases/example.yaml', body: caseBody},
+    {path: 'fixtures/hello.txt', body: 'hello'},
+  ];
+  for (const file of payloads) {
+    const target = path.join(root, file.path);
+    await fs.mkdir(path.dirname(target), {recursive: true});
+    await fs.writeFile(target, file.body);
+  }
+  await fs.writeFile(path.join(root, 'manifest.json'), JSON.stringify({
+    schema_version: 1,
+    dataset: {id: 'test', version: '1'},
+    cases: [{id: 'test/example', path: 'cases/example.yaml'}],
+    files: payloads.map(({path: filePath, body}) => ({
+      path: filePath, size: Buffer.byteLength(body), sha256: sha256Hex(body),
+    })),
+  }));
+  const dataset = await loadDataset(root);
+  const inputs = await createDirectoryRunInputProvider(dataset.root, {manifest: dataset.manifest});
+  return {root, dataset, inputs};
+}

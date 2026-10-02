@@ -118,6 +118,7 @@ export function createClaudePluginInstaller(
             commands: installContext.commands,
             identity,
             marketplacePath,
+            marketplaceCommit,
             signal: installContext.signal,
           });
           const installResult = await runChecked(
@@ -239,9 +240,11 @@ async function ensureMarketplaceCheckout(input: {
     input.signal,
     'Forge could not identify the plugin marketplace snapshot.',
   );
-  if (!FULL_GIT_COMMIT.test(revision.stdout.trim())) {
+  const commit = revision.stdout.trim();
+  if (!FULL_GIT_COMMIT.test(commit)) {
     throw new Error('Plugin marketplace checkout did not resolve to a Git commit.');
   }
+
   const remote = await runGit(
     input.commands,
     input.marketplacePath,
@@ -255,13 +258,14 @@ async function ensureMarketplaceCheckout(input: {
   ) {
     throw new Error('Plugin marketplace checkout does not match its repository.');
   }
-  return revision.stdout.trim();
+  return commit;
 }
 
 async function readSelectedMarketplaceEntry(input: {
   readonly commands: CommandRunner;
   readonly identity: QualifiedPluginId;
   readonly marketplacePath: string;
+  readonly marketplaceCommit: string;
   readonly signal: AbortSignal;
 }): Promise<MarketplaceEntry> {
   const shown = await runGit(
@@ -271,7 +275,7 @@ async function readSelectedMarketplaceEntry(input: {
       '-C',
       input.marketplacePath,
       'show',
-      'HEAD:.claude-plugin/marketplace.json',
+      `${input.marketplaceCommit}:.claude-plugin/marketplace.json`,
     ],
     input.signal,
     'Forge could not read the plugin marketplace snapshot.',
@@ -462,14 +466,13 @@ async function assertInstalledPluginRecord(
   if (expectedCommit !== undefined && record.gitCommitSha !== expectedCommit) {
     throw new Error('Claude installed plugin state does not match the marketplace commit.');
   }
-  if (
-    isGitMarketplaceSource(marketplaceSource) &&
-    (typeof record.gitCommitSha !== 'string' ||
-      !FULL_GIT_COMMIT.test(record.gitCommitSha))
-  ) {
-    throw new Error('Claude installed plugin state omitted its resolved Git commit.');
+  if (!isGitMarketplaceSource(marketplaceSource) || !Object.hasOwn(record, 'gitCommitSha')) {
+    return undefined;
   }
-  return typeof record.gitCommitSha === 'string' ? record.gitCommitSha : undefined;
+  if (typeof record.gitCommitSha !== 'string' || !FULL_GIT_COMMIT.test(record.gitCommitSha)) {
+    throw new Error('Claude installed plugin state returned an invalid Git commit.');
+  }
+  return record.gitCommitSha;
 }
 
 function installedPluginLocation(

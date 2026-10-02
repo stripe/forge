@@ -7,7 +7,6 @@ v1.8 from Harbor's active RFC and reference Pydantic models.
 - Release: `v0.23.0`
 - Commit: `1e5c5c6db929a10a140d05e606882c671ae20729`
 - RFC: `rfcs/0001-trajectory-format.md`
-- RFC SHA-256: `ab2dd5602187ac8271adba13bb9c89dd70961878faa1ab26324d98116bf37b34`
 - Reference models: `src/harbor/models/trajectories/`
 - Upstream license: Apache License 2.0
 

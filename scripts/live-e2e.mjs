@@ -47,7 +47,6 @@ import {
   createDockerRuntimeAdapter,
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
-  FORGE_RUNTIME_ASSET_DIGEST,
 } from '../dist/runtime/docker/index.js';
 import {assertRuntimeAdapterConforms} from '../dist/testing/index.js';
 
@@ -206,6 +205,7 @@ try {
       bridge,
       dockerExecutable,
       platform: dockerReport.platform,
+      imageId: dockerReport.image_id,
       signal,
     });
   }
@@ -397,11 +397,11 @@ async function runClaudePluginConformance({
       installed.enabled !== true ||
       receipt.plugin !== 'stripe@claude-plugins-official' ||
       receipt.marketplace !== 'anthropics/claude-plugins-official' ||
-      receipt.marketplace_commit.length !== 40 ||
+      !/^[a-f0-9]{40}$/.test(receipt.marketplace_commit) ||
       receipt.native_plugin_id !== installed.id ||
       receipt.version !== installed.version ||
-      installed.installPath !== `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}` ||
-      !/^sha256:[a-f0-9]{64}$/.test(receipt.installed_tree.sha256)
+      !/^sha256:[a-f0-9]{64}$/.test(receipt.installed_tree.sha256) ||
+      installed.installPath !== `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}`
     ) {
       throw new Error('Claude did not load the latest plugin from native user settings.');
     }
@@ -486,8 +486,22 @@ async function runDockerConformance(runtime, runId, executionSignal) {
     throw new Error('The quickstart experiment config contains no run selection.');
   }
   const plan = resolveRunPlan({dataset, experiment, selection});
+  let imageId;
   const report = await assertRuntimeAdapterConforms(
-    runtime,
+    {
+      ...runtime,
+      async prepare(input) {
+        const prepared = await runtime.prepare(input);
+        return Object.freeze({
+          ...prepared,
+          async quiesce() {
+            const sealed = await prepared.quiesce();
+            imageId = sealed.metadata.imageId;
+            return sealed;
+          },
+        });
+      },
+    },
     {
       runId,
       plan,
@@ -512,10 +526,14 @@ async function runDockerConformance(runtime, runId, executionSignal) {
       }],
     },
   );
+  if (typeof imageId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(imageId)) {
+    throw new Error('Docker conformance did not identify the executed image.');
+  }
   return Object.freeze({
     valid: true,
     adapter: {id: runtime.id, version: runtime.version},
     platform: plan.runtime.platform,
+    image_id: imageId,
     run_id: report.runtimeId,
     cleanup_and_idempotent_disposal_verified: true,
   });
@@ -1197,13 +1215,12 @@ async function assertDockerCanReachBridge({
   bridge,
   dockerExecutable,
   platform,
+  imageId,
   signal: executionSignal,
 }) {
-  const architecture = platform === 'linux/arm64' ? 'arm64' : 'amd64';
-  const image = `stripe-forge-runtime:${FORGE_RUNTIME_ASSET_DIGEST.slice(
-    0,
-    20,
-  )}-${architecture}`;
+  if (typeof imageId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(imageId)) {
+    throw new Error('The bridge probe requires an immutable Docker image ID.');
+  }
   const result = await runBoundedCommand(
     dockerExecutable,
     [
@@ -1214,7 +1231,7 @@ async function assertDockerCanReachBridge({
       platform,
       '--entrypoint',
       '/usr/bin/curl',
-      image,
+      imageId,
       '--silent',
       '--show-error',
       '--max-time',

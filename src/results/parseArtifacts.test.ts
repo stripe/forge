@@ -40,6 +40,9 @@ describe('canonical interaction and judge evidence parsing', () => {
       }),
     );
     assert.throws(() => parseSetupArtifact({...artifact, unknown: true}));
+    for (const schema_version of [2, 3]) {
+      assert.throws(() => parseSetupArtifact({...artifact, schema_version}));
+    }
   });
 
   it('strictly parses one-shot and multi-turn interaction audits', () => {

@@ -10,6 +10,7 @@ import type {
   AgentNativeEvidenceResult,
 } from '../contracts/agent.js';
 import type {
+  RunArtifact,
   RunArtifactStore,
   RunArtifactTransaction,
 } from '../contracts/artifacts.js';
@@ -41,8 +42,6 @@ const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
 const RAW_NATIVE_SESSION = `{"type":"system","credential":"${SECRET}"}\n`;
 const DIGEST_A = `sha256:${'a'.repeat(64)}` as const;
-const DIGEST_B = `sha256:${'b'.repeat(64)}` as const;
-const DIGEST_C = `sha256:${'c'.repeat(64)}` as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -141,6 +140,77 @@ describe('executeEval', () => {
     );
     expect(await fs.readFile(nativePath, 'utf8')).toBe(RAW_NATIVE_SESSION);
     expect((await fs.stat(nativePath)).mode & 0o777).toBe(0o600);
+    expect(completed.result).not.toHaveProperty('plan_sha256');
+    const workspaceEvidence = JSON.parse(await fs.readFile(
+      path.join(completed.location, 'workspace-evidence.json'),
+      'utf8',
+    )) as {schema_version: number; entries: Array<Record<string, unknown>>};
+    expect(workspaceEvidence.schema_version).toBe(1);
+    expect(workspaceEvidence.entries[0]).not.toHaveProperty('sha256');
+  });
+
+  it('isolates contributor result snapshots and captures returned artifact bytes', async () => {
+    const nativeBody = Buffer.from(RAW_NATIVE_SESSION);
+    const fixture = await executionFixture({
+      nativeArtifact: true,
+      nativeArtifactBody: nativeBody,
+    });
+    const contributionBody = Buffer.from('first contribution\n');
+    const contributed = {
+      path: 'extensions/first/report.txt',
+      body: contributionBody,
+      mediaType: 'text/plain',
+    } satisfies RunArtifact;
+    let nativeDigest: unknown;
+    const composition: ForgeComposition = {
+      ...fixture.composition(createArtifactStore({
+        root: path.join(fixture.root, 'snapshot-artifacts'),
+      })),
+      contributors: [
+        {
+          id: 'first',
+          async contribute({result}) {
+            const descriptors = result.supplemental_artifacts as Array<{sha256: string}>;
+            nativeDigest = descriptors[0]!.sha256;
+            descriptors[0]!.sha256 = `sha256:${'f'.repeat(64)}`;
+            (result.evaluation as {status: string}).status = 'failed';
+            return [contributed];
+          },
+        },
+        {
+          id: 'second',
+          async contribute({result}) {
+            expect((result.supplemental_artifacts as Array<{sha256: string}>)[0]?.sha256)
+              .toBe(nativeDigest);
+            expect(result.evaluation).toMatchObject({status: 'passed'});
+            nativeBody.fill(0);
+            contributionBody.fill(0);
+            contributed.path = 'extensions/second/replaced.txt';
+            return [];
+          },
+        },
+      ],
+    };
+
+    const completed = await executeEval({
+      runId: 'run-contributor-snapshots',
+      plan: fixture.plan,
+      composition,
+      now: monotonicClock(),
+    });
+    expect(completed.result.evaluation.status).toBe('passed');
+    expect(completed.result.supplemental_artifacts[0]?.sha256).toBe(nativeDigest);
+    expect(await fs.readFile(
+      path.join(completed.location, 'native/claude-code/session.jsonl'),
+      'utf8',
+    )).toBe(RAW_NATIVE_SESSION);
+    expect(await fs.readFile(
+      path.join(completed.location, 'extensions/first/report.txt'),
+      'utf8',
+    )).toBe('first contribution\n');
+    await expect(verifyCompletedRun(completed.location)).resolves.toMatchObject({
+      runId: 'run-contributor-snapshots',
+    });
   });
 
   it('omits standalone evaluation and empty workspace evidence artifacts', async () => {
@@ -704,6 +774,7 @@ async function executionFixture(
     adapterFallbackEvidence?: boolean;
     omitEvidenceSession?: boolean;
     nativeArtifact?: boolean;
+    nativeArtifactBody?: Uint8Array;
     nativeArtifactSessionId?: string;
     nativeEvidenceUnavailable?: boolean;
     credentialValue?: string;
@@ -829,7 +900,7 @@ async function executionFixture(
                 options.nativeArtifactSessionId ?? context.sessionId,
               mediaType: 'application/x-ndjson',
               extension: 'jsonl',
-              body: Buffer.from(RAW_NATIVE_SESSION, 'utf8'),
+              body: options.nativeArtifactBody ?? Buffer.from(RAW_NATIVE_SESSION, 'utf8'),
             };
           },
         }
@@ -930,8 +1001,8 @@ function resolvedPlan(): ResolvedRunPlanV1 {
     },
     provenance: {
       dataset: {id: 'sample', version: '1', manifest_sha256: DIGEST_A},
-      experiment: {id: 'local', version: '1', sha256: DIGEST_B},
-      case: {id: 'sample/case', path: 'cases/case.yaml', sha256: DIGEST_C},
+      experiment: {id: 'local', version: '1'},
+      case: {id: 'sample/case', path: 'cases/case.yaml'},
       forge: {version: FORGE_VERSION},
     },
     case: {

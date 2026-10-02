@@ -104,6 +104,9 @@ try {
       ]);
       assert.equal(typeof forge.parseJudgeTranscriptProjection, 'function');
       assert.equal(forge.RUN_RESULT_SCHEMA_VERSION, 1);
+      assert.equal(forge.RESOLVED_RUN_PLAN_SCHEMA_VERSION, 1);
+      assert.equal(forge.SETUP_ARTIFACT_SCHEMA_VERSION, 1);
+      assert.equal(forge.WORKSPACE_EVIDENCE_SCHEMA_VERSION, 1);
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
       assert.equal(atif.isAtifTimestamp('2024-02-29T00:00:00Z'), true);
       assert.equal(typeof atif.parseNormalizedTrajectory, 'function');

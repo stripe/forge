@@ -253,7 +253,7 @@ is selected.
 | [`parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
 | [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
 | [`paths.ts`](https://github.com/stripe/forge/blob/main/src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
-| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used by loaders, planner, receipts, evaluation, and results |
+| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for dataset pins, bundle identity checks, plugin snapshot fingerprints, and artifact verification |
 | [`checks.ts`](https://github.com/stripe/forge/blob/main/src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
 | [`errors.ts`](https://github.com/stripe/forge/blob/main/src/model/errors.ts) | `BenchmarkModelError` and stable model/loading error codes | Thrown by safe loaders and exposed through `model/index.ts` |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/model/index.ts) | Public model barrel | Re-exported by the package root |
@@ -267,7 +267,7 @@ raw YAML/JSON
    │ parse.ts
    ▼
 EvalCaseV1 / ExperimentConfigV1 / DatasetManifestV1
-   │ loaders.ts adds paths and byte digests
+   │ loaders.ts verifies dataset bytes and adds source paths
    ▼
 LoadedDatasetV1 + LoadedExperimentConfigV1
    │ planning/planner.ts
@@ -307,7 +307,7 @@ implementations.
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
-| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; default implementation safely roots access in a dataset directory |
+| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; manifest-backed directory providers check returned bytes and inventory |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented only by the Claude adapter; selected by `setup/forgePlugin.ts` |
@@ -435,7 +435,7 @@ those two sides.
 | [`hostFileImport.ts`](https://github.com/stripe/forge/blob/main/src/runtime/hostFileImport.ts) | `importHostFileIntoState` | Streams and verifies trusted host file imports into declared run-owned state. |
 | [`platform.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/platform.ts) | `detectDockerRuntimePlatform` | Queries the selected Docker server and maps its architecture to the concrete platform used when planning an authored `native` experiment. |
 | [`commandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/commandRunner.ts) | `DockerCommandController` | Implements scoped `CommandRunner`s over `docker exec`, creates temporary env files, tracks active commands, and closes setup/all command authority at lifecycle barriers. |
-| [`assets.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets.ts) | Base image, CLI version, and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |
+| [`assets.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets.ts) | CLI version and asset digest constants | Consumed by Docker runtime and built-in agent adapters for pin verification. Updated with packaged assets. |
 | [`assets/Dockerfile`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets/Dockerfile) | Forge-owned image | Installs the pinned CLIs and runtime dependencies. Copied into the package at build time. |
 | [`assets/entrypoint.sh`](https://github.com/stripe/forge/blob/main/src/runtime/docker/assets/entrypoint.sh) | Container entrypoint | Keeps the prepared container available for `docker exec`. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/runtime/docker/index.ts) | Public Docker subpath | Exports adapter and platform helpers plus pin metadata |
@@ -579,7 +579,7 @@ different.
 
 The verifier deliberately imports:
 
-- plan parsing/digest policy from `model` and `planning`;
+- strict plan parsing and canonical serialization from `model` and `planning`;
 - turn coverage from `evidence/selection.ts`;
 - ATIF parsing from `atif`;
 - judge projection/prompt versions from `evaluation`; and

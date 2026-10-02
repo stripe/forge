@@ -36,7 +36,14 @@ describe('workspace checks', () => {
       workspace({'greeting.txt': 'Hello, world!\n'}),
       checks,
     );
-    expect(evidence.entries[0]?.sha256).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(evidence.schema_version).toBe(1);
+    expect(evidence.entries[0]).toEqual({
+      path: 'greeting.txt',
+      exists: true,
+      kind: 'file',
+      size_bytes: 14,
+      content_base64: Buffer.from('Hello, world!\n').toString('base64'),
+    });
     expect(runWorkspaceChecks(checks, evidence).every(({passed}) => passed)).toBe(true);
   });
 });

@@ -52,27 +52,21 @@ export function parseAgentPluginInstallationReceipt(
 function parsePluginSourceReceipt(
   input: unknown,
 ): AgentPluginInstallationReceipt['source'] {
-  if (!isPlainRecord(input) || typeof input.kind !== 'string') {
+  if (
+    !isPlainRecord(input) ||
+    (input.kind !== 'marketplace-path' &&
+      input.kind !== 'archive' &&
+      input.kind !== 'github' &&
+      input.kind !== 'url' &&
+      input.kind !== 'git-subdir')
+  ) {
     throw new TypeError('Agent plugin source receipt is invalid.');
   }
-  if (input.kind === 'marketplace-path' && hasExactKeys(input, ['kind'])) {
-    return Object.freeze({kind: input.kind});
-  }
-  if (input.kind === 'archive' && hasExactKeys(input, ['kind'])) {
+  if (hasExactKeys(input, ['kind'])) {
     return Object.freeze({kind: input.kind});
   }
   if (
-    input.kind === 'archive' &&
-    hasExactKeys(input, ['kind', 'sha256']) &&
-    typeof input.sha256 === 'string' &&
-    isSha256Digest(input.sha256)
-  ) {
-    return Object.freeze({kind: input.kind, sha256: input.sha256});
-  }
-  if (
-    (input.kind === 'github' ||
-      input.kind === 'url' ||
-      input.kind === 'git-subdir') &&
+    (input.kind === 'github' || input.kind === 'url' || input.kind === 'git-subdir') &&
     hasExactKeys(input, ['kind', 'commit']) &&
     typeof input.commit === 'string' &&
     isFullGitCommit(input.commit)
@@ -82,18 +76,22 @@ function parsePluginSourceReceipt(
   throw new TypeError('Agent plugin source receipt is invalid.');
 }
 
+function isQualifiedPluginId(value: string): boolean {
+  const separator = value.indexOf('@');
+  return (
+    separator > 0 &&
+    separator === value.lastIndexOf('@') &&
+    isSafeSimpleIdentifier(value.slice(0, separator)) &&
+    isSafeSimpleIdentifier(value.slice(separator + 1))
+  );
+}
+
 function parseInstalledPluginTree(
   input: unknown,
 ): AgentPluginInstallationReceipt['installed_tree'] {
   if (
     !isPlainRecord(input) ||
-    !hasExactKeys(input, [
-      'format',
-      'sha256',
-      'entry_count',
-      'file_count',
-      'size_bytes',
-    ]) ||
+    !hasExactKeys(input, ['format', 'sha256', 'entry_count', 'file_count', 'size_bytes']) ||
     input.format !== 'forge-plugin-tree-v1' ||
     typeof input.sha256 !== 'string' ||
     !isSha256Digest(input.sha256) ||
@@ -111,20 +109,6 @@ function parseInstalledPluginTree(
     file_count: input.file_count,
     size_bytes: input.size_bytes,
   });
-}
-
-function isQualifiedPluginId(value: string): boolean {
-  const separator = value.indexOf('@');
-  return (
-    separator > 0 &&
-    separator === value.lastIndexOf('@') &&
-    isSafeSimpleIdentifier(value.slice(0, separator)) &&
-    isSafeSimpleIdentifier(value.slice(separator + 1))
-  );
-}
-
-function isFullGitCommit(value: string): boolean {
-  return /^[a-f0-9]{40}$/.test(value);
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
@@ -151,6 +135,10 @@ function hasExactKeys(
     ) &&
     expected.every((key) => Object.hasOwn(input, key))
   );
+}
+
+function isFullGitCommit(value: string): boolean {
+  return /^[a-f0-9]{40}$/.test(value);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

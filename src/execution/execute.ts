@@ -1,4 +1,3 @@
-import {createHash} from 'node:crypto';
 import * as path from 'node:path';
 
 import {
@@ -67,15 +66,14 @@ import {
 import {snapshotAgentToolCalls} from '../interaction/conversation.js';
 import {
   isSafeSimpleIdentifier,
+  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
 import {parseResolvedRunPlanWithSetupActions} from '../model/parse.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
-import {
-  resolvedRunPlanSha256,
-  serializeResolvedRunPlan,
-} from '../planning/index.js';
+import {sha256Digest} from '../model/hashes.js';
+import {serializeResolvedRunPlan} from '../planning/index.js';
 import {
   MAX_SETUP_ARTIFACT_BYTES,
   RUN_RESULT_SCHEMA_VERSION,
@@ -524,31 +522,35 @@ export async function executeEvalWithTestHooks(
       ? []
       : [selectedEvidence.nativeArtifact];
     const nativeDescriptors = nativeArtifacts.map(describeArtifact);
-    let result = buildResult({
-      input,
-      agent: preflight.agent,
-      runtime: sealed,
-      interaction,
-      completionCalls: completions.calls,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
-      evaluation: evaluated.evaluation,
-      coreDescriptors,
-      supplementalDescriptors: nativeDescriptors,
-      warnings: rolePlayerWarnings(interaction.failure),
-      startedAt,
-      completedAt: now(),
-    });
-
-    const contributedArtifacts = await buildSupplementalArtifacts(
-      input,
-      result,
-      secrets,
-      signal,
-    );
+    let contributedArtifacts: RunArtifact[] = [];
+    if ((input.composition.contributors?.length ?? 0) > 0) {
+      const contributorResult = buildResult({
+        input,
+        agent: preflight.agent,
+        runtime: sealed,
+        interaction,
+        completionCalls: completions.calls,
+        evidence: redacted.evidence,
+        redactionCount: redacted.replacements,
+        evaluation: evaluated.evaluation,
+        coreDescriptors,
+        supplementalDescriptors: nativeDescriptors,
+        warnings: rolePlayerWarnings(interaction.failure),
+        startedAt,
+        completedAt: now(),
+      });
+      contributedArtifacts = await buildSupplementalArtifacts(
+        input,
+        contributorResult,
+        secrets,
+        signal,
+      );
+    }
     const supplementalArtifacts = [...nativeArtifacts, ...contributedArtifacts];
-    const supplementalDescriptors = supplementalArtifacts.map(describeArtifact);
-    result = {...result, supplemental_artifacts: supplementalDescriptors};
+    const supplementalDescriptors = [
+      ...nativeDescriptors,
+      ...contributedArtifacts.map(describeArtifact),
+    ];
 
     await events.phase('artifact_stage', async () => {
       phase = 'artifact_stage';
@@ -575,7 +577,7 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    result = buildResult({
+    const result = buildResult({
       input,
       agent: preflight.agent,
       runtime: sealed,
@@ -908,7 +910,7 @@ function buildEvalPreflight(
 }
 
 function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
-  if (plan.schema_version !== 1) {
+  if (plan.schema_version !== RESOLVED_RUN_PLAN_SCHEMA_VERSION) {
     throw new ForgeExecutionError('invalid_plan', 'preflight', 'Unsupported run-plan version.');
   }
   if (plan.provenance.forge.version !== FORGE_VERSION) {
@@ -1632,21 +1634,32 @@ async function buildSupplementalArtifacts(
   signal: AbortSignal,
 ): Promise<RunArtifact[]> {
   const artifacts: RunArtifact[] = [];
+  const resultJson = serializeCanonicalJson(result);
   for (const contributor of input.composition.contributors ?? []) {
     if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(contributor.id)) {
       throw new TypeError('Artifact contributor IDs must be safe identifiers.');
     }
     const contributed = await contributor.contribute({
       runId: input.runId,
-      result: result as unknown as Readonly<Record<string, unknown>>,
+      result: JSON.parse(resultJson) as Readonly<Record<string, unknown>>,
       signal,
     });
     for (const artifact of contributed) {
-      if (!artifact.path.startsWith(`extensions/${contributor.id}/`)) {
+      const {path: artifactPath, body, mediaType, sensitivity} = artifact;
+      if (!(body instanceof Uint8Array)) {
+        throw new TypeError('Contributed artifacts require bytes.');
+      }
+      const snapshot: RunArtifact = {
+        path: artifactPath,
+        body: Uint8Array.from(body),
+        mediaType,
+        ...(sensitivity === undefined ? {} : {sensitivity}),
+      };
+      if (!snapshot.path.startsWith(`extensions/${contributor.id}/`)) {
         throw new TypeError(`Contributor ${contributor.id} wrote outside its namespace.`);
       }
-      assertNoSecrets(artifact.body, secrets, artifact.path);
-      artifacts.push(artifact);
+      assertNoSecrets(snapshot.body, secrets, snapshot.path);
+      artifacts.push(snapshot);
     }
   }
   const paths = new Set<string>();
@@ -1676,7 +1689,6 @@ function buildResult(input: {
     schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: input.input.runId,
     selection: input.input.plan.selection,
-    plan_sha256: resolvedRunPlanSha256(input.input.plan),
     forge: {
       version: FORGE_VERSION,
       ...(input.input.plan.provenance.forge.action_bundles === undefined
@@ -1769,20 +1781,15 @@ function jsonArtifact(path: string, body: string): RunArtifact {
 }
 
 function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
-  const hash = canonicalBytesSha256(artifact.body);
   return {
     path: artifact.path,
     media_type: artifact.mediaType,
     size_bytes: artifact.body.byteLength,
-    sha256: hash,
+    sha256: sha256Digest(artifact.body),
     ...(artifact.sensitivity === undefined
       ? {}
       : {sensitivity: artifact.sensitivity}),
   };
-}
-
-function canonicalBytesSha256(body: Uint8Array): `sha256:${string}` {
-  return `sha256:${createHash('sha256').update(body).digest('hex')}`;
 }
 
 /**

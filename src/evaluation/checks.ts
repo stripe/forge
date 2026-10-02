@@ -2,7 +2,6 @@ import {runInNewContext} from 'node:vm';
 
 import type {AtifTrajectoryV1_8} from '../atif/index.js';
 import type {ReadonlyWorkspace} from '../contracts/runtime.js';
-import {sha256Digest} from '../model/hashes.js';
 import type {ChecksV1, ResolvedRunPlanV1} from '../model/types.js';
 import {
   WORKSPACE_EVIDENCE_SCHEMA_VERSION,
@@ -116,7 +115,6 @@ export async function collectWorkspaceEvidence(
         exists: true,
         kind: 'file',
         size_bytes: body.byteLength,
-        sha256: sha256Digest(body),
         content_base64: Buffer.from(body).toString('base64'),
       });
     } catch (error) {

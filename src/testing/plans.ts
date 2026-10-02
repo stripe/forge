@@ -1,3 +1,4 @@
+import {RESOLVED_RUN_PLAN_SCHEMA_VERSION} from '../model/types.js';
 import {parseResolvedRunPlan} from '../model/parse.js';
 import {FORGE_VERSION} from '../version.js';
 import type {
@@ -10,8 +11,6 @@ import type {
 } from '../model/types.js';
 
 const DATASET_DIGEST = `sha256:${'1'.repeat(64)}` as const;
-const EXPERIMENT_DIGEST = `sha256:${'2'.repeat(64)}` as const;
-const CASE_DIGEST = `sha256:${'3'.repeat(64)}` as const;
 
 export interface TestResolvedRunPlanOptions {
   readonly forgeVersion?: string;
@@ -54,7 +53,7 @@ export function createTestResolvedRunPlan(
   const maxTurns = mode === 'one_shot' ? 1 : (options.maxTurns ?? 10);
 
   return parseResolvedRunPlan({
-    schema_version: 1,
+    schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
     selection: {
       case_id: caseId,
       treatment,
@@ -70,12 +69,10 @@ export function createTestResolvedRunPlan(
       experiment: {
         id: 'testing/experiment',
         version: '1.0.0',
-        sha256: EXPERIMENT_DIGEST,
       },
       case: {
         id: caseId,
         path: `cases/${caseId}/eval.yaml`,
-        sha256: CASE_DIGEST,
       },
       forge: {version: options.forgeVersion ?? FORGE_VERSION},
     },

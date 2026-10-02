@@ -146,6 +146,65 @@ describe('unified live end-to-end suite', () => {
     assert.throws(() => verify(result, {...trajectory, agent: {...trajectory.agent, version: '0.0.0'}},
       1, '/synthetic-result', identity), /exact native agent session evidence/);
   });
+
+  it('uses the conformance image ID for the bridge probe instead of reconstructing a tag', async () => {
+    const source = await fs.readFile(liveScript, 'utf8');
+    const imageId = `sha256:${'a'.repeat(64)}`;
+    const signal = new AbortController().signal;
+    const runConformance = runInNewContext(`${section(source,
+      'async function runDockerConformance(', 'async function runSelection(')}
+      runDockerConformance`, {
+      path,
+      Buffer,
+      repositoryRoot,
+      loadDataset: async () => ({}),
+      loadExperimentConfig: async () => ({}),
+      expandExperiment: () => [{}],
+      resolveRunPlan: () => ({runtime: {platform: 'linux/amd64'}}),
+      async assertRuntimeAdapterConforms(adapter: {
+        prepare(): Promise<{quiesce(): Promise<unknown>}>;
+      }) {
+        const prepared = await adapter.prepare();
+        await prepared.quiesce();
+        return {runtimeId: 'probe'};
+      },
+    }) as (runtime: unknown, runId: string, signal: AbortSignal) => Promise<{
+      image_id: string; platform: string;
+    }>;
+    const report = await runConformance({
+      id: 'forge/docker',
+      async prepare() {
+        return {async quiesce() {return {metadata: {imageId}};}};
+      },
+    }, 'probe', signal);
+    assert.equal(report.image_id, imageId);
+
+    const calls: string[][] = [];
+    const probeBridge = runInNewContext(`${section(source,
+      'async function assertDockerCanReachBridge(', 'function runBoundedCommand(')}
+      assertDockerCanReachBridge`, {
+      AbortSignal,
+      async runBoundedCommand(executable: string, argv: readonly string[]) {
+        assert.equal(executable, 'docker');
+        calls.push([...argv]);
+        return {exitCode: 0, stdout: '204'};
+      },
+    }) as (input: Record<string, unknown>) => Promise<void>;
+    const input = {
+      bridge: {healthUrl: 'http://bridge.test/health'},
+      dockerExecutable: 'docker',
+      platform: report.platform,
+      imageId: report.image_id,
+      signal,
+    };
+    await probeBridge(input);
+    const argv = calls[0]!;
+    assert.equal(argv[argv.indexOf('/usr/bin/curl') + 1], imageId);
+    assert.ok(argv.includes('--pull=never'));
+    await assert.rejects(probeBridge({...input, imageId: 'stripe-forge-runtime:mutable'}),
+      /immutable Docker image ID/);
+    assert.equal(calls.length, 1);
+  });
 });
 
 /** Evaluate only the production configuration prefix; no imports, sockets, or Docker exist in this context. */

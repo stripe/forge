@@ -24,10 +24,12 @@ import {
   JUDGE_EVIDENCE_SCHEMA_VERSION,
   RUN_RESULT_SCHEMA_VERSION,
   SETUP_ARTIFACT_SCHEMA_VERSION,
+  WORKSPACE_EVIDENCE_SCHEMA_VERSION,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RunResult,
   type SetupArtifactV1,
+  type WorkspaceEvidenceV1,
 } from './types.js';
 
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -72,6 +74,24 @@ const setupArtifactSchema = z.object({
     }
   }
 });
+
+const workspaceEvidenceSchema = z.object({
+  schema_version: z.literal(WORKSPACE_EVIDENCE_SCHEMA_VERSION),
+  entries: z.array(z.object({
+    path: safeText,
+    exists: z.boolean(),
+    kind: z.enum(['file', 'directory', 'other', 'missing']),
+    size_bytes: z.number().int().nonnegative().optional(),
+    content_base64: z.string().max(342_000).optional(),
+    issue: z.string().max(64 * 1024).optional(),
+  }).strict()),
+  complete: z.boolean(),
+  warnings: z.array(z.object({
+    code: safeText,
+    message: z.string().min(1).max(64 * 1024),
+    path: safeText.optional(),
+  }).strict()),
+}).strict();
 
 const checkResult = z.object({
   name: safeText,
@@ -396,7 +416,6 @@ const runResultFields = {
       return z.NEVER;
     }
   }),
-  plan_sha256: digest,
   forge: z.object({
     version: safeVersion,
     action_bundles: z
@@ -550,6 +569,11 @@ export function parseInteractionArtifact(input: unknown): InteractionArtifactV1 
 
 export function parseSetupArtifact(input: unknown): SetupArtifactV1 {
   return setupArtifactSchema.parse(input) as SetupArtifactV1;
+}
+
+/** @internal Strict wire parser used by completed-run verification. */
+export function parseWorkspaceEvidence(input: unknown): WorkspaceEvidenceV1 {
+  return workspaceEvidenceSchema.parse(input) as WorkspaceEvidenceV1;
 }
 
 export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {

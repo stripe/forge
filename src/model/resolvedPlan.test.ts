@@ -38,12 +38,10 @@ function validPlan(): ResolvedRunPlanV1 {
       experiment: {
         id: 'sample/experiment',
         version: '1.0.0',
-        sha256: DIGEST,
       },
       case: {
         id: 'sample/write',
         path: 'cases/sample/write/eval.yaml',
-        sha256: DIGEST,
       },
       forge: {version: '0.1.0'},
     },
@@ -82,6 +80,22 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('rejects unsupported plan versions and removed source digest fields', () => {
+    expect(() => parseResolvedRunPlan({...validPlan(), schema_version: 2})).toThrow(
+      BenchmarkModelError,
+    );
+    for (const source of ['experiment', 'case'] as const) {
+      const plan = validPlan();
+      expect(() => parseResolvedRunPlan({
+        ...plan,
+        provenance: {
+          ...plan.provenance,
+          [source]: {...plan.provenance[source], sha256: DIGEST},
+        },
+      })).toThrow(BenchmarkModelError);
+    }
+  });
+
   it('accepts and projects a complete planner output', () => {
     const input = validPlan();
     const parsed = parseResolvedRunPlan(input);
