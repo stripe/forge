@@ -448,16 +448,25 @@ the Docker CLI and a Forge-owned image. It:
 #### Run-owned paths and mounts
 
 For one run, `R` is the temporary host directory
-`<temporaryRoot>/stripe-forge-run-<random>`. The Docker daemon must be able to
-access it. Arrows show what the **container** can do through each bind mount;
-the Forge host process can separately read and write the source directories.
+`<temporaryRoot>/stripe-forge-run-<random>`. Forge uses bind mounts, not named
+Docker volumes. The Docker daemon must be able to access `R`.
+
+| Bind mount (host → container) | Purpose | Typical contents | Container access |
+| --- | --- | --- | --- |
+| `R/workspace` → `/workspace` | Working directory for the case | Files placed by setup; files created or edited by the agent | Read/write during setup and interaction |
+| `R/home` → `/home/forge` | Run-specific agent home | Agent settings and caches outside dedicated state mounts | Read/write during setup and interaction |
+| `R/state/{id}` → declared `containerPath` | Dedicated state requested by an agent or setup action; one mount per ID | Session logs, plugin files, or imported tools, depending on the request | Read/write during setup; read-only during interaction if sealed, otherwise read/write |
+
+The access column describes the **container**, running as UID `10001`. The
+Forge host process can separately read and write the host source directories.
+The diagram shows the path mappings:
 
 ```mermaid
 flowchart LR
     subgraph Host["Host: per-run directory R"]
-        W["R/workspace<br/>setup files and agent edits"]
-        H["R/home<br/>other agent settings and caches"]
-        S["R/state/{id}<br/>session logs, plugins, or imported tools"]
+        W["R/workspace"]
+        H["R/home"]
+        S["R/state/{id}"]
     end
     subgraph Container["Container: UID:GID 10001:10001"]
         CW["/workspace"]
@@ -465,9 +474,9 @@ flowchart LR
         CS["declared containerPath"]
     end
 
-    W -->|can read and write| CW
-    H -->|can read and write| CH
-    S -->|can read and write during setup| CS
+    W --> CW
+    H --> CH
+    S --> CS
 ```
 
 These modes are set on the **host filesystem**. A bind mount exposes the same
