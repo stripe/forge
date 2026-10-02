@@ -1196,31 +1196,29 @@ runtime descriptor in its experiment:
 ```yaml
 runtime:
   adapter: acme/process
-  adapter_version: '1'
-  config_version: 1
   platform: linux/amd64
   config:
-    profile: isolated-worker-v1
+    profile: isolated-worker
     tool_build: immutable-build-123
-    network_policy: approved-egress-v1
+    network_policy: approved-egress
 ```
 
 The names and fields inside `config` belong to that adapter. The public parser
 validates the strict envelope and bounded plain JSON (at most 1 MiB serialized
 configuration, subject to the overall graph limits). It rejects unsafe object
-keys and does not add defaults or rewrite external configuration. Namespaced
-adapter IDs, implementation versions, configuration versions, and platform are
-required. `docker` and `forge/docker` are reserved for the built-in format.
+keys and does not add defaults or rewrite external configuration. A namespaced
+adapter ID and platform are required. `docker` and `forge/docker` are reserved
+for the built-in format.
 
 Supply one implementation through `ForgeComposition.runtime`; no registry,
 automatic imports, or runtime discovery is involved. An external adapter must
 implement synchronous, pure `preflight({plan, requirements, environment})`. Forge calls it
 after merging agent and setup requirements, before resolving any credentials
-or allocating resources. It must reject unsupported config versions, unknown
-fields, missing effective settings, unsupported requirements, and incompatible
-limits. It must not inspect ambient state, normalize defaults, allocate, or
-return a promise. Physical executable and environment checks belong in
-`prepare()`. The implementation ID and version must match the plan exactly.
+or allocating resources. It must reject unknown config fields, missing
+effective settings, unsupported requirements, and incompatible limits. It must
+not inspect ambient state, normalize defaults, allocate, or return a promise.
+Physical executable and environment checks belong in `prepare()`. The
+implementation ID must match the plan exactly.
 The preflight environment contains plain variables and opaque credential
 names, references, and scopes. Use it to reject incompatible environment policy
 before secret resolution; secret values are supplied only to `prepare()`.
@@ -1231,14 +1229,11 @@ CLI cannot execute an external descriptor on its own. Wrappers using `runCli`
 receive the selected descriptor in the factory's `options.runtime` field and
 explicitly choose their implementation.
 
-The complete descriptor participates in the resolved plan digest. External
-runtime results record `runtime.adapter_version`; verification binds runtime
-identity, version, and platform to the plan without loading the private
-adapter. The built-in Docker runtime is unversioned; its behavior comes from
-the installed Forge package, whose version is recorded separately. Older
-Docker results with or without `adapter_version: '1'` remain verifiable.
-Offline verification checks the recorded artifacts and descriptor, not the
-private adapter's configuration semantics or actual isolation enforcement.
+The complete descriptor participates in the resolved plan digest. Verification
+binds runtime identity and platform to the plan without loading the private
+adapter. Offline verification checks the recorded artifacts and descriptor,
+not the private adapter's configuration semantics or actual isolation
+enforcement.
 
 Keep settings that can affect evaluation behavior, such as immutable tool
 builds, resources, and network profiles, in the resolved configuration. Keep

@@ -424,10 +424,9 @@ PreparedRuntime ── finalizeSetup() ── interaction continues
 ```
 
 External runtimes are represented in the plan by a namespaced adapter ID,
-adapter version, config version, platform, and bounded public JSON config. The
-composition's adapter must match those pins and implement pure synchronous
-preflight. Private paths, credentials, or inferred host settings do not belong
-in runtime config.
+platform, and bounded public JSON config. The composition's adapter must match
+that ID and implement pure synchronous preflight. Private paths, credentials,
+or inferred host settings do not belong in runtime config.
 
 ### Built-in Docker runtime
 

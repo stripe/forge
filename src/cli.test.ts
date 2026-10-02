@@ -44,7 +44,7 @@ describe('Forge CLI', () => {
     const fixture = await createBenchmarkFixture();
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
     const descriptor = {
-      adapter: 'acme/process', adapter_version: '1', config_version: 1,
+      adapter: 'acme/process',
       platform: 'linux/amd64' as const, config: {profile: 'test-worker'},
     };
     await fs.writeFile(fixture.experimentPath, JSON.stringify({...config, runtime: descriptor}));

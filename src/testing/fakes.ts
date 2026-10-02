@@ -252,7 +252,6 @@ export type TestCommandHandler = (
 
 export interface FakeRuntimeAdapterOptions {
   readonly id?: string;
-  readonly version?: string;
   readonly initialFiles?: Readonly<Record<string, TestFileContents>>;
   readonly stateFiles?: Readonly<
     Record<string, Readonly<Record<string, TestFileContents>>>
@@ -280,14 +279,10 @@ export function createFakeRuntimeAdapter(
   options: FakeRuntimeAdapterOptions = {},
 ): FakeRuntimeAdapterFixture {
   const id = options.id ?? 'forge/docker';
-  const version = options.version ?? (
-    id === 'forge/docker' || id === 'docker' ? undefined : '1'
-  );
   const runs: FakeRuntimeRun[] = [];
 
   const adapter: RuntimeAdapter = {
     id,
-    ...(version === undefined ? {} : {version}),
     preflight() {},
     async prepare(input): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
@@ -414,7 +409,6 @@ export function createFakeRuntimeAdapter(
             ),
             metadata: Object.freeze({
               adapter: id,
-              ...(version === undefined ? {} : {adapter_version: version}),
               ...(options.metadata ?? {}),
             }),
           });

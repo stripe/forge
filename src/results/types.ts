@@ -261,8 +261,6 @@ interface RunResultCommon {
   };
   readonly runtime: {
     adapter: string;
-    /** Present for external runtimes; historical Docker results may also have it. */
-    adapter_version?: string;
     runtime_id: string;
     platform: string;
     metadata: Readonly<Record<string, string>>;

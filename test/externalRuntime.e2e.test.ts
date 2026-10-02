@@ -44,8 +44,6 @@ describe('external runtime composition', () => {
     ]);
     const descriptor = {
       adapter: 'acme/process',
-      adapter_version: '1',
-      config_version: 1,
       platform: 'linux/amd64',
       config: {profile: 'test-sandbox', network_policy: 'offline'},
     };
@@ -73,7 +71,6 @@ describe('external runtime composition', () => {
 
     const runtime = createFakeRuntimeAdapter({
       id: descriptor.adapter,
-      version: descriptor.adapter_version,
       metadata: {mode: 'in-memory-test'},
     });
     let preflightCalls = 0;
@@ -164,10 +161,9 @@ describe('external runtime composition', () => {
     assert.equal(preflightCalls, 2);
     assert.deepEqual(verified.result.runtime, {
       adapter: 'acme/process',
-      adapter_version: '1',
       runtime_id: 'external-runtime-e2e',
       platform: 'linux/amd64',
-      metadata: {adapter: 'acme/process', adapter_version: '1', mode: 'in-memory-test'},
+      metadata: {adapter: 'acme/process', mode: 'in-memory-test'},
     });
     const storedPlan = JSON.parse(await fs.readFile(
       path.join(completed.location, 'plan.json'), 'utf8',
@@ -182,16 +178,17 @@ describe('external runtime composition', () => {
     try {
       for (const [field, value] of [
         ['adapter', 'acme/other'],
-        ['adapter_version', '2'],
-        ['adapter_version', undefined],
         ['platform', 'linux/arm64'],
       ] as const) {
         const altered = JSON.parse(originalResult) as {runtime: Record<string, unknown>};
-        if (value === undefined) delete altered.runtime[field];
-        else altered.runtime[field] = value;
+        altered.runtime[field] = value;
         await fs.writeFile(resultPath, JSON.stringify(altered));
         await assert.rejects(verifyCompletedRun(completed.location), /runtime does not match/);
       }
+      const obsoleteVersion = JSON.parse(originalResult) as {runtime: Record<string, unknown>};
+      obsoleteVersion.runtime.adapter_version = '1';
+      await fs.writeFile(resultPath, JSON.stringify(obsoleteVersion));
+      await assert.rejects(verifyCompletedRun(completed.location));
     } finally {
       await fs.writeFile(resultPath, originalResult);
     }

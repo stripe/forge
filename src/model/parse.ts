@@ -349,8 +349,6 @@ const ExternalRuntimeSchema = z.object({
       value.split('/').every(isSafeSimpleIdentifier),
     'must be a namespaced external runtime identifier',
   ),
-  adapter_version: VersionSchema,
-  config_version: PositiveIntegerSchema,
   platform: z.enum(['linux/amd64', 'linux/arm64']),
   config: z.unknown().superRefine((value, context) => {
     try {

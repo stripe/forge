@@ -69,9 +69,9 @@ export async function assertRuntimeAdapterConforms(
   input: RuntimePreparation,
   options: RuntimeAdapterConformanceOptions = {},
 ): Promise<RuntimeAdapterConformanceReport> {
-  if (!adapter.id || ('config' in input.plan.runtime && !adapter.version)) {
+  if (!adapter.id) {
     throw new TestingConformanceError(
-      'Runtime adapters must expose a non-empty id; external runtimes also need a version.',
+      'Runtime adapters must expose a non-empty id.',
     );
   }
   const probePath = options.probePath ?? '.forge-conformance/probe.bin';

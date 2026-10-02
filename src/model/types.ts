@@ -170,8 +170,6 @@ export interface ForgeDockerRuntimeConfigV1 {
 export interface ForgeExternalRuntimeV1 {
   /** Namespaced adapter identity. Built-in Docker identities are reserved. */
   adapter: string;
-  adapter_version: string;
-  config_version: number;
   platform: 'linux/amd64' | 'linux/arm64';
   /** Public, bounded JSON only; credentials remain composition capabilities. */
   config: JsonObject;

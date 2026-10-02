@@ -12,10 +12,8 @@ import {
 
 const descriptor = {
   adapter: 'example/memory',
-  adapter_version: '1',
-  config_version: 1,
   platform: 'linux/amd64',
-  config: {profile: 'offline-example-v1'},
+  config: {profile: 'offline-example'},
 };
 const runtime = createFakeRuntimeAdapter({id: descriptor.adapter});
 const agent = createScriptedAgentAdapter();

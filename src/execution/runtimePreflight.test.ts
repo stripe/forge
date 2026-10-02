@@ -15,8 +15,8 @@ import {createTestResolvedRunPlan} from '../testing/plans.js';
 import {executeEval, preflightEval} from './execute.js';
 
 const selected: ForgeExternalRuntimeV1 = {
-  adapter: 'acme/process', adapter_version: '1', config_version: 1,
-  platform: 'linux/amd64', config: {profile: 'test-v1'},
+  adapter: 'acme/process',
+  platform: 'linux/amd64', config: {profile: 'test'},
 };
 
 function fixture(runtime: RuntimeAdapter): {composition: ForgeComposition; resolutions: string[]} {
@@ -90,13 +90,11 @@ describe('runtime composition preflight', () => {
     assert.equal(fake.runs.length, 0);
   });
 
-  it('rejects identity/version mismatches, absent validation and invalid config before credentials or prepare', async () => {
+  it('rejects identity mismatches, absent validation and invalid config before credentials or prepare', async () => {
     const fake = createFakeRuntimeAdapter({id: selected.adapter});
     const variants: RuntimeAdapter[] = [
       {...fake.adapter, id: 'acme/other'},
-      {...fake.adapter, version: '2'},
-      {id: fake.adapter.id, prepare: fake.adapter.prepare, preflight() {}},
-      {id: fake.adapter.id, version: selected.adapter_version, prepare: fake.adapter.prepare},
+      {id: fake.adapter.id, prepare: fake.adapter.prepare} as RuntimeAdapter,
       {...fake.adapter, preflight() {throw new TypeError('Unknown execution profile.');}},
       {...fake.adapter, async preflight() {throw new TypeError('Async validation is unsupported.');}},
     ];
@@ -111,7 +109,7 @@ describe('runtime composition preflight', () => {
     }
   });
 
-  it('rejects substituting a different runtime into a legacy Docker plan', () => {
+  it('rejects substituting a different runtime into a Docker plan', () => {
     const fake = createFakeRuntimeAdapter({id: selected.adapter});
     const current = fixture(fake.adapter);
     assert.throws(() => preflightEval({
@@ -120,15 +118,14 @@ describe('runtime composition preflight', () => {
     assert.deepEqual(current.resolutions, []);
   });
 
-  it('accepts both Docker identifiers without a separate adapter version', () => {
-    for (const id of ['docker', 'forge/docker']) {
-      const runtime = createFakeRuntimeAdapter({id}).adapter;
-      assert.equal(runtime.version, undefined);
-      const current = fixture(runtime);
-      const plan = createTestResolvedRunPlan();
-      const before = JSON.stringify(plan);
-      preflightEval({plan, composition: current.composition});
-      assert.equal(JSON.stringify(plan), before);
-    }
+  it('accepts only the built-in Docker identity without rewriting the plan', () => {
+    const plan = createTestResolvedRunPlan();
+    const before = JSON.stringify(plan);
+    preflightEval({plan, composition: fixture(createFakeRuntimeAdapter().adapter).composition});
+    assert.equal(JSON.stringify(plan), before);
+    assert.throws(() => preflightEval({
+      plan,
+      composition: fixture(createFakeRuntimeAdapter({id: 'docker'}).adapter).composition,
+    }));
   });
 });
