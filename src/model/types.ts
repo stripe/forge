@@ -1,7 +1,7 @@
 /** Wire schema version for authored benchmark inputs. */
 export const BENCHMARK_SCHEMA_VERSION = 1 as const;
 /** Wire schema version for complete generated run plans. */
-export const RESOLVED_RUN_PLAN_SCHEMA_VERSION = 2 as const;
+export const RESOLVED_RUN_PLAN_SCHEMA_VERSION = 1 as const;
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -242,7 +242,7 @@ export type InitialPromptSourceV1 =
   | 'case.task'
   | 'case.initial_prompt';
 
-export interface ResolvedRunPlanV2 {
+export interface ResolvedRunPlanV1 {
   schema_version: typeof RESOLVED_RUN_PLAN_SCHEMA_VERSION;
   selection: RunSelection;
   provenance: {

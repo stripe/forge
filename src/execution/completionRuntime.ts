@@ -14,7 +14,7 @@ import type {
   CredentialResolver,
 } from '../contracts/credentials.js';
 import type {ForgeComposition} from '../contracts/composition.js';
-import type {ModelRefV1, ResolvedRunPlanV2} from '../model/types.js';
+import type {ModelRefV1, ResolvedRunPlanV1} from '../model/types.js';
 import type {CompletionCallSummaryV1} from '../results/types.js';
 import {redactSecrets} from '../security/redaction.js';
 
@@ -71,7 +71,7 @@ export class CompletionConfigurationError extends Error {
 
 /** Pure provider selection and requirement validation for one resolved plan. */
 export function completionBindingsForPlan(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
 ): readonly CompletionBinding[] {
   const requested: Array<{purpose: CompletionPurpose; model: ModelRefV1}> = [];

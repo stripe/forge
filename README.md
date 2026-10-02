@@ -359,9 +359,7 @@ size, and digest of every accompanying file. Forge quiesces the runtime, stages
 the artifacts, disposes the runtime, then uses a directory rename as the atomic
 completion boundary. Use
 `verifyCompletedRun(location)` to re-read and verify a committed result. Result
-schema version 2 records the evidence source and adapter provenance. Generated
-plans, setup receipts, and deterministic workspace evidence also use schema
-version 2; authored cases, dataset manifests, and experiments use version 1.
+schema version 1 records the evidence source and adapter provenance.
 The `plan.json` artifact descriptor is the stored plan checksum.
 
 `plan.json` is the exact resolved execution plan. `setup.json` is the ordered
@@ -1161,7 +1159,7 @@ Forge persists the canonical agent trajectory as a standalone
   such as an invalid timestamp remains an explicit partial-evidence warning.
   Unsupported-record fallback diagnostics identify a safe record category and
   line number, never native payload values.
-- Result schema v2 records the normalization source kind, native format, source
+- Result schema v1 records the normalization source kind, native format, source
   session, and adapter identity for every completed agent interaction. Forge
   rejects adapter evidence which omits or contradicts the selected session.
 - `verifyCompletedRun` independently parses `trajectory.json` and applies the

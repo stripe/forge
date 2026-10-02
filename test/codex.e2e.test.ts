@@ -13,9 +13,9 @@ import {
   parseJudgeEvidence,
   preflightEval,
   verifyCompletedRun,
-  type CompletedRunV2,
+  type CompletedRunV1,
   type ForgeComposition,
-  type ResolvedRunPlanV2,
+  type ResolvedRunPlanV1,
 } from '../src/index.js';
 import {parseAtifTrajectory} from '../src/atif/index.js';
 import {CODEX_HOME_STATE_ID, createCodexAdapter} from '../src/agents/codex/index.js';
@@ -194,7 +194,7 @@ function truncatedMcpFixture(shape: 'text' | 'structured-content' | 'text-metada
   return {result, output, retainedMarker, omittedMarker, unselectedMarker, truncationMarker, isError};
 }
 
-async function fixture(plan: ResolvedRunPlanV2, options: {
+async function fixture(plan: ResolvedRunPlanV1, options: {
   responses?: readonly string[];
   native?: (turns: readonly Turn[]) => string | undefined;
   stdout?: (response: string) => string;
@@ -257,7 +257,7 @@ async function readArtifact(location: string, name: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(path.join(location, name), 'utf8')) as unknown;
 }
 
-async function assertRestrictedNative(completed: CompletedRunV2, expected: string) {
+async function assertRestrictedNative(completed: CompletedRunV1, expected: string) {
   const descriptor = completed.result.supplemental_artifacts.find((artifact) =>
     artifact.path === 'native/codex/session.jsonl',
   );

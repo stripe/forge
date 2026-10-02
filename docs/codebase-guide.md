@@ -150,7 +150,7 @@ flowchart TD
     EX[planning/planner.ts: expandExperiment]
     SEL[cli.ts: selectOne]
     RP[planning/planner.ts: resolveRunPlan]
-    PLAN[ResolvedRunPlanV2]
+    PLAN[ResolvedRunPlanV1]
 
     CLI --> LD --> PM
     CLI --> LE --> PM
@@ -272,7 +272,7 @@ EvalCaseV1 / ExperimentConfigV1 / DatasetManifestV1
 LoadedDatasetV1 + LoadedExperimentConfigV1
    │ planning/planner.ts
    ▼
-ResolvedRunPlanV2
+ResolvedRunPlanV1
 ```
 
 Do not add runtime behavior to these types. A resolved plan is plain,

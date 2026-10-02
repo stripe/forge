@@ -36,7 +36,7 @@ describe('workspace checks', () => {
       workspace({'greeting.txt': 'Hello, world!\n'}),
       checks,
     );
-    expect(evidence.schema_version).toBe(2);
+    expect(evidence.schema_version).toBe(1);
     expect(evidence.entries[0]).toEqual({
       path: 'greeting.txt',
       exists: true,

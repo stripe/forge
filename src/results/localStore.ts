@@ -17,7 +17,7 @@ import {sha256Digest} from '../model/hashes.js';
 import {
   parseResolvedRunPlan,
   type PluginSetupStepV1,
-  type ResolvedRunPlanV2,
+  type ResolvedRunPlanV1,
 } from '../model/index.js';
 import {isSafeDatasetRelativePath} from '../model/paths.js';
 import {serializeResolvedRunPlan} from '../planning/index.js';
@@ -183,7 +183,7 @@ export async function verifyCompletedRun(
 /** @internal Engine-bound variant for plans using its immutable action registry. */
 export async function verifyCompletedRunWithPlanParser(
   location: string,
-  parsePlan: (value: unknown) => ResolvedRunPlanV2,
+  parsePlan: (value: unknown) => ResolvedRunPlanV1,
 ): Promise<CompletedRun> {
   const runDir = path.resolve(location);
   const stat = await fs.lstat(runDir);
@@ -303,8 +303,8 @@ function assertResultArtifacts(
 function verifyPlanArtifact(
   result: RunResult,
   artifactBodies: ReadonlyMap<string, Buffer>,
-  parsePlan: (value: unknown) => ResolvedRunPlanV2,
-): ResolvedRunPlanV2 {
+  parsePlan: (value: unknown) => ResolvedRunPlanV1,
+): ResolvedRunPlanV1 {
   const path = 'plan.json';
   const body = requireCoreArtifact(result, artifactBodies, path);
   const plan = parseJsonArtifact(path, body, parsePlan);
@@ -348,7 +348,7 @@ function verifyPlanArtifact(
 
 function verifyCanonicalArtifactInventory(
   result: RunResult,
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
 ): void {
   const expectedPaths = [
     'plan.json',
@@ -417,7 +417,7 @@ function verifyCanonicalArtifactInventory(
 
 function verifySetupArtifact(
   result: RunResult,
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
 ): void {
   const artifactPath = 'setup.json';
@@ -574,7 +574,7 @@ function verifyTrajectoryArtifact(
 
 function verifyJudgeEvidence(
   result: RunResult,
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
   trajectory: AtifTrajectoryV1_8,
 ): void {

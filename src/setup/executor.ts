@@ -8,7 +8,7 @@ import {
 import {isSafeActionIdentifier} from '../model/paths.js';
 import type {
   AgentSelectionV1,
-  ResolvedRunPlanV2,
+  ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
 import type {AgentPluginInstaller} from '../contracts/plugin.js';
@@ -60,7 +60,7 @@ export function createSetupExecutorWithHandlers(
       steps: readonly SetupStepV1[],
       context: Readonly<{
         selection: AgentSelectionV1;
-        runtime: ResolvedRunPlanV2['runtime'];
+        runtime: ResolvedRunPlanV1['runtime'];
         pluginInstaller?: AgentPluginInstaller;
       }>,
     ) {

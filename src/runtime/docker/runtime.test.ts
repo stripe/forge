@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 import type {CommandResult} from '../../contracts/command.js';
 import type {RuntimePreparation} from '../../contracts/runtime.js';
-import type {ResolvedRunPlanV2} from '../../model/types.js';
+import type {ResolvedRunPlanV1} from '../../model/types.js';
 import type {
   HostCommandOptions,
   HostCommandRunner,
@@ -118,7 +118,7 @@ function preparation(overrides: Partial<RuntimePreparation> = {}): RuntimePrepar
         },
       },
       limits: {run_timeout_ms: 60_000},
-    } as ResolvedRunPlanV2,
+    } as ResolvedRunPlanV1,
     environment: {
       variables: {PUBLIC_VALUE: 'visible'},
       credentials: {

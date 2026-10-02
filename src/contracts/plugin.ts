@@ -8,7 +8,7 @@ import type {
   AgentSelectionV1,
   JsonObject,
   PluginSelectionV1,
-  ResolvedRunPlanV2,
+  ResolvedRunPlanV1,
 } from '../model/types.js';
 
 export type AgentPluginSourceKind =
@@ -33,7 +33,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
 /** Ambient-free context for binding one portable plugin to an agent adapter. */
 export interface AgentPluginPreflightContext {
   readonly selection: AgentSelectionV1;
-  readonly runtime: ResolvedRunPlanV2['runtime'];
+  readonly runtime: ResolvedRunPlanV1['runtime'];
 }
 
 /** Narrow authority supplied to one already-preflighted native installation. */

@@ -9,7 +9,7 @@ import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
-import type {ResolvedRunPlanV2} from '../model/types.js';
+import type {ResolvedRunPlanV1} from '../model/types.js';
 import {serializeResolvedRunPlan} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {createTestResolvedRunPlan} from '../testing/plans.js';
@@ -21,7 +21,7 @@ import {
   type ArtifactDescriptorV1,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
-  type RunResultV2,
+  type RunResultV1,
 } from './types.js';
 
 const roots: string[] = [];
@@ -264,7 +264,7 @@ describe('local artifact store', () => {
     );
   });
 
-  it('verifies workspace evidence v2 and rejects legacy entry digests', async () => {
+  it('strictly verifies workspace evidence schema and removed fields', async () => {
     const canonical = [
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
       {path: 'trajectory.json', body: oneShotTrajectory},
@@ -276,14 +276,15 @@ describe('local artifact store', () => {
       size_bytes: 4,
       content_base64: Buffer.from('done').toString('base64'),
     };
-    const workspace = {schema_version: 2, entries: [entry], complete: true, warnings: []};
+    const workspace = {schema_version: 1, entries: [entry], complete: true, warnings: []};
     const valid = await commitArtifacts([
       ...canonical,
       {path: 'workspace-evidence.json', body: jsonBody(workspace)},
     ], withPassingWorkspaceCheck);
     await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
     for (const invalidWorkspace of [
-      {...workspace, schema_version: 1},
+      {...workspace, schema_version: 2},
+      {...workspace, schema_version: 3},
       {...workspace, entries: [{...entry, sha256: `sha256:${'a'.repeat(64)}`}]},
     ]) {
       const invalid = await commitArtifacts([
@@ -316,7 +317,7 @@ describe('local artifact store', () => {
   });
 
   it('rejects unsupported result schema versions', () => {
-    for (const schema_version of [1, 3]) {
+    for (const schema_version of [2, 3]) {
       expect(() => parseRunResult({...resultFor([]), schema_version})).toThrow();
     }
   });
@@ -384,7 +385,7 @@ describe('local artifact store', () => {
     ).toThrow();
   });
 
-  it('rejects contradictory result-schema-v2 evidence provenance', () => {
+  it('rejects contradictory result evidence provenance', () => {
     const result = resultFor([]);
     expect(() =>
       parseRunResult({
@@ -491,7 +492,7 @@ describe('local artifact store', () => {
     ];
     const setup = (resolution: unknown) =>
       jsonBody({
-        schema_version: 2,
+        schema_version: 1,
         steps: [{index: 0, uses: 'forge/plugin', resolution}],
       });
 
@@ -1114,7 +1115,7 @@ function codexEvidenceArtifacts(steps: readonly AtifStep[]): TestArtifact[] {
 async function commitCodexEvidence(
   interaction: InteractionArtifactV1,
   steps: readonly AtifStep[],
-  transform: (result: RunResultV2) => RunResultV2 = (result) => result,
+  transform: (result: RunResultV1) => RunResultV1 = (result) => result,
 ): Promise<string> {
   const plan = createTestResolvedRunPlan({
     caseId: 'sample/case',
@@ -1160,11 +1161,11 @@ async function rebindCodexEvidence(
 
 async function commitArtifacts(
   artifacts: readonly TestArtifact[],
-  transform: (result: RunResultV2) => RunResultV2 = (result) => result,
+  transform: (result: RunResultV1) => RunResultV1 = (result) => result,
   options: {
     readonly includePlan?: boolean;
     readonly includeSetup?: boolean;
-    readonly plan?: ResolvedRunPlanV2;
+    readonly plan?: ResolvedRunPlanV1;
   } = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
@@ -1198,7 +1199,7 @@ async function commitArtifacts(
   return committed.location;
 }
 
-function testPlanForResult(result: RunResultV2): ResolvedRunPlanV2 {
+function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
   const multiTurn = result.interaction.mode === 'multi_turn';
   const guidelines = result.evaluation.guidelines.map(({guideline}) => guideline);
   const hasChecks = result.evaluation.checks.length > 0;
@@ -1282,17 +1283,17 @@ function judgeEvidenceBody(): Buffer {
 }
 
 function emptyWorkspaceEvidenceBody(): Buffer {
-  return jsonBody({schema_version: 2, entries: [], complete: true, warnings: []});
+  return jsonBody({schema_version: 1, entries: [], complete: true, warnings: []});
 }
 
-function emptySetupBody(plan: ResolvedRunPlanV2): Buffer {
+function emptySetupBody(plan: ResolvedRunPlanV1): Buffer {
   return jsonBody({
-    schema_version: 2,
+    schema_version: 1,
     steps: plan.setup.map((step, index) => ({index, uses: step.uses})),
   });
 }
 
-function withPassingGuideline(result: RunResultV2): RunResultV2 {
+function withPassingGuideline(result: RunResultV1): RunResultV1 {
   return {
     ...result,
     evaluation: {
@@ -1305,7 +1306,7 @@ function withPassingGuideline(result: RunResultV2): RunResultV2 {
   };
 }
 
-function withPassingWorkspaceCheck(result: RunResultV2): RunResultV2 {
+function withPassingWorkspaceCheck(result: RunResultV1): RunResultV1 {
   return {
     ...result,
     evaluation: {
@@ -1315,14 +1316,14 @@ function withPassingWorkspaceCheck(result: RunResultV2): RunResultV2 {
   };
 }
 
-function withMultiTurnSummary(result: RunResultV2): RunResultV2 {
+function withMultiTurnSummary(result: RunResultV1): RunResultV1 {
   return {
     ...result,
     interaction: {mode: 'multi_turn', turn_count: 2},
   };
 }
 
-function withZeroTurnRolePlayerFailure(result: RunResultV2): RunResultV2 {
+function withZeroTurnRolePlayerFailure(result: RunResultV1): RunResultV1 {
   return {
     ...result,
     agent: {...result.agent, session_id: null},
@@ -1358,8 +1359,8 @@ function withZeroTurnRolePlayerFailure(result: RunResultV2): RunResultV2 {
 
 function resultFor(
   artifacts: ArtifactDescriptorV1[],
-  plan: ResolvedRunPlanV2 = testPlan,
-): RunResultV2 {
+  plan: ResolvedRunPlanV1 = testPlan,
+): RunResultV1 {
   return {
     schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: 'run-1',

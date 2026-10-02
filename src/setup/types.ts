@@ -1,7 +1,7 @@
 import type {
   AgentSelectionV1,
   JsonObject,
-  ResolvedRunPlanV2,
+  ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
 import type {CommandRunner} from '../contracts/command.js';
@@ -35,7 +35,7 @@ export interface SetupStepRequirements {
 export interface SetupPreflightContext {
   readonly stepIndex: number;
   readonly selection: AgentSelectionV1;
-  readonly runtime: ResolvedRunPlanV2['runtime'];
+  readonly runtime: ResolvedRunPlanV1['runtime'];
   /** Selected adapter's narrow native plugin mechanism, when available. */
   readonly pluginInstaller?: AgentPluginInstaller;
 }
@@ -63,7 +63,7 @@ export interface SetupExecutionContext
   extends Omit<SetupApplyContext, 'commands'> {
   readonly stepIndex: number;
   readonly selection: AgentSelectionV1;
-  readonly runtime: ResolvedRunPlanV2['runtime'];
+  readonly runtime: ResolvedRunPlanV1['runtime'];
   /** Contains only state directories declared by this prepared step. */
   readonly stateDirectories: ReadonlyMap<string, MutableWorkspace>;
   /**

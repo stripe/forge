@@ -334,7 +334,7 @@ describe('Forge CLI', () => {
     expect(exitCode).toBe(0);
     expect(stdout.endsWith('\n')).toBe(true);
     expect(JSON.parse(stdout)).toMatchObject({
-      schema_version: 2,
+      schema_version: 1,
       selection: {
         case_id: 'case/example',
         treatment: 'baseline',

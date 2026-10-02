@@ -93,7 +93,7 @@ flowchart LR
     D --> M
     X --> M
     M --> P
-    P -->|ResolvedRunPlanV2| E
+    P -->|ResolvedRunPlanV1| E
     RT --> E
     A --> E
     C --> E
@@ -186,7 +186,7 @@ entry before `plan` or `run` proceeds.
 ### Plan resolution
 
 [`resolveRunPlan`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) validates all references and
-produces a deeply frozen `ResolvedRunPlanV2`. It:
+produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 - checks dataset and experiment compatibility;
 - checks that the selection is present in the matrix;
@@ -201,9 +201,8 @@ produces a deeply frozen `ResolvedRunPlanV2`. It:
 - records the dataset manifest pin, experiment and case identities, installed
   Forge package, and action-bundle implementation pins.
 
-Plans use schema version 2 and canonical JSON with recursively sorted object
-keys and retained array order. The `plan.json` artifact descriptor binds these
-bytes to `result.json`. Authored benchmark documents continue to use version 1.
+Plans use canonical JSON with recursively sorted object keys and retained array
+order. The `plan.json` artifact descriptor binds these bytes to `result.json`.
 
 ## Engines, action registries, and compositions
 
@@ -797,10 +796,9 @@ native/<adapter-id>/session.<ext>    # exact restricted root-session source
 extensions/<contributor-id>/...     # optional host contribution
 ```
 
-Generated plans, results, setup receipts, and deterministic workspace evidence
-use schema version 2. Interaction, evaluation, and judge evidence retain
-version 1, and the trajectory retains ATIF v1.8. Parsers accept only the current
-version of each format.
+Core plans, results, setup receipts, interaction, evaluation, and evidence
+artifacts use schema version 1. The trajectory uses ATIF v1.8. Parsers accept
+only the current version of each format.
 
 `result.json.evaluation` is the sole canonical evaluation result. The other
 core files serve distinct audit roles:
@@ -846,7 +844,7 @@ hashes. It also requires:
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
 - canonical plan bytes to match their artifact descriptor and result summary;
-- schema-version-2 workspace evidence with no unknown fields;
+- schema-version-1 workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
 - trajectory session identity and completed-turn coverage to match the

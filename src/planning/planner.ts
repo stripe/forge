@@ -7,7 +7,7 @@ import {
   type ForgeDockerRuntimeV1,
   type LoadedExperimentConfigV1,
   type LoadedDatasetV1,
-  type ResolvedRunPlanV2,
+  type ResolvedRunPlanV1,
   type RunSelection,
   type SetupStepV1,
   type WriteSetupStepV1,
@@ -76,7 +76,7 @@ export function resolveRunPlan(input: {
   experiment: LoadedExperimentConfigV1;
   selection: RunSelection;
   runtimePlatform?: ForgeDockerRuntimeV1['platform'];
-}): ResolvedRunPlanV2 {
+}): ResolvedRunPlanV1 {
   return resolveRunPlanWithSetupActions(input, defaultSetupActionRegistry);
 }
 
@@ -89,7 +89,7 @@ export function resolveRunPlanWithSetupActions(
     runtimePlatform?: ForgeDockerRuntimeV1['platform'];
   },
   setupActions: SetupActionRegistry,
-): ResolvedRunPlanV2 {
+): ResolvedRunPlanV1 {
   const {dataset, selection} = input;
   const config = input.experiment.config;
   assertDatasetCompatibility(dataset, config);
@@ -168,7 +168,7 @@ export function resolveRunPlanWithSetupActions(
     throw new PlanningError('unknown_case', 'Selected case has no effective prompt.');
   }
 
-  const plan: ResolvedRunPlanV2 = {
+  const plan: ResolvedRunPlanV1 = {
     schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
     selection: cloneJson(selection),
     provenance: {
@@ -238,9 +238,9 @@ export function resolveRunPlanWithSetupActions(
 function resolveRuntime(
   runtime: ExperimentConfigV1['runtime'],
   runtimePlatform: ForgeDockerRuntimeV1['platform'] | undefined,
-): ResolvedRunPlanV2['runtime'] {
+): ResolvedRunPlanV1['runtime'] {
   if (runtime.adapter !== 'docker' || runtime.platform !== 'native') {
-    return cloneJson(runtime) as ResolvedRunPlanV2['runtime'];
+    return cloneJson(runtime) as ResolvedRunPlanV1['runtime'];
   }
   if (runtimePlatform === undefined) {
     throw new PlanningError(
@@ -261,11 +261,11 @@ function resolveRuntime(
 }
 
 /** Canonical JSON used when a caller needs a stable resolved-plan digest. */
-export function serializeResolvedRunPlan(plan: ResolvedRunPlanV2): string {
+export function serializeResolvedRunPlan(plan: ResolvedRunPlanV1): string {
   return `${JSON.stringify(sortJson(plan))}\n`;
 }
 
-export function resolvedRunPlanSha256(plan: ResolvedRunPlanV2): `sha256:${string}` {
+export function resolvedRunPlanSha256(plan: ResolvedRunPlanV1): `sha256:${string}` {
   return sha256Digest(serializeResolvedRunPlan(plan));
 }
 

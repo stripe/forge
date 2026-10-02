@@ -6,7 +6,7 @@ import type {
   ChecksV1,
   ForgeRuntimeV1,
   ModelRefV1,
-  ResolvedRunPlanV2,
+  ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
 
@@ -34,7 +34,7 @@ export interface TestResolvedRunPlanOptions {
 /** Create a strict, minimal one-shot plan for public contract tests. */
 export function createTestResolvedRunPlan(
   options: TestResolvedRunPlanOptions = {},
-): ResolvedRunPlanV2 {
+): ResolvedRunPlanV1 {
   const caseId = options.caseId ?? 'testing/example';
   const prompt = options.prompt ?? 'Complete the test task.';
   const mode = options.mode ?? 'one_shot';

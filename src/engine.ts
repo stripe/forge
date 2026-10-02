@@ -21,13 +21,13 @@ import type {
   ForgeDockerRuntimeV1,
   LoadedDatasetV1,
   LoadedExperimentConfigV1,
-  ResolvedRunPlanV2,
+  ResolvedRunPlanV1,
   RunSelection,
   SetupActionBundleReferenceV1,
   SetupStepV1,
 } from './model/types.js';
 import {resolveRunPlanWithSetupActions} from './planning/planner.js';
-import type {CompletedRun, CompletedRunV2} from './results/types.js';
+import type {CompletedRun, CompletedRunV1} from './results/types.js';
 import {verifyCompletedRunWithPlanParser} from './results/localStore.js';
 import {
   createSetupActionRegistry,
@@ -47,7 +47,7 @@ export interface ForgeEngine {
   parseEvalCaseYaml(source: string): EvalCaseV1;
   parseExperimentConfig(value: unknown): ExperimentConfigV1;
   parseExperimentConfigYaml(source: string): ExperimentConfigV1;
-  parseResolvedRunPlan(value: unknown): ResolvedRunPlanV2;
+  parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1;
   parseSetupStep(value: unknown): SetupStepV1;
   loadDataset(datasetRoot: string): Promise<LoadedDatasetV1>;
   loadExperimentConfig(experimentPath: string): Promise<LoadedExperimentConfigV1>;
@@ -56,9 +56,9 @@ export interface ForgeEngine {
     readonly experiment: LoadedExperimentConfigV1;
     readonly selection: RunSelection;
     readonly runtimePlatform?: ForgeDockerRuntimeV1['platform'];
-  }): ResolvedRunPlanV2;
+  }): ResolvedRunPlanV1;
   preflightEval(request: PreflightEvalInput): void;
-  executeEval(request: ExecuteEvalInput): Promise<CompletedRunV2>;
+  executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1>;
   verifyCompletedRun(location: string): Promise<CompletedRun>;
 }
 

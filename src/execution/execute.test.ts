@@ -22,7 +22,7 @@ import type {
   RuntimeAdapter,
   SealedRuntime,
 } from '../contracts/runtime.js';
-import type {ResolvedRunPlanV2} from '../model/types.js';
+import type {ResolvedRunPlanV1} from '../model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../results/index.js';
 import {FORGE_VERSION} from '../version.js';
 import {createOwnedWorkspace} from '../runtime/workspace.js';
@@ -67,7 +67,7 @@ describe('executeEval', () => {
     });
 
     expect(completed.result).toMatchObject({
-      schema_version: 2,
+      schema_version: 1,
       run_id: 'run-1',
       forge: {version: FORGE_VERSION},
       agent: {session_id: 'canonical-session'},
@@ -115,7 +115,7 @@ describe('executeEval', () => {
 
     const verified = await verifyCompletedRun(completed.location);
     expect(verified.result).toMatchObject({
-      schema_version: 2,
+      schema_version: 1,
       evidence: {
         provenance: {
           source: {kind: 'native_log', format: 'claude-code-jsonl'},
@@ -145,7 +145,7 @@ describe('executeEval', () => {
       path.join(completed.location, 'workspace-evidence.json'),
       'utf8',
     )) as {schema_version: number; entries: Array<Record<string, unknown>>};
-    expect(workspaceEvidence.schema_version).toBe(2);
+    expect(workspaceEvidence.schema_version).toBe(1);
     expect(workspaceEvidence.entries[0]).not.toHaveProperty('sha256');
   });
 
@@ -217,7 +217,7 @@ describe('executeEval', () => {
     const emptyCheckVariants: Array<
       readonly [
         string,
-        ResolvedRunPlanV2['evaluation']['checks'],
+        ResolvedRunPlanV1['evaluation']['checks'],
       ]
     > = [
       ['omitted', undefined],
@@ -231,7 +231,7 @@ describe('executeEval', () => {
         emptyChecks === undefined
           ? caseWithoutChecks
           : {...caseWithoutChecks, checks: emptyChecks};
-      const plan: ResolvedRunPlanV2 = {
+      const plan: ResolvedRunPlanV1 = {
         ...fixture.plan,
         case: evalCase,
         evaluation: {
@@ -403,11 +403,11 @@ describe('executeEval', () => {
 
   it('assigns credential scope from a first-party setup capability', async () => {
     const fixture = await executionFixture();
-    const step: ResolvedRunPlanV2['setup'][number] = {
+    const step: ResolvedRunPlanV1['setup'][number] = {
       uses: 'forge/command',
       with: {argv: ['true']},
     };
-    const plan: ResolvedRunPlanV2 = {
+    const plan: ResolvedRunPlanV1 = {
       ...fixture.plan,
       treatment: {id: fixture.plan.treatment.id, setup: [step]},
       setup: [step],
@@ -492,11 +492,11 @@ describe('executeEval', () => {
   ] as const) {
     it(`rejects a setup resolution containing ${description} before interaction`, async () => {
       const fixture = await executionFixture({credentialValue: credential});
-      const step: ResolvedRunPlanV2['setup'][number] = {
+      const step: ResolvedRunPlanV1['setup'][number] = {
         uses: 'forge/command',
         with: {argv: ['true']},
       };
-      const plan: ResolvedRunPlanV2 = {
+      const plan: ResolvedRunPlanV1 = {
         ...fixture.plan,
         treatment: {id: fixture.plan.treatment.id, setup: [step]},
         setup: [step],
@@ -535,11 +535,11 @@ describe('executeEval', () => {
 
   it('preflights every first-party setup operation before resolving credentials or allocating', async () => {
     const fixture = await executionFixture();
-    const step: ResolvedRunPlanV2['setup'][number] = {
+    const step: ResolvedRunPlanV1['setup'][number] = {
       uses: 'forge/command',
       with: {argv: ['true']},
     };
-    const plan: ResolvedRunPlanV2 = {
+    const plan: ResolvedRunPlanV1 = {
       ...fixture.plan,
       treatment: {id: fixture.plan.treatment.id, setup: [step]},
       setup: [step],
@@ -589,7 +589,7 @@ describe('executeEval', () => {
 
   it('rejects a plan stamped by another package version', async () => {
     const fixture = await executionFixture();
-    const plan: ResolvedRunPlanV2 = {
+    const plan: ResolvedRunPlanV1 = {
       ...fixture.plan,
       provenance: {
         ...fixture.plan.provenance,
@@ -781,7 +781,7 @@ async function executionFixture(
   } = {},
 ): Promise<{
   root: string;
-  plan: ResolvedRunPlanV2;
+  plan: ResolvedRunPlanV1;
   calls: string[];
   composition: (store: RunArtifactStore) => ForgeComposition;
 }> {
@@ -981,7 +981,7 @@ function nativeEvidence(
   } as AgentNativeEvidenceResult;
 }
 
-function resolvedPlan(): ResolvedRunPlanV2 {
+function resolvedPlan(): ResolvedRunPlanV1 {
   const agent = {
     adapter: 'claude-code',
     provider: 'anthropic',
@@ -992,7 +992,7 @@ function resolvedPlan(): ResolvedRunPlanV2 {
     file_checks: [{file: 'greeting.txt', exists: true, contains: 'hello'}],
   };
   return {
-    schema_version: 2,
+    schema_version: 1,
     selection: {
       case_id: 'sample/case',
       treatment: 'baseline',

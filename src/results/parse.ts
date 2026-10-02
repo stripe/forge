@@ -28,8 +28,8 @@ import {
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RunResult,
-  type SetupArtifactV2,
-  type WorkspaceEvidenceV2,
+  type SetupArtifactV1,
+  type WorkspaceEvidenceV1,
 } from './types.js';
 
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -567,13 +567,13 @@ export function parseInteractionArtifact(input: unknown): InteractionArtifactV1 
   return interactionArtifactSchema.parse(input) as InteractionArtifactV1;
 }
 
-export function parseSetupArtifact(input: unknown): SetupArtifactV2 {
-  return setupArtifactSchema.parse(input) as SetupArtifactV2;
+export function parseSetupArtifact(input: unknown): SetupArtifactV1 {
+  return setupArtifactSchema.parse(input) as SetupArtifactV1;
 }
 
 /** @internal Strict wire parser used by completed-run verification. */
-export function parseWorkspaceEvidence(input: unknown): WorkspaceEvidenceV2 {
-  return workspaceEvidenceSchema.parse(input) as WorkspaceEvidenceV2;
+export function parseWorkspaceEvidence(input: unknown): WorkspaceEvidenceV1 {
+  return workspaceEvidenceSchema.parse(input) as WorkspaceEvidenceV1;
 }
 
 export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {

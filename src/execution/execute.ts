@@ -68,7 +68,7 @@ import {
   isSafeSimpleIdentifier,
   RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   type JsonValue,
-  type ResolvedRunPlanV2,
+  type ResolvedRunPlanV1,
 } from '../model/index.js';
 import {parseResolvedRunPlanWithSetupActions} from '../model/parse.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
@@ -85,17 +85,17 @@ import {
   type AtifEvidenceProvenanceV1,
   type ArtifactDescriptorV1,
   type AvaDecisionV1,
-  type CompletedRunV2,
+  type CompletedRunV1,
   type CompletionCallSummaryV1,
   type EvaluationResultV1,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RolePlayerErrorV1,
-  type RunResultV2,
+  type RunResultV1,
   type RunStopReasonV1,
   type RunWarningV1,
-  type SetupArtifactV2,
-  type WorkspaceEvidenceV2,
+  type SetupArtifactV1,
+  type WorkspaceEvidenceV1,
 } from '../results/index.js';
 import {FORGE_VERSION} from '../version.js';
 import {
@@ -136,7 +136,7 @@ const SAFE_NATIVE_EXTENSION = /^[a-z0-9]{1,16}$/;
 
 export interface ExecuteEvalInput {
   readonly runId: string;
-  readonly plan: ResolvedRunPlanV2;
+  readonly plan: ResolvedRunPlanV1;
   readonly composition: ForgeComposition;
   readonly signal?: AbortSignal;
   /** Test seam; production uses the wall clock. */
@@ -154,7 +154,7 @@ interface ExecuteEvalTestHooks {
 }
 
 export interface PreflightEvalInput {
-  readonly plan: ResolvedRunPlanV2;
+  readonly plan: ResolvedRunPlanV1;
   readonly composition: ForgeComposition;
 }
 
@@ -199,7 +199,7 @@ export function preflightEvalWithSetupActions(
 }
 
 /** Execute one already-resolved run and return only after atomic commit. */
-export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV2> {
+export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1> {
   return executeEvalWithSetupActions(request, defaultSetupActionRegistry);
 }
 
@@ -207,7 +207,7 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
 export async function executeEvalWithSetupActions(
   request: ExecuteEvalInput,
   setupActions: SetupActionRegistry,
-): Promise<CompletedRunV2> {
+): Promise<CompletedRunV1> {
   return executeEvalWithTestHooks(request, {}, setupActions);
 }
 
@@ -216,7 +216,7 @@ export async function executeEvalWithTestHooks(
   request: ExecuteEvalInput,
   hooks: ExecuteEvalTestHooks,
   setupActions: SetupActionRegistry = defaultSetupActionRegistry,
-): Promise<CompletedRunV2> {
+): Promise<CompletedRunV1> {
   let input: ExecuteEvalInput;
   try {
     input = {
@@ -634,7 +634,7 @@ interface ExecutedInteraction {
 }
 
 async function executeInteraction(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   session: AgentSession,
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
@@ -846,7 +846,7 @@ function rolePlayerErrorRecord(error: {
 }
 
 function buildEvalPreflight(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
   setupExecutor: SetupExecutor,
 ): EvalPreflight {
@@ -909,7 +909,7 @@ function buildEvalPreflight(
   });
 }
 
-function assertExecutablePlan(plan: ResolvedRunPlanV2): void {
+function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
   if (plan.schema_version !== RESOLVED_RUN_PLAN_SCHEMA_VERSION) {
     throw new ForgeExecutionError('invalid_plan', 'preflight', 'Unsupported run-plan version.');
   }
@@ -925,7 +925,7 @@ function assertExecutablePlan(plan: ResolvedRunPlanV2): void {
 }
 
 function preflightRuntime(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
   requirements: RuntimeRequirements,
   environment: ScopedEnvironmentSpecification,
@@ -955,7 +955,7 @@ function preflightRuntime(
 }
 
 function selectedAgent(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
 ): AgentAdapter {
   const agent = composition.agents.get(plan.agent.adapter);
@@ -1376,7 +1376,7 @@ function redactNormalizedTrajectory(
 }
 
 function rolePlayerErrorEvidence(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   agent: AgentAdapter,
   identity: AgentEvidenceIdentity,
 ): NormalizedTrajectory {
@@ -1425,7 +1425,7 @@ function redactJudgeWorkspaceEvidence(
 }
 
 function buildInteractionArtifact(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   interaction: ExecutedInteraction,
 ): InteractionArtifactV1 {
   const turns = interaction.turns.map((turn) => ({
@@ -1571,11 +1571,11 @@ function buildNativeArtifact(
 }
 
 function buildCoreArtifacts(
-  plan: ResolvedRunPlanV2,
-  setup: SetupArtifactV2,
+  plan: ResolvedRunPlanV1,
+  setup: SetupArtifactV1,
   trajectoryJson: string,
   interaction: InteractionArtifactV1,
-  workspaceEvidence: WorkspaceEvidenceV2,
+  workspaceEvidence: WorkspaceEvidenceV1,
   judgeEvidence: JudgeEvidenceV1 | undefined,
 ): RunArtifact[] {
   const setupJson = serializeCanonicalJson(setup);
@@ -1599,9 +1599,9 @@ function buildCoreArtifacts(
 }
 
 function buildSetupArtifact(
-  plan: ResolvedRunPlanV2,
+  plan: ResolvedRunPlanV1,
   applied: AppliedSetup,
-): SetupArtifactV2 {
+): SetupArtifactV1 {
   if (
     applied.steps.length !== plan.setup.length ||
     applied.steps.some(
@@ -1629,7 +1629,7 @@ function buildSetupArtifact(
 
 async function buildSupplementalArtifacts(
   input: ExecuteEvalInput,
-  result: RunResultV2,
+  result: RunResultV1,
   secrets: readonly string[],
   signal: AbortSignal,
 ): Promise<RunArtifact[]> {
@@ -1684,7 +1684,7 @@ function buildResult(input: {
   warnings: RunWarningV1[];
   startedAt: Date;
   completedAt: Date;
-}): RunResultV2 {
+}): RunResultV1 {
   return {
     schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: input.input.runId,

@@ -33,7 +33,7 @@ import {
   type EvalCaseV1,
   type JsonObject,
   type JsonValue,
-  type ResolvedRunPlanV2,
+  type ResolvedRunPlanV1,
   type RunSelection,
   type SetupStepV1,
 } from './types.js';
@@ -893,7 +893,7 @@ export function parseRunSelection(value: unknown): RunSelection {
  * treatment, and agent. Callers therefore cannot change score-affecting input
  * by editing only one copy inside a serialized plan.
  */
-export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV2 {
+export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1 {
   return parseResolvedRunPlanWithSetupActions(
     value,
     defaultSetupActionRegistry,
@@ -904,13 +904,13 @@ export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV2 {
 export function parseResolvedRunPlanWithSetupActions(
   value: unknown,
   setupActions: SetupActionRegistry,
-): ResolvedRunPlanV2 {
+): ResolvedRunPlanV1 {
   const parsed = parseWithSchema(
     ResolvedRunPlanSchema,
     value,
     'invalid_plan',
     'resolved run plan',
-  ) as ResolvedRunPlanV2;
+  ) as ResolvedRunPlanV1;
   const caseSetup = normalizeSetupSteps(
     parsed.case.setup,
     setupActions,
@@ -925,7 +925,7 @@ export function parseResolvedRunPlanWithSetupActions(
     'invalid_plan',
     'resolved treatment setup step',
   );
-  const normalized: ResolvedRunPlanV2 = {
+  const normalized: ResolvedRunPlanV1 = {
     ...parsed,
     case: {
       ...parsed.case,
@@ -942,7 +942,7 @@ export function parseResolvedRunPlanWithSetupActions(
     normalized,
     'invalid_plan',
     'resolved run plan',
-  ) as ResolvedRunPlanV2;
+  ) as ResolvedRunPlanV1;
   try {
     setupActions.assertExactReferences(
       rechecked.setup,
