@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {
+  inspectCampaign,
   readCampaignSelections,
   runCampaign,
   type CampaignOptions,
@@ -33,6 +34,7 @@ describe('public campaign API', () => {
   it('exports orchestration through its subpath, separate from the root engine API', () => {
     assert.equal(typeof runCampaign, 'function');
     assert.equal(typeof readCampaignSelections, 'function');
+    assert.equal(typeof inspectCampaign, 'function');
     assert.equal('runCampaign' in rootExports, false);
     const optionsType = (_options: CampaignOptions): void => undefined;
     const summaryType = (_summary: CampaignSummary): void => undefined;
@@ -148,6 +150,8 @@ describe('public campaign API', () => {
       campaign: path.join(root, 'campaign.json'), total: 2, executed: 2, skipped: 0, completed: 1, errored: 1,
     });
     assert.deepEqual(await readCampaignSelections(root), plans.map((plan) => plan.selection));
+    assert.deepEqual(await readCampaignSelections(`${root}/.`), plans.map((plan) => plan.selection));
+    assert.deepEqual(await readCampaignSelections(path.relative(process.cwd(), root)), plans.map((plan) => plan.selection));
     fail = false;
     const resumed = await runCampaign({...options, resume: true, jobs: 3});
     assert.equal(resumed.executed, 1);

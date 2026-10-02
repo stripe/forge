@@ -63,6 +63,7 @@ try {
       import * as atif from '@stripe/forge/atif/v1.8';
       import * as cli from '@stripe/forge/cli';
       import * as campaign from '@stripe/forge/campaign';
+      import * as campaignCli from '@stripe/forge/campaign/cli';
       import * as claude from '@stripe/forge/agents/claude-code';
       import * as codex from '@stripe/forge/agents/codex';
       import * as anthropic from '@stripe/forge/providers/anthropic';
@@ -116,6 +117,10 @@ try {
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
       assert.equal(typeof campaign.runCampaign, 'function');
       assert.equal(typeof campaign.readCampaignSelections, 'function');
+      assert.equal(typeof campaign.inspectCampaign, 'function');
+      assert.equal(typeof campaignCli.runCampaignCommand, 'function');
+      assert.equal(typeof campaignCli.parseCampaignArgs, 'function');
+      assert.equal(typeof campaignCli.createCampaignCliOptions, 'function');
       assert.equal('runCampaign' in forge, false);
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
       assert.equal(typeof codex.createCodexAdapter, 'function');
@@ -221,6 +226,34 @@ try {
       });
       assert.equal(resumed.executed, 0);
       assert.equal(resumed.skipped, 2);
+
+      const commandOptions = {
+        hostOptions: {tag: {type: 'string'}, upload: {type: 'boolean'}},
+        engine, experimentRunIdFactory: () => 'package-command',
+        runIdFactory: () => 'command-run-' + (++nextId),
+        loadCampaign: async (context) => {
+          assert.equal(context.engine, engine);
+          assert.equal(context.values.tag, 'smoke');
+          if (context.resume) assert.deepEqual(context.savedSelections, plans.map((plan) => plan.selection));
+          return {plans, composition: {...composition, artifactStore: forge.createArtifactStore({root: context.root})},
+            execute: (input) => {
+              const agent = testing.createScriptedAgentAdapter().adapter;
+              return engine.executeEval({...input, composition: {
+                ...input.composition, agents: new Map([[agent.id, agent]]),
+              }});
+            }};
+        },
+      };
+      const command = await campaignCli.runCampaignCommand(['--tag', 'smoke', '--upload', '-j2'], commandOptions);
+      assert.equal(command.completed, 2);
+      assert.equal(command.arguments.values.upload, true);
+      assert.ok(command.outcomes.every((outcome) => outcome.artifact.evaluation.status === 'passed'));
+      const inspected = await campaign.inspectCampaign({root: command.location + '/.', engine});
+      assert.deepEqual(inspected.outcomes, command.outcomes);
+      const commandResume = await campaignCli.runCampaignCommand(['--tag', 'smoke', '--resume', command.experiment_run_id], commandOptions);
+      assert.equal(commandResume.executed, 0);
+      assert.equal(commandResume.skipped, 2);
+      assert.deepEqual(commandResume.outcomes, command.outcomes);
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);
@@ -239,9 +272,10 @@ try {
     path.join(consumerRoot, 'commonjs.cjs'),
     `
       const assert = require('node:assert/strict');
-      void Promise.all([import('@stripe/forge'), import('@stripe/forge/campaign')]).then(([forge, campaign]) => {
+      void Promise.all([import('@stripe/forge'), import('@stripe/forge/campaign'), import('@stripe/forge/campaign/cli')]).then(([forge, campaign, campaignCli]) => {
         assert.equal(typeof forge.executeEval, 'function');
         assert.equal(typeof campaign.runCampaign, 'function');
+        assert.equal(typeof campaignCli.runCampaignCommand, 'function');
       }).catch((error) => {
         console.error(error);
         process.exitCode = 1;

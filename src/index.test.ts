@@ -50,6 +50,8 @@ describe('@stripe/forge package root', () => {
   it('keeps campaign orchestration on its documented subpath', () => {
     expect('runCampaign' in rootExports).toBe(false);
     expect('readCampaignSelections' in rootExports).toBe(false);
+    expect('inspectCampaign' in rootExports).toBe(false);
+    expect('runCampaignCommand' in rootExports).toBe(false);
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {

@@ -219,10 +219,28 @@ Embedding hosts supply resolved plans, an engine, a pure preflight composition,
 and an execution callback. The callback may construct per-run host resources
 and composition around execution by that same engine, honoring cancellation and
 finishing cleanup before settling. The host retains input loading, command
-grammar, execution ID selection, and evaluation exit policy. The shared
+grammar, publication, and evaluation exit policy. The shared
 controller requires verified local artifacts below its selected root; it is
 not a remote worker protocol. It does not alter `executeEval` or its scoring
 semantics. See the README's [campaign workflow](../README.md#running-and-resuming-an-experiment).
+
+The command stage exposed through `@stripe/forge/campaign/cli` composes shared
+operational options with host-defined arguments, validates invocation rules,
+selects execution IDs/roots, and restores saved selections before invoking the
+host loader. The loader supplies resolved plans, pure capability descriptors,
+and an execution closure. Generated inputs remain alive until workers drain;
+the command stage then awaits prepared-input disposal. The loader owns partial
+cleanup on rejection, and workers own scoped runtime/resource cleanup.
+
+Bounded verified outcomes include skipped selections and separate evaluation
+status from execution completion. Remote publication follows the shared stage,
+with destination-specific retry state outside the execution checkpoint. A
+read-only campaign inspection API verifies latest immutable commits against
+saved plan digests without regenerating inputs or altering execution state,
+supporting independent publication retries. The public CLI uses this same
+command stage while retaining its own grammar, input loader, rendering, and
+exit policy. Exact embedding contracts are documented in the README's
+[programmatic campaign API](../README.md#experiment-campaigns).
 
 ### Plan resolution
 
@@ -969,6 +987,7 @@ Specialized subpaths expose:
 - `@stripe/forge/setup`;
 - `@stripe/forge/testing`;
 - `@stripe/forge/campaign`;
+- `@stripe/forge/campaign/cli`;
 - `@stripe/forge/cli`; and
 - `@stripe/forge/package.json`.
 
@@ -978,8 +997,8 @@ engine APIs:
 - `validate` loads inputs, expands every selection, resolves plans, constructs
   the default composition, and runs pure preflight;
 - `plan` selects one entry and prints canonical plan JSON; and
-- `run` selects every matching entry, constructs a composition, and delegates
-  bounded execution and explicit resume to the shared campaign controller.
+- `run` supplies its argument validation and input loader to the shared campaign
+  command stage for bounded execution and explicit resume.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
 Codex agent adapters, the Anthropic host completion provider, an explicit
