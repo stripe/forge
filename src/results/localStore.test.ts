@@ -183,6 +183,13 @@ describe('local artifact store', () => {
       result as unknown as Readonly<Record<string, unknown>>,
     );
     await expect(verifyCompletedRun(committed.location)).resolves.toMatchObject({runId: 'run-1'});
+    await fs.writeFile(path.join(committed.location, 'result.json'), JSON.stringify({
+      ...result,
+      runtime: {...result.runtime, adapter: 'docker'},
+    }));
+    await expect(verifyCompletedRun(committed.location)).rejects.toThrow(
+      'plan.json runtime does not match',
+    );
   });
 
   it('rejects duplicate descriptors that omit a staged artifact', async () => {
@@ -230,6 +237,14 @@ describe('local artifact store', () => {
 
   it('rejects unsupported result schema versions', () => {
     expect(() => parseRunResult({...resultFor([]), schema_version: 2})).toThrow();
+  });
+
+  it('rejects the removed runtime version field', () => {
+    const result = resultFor([]);
+    expect(() => parseRunResult({
+      ...result,
+      runtime: {...result.runtime, adapter_version: '1'},
+    })).toThrow();
   });
 
   it('requires non-empty, unique, canonically ordered action bundle provenance', () => {
@@ -1271,7 +1286,7 @@ function resultFor(
     plan_sha256: resolvedRunPlanSha256(plan),
     forge: {version: plan.provenance.forge.version},
     runtime: {
-      adapter: 'docker',
+      adapter: 'forge/docker',
       runtime_id: 'run-1',
       platform: 'linux/amd64',
       metadata: {},

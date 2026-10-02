@@ -42,4 +42,31 @@ describe('owned workspace', () => {
     await assert.rejects(workspace.readFile('escape/anything'), /symlink|not a file|ENOENT/);
     await assert.rejects(workspace.writeFile('../escape', new Uint8Array()), /Invalid workspace/);
   });
+
+  it(
+    'assigns configured ownership to host-written files and parents',
+    {skip: typeof process.getuid !== 'function' || typeof process.getgid !== 'function'},
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-workspace-test-'));
+      roots.push(root);
+      const uid = process.getuid!();
+      const gid = process.getgid!();
+      const workspace = await createOwnedWorkspace(root, {
+        writeOwner: {uid, gid},
+      });
+      await workspace.writeFile('private/file.txt', Buffer.from('owned'), {
+        mode: 0o600,
+      });
+
+      const [directory, file] = await Promise.all([
+        fs.stat(path.join(root, 'private')),
+        fs.stat(path.join(root, 'private', 'file.txt')),
+      ]);
+      assert.equal(directory.uid, uid);
+      assert.equal(directory.gid, gid);
+      assert.equal(file.uid, uid);
+      assert.equal(file.gid, gid);
+      assert.equal(file.mode & 0o777, 0o600);
+    },
+  );
 });

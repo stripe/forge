@@ -6,6 +6,12 @@ explains how to author and run an evaluation, while this document explains the
 boundaries, control flow, trust model, and extension points that make a run
 reproducible.
 
+Reproducible here means auditable semantics and provenance, not guaranteed
+byte-for-byte replay. Forge records declared intent, material setup-time
+resolutions, selected evidence, and the resulting evaluation. Models, network
+resources, registries, and other external systems can still change between
+runs.
+
 For a file-by-file tour and concrete call graphs, see the
 [Forge codebase guide](codebase-guide.md).
 
@@ -29,8 +35,10 @@ contracts, but they do not own benchmark semantics or lifecycle control.
 Forge is designed around five properties.
 
 **Reproducible semantics.** Cases say what is evaluated; experiments say how
-cases run; resolved plans materialize all defaults and provenance for one run.
-Runtime code does not infer omitted settings from ambient state.
+cases run; resolved plans materialize declared defaults and planning provenance
+for one run. `setup.json` records bounded non-sensitive choices resolved while
+realizing that plan. Runtime code does not infer omitted settings from ambient
+state.
 
 **Portable mechanisms.** Runtime, coding-agent, credential, completion,
 storage, input, and observation behavior enters through public contracts in
@@ -329,6 +337,7 @@ The runtime receives the resolved environment and the combined executable and
 state-directory requirements. It returns a `PreparedRuntime` with:
 
 - mutable workspace and declared state directories;
+- an optional host-only bounded file import into declared state;
 - logical runtime paths;
 - uncredentialed, setup-scoped, and agent-scoped command projections;
 - `finalizeSetup`, `quiesce`, and idempotent `dispose` lifecycle methods.
@@ -347,7 +356,11 @@ Setup actions execute strictly in plan order. Each prepared action receives:
 - the already-fixed agent and runtime selections.
 
 An action may return bounded, non-sensitive JSON for `setup.json`, such as a
-plugin installation receipt. Static built-ins return no dynamic resolution.
+plugin installation receipt. A resolution records every material setup-time
+choice not already fixed by the plan that could explain different realized
+behavior, such as an actual version, commit, artifact identity, or content
+digest. It does not include credentials or private host paths. Static built-ins
+return no dynamic resolution.
 After every action succeeds, Forge calls `finalizeSetup()`. This closes setup
 command authority and asks the runtime to seal any state directory declared
 immutable for interaction.
@@ -423,40 +436,95 @@ PreparedRuntime ── finalizeSetup() ── interaction continues
 ```
 
 External runtimes are represented in the plan by a namespaced adapter ID,
-adapter version, config version, platform, and bounded public JSON config. The
-composition's adapter must match those pins and implement pure synchronous
-preflight. Private paths, credentials, or inferred host settings do not belong
-in runtime config.
+platform, and bounded public JSON config. The composition's adapter must match
+that ID and implement pure synchronous preflight. Private paths, credentials,
+or inferred host settings do not belong in runtime config.
 
 ### Built-in Docker runtime
 
-[`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker@1` using
-the Docker CLI and a Forge-owned image. It:
+[`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
+with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
+builds an image with pinned Claude Code and Codex versions, and records the
+built image ID. Docker can reuse the image across runs.
 
-- verifies packaged Docker assets against a compiled digest;
-- builds one cached image per selected platform and records the immutable image
-  ID;
-- pins the installed Claude Code and Codex CLI versions;
-- creates fresh host-backed workspace, home, state, and environment-file
-  directories for every run;
-- runs as a non-root user with a read-only root filesystem, all capabilities
-  dropped, `no-new-privileges`, explicit CPU/memory/process limits, and a
-  bounded temporary filesystem;
-- bind-mounts only run-owned workspace, home, and declared state directories;
-- passes commands as argv vectors through `docker exec`, never an implicit
-  shell;
-- writes a short-lived mode-`0600` env file containing only the variables
-  allowed for that command projection;
-- waits for active commands before setup finalization and quiescence; and
-- removes the container and all run-owned temporary files during disposal.
+Each run uses a non-root container with a read-only image filesystem. On hosts
+which expose a non-root Unix UID, Forge builds the image's named `forge` user
+with that UID so host and container views of bind-mounted files have the same
+owner. A root host keeps the non-root fallback UID `10001` and assigns
+host-written runtime files to it. The effective UID is retained in runtime
+metadata alongside the immutable image ID. Forge limits CPU, memory, processes,
+and writable `/tmp`; drops Linux capabilities; blocks privilege escalation;
+and does not mount the Docker socket. Commands go through `docker exec` as
+argument lists, without an implicit shell.
 
-If a state directory requests `sealAfterSetup`, Docker replaces the setup
-container and remounts that directory read-only before interaction. Otherwise
-the same container remains active until quiescence.
+#### Run-owned paths and mounts
 
-The built-in coding-agent CLIs run with their own approval/sandbox mechanisms
-disabled because the Docker runtime is the isolation boundary. A custom runtime
-must provide equivalent isolation appropriate to its environment.
+For one run, `R` is the temporary host directory
+`<temporaryRoot>/stripe-forge-run-<random>`. Forge uses bind mounts, not named
+Docker volumes. The Docker daemon must be able to access `R`. The first three
+rows are bind mounts; `/tmp` is a container-local tmpfs rather than a host
+directory.
+
+| Source | Container target | Purpose | Examples | Host access |
+| --- | --- | --- | --- | --- |
+| `R/workspace` | `/workspace` | The case working directory: setup populates it, the agent edits it, and checks evaluate it. | The quickstart's `hello.txt`; source files copied by `forge/write`; files created or changed by the agent. | `PreparedRuntime.workspace` is mutable until quiescence; `SealedRuntime.workspace` is read-only afterward. |
+| `R/home` | `/home/forge` | An isolated writable `HOME` for the non-root agent process, without mounting the host user's real home. | Tool-owned settings and caches such as `.config/...` or `.cache/...`, except paths replaced by more-specific state mounts. | No general home filesystem capability is exposed by the runtime contract. The Docker adapter retains the backing path only to mount and clean it up. |
+| `R/state/{id}` | The requirement's `containerPath` | Named state explicitly requested by an agent or setup action; each ID gets its own mount and lifecycle. | Claude `<session-id>.jsonl`; Codex `sessions/.../rollout-...jsonl`; `installed_plugins.json` and plugin caches; a host-imported tool under a sealed `/opt/...` target. | Available by ID through `PreparedRuntime.stateDirectories`; mutable until quiescence, or until setup finalization when sealed, then read-only through `SealedRuntime.stateDirectories`. Trusted host imports also target a declared state ID. |
+| Memory-backed tmpfs | `/tmp` | Bounded ephemeral scratch space on an otherwise read-only container root filesystem. | Temporary files created by CLIs and subprocesses. | None. It has no path below `R` and disappears with the container. |
+
+“Host access” describes the public runtime capability, not the Unix mode of the
+backing directory. Those modes are listed below. The diagram shows only the
+host-to-container bind mounts:
+
+```mermaid
+flowchart LR
+    subgraph Host["Host: per-run directory R"]
+        W["R/workspace"]
+        H["R/home"]
+        S["R/state/{id}"]
+    end
+    subgraph Container["Container: named non-root forge user"]
+        CW["/workspace"]
+        CH["/home/forge"]
+        CS["declared containerPath"]
+    end
+
+    W --> CW
+    H --> CH
+    S --> CS
+```
+
+Forge sets these directory modes on the host:
+
+| Host directories | Mode | Why |
+| --- | --- | --- |
+| `R`, `R/state` | `0700` | Other host users cannot reach the run's files. |
+| `R/workspace`, `R/home`, each `R/state/{id}` | `0777` | The run-owned mount leaves remain writable across native Linux and Docker file-sharing implementations. Their private `0700` ancestor prevents access by other host users. |
+
+The container sees the mounted directories' modes. A sealed state mount becomes
+read-only to the container even though its host directory remains `0777`.
+
+- **Setup:** All bind mounts are writable. A state mount goes under
+  `/home/forge`, or under `/opt` when it will be sealed.
+- **Agent interaction:** `finalizeSetup` closes imports, stops admission of new
+  setup commands, and waits for active setup commands. If state must be sealed,
+  Forge starts a new container with the same host files and makes only those
+  state mounts read-only. Otherwise it keeps the setup container. Forge then
+  verifies that every declared executable resolves to a regular file executable
+  by the final container user. No files are copied.
+- **Finish:** `quiesce` stops commands and the container before Forge reads
+  evidence; `dispose` removes the container and `R`.
+
+Trusted host code can use `PreparedRuntime.importHostFile` during setup to copy
+a SHA-256-verified file into declared state. Setup actions and agents cannot
+call it. See [Runtime layouts and conformance](../README.md#runtime-layouts-and-conformance)
+for its exact contract. This low-level capability currently verifies the copy
+but does not add an import receipt to `setup.json`; that is a provenance gap for
+integrations where the imported contents can affect evaluation behavior.
+
+The built-in agents disable their own approval and sandbox mechanisms because
+Docker provides the isolation boundary. A custom runtime must provide
+equivalent isolation.
 
 ## Setup architecture
 
@@ -726,8 +794,8 @@ extensions/<contributor-id>/...     # optional host contribution
 `result.json.evaluation` is the sole canonical evaluation result. The other
 core files serve distinct audit roles:
 
-- `plan.json`: exact canonical execution input;
-- `setup.json`: ordered action audit and bounded runtime resolutions;
+- `plan.json`: exact canonical declared execution input;
+- `setup.json`: ordered action audit and bounded material setup resolutions;
 - `trajectory.json`: full selected, normalized, redacted ATIF trajectory;
 - `interaction.json`: driver turns, stop reason, and Ava audit;
 - `workspace-evidence.json`: exact requested bytes used by deterministic
@@ -909,18 +977,21 @@ as the stable core.
 Changes that cross module boundaries should preserve these properties:
 
 1. Cases remain independent of experiments and environments.
-2. A resolved plan is complete, canonical, deeply immutable, and free of
-   ambient inference.
-3. All pure validation finishes before credential resolution or allocation.
-4. Setup actions run in case-then-treatment order and receive least privilege.
-5. One persistent, exactly identified coding-agent session backs a run.
-6. Mutation stops before evidence selection or evaluation.
-7. Native evidence must cover the driver ledger or explicitly fall back.
-8. Judge-visible transcript data is a positive, versioned projection of the
+2. A resolved plan completely captures declared semantics, is canonical and
+   deeply immutable, and is free of ambient inference.
+3. Material non-sensitive setup-time resolutions not fixed by the plan are
+   recorded in `setup.json`; changing external state is explicit rather than
+   mistaken for deterministic replay.
+4. All pure validation finishes before credential resolution or allocation.
+5. Setup actions run in case-then-treatment order and receive least privilege.
+6. One persistent, exactly identified coding-agent session backs a run.
+7. Mutation stops before evidence selection or evaluation.
+8. Native evidence must cover the driver ledger or explicitly fall back.
+9. Judge-visible transcript data is a positive, versioned projection of the
    redacted canonical trajectory.
-9. Every persisted companion file is described, path-validated, and committed
+10. Every persisted companion file is described, path-validated, and committed
    atomically; core and native artifacts retain their explicit size bounds.
-10. Cleanup, observation, and publication cannot reorder or redefine scoring
+11. Cleanup, observation, and publication cannot reorder or redefine scoring
     semantics.
 
 The tests adjacent to each module cover its local contract. Cross-module and

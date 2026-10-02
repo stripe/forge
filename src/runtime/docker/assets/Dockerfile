@@ -20,7 +20,16 @@ RUN npm install --global --omit=dev --no-audit --no-fund \
 COPY --chown=root:root entrypoint.sh /usr/local/bin/forge-entrypoint
 RUN chmod 0755 /usr/local/bin/forge-entrypoint
 
+# Match the non-root container user to the invoking host UID when Forge builds
+# the image. Bind-mounted files then have one owner on native Linux in both the
+# host and container views. UID 1000 belongs to the unused base-image `node`
+# account, so remove that account before remapping the run user.
+ARG FORGE_UID=10001
+RUN if getent passwd node >/dev/null; then userdel --remove node; fi \
+    && usermod --uid "${FORGE_UID}" forge \
+    && chown -R forge:forge /workspace /home/forge
+
 ENV HOME=/home/forge
 WORKDIR /workspace
-USER 10001:10001
+USER forge:forge
 ENTRYPOINT ["/usr/local/bin/forge-entrypoint"]

@@ -932,23 +932,23 @@ function preflightRuntime(
   const selected = plan.runtime;
   const external = 'config' in selected;
   const matches = external
-    ? runtime.id === selected.adapter && runtime.version === selected.adapter_version
-    : (runtime.id === 'forge/docker' || runtime.id === 'docker') && runtime.version === '1';
-  if (!matches || (external && typeof runtime.preflight !== 'function')) {
+    ? runtime.id === selected.adapter
+    : runtime.id === 'forge/docker';
+  if (!matches || typeof runtime.preflight !== 'function') {
     throw new ForgeExecutionError(
       'unsupported_capability',
       'preflight',
-      'The supplied runtime must match the planned adapter and version and validate its configuration.',
+      external
+        ? 'The supplied runtime must match the planned adapter and validate its configuration.'
+        : 'The supplied runtime must match the built-in Docker identity and provide pure preflight.',
     );
   }
-  if (runtime.preflight) {
-    const result: unknown = runtime.preflight(Object.freeze({plan, requirements, environment}));
-    if (result !== undefined) {
-      // A mistakenly async validator must fail before authority is resolved,
-      // without leaving its rejected promise unhandled in the host process.
-      if (result instanceof Promise) void result.catch(() => undefined);
-      throw new TypeError('Runtime preflight must synchronously validate without returning a value.');
-    }
+  const result: unknown = runtime.preflight(Object.freeze({plan, requirements, environment}));
+  if (result !== undefined) {
+    // A mistakenly async validator must fail before authority is resolved,
+    // without leaving its rejected promise unhandled in the host process.
+    if (result instanceof Promise) void result.catch(() => undefined);
+    throw new TypeError('Runtime preflight must synchronously validate without returning a value.');
   }
 }
 
@@ -1690,7 +1690,6 @@ function buildResult(input: {
     },
     runtime: {
       adapter: input.input.composition.runtime.id,
-      adapter_version: input.input.composition.runtime.version,
       runtime_id: input.runtime.runtimeId,
       platform: input.input.plan.runtime.platform,
       metadata: input.runtime.metadata,

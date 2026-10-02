@@ -498,6 +498,18 @@ async function runDockerConformance(runtime, runId, executionSignal) {
     {
       probePath: '.forge-conformance/live-e2e.bin',
       probeBody: Buffer.from('forge-live-e2e\n', 'utf8'),
+      commandProbes: [{
+        scope: 'uncredentialed',
+        argv: [
+          '/bin/sh',
+          '-c',
+          'printf %s "$1" > "$2" && chmod 0600 "$2" && mkdir -m 0700 "$3" && printf private > "$3/evidence"',
+          'forge-filesystem-ownership-probe',
+          'forge-live-e2e\n',
+          '.forge-conformance/live-e2e.bin',
+          '.forge-conformance/private',
+        ],
+      }],
     },
   );
   return Object.freeze({

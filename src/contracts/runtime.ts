@@ -53,6 +53,22 @@ export interface RuntimeRequirements {
   readonly stateDirectories: readonly RuntimeStateDirectoryRequirement[];
 }
 
+/** A host-authorized, bounded import into a declared run-owned state directory. */
+export interface HostFileImport {
+  /** Absolute path on the host. The final path component must not be a symlink. */
+  readonly sourcePath: string;
+  readonly stateDirectoryId: string;
+  /** Single safe filename at the root of that declared state directory. */
+  readonly relativePath: string;
+  readonly maxBytes: number;
+  /** Digest of the bytes installed, in sha256:<lowercase hex> form. */
+  readonly sha256: string;
+  /** POSIX permissions applied to the completed file. Defaults to 0644. */
+  readonly mode?: number;
+  /** Recheck the file at setup finalization; requires sealAfterSetup. */
+  readonly verifyAfterSetup?: boolean;
+}
+
 export interface ReadonlyWorkspace {
   inspect(relativePath: string): Promise<WorkspaceEntry>;
   readFile(relativePath: string, options?: {maxBytes?: number}): Promise<Uint8Array>;
@@ -98,6 +114,12 @@ export interface PreparedRuntime {
   readonly workspace: MutableWorkspace;
   readonly paths: RuntimeLogicalPaths;
   readonly stateDirectories: ReadonlyMap<string, MutableWorkspace>;
+  /**
+   * Optional host-only capability. It is not projected to setup actions or
+   * agents. An adapter that implements it must copy without buffering the
+   * whole file, verify the installed bytes, and revoke it at finalization.
+   */
+  importHostFile?(input: HostFileImport, signal?: AbortSignal): Promise<void>;
   readonly commands: Readonly<{
     /** Explicit plain variables only; resolved credentials are never exposed. */
     uncredentialed: CommandRunner;
@@ -123,13 +145,11 @@ export interface PreparedRuntime {
 /** Forge owns lifecycle ordering; adapters own only runtime mechanics. */
 export interface RuntimeAdapter {
   readonly id: string;
-  readonly version: string;
   /**
    * Pure, synchronous validation of the exact configuration and combined
    * agent/setup requirements. Never normalize defaults, resolve credentials,
-   * inspect ambient state, allocate, or execute commands. Required for external
-   * runtime descriptors; optional for legacy Docker implementations.
+   * inspect ambient state, allocate, or execute commands.
    */
-  preflight?(input: RuntimePreflight): void;
+  preflight(input: RuntimePreflight): void;
   prepare(input: RuntimePreparation): Promise<PreparedRuntime>;
 }

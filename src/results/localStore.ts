@@ -325,13 +325,9 @@ function verifyPlanArtifact(
   }
   const plannedRuntime = plan.runtime;
   const externalRuntime = 'config' in plannedRuntime;
-  // Old Docker v1 artifacts omitted adapter_version. Preserve their bytes and
-  // alias while binding every external runtime to its explicit version pin.
   const runtimeMatches = externalRuntime
-    ? result.runtime.adapter === plannedRuntime.adapter &&
-      result.runtime.adapter_version === plannedRuntime.adapter_version
-    : (result.runtime.adapter === 'docker' || result.runtime.adapter === 'forge/docker') &&
-      (result.runtime.adapter_version === undefined || result.runtime.adapter_version === '1');
+    ? result.runtime.adapter === plannedRuntime.adapter
+    : result.runtime.adapter === 'forge/docker';
   if (!runtimeMatches || result.runtime.platform !== plannedRuntime.platform) {
     throw new ArtifactStoreError('plan.json runtime does not match the completed result.');
   }

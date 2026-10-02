@@ -7,10 +7,8 @@ import {createTestResolvedRunPlan} from '../testing/plans.js';
 
 const runtime: ForgeExternalRuntimeV1 = {
   adapter: 'acme/process',
-  adapter_version: '2.1',
-  config_version: 1,
   platform: 'linux/amd64',
-  config: {profile: 'worker-v1', tools: {revision: 'immutable-build'}, limit_ms: 20_000},
+  config: {profile: 'worker', tools: {revision: 'immutable-build'}, limit_ms: 20_000},
 };
 
 function experiment(selectedRuntime: unknown): unknown {
@@ -42,12 +40,10 @@ describe('external runtime wire configuration', () => {
     assert(Object.isFrozen(reparsed.runtime.config.tools));
   });
 
-  it('binds adapter version, configuration version, platform and config into the plan digest', () => {
+  it('binds adapter, platform and config into the plan digest', () => {
     const original = createTestResolvedRunPlan({runtime});
     for (const variant of [
       {...runtime, adapter: 'acme/other'},
-      {...runtime, adapter_version: '2.2'},
-      {...runtime, config_version: 2},
       {...runtime, platform: 'linux/arm64' as const},
       {...runtime, config: {...runtime.config, limit_ms: 10_000}},
     ]) {
@@ -65,16 +61,15 @@ describe('external runtime wire configuration', () => {
       {...runtime, adapter: '../process'},
       {...runtime, adapter: 'process'},
       {...runtime, adapter: 'acme/process/extra'},
-      {...runtime, adapter_version: ''},
-      {...runtime, config_version: 0},
-      {...runtime, config_version: 1.5},
+      {...runtime, adapter_version: '1'},
+      {...runtime, config_version: 1},
       {...runtime, platform: 'darwin/arm64'},
       {...runtime, image: {kind: 'forge'}},
       {...runtime, config: []},
       {...runtime, config: {limit: Infinity}},
       {...runtime, config: JSON.parse('{"__proto__":{"unsafe":true}}')},
     ];
-    for (const field of ['adapter_version', 'config_version', 'platform', 'config']) {
+    for (const field of ['platform', 'config']) {
       const missing: Record<string, unknown> = {...runtime};
       delete missing[field];
       invalid.push(missing);

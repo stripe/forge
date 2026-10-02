@@ -56,6 +56,21 @@ export class DockerCommandController {
     });
   }
 
+  /** Runtime-owned, credential-free probes after setup command authority closes. */
+  finalizedWithoutCredentials(): CommandRunner {
+    return Object.freeze({
+      run: async (argv: readonly string[], options?: CommandOptions) => {
+        if (!this.setupFinalized) {
+          throw new CommandExecutionError(
+            'Runtime setup has not been finalized.',
+            'command_runner_closed',
+          );
+        }
+        return this.run(undefined, undefined, argv, options, true);
+      },
+    });
+  }
+
   async closeAndWait(): Promise<void> {
     this.closed = true;
     const settled = await Promise.allSettled([...this.active]);
@@ -99,6 +114,7 @@ export class DockerCommandController {
     allowedCredentialEnvironmentNames: ReadonlySet<string> | undefined,
     argv: readonly string[],
     options: CommandOptions = {},
+    allowAfterSetup = false,
   ): Promise<CommandResult> {
     if (this.closed) {
       throw new CommandExecutionError(
@@ -106,7 +122,7 @@ export class DockerCommandController {
         'command_runner_closed',
       );
     }
-    if (this.setupFinalized && scope !== 'agent') {
+    if (this.setupFinalized && scope !== 'agent' && !allowAfterSetup) {
       throw new CommandExecutionError(
         'Runtime setup command runner has been finalized.',
         'command_runner_closed',

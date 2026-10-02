@@ -752,8 +752,8 @@ async function executionFixture(
     dispose,
   };
   const runtime: RuntimeAdapter = {
-    id: 'docker',
-    version: '1',
+    id: 'forge/docker',
+    preflight() {},
     async prepare(input) {
       calls.push('runtime:prepare');
       expect(input.environment.credentials.ANTHROPIC_API_KEY?.value).toBe(

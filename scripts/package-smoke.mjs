@@ -123,7 +123,7 @@ try {
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
 
       const externalPlan = testing.createTestResolvedRunPlan({runtime: {
-        adapter: 'package-smoke/process', adapter_version: '1', config_version: 1,
+        adapter: 'package-smoke/process',
         platform: 'linux/amd64', config: {profile: 'offline'},
       }});
       assert.equal(forge.parseResolvedRunPlan(externalPlan).runtime.adapter, 'package-smoke/process');

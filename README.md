@@ -6,6 +6,14 @@ an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session
 through a runtime adapter, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
 
+In Forge, reproducible means that a completed run provides an auditable account
+of its declared intent, material setup resolutions, selected interaction
+evidence, and result. It does not mean that a networked, model-driven run can be
+replayed byte-for-byte: model responses, websites, documentation, registries,
+and other external systems may change independently. `plan.json` records what
+Forge intended to run, while `setup.json` records bounded non-sensitive values
+that setup resolved at execution time.
+
 For a conceptual explanation of its boundaries, lifecycle, trust model, and
 extension points, see [Forge architecture](docs/architecture.md). For a
 file-by-file map and concrete call paths, see the
@@ -363,6 +371,13 @@ selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
 post-run driver audit record, not an execution input: it contains the public
 agent turns, stop reason, and, for multi-turn runs, Ava's private need model and
 decision history. It is not supplied to the guideline judge.
+
+This plan/receipt split is deliberate. The plan captures declared semantics;
+the setup receipt captures material facts that become known only while setup is
+running, such as selected versions, commits, artifact identities, and content
+digests. A receipt makes a changing dependency explainable and comparable
+across runs, but does not make the external dependency replayable. Credentials,
+private host paths, and unrelated ambient state do not belong in either file.
 
 `workspace-evidence.json` contains bounded evidence for the paths inspected by
 configured deterministic file checks; it is not a workspace snapshot.
@@ -813,7 +828,9 @@ actions. `parseWith` must produce a stable canonical value: Forge proves its
 output is a fixed point during authoring and rejects any resolved plan that the
 parser would transform. An `apply` implementation may return bounded,
 non-sensitive JSON describing execution-time resolution; Forge snapshots it in
-`setup.json`. See
+`setup.json`. Actions should return every material non-sensitive value resolved
+during setup that could explain a behavioral difference between runs, rather
+than implying that a rolling external dependency was pinned by the plan. See
 [Setup action bundles](docs/setup-action-bundles.md) for the full contract and
 security model.
 
@@ -1196,31 +1213,34 @@ runtime descriptor in its experiment:
 ```yaml
 runtime:
   adapter: acme/process
-  adapter_version: '1'
-  config_version: 1
   platform: linux/amd64
   config:
-    profile: isolated-worker-v1
+    profile: isolated-worker
     tool_build: immutable-build-123
-    network_policy: approved-egress-v1
+    network_policy: approved-egress
 ```
 
 The names and fields inside `config` belong to that adapter. The public parser
 validates the strict envelope and bounded plain JSON (at most 1 MiB serialized
 configuration, subject to the overall graph limits). It rejects unsafe object
-keys and does not add defaults or rewrite external configuration. Namespaced
-adapter IDs, implementation versions, configuration versions, and platform are
-required. `docker` and `forge/docker` are reserved for the built-in format.
+keys and does not add defaults or rewrite external configuration. A namespaced
+adapter ID and platform are required. `docker` and `forge/docker` are reserved
+for the built-in format.
 
 Supply one implementation through `ForgeComposition.runtime`; no registry,
 automatic imports, or runtime discovery is involved. An external adapter must
 implement synchronous, pure `preflight({plan, requirements, environment})`. Forge calls it
 after merging agent and setup requirements, before resolving any credentials
-or allocating resources. It must reject unsupported config versions, unknown
-fields, missing effective settings, unsupported requirements, and incompatible
-limits. It must not inspect ambient state, normalize defaults, allocate, or
-return a promise. Physical executable and environment checks belong in
-`prepare()`. The implementation ID and version must match the plan exactly.
+or allocating resources. It must reject unknown config fields, missing
+effective settings, unsupported requirements, and incompatible limits. It must
+not inspect ambient state, normalize defaults, allocate, or return a promise.
+Environment checks belong in `prepare()`. A runtime with a host-import phase
+may defer physical executable checks until those imports finish, but must
+complete them after setup command authority closes and before interaction. The
+built-in Docker runtime requires each resolved target to be a regular file
+executable by its final non-root container user; a shell built-in or merely
+discoverable path is insufficient. The implementation ID must match the plan
+exactly.
 The preflight environment contains plain variables and opaque credential
 names, references, and scopes. Use it to reject incompatible environment policy
 before secret resolution; secret values are supplied only to `prepare()`.
@@ -1231,20 +1251,22 @@ CLI cannot execute an external descriptor on its own. Wrappers using `runCli`
 receive the selected descriptor in the factory's `options.runtime` field and
 explicitly choose their implementation.
 
-The complete descriptor participates in the resolved plan digest. New results
-record `runtime.adapter_version`; verification binds runtime identity,
-version, and platform to the plan without loading the private adapter. Offline
-verification checks the recorded artifacts and descriptor, not the private
-adapter's configuration semantics or actual isolation enforcement. Historical
-Docker v1 results without `adapter_version` remain accepted, and their existing
-plan bytes and `docker`/`forge/docker` identity aliases are preserved.
+The complete descriptor participates in the resolved plan digest. Verification
+binds runtime identity and platform to the plan without loading the private
+adapter. Offline verification checks the recorded artifacts and descriptor,
+not the private adapter's configuration semantics or actual isolation
+enforcement.
 
-Keep settings that can affect evaluation behavior, such as immutable tool
-builds, resources, and network profiles, in the resolved configuration. Keep
-credentials and infrastructure clients in the composition. An adapter may
-record actual build and deployment identity in sealed runtime metadata. A
-worker deployment is distinct from its command-execution mechanism; hosts can
-reuse an adapter when moving a worker without changing that mechanism.
+Keep declared behavior, constraints, and policies, such as resources and
+network policy, in the resolved configuration. Pin an immutable tool build
+there when that exact build is part of the intended experiment. When setup
+intentionally resolves changing external state, retain its actual non-sensitive
+identity, version, and digest in `setup.json` instead of treating it as though
+the plan pinned it. Keep credentials and infrastructure clients in the
+composition. An adapter may record actual build and deployment identity in
+sealed runtime metadata. A worker deployment is distinct from its
+command-execution mechanism; hosts can reuse an adapter when moving a worker
+without changing that mechanism.
 
 See [the runnable external-runtime example](https://github.com/stripe/forge/blob/main/examples/external-runtime/README.md)
 for an offline demonstration using test adapters. It completes the ordinary
@@ -1257,6 +1279,25 @@ its meaning is an absolute path visible to commands in the selected runtime.
 The runtime must expose exactly the declared state directories and enforce its
 mutable, setup-finalized, sealed, and disposed boundaries. An adapter which
 cannot enforce `sealAfterSetup: true` must reject that requirement in preflight.
+
+Trusted embedding hosts can use the optional `PreparedRuntime.importHostFile`
+capability to install a large local file into a declared state directory without
+holding it all in Node memory. The host supplies an absolute source path, a
+single safe filename at the state root, a byte limit, and the expected SHA-256.
+The Docker runtime streams the copy, verifies the staged bytes, and publishes them
+atomically. `verifyAfterSetup: true` checks the file again as setup ends and
+requires a sealed state directory. This capability is available only to the
+host holding `PreparedRuntime`; it is not exposed to authored YAML, setup
+actions, or agents. A custom runtime may omit it; hosts that need imports must
+check for support. Docker state mounts may be under `/home/forge`, or under
+`/opt` when `sealAfterSetup: true` protects a system-managed tool.
+
+The expected SHA-256 establishes transfer integrity for that import. The core
+capability does not currently add an import receipt to `setup.json` or bind the
+digest into the resolved plan. An integration which makes imported bytes
+material to an evaluation must therefore treat their missing persisted identity
+as a provenance limitation; pinning an expected digest in resolved runtime
+configuration provides a stronger declared guarantee.
 
 The public Claude adapter accepts a fixed, runtime-visible layout:
 
@@ -1387,6 +1428,13 @@ host-owned semantics and capabilities.
 
 ## Security and reproducibility
 
+Forge targets auditable semantics and provenance rather than deterministic
+replay of every external system. It records the bounded values it controls or
+resolves, plus the evidence it actually selects. It cannot inventory the state
+of the internet, force a model provider to repeat an output, or prove that a
+remote document remained unchanged unless an integration records an immutable
+identity or content digest.
+
 - Datasets are exact-manifest, hash-verified trees. Forge rejects symbolic
   links, special files, traversal, undeclared payloads, and unsafe roots.
 - The Docker build context contains only Forge's packaged Dockerfile and
@@ -1400,9 +1448,14 @@ host-owned semantics and capabilities.
   Docker experiment may request `native`; planning then materializes the Docker
   server's architecture before execution. Forge records both its runtime asset
   digest and Docker's immutable built image ID in the result metadata.
-- Containers run as UID/GID `10001`, with a read-only root filesystem, all Linux
-  capabilities dropped, `no-new-privileges`, bounded memory/CPU/processes,
-  bounded commands, and run-owned workspace/home/state mounts.
+- Containers run as the named non-root `forge` user. On a non-root Unix host,
+  that image user has the host UID so bind-mounted setup files and agent output
+  retain one owner in both filesystem views; root hosts use fallback UID
+  `10001` and assign host-written runtime files to it. Runtime metadata records
+  the effective UID. Containers otherwise use a read-only root filesystem, all
+  Linux capabilities dropped,
+  `no-new-privileges`, bounded memory/CPU/processes, bounded commands, and
+  run-owned workspace/home/state mounts.
 - Forge never mounts the Docker socket into the evaluation container.
 - Plugin installation uses an uncredentialed command projection and verifies
   the selected marketplace, native installation, dependencies, and filesystem
@@ -1478,6 +1531,9 @@ proxy, or an offline execution mode.
 - Each CLI process asks Docker to build and verify the Forge image; Docker's
   content cache normally reuses prior layers. A cold cache still needs registry
   availability, and the host Docker implementation can affect build success.
+- `PreparedRuntime.importHostFile` verifies requested bytes but does not
+  currently emit a core `setup.json` receipt for the installed digest, size,
+  mode, and destination.
 
 ## Development
 
@@ -1518,8 +1574,8 @@ pnpm test:live
 
 One invocation builds once and runs the following checks in order:
 
-1. The real Docker adapter conformance probe, including sealing, cleanup, and
-   idempotent disposal.
+1. The real Docker adapter conformance probe, including bidirectional bind-mount
+   writes, private file ownership, sealing, cleanup, and idempotent disposal.
 2. A credential-free install of the latest Stripe Claude plugin through the
    current marketplace, followed by verification of writable plugin files,
    native settings, and hook data, with the same container retained after setup.
