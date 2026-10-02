@@ -1,6 +1,8 @@
 import * as assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import * as fs from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import fsPromises, * as fs from 'node:fs/promises';
+import {syncBuiltinESMExports} from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
@@ -134,6 +136,30 @@ describe('resumable CLI campaigns', () => {
     assert.equal(resumed.summary.executed, 0);
     assert.equal(resumed.summary.skipped, 3);
     assert.equal((await fixture.readCheckpoint()).entries[0]!.attempts[0]!.state, 'completed');
+  });
+
+  it('completes and resumes through a symlinked output directory without new attempts', async () => {
+    const fixture = await createFixture();
+    await fs.mkdir(fixture.output);
+    const alias = path.join(path.dirname(fixture.output), 'results-alias');
+    await fs.symlink(fixture.output, alias, 'dir');
+    const first = await fixture.run(['--output', alias]);
+    assert.equal(first.code, 0);
+    assert.equal(first.summary.completed, 3);
+    assert.equal(first.summary.errored, 0);
+    const checkpoint = await fixture.readCheckpoint();
+    for (const entry of checkpoint.entries) {
+      assert.equal(entry.attempts[0]!.state, 'completed');
+      const result = await verifyCompletedRun(path.join(fixture.root, 'runs', entry.attempts[0]!.run_id));
+      assert.equal(result.result.failure, null);
+    }
+    for (const output of [alias, fixture.output]) {
+      const resumed = await fixture.run(['--output', output, '--resume', 'exp-1']);
+      assert.equal(resumed.code, 0);
+      assert.equal(resumed.summary.executed, 0);
+      assert.equal(resumed.summary.skipped, 3);
+      assert.deepEqual(await fixture.readCheckpoint(), checkpoint);
+    }
   });
 
   it('resumes interrupted executions and entries never started', async () => {
@@ -273,14 +299,175 @@ describe('resumable CLI campaigns', () => {
   it('reclaims a local process lock after its owner exits', async () => {
     const fixture = await createFixture();
     await fixture.run();
-    const owner = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], {encoding: 'utf8'});
-    assert.equal(owner.status, 0);
-    const lock = path.join(fixture.root, '.campaign.lock');
-    await fs.writeFile(lock, JSON.stringify({pid: Number(owner.stdout)}));
+    const {lock} = await createDeadOwnerLock(fixture.root);
     const resumed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(resumed.code, 0);
     assert.equal(resumed.summary.skipped, 3);
     await assert.rejects(fs.stat(lock), {code: 'ENOENT'});
+  });
+
+  it('rejects a delayed competing stale-owner removal without disturbing the active writer', async (context) => {
+    const fixture = await createFixture();
+    await fixture.run(['--repetition', '0'], {execute: async () => {throw new Error('interrupted');}});
+    const {lock, ownerFile} = await createDeadOwnerLock(fixture.root);
+    const removals = [createGate(), createGate()];
+    const firstRemoval = createGate();
+    const bothRemovals = createGate();
+    const started = createGate();
+    const finish = createGate();
+    let removalCount = 0;
+    let executions = 0;
+    const originalUnlink = fsPromises.unlink;
+    context.mock.method(fsPromises, 'unlink', async (...args: Parameters<typeof originalUnlink>) => {
+      if (args[0] === ownerFile && removalCount < 2) {
+        const gate = removals[removalCount++]!;
+        if (removalCount === 1) firstRemoval.resolve();
+        if (removalCount === 2) bothRemovals.resolve();
+        await gate.promise;
+      }
+      return originalUnlink(...args);
+    });
+    syncBuiltinESMExports();
+    const options: RunCliOptions = {execute: async (input) => {
+      executions += 1;
+      started.resolve();
+      await finish.promise;
+      return defaultForgeEngine.executeEval(input);
+    }};
+    const first = fixture.run(['--resume', 'exp-1'], options);
+    let second: ReturnType<typeof fixture.run> | undefined;
+    try {
+      await waitFor(firstRemoval.promise);
+      second = fixture.run(['--resume', 'exp-1'], options);
+      await waitFor(bothRemovals.promise);
+      removals[0]!.resolve();
+      await waitFor(started.promise);
+      removals[1]!.resolve();
+      const rejected = await waitFor(second);
+      assert.equal(rejected.code, 1);
+      assert.match(rejected.stderr, /Another campaign process/);
+      assert.equal(executions, 1);
+      assert.equal((await fs.readdir(lock)).length, 1);
+      const active = await fixture.readCheckpoint();
+      assert.equal(active.entries[0]!.attempts.at(-1)!.state, 'running');
+      finish.resolve();
+      assert.equal((await waitFor(first)).code, 0);
+      assert.equal((await fixture.readCheckpoint()).entries[0]!.attempts.length, 2);
+    } finally {
+      for (const gate of removals) gate.resolve();
+      finish.resolve();
+      await Promise.allSettled([first, ...(second === undefined ? [] : [second])]);
+      context.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  });
+
+  it('rejects delayed empty-lock cleanup after another writer publishes its owner', async (context) => {
+    const fixture = await createFixture();
+    await fixture.run(['--repetition', '0'], {execute: async () => {throw new Error('interrupted');}});
+    const {lock} = await createDeadOwnerLock(fixture.root);
+    const removing = createGate();
+    const remove = createGate();
+    const started = createGate();
+    const finish = createGate();
+    let delayed = false;
+    let executions = 0;
+    const originalRmdir = fsPromises.rmdir;
+    context.mock.method(fsPromises, 'rmdir', async (...args: Parameters<typeof originalRmdir>) => {
+      if (args[0] === lock && !delayed) {
+        delayed = true;
+        removing.resolve();
+        await remove.promise;
+      }
+      return originalRmdir(...args);
+    });
+    syncBuiltinESMExports();
+    const options: RunCliOptions = {execute: async (input) => {
+      executions += 1;
+      started.resolve();
+      await finish.promise;
+      return defaultForgeEngine.executeEval(input);
+    }};
+    const first = fixture.run(['--resume', 'exp-1'], options);
+    let second: ReturnType<typeof fixture.run> | undefined;
+    try {
+      await waitFor(removing.promise);
+      second = fixture.run(['--resume', 'exp-1'], options);
+      await waitFor(started.promise);
+      remove.resolve();
+      const rejected = await waitFor(first);
+      assert.equal(rejected.code, 1);
+      assert.match(rejected.stderr, /Another campaign process/);
+      assert.equal(executions, 1);
+      assert.equal((await fs.readdir(lock)).length, 1);
+      finish.resolve();
+      assert.equal((await waitFor(second)).code, 0);
+      assert.equal((await fixture.readCheckpoint()).entries[0]!.attempts.length, 2);
+    } finally {
+      remove.resolve();
+      finish.resolve();
+      await Promise.allSettled([first, ...(second === undefined ? [] : [second])]);
+      context.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  });
+
+  it('recovers an empty lock directory left during interrupted cleanup', async () => {
+    const fixture = await createFixture();
+    await fixture.run();
+    const lock = path.join(fixture.root, '.campaign.lock');
+    await fs.mkdir(lock);
+    const resumed = await fixture.run(['--resume', 'exp-1']);
+    assert.equal(resumed.code, 0);
+    assert.equal(resumed.summary.skipped, 3);
+    await assert.rejects(fs.stat(lock), {code: 'ENOENT'});
+  });
+
+  it('reclaims a stale lock when directory contention reports Windows EPERM', async (context) => {
+    const fixture = await createFixture();
+    await fixture.run();
+    const {lock} = await createDeadOwnerLock(fixture.root);
+    const originalRename = fsPromises.rename;
+    let collision = false;
+    context.mock.method(fsPromises, 'rename', async (...args: Parameters<typeof originalRename>) => {
+      if (args[1] === lock && !collision) {
+        collision = true;
+        throw Object.assign(new Error('Directory collision'), {code: 'EPERM'});
+      }
+      return originalRename(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      const resumed = await fixture.run(['--resume', 'exp-1']);
+      assert.equal(resumed.code, 0);
+      assert.equal(resumed.summary.skipped, 3);
+      assert.equal(collision, true);
+      await assert.rejects(fs.stat(lock), {code: 'ENOENT'});
+    } finally {
+      context.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  });
+
+  it('preserves a genuine publication permission error when no lock exists', async (context) => {
+    const fixture = await createFixture();
+    const originalRename = fsPromises.rename;
+    context.mock.method(fsPromises, 'rename', async (...args: Parameters<typeof originalRename>) => {
+      if (path.basename(String(args[1])) === '.campaign.lock') {
+        throw Object.assign(new Error('Publication permission denied'), {code: 'EPERM'});
+      }
+      return originalRename(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      const first = await fixture.run();
+      assert.equal(first.code, 1);
+      assert.match(first.stderr, /Publication permission denied/);
+      await assert.rejects(fs.stat(fixture.checkpoint), {code: 'ENOENT'});
+    } finally {
+      context.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
   });
 
   it('retries committed role-player errors while retaining their valid artifacts', async () => {
@@ -342,6 +529,33 @@ interface Checkpoint {
     plan_sha256: string;
     attempts: Array<{run_id: string; state: string; error_code?: string}>;
   }>;
+}
+
+function createGate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((ready) => {resolve = ready;});
+  return {promise, resolve};
+}
+
+async function waitFor<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Timed out waiting for the lock interleaving.')), 5_000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function createDeadOwnerLock(root: string) {
+  const owner = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], {encoding: 'utf8'});
+  assert.equal(owner.status, 0);
+  const lock = path.join(root, '.campaign.lock');
+  const ownerFile = path.join(lock, `owner-${randomUUID()}.json`);
+  await fs.mkdir(lock);
+  await fs.writeFile(ownerFile, JSON.stringify({pid: Number(owner.stdout)}));
+  return {lock, ownerFile};
 }
 
 async function createFixture(options: {anotherCase?: boolean} = {}) {

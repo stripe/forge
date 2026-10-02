@@ -195,8 +195,11 @@ The checkpoint binds that ID to its directory. Each entry records its selection,
 canonical plan SHA-256, and ordered attempts with
 a unique run ID and `running`, `completed`, or `errored` state. Errored attempts
 retain only a stable error code. Checkpoint updates use synced temporary files
-and atomic rename; a local process lock prevents simultaneous writers and can
-be reclaimed after its owner exits.
+and atomic rename. A local lock directory is published with a unique owner
+marker to prevent simultaneous writers. Recovery removes only the exited
+owner's marker and an empty lock directory, so delayed cleanup cannot remove
+a replacement owner's lock. Committed artifact locations are compared after
+resolving filesystem aliases, including symlinked output directories.
 
 `--resume <experiment-run-id>` requires an explicit ID and loads that
 execution's saved selections. Bare `--resume` is rejected. The resolved plans
@@ -962,7 +965,8 @@ engine APIs:
 - `validate` loads inputs, expands every selection, resolves plans, constructs
   the default composition, and runs pure preflight;
 - `plan` selects one entry and prints canonical plan JSON; and
-- `run` selects one entry, constructs a composition, and calls `executeEval`.
+- `run` selects every matching entry, constructs a composition, and delegates
+  sequential execution and explicit resume to the CLI campaign controller.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
 Codex agent adapters, the Anthropic host completion provider, an explicit

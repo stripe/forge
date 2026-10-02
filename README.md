@@ -464,7 +464,8 @@ npx --no-install forge run --experiment ./experiment.yaml --resume EXPERIMENT_RU
 An ID is required: bare `--resume` is a usage error. If the same experiment was
 run three times, each execution has a different ID and any of them can be
 resumed independently. `--output <directory>` changes the base output directory;
-resume must use the same base directory. Resume uses the saved selections,
+resume must use the same underlying base directory, which may be accessed
+through a symlink. Resume uses the saved selections,
 including an original `--case` filter, so omit selection options on resume.
 
 Resume verifies each completed run before skipping it and requires the same

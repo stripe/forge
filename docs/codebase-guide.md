@@ -149,13 +149,19 @@ flowchart TD
     LE[model/loaders.ts: loadExperimentConfig]
     PM[model/parse.ts]
     EX[planning/planner.ts: expandExperiment]
-    SEL[cli.ts: selectOne]
+    ONE[cli.ts: selectOne]
+    MANY[cli.ts: selectMatching]
+    SAVED[campaign.ts: readCampaignSelections]
     RP[planning/planner.ts: resolveRunPlan]
     PLAN[ResolvedRunPlanV1]
 
-    CLI --> LD --> PM
     CLI --> LE --> PM
-    CLI --> EX --> SEL --> RP
+    LE -->|dataset.path| LD --> PM
+    CLI --> EX
+    EX -->|plan| ONE --> RP
+    EX -->|run| MANY --> RP
+    EX -->|validate| RP
+    CLI -->|resume| SAVED --> RP
     LD --> RP
     LE --> RP
     RP --> PLAN

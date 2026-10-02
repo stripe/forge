@@ -185,7 +185,11 @@ export async function runCampaign(options: CampaignOptions): Promise<{
           composition: options.composition,
           signal: options.signal,
         });
-        if (path.resolve(result.location) !== path.join(root, 'runs', runId)) {
+        const [actualLocation, expectedLocation] = await Promise.all([
+          fs.realpath(result.location),
+          fs.realpath(path.join(root, 'runs', runId)),
+        ]);
+        if (actualLocation !== expectedLocation) {
           throw new Error('Campaigns require the local artifact store at the selected output directory.');
         }
         attempt = await inspectAttempt(options, root, entry.plan_sha256, runId);
@@ -275,42 +279,84 @@ async function writeCampaign(checkpoint: string, campaign: Campaign): Promise<vo
 async function acquireCampaignLock(root: string): Promise<() => Promise<void>> {
   const lock = path.join(root, '.campaign.lock');
   const temporary = `${lock}.${randomUUID()}`;
-  await fs.writeFile(temporary, serializeCanonicalJson({pid: process.pid}), {flag: 'wx', mode: 0o600});
+  const ownerName = `owner-${randomUUID()}.json`;
+  await fs.mkdir(temporary, {mode: 0o700});
   try {
+    await fs.writeFile(path.join(temporary, ownerName), serializeCanonicalJson({pid: process.pid}), {
+      flag: 'wx', mode: 0o600,
+    });
     while (true) {
       try {
-        // Linking publishes an already-complete lock file atomically.
-        await fs.link(temporary, lock);
+        // Publish a nonempty directory atomically. A competing rename or rmdir
+        // cannot replace it while its unique owner marker remains present.
+        await fs.rename(temporary, lock);
         break;
       } catch (error) {
-        if (!hasCode(error, 'EEXIST')) throw error;
+        if (hasCode(error, 'EPERM')) {
+          // Windows reports EPERM for a directory collision. Only treat it as
+          // contention when the destination is an existing real directory.
+          const destination = await fs.lstat(lock).catch(() => undefined);
+          if (!destination?.isDirectory() || destination.isSymbolicLink()) throw error;
+        } else if (!hasCode(error, 'EEXIST') && !hasCode(error, 'ENOTEMPTY')) {
+          throw error;
+        }
         try {
-          const stat = await fs.lstat(lock);
-          if (!stat.isFile()) throw new Error('Invalid campaign lock.');
-          const owner = z.object({pid: z.number().int().positive()}).strict()
-            .parse(JSON.parse(await fs.readFile(lock, 'utf8')));
-          try {
-            process.kill(owner.pid, 0);
-          } catch (probeError) {
-            if (!hasCode(probeError, 'ESRCH')) throw probeError;
-            const current = await fs.lstat(lock);
-            if (stat.ino === current.ino && stat.dev === current.dev) await fs.unlink(lock);
-            continue;
-          }
-          throw new Error('Another campaign process is using this output directory.');
+          await reclaimCampaignLock(lock);
         } catch (lockError) {
           if (hasCode(lockError, 'ENOENT')) continue;
           throw lockError;
         }
       }
     }
-    const owned = await fs.lstat(lock);
     return async () => {
-      const current = await fs.lstat(lock);
-      if (owned.ino === current.ino && owned.dev === current.dev) await fs.unlink(lock);
+      await fs.unlink(path.join(lock, ownerName));
+      await removeEmptyLockDirectory(lock);
     };
   } finally {
-    await fs.rm(temporary, {force: true});
+    await fs.rm(temporary, {recursive: true, force: true});
+  }
+}
+
+async function reclaimCampaignLock(lock: string): Promise<void> {
+  const stat = await fs.lstat(lock);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid campaign lock.');
+  const entries = await fs.readdir(lock);
+  if (entries.length === 0) {
+    // Recovery or release may have removed the marker before a process exit.
+    await removeEmptyLockDirectory(lock);
+    return;
+  }
+  const ownerName = entries[0]!;
+  if (entries.length !== 1 || !/^owner-[0-9a-f-]{36}\.json$/.test(ownerName)) {
+    throw new Error('Invalid campaign lock owner.');
+  }
+  const ownerFile = path.join(lock, ownerName);
+  const ownerStat = await fs.lstat(ownerFile);
+  if (!ownerStat.isFile() || ownerStat.isSymbolicLink() || ownerStat.size > 128) {
+    throw new Error('Invalid campaign lock owner.');
+  }
+  const owner = z.object({pid: z.number().int().positive()}).strict()
+    .parse(JSON.parse(await fs.readFile(ownerFile, 'utf8')));
+  try {
+    process.kill(owner.pid, 0);
+  } catch (error) {
+    if (!hasCode(error, 'ESRCH')) throw error;
+    // A delayed reclaimer can only remove the marker it inspected, never a
+    // replacement owner's marker. Never recursively remove the published lock.
+    await fs.unlink(ownerFile);
+    await removeEmptyLockDirectory(lock);
+    return;
+  }
+  throw new Error('Another campaign process is using this output directory.');
+}
+
+async function removeEmptyLockDirectory(lock: string): Promise<void> {
+  try {
+    await fs.rmdir(lock);
+  } catch (error) {
+    // A contender may already have published its nonempty lock or removed the
+    // empty directory. Neither outcome permits deleting a current owner.
+    if (!hasCode(error, 'ENOENT') && !hasCode(error, 'ENOTEMPTY') && !hasCode(error, 'EEXIST')) throw error;
   }
 }
 
