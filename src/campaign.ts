@@ -3,47 +3,49 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {z} from 'zod';
 
+import {
+  campaignRunIdSchema as runIdSchema,
+  campaignSchema,
+  type Campaign,
+  type CampaignAttempt as Attempt,
+  type SettledCampaignAttempt as SettledAttempt,
+} from './campaignModel.js';
+import {
+  buildCampaignReport,
+  serializeCampaignReport,
+  type CampaignReportEvaluationV1,
+  type CampaignReportRunV1,
+} from './campaignReport.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import type {ForgeEngine} from './engine.js';
 import {ForgeExecutionError} from './execution/errors.js';
 import type {ExecuteEvalInput} from './execution/execute.js';
-import {isSha256Digest} from './model/hashes.js';
-import {parseRunSelection} from './model/parse.js';
 import type {ResolvedRunPlanV1, RunSelection} from './model/types.js';
 import {resolvedRunPlanSha256} from './planning/planner.js';
 import type {CompletedRunV1, EvalStatus} from './results/types.js';
 import {serializeCanonicalJson} from './serialization.js';
 
-const MAX_CAMPAIGN_BYTES = 16 * 1024 * 1024;
-const runIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
-const errorCodeSchema = z.enum([
-  'execution_error', 'invalid_artifacts', 'role_player_error',
-  'aborted', 'agent_failed', 'artifact_failed', 'credential_failed',
-  'evaluation_failed', 'evidence_failed', 'invalid_plan', 'runtime_failed',
-  'setup_failed', 'unsupported_capability',
-]);
-const attemptSchema = z.discriminatedUnion('state', [
-  z.object({run_id: runIdSchema, state: z.literal('running')}).strict(),
-  z.object({run_id: runIdSchema, state: z.literal('completed')}).strict(),
-  z.object({
-    run_id: runIdSchema,
-    state: z.literal('errored'),
-    error_code: errorCodeSchema,
-  }).strict(),
-]);
-const campaignSchema = z.object({
-  schema_version: z.literal(1),
-  experiment_run_id: runIdSchema,
-  entries: z.array(z.object({
-    selection: z.unknown().transform(parseRunSelection),
-    plan_sha256: z.string().refine(isSha256Digest),
-    attempts: z.array(attemptSchema).max(10_000),
-  }).strict()).min(1).max(100_000),
-}).strict();
+export {
+  CAMPAIGN_REPORT_SCHEMA_VERSION,
+  parseCampaignReport,
+  type CampaignReportCaseV1,
+  type CampaignReportEvaluationV1,
+  type CampaignReportRunV1,
+  type CampaignReportStatisticsV1,
+  type CampaignReportV1,
+} from './campaignReport.js';
 
-type Campaign = z.infer<typeof campaignSchema>;
-type Attempt = z.infer<typeof attemptSchema>;
-type SettledAttempt = Exclude<Attempt, {state: 'running'}>;
+const MAX_CAMPAIGN_BYTES = 16 * 1024 * 1024;
+
+/** A report failure does not invalidate committed evaluations or their checkpoint. */
+export class CampaignReportError extends Error {
+  readonly report: string;
+  constructor(report: string, cause: unknown) {
+    super(`Could not write campaign report at ${report}. Saved evaluations can be resumed without rerunning completed entries.`, {cause});
+    this.name = 'CampaignReportError';
+    this.report = report;
+  }
+}
 
 /** Bounded metadata from a verified local commit, independent of publication. */
 export interface CampaignArtifact {
@@ -85,6 +87,7 @@ export type CampaignProgressEvent =
 
 export interface CampaignSummary {
   readonly campaign: string;
+  readonly report: string;
   readonly total: number;
   readonly executed: number;
   readonly skipped: number;
@@ -192,6 +195,18 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
   }
   const release = await acquireCampaignLock(root);
   const checkpoint = path.join(root, 'campaign.json');
+  const reportPath = path.join(root, 'report.json');
+  const inspections = new Map<string, CachedInspection>();
+  const inspect = async (entry: Campaign['entries'][number], runId: string): Promise<AttemptInspection> => {
+    const identity = serializeCanonicalJson({selection: entry.selection, plan_sha256: entry.plan_sha256});
+    const cached = inspections.get(runId);
+    if (cached?.identity === identity) return cached.inspected;
+    const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection);
+    inspections.set(runId, {identity, inspected});
+    return inspected;
+  };
+  let reportReady = false;
+  let succeeded = false;
   try {
     let campaign = await readCampaign(checkpoint);
     if (campaign === undefined) {
@@ -222,6 +237,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
         runIds.add(attempt.run_id);
       }
     }
+    reportReady = true;
 
     // Inspect every prior result before running anything. This also recovers a
     // run committed just before the process died while updating its checkpoint.
@@ -231,7 +247,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       options.signal.throwIfAborted();
       const last = entry.attempts.at(-1);
       if (last !== undefined) {
-        const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
+        const inspected = await inspect(entry, last.run_id);
         const recovered = inspected.attempt;
         if (
           recovered.state !== 'errored' ||
@@ -318,7 +334,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             if (actualLocation !== expectedLocation) {
               throw new Error('Campaigns require the local artifact store at the selected output directory.');
             }
-            const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection);
+            const inspected = await inspect(entry, runId);
             attempt = inspected.attempt;
             artifact = inspected.artifact;
           } catch (error) {
@@ -333,9 +349,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             // A callback can fail after its local commit (for example during
             // host cleanup). Keep the execution error while exposing verified
             // artifacts for independent publication.
-            if (options.onOutcome !== undefined) {
-              artifact = (await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection)).artifact;
-            }
+            artifact = (await inspect(entry, runId)).artifact;
           }
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
@@ -355,8 +369,10 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
     await Promise.all(Array.from({length: Math.min(jobs, pending.length)}, () => worker()));
     if (failed) throw failure;
     options.signal.throwIfAborted();
+    succeeded = true;
     return {
       campaign: checkpoint,
+      report: reportPath,
       total: campaign.entries.length,
       executed,
       skipped,
@@ -364,8 +380,56 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       errored,
     };
   } finally {
-    await release();
+    try {
+      if (reportReady) {
+        try {
+          // Read the last durable checkpoint, including after coordinator
+          // failures. Workers have drained and this process still owns the lock.
+          const source = await readCampaignSource(checkpoint);
+          if (source === undefined) throw new Error('Campaign checkpoint is missing.');
+          if (source.campaign.experiment_run_id !== path.basename(root)) {
+            throw new Error('Campaign checkpoint identity does not match its directory.');
+          }
+          const runs: CampaignReportRunV1[] = [];
+          for (const [index, entry] of source.campaign.entries.entries()) {
+            const last = entry.attempts.at(-1);
+            if (last === undefined) {
+              runs.push({selection_index: index, selection: entry.selection, run_id: null,
+                state: 'pending', error_code: null, attempt_count: 0, result_path: null, evaluation: null});
+              continue;
+            }
+            const inspected = await inspect(entry, last.run_id);
+            const effective = inspected.artifact === null && last.state === 'errored' ? last : inspected.attempt;
+            runs.push({selection_index: index, selection: entry.selection, run_id: last.run_id,
+              state: effective.state, error_code: effective.state === 'errored' ? effective.error_code : null,
+              attempt_count: entry.attempts.length,
+              result_path: inspected.artifact === null ? null : `runs/${last.run_id}/result.json`,
+              evaluation: effective.state === 'completed' ? inspected.evaluation : null});
+          }
+          const report = buildCampaignReport({experimentRunId: source.campaign.experiment_run_id,
+            generatedAt: new Date().toISOString(), checkpointBody: source.body, runs});
+          await writeAtomicDocument(reportPath, serializeCampaignReport(report));
+        } catch (error) {
+          // Report generation is best effort after interruption. Preserve the
+          // original failure, but surface reporting failure on normal completion.
+          if (succeeded && !options.signal.aborted) throw new CampaignReportError(reportPath, error);
+        }
+      }
+      if (succeeded) options.signal.throwIfAborted();
+    } finally {
+      await release();
+    }
   }
+}
+
+interface AttemptInspection {
+  attempt: SettledAttempt;
+  artifact: CampaignArtifact | null;
+  evaluation: CampaignReportEvaluationV1 | null;
+}
+interface CachedInspection {
+  identity: string;
+  inspected: AttemptInspection;
 }
 
 async function inspectAttempt(
@@ -374,7 +438,7 @@ async function inspectAttempt(
   planDigest: string,
   runId: string,
   selection: RunSelection,
-): Promise<{attempt: SettledAttempt; artifact: CampaignArtifact | null}> {
+): Promise<AttemptInspection> {
   try {
     const location = path.join(root, 'runs', runId);
     const completed = await engine.verifyCompletedRun(location);
@@ -386,11 +450,15 @@ async function inspectAttempt(
     const attempt: SettledAttempt = completed.result.failure === null
       ? {run_id: runId, state: 'completed'}
       : {run_id: runId, state: 'errored', error_code: 'role_player_error'};
-    return {attempt, artifact: {location,
+    const evaluation = completed.result.evaluation;
+    return {attempt, evaluation: {status: evaluation.status, score: evaluation.score,
+      guidelines_passed: evaluation.guidelines_passed, guidelines_total: evaluation.guidelines_total,
+      checks_passed: evaluation.checks.filter((check) => check.passed).length, checks_total: evaluation.checks.length},
+      artifact: {location,
       evaluation: {status: completed.result.evaluation.status, score: completed.result.evaluation.score},
       failure: completed.result.failure === null ? null : 'role_player_error'}};
   } catch {
-    return {attempt: {run_id: runId, state: 'errored', error_code: 'invalid_artifacts'}, artifact: null};
+    return {attempt: {run_id: runId, state: 'errored', error_code: 'invalid_artifacts'}, artifact: null, evaluation: null};
   }
 }
 
@@ -405,10 +473,16 @@ function campaignOutcome(
 }
 
 async function readCampaign(checkpoint: string): Promise<Campaign | undefined> {
+  return (await readCampaignSource(checkpoint))?.campaign;
+}
+
+async function readCampaignSource(checkpoint: string): Promise<{campaign: Campaign; body: string} | undefined> {
   try {
     const stat = await fs.lstat(checkpoint);
     if (!stat.isFile() || stat.size > MAX_CAMPAIGN_BYTES) throw new Error('Invalid campaign checkpoint.');
-    return campaignSchema.parse(JSON.parse(await fs.readFile(checkpoint, 'utf8')));
+    const body = await fs.readFile(checkpoint, 'utf8');
+    if (Buffer.byteLength(body) > MAX_CAMPAIGN_BYTES) throw new Error('Invalid campaign checkpoint.');
+    return {campaign: campaignSchema.parse(JSON.parse(body)), body};
   } catch (error) {
     if (hasCode(error, 'ENOENT')) return undefined;
     throw new Error('Cannot read a valid schema-version-1 campaign.json.', {cause: error});
@@ -418,6 +492,10 @@ async function readCampaign(checkpoint: string): Promise<Campaign | undefined> {
 async function writeCampaign(checkpoint: string, campaign: Campaign): Promise<void> {
   const body = serializeCanonicalJson(campaignSchema.parse(campaign));
   if (Buffer.byteLength(body) > MAX_CAMPAIGN_BYTES) throw new Error('Campaign checkpoint exceeds its byte limit.');
+  await writeAtomicDocument(checkpoint, body);
+}
+
+async function writeAtomicDocument(checkpoint: string, body: string): Promise<void> {
   const temporary = `${checkpoint}.${randomUUID()}.tmp`;
   try {
     const handle = await fs.open(temporary, 'wx', 0o600);

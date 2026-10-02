@@ -112,7 +112,9 @@ If you are following the public executable, start instead at
 | [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
 | [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
 | [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, filters matrix entries, creates adapters, and calls the engine or campaign controller. It is composition code, not benchmark semantics. |
-| [`src/campaign.ts`](https://github.com/stripe/forge/blob/main/src/campaign.ts) | `runCampaign`, `readCampaignSelections`, `inspectCampaign` | Shared campaign controller, bounded verified outcome collection, and read-only inspection of latest attempts. |
+| [`src/campaign.ts`](https://github.com/stripe/forge/blob/main/src/campaign.ts) | `runCampaign`, `readCampaignSelections`, `inspectCampaign` | Shared campaign controller, checkpoint/report persistence under the lock, bounded verified outcome collection, and read-only inspection of latest attempts. |
+| [`src/campaignModel.ts`](https://github.com/stripe/forge/blob/main/src/campaignModel.ts) | Checkpoint schemas and attempt types | Strict execution checkpoint model shared by the controller and report schemas. |
+| [`src/campaignReport.ts`](https://github.com/stripe/forge/blob/main/src/campaignReport.ts) | `parseCampaignReport`, report types, internal builder/serializer | Bounded scorecard schema, case/configuration aggregation, and verification that statistics match run rows. Public parser/types are re-exported through the campaign subpath. |
 | [`src/campaignCli.ts`](https://github.com/stripe/forge/blob/main/src/campaignCli.ts) | `runCampaignCommand`, `parseCampaignArgs`, `createCampaignCliOptions` | Shared operational options, execution IDs/roots, saved selection restoration, host loading, and prepared-input cleanup. Used by the public CLI and available to other command hosts. |
 | [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION` | Reads the exact installed package version from its exported `package.json` for CLI output and plan/result provenance. |
 | [`src/serialization.ts`](https://github.com/stripe/forge/blob/main/src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
@@ -176,6 +178,8 @@ case ID. `run` executes all matching selections through `campaign.ts`; `plan`
 requires one. The experiment's `dataset.path` is resolved relative to its file.
 Campaign resume selects a saved experiment execution by its explicit ID.
 `--jobs` controls the campaign worker count without changing resolved plans.
+After workers drain, the controller atomically saves `report.json` from verified
+latest outcomes before releasing the lock; a resume refreshes the scorecard.
 Hosts with their own input formats can use `@stripe/forge/campaign/cli` with their
 own argument definitions and loader, or call `@stripe/forge/campaign` directly.
 See the README's [embedding contracts](../README.md#experiment-campaigns).

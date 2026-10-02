@@ -52,6 +52,9 @@ describe('@stripe/forge package root', () => {
     expect('readCampaignSelections' in rootExports).toBe(false);
     expect('inspectCampaign' in rootExports).toBe(false);
     expect('runCampaignCommand' in rootExports).toBe(false);
+    expect('parseCampaignReport' in rootExports).toBe(false);
+    expect('CAMPAIGN_REPORT_SCHEMA_VERSION' in rootExports).toBe(false);
+    expect('CampaignReportError' in rootExports).toBe(false);
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {

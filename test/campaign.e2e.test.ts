@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {runCli, type RunCliOptions} from '../src/cli.js';
+import {parseCampaignReport} from '../src/campaign.js';
 import {defaultForgeEngine} from '../src/engine.js';
 import {ForgeExecutionError} from '../src/execution/errors.js';
 import {executeEvalWithTestHooks} from '../src/execution/execute.js';
@@ -192,6 +193,9 @@ describe('resumable CLI campaigns', () => {
       assert.equal(checkpoint.entries[2]!.attempts.length, 0);
       assert.deepEqual(checkpoint.entries.slice(0, 2).map((entry) => entry.attempts.at(-1)!.error_code),
         ['aborted', 'aborted']);
+      const cancelled = await readReport(fixture.root);
+      assert.deepEqual(cancelled.runs.map((run) => run.state), ['errored', 'errored', 'pending']);
+      assert.equal(cancelled.summary.pass_rate, null);
       const resumed = await fixture.run(['--resume', 'exp-1', '--jobs', '3']);
       assert.equal(resumed.code, 0);
       assert.equal(resumed.summary.executed, 3);
@@ -294,6 +298,9 @@ describe('resumable CLI campaigns', () => {
       assert.match(failed.stderr, /checkpoint disk failure/);
       assert.deepEqual((await fixture.readCheckpoint()).entries.map((entry) => entry.attempts.length), [1, 1, 0]);
       await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-2'));
+      const interrupted = await readReport(fixture.root);
+      assert.deepEqual(interrupted.runs.map((run) => run.state), ['errored', 'completed', 'pending']);
+      assert.equal(interrupted.checkpoint_sha256, sha256Digest(await fs.readFile(fixture.checkpoint)));
       failWrites = false;
       const resumed = await fixture.run(['--resume', 'exp-1', '--jobs', '2']);
       assert.equal(resumed.code, 0);
@@ -373,7 +380,8 @@ describe('resumable CLI campaigns', () => {
     assert.deepEqual(executed, [0, 1, 2]);
     assert.deepEqual(first.summary, {
       experiment_run_id: 'exp-1', location: fixture.root,
-      campaign: fixture.checkpoint, total: 3, executed: 3, skipped: 0, completed: 2, errored: 1,
+      campaign: fixture.checkpoint, report: path.join(fixture.root, 'report.json'),
+      total: 3, executed: 3, skipped: 0, completed: 2, errored: 1,
     });
     const before = await fs.readFile(path.join(fixture.root, 'runs', 'attempt-1', 'result.json'));
     const journal = await fixture.readCheckpoint();
@@ -382,6 +390,12 @@ describe('resumable CLI campaigns', () => {
     ]);
     assert.equal((await fs.readFile(fixture.checkpoint, 'utf8')).includes('secret-adapter-detail'), false);
     assert.equal(first.stderr.includes('secret-adapter-detail'), false);
+    const initialReport = await readReport(fixture.root);
+    assert.equal(initialReport.summary.completed, 2);
+    assert.equal(initialReport.summary.errored, 1);
+    assert.equal(initialReport.cases[0]!.selections, 3);
+    assert.deepEqual(initialReport.runs.map((run) => run.run_id), ['attempt-1', 'attempt-2', 'attempt-3']);
+    assert.equal(JSON.stringify(initialReport).includes('secret-adapter-detail'), false);
 
     fail = false;
     executed.length = 0;
@@ -390,6 +404,10 @@ describe('resumable CLI campaigns', () => {
     assert.deepEqual(executed, [1]);
     assert.equal(resumed.summary.skipped, 2);
     assert.equal(resumed.summary.completed, 3);
+    const resumedReport = await readReport(fixture.root);
+    assert.equal(resumedReport.summary.completed, 3);
+    assert.equal(resumedReport.summary.retry_attempts, 1);
+    assert.deepEqual(resumedReport.runs.map((run) => run.run_id), ['attempt-1', 'attempt-4', 'attempt-3']);
     assert.deepEqual((await fixture.readCheckpoint()).entries[1]!.attempts, [
       {run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed'},
       {run_id: 'attempt-4', state: 'completed'},
@@ -409,6 +427,11 @@ describe('resumable CLI campaigns', () => {
     assert.equal(first.code, 0);
     const run = await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-1'));
     assert.equal(run.result.evaluation.status, 'failed');
+    const report = await readReport(fixture.root);
+    assert.equal(report.summary.failed, 3);
+    assert.equal(report.summary.pass_rate, 0);
+    assert.equal(report.summary.coverage, 1);
+    assert.equal(report.summary.guideline_score.mean, null);
     const journal = await fixture.readCheckpoint();
     journal.entries[0]!.attempts[0] = {run_id: 'attempt-1', state: 'running'};
     await fs.writeFile(fixture.checkpoint, JSON.stringify(journal));
@@ -479,6 +502,9 @@ describe('resumable CLI campaigns', () => {
     assert.equal(resumed.summary.skipped, 2);
     assert.equal(await fs.readFile(trajectory, 'utf8'), 'corrupted');
     await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-4'));
+    const report = await readReport(fixture.root);
+    assert.equal(report.runs[1]!.run_id, 'attempt-4');
+    assert.equal(report.summary.retry_attempts, 1);
   });
 
   it('refuses changed plans and selector sets before executing', async () => {
@@ -816,6 +842,10 @@ function createGate() {
   let resolve!: () => void;
   const promise = new Promise<void>((ready) => {resolve = ready;});
   return {promise, resolve};
+}
+
+async function readReport(root: string) {
+  return parseCampaignReport(JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')));
 }
 
 async function waitFor<T>(promise: Promise<T>): Promise<T> {

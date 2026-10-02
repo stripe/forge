@@ -58,6 +58,7 @@ try {
     path.join(consumerRoot, 'esm.mjs'),
     `
       import assert from 'node:assert/strict';
+      import * as fs from 'node:fs/promises';
       import * as path from 'node:path';
       import * as forge from '@stripe/forge';
       import * as atif from '@stripe/forge/atif/v1.8';
@@ -118,10 +119,14 @@ try {
       assert.equal(typeof campaign.runCampaign, 'function');
       assert.equal(typeof campaign.readCampaignSelections, 'function');
       assert.equal(typeof campaign.inspectCampaign, 'function');
+      assert.equal(typeof campaign.parseCampaignReport, 'function');
+      assert.equal(typeof campaign.CampaignReportError, 'function');
+      assert.equal(campaign.CAMPAIGN_REPORT_SCHEMA_VERSION, 1);
       assert.equal(typeof campaignCli.runCampaignCommand, 'function');
       assert.equal(typeof campaignCli.parseCampaignArgs, 'function');
       assert.equal(typeof campaignCli.createCampaignCliOptions, 'function');
       assert.equal('runCampaign' in forge, false);
+      assert.equal('parseCampaignReport' in forge, false);
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
       assert.equal(typeof codex.createCodexAdapter, 'function');
       assert.equal(typeof codex.parseCodexStream, 'function');
@@ -220,12 +225,20 @@ try {
       const summary = await campaign.runCampaign(campaignOptions);
       assert.equal(summary.completed, 2);
       assert.equal(summary.errored, 0);
+      assert.equal(summary.report, path.join(campaignRoot, 'report.json'));
+      const scorecard = campaign.parseCampaignReport(JSON.parse(await fs.readFile(summary.report, 'utf8')));
+      assert.equal(scorecard.summary.completed, 2);
+      assert.equal(scorecard.summary.pass_rate, 1);
+      assert.deepEqual(scorecard.summary.guideline_score, {mean: null, evaluations: 0});
+      assert.equal(scorecard.cases.length, 2);
       assert.deepEqual(await campaign.readCampaignSelections(campaignRoot), plans.map((plan) => plan.selection));
       const resumed = await campaign.runCampaign({...campaignOptions, resume: true, jobs: 3,
         execute: async () => {throw new Error('completed runs must be skipped');},
       });
       assert.equal(resumed.executed, 0);
       assert.equal(resumed.skipped, 2);
+      assert.deepEqual(campaign.parseCampaignReport(JSON.parse(await fs.readFile(resumed.report, 'utf8'))).runs,
+        scorecard.runs);
 
       const commandOptions = {
         hostOptions: {tag: {type: 'string'}, upload: {type: 'boolean'}},
@@ -246,6 +259,8 @@ try {
       };
       const command = await campaignCli.runCampaignCommand(['--tag', 'smoke', '--upload', '-j2'], commandOptions);
       assert.equal(command.completed, 2);
+      assert.equal(command.report, path.join(command.location, 'report.json'));
+      assert.equal(campaign.parseCampaignReport(JSON.parse(await fs.readFile(command.report, 'utf8'))).summary.passed, 2);
       assert.equal(command.arguments.values.upload, true);
       assert.ok(command.outcomes.every((outcome) => outcome.artifact.evaluation.status === 'passed'));
       const inspected = await campaign.inspectCampaign({root: command.location + '/.', engine});
@@ -275,6 +290,7 @@ try {
       void Promise.all([import('@stripe/forge'), import('@stripe/forge/campaign'), import('@stripe/forge/campaign/cli')]).then(([forge, campaign, campaignCli]) => {
         assert.equal(typeof forge.executeEval, 'function');
         assert.equal(typeof campaign.runCampaign, 'function');
+        assert.equal(typeof campaign.parseCampaignReport, 'function');
         assert.equal(typeof campaignCli.runCampaignCommand, 'function');
       }).catch((error) => {
         console.error(error);
