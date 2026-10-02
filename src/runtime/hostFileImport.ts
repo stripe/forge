@@ -11,6 +11,7 @@ export async function importHostFileIntoState(
   stagingRoot: string,
   input: HostFileImport,
   signal?: AbortSignal,
+  writeOwner?: Readonly<{uid: number; gid: number}>,
 ): Promise<void> {
   validateImport(input);
   signal?.throwIfAborted();
@@ -49,6 +50,9 @@ export async function importHostFileIntoState(
       throw new Error('Imported host file does not match its expected SHA-256.');
     }
     signal?.throwIfAborted();
+    if (writeOwner !== undefined) {
+      await fs.chown(staged, writeOwner.uid, writeOwner.gid);
+    }
     await fs.chmod(staged, input.mode ?? 0o644);
     await rejectUnsafeDestination(destination);
     await fs.rename(staged, destination);

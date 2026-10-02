@@ -38,10 +38,31 @@ import {DockerCommandController} from './commandRunner.js';
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;
 const DEFAULT_COMMAND_OUTPUT_BYTES = 16 * 1024 * 1024;
-const FORGE_CONTAINER_USER = '10001:10001';
+const DEFAULT_FORGE_USER_ID = 10001;
+const FORGE_GROUP_ID = 10001;
+const FORGE_CONTAINER_USER = 'forge:forge';
 const CONTAINER_WORKSPACE = '/workspace';
 const CONTAINER_HOME = '/home/forge';
 const PACKAGED_ASSET_ROOT = fileURLToPath(new URL('./assets', import.meta.url));
+const EXECUTABLE_PROBE_SCRIPT = `
+const fs = require('node:fs');
+const path = require('node:path');
+const requested = process.argv[2];
+function isExecutableFile(candidate) {
+  try {
+    if (!fs.statSync(candidate).isFile()) return false;
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+const candidates = requested.includes('/')
+  ? [path.resolve(requested)]
+  : (process.env.PATH ?? '').split(':').map((directory) =>
+      path.resolve(directory || process.cwd(), requested));
+process.exit(candidates.some(isExecutableFile) ? 0 : 1);
+`.trim();
 
 export interface DockerRuntimeAdapterOptions {
   readonly dockerExecutable?: string;
@@ -83,6 +104,7 @@ export async function validateDockerRuntimeHost(
   }
   const hostCommands = options.hostCommands ?? createHostCommandRunner();
   const signal = options.signal ?? new AbortController().signal;
+  const filesystemIdentity = resolveFilesystemIdentity();
   const image = await buildForgeImage({
     buildTimeoutMs: positive(
       options.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
@@ -93,6 +115,7 @@ export async function validateDockerRuntimeHost(
     platform: options.platform,
     signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
+    userId: filesystemIdentity.containerUserId,
   });
   const operationTimeoutMs = positive(
     options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
@@ -166,6 +189,7 @@ export function createDockerRuntimeAdapter(
     options.maximumCommandOutputBytes ?? DEFAULT_COMMAND_OUTPUT_BYTES,
     'maximumCommandOutputBytes',
   );
+  const filesystemIdentity = resolveFilesystemIdentity();
   const imageBuilds = new Map<RuntimePlatform, Promise<BuiltForgeImage>>();
 
   return Object.freeze({
@@ -194,6 +218,7 @@ export function createDockerRuntimeAdapter(
           platform: runtime.platform,
           signal: input.signal,
           temporaryRoot,
+          userId: filesystemIdentity.containerUserId,
         }).catch((error: unknown) => {
           imageBuilds.delete(runtime.platform);
           throw error;
@@ -219,9 +244,27 @@ export function createDockerRuntimeAdapter(
       // needs write access only to these two run-owned mount leaves.
       await fs.chmod(workspaceRoot, 0o777);
       await fs.chmod(homeRoot, 0o777);
+      if (filesystemIdentity.hostWriteOwner !== undefined) {
+        await Promise.all([
+          fs.chown(
+            workspaceRoot,
+            filesystemIdentity.hostWriteOwner.uid,
+            filesystemIdentity.hostWriteOwner.gid,
+          ),
+          fs.chown(
+            homeRoot,
+            filesystemIdentity.hostWriteOwner.uid,
+            filesystemIdentity.hostWriteOwner.gid,
+          ),
+        ]);
+      }
 
       let mutationOpen = true;
-      const ownedWorkspace = await createOwnedWorkspace(workspaceRoot);
+      const ownedWorkspace = await createOwnedWorkspace(workspaceRoot, {
+        ...(filesystemIdentity.hostWriteOwner === undefined
+          ? {}
+          : {writeOwner: filesystemIdentity.hostWriteOwner}),
+      });
       const workspace = guardedWorkspace(ownedWorkspace, () => mutationOpen);
       const sealedWorkspace = readonlyWorkspace(ownedWorkspace);
       const stateDirectories = new Map<string, MutableWorkspace>();
@@ -235,7 +278,18 @@ export function createDockerRuntimeAdapter(
         const source = path.join(stateRoot, requirement.id);
         await fs.mkdir(source, {mode: 0o777});
         await fs.chmod(source, 0o777);
-        const ownedState = await createOwnedWorkspace(source);
+        if (filesystemIdentity.hostWriteOwner !== undefined) {
+          await fs.chown(
+            source,
+            filesystemIdentity.hostWriteOwner.uid,
+            filesystemIdentity.hostWriteOwner.gid,
+          );
+        }
+        const ownedState = await createOwnedWorkspace(source, {
+          ...(filesystemIdentity.hostWriteOwner === undefined
+            ? {}
+            : {writeOwner: filesystemIdentity.hostWriteOwner}),
+        });
         stateDirectories.set(
           requirement.id,
           guardedWorkspace(
@@ -352,6 +406,7 @@ export function createDockerRuntimeAdapter(
             adapter: 'forge/docker',
             claudeCodeVersion: FORGE_CLAUDE_CODE_VERSION,
             codexVersion: FORGE_CODEX_VERSION,
+            containerUserId: String(filesystemIdentity.containerUserId),
             imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
             imageId: image.id,
             imageTag: image.tag,
@@ -395,6 +450,7 @@ export function createDockerRuntimeAdapter(
               importRoot,
               snapshot,
               importSignal,
+              filesystemIdentity.hostWriteOwner,
             );
             importedFiles.set(key, snapshot);
           })();
@@ -429,70 +485,72 @@ export function createDockerRuntimeAdapter(
           }
           importsOpen = false;
           await waitForImports();
+          await controller.finalizeSetupAndWait();
+          setupFinalized = true;
+          if (stateMounts.some(({sealAfterSetup}) => sealAfterSetup)) {
+            const stopped = await hostCommands.run(
+              [dockerExecutable, 'stop', '--time', '10', containerName],
+              {
+                maxOutputBytes: maximumCommandOutputBytes,
+                timeoutMs: operationTimeoutMs,
+              },
+            );
+            if (stopped.exitCode !== 0) {
+              throw new Error('Docker could not stop the Forge setup container.');
+            }
+            const removed = await hostCommands.run(
+              [dockerExecutable, 'rm', '--force', '--volumes', containerName],
+              {
+                maxOutputBytes: maximumCommandOutputBytes,
+                timeoutMs: operationTimeoutMs,
+              },
+            );
+            if (removed.exitCode !== 0) {
+              throw new Error('Docker could not replace the Forge setup container.');
+            }
+            containerExists = false;
+            for (const imported of importedFiles.values()) {
+              if (!imported.verifyAfterSetup) continue;
+              const digest = await hashStateFile(
+                path.join(stateRoot, imported.stateDirectoryId),
+                imported.relativePath,
+                imported.maxBytes,
+                input.signal,
+              );
+              if (digest !== imported.sha256) {
+                throw new Error(
+                  'Sealed host-imported file differs from its expected SHA-256.',
+                );
+              }
+            }
+            await fs.rm(cidFile, {force: true});
+            try {
+              const restarted = await hostCommands.run(startArgv(true), {
+                maxOutputBytes: maximumCommandOutputBytes,
+                timeoutMs: operationTimeoutMs,
+              });
+              if (restarted.exitCode !== 0) {
+                throw new Error(
+                  'Docker could not start the Forge interaction container.',
+                );
+              }
+              containerExists = true;
+            } catch (error) {
+              await bestEffortRemoveContainer(
+                dockerExecutable,
+                containerName,
+                hostCommands,
+                operationTimeoutMs,
+                maximumCommandOutputBytes,
+              );
+              throw error;
+            }
+          }
           await assertExecutablesAvailable(
-            uncredentialedCommands,
+            controller.finalizedWithoutCredentials(),
             executableRequirements,
             input.signal,
           );
-          await controller.finalizeSetupAndWait();
-          setupFinalized = true;
-          if (!stateMounts.some(({sealAfterSetup}) => sealAfterSetup)) return;
-
-          const stopped = await hostCommands.run(
-            [dockerExecutable, 'stop', '--time', '10', containerName],
-            {
-              maxOutputBytes: maximumCommandOutputBytes,
-              timeoutMs: operationTimeoutMs,
-            },
-          );
-          if (stopped.exitCode !== 0) {
-            throw new Error('Docker could not stop the Forge setup container.');
-          }
-          const removed = await hostCommands.run(
-            [dockerExecutable, 'rm', '--force', '--volumes', containerName],
-            {
-              maxOutputBytes: maximumCommandOutputBytes,
-              timeoutMs: operationTimeoutMs,
-            },
-          );
-          if (removed.exitCode !== 0) {
-            throw new Error('Docker could not replace the Forge setup container.');
-          }
-          containerExists = false;
-          for (const imported of importedFiles.values()) {
-            if (!imported.verifyAfterSetup) continue;
-            const digest = await hashStateFile(
-              path.join(stateRoot, imported.stateDirectoryId),
-              imported.relativePath,
-              imported.maxBytes,
-              input.signal,
-            );
-            if (digest !== imported.sha256) {
-              throw new Error('Sealed host-imported file differs from its expected SHA-256.');
-            }
-          }
-          await fs.rm(cidFile, {force: true});
-          try {
-            const restarted = await hostCommands.run(startArgv(true), {
-              maxOutputBytes: maximumCommandOutputBytes,
-              timeoutMs: operationTimeoutMs,
-            });
-            if (restarted.exitCode !== 0) {
-              throw new Error(
-                'Docker could not start the Forge interaction container.',
-              );
-            }
-            containerExists = true;
-          } catch (error) {
-            await bestEffortRemoveContainer(
-              dockerExecutable,
-              containerName,
-              hostCommands,
-              operationTimeoutMs,
-              maximumCommandOutputBytes,
-            );
-            throw error;
-          }
         },
         quiesce(): Promise<SealedRuntime> {
           if (disposePromise) {
@@ -571,6 +629,7 @@ interface BuildForgeImageInput {
   readonly platform: RuntimePlatform;
   readonly signal: AbortSignal;
   readonly temporaryRoot: string;
+  readonly userId: number;
 }
 
 interface BuiltForgeImage {
@@ -582,7 +641,7 @@ async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeI
   const buildRoot = await fs.mkdtemp(
     path.join(input.temporaryRoot, 'stripe-forge-build-'),
   );
-  const image = imageTag(input.platform);
+  const image = imageTag(input.platform, input.userId);
   try {
     const dockerfile = await fs.readFile(path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'));
     const entrypoint = await fs.readFile(
@@ -604,6 +663,8 @@ async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeI
         'build',
         '--platform',
         input.platform,
+        '--build-arg',
+        `FORGE_UID=${input.userId}`,
         '--tag',
         image,
         '--file',
@@ -829,9 +890,9 @@ async function assertExecutablesAvailable(
     signal.throwIfAborted();
     const result = await commands.run(
       [
-        '/bin/sh',
-        '-c',
-        'command -v "$1" >/dev/null 2>&1',
+        '/usr/local/bin/node',
+        '-e',
+        EXECUTABLE_PROBE_SCRIPT,
         'forge-executable-check',
         executable,
       ],
@@ -915,10 +976,37 @@ function containerNameFor(runId: string): string {
   return `stripe-forge-${runId}-${randomUUID().slice(0, 8)}`.slice(0, 200);
 }
 
-function imageTag(platform: RuntimePlatform): string {
+function resolveFilesystemIdentity(): Readonly<{
+  containerUserId: number;
+  hostWriteOwner?: Readonly<{uid: number; gid: number}>;
+}> {
+  const hostUserId = typeof process.getuid === 'function'
+    ? process.getuid()
+    : undefined;
+  if (
+    hostUserId !== undefined &&
+    (!Number.isSafeInteger(hostUserId) || hostUserId < 0 || hostUserId > 0xffff_fffe)
+  ) {
+    throw new Error('Forge Docker runtime cannot represent the host user ID.');
+  }
+  if (hostUserId === 0) {
+    return Object.freeze({
+      containerUserId: DEFAULT_FORGE_USER_ID,
+      hostWriteOwner: Object.freeze({
+        uid: DEFAULT_FORGE_USER_ID,
+        gid: FORGE_GROUP_ID,
+      }),
+    });
+  }
+  return Object.freeze({
+    containerUserId: hostUserId ?? DEFAULT_FORGE_USER_ID,
+  });
+}
+
+function imageTag(platform: RuntimePlatform, userId: number): string {
   return `stripe-forge-runtime:${FORGE_RUNTIME_ASSET_DIGEST.slice(0, 20)}-${
     platform === 'linux/amd64' ? 'amd64' : 'arm64'
-  }`;
+  }-uid${userId}`;
 }
 
 function mountArgument(

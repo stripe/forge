@@ -1219,7 +1219,10 @@ effective settings, unsupported requirements, and incompatible limits. It must
 not inspect ambient state, normalize defaults, allocate, or return a promise.
 Environment checks belong in `prepare()`. A runtime with a host-import phase
 may defer physical executable checks until those imports finish, but must
-complete them before interaction. The implementation ID must match the plan
+complete them after setup command authority closes and before interaction. The
+built-in Docker runtime requires each resolved target to be a regular file
+executable by its final non-root container user; a shell built-in or merely
+discoverable path is insufficient. The implementation ID must match the plan
 exactly.
 The preflight environment contains plain variables and opaque credential
 names, references, and scopes. Use it to reject incompatible environment policy
@@ -1410,9 +1413,14 @@ host-owned semantics and capabilities.
   Docker experiment may request `native`; planning then materializes the Docker
   server's architecture before execution. Forge records both its runtime asset
   digest and Docker's immutable built image ID in the result metadata.
-- Containers run as UID/GID `10001`, with a read-only root filesystem, all Linux
-  capabilities dropped, `no-new-privileges`, bounded memory/CPU/processes,
-  bounded commands, and run-owned workspace/home/state mounts.
+- Containers run as the named non-root `forge` user. On a non-root Unix host,
+  that image user has the host UID so bind-mounted setup files and agent output
+  retain one owner in both filesystem views; root hosts use fallback UID
+  `10001` and assign host-written runtime files to it. Runtime metadata records
+  the effective UID. Containers otherwise use a read-only root filesystem, all
+  Linux capabilities dropped,
+  `no-new-privileges`, bounded memory/CPU/processes, bounded commands, and
+  run-owned workspace/home/state mounts.
 - Forge never mounts the Docker socket into the evaluation container.
 - Plugin installation uses an uncredentialed command projection and verifies
   the selected marketplace, native installation, dependencies, and filesystem
@@ -1528,8 +1536,8 @@ pnpm test:live
 
 One invocation builds once and runs the following checks in order:
 
-1. The real Docker adapter conformance probe, including sealing, cleanup, and
-   idempotent disposal.
+1. The real Docker adapter conformance probe, including bidirectional bind-mount
+   writes, private file ownership, sealing, cleanup, and idempotent disposal.
 2. A credential-free install of the latest Stripe Claude plugin through the
    current marketplace, followed by verification of writable plugin files,
    native settings, and hook data, with the same container retained after setup.

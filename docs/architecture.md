@@ -435,11 +435,15 @@ with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
 builds an image with pinned Claude Code and Codex versions, and records the
 built image ID. Docker can reuse the image across runs.
 
-Each run uses a non-root container with a read-only image filesystem. Forge
-limits its CPU, memory, processes, and writable `/tmp`; drops Linux
-capabilities; blocks privilege escalation; and does not mount the Docker
-socket. Commands go through `docker exec` as argument lists, without an
-implicit shell.
+Each run uses a non-root container with a read-only image filesystem. On hosts
+which expose a non-root Unix UID, Forge builds the image's named `forge` user
+with that UID so host and container views of bind-mounted files have the same
+owner. A root host keeps the non-root fallback UID `10001` and assigns
+host-written runtime files to it. The effective UID is retained in runtime
+metadata alongside the immutable image ID. Forge limits CPU, memory, processes,
+and writable `/tmp`; drops Linux capabilities; blocks privilege escalation;
+and does not mount the Docker socket. Commands go through `docker exec` as
+argument lists, without an implicit shell.
 
 #### Run-owned paths and mounts
 
@@ -467,7 +471,7 @@ flowchart LR
         H["R/home"]
         S["R/state/{id}"]
     end
-    subgraph Container["Container: UID:GID 10001:10001"]
+    subgraph Container["Container: named non-root forge user"]
         CW["/workspace"]
         CH["/home/forge"]
         CS["declared containerPath"]
@@ -483,17 +487,19 @@ Forge sets these directory modes on the host:
 | Host directories | Mode | Why |
 | --- | --- | --- |
 | `R`, `R/state` | `0700` | Other host users cannot reach the run's files. |
-| `R/workspace`, `R/home`, each `R/state/{id}` | `0777` | Container UID `10001` can write even when the host owner has a different UID. |
+| `R/workspace`, `R/home`, each `R/state/{id}` | `0777` | The run-owned mount leaves remain writable across native Linux and Docker file-sharing implementations. Their private `0700` ancestor prevents access by other host users. |
 
 The container sees the mounted directories' modes. A sealed state mount becomes
 read-only to the container even though its host directory remains `0777`.
 
 - **Setup:** All bind mounts are writable. A state mount goes under
   `/home/forge`, or under `/opt` when it will be sealed.
-- **Agent interaction:** `finalizeSetup` closes imports and setup commands. If
-  state must be sealed, Forge starts a new container with the same host files
-  and makes only those state mounts read-only. Otherwise it keeps the setup
-  container. No files are copied.
+- **Agent interaction:** `finalizeSetup` closes imports, stops admission of new
+  setup commands, and waits for active setup commands. If state must be sealed,
+  Forge starts a new container with the same host files and makes only those
+  state mounts read-only. Otherwise it keeps the setup container. Forge then
+  verifies that every declared executable resolves to a regular file executable
+  by the final container user. No files are copied.
 - **Finish:** `quiesce` stops commands and the container before Forge reads
   evidence; `dispose` removes the container and `R`.
 

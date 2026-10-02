@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -39,6 +40,7 @@ function fakeDocker(
   fixtureOptions: {
     missingExecutable?: string;
     executableAvailable?: (executable: string) => boolean | Promise<boolean>;
+    beforeResult?: (argv: readonly string[]) => void | Promise<void>;
     hostProbeExitCode?: number;
     hostProbeError?: Error;
   } = {},
@@ -70,9 +72,11 @@ function fakeDocker(
             assert.ok(dockerfile.includes(`test -x /usr/local/bin/${executable}`));
             assert.ok(dockerfile.includes(`/usr/local/bin/${executable} --version`));
           }
-          assert.match(dockerfile, /USER 10001:10001/);
+          assert.match(dockerfile, /ARG FORGE_UID=10001/);
+          assert.match(dockerfile, /USER forge:forge/);
         }
         calls.push(call);
+        await fixtureOptions.beforeResult?.(argv);
         const namedMissingExecutable =
           argv.includes('forge-executable-check') &&
           argv.at(-1) === fixtureOptions.missingExecutable;
@@ -278,12 +282,17 @@ describe('Forge Docker runtime', () => {
       '--platform',
       'linux/amd64',
     ]);
+    const buildArgIndex = build.argv.indexOf('--build-arg');
+    const expectedUserId = typeof process.getuid === 'function' && process.getuid() > 0
+      ? process.getuid()
+      : 10001;
+    assert.equal(build.argv[buildArgIndex + 1], `FORGE_UID=${expectedUserId}`);
     await assert.rejects(fs.stat(build.argv.at(-1)!));
 
     const run = docker.calls.find((call) => call.argv[1] === 'run')!;
     assert.equal(run.argv[0], '/opt/test-docker');
     assert.ok(run.argv.includes('--read-only'));
-    assert.ok(run.argv.includes('10001:10001'));
+    assert.ok(run.argv.includes('forge:forge'));
     assert.ok(run.argv.includes('no-new-privileges:true'));
     assert.ok(run.argv.includes(IMAGE_ID));
     assert.ok(
@@ -350,6 +359,7 @@ describe('Forge Docker runtime', () => {
     );
     assert.equal(sealed.metadata.claudeCodeVersion, FORGE_CLAUDE_CODE_VERSION);
     assert.equal(sealed.metadata.codexVersion, FORGE_CODEX_VERSION);
+    assert.equal(sealed.metadata.containerUserId, String(expectedUserId));
     for (const commands of [
       prepared.commands.uncredentialed,
       setupCommands,
@@ -429,7 +439,7 @@ describe('Forge Docker runtime', () => {
     );
     const run = docker.calls.find((call) => call.argv[1] === 'run')!;
     assert.ok(run.argv.includes('--read-only'));
-    assert.ok(run.argv.includes('10001:10001'));
+    assert.ok(run.argv.includes('forge:forge'));
     assert.ok(run.argv.includes('no-new-privileges:true'));
     assert.equal(run.argv[run.argv.indexOf('--cap-drop') + 1], 'ALL');
     assert.equal(
@@ -592,6 +602,11 @@ describe('Forge Docker runtime', () => {
     await prepared.finalizeSetup();
     await assert.rejects(async () => prepared.importHostFile!(request), /no longer available/);
     const runs = docker.calls.filter((call) => call.argv[1] === 'run');
+    const restartedIndex = docker.calls.lastIndexOf(runs[1]!);
+    const executableCheckIndex = docker.calls.findIndex((call) =>
+      call.argv.includes('forge-executable-check'),
+    );
+    assert.ok(executableCheckIndex > restartedIndex);
     assert.match(
       runs[1]!.argv.find((argument) => argument.includes('target=/opt/example-tool/bin'))!,
       /,readonly$/,
@@ -706,6 +721,81 @@ describe('Forge Docker runtime', () => {
     const importFailure = assert.rejects(importing, /aborted/i);
     await assert.rejects(prepared.finalizeSetup(), /Active host file imports failed/);
     await importFailure;
+    await prepared.dispose();
+  });
+
+  it('closes and drains setup commands before validating executables', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
+    roots.push(temporaryRoot);
+    let releaseSetup!: () => void;
+    let reportSetupStarted!: () => void;
+    const setupStarted = new Promise<void>((resolve) => {
+      reportSetupStarted = resolve;
+    });
+    const setupReleased = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    const docker = fakeDocker({
+      async beforeResult(argv) {
+        if (!argv.includes('slow-setup')) return;
+        reportSetupStarted();
+        await setupReleased;
+      },
+    });
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: docker.runner,
+      temporaryRoot,
+    });
+    const prepared = await adapter.prepare(preparation());
+    const activeSetup = prepared.commands.setup([]).run(['slow-setup']);
+    await setupStarted;
+
+    const finalizing = prepared.finalizeSetup();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(
+      docker.calls.some((call) => call.argv.includes('forge-executable-check')),
+      false,
+    );
+
+    releaseSetup();
+    await Promise.all([activeSetup, finalizing]);
+    const setupIndex = docker.calls.findIndex((call) => call.argv.includes('slow-setup'));
+    const validationIndex = docker.calls.findIndex((call) =>
+      call.argv.includes('forge-executable-check'),
+    );
+    assert.ok(setupIndex >= 0 && validationIndex > setupIndex);
+    await prepared.dispose();
+  });
+
+  it('requires a regular executable file instead of a command-v match', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
+    roots.push(temporaryRoot);
+    const executable = path.join(temporaryRoot, 'tool');
+    await fs.writeFile(executable, '#!/bin/sh\nexit 0\n', {mode: 0o755});
+    const docker = fakeDocker();
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: docker.runner,
+      temporaryRoot,
+    });
+    const prepared = await adapter.prepare(
+      preparation({
+        requirements: {executables: ['claude'], stateDirectories: []},
+      }),
+    );
+    await prepared.finalizeSetup();
+    const check = docker.calls.find((call) =>
+      call.argv.includes('forge-executable-check'),
+    )!;
+    const nodeIndex = check.argv.indexOf('/usr/local/bin/node');
+    assert.ok(nodeIndex >= 0);
+    const probeArguments = check.argv.slice(nodeIndex + 1, -1);
+    const probe = (candidate: string) =>
+      spawnSync(process.execPath, [...probeArguments, candidate], {
+        cwd: temporaryRoot,
+      });
+    assert.equal(probe(executable).status, 0);
+    assert.notEqual(probe('/etc/passwd').status, 0);
+    assert.notEqual(probe('cd').status, 0);
     await prepared.dispose();
   });
 

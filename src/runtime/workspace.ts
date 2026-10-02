@@ -13,8 +13,19 @@ import type {
 const DEFAULT_READ_LIMIT = 64 * 1024 * 1024;
 const DEFAULT_ENTRY_LIMIT = 100_000;
 
+export interface OwnedWorkspaceOptions {
+  /**
+   * Optional owner for files and directories created through this workspace.
+   * Used only when a privileged host launches a non-root runtime user.
+   */
+  readonly writeOwner?: Readonly<{uid: number; gid: number}>;
+}
+
 /** Host-backed workspace used only for a fresh, runtime-owned root. */
-export async function createOwnedWorkspace(root: string): Promise<MutableWorkspace> {
+export async function createOwnedWorkspace(
+  root: string,
+  workspaceOptions: OwnedWorkspaceOptions = {},
+): Promise<MutableWorkspace> {
   const canonicalRoot = await fs.realpath(root);
   const rootStat = await fs.lstat(canonicalRoot);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
@@ -116,7 +127,11 @@ export async function createOwnedWorkspace(root: string): Promise<MutableWorkspa
         throw new TypeError('Workspace file mode must be between 0000 and 0777.');
       }
       const candidate = resolveCandidate(canonicalRoot, relativePath);
-      await ensureOwnedParents(canonicalRoot, path.dirname(candidate));
+      await ensureOwnedParents(
+        canonicalRoot,
+        path.dirname(candidate),
+        workspaceOptions.writeOwner,
+      );
       try {
         const existing = await fs.lstat(candidate);
         if (existing.isSymbolicLink() || existing.isDirectory()) {
@@ -132,6 +147,13 @@ export async function createOwnedWorkspace(root: string): Promise<MutableWorkspa
       );
       try {
         await fs.writeFile(temporary, body, {flag: 'wx', mode: 0o600});
+        if (workspaceOptions.writeOwner !== undefined) {
+          await fs.chown(
+            temporary,
+            workspaceOptions.writeOwner.uid,
+            workspaceOptions.writeOwner.gid,
+          );
+        }
         await fs.chmod(temporary, mode);
         await fs.rename(temporary, candidate);
       } finally {
@@ -153,7 +175,11 @@ function resolveCandidate(root: string, relativePath: string): string {
     : path.join(root, ...relativePath.split('/'));
 }
 
-async function ensureOwnedParents(root: string, parent: string): Promise<void> {
+async function ensureOwnedParents(
+  root: string,
+  parent: string,
+  writeOwner: OwnedWorkspaceOptions['writeOwner'],
+): Promise<void> {
   const relative = path.relative(root, parent);
   if (relative === '') return;
   let current = root;
@@ -167,6 +193,9 @@ async function ensureOwnedParents(root: string, parent: string): Promise<void> {
     } catch (error) {
       if (!isMissing(error)) throw error;
       await fs.mkdir(current, {mode: 0o755});
+      if (writeOwner !== undefined) {
+        await fs.chown(current, writeOwner.uid, writeOwner.gid);
+      }
     }
   }
 }
