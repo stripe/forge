@@ -10,8 +10,7 @@ credentials or Docker allocation:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --experiment examples/codex/experiment.yaml \
-  --dataset examples/quickstart/dataset
+  --experiment examples/codex/experiment.yaml
 
 node dist/cli.js plan \
   --experiment examples/codex/experiment.yaml \
@@ -50,6 +49,11 @@ the same Codex session through exact-ID resume, but require an explicit
 CLI currently uses the Anthropic completion provider for those two roles,
 independently of the Codex agent and its key. Codex plugin installation is not
 implemented.
+
+The experiment uses `dataset.path: ../quickstart/dataset`. Each CLI invocation
+creates a new execution ID; resume a specific execution with
+`--resume <experiment-run-id>`. Its eval artifacts are under
+`results/experiments/<experiment-run-id>/runs/codex-001/`.
 
 The committed run includes normalized `trajectory.json`, driver
 `interaction.json`, and deterministic `workspace-evidence.json`. When the exact

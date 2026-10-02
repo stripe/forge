@@ -75,8 +75,6 @@ describe('multi-turn CLI end to end', () => {
         'validate',
         '--experiment',
         fixture.experimentPath,
-        '--dataset',
-        fixture.datasetRoot,
       ],
       {
         compositionFactory,
@@ -118,11 +116,10 @@ describe('multi-turn CLI end to end', () => {
     );
 
     assert.equal(exitCode, 0, stderr);
-    assert.equal(stderr, '');
-    const summary = JSON.parse(stdout) as {
-      location: string;
-      result: {evaluation: {score: number; status: string}; stop_reason: string};
-    };
+    assert.equal(stderr.includes('forge:'), false);
+    const campaign = JSON.parse(stdout) as {location: string; completed: number};
+    assert.equal(campaign.completed, 1);
+    const summary = await verifyCompletedRun(path.join(campaign.location, 'runs', 'cli-multi-1'));
     assert.deepEqual(summary.result.evaluation, {
       schema_version: 1,
       score: 1,
@@ -210,6 +207,7 @@ checks:
 id: examples/multi-experiment
 version: 1.0.0
 dataset:
+  path: ./dataset
   id: multi-e2e
   version: 1.0.0
   manifest_sha256: ${sha256Digest(manifestRaw)}

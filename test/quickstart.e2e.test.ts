@@ -98,18 +98,13 @@ describe('checked-in quickstart', () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(stderr).toBe('');
-    const summary = JSON.parse(stdout) as {
-      location: string;
-      run_id: string;
-      result: {evaluation: {score: number; status: string}};
-    };
-    expect(summary.run_id).toBe('quickstart-e2e');
-    // v0.1 check-only cases use status as the pass/fail signal. The numeric
-    // score remains the guideline ratio and is therefore zero with no judge.
-    expect(summary.result.evaluation).toMatchObject({score: 0, status: 'passed'});
+    expect(stderr).not.toContain('forge:');
+    const summary = JSON.parse(stdout) as {location: string; completed: number};
+    expect(summary.completed).toBe(1);
+    const completed = await verifyCompletedRun(path.join(summary.location, 'runs', 'quickstart-e2e'));
+    expect(completed.runId).toBe('quickstart-e2e');
+    expect(completed.result.evaluation).toMatchObject({score: 0, status: 'passed'});
 
-    const completed = await verifyCompletedRun(summary.location);
     expect(completed.result.runtime.adapter).toBe('forge/docker');
     expect(Object.hasOwn(completed.result.runtime, 'adapter_version')).toBe(false);
     expect(completed.result.selection).toMatchObject({
@@ -131,7 +126,7 @@ describe('checked-in quickstart', () => {
 
     const workspaceEvidence = JSON.parse(
       await fs.readFile(
-        path.join(summary.location, 'workspace-evidence.json'),
+        path.join(completed.location, 'workspace-evidence.json'),
         'utf8',
       ),
     ) as {entries: Array<{path: string; content_base64?: string}>};

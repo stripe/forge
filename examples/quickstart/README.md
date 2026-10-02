@@ -9,8 +9,7 @@ From the repository root:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --experiment examples/quickstart/experiment.yaml \
-  --dataset examples/quickstart/dataset
+  --experiment examples/quickstart/experiment.yaml
 
 node dist/cli.js plan \
   --experiment examples/quickstart/experiment.yaml \
@@ -54,10 +53,13 @@ config.
 The endpoint must be reachable from inside the evaluation container; container
 loopback does not refer to a gateway process on the host.
 
-`--case-file` walks up to discover `dataset/manifest.json`, verifies the entire
-dataset, maps the selected file to its manifest case ID, and then resolves that
-case through the experiment config. It does not accept an unmanifested or legacy
-combined eval file.
+The experiment's `dataset.path` locates the pinned dataset relative to the
+experiment file. `--case-file` selects a manifest-listed case within that
+dataset. Each invocation creates a new experiment execution; eval artifacts are
+under `results/experiments/<experiment-run-id>/runs/quickstart-001/`.
+Use `--resume <experiment-run-id>` to retry execution errors or unfinished
+entries while preserving completed scores. See the root README's
+[campaign workflow](../../README.md#running-and-resuming-an-experiment).
 
 ## Opt-in live checks
 

@@ -40,8 +40,7 @@ From the repository root:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --experiment examples/multi-turn/experiment.yaml \
-  --dataset examples/multi-turn/dataset
+  --experiment examples/multi-turn/experiment.yaml
 
 node dist/cli.js plan \
   --experiment examples/multi-turn/experiment.yaml \
@@ -50,8 +49,9 @@ node dist/cli.js plan \
   --model claude-sonnet-4-6
 ```
 
-`--case-file` discovers and verifies the dataset manifest, then selects the
-case's stable ID from the experiment matrix. It does not turn the case into an
+The experiment locates its dataset with `dataset.path: ./dataset`.
+`--case-file` selects the case's stable ID from that verified dataset and the
+experiment matrix. It does not turn the case into an
 unversioned ad hoc experiment.
 
 ## Run with Docker and Anthropic

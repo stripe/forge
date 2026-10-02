@@ -145,7 +145,9 @@ inventory, not a best-effort index:
 - each case ID must agree with its manifest entry.
 
 The experiment pins the dataset ID, version, and digest of the raw manifest
-bytes. Planning refuses to combine a loaded dataset with a different pin.
+bytes. Its optional `dataset.path` locates those bytes for the CLI, relative to
+the experiment file. Programmatic hosts can continue supplying a loaded dataset
+directly; the location is excluded from resolved plans and execution semantics. Planning refuses to combine a loaded dataset with a different pin.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
 access to dataset payloads. The directory provider accepts the verified
 manifest, checks each returned buffer against its declared size and hash, and
@@ -181,7 +183,31 @@ campaign runner is responsible for retrying that selection.
 
 A `RunSelection` chooses exactly one case, treatment, agent/provider/model
 triple, and zero-based repetition. The CLI requires filters to resolve to one
-entry before `plan` or `run` proceeds.
+entry for `plan`. `run` resolves and purely preflights every matching plan
+before executing them sequentially. The CLI loads the dataset from the
+experiment config and permits selectors such as `--case` to restrict execution.
+
+The CLI-owned campaign controller checkpoints attempts in a strict,
+schema-version-1 `campaign.json` under
+`results/experiments/<experiment-run-id>/`, outside the immutable eval run
+directories. Every new invocation receives a distinct experiment execution ID.
+The checkpoint binds that ID to its directory. Each entry records its selection,
+canonical plan SHA-256, and ordered attempts with
+a unique run ID and `running`, `completed`, or `errored` state. Errored attempts
+retain only a stable error code. Checkpoint updates use synced temporary files
+and atomic rename; a local process lock prevents simultaneous writers and can
+be reclaimed after its owner exits.
+
+`--resume <experiment-run-id>` requires an explicit ID and loads that
+execution's saved selections. Bare `--resume` is rejected. The resolved plans
+must retain their original checksums. Resume independently verifies prior run
+artifacts and their plan checksum before
+skipping an entry, including recovery after a commit/checkpoint interruption.
+Execution errors, committed role-player failures, missing results, and invalid
+artifacts receive new attempt IDs. Completed failed or partial evaluations are
+kept. One errored entry does not stop other entries, while cancellation stops
+the campaign. This controller does not alter `executeEval` or its scoring
+semantics. See the README's [campaign workflow](../README.md#running-and-resuming-an-experiment).
 
 ### Plan resolution
 
@@ -971,7 +997,7 @@ external runtime without changing core lifecycle semantics.
 The current architecture leaves several responsibilities outside the public
 engine:
 
-- campaign scheduling, concurrency, and experiment-level retries;
+- parallel campaign scheduling and automatic experiment-level retries;
 - remote result publication and access control;
 - interactive or human-driven execution;
 - dynamic setup plugin discovery or imports named by YAML;

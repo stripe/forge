@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 import {randomUUID} from 'node:crypto';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 
 import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import {createCodexAdapter} from './agents/codex/index.js';
+import {readCampaignSelections, runCampaign} from './campaign.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import type {RuntimePlatform} from './contracts/runtime.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
@@ -48,7 +48,6 @@ const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
 
 const CLI_OPTIONS = {
   experiment: {type: 'string', short: 'e'},
-  dataset: {type: 'string', short: 'd'},
   case: {type: 'string'},
   'case-file': {type: 'string'},
   treatment: {type: 'string'},
@@ -58,6 +57,7 @@ const CLI_OPTIONS = {
   repetition: {type: 'string'},
   output: {type: 'string', short: 'o'},
   'run-id': {type: 'string'},
+  resume: {type: 'string'},
   'credential-env': {type: 'string', multiple: true},
   host: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
@@ -77,15 +77,14 @@ const SELECTOR_OPTIONS: readonly CliOptionName[] = [
 ];
 
 const USAGE = `Usage:
-  forge validate --experiment <file> --dataset <directory> [--host]
-  forge plan --experiment <file> --dataset <directory> [selection options]
-  forge plan --experiment <file> --case-file <file> [selection options]
-  forge run --experiment <file> --dataset <directory> [selection options] [run options]
-  forge run --experiment <file> --case-file <file> [selection options] [run options]
+  forge validate --experiment <file> [--host]
+  forge plan --experiment <file> [selection options]
+  forge run --experiment <file> [selection options] [run options]
+  forge run --experiment <file> --resume <experiment-run-id> [run options]
 
 Selection options:
   --case <id>          Select an eval case
-  --case-file <file>   Select a manifest-listed case by file; discovers its dataset when --dataset is omitted
+  --case-file <file>   Select a manifest-listed case within the configured dataset
   --treatment <id>     Select a treatment
   --agent <adapter>    Select an agent adapter
   --provider <id>      Select a model provider
@@ -93,16 +92,19 @@ Selection options:
   --repetition <index> Select a zero-based repetition
 
 Run options:
-  --output <directory> Write results below this directory
-  --run-id <id>        Use an explicit run identifier
+  --output <directory> Write experiment executions below this directory (default: ./results)
+  --run-id <id>        Use an explicit eval ID when exactly one combination is selected
+  --resume <id>        Resume this experiment execution; an ID is required
   --credential-env <reference>=<environment-name>
                         Bind an opaque credential reference for this run
 
 Validation options:
   --host                Build and inspect the selected Docker runtime image
 
-If selection options match more than one matrix entry, narrow the selection.
-The run command writes atomic results below ./results by default.
+The experiment's dataset.path locates the dataset relative to the experiment file.
+The run command executes every matching matrix entry sequentially.
+Each new invocation creates results/experiments/<experiment-run-id>/.
+The plan command requires exactly one matching matrix entry.
 `;
 
 export interface DefaultCliCompositionOptions {
@@ -130,6 +132,7 @@ export interface RunCliOptions {
   ) => Promise<ForgeComposition>;
   readonly execute?: typeof executeEval;
   readonly runIdFactory?: () => string;
+  readonly experimentRunIdFactory?: () => string;
   /** Concrete target for authored `platform: native`; defaults to Docker detection. */
   readonly runtimePlatform?: RuntimePlatform;
   readonly detectDockerPlatform?: typeof detectDockerRuntimePlatform;
@@ -223,13 +226,18 @@ export async function runCli(
 
     const allowed: CliOptionName[] = [
       'experiment',
-      'dataset',
       ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
-        ? (['output', 'run-id', 'credential-env'] as const)
+        ? (['output', 'run-id', 'credential-env', 'resume'] as const)
         : []),
     ];
     assertAllowedOptions(parsed.values, allowed);
+    if (parsed.values.resume !== undefined) {
+      assertRunId(parsed.values.resume, '--resume');
+      if (parsed.values['run-id'] !== undefined || SELECTOR_OPTIONS.some((name) => parsed.values[name] !== undefined)) {
+        throw new CliUsageError('--resume uses the saved selections and fresh eval IDs; omit selection options and --run-id.');
+      }
+    }
 
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const experimentPath = resolveRequiredPath(
@@ -245,15 +253,11 @@ export async function runCli(
       'case-file',
       cwd,
     );
-    const datasetPath = parsed.values.dataset === undefined
-      ? caseFilePath === undefined
-        ? resolveRequiredPath(undefined, 'dataset', cwd)
-        : await discoverDatasetRoot(caseFilePath)
-      : resolveRequiredPath(parsed.values.dataset, 'dataset', cwd);
-    const [dataset, experiment] = await Promise.all([
-      engine.loadDataset(datasetPath),
-      engine.loadExperimentConfig(experimentPath),
-    ]);
+    const experiment = await engine.loadExperimentConfig(experimentPath);
+    if (experiment.config.dataset.path === undefined) {
+      throw new CliUsageError('The experiment must declare dataset.path, relative to the experiment file.');
+    }
+    const dataset = await engine.loadDataset(path.resolve(experiment.root, experiment.config.dataset.path));
     const nativeDocker =
       experiment.config.runtime.adapter === 'docker' &&
       experiment.config.runtime.platform === 'native';
@@ -368,33 +372,45 @@ export async function runCli(
         throw error;
       }
     }
-    const selection = selectOne(experiment.config, {
+    const filters: SelectionFilters = {
       caseId,
       treatment: parsed.values.treatment,
       adapter: parsed.values.agent,
       provider: parsed.values.provider,
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
-    });
-    const plan = engine.resolveRunPlan({
+    };
+    const outputRoot = path.resolve(cwd, parsed.values.output ?? DEFAULT_RESULTS_DIRECTORY);
+    const experimentRunId = command === 'run'
+      ? parsed.values.resume ?? (options.experimentRunIdFactory ?? randomUUID)()
+      : undefined;
+    if (experimentRunId !== undefined) assertRunId(experimentRunId, 'Experiment execution ID');
+    const resultsRoot = experimentRunId === undefined
+      ? outputRoot
+      : path.join(outputRoot, 'experiments', experimentRunId);
+    const selections = parsed.values.resume !== undefined
+      ? await readCampaignSelections(resultsRoot)
+      : command === 'run'
+        ? selectMatching(experiment.config, filters)
+        : [selectOne(experiment.config, filters)];
+    const plans = selections.map((selection) => engine.resolveRunPlan({
       dataset,
       experiment,
       selection,
       ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
-    });
+    }));
+    const plan = plans[0]!;
 
     if (command === 'plan') {
       stdout(serializeResolvedRunPlan(plan));
       return 0;
     }
 
-    const resultsRoot = path.resolve(
-      cwd,
-      parsed.values.output ?? DEFAULT_RESULTS_DIRECTORY,
-    );
-    const runId = parsed.values['run-id'] ??
-      (options.runIdFactory ?? randomUUID)();
-    assertRunId(runId);
+    const explicitRunId = parsed.values['run-id'];
+    if (explicitRunId !== undefined) {
+      assertRunId(explicitRunId, '--run-id');
+      if (plans.length !== 1) throw new CliUsageError('--run-id requires exactly one selected eval combination.');
+    }
     const credentialBindings = parseCredentialEnvironmentBindings(
       parsed.values['credential-env'],
     );
@@ -412,20 +428,19 @@ export async function runCli(
         ? {}
         : {credentialBindings}),
     });
-    const completed = await (options.execute ?? engine.executeEval)({
-      runId,
-      plan,
+    const summary = await runCampaign({
+      root: resultsRoot,
+      plans,
       composition,
+      engine,
+      resume: parsed.values.resume !== undefined,
       signal: options.signal ?? new AbortController().signal,
+      execute: options.execute ?? engine.executeEval,
+      runIdFactory: explicitRunId === undefined ? options.runIdFactory ?? randomUUID : () => explicitRunId,
+      progress: (event) => stderr(serializeCanonicalJson({experiment_run_id: experimentRunId, ...event})),
     });
-    stdout(
-      serializeCanonicalJson({
-        location: completed.location,
-        result: completed.result,
-        run_id: completed.runId,
-      }),
-    );
-    return 0;
+    stdout(serializeCanonicalJson({experiment_run_id: experimentRunId, location: resultsRoot, ...summary}));
+    return summary.errored === 0 ? 0 : 1;
   } catch (error) {
     stderr(`forge: ${errorMessage(error)}\n`);
     if (isUsageError(error)) stderr(`Run forge --help for usage.\n`);
@@ -446,6 +461,19 @@ function selectOne(
   experiment: ExperimentConfigV1,
   filters: SelectionFilters,
 ): RunSelection {
+  const matches = selectMatching(experiment, filters);
+  if (matches.length > 1) {
+    throw new CliUsageError(
+      `Selection matches ${matches.length} matrix entries; add selection options.`,
+    );
+  }
+  return matches[0]!;
+}
+
+function selectMatching(
+  experiment: ExperimentConfigV1,
+  filters: SelectionFilters,
+): RunSelection[] {
   const matches = expandExperiment(experiment).filter((selection) =>
     (filters.caseId === undefined || selection.case_id === filters.caseId) &&
     (filters.treatment === undefined || selection.treatment === filters.treatment) &&
@@ -457,12 +485,7 @@ function selectOne(
   if (matches.length === 0) {
     throw new CliUsageError('Selection does not match the benchmark matrix.');
   }
-  if (matches.length > 1) {
-    throw new CliUsageError(
-      `Selection matches ${matches.length} matrix entries; add selection options.`,
-    );
-  }
-  return parseRunSelection(matches[0]);
+  return matches.map(parseRunSelection);
 }
 
 function parseRepetition(value: string | undefined): number | undefined {
@@ -498,33 +521,6 @@ function resolveOptionalPath(
     throw new CliUsageError(`--${option} must be a safe path.`);
   }
   return path.resolve(cwd, value);
-}
-
-async function discoverDatasetRoot(caseFilePath: string): Promise<string> {
-  let directory = path.dirname(caseFilePath);
-  while (true) {
-    const manifestPath = path.join(directory, 'manifest.json');
-    try {
-      await fs.lstat(manifestPath);
-      return directory;
-    } catch (error) {
-      if (!isMissingPathError(error)) throw error;
-    }
-    const parent = path.dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
-  }
-  throw new CliUsageError(
-    'Could not discover a dataset manifest from --case-file; pass --dataset explicitly.',
-  );
-}
-
-function isMissingPathError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-  );
 }
 
 function assertAllowedOptions(
@@ -574,9 +570,9 @@ function parseCredentialEnvironmentBindings(
   return Object.freeze(Object.fromEntries(bindings));
 }
 
-function assertRunId(value: string): void {
+function assertRunId(value: string, label: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
-    throw new CliUsageError('--run-id must be a safe identifier.');
+    throw new CliUsageError(`${label} must be a safe identifier.`);
   }
 }
 

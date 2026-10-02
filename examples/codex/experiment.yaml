@@ -2,6 +2,7 @@ schema_version: 1
 id: examples/codex
 version: 0.1.0
 dataset:
+  path: ../quickstart/dataset
   id: forge-quickstart
   version: 0.1.0
   manifest_sha256: sha256:2d75e3a65ff5c3b6c9612a572f078e6dd496c0b63007cf3c6e6da94c62fcd4e0

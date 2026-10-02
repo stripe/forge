@@ -405,6 +405,10 @@ const ExperimentConfigSchema = z
     id: CaseIdSchema,
     version: VersionSchema,
     dataset: DatasetIdentitySchema.extend({
+      path: z.string().min(1).max(4096).refine(
+        (value) => value === value.trim() && !value.includes('\0'),
+        'must be a non-empty dataset location without NUL bytes',
+      ).optional(),
       manifest_sha256: z
         .string()
         .refine(isSha256Digest, 'must be a sha256: digest'),
