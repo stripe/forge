@@ -361,10 +361,11 @@ Setup actions execute strictly in plan order. Each prepared action receives:
 An action may return bounded, non-sensitive JSON for `setup.json`, such as a
 plugin installation receipt. A resolution records every material setup-time
 choice not already fixed by the plan that could explain different realized
-behavior, such as the installed plugin version. Digest fields serve an
-expected-content check, artifact verification, or a specific identity consumer;
-they are not emitted solely as unused provenance. Resolutions do not include
-credentials or private host paths. Static built-ins return no dynamic resolution.
+behavior, such as the installed plugin version and source revision. Digest
+fields serve an expected-content check, artifact verification, or a documented
+content-identity workflow such as comparing installed plugin snapshots.
+Resolutions do not include credentials or private host paths. Static built-ins
+return no dynamic resolution.
 After every action succeeds, Forge calls `finalizeSetup()`. This closes setup
 command authority and asks the runtime to seal any state directory declared
 immutable for interaction.
@@ -560,10 +561,12 @@ and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
 `forge/plugin` intentionally resolves the current marketplace entry at
-execution time. Its `setup.json` receipt records the selected IDs, installed
-version, and source kind. It does not identify exact installed plugin bytes,
-and plugin state remains writable during interaction. This is a
-documented mutable-treatment semantic, not general plan reproducibility; see
+execution time. Its `setup.json` receipt records the selected IDs, catalog
+commit, installed version, reported source commit when available, and an
+installation-time tree fingerprint. These identify the catalog snapshot and
+observed installed contents; plugin state remains writable during interaction.
+This is a documented mutable-treatment semantic, not general plan
+reproducibility; see
 [Marketplace plugin treatments](plugin-action.md).
 
 ## Interaction architecture

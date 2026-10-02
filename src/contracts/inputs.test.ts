@@ -7,6 +7,9 @@ import {afterEach, describe, it} from 'node:test';
 import {createDirectoryRunInputProvider} from './inputs.js';
 import {loadDataset} from '../model/loaders.js';
 import {sha256Hex} from '../model/hashes.js';
+import {writeSetupHandler} from '../setup/forgeWrite.js';
+import {createMemoryWorkspace} from '../testing/memoryWorkspace.js';
+import {createTestResolvedRunPlan} from '../testing/plans.js';
 
 const temporaryRoots: string[] = [];
 
@@ -17,6 +20,50 @@ afterEach(async () => {
 });
 
 describe('createDirectoryRunInputProvider', () => {
+  it('rejects a manifest file replaced by an empty directory without rejecting subtrees', async () => {
+    const {root, inputs} = await verifiedDatasetInputs();
+    assert.equal((await inputs.inspect('fixtures')).kind, 'directory');
+    assert.deepEqual(await inputs.listFiles('fixtures'), [
+      {path: 'fixtures/hello.txt', kind: 'file', size: 5},
+    ]);
+    const source = path.join(root, 'fixtures/hello.txt');
+    await fs.rm(source);
+    await fs.mkdir(source);
+    await assert.rejects(inputs.inspect('fixtures/hello.txt'), /manifest file type/);
+    await assert.rejects(inputs.listFiles('fixtures/hello.txt'), /manifest file type/);
+    await assert.rejects(inputs.listFiles('fixtures'), /manifest file type/);
+
+    const plain = await createDirectoryRunInputProvider(root);
+    assert.equal((await plain.inspect('fixtures/hello.txt')).kind, 'directory');
+    assert.deepEqual(await plain.listFiles('fixtures/hello.txt'), []);
+  });
+
+  it('fails forge/write instead of skipping a source file replaced by an empty directory', async () => {
+    const {root, inputs} = await verifiedDatasetInputs();
+    const source = path.join(root, 'fixtures/hello.txt');
+    await fs.rm(source);
+    await fs.mkdir(source);
+    const workspace = createMemoryWorkspace();
+    const plan = createTestResolvedRunPlan();
+    const prepared = writeSetupHandler.preflight({
+      uses: 'forge/write',
+      with: {target: 'hello.txt', source: {dataset_path: 'fixtures/hello.txt'}},
+    }, {stepIndex: 0, selection: plan.agent, runtime: plan.runtime});
+    await assert.rejects(prepared.apply({
+      runId: 'changed-input-type',
+      paths: {workspace: '/workspace', home: '/home/forge'},
+      workspace: workspace.mutable,
+      stateDirectories: new Map(),
+      commands: {async run() {throw new Error('No commands expected.');}},
+      inputs,
+      signal: new AbortController().signal,
+      stepIndex: 0,
+      selection: plan.agent,
+      runtime: plan.runtime,
+    }), /manifest file type/);
+    assert.equal(workspace.snapshot().size, 0);
+  });
+
   it('aborts an active read while it waits for input bytes', {timeout: 1_000}, async (t) => {
     const {root, inputs} = await verifiedDatasetInputs();
     const probe = await fs.open(path.join(root, 'fixtures/hello.txt'), 'r');

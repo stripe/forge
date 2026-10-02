@@ -49,8 +49,8 @@ The plugin action intentionally follows the marketplace's current default branch
 1. Each run starts with fresh, run-owned agent state.
 2. Forge registers the authored marketplace through the agent's native CLI.
 3. The marketplace entry selects the plugin source and installed version.
-4. Forge validates the native installation and records its IDs, version, and
-   source kind.
+4. Forge validates the native installation and records its IDs, version,
+   catalog commit, reported source commit, and installed-content fingerprint.
 5. Plugin state remains writable during interaction.
 
 The experiment therefore has no plugin-version, marketplace-commit, or source
@@ -103,12 +103,22 @@ setup, the prepared operation:
 The receipt includes:
 
 - the authored marketplace and plugin IDs;
-- the native plugin ID and installed version; and
-- the selected source kind.
+- the exact catalog commit used to read the marketplace entry;
+- the native plugin ID and installed version;
+- the selected source kind and installer-reported Git commit when available; and
+- a deterministic digest and size/count summary of the installed tree.
 
 Forge bounds and validates the installed tree, rejecting symbolic links and
-special entries. It does not calculate a tree fingerprint. The receipt describes
-the validated installation, without asserting exact plugin content identity.
+special entries. The tree fingerprint covers relative paths, directories, and
+the exact regular-file bytes read after installation in stable path order,
+independent of the adapter's listing order. It lets runs compare installed
+contents even when the plugin version or reported source commit is unchanged.
+
+Git commits identify the catalog snapshot and the source revision reported by
+the native installer. A source commit is optional for an unpinned Git source;
+when the catalog supplies an expected commit, the installer must report that
+same commit. The tree fingerprint identifies observed installation-time
+contents separately from those source identities.
 
 The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may

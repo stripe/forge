@@ -14,6 +14,7 @@ import {
   createClaudePluginInstaller,
 } from './plugins.js';
 
+const CATALOG_COMMIT = 'a'.repeat(40);
 const PLUGIN_COMMIT = 'b'.repeat(40);
 const MARKETPLACE_REPOSITORY =
   'https://github.com/anthropics/claude-plugins-official.git';
@@ -75,7 +76,7 @@ describe('Claude plugin installer', () => {
     assert.equal(state.snapshot().size, 0);
   });
 
-  it('verifies the native plugin in writable per-run state without unused hashes', async () => {
+  it('records the observed source identities and initial installed content snapshot', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, {requireSafeDirectory: true});
     const prepared = createClaudePluginInstaller({
@@ -139,11 +140,19 @@ describe('Claude plugin installer', () => {
       adapter: 'claude-code',
       plugin: distribution.plugin,
       marketplace: distribution.marketplace,
+      marketplace_commit: CATALOG_COMMIT,
       native_plugin_id: nativeId,
       version: LATEST_VERSION,
-      source: {kind: 'git-subdir'},
+      source: {kind: 'git-subdir', commit: PLUGIN_COMMIT},
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: receipt.installed_tree.sha256,
+        entry_count: 2,
+        file_count: 1,
+        size_bytes: Buffer.byteLength(JSON.stringify({name: 'stripe', version: LATEST_VERSION})),
+      },
     });
-    assert.equal(harness.calls.some((argv) => argv.includes('rev-parse')), false);
+    assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
   });
 
   it('reuses the registered marketplace across repeated plugin setup', async () => {
@@ -212,6 +221,26 @@ describe('Claude plugin installer', () => {
       origin: MARKETPLACE_REPOSITORY.replace(/\.git$/, ''),
     });
     await installerPreflight().install(installContext(state, harness.commands));
+  });
+
+  it('reads and records the captured marketplace snapshot', async () => {
+    const state = createMemoryWorkspace();
+    const commit = 'd'.repeat(40);
+    const harness = nativeCommandHarness(state, {marketplaceCommit: commit});
+    const receipt = await installerPreflight().install(installContext(state, harness.commands));
+    assert.equal(receipt.marketplace_commit, commit);
+    const readCatalog = harness.calls.find((argv) => argv.includes('show'))!;
+    assert.equal(readCatalog.at(-1), `${commit}:.claude-plugin/marketplace.json`);
+  });
+
+  it('rejects a marketplace checkout without a full lowercase Git commit', async () => {
+    for (const marketplaceCommit of ['not-a-commit', 'A'.repeat(40)]) {
+      const state = createMemoryWorkspace();
+      const harness = nativeCommandHarness(state, {marketplaceCommit});
+      await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
+        /did not resolve to a Git commit/);
+      assert.equal(harness.calls.some((argv) => argv.includes('install')), false);
+    }
   });
 
   it('requires its plugin state before running commands', async () => {
@@ -317,6 +346,29 @@ describe('Claude plugin installer', () => {
     assert.deepEqual(receipt.source, {kind: 'github'});
   });
 
+  it('records the native source revision when an unpinned Git source reports one', async () => {
+    const state = createMemoryWorkspace();
+    const commit = 'd'.repeat(40);
+    const harness = nativeCommandHarness(state, {
+      catalogSource: {source: 'github', repo: 'example/plugin', ref: 'main'},
+      installedCommit: commit,
+    });
+    const receipt = await installerPreflight().install(installContext(state, harness.commands));
+    assert.deepEqual(receipt.source, {kind: 'github', commit});
+  });
+
+  it('rejects a malformed source revision reported by an unpinned Git installation', async () => {
+    for (const installedCommit of ['not-a-commit', 'D'.repeat(40)]) {
+      const state = createMemoryWorkspace();
+      const harness = nativeCommandHarness(state, {
+        catalogSource: {source: 'github', repo: 'example/plugin', ref: 'main'},
+        installedCommit,
+      });
+      await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
+        /returned an invalid Git commit/);
+    }
+  });
+
   it('accepts the version currently resolved by the marketplace', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, {installedVersion: '0.9.3'});
@@ -409,6 +461,7 @@ function nativeCommandHarness(
   options: {
     readonly catalogSource?: unknown;
     readonly installedVersion?: string;
+    readonly marketplaceCommit?: string;
     readonly installedCommit?: string | null;
     readonly extraPlugin?: boolean;
     readonly origin?: string;
@@ -447,6 +500,7 @@ function nativeCommandHarness(
         if (options.requireSafeDirectory && !git.includes(`safe.directory=${root}`)) {
           return {...result(), exitCode: 128, stderr: 'fatal: detected dubious ownership'};
         }
+        if (git.includes('rev-parse')) return result(options.marketplaceCommit ?? CATALOG_COMMIT);
         if (git.includes('get-url')) return result(options.origin ?? MARKETPLACE_REPOSITORY);
         if (git.includes('show')) return result(catalog);
         assert.fail('Unexpected Git command.');

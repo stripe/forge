@@ -13,7 +13,7 @@ import {
   isSafeVersion,
 } from '../../model/paths.js';
 import {
-  assertInstalledPluginTree,
+  inspectInstalledPluginTree,
   pluginSourceReceipt,
 } from './pluginReceipt.js';
 import {
@@ -104,7 +104,7 @@ export function createClaudePluginInstaller(
           const marketplaceRelativePath = `marketplaces/${identity.marketplace}`;
           const marketplacePath = `${pluginStatePath}/${marketplaceRelativePath}`;
 
-          await ensureMarketplaceCheckout({
+          const marketplaceCommit = await ensureMarketplaceCheckout({
             commands: installContext.commands,
             distribution: selected,
             executable,
@@ -118,6 +118,7 @@ export function createClaudePluginInstaller(
             commands: installContext.commands,
             identity,
             marketplacePath,
+            marketplaceCommit,
             signal: installContext.signal,
           });
           const installResult = await runChecked(
@@ -161,7 +162,7 @@ export function createClaudePluginInstaller(
           if (installed.installPath !== installedLocation.absolute) {
             throw new Error('Claude plugin list returned an invalid installation path.');
           }
-          await assertInstalledPluginRecord(
+          const sourceCommit = await assertInstalledPluginRecord(
             state,
             expectedPluginIds,
             nativePluginId,
@@ -169,7 +170,7 @@ export function createClaudePluginInstaller(
             installedLocation.absolute,
             entry.source,
           );
-          await assertInstalledPluginTree(
+          const installedTree = await inspectInstalledPluginTree(
             state,
             installedLocation.relative,
             installContext.signal,
@@ -178,9 +179,11 @@ export function createClaudePluginInstaller(
             adapter: adapterId,
             plugin: selected.plugin,
             marketplace: selected.marketplace,
+            marketplace_commit: marketplaceCommit,
             native_plugin_id: nativePluginId,
             version: installed.version,
-            source: pluginSourceReceipt(entry.source),
+            source: pluginSourceReceipt(entry.source, sourceCommit),
+            installed_tree: installedTree,
           });
         },
       });
@@ -197,7 +200,7 @@ async function ensureMarketplaceCheckout(input: {
   readonly marketplaceRelativePath: string;
   readonly signal: AbortSignal;
   readonly state: MutableWorkspace;
-}): Promise<void> {
+}): Promise<string> {
   let known = await knownMarketplaces(input.state);
   if (!Object.hasOwn(known, input.identity.marketplace)) {
     await runChecked(
@@ -230,6 +233,18 @@ async function ensureMarketplaceCheckout(input: {
     throw new Error('Plugin marketplace checkout state is malformed.');
   }
 
+  const revision = await runGit(
+    input.commands,
+    input.marketplacePath,
+    ['-C', input.marketplacePath, 'rev-parse', 'HEAD'],
+    input.signal,
+    'Forge could not identify the plugin marketplace snapshot.',
+  );
+  const commit = revision.stdout.trim();
+  if (!FULL_GIT_COMMIT.test(commit)) {
+    throw new Error('Plugin marketplace checkout did not resolve to a Git commit.');
+  }
+
   const remote = await runGit(
     input.commands,
     input.marketplacePath,
@@ -243,12 +258,14 @@ async function ensureMarketplaceCheckout(input: {
   ) {
     throw new Error('Plugin marketplace checkout does not match its repository.');
   }
+  return commit;
 }
 
 async function readSelectedMarketplaceEntry(input: {
   readonly commands: CommandRunner;
   readonly identity: QualifiedPluginId;
   readonly marketplacePath: string;
+  readonly marketplaceCommit: string;
   readonly signal: AbortSignal;
 }): Promise<MarketplaceEntry> {
   const shown = await runGit(
@@ -258,7 +275,7 @@ async function readSelectedMarketplaceEntry(input: {
       '-C',
       input.marketplacePath,
       'show',
-      'HEAD:.claude-plugin/marketplace.json',
+      `${input.marketplaceCommit}:.claude-plugin/marketplace.json`,
     ],
     input.signal,
     'Forge could not read the plugin marketplace snapshot.',
@@ -427,7 +444,7 @@ async function assertInstalledPluginRecord(
   expectedVersion: string,
   expectedInstallPath: string,
   marketplaceSource: unknown,
-): Promise<void> {
+): Promise<string | undefined> {
   const plugins = await installedPluginRecords(state);
   const actualIds = new Set(Object.keys(plugins));
   if (!setsEqual(actualIds, expectedPluginIds)) {
@@ -449,6 +466,13 @@ async function assertInstalledPluginRecord(
   if (expectedCommit !== undefined && record.gitCommitSha !== expectedCommit) {
     throw new Error('Claude installed plugin state does not match the marketplace commit.');
   }
+  if (!isGitMarketplaceSource(marketplaceSource) || !Object.hasOwn(record, 'gitCommitSha')) {
+    return undefined;
+  }
+  if (typeof record.gitCommitSha !== 'string' || !FULL_GIT_COMMIT.test(record.gitCommitSha)) {
+    throw new Error('Claude installed plugin state returned an invalid Git commit.');
+  }
+  return record.gitCommitSha;
 }
 
 function installedPluginLocation(

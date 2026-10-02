@@ -482,9 +482,17 @@ describe('local artifact store', () => {
       adapter: 'claude-code',
       plugin: 'stripe@claude-plugins-official',
       marketplace: 'anthropics/claude-plugins-official',
+      marketplace_commit: 'a'.repeat(40),
       native_plugin_id: 'stripe@forge-test',
       version: '0.9.2',
-      source: {kind: 'git-subdir'},
+      source: {kind: 'git-subdir', commit: 'b'.repeat(40)},
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: `sha256:${'c'.repeat(64)}`,
+        entry_count: 2,
+        file_count: 1,
+        size_bytes: 42,
+      },
     } as const;
     const core = [
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},

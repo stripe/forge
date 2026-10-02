@@ -366,18 +366,20 @@ The `plan.json` artifact descriptor is the stored plan checksum.
 audit of applied setup actions. Static actions repeat only their plan index and
 namespaced `uses` ID; actions which resolve mutable inputs add a bounded
 non-sensitive resolution. For `forge/plugin`, that resolution records the
-selected marketplace and plugin IDs, native plugin ID, installed version, and
-source kind. `trajectory.json` is the full selected, normalized, redacted ATIF
-audit trajectory. `interaction.json` is a
+selected marketplace and plugin IDs, the catalog commit, native plugin ID,
+installed version, source kind and reported Git commit when available, and a
+fingerprint of the installed plugin tree. `trajectory.json` is the full
+selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
 post-run driver audit record, not an execution input: it contains the public
 agent turns, stop reason, and, for multi-turn runs, Ava's private need model and
 decision history. It is not supplied to the guideline judge.
 
 This plan/receipt split is deliberate. The plan captures declared semantics;
 the setup receipt captures material facts that become known only while setup is
-running, such as the installed plugin version. Receipts describe the validated
-installation and its selected source kind; they do not attest to exact plugin
-bytes or make an external dependency replayable. Credentials, private host
+running, such as the installed plugin version and source revision. Plugin
+receipts identify the catalog and installation-time contents so runs can be
+compared when a rolling dependency changes. They do not attest to final plugin
+state or make an external dependency replayable. Credentials, private host
 paths, and unrelated ambient state do not belong in either file.
 
 `workspace-evidence.json` contains bounded evidence and exact base64-encoded
@@ -1273,8 +1275,9 @@ network policy, in the resolved configuration. Pin an immutable tool build
 there when that exact build is part of the intended experiment. When setup
 intentionally resolves changing external state, retain its actual non-sensitive
 identity and version in `setup.json` instead of treating it as though the plan
-pinned it. Compute a content digest only when an expected-content check or a
-specific identity consumer uses it. Keep credentials and infrastructure clients
+pinned it. Compute a content digest for an expected-content check, artifact
+verification, or a documented identity workflow such as comparing installed
+plugin snapshots. Keep credentials and infrastructure clients
 in the composition. An adapter may record actual build and deployment identity in
 sealed runtime metadata. A worker deployment is distinct from its
 command-execution mechanism; hosts can reuse an adapter when moving a worker

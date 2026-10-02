@@ -397,8 +397,10 @@ async function runClaudePluginConformance({
       installed.enabled !== true ||
       receipt.plugin !== 'stripe@claude-plugins-official' ||
       receipt.marketplace !== 'anthropics/claude-plugins-official' ||
+      !/^[a-f0-9]{40}$/.test(receipt.marketplace_commit) ||
       receipt.native_plugin_id !== installed.id ||
       receipt.version !== installed.version ||
+      !/^sha256:[a-f0-9]{64}$/.test(receipt.installed_tree.sha256) ||
       installed.installPath !== `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}`
     ) {
       throw new Error('Claude did not load the latest plugin from native user settings.');
@@ -460,6 +462,8 @@ async function runClaudePluginConformance({
       run_id: runId,
       plugin: 'stripe@claude-plugins-official',
       version: installed.version,
+      marketplace_commit: receipt.marketplace_commit,
+      initial_installed_tree_sha256: receipt.installed_tree.sha256,
       plugin_files_writable: true,
       native_settings_writable: true,
       plugin_data_writable: true,

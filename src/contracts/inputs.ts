@@ -60,6 +60,12 @@ export async function createDirectoryRunInputProvider(
     return file;
   }
 
+  function assertDeclaredDirectory(datasetPath: string) {
+    if (manifestFiles?.has(datasetPath)) {
+      throw new Error(`Dataset input no longer has its manifest file type: ${datasetPath}`);
+    }
+  }
+
   return {
     async inspect(datasetPath) {
       const {canonicalPath, stat: inputStat} = await resolveSafeInput(
@@ -71,6 +77,7 @@ export async function createDirectoryRunInputProvider(
         throw new Error(`Dataset input is not a regular file or directory: ${datasetPath}`);
       }
       if (inputStat.isFile()) assertDeclaredFile(datasetPath, Number(inputStat.size));
+      else assertDeclaredDirectory(datasetPath);
       return Object.freeze({
         path: datasetPath,
         kind: inputStat.isFile() ? 'file' : 'directory',
@@ -105,6 +112,7 @@ export async function createDirectoryRunInputProvider(
       if (!inputStat.isDirectory()) {
         throw new Error(`Dataset input is not a directory: ${datasetPath}`);
       }
+      assertDeclaredDirectory(datasetPath);
       const limit = positiveLimit(listOptions.maxEntries ?? 100_000);
       const entries: RunInputEntry[] = [];
       const pending: Array<{absolute: string; relative: string}> = [
@@ -123,6 +131,7 @@ export async function createDirectoryRunInputProvider(
             throw new Error(`Dataset input trees may not contain symlinks: ${childPath}`);
           }
           if (childStat.isDirectory()) {
+            assertDeclaredDirectory(childPath);
             pending.push({absolute: childAbsolute, relative: childPath});
           } else if (childStat.isFile()) {
             assertDeclaredFile(childPath, childStat.size);
