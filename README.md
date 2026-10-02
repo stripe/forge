@@ -991,8 +991,7 @@ or an explicit host command runner to `detectDockerRuntimePlatform`.
 
 ### Experiment campaigns
 
-Hosts with their own input formats or command-line wrappers can share the CLI's
-run loop through `@stripe/forge/campaign`. Reuse the loaded inputs and composition
+Hosts can share the run loop through `@stripe/forge/campaign`. Reuse the loaded inputs and composition
 above, choose an execution ID, resolve every selected plan, and point the local
 artifact store at the campaign root:
 
@@ -1035,14 +1034,101 @@ same engine. It must honor the supplied signal and finish cleanup in `finally`
 before settling; its full lifetime occupies a job slot. The artifact store must
 commit at `<root>/runs/<run-id>` so the campaign can verify results. Progress
 callbacks are synchronous; throwing stops scheduling and cancels active work.
-`CampaignOptions`, `CampaignProgressEvent`, and `CampaignSummary` are exported
+An optional synchronous `onOutcome(outcome, selectionIndex)` callback collects
+bounded verified outcomes, including selections skipped on resume. Like progress,
+throwing from this callback stops scheduling. `CampaignOptions`,
+`CampaignProgressEvent`, `CampaignSummary`, and `CampaignOutcome` are exported
 types from the same subpath.
 
-The host owns input loading, execution ID selection, CLI parsing, and exit
-policy. Retain generated inputs for resume, or regenerate them and let the
-campaign reject changed resolved-plan checksums. A wrapper must map its flags
-to `jobs` and `resume`; subsequent orchestration behavior comes from the shared
-loop. The engine's per-eval lifecycle and scoring remain unchanged.
+For command hosts, `@stripe/forge/campaign/cli` adds a shared run/resume stage.
+`runCampaignCommand` parses `--jobs`/`-j`, `--resume <id>`, `--output`/`-o`, and
+`--run-id`, selects the execution ID/root, restores saved selections before
+loading inputs, and delegates execution to `runCampaign`. Hosts supply their own
+option definitions, validation, and loader; no experiment format or dataset
+argument is required by this wrapper. The public `forge run` uses the same stage.
+
+This example is an embedding pattern; `prepareInputs` and `publish` are
+host-supplied functions:
+
+```js
+import {runCampaignCommand} from '@stripe/forge/campaign/cli';
+
+async function runHostCommand(argv, {engine, prepareInputs, publish}) {
+  const result = await runCampaignCommand(argv, {
+    engine,
+    hostOptions: {
+      experiment: {type: 'string', short: 'e'},
+      case: {type: 'string'},
+      upload: {type: 'boolean'},
+    },
+    selectorOptions: ['case'],
+    validateHostArgs({values}) {
+      if (!values.experiment) throw new Error('--experiment is required');
+    },
+    loadCampaign: async (context) => {
+      // May read custom YAML and generate a deterministic input inventory.
+      // On resume, reproduce context.savedSelections in their original order.
+      const inputs = await prepareInputs(context);
+      return {
+        plans: inputs.plans,
+        composition: inputs.preflightComposition,
+        execute: (request) => inputs.execute(request),
+        dispose: () => inputs.dispose(),
+      };
+    },
+  });
+  if (result.arguments.values.upload) await publish(result.outcomes);
+  return result;
+}
+```
+
+The outer router owns commands, help, and version handling. It can compose its
+parser with `createCampaignCliOptions(hostOptions)` or use `parseCampaignArgs`;
+forward shared run flags rather than rejecting them in a separate hardcoded
+list. Long-name and short-alias collisions are rejected. `allowPositionals: true`
+lets `validateHostArgs` enforce host-specific positional grammar, including
+rejecting positional selectors on resume. `suppliedOptions` lists explicit
+options independently of defaults. Explicit options listed in `selectorOptions`
+are forbidden on resume; the loader must use saved selections instead of
+selection defaults and reproduce the original plan checksums. Compatible
+operational flags become available after a pinned dependency upgrade; flags
+which require new host input or capability behavior still need host integration.
+
+Loading may parse and materialize inputs but must defer credentials, bridges,
+runtime allocation, and tool preparation until `execute`, after every plan
+passes pure preflight. Use the supplied engine for planning and execution. The
+loader must clean partial preparation if it throws before returning. Once it
+returns, the wrapper awaits its `dispose` exactly once after callbacks drain,
+including on cancellation or failure, and preserves the primary error if
+disposal also fails. Cancellation during disposal still rejects the command
+after cleanup finishes. Prepared-input disposal and per-run cleanup must operate
+independently of an aborted signal. Host capabilities must support the selected
+concurrency; sharing checkpoints does not make host global resources safe.
+
+The result contains the execution reference, counts, parsed arguments, and one
+outcome per selection in original order. An outcome has its plan digest, latest
+run ID, execution state/error code, and, when verified, a local artifact reference
+with evaluation status/score and a bounded failure code. Valid failed or partial
+scores remain completed. Publication and final exit policy are host-owned.
+Keep upload state outside `campaign.json`, keyed by immutable run/artifact
+identity and destination, and use idempotent publication or a publication lock.
+Publish verified skipped outcomes too; an upload error must not cause an eval to
+rerun. Do not perform uploads inside the execution or outcome callbacks.
+
+`inspectCampaign({root, engine, signal?})` from `@stripe/forge/campaign` verifies
+the latest attempt for every saved selection without loading inputs, acquiring
+execution credentials, or changing the checkpoint. It supports publication-only
+retries even when the original sources have changed. Both the saved selection
+and plan digest must match the verified commit. Inspection derives effective
+state from artifacts just as resume does: an errored or running checkpoint with
+a valid successful commit is reported completed, without changing the checkpoint.
+It returns no historical
+attempts; an unstarted selection has a pending outcome with no artifact.
+Invalid or missing artifacts have no publishable reference. Inspection is a
+snapshot and does not wait for active execution. After a failed stage has drained
+and disposed inputs, `CampaignCommandError.reference` identifies the execution
+for inspection; its `cause` is caller-owned and must not be persisted wholesale.
+The wrapper performs no publication after cancellation or any other failure.
 
 ### Completion providers
 
@@ -1193,7 +1279,8 @@ async function loadForge() {
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
-| `@stripe/forge/campaign` | Shared local experiment scheduling, checkpoints, resume, and progress types |
+| `@stripe/forge/campaign` | Shared local scheduling, checkpoints, resume, verified outcomes, and read-only inspection |
+| `@stripe/forge/campaign/cli` | Extensible shared run/resume command stage and operational option definitions |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |

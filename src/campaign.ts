@@ -11,7 +11,7 @@ import {isSha256Digest} from './model/hashes.js';
 import {parseRunSelection} from './model/parse.js';
 import type {ResolvedRunPlanV1, RunSelection} from './model/types.js';
 import {resolvedRunPlanSha256} from './planning/planner.js';
-import type {CompletedRunV1} from './results/types.js';
+import type {CompletedRunV1, EvalStatus} from './results/types.js';
 import {serializeCanonicalJson} from './serialization.js';
 
 const MAX_CAMPAIGN_BYTES = 16 * 1024 * 1024;
@@ -43,6 +43,31 @@ const campaignSchema = z.object({
 
 type Campaign = z.infer<typeof campaignSchema>;
 type Attempt = z.infer<typeof attemptSchema>;
+type SettledAttempt = Exclude<Attempt, {state: 'running'}>;
+
+/** Bounded metadata from a verified local commit, independent of publication. */
+export interface CampaignArtifact {
+  readonly location: string;
+  readonly evaluation: {readonly status: EvalStatus; readonly score: number};
+  readonly failure: 'role_player_error' | null;
+}
+
+/** The effective latest attempt for one selection, in saved selection order. */
+export interface CampaignOutcome {
+  readonly selection: RunSelection;
+  readonly plan_sha256: string;
+  readonly run_id: string | null;
+  readonly state: 'pending' | 'completed' | 'errored';
+  readonly error_code: Extract<Attempt, {state: 'errored'}>['error_code'] | null;
+  readonly artifact: CampaignArtifact | null;
+}
+
+export interface CampaignInspection {
+  readonly experiment_run_id: string;
+  readonly location: string;
+  readonly campaign: string;
+  readonly outcomes: readonly CampaignOutcome[];
+}
 
 export type CampaignProgressEvent =
   | {readonly state: 'started' | 'resuming'; readonly location: string}
@@ -69,6 +94,39 @@ export interface CampaignSummary {
 
 /** Resume the original selection even when the new invocation has no filters. */
 export async function readCampaignSelections(root: string): Promise<RunSelection[]> {
+  root = path.resolve(root);
+  const campaign = await requireCampaign(root);
+  return campaign.entries.map(({selection}) => selection);
+}
+
+/** Verify latest committed attempts without loading inputs or changing state. */
+export async function inspectCampaign(options: {
+  readonly root: string;
+  readonly engine: ForgeEngine;
+  readonly signal?: AbortSignal;
+}): Promise<CampaignInspection> {
+  const root = path.resolve(options.root);
+  options.signal?.throwIfAborted();
+  const campaign = await requireCampaign(root);
+  const outcomes: CampaignOutcome[] = [];
+  for (const entry of campaign.entries) {
+    options.signal?.throwIfAborted();
+    const last = entry.attempts.at(-1);
+    if (last === undefined) {
+      outcomes.push({selection: entry.selection, plan_sha256: entry.plan_sha256,
+        run_id: null, state: 'pending', error_code: null, artifact: null});
+      continue;
+    }
+    const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
+    const attempt = inspected.artifact === null && last.state === 'errored' ? last : inspected.attempt;
+    outcomes.push(campaignOutcome(entry, attempt, inspected.artifact));
+  }
+  options.signal?.throwIfAborted();
+  return {experiment_run_id: campaign.experiment_run_id, location: root,
+    campaign: path.join(root, 'campaign.json'), outcomes};
+}
+
+async function requireCampaign(root: string): Promise<Campaign> {
   const campaign = await readCampaign(path.join(root, 'campaign.json'));
   if (campaign === undefined) {
     throw new Error('No experiment execution with this ID exists in the output directory.');
@@ -76,7 +134,7 @@ export async function readCampaignSelections(root: string): Promise<RunSelection
   if (campaign.experiment_run_id !== path.basename(root)) {
     throw new Error('Experiment execution ID does not match its checkpoint.');
   }
-  return campaign.entries.map(({selection}) => selection);
+  return campaign;
 }
 
 /** Local campaign checkpoint and scheduling, separate from eval semantics. */
@@ -97,6 +155,8 @@ export interface CampaignOptions {
   readonly execute: (input: ExecuteEvalInput) => Promise<CompletedRunV1>;
   readonly runIdFactory: () => string;
   readonly progress: (event: CampaignProgressEvent) => void;
+  /** Synchronous result collection, including verified selections skipped on resume. */
+  readonly onOutcome?: (outcome: CampaignOutcome, selectionIndex: number) => void;
 }
 
 /** Execute each pending selection once, retaining all earlier attempt IDs. */
@@ -171,7 +231,8 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       options.signal.throwIfAborted();
       const last = entry.attempts.at(-1);
       if (last !== undefined) {
-        const recovered = await inspectAttempt(options, root, entry.plan_sha256, last.run_id);
+        const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
+        const recovered = inspected.attempt;
         if (
           recovered.state !== 'errored' ||
           recovered.error_code !== 'invalid_artifacts' ||
@@ -181,6 +242,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
         }
         if (recovered.state === 'completed') {
           skipped += 1;
+          options.onOutcome?.(campaignOutcome(entry, recovered, inspected.artifact), index);
           options.progress({selection: entry.selection, run_id: last.run_id, state: 'skipped'});
           continue;
         }
@@ -238,7 +300,8 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
           });
           if (task === undefined) return;
           const {index, runId, entry} = task;
-          let attempt: Attempt;
+          let attempt: SettledAttempt;
+          let artifact: CampaignArtifact | null = null;
           try {
             signal.throwIfAborted();
             executed += 1;
@@ -255,7 +318,9 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             if (actualLocation !== expectedLocation) {
               throw new Error('Campaigns require the local artifact store at the selected output directory.');
             }
-            attempt = await inspectAttempt(options, root, entry.plan_sha256, runId);
+            const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection);
+            attempt = inspected.attempt;
+            artifact = inspected.artifact;
           } catch (error) {
             // Error messages and causes may carry host data or credentials.
             // Persist stable codes, never arbitrary strings from an adapter.
@@ -265,6 +330,12 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
               error_code: signal.aborted ? 'aborted'
                 : error instanceof ForgeExecutionError ? error.code : 'execution_error',
             };
+            // A callback can fail after its local commit (for example during
+            // host cleanup). Keep the execution error while exposing verified
+            // artifacts for independent publication.
+            if (options.onOutcome !== undefined) {
+              artifact = (await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection)).artifact;
+            }
           }
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
@@ -272,6 +343,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             options.progress({selection: entry.selection, ...attempt});
             if (attempt.state === 'completed') completed += 1;
             else errored += 1;
+            options.onOutcome?.(campaignOutcome(entry, attempt, artifact), index);
           });
         }
       } catch (error) {
@@ -297,21 +369,39 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
 }
 
 async function inspectAttempt(
-  options: CampaignOptions,
+  engine: ForgeEngine,
   root: string,
   planDigest: string,
   runId: string,
-): Promise<Attempt> {
+  selection: RunSelection,
+): Promise<{attempt: SettledAttempt; artifact: CampaignArtifact | null}> {
   try {
-    const completed = await options.engine.verifyCompletedRun(path.join(root, 'runs', runId));
+    const location = path.join(root, 'runs', runId);
+    const completed = await engine.verifyCompletedRun(location);
     const descriptor = completed.result.artifacts.find((artifact) => artifact.path === 'plan.json');
     if (descriptor?.sha256 !== planDigest) throw new Error('Run belongs to a different plan.');
-    return completed.result.failure === null
+    if (serializeCanonicalJson(completed.result.selection) !== serializeCanonicalJson(selection)) {
+      throw new Error('Run belongs to a different selection.');
+    }
+    const attempt: SettledAttempt = completed.result.failure === null
       ? {run_id: runId, state: 'completed'}
       : {run_id: runId, state: 'errored', error_code: 'role_player_error'};
+    return {attempt, artifact: {location,
+      evaluation: {status: completed.result.evaluation.status, score: completed.result.evaluation.score},
+      failure: completed.result.failure === null ? null : 'role_player_error'}};
   } catch {
-    return {run_id: runId, state: 'errored', error_code: 'invalid_artifacts'};
+    return {attempt: {run_id: runId, state: 'errored', error_code: 'invalid_artifacts'}, artifact: null};
   }
+}
+
+function campaignOutcome(
+  entry: Campaign['entries'][number],
+  attempt: SettledAttempt,
+  artifact: CampaignArtifact | null,
+): CampaignOutcome {
+  return {selection: entry.selection, plan_sha256: entry.plan_sha256,
+    run_id: attempt.run_id, state: attempt.state,
+    error_code: attempt.state === 'errored' ? attempt.error_code : null, artifact};
 }
 
 async function readCampaign(checkpoint: string): Promise<Campaign | undefined> {

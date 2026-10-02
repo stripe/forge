@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 
-import {randomUUID} from 'node:crypto';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 
 import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import {createCodexAdapter} from './agents/codex/index.js';
-import {readCampaignSelections, runCampaign} from './campaign.js';
+import {
+  CAMPAIGN_CLI_OPTIONS,
+  CampaignCommandError,
+  CampaignUsageError,
+  createCampaignCliOptions,
+  runCampaignCommand,
+} from './campaignCli.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import type {RuntimePlatform} from './contracts/runtime.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
@@ -46,7 +51,7 @@ const OPENAI_API_KEY_REFERENCE = 'openai.api-key';
 const CODEX_API_KEY_ENVIRONMENT = 'CODEX_API_KEY';
 const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
 
-const CLI_OPTIONS = {
+const HOST_CLI_OPTIONS = {
   experiment: {type: 'string', short: 'e'},
   case: {type: 'string'},
   'case-file': {type: 'string'},
@@ -55,19 +60,16 @@ const CLI_OPTIONS = {
   provider: {type: 'string'},
   model: {type: 'string'},
   repetition: {type: 'string'},
-  output: {type: 'string', short: 'o'},
-  'run-id': {type: 'string'},
-  resume: {type: 'string'},
-  jobs: {type: 'string', short: 'j'},
   'credential-env': {type: 'string', multiple: true},
   host: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
   version: {type: 'boolean'},
 } as const;
+const CLI_OPTIONS = createCampaignCliOptions(HOST_CLI_OPTIONS);
 
 type CliOptionName = keyof typeof CLI_OPTIONS;
 
-const SELECTOR_OPTIONS: readonly CliOptionName[] = [
+const SELECTOR_OPTIONS: readonly (keyof typeof HOST_CLI_OPTIONS)[] = [
   'case',
   'case-file',
   'treatment',
@@ -230,16 +232,12 @@ export async function runCli(
       'experiment',
       ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
-        ? (['output', 'run-id', 'credential-env', 'resume', 'jobs'] as const)
+        ? [...Object.keys(CAMPAIGN_CLI_OPTIONS) as (keyof typeof CAMPAIGN_CLI_OPTIONS)[], 'credential-env' as const]
         : []),
     ];
     assertAllowedOptions(parsed.values, allowed);
-    const jobs = parseJobs(parsed.values.jobs);
-    if (parsed.values.resume !== undefined) {
-      assertRunId(parsed.values.resume, '--resume');
-      if (parsed.values['run-id'] !== undefined || SELECTOR_OPTIONS.some((name) => parsed.values[name] !== undefined)) {
-        throw new CliUsageError('--resume uses the saved selections and fresh eval IDs; omit selection options and --run-id.');
-      }
+    if (command === 'run') {
+      return await runPublicCampaign(argv, options, engine, stdout, stderr);
     }
 
     const cwd = path.resolve(options.cwd ?? process.cwd());
@@ -383,73 +381,80 @@ export async function runCli(
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
     };
-    const outputRoot = path.resolve(cwd, parsed.values.output ?? DEFAULT_RESULTS_DIRECTORY);
-    const experimentRunId = command === 'run'
-      ? parsed.values.resume ?? (options.experimentRunIdFactory ?? randomUUID)()
-      : undefined;
-    if (experimentRunId !== undefined) assertRunId(experimentRunId, 'Experiment execution ID');
-    const resultsRoot = experimentRunId === undefined
-      ? outputRoot
-      : path.join(outputRoot, 'experiments', experimentRunId);
-    const selections = parsed.values.resume !== undefined
-      ? await readCampaignSelections(resultsRoot)
-      : command === 'run'
-        ? selectMatching(experiment.config, filters)
-        : [selectOne(experiment.config, filters)];
-    const plans = selections.map((selection) => engine.resolveRunPlan({
+    const plan = engine.resolveRunPlan({
       dataset,
       experiment,
-      selection,
+      selection: selectOne(experiment.config, filters),
       ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
-    }));
-    const plan = plans[0]!;
-
-    if (command === 'plan') {
-      stdout(serializeResolvedRunPlan(plan));
-      return 0;
-    }
-
-    const explicitRunId = parsed.values['run-id'];
-    if (explicitRunId !== undefined) {
-      assertRunId(explicitRunId, '--run-id');
-      if (plans.length !== 1) throw new CliUsageError('--run-id requires exactly one selected eval combination.');
-    }
-    const credentialBindings = parseCredentialEnvironmentBindings(
-      parsed.values['credential-env'],
-    );
-    const compositionFactory =
-      options.compositionFactory ?? createDefaultCliComposition;
-    const composition = await compositionFactory({
-      datasetRoot: dataset.root,
-      datasetManifest: dataset.manifest,
-      runtime: plan.runtime,
-      resultsRoot,
-      ...(options.environment === undefined
-        ? {}
-        : {environment: options.environment}),
-      ...(Object.keys(credentialBindings).length === 0
-        ? {}
-        : {credentialBindings}),
     });
-    const summary = await runCampaign({
-      root: resultsRoot,
-      plans,
-      composition,
-      engine,
-      resume: parsed.values.resume !== undefined,
-      jobs,
-      signal: options.signal ?? new AbortController().signal,
-      execute: options.execute ?? engine.executeEval,
-      runIdFactory: explicitRunId === undefined ? options.runIdFactory ?? randomUUID : () => explicitRunId,
-      progress: (event) => stderr(serializeCanonicalJson({experiment_run_id: experimentRunId, ...event})),
-    });
-    stdout(serializeCanonicalJson({experiment_run_id: experimentRunId, location: resultsRoot, ...summary}));
-    return summary.errored === 0 ? 0 : 1;
+    stdout(serializeResolvedRunPlan(plan));
+    return 0;
   } catch (error) {
     stderr(`forge: ${errorMessage(error)}\n`);
     if (isUsageError(error)) stderr(`Run forge --help for usage.\n`);
     return isUsageError(error) ? 2 : 1;
   }
+}
+
+async function runPublicCampaign(
+  argv: readonly string[], options: RunCliOptions, engine: ForgeEngine,
+  stdout: (text: string) => void, stderr: (text: string) => void,
+): Promise<number> {
+  const result = await runCampaignCommand(argv, {
+    hostOptions: HOST_CLI_OPTIONS,
+    selectorOptions: SELECTOR_OPTIONS,
+    allowPositionals: true,
+    engine,
+    ...(options.cwd === undefined ? {} : {cwd: options.cwd}),
+    ...(options.signal === undefined ? {} : {signal: options.signal}),
+    ...(options.runIdFactory === undefined ? {} : {runIdFactory: options.runIdFactory}),
+    ...(options.experimentRunIdFactory === undefined ? {} : {experimentRunIdFactory: options.experimentRunIdFactory}),
+    progress: (event) => stderr(serializeCanonicalJson(event)),
+    validateHostArgs: ({values}) => {
+      resolveRequiredPath(values.experiment, 'experiment', options.cwd ?? process.cwd());
+      if (values.case !== undefined && values['case-file'] !== undefined) {
+        throw new CliUsageError('--case and --case-file cannot be combined.');
+      }
+      parseRepetition(values.repetition);
+      parseCredentialEnvironmentBindings(values['credential-env']);
+    },
+    loadCampaign: async ({values, cwd, root, savedSelections, signal}) => {
+      const experiment = await engine.loadExperimentConfig(resolveRequiredPath(values.experiment, 'experiment', cwd));
+      if (experiment.config.dataset.path === undefined) {
+        throw new CliUsageError('The experiment must declare dataset.path, relative to the experiment file.');
+      }
+      const dataset = await engine.loadDataset(path.resolve(experiment.root, experiment.config.dataset.path));
+      const runtimePlatform = experiment.config.runtime.adapter === 'docker' && experiment.config.runtime.platform === 'native'
+        ? options.runtimePlatform ?? await (options.detectDockerPlatform ?? detectDockerRuntimePlatform)({signal})
+        : undefined;
+      let caseId = values.case;
+      const caseFilePath = resolveOptionalPath(values['case-file'], 'case-file', cwd);
+      if (caseFilePath !== undefined) {
+        try {
+          caseId = await resolveManifestCaseIdFromFile(dataset, caseFilePath);
+        } catch (error) {
+          if (error instanceof ManifestCaseFileError) throw new CliUsageError(error.message);
+          throw error;
+        }
+      }
+      const selections = savedSelections ?? selectMatching(experiment.config, {
+        caseId, treatment: values.treatment, adapter: values.agent,
+        provider: values.provider, model: values.model, repetition: parseRepetition(values.repetition),
+      });
+      const plans = selections.map((selection) => engine.resolveRunPlan({dataset, experiment, selection,
+        ...(runtimePlatform === undefined ? {} : {runtimePlatform})}));
+      const credentialBindings = parseCredentialEnvironmentBindings(values['credential-env']);
+      const composition = await (options.compositionFactory ?? createDefaultCliComposition)({
+        datasetRoot: dataset.root, datasetManifest: dataset.manifest, runtime: plans[0]!.runtime, resultsRoot: root,
+        ...(options.environment === undefined ? {} : {environment: options.environment}),
+        ...(Object.keys(credentialBindings).length === 0 ? {} : {credentialBindings}),
+      });
+      return {plans, composition, execute: options.execute ?? ((request) => engine.executeEval(request))};
+    },
+  });
+  const {outcomes: _outcomes, arguments: _arguments, ...summary} = result;
+  stdout(serializeCanonicalJson(summary));
+  return result.errored === 0 ? 0 : 1;
 }
 
 interface SelectionFilters {
@@ -502,14 +507,6 @@ function parseRepetition(value: string | undefined): number | undefined {
     throw new CliUsageError('repetition must be a safe integer.');
   }
   return repetition;
-}
-
-function parseJobs(value: string | undefined): number {
-  if (value === undefined) return 1;
-  if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
-    throw new CliUsageError('--jobs must be a positive safe integer.');
-  }
-  return Number(value);
 }
 
 function resolveRequiredPath(
@@ -582,12 +579,6 @@ function parseCredentialEnvironmentBindings(
   return Object.freeze(Object.fromEntries(bindings));
 }
 
-function assertRunId(value: string, label: string): void {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
-    throw new CliUsageError(`${label} must be a safe identifier.`);
-  }
-}
-
 function isCommand(value: string | undefined): value is 'validate' | 'plan' | 'run' {
   return value === 'validate' || value === 'plan' || value === 'run';
 }
@@ -600,8 +591,10 @@ class CliUsageError extends Error {
 }
 
 function isUsageError(error: unknown): boolean {
+  if (error instanceof CampaignCommandError) return isUsageError(error.cause);
   return (
     error instanceof CliUsageError ||
+    error instanceof CampaignUsageError ||
     (typeof error === 'object' &&
       error !== null &&
       'code' in error &&
