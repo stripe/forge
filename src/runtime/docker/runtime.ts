@@ -190,7 +190,59 @@ export function createDockerRuntimeAdapter(
     'maximumCommandOutputBytes',
   );
   const filesystemIdentity = resolveFilesystemIdentity();
-  const imageBuilds = new Map<RuntimePlatform, Promise<BuiltForgeImage>>();
+  const imageBuilds = new Map<RuntimePlatform, SharedImageBuild>();
+
+  async function imageFor(platform: RuntimePlatform, signal: AbortSignal): Promise<BuiltForgeImage> {
+    signal.throwIfAborted();
+    let build = imageBuilds.get(platform);
+    if (!build) {
+      const controller = new AbortController();
+      const created: SharedImageBuild = {
+        controller,
+        waiters: 0,
+        settled: false,
+        promise: buildForgeImage({
+          buildTimeoutMs,
+          dockerExecutable,
+          hostCommands,
+          platform,
+          signal: controller.signal,
+          temporaryRoot,
+          userId: filesystemIdentity.containerUserId,
+        }).then((image) => {
+          created.settled = true;
+          return image;
+        }, (error: unknown) => {
+          created.settled = true;
+          if (imageBuilds.get(platform) === created) imageBuilds.delete(platform);
+          throw error;
+        }),
+      };
+      imageBuilds.set(platform, created);
+      build = created;
+    }
+    const shared = build;
+    shared.waiters += 1;
+    let abort!: () => void;
+    try {
+      return await new Promise<BuiltForgeImage>((resolve, reject) => {
+        abort = () => reject(signal.reason);
+        signal.addEventListener('abort', abort, {once: true});
+        if (signal.aborted) abort();
+        shared.promise.then(resolve, reject);
+      });
+    } finally {
+      signal.removeEventListener('abort', abort);
+      shared.waiters -= 1;
+      if (shared.waiters === 0 && !shared.settled) {
+        // A run may stop waiting independently. Only the last waiter cancels
+        // the shared build, and must drain its command and temporary context.
+        if (imageBuilds.get(platform) === shared) imageBuilds.delete(platform);
+        shared.controller.abort();
+        await shared.promise.catch(() => undefined);
+      }
+    }
+  }
 
   return Object.freeze({
     id: 'forge/docker',
@@ -209,23 +261,7 @@ export function createDockerRuntimeAdapter(
       const stateRequirements = validateStateRequirements(
         input.requirements.stateDirectories,
       );
-      let imageBuild = imageBuilds.get(runtime.platform);
-      if (!imageBuild) {
-        imageBuild = buildForgeImage({
-          buildTimeoutMs,
-          dockerExecutable,
-          hostCommands,
-          platform: runtime.platform,
-          signal: input.signal,
-          temporaryRoot,
-          userId: filesystemIdentity.containerUserId,
-        }).catch((error: unknown) => {
-          imageBuilds.delete(runtime.platform);
-          throw error;
-        });
-        imageBuilds.set(runtime.platform, imageBuild);
-      }
-      const image = await imageBuild;
+      const image = await imageFor(runtime.platform, input.signal);
       input.signal.throwIfAborted();
 
       const runRoot = await fs.mkdtemp(path.join(temporaryRoot, 'stripe-forge-run-'));
@@ -635,6 +671,13 @@ interface BuildForgeImageInput {
 interface BuiltForgeImage {
   readonly tag: string;
   readonly id: string;
+}
+
+interface SharedImageBuild {
+  readonly controller: AbortController;
+  readonly promise: Promise<BuiltForgeImage>;
+  waiters: number;
+  settled: boolean;
 }
 
 async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeImage> {

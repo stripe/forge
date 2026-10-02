@@ -443,6 +443,19 @@ prints a generated `experiment_run_id`. The dataset location comes from
 `dataset.path`; there is no `--dataset` or `--all` flag. Use `--case <case-id>` or
 the other selection options to run a subset of the matrix.
 
+`--jobs <count>` (or `-j <count>`) limits simultaneous evals; the default is 1.
+For example, this executes up to four selections at a time and starts another
+as soon as a slot is free:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml --jobs 4
+```
+
+Each eval retains its own runtime, agent session, and artifacts. Size concurrency
+for the host's memory/CPU capacity and provider rate limits; `--jobs` limits
+evals, not individual provider requests. Each eval may also judge up to four
+guidelines concurrently. Completion and progress records can arrive in any order.
+
 Each execution has an independent checkpoint and eval artifacts:
 
 ```text
@@ -467,6 +480,12 @@ resumed independently. `--output <directory>` changes the base output directory;
 resume must use the same underlying base directory, which may be accessed
 through a symlink. Resume uses the saved selections,
 including an original `--case` filter, so omit selection options on resume.
+Concurrency is a scheduling choice, excluded from plan checksums. Resume can
+use a different number of jobs:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml --resume EXPERIMENT_RUN_ID --jobs 2
+```
 
 Resume verifies each completed run before skipping it and requires the same
 resolved plans, including dataset pins, setup, models, runtime, and Forge
@@ -482,7 +501,10 @@ skipped, completed, and errored counts. Exit code 1 means execution errors
 remain; code 0 means every entry completed, regardless of evaluation scores.
 Each invocation attempts pending entries once; `matrix.retries` does not add
 automatic attempts. Campaigns use the local artifact store and permit one
-active process per execution. `--run-id` can name an eval only when exactly one
+active process per execution. Cancellation stops new work, signals active evals,
+and waits for their cleanup before releasing the checkpoint lock. A checkpoint
+failure also cancels and drains active work; resume verifies any results committed
+before interruption. `--run-id` can name an eval only when exactly one
 combination is selected; it cannot be combined with resume.
 
 ## Running Codex
@@ -922,20 +944,21 @@ if (selections.length !== 1) throw new Error('Choose exactly one selection');
 
 const plan = resolveRunPlan({dataset, experiment, selection: selections[0]});
 const claude = createClaudeCodeAdapter();
+const composition = {
+  runtime: createDockerRuntimeAdapter(),
+  agents: new Map([[claude.id, claude]]),
+  credentialResolver: createEnvironmentCredentialResolver({
+    bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
+  }),
+  inputProvider: await createDirectoryRunInputProvider(dataset.root, {
+    manifest: dataset.manifest,
+  }),
+  artifactStore: createArtifactStore({root: './results'}),
+};
 const completed = await executeEval({
   runId: 'hello-001',
   plan,
-  composition: {
-    runtime: createDockerRuntimeAdapter(),
-    agents: new Map([[claude.id, claude]]),
-    credentialResolver: createEnvironmentCredentialResolver({
-      bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
-    }),
-    inputProvider: await createDirectoryRunInputProvider(dataset.root, {
-      manifest: dataset.manifest,
-    }),
-    artifactStore: createArtifactStore({root: './results'}),
-  },
+  composition,
 });
 
 console.log(completed.location);
@@ -965,6 +988,61 @@ const plan = resolveRunPlan({
 
 Hosts using a remote or wrapped Docker executable can pass the same executable
 or an explicit host command runner to `detectDockerRuntimePlatform`.
+
+### Experiment campaigns
+
+Hosts with their own input formats or command-line wrappers can share the CLI's
+run loop through `@stripe/forge/campaign`. Reuse the loaded inputs and composition
+above, choose an execution ID, resolve every selected plan, and point the local
+artifact store at the campaign root:
+
+```js
+import {randomUUID} from 'node:crypto';
+import * as path from 'node:path';
+import {defaultForgeEngine} from '@stripe/forge';
+import {readCampaignSelections, runCampaign} from '@stripe/forge/campaign';
+
+const engine = defaultForgeEngine; // Or the host's immutable custom engine.
+const resumeId = undefined; // Set to an existing experiment execution ID to resume.
+const experimentRunId = resumeId ?? randomUUID();
+const root = path.resolve('results', 'experiments', experimentRunId);
+const selected = resumeId === undefined
+  ? expandExperiment(experiment)
+  : await readCampaignSelections(root);
+const plans = selected.map((selection) => engine.resolveRunPlan({
+  dataset, experiment, selection,
+  runtimePlatform: plan.runtime.platform,
+}));
+const summary = await runCampaign({
+  root,
+  plans,
+  engine,
+  composition: {...composition, artifactStore: createArtifactStore({root})},
+  resume: resumeId !== undefined,
+  jobs: 4,
+  signal: new AbortController().signal,
+  execute: (input) => engine.executeEval(input),
+  runIdFactory: randomUUID,
+  progress: (event) => console.error(event),
+});
+console.log(summary);
+```
+
+`runCampaign` preflights every plan with the supplied `engine` and `composition`
+before writing checkpoints or invoking `execute`. The callback may acquire
+per-run host resources and construct another composition before calling that
+same engine. It must honor the supplied signal and finish cleanup in `finally`
+before settling; its full lifetime occupies a job slot. The artifact store must
+commit at `<root>/runs/<run-id>` so the campaign can verify results. Progress
+callbacks are synchronous; throwing stops scheduling and cancels active work.
+`CampaignOptions`, `CampaignProgressEvent`, and `CampaignSummary` are exported
+types from the same subpath.
+
+The host owns input loading, execution ID selection, CLI parsing, and exit
+policy. Retain generated inputs for resume, or regenerate them and let the
+campaign reject changed resolved-plan checksums. A wrapper must map its flags
+to `jobs` and `resume`; subsequent orchestration behavior comes from the shared
+loop. The engine's per-eval lifecycle and scoring remain unchanged.
 
 ### Completion providers
 
@@ -1115,6 +1193,7 @@ async function loadForge() {
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
+| `@stripe/forge/campaign` | Shared local experiment scheduling, checkpoints, resume, and progress types |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
@@ -1496,7 +1575,8 @@ This is the intended boundary for an embedding integration: depend on an exact
 and composition without overriding the shared lifecycle. Command-line wrappers
 can import `runCli` from `@stripe/forge/cli` and provide both that engine and a
 `compositionFactory`, preserving the public command grammar while selecting
-host-owned semantics and capabilities.
+host-owned semantics and capabilities. Wrappers with their own grammar or
+generated inputs can instead use the shared [campaign API](#experiment-campaigns).
 
 ## Security and reproducibility
 
@@ -1589,10 +1669,10 @@ proxy, or an offline execution mode.
   images, mounts, and other execution mechanisms require a host-supplied
   runtime. No additional runtime implementations or interactive/human
   controller ship in this package.
-- `run` executes selected entries sequentially and supports explicit
-  `--resume <experiment-run-id>`. There is no parallel campaign scheduler or automatic run retry
-  loop; experiment-level `retries` is not acted on by the CLI. Ava and guideline
-  completion attempts have their own fixed retry policy and do not implement
+- `run` supports bounded local concurrency through `--jobs` and explicit
+  `--resume <experiment-run-id>`. There is no distributed scheduler or automatic
+  run retry loop; experiment-level `retries` is not acted on by the CLI. Ava and
+  guideline completion attempts have their own fixed retry policy and do not implement
   the experiment config's campaign retry field.
 - Built-in setup includes `forge/write`, `forge/command`, and Claude-backed
   `forge/plugin`. The plugin action installs the current entry from a public

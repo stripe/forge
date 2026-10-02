@@ -44,6 +44,29 @@ const campaignSchema = z.object({
 type Campaign = z.infer<typeof campaignSchema>;
 type Attempt = z.infer<typeof attemptSchema>;
 
+export type CampaignProgressEvent =
+  | {readonly state: 'started' | 'resuming'; readonly location: string}
+  | {
+      readonly state: 'running' | 'completed' | 'skipped';
+      readonly selection: RunSelection;
+      readonly run_id: string;
+    }
+  | {
+      readonly state: 'errored';
+      readonly selection: RunSelection;
+      readonly run_id: string;
+      readonly error_code: Extract<Attempt, {state: 'errored'}>['error_code'];
+    };
+
+export interface CampaignSummary {
+  readonly campaign: string;
+  readonly total: number;
+  readonly executed: number;
+  readonly skipped: number;
+  readonly completed: number;
+  readonly errored: number;
+}
+
 /** Resume the original selection even when the new invocation has no filters. */
 export async function readCampaignSelections(root: string): Promise<RunSelection[]> {
   const campaign = await readCampaign(path.join(root, 'campaign.json'));
@@ -56,28 +79,32 @@ export async function readCampaignSelections(root: string): Promise<RunSelection
   return campaign.entries.map(({selection}) => selection);
 }
 
-/** CLI-owned checkpoint, separate from immutable per-run artifacts. */
+/** Local campaign checkpoint and scheduling, separate from eval semantics. */
 export interface CampaignOptions {
   readonly root: string;
   readonly plans: readonly ResolvedRunPlanV1[];
+  /** Pure preflight composition; execute may supply per-run capabilities. */
   readonly composition: ForgeComposition;
   readonly engine: ForgeEngine;
   readonly resume: boolean;
+  /** Maximum simultaneous eval executions; defaults to one. Not plan semantics. */
+  readonly jobs?: number;
   readonly signal: AbortSignal;
+  /**
+   * Execute with the supplied engine and local artifact root. May compose
+   * per-run host resources; must honor signal and finish cleanup before settling.
+   */
   readonly execute: (input: ExecuteEvalInput) => Promise<CompletedRunV1>;
   readonly runIdFactory: () => string;
-  readonly progress: (event: Readonly<Record<string, unknown>>) => void;
+  readonly progress: (event: CampaignProgressEvent) => void;
 }
 
 /** Execute each pending selection once, retaining all earlier attempt IDs. */
-export async function runCampaign(options: CampaignOptions): Promise<{
-  campaign: string;
-  total: number;
-  executed: number;
-  skipped: number;
-  completed: number;
-  errored: number;
-}> {
+export async function runCampaign(options: CampaignOptions): Promise<CampaignSummary> {
+  const jobs = options.jobs ?? 1;
+  if (!Number.isSafeInteger(jobs) || jobs < 1) {
+    throw new Error('Campaign jobs must be a positive safe integer.');
+  }
   const root = path.resolve(options.root);
   if (root === path.parse(root).root) {
     throw new Error('Campaign output must not be a filesystem root.');
@@ -165,50 +192,97 @@ export async function runCampaign(options: CampaignOptions): Promise<{
     let completed = skipped;
     let errored = 0;
     let executed = 0;
-    for (const index of pending) {
-      options.signal.throwIfAborted();
-      const entry = campaign.entries[index]!;
-      const runId = runIdSchema.parse(options.runIdFactory());
-      if (runIds.has(runId) || await exists(path.join(root, 'runs', runId))) {
-        throw new Error('Campaign run ID already exists.');
-      }
-      runIds.add(runId);
-      entry.attempts.push({run_id: runId, state: 'running'});
-      await writeCampaign(checkpoint, campaign);
-      options.progress({selection: entry.selection, run_id: runId, state: 'running'});
-      let attempt: Attempt;
-      executed += 1;
-      try {
-        const result = await options.execute({
-          runId,
-          plan: options.plans[index]!,
-          composition: options.composition,
-          signal: options.signal,
-        });
-        const [actualLocation, expectedLocation] = await Promise.all([
-          fs.realpath(result.location),
-          fs.realpath(path.join(root, 'runs', runId)),
-        ]);
-        if (actualLocation !== expectedLocation) {
-          throw new Error('Campaigns require the local artifact store at the selected output directory.');
-        }
-        attempt = await inspectAttempt(options, root, entry.plan_sha256, runId);
-      } catch (error) {
-        // Error messages and causes may carry host data or credentials. Persist
-        // only stable codes, never arbitrary strings from an adapter.
-        attempt = {
-          run_id: runId,
-          state: 'errored',
-          error_code: error instanceof ForgeExecutionError ? error.code : 'execution_error',
-        };
-      }
-      entry.attempts[entry.attempts.length - 1] = attempt;
-      await writeCampaign(checkpoint, campaign);
-      options.progress({selection: entry.selection, ...attempt});
-      if (attempt.state === 'completed') completed += 1;
-      else errored += 1;
-      options.signal.throwIfAborted();
+    let nextPending = 0;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([options.signal, controller.signal]);
+    let failed = false;
+    let failure: unknown;
+    function fail(error: unknown) {
+      if (failed) return;
+      failed = true;
+      failure = error;
+      controller.abort(error);
     }
+    // Both mutation and persistence belong to one coordinator. Workers never
+    // write snapshots independently or reserve the same pending selection.
+    let updates = Promise.resolve();
+    function update<T>(action: () => Promise<T>): Promise<T> {
+      const operation = updates.then(async () => {
+        try {
+          return await action();
+        } catch (error) {
+          fail(error);
+          throw error;
+        }
+      });
+      updates = operation.then(() => undefined, () => undefined);
+      return operation;
+    }
+    async function worker() {
+      try {
+        while (!signal.aborted) {
+          const task = await update(async () => {
+            if (signal.aborted) return undefined;
+            const index = pending[nextPending++];
+            if (index === undefined) return undefined;
+            const entry = campaign!.entries[index]!;
+            const runId = runIdSchema.parse(options.runIdFactory());
+            if (runIds.has(runId) || await exists(path.join(root, 'runs', runId))) {
+              throw new Error('Campaign run ID already exists.');
+            }
+            runIds.add(runId);
+            entry.attempts.push({run_id: runId, state: 'running'});
+            await writeCampaign(checkpoint, campaign!);
+            options.progress({selection: entry.selection, run_id: runId, state: 'running'});
+            return {index, runId, entry};
+          });
+          if (task === undefined) return;
+          const {index, runId, entry} = task;
+          let attempt: Attempt;
+          try {
+            signal.throwIfAborted();
+            executed += 1;
+            const result = await options.execute({
+              runId,
+              plan: options.plans[index]!,
+              composition: options.composition,
+              signal,
+            });
+            const [actualLocation, expectedLocation] = await Promise.all([
+              fs.realpath(result.location),
+              fs.realpath(path.join(root, 'runs', runId)),
+            ]);
+            if (actualLocation !== expectedLocation) {
+              throw new Error('Campaigns require the local artifact store at the selected output directory.');
+            }
+            attempt = await inspectAttempt(options, root, entry.plan_sha256, runId);
+          } catch (error) {
+            // Error messages and causes may carry host data or credentials.
+            // Persist stable codes, never arbitrary strings from an adapter.
+            attempt = {
+              run_id: runId,
+              state: 'errored',
+              error_code: signal.aborted ? 'aborted'
+                : error instanceof ForgeExecutionError ? error.code : 'execution_error',
+            };
+          }
+          await update(async () => {
+            entry.attempts[entry.attempts.length - 1] = attempt;
+            await writeCampaign(checkpoint, campaign!);
+            options.progress({selection: entry.selection, ...attempt});
+            if (attempt.state === 'completed') completed += 1;
+            else errored += 1;
+          });
+        }
+      } catch (error) {
+        fail(error);
+      }
+    }
+    // Retain the campaign lock until every active callback has cleaned up,
+    // including when cancellation or a coordinator failure stops new work.
+    await Promise.all(Array.from({length: Math.min(jobs, pending.length)}, () => worker()));
+    if (failed) throw failure;
+    options.signal.throwIfAborted();
     return {
       campaign: checkpoint,
       total: campaign.entries.length,

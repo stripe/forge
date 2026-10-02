@@ -40,7 +40,7 @@ function fakeDocker(
   fixtureOptions: {
     missingExecutable?: string;
     executableAvailable?: (executable: string) => boolean | Promise<boolean>;
-    beforeResult?: (argv: readonly string[]) => void | Promise<void>;
+    beforeResult?: (argv: readonly string[], options: HostCommandOptions) => void | Promise<void>;
     hostProbeExitCode?: number;
     hostProbeError?: Error;
   } = {},
@@ -76,7 +76,7 @@ function fakeDocker(
           assert.match(dockerfile, /USER forge:forge/);
         }
         calls.push(call);
-        await fixtureOptions.beforeResult?.(argv);
+        await fixtureOptions.beforeResult?.(argv, options);
         const namedMissingExecutable =
           argv.includes('forge-executable-check') &&
           argv.at(-1) === fixtureOptions.missingExecutable;
@@ -146,6 +146,153 @@ describe('Forge Docker runtime', () => {
     const adapter = createDockerRuntimeAdapter();
     assert.equal(adapter.id, 'forge/docker');
     assert.equal(Object.hasOwn(adapter, 'version'), false);
+  });
+
+  for (const cancelledIndex of [0, 1]) {
+    it(`isolates cancellation of image-build ${cancelledIndex === 0 ? 'starter' : 'follower'} from other evals`, async () => {
+      const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-build-test-'));
+      roots.push(temporaryRoot);
+      const buildStarted = createGate();
+      const releaseBuild = createGate();
+      const docker = fakeDocker({async beforeResult(argv, options) {
+        if (argv[1] !== 'build') return;
+        buildStarted.resolve();
+        await releaseBuild.promise;
+        options.signal?.throwIfAborted();
+      }});
+      const adapter = createDockerRuntimeAdapter({hostCommands: docker.runner, temporaryRoot});
+      const controllers = [new AbortController(), new AbortController()];
+      const preparing = controllers.map((controller, index) => adapter.prepare(preparation({
+        runId: `run-${index}`, signal: controller.signal,
+      })));
+      const outcomes = preparing.map((promise) => promise.then(
+        (runtime) => ({runtime}), (error: unknown) => ({error}),
+      ));
+      try {
+        await waitFor(buildStarted.promise);
+        let cancelledFinished = false;
+        void outcomes[cancelledIndex]!.then(() => {cancelledFinished = true;});
+        const reason = new Error('This eval timed out.');
+        controllers[cancelledIndex]!.abort(reason);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(cancelledFinished, true, 'cancelled eval must stop waiting before the build completes');
+        assert.deepEqual(await outcomes[cancelledIndex]!, {error: reason});
+        const build = docker.calls.find((call) => call.argv[1] === 'build')!;
+        assert.equal(build.options.signal!.aborted, false, 'a sibling still needs the shared build');
+        assert.equal(docker.calls.some((call) => call.argv[1] === 'run'), false);
+
+        releaseBuild.resolve();
+        const sibling = await preparing[1 - cancelledIndex]!;
+        assert.equal(sibling.paths.workspace, '/workspace');
+        const reused = adapter.prepare(preparation({runId: 'reused'}));
+        preparing.push(reused);
+        await reused;
+        assert.equal(docker.calls.filter((call) => call.argv[1] === 'build').length, 1);
+      } finally {
+        for (const controller of controllers) controller.abort();
+        releaseBuild.resolve();
+        const settled = await Promise.allSettled(preparing);
+        await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.dispose()] : []));
+      }
+    });
+  }
+
+  it('cancels and drains an unused build without evicting its replacement', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-build-test-'));
+    roots.push(temporaryRoot);
+    const buildStarted = createGate();
+    const buildAborted = createGate();
+    const releaseCleanup = createGate();
+    const replacementStarted = createGate();
+    const releaseReplacement = createGate();
+    let builds = 0;
+    const docker = fakeDocker({async beforeResult(argv, options) {
+      if (argv[1] !== 'build') return;
+      if (++builds === 1) {
+        buildStarted.resolve();
+        options.signal!.throwIfAborted();
+        await new Promise<void>((resolve) => options.signal!.addEventListener('abort', () => {
+          buildAborted.resolve();
+          resolve();
+        }, {once: true}));
+        await releaseCleanup.promise;
+      } else {
+        replacementStarted.resolve();
+        await releaseReplacement.promise;
+      }
+      options.signal!.throwIfAborted();
+    }});
+    const adapter = createDockerRuntimeAdapter({hostCommands: docker.runner, temporaryRoot});
+    const cancelled = new AbortController();
+    const replacement = new AbortController();
+    const preparing = [0, 1].map((index) => adapter.prepare(preparation({
+      runId: `cancelled-${index}`, signal: cancelled.signal,
+    })));
+    const cancellations = Promise.allSettled(preparing);
+    try {
+      await waitFor(buildStarted.promise);
+      let drained = false;
+      void cancellations.then(() => {drained = true;});
+      cancelled.abort(new Error('Campaign cancelled.'));
+      await waitFor(buildAborted.promise);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(drained, false, 'the last waiter must await build cleanup');
+      const buildRoot = docker.calls.find((call) => call.argv[1] === 'build')!.argv.at(-1)!;
+      assert.ok((await fs.stat(buildRoot)).isDirectory());
+
+      const fresh = adapter.prepare(preparation({runId: 'fresh', signal: replacement.signal}));
+      preparing.push(fresh);
+      await waitFor(replacementStarted.promise);
+      releaseCleanup.resolve();
+      const cancelledOutcomes = await cancellations;
+      assert.ok(cancelledOutcomes.every((result) => result.status === 'rejected' && result.reason === cancelled.signal.reason));
+      await assert.rejects(fs.stat(buildRoot), {code: 'ENOENT'});
+
+      const joined = adapter.prepare(preparation({runId: 'joined', signal: replacement.signal}));
+      preparing.push(joined);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(builds, 2, 'the old build failure must not evict the new build');
+      releaseReplacement.resolve();
+      await Promise.all([fresh, joined]);
+    } finally {
+      cancelled.abort();
+      replacement.abort();
+      releaseCleanup.resolve();
+      releaseReplacement.resolve();
+      const settled = await Promise.allSettled(preparing);
+      await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.dispose()] : []));
+    }
+  });
+
+  it('shares genuine build failures and retries with a fresh build', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-build-test-'));
+    roots.push(temporaryRoot);
+    const releaseBuild = createGate();
+    const buildStarted = createGate();
+    const failure = new Error('Docker build failed.');
+    let builds = 0;
+    const docker = fakeDocker({async beforeResult(argv) {
+      if (argv[1] !== 'build' || ++builds !== 1) return;
+      buildStarted.resolve();
+      await releaseBuild.promise;
+      throw failure;
+    }});
+    const adapter = createDockerRuntimeAdapter({hostCommands: docker.runner, temporaryRoot});
+    const preparing = [0, 1].map((index) => adapter.prepare(preparation({runId: `failed-${index}`})));
+    const failures = preparing.map((promise) => assert.rejects(promise, (error: unknown) => error === failure));
+    try {
+      await waitFor(buildStarted.promise);
+      releaseBuild.resolve();
+      await Promise.all(failures);
+      const retry = adapter.prepare(preparation({runId: 'retry'}));
+      preparing.push(retry);
+      await retry;
+      assert.equal(builds, 2);
+    } finally {
+      releaseBuild.resolve();
+      const settled = await Promise.allSettled(preparing);
+      await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.dispose()] : []));
+    }
   });
 
   it('validates a host by building and inspecting the selected image', async () => {
@@ -828,3 +975,23 @@ describe('Forge Docker runtime', () => {
     );
   });
 });
+
+function createGate(): {promise: Promise<void>; resolve: () => void} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {resolve = complete;});
+  return {promise, resolve};
+}
+
+async function waitFor<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Timed out waiting for test progress.')), 5000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

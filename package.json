@@ -46,6 +46,10 @@
       "types": "./dist/cli.d.ts",
       "import": "./dist/cli.js"
     },
+    "./campaign": {
+      "types": "./dist/campaign.d.ts",
+      "import": "./dist/campaign.js"
+    },
     "./agents/claude-code": {
       "types": "./dist/agents/claude-code/index.d.ts",
       "import": "./dist/agents/claude-code/index.js"

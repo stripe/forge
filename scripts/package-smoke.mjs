@@ -58,9 +58,11 @@ try {
     path.join(consumerRoot, 'esm.mjs'),
     `
       import assert from 'node:assert/strict';
+      import * as path from 'node:path';
       import * as forge from '@stripe/forge';
       import * as atif from '@stripe/forge/atif/v1.8';
       import * as cli from '@stripe/forge/cli';
+      import * as campaign from '@stripe/forge/campaign';
       import * as claude from '@stripe/forge/agents/claude-code';
       import * as codex from '@stripe/forge/agents/codex';
       import * as anthropic from '@stripe/forge/providers/anthropic';
@@ -112,6 +114,9 @@ try {
       assert.equal(typeof atif.parseNormalizedTrajectory, 'function');
       assert.equal(typeof cli.runCli, 'function');
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
+      assert.equal(typeof campaign.runCampaign, 'function');
+      assert.equal(typeof campaign.readCampaignSelections, 'function');
+      assert.equal('runCampaign' in forge, false);
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
       assert.equal(typeof codex.createCodexAdapter, 'function');
       assert.equal(typeof codex.parseCodexStream, 'function');
@@ -177,6 +182,45 @@ try {
         }),
         {uses: 'package-smoke/tool', with: {name: 'formatter'}},
       );
+
+      const campaignRoot = path.resolve('results', 'package-campaign');
+      const plans = ['first', 'second'].map((id) => {
+        const plan = structuredClone(testing.createTestResolvedRunPlan({caseId: 'testing/' + id}));
+        plan.provenance.forge.action_bundles = [bundle.manifest];
+        plan.treatment.setup = [{uses: 'package-smoke/tool', with: {name: 'formatter'}}];
+        plan.setup = [...plan.treatment.setup];
+        return engine.parseResolvedRunPlan(plan);
+      });
+      const agent = testing.createScriptedAgentAdapter().adapter;
+      const composition = {
+        runtime: testing.createFakeRuntimeAdapter().adapter,
+        agents: new Map([[agent.id, agent]]),
+        credentialResolver: testing.createStaticCredentialResolver(),
+        inputProvider: testing.createMemoryRunInputProvider(),
+        artifactStore: forge.createArtifactStore({root: campaignRoot}),
+      };
+      let nextId = 0;
+      const campaignOptions = {
+        root: campaignRoot, plans, engine, composition, jobs: 2, resume: false,
+        signal: new AbortController().signal,
+        runIdFactory: () => 'package-run-' + (++nextId),
+        progress: () => {},
+        execute: (input) => {
+          const runAgent = testing.createScriptedAgentAdapter().adapter;
+          return engine.executeEval({...input, composition: {
+            ...composition, agents: new Map([[runAgent.id, runAgent]]),
+          }});
+        },
+      };
+      const summary = await campaign.runCampaign(campaignOptions);
+      assert.equal(summary.completed, 2);
+      assert.equal(summary.errored, 0);
+      assert.deepEqual(await campaign.readCampaignSelections(campaignRoot), plans.map((plan) => plan.selection));
+      const resumed = await campaign.runCampaign({...campaignOptions, resume: true, jobs: 3,
+        execute: async () => {throw new Error('completed runs must be skipped');},
+      });
+      assert.equal(resumed.executed, 0);
+      assert.equal(resumed.skipped, 2);
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);
@@ -195,8 +239,9 @@ try {
     path.join(consumerRoot, 'commonjs.cjs'),
     `
       const assert = require('node:assert/strict');
-      void import('@stripe/forge').then((forge) => {
+      void Promise.all([import('@stripe/forge'), import('@stripe/forge/campaign')]).then(([forge, campaign]) => {
         assert.equal(typeof forge.executeEval, 'function');
+        assert.equal(typeof campaign.runCampaign, 'function');
       }).catch((error) => {
         console.error(error);
         process.exitCode = 1;
