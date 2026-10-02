@@ -450,71 +450,78 @@ the Docker CLI and a Forge-owned image. It:
 
 For one run, let `R` be the fresh host directory
 `<temporaryRoot>/stripe-forge-run-<random>`. Forge uses bind mounts, not named
-Docker volumes. The paths under `R` are on the host; the paths on the right are
-what processes inside the container see:
+Docker volumes. The Docker daemon must be able to access the host paths under
+`R`. These are the only bind mounts:
 
 ```mermaid
 flowchart LR
-    subgraph Host["Host filesystem: R is mode 0700"]
-        W["R/workspace - 0777"]
-        H["R/home - 0777"]
-        S["R/state/{id} - 0777"]
-        I["R/imports - 0700"]
-        E["R/environment - 0700"]
-        C["R/container-id - host only"]
+    subgraph Host["Host: per-run directory R"]
+        W["R/workspace"]
+        H["R/home"]
+        S["R/state/{id}<br/>one per declared state directory"]
     end
-    CLI["Forge host process / Docker CLI"]
-    subgraph Container["Container processes: UID:GID 10001:10001"]
+    subgraph Container["Container: UID:GID 10001:10001"]
         CW["/workspace"]
         CH["/home/forge"]
-        CS["declared state path"]
-        T["/tmp - 256 MiB tmpfs"]
-        ROOT["image root - read-only"]
+        CS["declared containerPath"]
     end
 
-    W -->|RW bind in both phases| CW
-    H -->|RW bind in both phases| CH
-    S -->|RW setup, RO interaction if sealed| CS
-    I -.->|verified host-side rename| S
-    E -.->|temporary docker exec env-file| CLI
-    C -.->|read for cleanup| CLI
-    CLI -->|docker run / exec / stop / rm| Container
+    W -->|read-write| CW
+    H -->|read-write| CH
+    S -->|state mount| CS
 ```
 
-| Host path or Docker filesystem | Host-side mode | Container access |
-| --- | --- | --- |
-| `R` | `0700`, created by `mkdtemp` | Not mounted. As the private parent, it prevents other host users from traversing to the world-writable mount leaves. |
-| `R/workspace` | `0777` | Read-write bind at `/workspace` during setup and interaction. |
-| `R/home` | `0777` | Read-write bind at `/home/forge` during setup and interaction. |
-| `R/state` and `R/state/{id}` | Parent `0700`; each declared leaf `0777` | Only each leaf is bind-mounted at its declared `containerPath`. It is read-write during setup; an unsealed leaf stays read-write during interaction, while a sealed leaf is remounted read-only. State paths must be below `/home/forge`, or below `/opt` when sealed. |
-| `R/imports` | `0700`; staged files start `0600` | Never mounted. A trusted host import streams here, verifies the staged SHA-256, applies the requested file mode (default `0644`, or for example `0755` for an executable), then renames the file into a declared state leaf. |
-| `R/environment` | `0700`; each command's env file is `0600` | Never mounted. The Docker CLI reads it via `docker exec --env-file`; Forge deletes it after that command. Only the variables and credential scope allowed for that command are included. |
-| `R/container-id` | Created by Docker's `--cidfile`; Forge does not set its mode | Never mounted; used by the host for cleanup if container startup only partly succeeds. |
-| `/tmp` | No host path | A separate read-write tmpfs with `nosuid,nodev,noexec` and a 256 MiB size limit. |
-| Image root filesystem | Not a run-owned host directory | `--read-only`; writable bind mounts and `/tmp` are independent exceptions. The Docker socket is not mounted. |
+The leading `0` marks an octal mode. The next three digits grant permissions
+to the owner, group, and others, respectively. On a file, `r` means read,
+`w` means write, and `x` means execute. On a directory, they mean list entries,
+change entries (with `x`), and traverse, respectively.
 
-The `0777` bind-mount leaves allow the container's non-root UID `10001` to
-write even when it differs from the host owner's UID. Sealing changes the
-*Docker mount mode*, not the host directory's `0777` permissions. A declared
-state mount nested under `/home/forge` overlays that path in the home bind
-mount; its host source is still the separate `R/state/{id}` directory. These
-directory modes do not set every file's mode: host `writeFile` defaults to
-`0644`, while container-created files follow the container process's own mode
-and umask.
+| Mode | Owner | Group | Others | Used for |
+| --- | --- | --- | --- | --- |
+| `0700` | `rwx` | `---` | `---` | Private host directories: `R`, `R/state`, `R/imports`, `R/environment` |
+| `0777` | `rwx` | `rwx` | `rwx` | Mounted leaves: `R/workspace`, `R/home`, each `R/state/{id}` |
+| `0600` | `rw-` | `---` | `---` | Temporary import and command environment files |
+| `0644` | `rw-` | `r--` | `r--` | Default host-written files, including ordinary imports |
+| `0755` | `rwx` | `r-x` | `r-x` | Executable imports |
+
+The private `R` prevents other host users from reaching its `0777` leaves.
+Those leaves let the container's non-root UID `10001` write even if it differs
+from the host owner's UID. File permissions are separate: host `writeFile`
+defaults to `0644`, while container-created files use the container process's
+mode and umask. A writable directory lets UID `10001` replace a host-owned
+`0644` or `0755` file, but not edit that file in place.
+
+`R/state` itself is not mounted. Each state leaf mounts at its declared
+`containerPath`, below `/home/forge` or, if sealed, below `/opt`. A state mount
+below `/home/forge` overlays that part of the home mount. All state mounts are
+read-write during setup. At
+`finalizeSetup`, Forge closes import and setup-command authority and waits for
+active work. If any state directory requests `sealAfterSetup`, Forge replaces
+the setup container with an interaction container using the **same host
+directories**; only the sealed state mounts become read-only. Unsealed state,
+workspace, and home mounts remain read-write. The host directory modes do not
+change, and no files are copied. Before replacement, Forge rechecks imports
+that requested setup-time verification. Without sealed state, Forge keeps the
+setup container. `quiesce` stops commands and the container before evidence is
+read; `dispose` removes the container and `R`.
+
+Other host-only paths under `R` are:
+
+- `R/imports` stages a host file as `0600`, verifies its SHA-256, sets its
+  requested mode (default `0644`), then renames it into a state leaf.
+- `R/environment` holds `0600` per-command files. The Docker CLI uses
+  `--env-file` only when that command has scoped variables; Forge deletes the
+  file after the command.
+- `R/container-id` is a Docker-created recovery file. Forge reads it only if
+  container startup partly fails; normal cleanup uses the container name.
+
+The image root is read-only. `/tmp` is a separate read-write 256 MiB tmpfs
+with `nosuid,nodev,noexec`; the Docker socket is not mounted.
 
 Forge also creates a separate, short-lived `stripe-forge-build-*` host directory
 for the Dockerfile and entrypoint while building the image. It is not mounted
 into an evaluation container and is removed after the build. The built image
 may remain cached by Docker across runs.
-
-At `prepare`, Forge starts a setup container with all declared state mounts
-read-write. At `finalizeSetup`, it closes import and setup-command authority and
-waits for active work. If any state directory requests `sealAfterSetup`, Forge
-stops and removes the setup container, optionally rechecks imported file hashes,
-then starts an interaction container using the **same host directories** but
-read-only mounts for those selected state leaves. Without a sealed state
-directory, it keeps the original container. `quiesce` stops commands and the
-container before evidence is read; `dispose` removes the container and `R`.
 
 The optional `PreparedRuntime.importHostFile` capability is deliberately absent
 from agent and setup projections. Docker opens a host source without following
