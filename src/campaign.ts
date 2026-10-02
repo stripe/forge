@@ -106,6 +106,7 @@ export async function inspectCampaign(options: {
   readonly signal?: AbortSignal;
 }): Promise<CampaignInspection> {
   const root = path.resolve(options.root);
+  options.signal?.throwIfAborted();
   const campaign = await requireCampaign(root);
   const outcomes: CampaignOutcome[] = [];
   for (const entry of campaign.entries) {
@@ -116,10 +117,11 @@ export async function inspectCampaign(options: {
         run_id: null, state: 'pending', error_code: null, artifact: null});
       continue;
     }
-    const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id);
+    const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
     const attempt = inspected.artifact === null && last.state === 'errored' ? last : inspected.attempt;
     outcomes.push(campaignOutcome(entry, attempt, inspected.artifact));
   }
+  options.signal?.throwIfAborted();
   return {experiment_run_id: campaign.experiment_run_id, location: root,
     campaign: path.join(root, 'campaign.json'), outcomes};
 }
@@ -229,7 +231,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       options.signal.throwIfAborted();
       const last = entry.attempts.at(-1);
       if (last !== undefined) {
-        const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id);
+        const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
         const recovered = inspected.attempt;
         if (
           recovered.state !== 'errored' ||
@@ -316,7 +318,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             if (actualLocation !== expectedLocation) {
               throw new Error('Campaigns require the local artifact store at the selected output directory.');
             }
-            const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, runId);
+            const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection);
             attempt = inspected.attempt;
             artifact = inspected.artifact;
           } catch (error) {
@@ -332,7 +334,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             // host cleanup). Keep the execution error while exposing verified
             // artifacts for independent publication.
             if (options.onOutcome !== undefined) {
-              artifact = (await inspectAttempt(options.engine, root, entry.plan_sha256, runId)).artifact;
+              artifact = (await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection)).artifact;
             }
           }
           await update(async () => {
@@ -371,12 +373,16 @@ async function inspectAttempt(
   root: string,
   planDigest: string,
   runId: string,
+  selection: RunSelection,
 ): Promise<{attempt: SettledAttempt; artifact: CampaignArtifact | null}> {
   try {
     const location = path.join(root, 'runs', runId);
     const completed = await engine.verifyCompletedRun(location);
     const descriptor = completed.result.artifacts.find((artifact) => artifact.path === 'plan.json');
     if (descriptor?.sha256 !== planDigest) throw new Error('Run belongs to a different plan.');
+    if (serializeCanonicalJson(completed.result.selection) !== serializeCanonicalJson(selection)) {
+      throw new Error('Run belongs to a different selection.');
+    }
     const attempt: SettledAttempt = completed.result.failure === null
       ? {run_id: runId, state: 'completed'}
       : {run_id: runId, state: 'errored', error_code: 'role_player_error'};

@@ -256,6 +256,45 @@ describe('shared campaign command', () => {
     assert.equal(wrongEngine.outcomes[0]!.artifact, null);
   });
 
+  it('rejects inspection when cancellation arrives during the final artifact verification', async () => {
+    const fixture = await createFixture();
+    const result = await fixture.run(['--case', 'testing/second']);
+    const before = await fs.readFile(result.campaign);
+    const controller = new AbortController();
+    const reason = new Error('inspection cancelled');
+    const engine = {...defaultForgeEngine, async verifyCompletedRun(location: string) {
+      const completed = await defaultForgeEngine.verifyCompletedRun(location);
+      controller.abort(reason);
+      return completed;
+    }};
+    await assert.rejects(inspectCampaign({root: result.location, engine, signal: controller.signal}),
+      (error: unknown) => error === reason);
+    assert.deepEqual(await fs.readFile(result.campaign), before);
+  });
+
+  it('withholds artifacts when checkpoint selections disagree with their verified commits', async () => {
+    const fixture = await createFixture();
+    const result = await fixture.run(['--case', 'testing/second']);
+    const original = JSON.parse(await fs.readFile(result.campaign, 'utf8'));
+    const selection = original.entries[0].selection;
+    for (const changed of [
+      {...selection, case_id: 'testing/wrong'},
+      {...selection, treatment: 'wrong'},
+      {...selection, agent: {...selection.agent, model: 'wrong'}},
+      {...selection, repetition: 1},
+    ]) {
+      const corrupt = structuredClone(original);
+      corrupt.entries[0].selection = changed;
+      const body = JSON.stringify(corrupt);
+      await fs.writeFile(result.campaign, body);
+      const inspected = await inspectCampaign({root: result.location, engine: defaultForgeEngine});
+      assert.equal(inspected.outcomes[0]!.artifact, null);
+      assert.equal(inspected.outcomes[0]!.state, 'errored');
+      assert.equal(inspected.outcomes[0]!.error_code, 'invalid_artifacts');
+      assert.equal(await fs.readFile(result.campaign, 'utf8'), body);
+    }
+  });
+
   it('returns verified role-player failures as publishable artifacts and retries their execution', async () => {
     const fixture = await createFixture();
     const plan = createTestResolvedRunPlan({mode: 'multi_turn',
@@ -363,6 +402,39 @@ describe('shared campaign command', () => {
       assert.ok(inspected.outcomes.every((outcome) => outcome.artifact !== null));
     }
     assert.equal(disposed, 1);
+  });
+
+  it('finishes disposal but rejects success when cancellation arrives during that cleanup', {timeout: 10_000}, async () => {
+    const fixture = await createFixture();
+    const entered = gate();
+    const release = gate();
+    const controller = new AbortController();
+    const reason = new Error('cancelled during disposal');
+    let disposed = 0;
+    let publicationReached = false;
+    const running = fixture.run(['--case', 'testing/second'], {...fixture.options,
+      signal: controller.signal,
+      loadCampaign: async (context) => ({...await fixture.options.loadCampaign(context),
+        dispose: async () => {
+          entered.resolve();
+          await release.promise;
+          disposed += 1;
+        }}),
+    }).then((result) => {
+      publicationReached = true;
+      return result;
+    });
+    const rejected = assert.rejects(running, (error: unknown) =>
+      error instanceof CampaignCommandError && error.cause === reason);
+    await entered.promise;
+    controller.abort(reason);
+    release.resolve();
+    await rejected;
+    assert.equal(disposed, 1);
+    assert.equal(publicationReached, false);
+    const resumed = await fixture.run(['--resume', 'exp-1']);
+    assert.equal(resumed.executed, 0);
+    assert.equal(resumed.skipped, 1);
   });
 
   it('drains aborted callbacks before releasing the lock and disposing prepared inputs', {timeout: 10_000}, async () => {

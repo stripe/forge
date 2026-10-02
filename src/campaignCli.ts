@@ -217,6 +217,9 @@ export async function runCampaignCommand<H extends ParseArgsOptionsConfig>(
   } finally {
     try {
       await loaded?.dispose?.();
+      // Cleanup completes independently of cancellation, but callers must not
+      // receive success and start publication after an interrupted command.
+      if (!failed) signal.throwIfAborted();
     } catch (error) {
       if (!failed) throw new CampaignCommandError(reference, error);
     }

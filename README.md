@@ -1100,7 +1100,8 @@ passes pure preflight. Use the supplied engine for planning and execution. The
 loader must clean partial preparation if it throws before returning. Once it
 returns, the wrapper awaits its `dispose` exactly once after callbacks drain,
 including on cancellation or failure, and preserves the primary error if
-disposal also fails. Prepared-input disposal and per-run cleanup must operate
+disposal also fails. Cancellation during disposal still rejects the command
+after cleanup finishes. Prepared-input disposal and per-run cleanup must operate
 independently of an aborted signal. Host capabilities must support the selected
 concurrency; sharing checkpoints does not make host global resources safe.
 
@@ -1117,7 +1118,11 @@ rerun. Do not perform uploads inside the execution or outcome callbacks.
 `inspectCampaign({root, engine, signal?})` from `@stripe/forge/campaign` verifies
 the latest attempt for every saved selection without loading inputs, acquiring
 execution credentials, or changing the checkpoint. It supports publication-only
-retries even when the original sources have changed. It returns no historical
+retries even when the original sources have changed. Both the saved selection
+and plan digest must match the verified commit. Inspection derives effective
+state from artifacts just as resume does: an errored or running checkpoint with
+a valid successful commit is reported completed, without changing the checkpoint.
+It returns no historical
 attempts; an unstarted selection has a pending outcome with no artifact.
 Invalid or missing artifacts have no publishable reference. Inspection is a
 snapshot and does not wait for active execution. After a failed stage has drained
