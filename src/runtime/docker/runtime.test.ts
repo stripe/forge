@@ -655,6 +655,38 @@ describe('Forge Docker runtime', () => {
     await prepared.stateDirectories.get('sealed')!.writeFile('existing', Buffer.from('file'));
     const entry = await prepared.stateDirectories.get('sealed')!.inspect('existing');
     assert.equal(entry.kind, 'file');
+    await prepared.importHostFile!(request);
+    await prepared.finalizeSetup();
+    await prepared.dispose();
+  });
+
+  it('propagates an import that fails while setup is finalizing', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-import-test-'));
+    roots.push(temporaryRoot);
+    const source = path.join(temporaryRoot, 'source');
+    await fs.writeFile(source, 'safe');
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: fakeDocker().runner,
+      temporaryRoot,
+    });
+    const prepared = await adapter.prepare(preparation({
+      requirements: {
+        executables: [],
+        stateDirectories: [{id: 'sealed', containerPath: '/opt/tool/bin', sealAfterSetup: true}],
+      },
+    }));
+    const abort = new AbortController();
+    const importing = prepared.importHostFile!({
+      sourcePath: source,
+      stateDirectoryId: 'sealed',
+      relativePath: 'tool',
+      maxBytes: 4,
+      sha256: `sha256:${createHash('sha256').update('safe').digest('hex')}`,
+    }, abort.signal);
+    abort.abort();
+    const importFailure = assert.rejects(importing, /aborted/i);
+    await assert.rejects(prepared.finalizeSetup(), /Active host file imports failed/);
+    await importFailure;
     await prepared.dispose();
   });
 

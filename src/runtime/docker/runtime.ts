@@ -306,11 +306,13 @@ export function createDockerRuntimeAdapter(
       const activeImports = new Set<Promise<void>>();
       const activeImportTargets = new Set<string>();
       const importedFiles = new Map<string, HostFileImport>();
-      const importFailures: unknown[] = [];
       const waitForImports = async (): Promise<void> => {
-        await Promise.allSettled([...activeImports]);
-        if (importFailures.length > 0) {
-          throw new AggregateError(importFailures, 'Host file imports failed.');
+        const settled = await Promise.allSettled([...activeImports]);
+        const failures = settled
+          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .map((result) => result.reason as unknown);
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'Active host file imports failed.');
         }
       };
       let sealedPromise: Promise<SealedRuntime> | undefined;
@@ -421,8 +423,7 @@ export function createDockerRuntimeAdapter(
               activeImports.delete(importing);
               activeImportTargets.delete(key);
             },
-            (error: unknown) => {
-              importFailures.push(error);
+            () => {
               activeImports.delete(importing);
               activeImportTargets.delete(key);
             },
