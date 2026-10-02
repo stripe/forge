@@ -1098,9 +1098,11 @@ root and return its path as `summary.report`. `parseCampaignReport` validates
 loaded report JSON, including agreement between run rows and aggregate
 statistics. `CAMPAIGN_REPORT_SCHEMA_VERSION`, `CampaignReportV1`, and its
 evaluation, run, statistics, and case types are exported from
-`@stripe/forge/campaign`. A reporting failure after normal execution rejects
-with `CampaignReportError`, which carries the report path and original cause;
-saved evaluations remain resumable.
+`@stripe/forge/campaign`. A reporting failure after normal execution makes
+`runCampaign` reject with `CampaignReportError`, which carries the report path
+and original cause. `runCampaignCommand` wraps it in `CampaignCommandError` as
+its cause, retaining the experiment reference. Saved evaluations remain
+resumable.
 
 For command hosts, `@stripe/forge/campaign/cli` adds a shared run/resume stage.
 `runCampaignCommand` parses `--jobs`/`-j`, `--resume <id>`, `--output`/`-o`, and
