@@ -1,4 +1,3 @@
-import {createHash} from 'node:crypto';
 import * as path from 'node:path';
 
 import {
@@ -67,15 +66,14 @@ import {
 import {snapshotAgentToolCalls} from '../interaction/conversation.js';
 import {
   isSafeSimpleIdentifier,
+  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   type JsonValue,
-  type ResolvedRunPlanV1,
+  type ResolvedRunPlanV2,
 } from '../model/index.js';
 import {parseResolvedRunPlanWithSetupActions} from '../model/parse.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
-import {
-  resolvedRunPlanSha256,
-  serializeResolvedRunPlan,
-} from '../planning/index.js';
+import {sha256Digest} from '../model/hashes.js';
+import {serializeResolvedRunPlan} from '../planning/index.js';
 import {
   MAX_SETUP_ARTIFACT_BYTES,
   RUN_RESULT_SCHEMA_VERSION,
@@ -87,17 +85,17 @@ import {
   type AtifEvidenceProvenanceV1,
   type ArtifactDescriptorV1,
   type AvaDecisionV1,
-  type CompletedRunV1,
+  type CompletedRunV2,
   type CompletionCallSummaryV1,
   type EvaluationResultV1,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RolePlayerErrorV1,
-  type RunResultV1,
+  type RunResultV2,
   type RunStopReasonV1,
   type RunWarningV1,
-  type SetupArtifactV1,
-  type WorkspaceEvidenceV1,
+  type SetupArtifactV2,
+  type WorkspaceEvidenceV2,
 } from '../results/index.js';
 import {FORGE_VERSION} from '../version.js';
 import {
@@ -138,7 +136,7 @@ const SAFE_NATIVE_EXTENSION = /^[a-z0-9]{1,16}$/;
 
 export interface ExecuteEvalInput {
   readonly runId: string;
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly composition: ForgeComposition;
   readonly signal?: AbortSignal;
   /** Test seam; production uses the wall clock. */
@@ -156,7 +154,7 @@ interface ExecuteEvalTestHooks {
 }
 
 export interface PreflightEvalInput {
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly composition: ForgeComposition;
 }
 
@@ -201,7 +199,7 @@ export function preflightEvalWithSetupActions(
 }
 
 /** Execute one already-resolved run and return only after atomic commit. */
-export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1> {
+export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV2> {
   return executeEvalWithSetupActions(request, defaultSetupActionRegistry);
 }
 
@@ -209,7 +207,7 @@ export async function executeEval(request: ExecuteEvalInput): Promise<CompletedR
 export async function executeEvalWithSetupActions(
   request: ExecuteEvalInput,
   setupActions: SetupActionRegistry,
-): Promise<CompletedRunV1> {
+): Promise<CompletedRunV2> {
   return executeEvalWithTestHooks(request, {}, setupActions);
 }
 
@@ -218,7 +216,7 @@ export async function executeEvalWithTestHooks(
   request: ExecuteEvalInput,
   hooks: ExecuteEvalTestHooks,
   setupActions: SetupActionRegistry = defaultSetupActionRegistry,
-): Promise<CompletedRunV1> {
+): Promise<CompletedRunV2> {
   let input: ExecuteEvalInput;
   try {
     input = {
@@ -524,31 +522,35 @@ export async function executeEvalWithTestHooks(
       ? []
       : [selectedEvidence.nativeArtifact];
     const nativeDescriptors = nativeArtifacts.map(describeArtifact);
-    let result = buildResult({
-      input,
-      agent: preflight.agent,
-      runtime: sealed,
-      interaction,
-      completionCalls: completions.calls,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
-      evaluation: evaluated.evaluation,
-      coreDescriptors,
-      supplementalDescriptors: nativeDescriptors,
-      warnings: rolePlayerWarnings(interaction.failure),
-      startedAt,
-      completedAt: now(),
-    });
-
-    const contributedArtifacts = await buildSupplementalArtifacts(
-      input,
-      result,
-      secrets,
-      signal,
-    );
+    let contributedArtifacts: RunArtifact[] = [];
+    if ((input.composition.contributors?.length ?? 0) > 0) {
+      const contributorResult = buildResult({
+        input,
+        agent: preflight.agent,
+        runtime: sealed,
+        interaction,
+        completionCalls: completions.calls,
+        evidence: redacted.evidence,
+        redactionCount: redacted.replacements,
+        evaluation: evaluated.evaluation,
+        coreDescriptors,
+        supplementalDescriptors: nativeDescriptors,
+        warnings: rolePlayerWarnings(interaction.failure),
+        startedAt,
+        completedAt: now(),
+      });
+      contributedArtifacts = await buildSupplementalArtifacts(
+        input,
+        contributorResult,
+        secrets,
+        signal,
+      );
+    }
     const supplementalArtifacts = [...nativeArtifacts, ...contributedArtifacts];
-    const supplementalDescriptors = supplementalArtifacts.map(describeArtifact);
-    result = {...result, supplemental_artifacts: supplementalDescriptors};
+    const supplementalDescriptors = [
+      ...nativeDescriptors,
+      ...contributedArtifacts.map(describeArtifact),
+    ];
 
     await events.phase('artifact_stage', async () => {
       phase = 'artifact_stage';
@@ -575,7 +577,7 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    result = buildResult({
+    const result = buildResult({
       input,
       agent: preflight.agent,
       runtime: sealed,
@@ -632,7 +634,7 @@ interface ExecutedInteraction {
 }
 
 async function executeInteraction(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   session: AgentSession,
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
@@ -844,7 +846,7 @@ function rolePlayerErrorRecord(error: {
 }
 
 function buildEvalPreflight(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   composition: ForgeComposition,
   setupExecutor: SetupExecutor,
 ): EvalPreflight {
@@ -907,8 +909,8 @@ function buildEvalPreflight(
   });
 }
 
-function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
-  if (plan.schema_version !== 1) {
+function assertExecutablePlan(plan: ResolvedRunPlanV2): void {
+  if (plan.schema_version !== RESOLVED_RUN_PLAN_SCHEMA_VERSION) {
     throw new ForgeExecutionError('invalid_plan', 'preflight', 'Unsupported run-plan version.');
   }
   if (plan.provenance.forge.version !== FORGE_VERSION) {
@@ -923,7 +925,7 @@ function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
 }
 
 function preflightRuntime(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   composition: ForgeComposition,
   requirements: RuntimeRequirements,
   environment: ScopedEnvironmentSpecification,
@@ -953,7 +955,7 @@ function preflightRuntime(
 }
 
 function selectedAgent(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   composition: ForgeComposition,
 ): AgentAdapter {
   const agent = composition.agents.get(plan.agent.adapter);
@@ -1374,7 +1376,7 @@ function redactNormalizedTrajectory(
 }
 
 function rolePlayerErrorEvidence(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   agent: AgentAdapter,
   identity: AgentEvidenceIdentity,
 ): NormalizedTrajectory {
@@ -1423,7 +1425,7 @@ function redactJudgeWorkspaceEvidence(
 }
 
 function buildInteractionArtifact(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   interaction: ExecutedInteraction,
 ): InteractionArtifactV1 {
   const turns = interaction.turns.map((turn) => ({
@@ -1569,11 +1571,11 @@ function buildNativeArtifact(
 }
 
 function buildCoreArtifacts(
-  plan: ResolvedRunPlanV1,
-  setup: SetupArtifactV1,
+  plan: ResolvedRunPlanV2,
+  setup: SetupArtifactV2,
   trajectoryJson: string,
   interaction: InteractionArtifactV1,
-  workspaceEvidence: WorkspaceEvidenceV1,
+  workspaceEvidence: WorkspaceEvidenceV2,
   judgeEvidence: JudgeEvidenceV1 | undefined,
 ): RunArtifact[] {
   const setupJson = serializeCanonicalJson(setup);
@@ -1597,9 +1599,9 @@ function buildCoreArtifacts(
 }
 
 function buildSetupArtifact(
-  plan: ResolvedRunPlanV1,
+  plan: ResolvedRunPlanV2,
   applied: AppliedSetup,
-): SetupArtifactV1 {
+): SetupArtifactV2 {
   if (
     applied.steps.length !== plan.setup.length ||
     applied.steps.some(
@@ -1627,26 +1629,37 @@ function buildSetupArtifact(
 
 async function buildSupplementalArtifacts(
   input: ExecuteEvalInput,
-  result: RunResultV1,
+  result: RunResultV2,
   secrets: readonly string[],
   signal: AbortSignal,
 ): Promise<RunArtifact[]> {
   const artifacts: RunArtifact[] = [];
+  const resultJson = serializeCanonicalJson(result);
   for (const contributor of input.composition.contributors ?? []) {
     if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(contributor.id)) {
       throw new TypeError('Artifact contributor IDs must be safe identifiers.');
     }
     const contributed = await contributor.contribute({
       runId: input.runId,
-      result: result as unknown as Readonly<Record<string, unknown>>,
+      result: JSON.parse(resultJson) as Readonly<Record<string, unknown>>,
       signal,
     });
     for (const artifact of contributed) {
-      if (!artifact.path.startsWith(`extensions/${contributor.id}/`)) {
+      const {path: artifactPath, body, mediaType, sensitivity} = artifact;
+      if (!(body instanceof Uint8Array)) {
+        throw new TypeError('Contributed artifacts require bytes.');
+      }
+      const snapshot: RunArtifact = {
+        path: artifactPath,
+        body: Uint8Array.from(body),
+        mediaType,
+        ...(sensitivity === undefined ? {} : {sensitivity}),
+      };
+      if (!snapshot.path.startsWith(`extensions/${contributor.id}/`)) {
         throw new TypeError(`Contributor ${contributor.id} wrote outside its namespace.`);
       }
-      assertNoSecrets(artifact.body, secrets, artifact.path);
-      artifacts.push(artifact);
+      assertNoSecrets(snapshot.body, secrets, snapshot.path);
+      artifacts.push(snapshot);
     }
   }
   const paths = new Set<string>();
@@ -1671,12 +1684,11 @@ function buildResult(input: {
   warnings: RunWarningV1[];
   startedAt: Date;
   completedAt: Date;
-}): RunResultV1 {
+}): RunResultV2 {
   return {
     schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: input.input.runId,
     selection: input.input.plan.selection,
-    plan_sha256: resolvedRunPlanSha256(input.input.plan),
     forge: {
       version: FORGE_VERSION,
       ...(input.input.plan.provenance.forge.action_bundles === undefined
@@ -1769,20 +1781,15 @@ function jsonArtifact(path: string, body: string): RunArtifact {
 }
 
 function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
-  const hash = canonicalBytesSha256(artifact.body);
   return {
     path: artifact.path,
     media_type: artifact.mediaType,
     size_bytes: artifact.body.byteLength,
-    sha256: hash,
+    sha256: sha256Digest(artifact.body),
     ...(artifact.sensitivity === undefined
       ? {}
       : {sensitivity: artifact.sensitivity}),
   };
-}
-
-function canonicalBytesSha256(body: Uint8Array): `sha256:${string}` {
-  return `sha256:${createHash('sha256').update(body).digest('hex')}`;
 }
 
 /**

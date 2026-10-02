@@ -1,13 +1,13 @@
 import {sha256Digest} from '../model/hashes.js';
 import {
-  BENCHMARK_SCHEMA_VERSION,
+  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
   type ExperimentConfigV1,
   type ForgeDockerRuntimeV1,
   type LoadedExperimentConfigV1,
   type LoadedDatasetV1,
-  type ResolvedRunPlanV1,
+  type ResolvedRunPlanV2,
   type RunSelection,
   type SetupStepV1,
   type WriteSetupStepV1,
@@ -76,7 +76,7 @@ export function resolveRunPlan(input: {
   experiment: LoadedExperimentConfigV1;
   selection: RunSelection;
   runtimePlatform?: ForgeDockerRuntimeV1['platform'];
-}): ResolvedRunPlanV1 {
+}): ResolvedRunPlanV2 {
   return resolveRunPlanWithSetupActions(input, defaultSetupActionRegistry);
 }
 
@@ -89,7 +89,7 @@ export function resolveRunPlanWithSetupActions(
     runtimePlatform?: ForgeDockerRuntimeV1['platform'];
   },
   setupActions: SetupActionRegistry,
-): ResolvedRunPlanV1 {
+): ResolvedRunPlanV2 {
   const {dataset, selection} = input;
   const config = input.experiment.config;
   assertDatasetCompatibility(dataset, config);
@@ -168,8 +168,8 @@ export function resolveRunPlanWithSetupActions(
     throw new PlanningError('unknown_case', 'Selected case has no effective prompt.');
   }
 
-  const plan: ResolvedRunPlanV1 = {
-    schema_version: BENCHMARK_SCHEMA_VERSION,
+  const plan: ResolvedRunPlanV2 = {
+    schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
     selection: cloneJson(selection),
     provenance: {
       dataset: {
@@ -179,12 +179,10 @@ export function resolveRunPlanWithSetupActions(
       experiment: {
         id: config.id,
         version: config.version,
-        sha256: input.experiment.sha256,
       },
       case: {
         id: definition.id,
         path: manifestCase.path,
-        sha256: loadedCase.sha256,
       },
       forge: {
         version: FORGE_VERSION,
@@ -240,9 +238,9 @@ export function resolveRunPlanWithSetupActions(
 function resolveRuntime(
   runtime: ExperimentConfigV1['runtime'],
   runtimePlatform: ForgeDockerRuntimeV1['platform'] | undefined,
-): ResolvedRunPlanV1['runtime'] {
+): ResolvedRunPlanV2['runtime'] {
   if (runtime.adapter !== 'docker' || runtime.platform !== 'native') {
-    return cloneJson(runtime) as ResolvedRunPlanV1['runtime'];
+    return cloneJson(runtime) as ResolvedRunPlanV2['runtime'];
   }
   if (runtimePlatform === undefined) {
     throw new PlanningError(
@@ -263,11 +261,11 @@ function resolveRuntime(
 }
 
 /** Canonical JSON used when a caller needs a stable resolved-plan digest. */
-export function serializeResolvedRunPlan(plan: ResolvedRunPlanV1): string {
+export function serializeResolvedRunPlan(plan: ResolvedRunPlanV2): string {
   return `${JSON.stringify(sortJson(plan))}\n`;
 }
 
-export function resolvedRunPlanSha256(plan: ResolvedRunPlanV1): `sha256:${string}` {
+export function resolvedRunPlanSha256(plan: ResolvedRunPlanV2): `sha256:${string}` {
   return sha256Digest(serializeResolvedRunPlan(plan));
 }
 

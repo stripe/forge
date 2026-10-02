@@ -1,4 +1,4 @@
-import type {AgentSelectionV1, ResolvedRunPlanV1} from '../model/types.js';
+import type {AgentSelectionV1, ResolvedRunPlanV2} from '../model/types.js';
 import type {RunInputProvider} from './inputs.js';
 import type {EnvironmentSpecification} from './credentials.js';
 import type {
@@ -144,7 +144,7 @@ export interface AgentEvidenceRuntime {
 
 export interface AgentPrepareContext {
   readonly runId: string;
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly selection: AgentSelectionV1;
   readonly runtime: AgentPrepareRuntime;
   readonly inputs: RunInputProvider;
@@ -153,7 +153,7 @@ export interface AgentPrepareContext {
 
 export interface AgentSessionContext {
   readonly runId: string;
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly selection: AgentSelectionV1;
   readonly runtime: AgentSessionRuntime;
   readonly inputs: RunInputProvider;
@@ -162,7 +162,7 @@ export interface AgentSessionContext {
 
 export interface AgentEvidenceContext {
   readonly runId: string;
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly selection: AgentSelectionV1;
   readonly runtime: AgentEvidenceRuntime;
   readonly sessionId: string;

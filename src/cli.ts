@@ -16,6 +16,7 @@ import {executeEval, FORGE_VERSION} from './execution/index.js';
 import {defaultForgeEngine, type ForgeEngine} from './engine.js';
 import {
   parseRunSelection,
+  type DatasetManifestV1,
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
   type RunSelection,
@@ -106,6 +107,8 @@ The run command writes atomic results below ./results by default.
 
 export interface DefaultCliCompositionOptions {
   readonly datasetRoot: string;
+  /** Verified inventory supplied by runCli for consumption-time input checks. */
+  readonly datasetManifest?: DatasetManifestV1;
   readonly resultsRoot: string;
   /** Resolved runtime selection supplied by runCli to embedding hosts. */
   readonly runtime?: ForgeRuntimeV1;
@@ -181,7 +184,9 @@ export async function createDefaultCliComposition(
       [completionProvider.id, completionProvider],
     ]),
     credentialResolver,
-    inputProvider: await createDirectoryRunInputProvider(options.datasetRoot),
+    inputProvider: await createDirectoryRunInputProvider(options.datasetRoot, {
+      ...(options.datasetManifest === undefined ? {} : {manifest: options.datasetManifest}),
+    }),
     artifactStore: createArtifactStore({root: options.resultsRoot}),
   });
 }
@@ -300,6 +305,7 @@ export async function runCli(
         );
         const composition = await compositionFactory({
           datasetRoot: dataset.root,
+          datasetManifest: dataset.manifest,
           ...(plans[0] === undefined ? {} : {runtime: plans[0].runtime}),
           resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
           ...(options.environment === undefined
@@ -396,6 +402,7 @@ export async function runCli(
       options.compositionFactory ?? createDefaultCliComposition;
     const composition = await compositionFactory({
       datasetRoot: dataset.root,
+      datasetManifest: dataset.manifest,
       runtime: plan.runtime,
       resultsRoot,
       ...(options.environment === undefined

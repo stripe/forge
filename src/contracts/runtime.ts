@@ -1,4 +1,4 @@
-import type {ResolvedRunPlanV1} from '../model/types.js';
+import type {ResolvedRunPlanV2} from '../model/types.js';
 import type {CommandRunner} from './command.js';
 import type {ResolvedEnvironment, ScopedEnvironmentSpecification} from './credentials.js';
 
@@ -86,14 +86,14 @@ export interface MutableWorkspace extends ReadonlyWorkspace {
 
 export interface RuntimePreparation {
   readonly runId: string;
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly environment: ResolvedEnvironment;
   readonly requirements: RuntimeRequirements;
   readonly signal: AbortSignal;
 }
 
 export interface RuntimePreflight {
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly requirements: RuntimeRequirements;
   /** Plain variables plus opaque credential names/references/scopes; never secret values. */
   readonly environment: ScopedEnvironmentSpecification;

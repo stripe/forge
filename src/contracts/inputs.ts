@@ -1,5 +1,9 @@
+import {constants} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import {sha256Hex} from '../model/hashes.js';
+import {parseDatasetManifest} from '../model/parse.js';
+import type {DatasetManifestV1} from '../model/types.js';
 
 export interface RunInputReadOptions {
   readonly signal?: AbortSignal;
@@ -30,6 +34,8 @@ export interface RunInputProvider {
 
 export interface DirectoryRunInputProviderOptions {
   readonly maxBytes?: number;
+  /** Verified dataset inventory to enforce again when payloads are consumed. */
+  readonly manifest?: DatasetManifestV1;
 }
 
 /** A traversal- and symlink-safe provider rooted at one dataset directory. */
@@ -41,6 +47,18 @@ export async function createDirectoryRunInputProvider(
   const stat = await fs.stat(canonicalRoot);
   if (!stat.isDirectory()) throw new TypeError('Run input root must be a directory.');
   const defaultLimit = positiveLimit(options.maxBytes ?? 64 * 1024 * 1024);
+  const manifestFiles = options.manifest === undefined
+    ? undefined
+    : new Map(parseDatasetManifest(options.manifest).files.map((file) => [file.path, file]));
+
+  function assertDeclaredFile(datasetPath: string, size: number) {
+    if (manifestFiles === undefined) return undefined;
+    const file = manifestFiles.get(datasetPath);
+    if (!file || file.size !== size) {
+      throw new Error(`Dataset input does not match its manifest inventory: ${datasetPath}`);
+    }
+    return file;
+  }
 
   return {
     async inspect(datasetPath) {
@@ -52,6 +70,7 @@ export async function createDirectoryRunInputProvider(
       if (!inputStat.isFile() && !inputStat.isDirectory()) {
         throw new Error(`Dataset input is not a regular file or directory: ${datasetPath}`);
       }
+      if (inputStat.isFile()) assertDeclaredFile(datasetPath, Number(inputStat.size));
       return Object.freeze({
         path: datasetPath,
         kind: inputStat.isFile() ? 'file' : 'directory',
@@ -71,9 +90,10 @@ export async function createDirectoryRunInputProvider(
       if (inputStat.size > limit) {
         throw new Error(`Dataset input exceeds its ${limit} byte limit: ${datasetPath}`);
       }
-      const body = await fs.readFile(canonicalPath, {signal: readOptions.signal});
-      if (body.byteLength > limit) {
-        throw new Error(`Dataset input exceeds its ${limit} byte limit: ${datasetPath}`);
+      const file = assertDeclaredFile(datasetPath, Number(inputStat.size));
+      const body = await readBoundedInput(canonicalPath, limit, readOptions.signal);
+      if (file && (body.byteLength !== file.size || sha256Hex(body) !== file.sha256)) {
+        throw new Error(`Dataset input does not match its manifest size or SHA-256: ${datasetPath}`);
       }
       return body;
     },
@@ -105,6 +125,7 @@ export async function createDirectoryRunInputProvider(
           if (childStat.isDirectory()) {
             pending.push({absolute: childAbsolute, relative: childPath});
           } else if (childStat.isFile()) {
+            assertDeclaredFile(childPath, childStat.size);
             entries.push(
               Object.freeze({path: childPath, kind: 'file', size: Number(childStat.size)}),
             );
@@ -117,9 +138,46 @@ export async function createDirectoryRunInputProvider(
         }
       }
       entries.sort((left, right) => left.path.localeCompare(right.path));
+      if (manifestFiles !== undefined) {
+        const expected = [...manifestFiles.keys()].filter(
+          (filePath) => filePath.startsWith(`${datasetPath}/`),
+        );
+        if (expected.length !== entries.length) {
+          throw new Error(`Dataset input tree does not match its manifest inventory: ${datasetPath}`);
+        }
+      }
       return Object.freeze(entries);
     },
   };
+}
+
+async function readBoundedInput(
+  filePath: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const handle = await fs.open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > maxBytes) {
+      throw new Error(`Dataset input is not a regular file within its ${maxBytes} byte limit.`);
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of handle.createReadStream({
+      autoClose: false,
+      ...(signal === undefined ? {} : {signal}),
+    })) {
+      signal?.throwIfAborted();
+      size += chunk.byteLength;
+      if (size > maxBytes) throw new Error(`Dataset input exceeds its ${maxBytes} byte limit.`);
+      chunks.push(chunk);
+    }
+    signal?.throwIfAborted();
+    return Buffer.concat(chunks, size);
+  } finally {
+    await handle.close();
+  }
 }
 
 async function resolveSafeInput(

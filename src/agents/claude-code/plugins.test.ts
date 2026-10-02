@@ -14,7 +14,6 @@ import {
   createClaudePluginInstaller,
 } from './plugins.js';
 
-const CATALOG_COMMIT = 'a'.repeat(40);
 const PLUGIN_COMMIT = 'b'.repeat(40);
 const MARKETPLACE_REPOSITORY =
   'https://github.com/anthropics/claude-plugins-official.git';
@@ -76,7 +75,7 @@ describe('Claude plugin installer', () => {
     assert.equal(state.snapshot().size, 0);
   });
 
-  it('installs the native plugin in writable per-run state and records its initial contents', async () => {
+  it('verifies the native plugin in writable per-run state without unused hashes', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, {requireSafeDirectory: true});
     const prepared = createClaudePluginInstaller({
@@ -140,21 +139,11 @@ describe('Claude plugin installer', () => {
       adapter: 'claude-code',
       plugin: distribution.plugin,
       marketplace: distribution.marketplace,
-      marketplace_commit: CATALOG_COMMIT,
       native_plugin_id: nativeId,
       version: LATEST_VERSION,
-      source: {kind: 'git-subdir', commit: PLUGIN_COMMIT},
-      installed_tree: {
-        format: 'forge-plugin-tree-v1',
-        sha256: receipt.installed_tree.sha256,
-        entry_count: 2,
-        file_count: 1,
-        size_bytes: Buffer.byteLength(
-          JSON.stringify({name: 'stripe', version: LATEST_VERSION}),
-        ),
-      },
+      source: {kind: 'git-subdir'},
     });
-    assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(harness.calls.some((argv) => argv.includes('rev-parse')), false);
   });
 
   it('reuses the registered marketplace across repeated plugin setup', async () => {
@@ -283,7 +272,7 @@ describe('Claude plugin installer', () => {
         receipt.source,
         typeof candidate.source === 'string'
           ? {kind: 'marketplace-path'}
-          : {kind: 'archive', sha256: `sha256:${'c'.repeat(64)}`},
+          : {kind: 'archive'},
       );
     }
   });
@@ -302,6 +291,30 @@ describe('Claude plugin installer', () => {
     await installerPreflight().install(installContext(state, harness.commands));
 
     assert.ok(state.snapshot().has('installed_plugins.json'));
+  });
+
+  it('rejects a native commit which differs from the catalog source assertion', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, {installedCommit: 'c'.repeat(40)});
+    await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
+      /does not match the marketplace commit/);
+  });
+
+  it('rejects a missing native commit when the catalog supplies an assertion', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, {installedCommit: null});
+    await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
+      /does not match the marketplace commit/);
+  });
+
+  it('accepts an unpinned Git source without requiring observed commit metadata', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, {
+      catalogSource: {source: 'github', repo: 'example/plugin', ref: 'main'},
+      installedCommit: null,
+    });
+    const receipt = await installerPreflight().install(installContext(state, harness.commands));
+    assert.deepEqual(receipt.source, {kind: 'github'});
   });
 
   it('accepts the version currently resolved by the marketplace', async () => {
@@ -396,6 +409,7 @@ function nativeCommandHarness(
   options: {
     readonly catalogSource?: unknown;
     readonly installedVersion?: string;
+    readonly installedCommit?: string | null;
     readonly extraPlugin?: boolean;
     readonly origin?: string;
     readonly requireSafeDirectory?: boolean;
@@ -430,11 +444,8 @@ function nativeCommandHarness(
         const git = command.slice(gitIndex + 1);
         const root = git.includes('-C') ? git[git.indexOf('-C') + 1] : undefined;
         assert.equal(root, `${pluginStatePath}/marketplaces/claude-plugins-official`);
-        if (git.includes('rev-parse')) {
-          if (options.requireSafeDirectory && !git.includes(`safe.directory=${root}`)) {
-            return {...result(), exitCode: 128, stderr: 'fatal: detected dubious ownership'};
-          }
-          return result(CATALOG_COMMIT);
+        if (options.requireSafeDirectory && !git.includes(`safe.directory=${root}`)) {
+          return {...result(), exitCode: 128, stderr: 'fatal: detected dubious ownership'};
         }
         if (git.includes('get-url')) return result(options.origin ?? MARKETPLACE_REPOSITORY);
         if (git.includes('show')) return result(catalog);
@@ -476,7 +487,9 @@ function nativeCommandHarness(
           Buffer.from(JSON.stringify({name: plugin, version})),
         );
         const plugins = readInstalledState(state);
-        const commit = plugin === 'stripe' ? catalogSourceCommit(catalogSource) : undefined;
+        const commit = options.installedCommit === null
+          ? undefined
+          : options.installedCommit ?? (plugin === 'stripe' ? catalogSourceCommit(catalogSource) : undefined);
         plugins[nativePluginId] = [{
           scope: 'user',
           installPath,

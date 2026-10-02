@@ -8,8 +8,7 @@ import type {
   AgentSelectionV1,
   JsonObject,
   PluginSelectionV1,
-  ResolvedRunPlanV1,
-  Sha256Digest,
+  ResolvedRunPlanV2,
 } from '../model/types.js';
 
 export type AgentPluginSourceKind =
@@ -24,27 +23,17 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
   readonly adapter: string;
   readonly plugin: string;
   readonly marketplace: string;
-  readonly marketplace_commit: string;
   readonly native_plugin_id: string;
   readonly version: string;
   readonly source: JsonObject & {
     readonly kind: AgentPluginSourceKind;
-    readonly commit?: string;
-    readonly sha256?: Sha256Digest;
-  };
-  readonly installed_tree: JsonObject & {
-    readonly format: 'forge-plugin-tree-v1';
-    readonly sha256: Sha256Digest;
-    readonly entry_count: number;
-    readonly file_count: number;
-    readonly size_bytes: number;
   };
 }
 
 /** Ambient-free context for binding one portable plugin to an agent adapter. */
 export interface AgentPluginPreflightContext {
   readonly selection: AgentSelectionV1;
-  readonly runtime: ResolvedRunPlanV1['runtime'];
+  readonly runtime: ResolvedRunPlanV2['runtime'];
 }
 
 /** Narrow authority supplied to one already-preflighted native installation. */

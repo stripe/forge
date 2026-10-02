@@ -50,6 +50,8 @@ truth for feature details; do not duplicate their full specifications here.
 - Treat credentials as scoped capabilities. Keep secret values out of authored
   inputs, plans, events, errors, transcripts, and ordinary artifacts; never
   copy the ambient host environment wholesale into a runtime.
+- Calculate a content digest only for an expected-content comparison, artifact
+  verification, or a specific identity consumer; do not emit unused fingerprints.
 - Keep result serialization deterministic, bounded, verifiable, and atomically
   committed. Cleanup, observation, and publication must not alter scoring
   semantics.

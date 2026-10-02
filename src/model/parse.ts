@@ -22,6 +22,7 @@ import {
 } from '../setup/registry.js';
 import {
   BENCHMARK_SCHEMA_VERSION,
+  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
   DEFAULT_DOCKER_PROCESS_COUNT,
@@ -32,7 +33,7 @@ import {
   type EvalCaseV1,
   type JsonObject,
   type JsonValue,
-  type ResolvedRunPlanV1,
+  type ResolvedRunPlanV2,
   type RunSelection,
   type SetupStepV1,
 } from './types.js';
@@ -524,7 +525,7 @@ const ResolvedRuntimeSchema = z.union([
 
 const ResolvedRunPlanSchema = z
   .object({
-    schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
+    schema_version: z.literal(RESOLVED_RUN_PLAN_SCHEMA_VERSION),
     selection: RunSelectionSchema,
     provenance: z
       .object({
@@ -537,18 +538,12 @@ const ResolvedRunPlanSchema = z
           .object({
             id: CaseIdSchema,
             version: VersionSchema,
-            sha256: z
-              .string()
-              .refine(isSha256Digest, 'must be a sha256: digest'),
           })
           .strict(),
         case: z
           .object({
             id: CaseIdSchema,
             path: DatasetPathSchema,
-            sha256: z
-              .string()
-              .refine(isSha256Digest, 'must be a sha256: digest'),
           })
           .strict(),
         forge: ForgeProvenanceSchema,
@@ -898,7 +893,7 @@ export function parseRunSelection(value: unknown): RunSelection {
  * treatment, and agent. Callers therefore cannot change score-affecting input
  * by editing only one copy inside a serialized plan.
  */
-export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1 {
+export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV2 {
   return parseResolvedRunPlanWithSetupActions(
     value,
     defaultSetupActionRegistry,
@@ -909,13 +904,13 @@ export function parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1 {
 export function parseResolvedRunPlanWithSetupActions(
   value: unknown,
   setupActions: SetupActionRegistry,
-): ResolvedRunPlanV1 {
+): ResolvedRunPlanV2 {
   const parsed = parseWithSchema(
     ResolvedRunPlanSchema,
     value,
     'invalid_plan',
     'resolved run plan',
-  ) as ResolvedRunPlanV1;
+  ) as ResolvedRunPlanV2;
   const caseSetup = normalizeSetupSteps(
     parsed.case.setup,
     setupActions,
@@ -930,7 +925,7 @@ export function parseResolvedRunPlanWithSetupActions(
     'invalid_plan',
     'resolved treatment setup step',
   );
-  const normalized: ResolvedRunPlanV1 = {
+  const normalized: ResolvedRunPlanV2 = {
     ...parsed,
     case: {
       ...parsed.case,
@@ -947,7 +942,7 @@ export function parseResolvedRunPlanWithSetupActions(
     normalized,
     'invalid_plan',
     'resolved run plan',
-  ) as ResolvedRunPlanV1;
+  ) as ResolvedRunPlanV2;
   try {
     setupActions.assertExactReferences(
       rechecked.setup,

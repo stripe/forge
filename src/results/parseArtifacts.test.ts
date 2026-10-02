@@ -22,7 +22,7 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 describe('canonical interaction and judge evidence parsing', () => {
   it('strictly parses ordered setup resolutions', () => {
     const artifact = {
-      schema_version: 1,
+      schema_version: 2,
       steps: [
         {index: 0, uses: 'forge/write'},
         {
@@ -40,6 +40,7 @@ describe('canonical interaction and judge evidence parsing', () => {
       }),
     );
     assert.throws(() => parseSetupArtifact({...artifact, unknown: true}));
+    assert.throws(() => parseSetupArtifact({...artifact, schema_version: 1}));
   });
 
   it('strictly parses one-shot and multi-turn interaction audits', () => {

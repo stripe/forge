@@ -359,28 +359,32 @@ size, and digest of every accompanying file. Forge quiesces the runtime, stages
 the artifacts, disposes the runtime, then uses a directory rename as the atomic
 completion boundary. Use
 `verifyCompletedRun(location)` to re-read and verify a committed result. Result
-schema version 1 records the evidence source and adapter provenance.
+schema version 2 records the evidence source and adapter provenance. Generated
+plans, setup receipts, and deterministic workspace evidence also use schema
+version 2; authored cases, dataset manifests, and experiments use version 1.
+The `plan.json` artifact descriptor is the stored plan checksum.
 
 `plan.json` is the exact resolved execution plan. `setup.json` is the ordered
 audit of applied setup actions. Static actions repeat only their plan index and
 namespaced `uses` ID; actions which resolve mutable inputs add a bounded
 non-sensitive resolution. For `forge/plugin`, that resolution records the
-marketplace commit, native plugin ID, resolved version and source identity, and
-a digest of the installed plugin tree. `trajectory.json` is the full
-selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
+selected marketplace and plugin IDs, native plugin ID, installed version, and
+source kind. `trajectory.json` is the full selected, normalized, redacted ATIF
+audit trajectory. `interaction.json` is a
 post-run driver audit record, not an execution input: it contains the public
 agent turns, stop reason, and, for multi-turn runs, Ava's private need model and
 decision history. It is not supplied to the guideline judge.
 
 This plan/receipt split is deliberate. The plan captures declared semantics;
 the setup receipt captures material facts that become known only while setup is
-running, such as selected versions, commits, artifact identities, and content
-digests. A receipt makes a changing dependency explainable and comparable
-across runs, but does not make the external dependency replayable. Credentials,
-private host paths, and unrelated ambient state do not belong in either file.
+running, such as the installed plugin version. Receipts describe the validated
+installation and its selected source kind; they do not attest to exact plugin
+bytes or make an external dependency replayable. Credentials, private host
+paths, and unrelated ambient state do not belong in either file.
 
-`workspace-evidence.json` contains bounded evidence for the paths inspected by
-configured deterministic file checks; it is not a workspace snapshot.
+`workspace-evidence.json` contains bounded evidence and exact base64-encoded
+bytes for the paths inspected by configured deterministic file checks. Its
+artifact checksum covers the whole file; entries do not carry separate digests.
 `judge-evidence.json` exists only when judging ran. Schema version 1 records the
 judge prompt version, positive transcript-projection policy, and the exact
 reduced, redacted steps supplied to the judge at `transcript.steps`, alongside
@@ -870,13 +874,21 @@ const completed = await executeEval({
     credentialResolver: createEnvironmentCredentialResolver({
       bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
     }),
-    inputProvider: await createDirectoryRunInputProvider(dataset.root),
+    inputProvider: await createDirectoryRunInputProvider(dataset.root, {
+      manifest: dataset.manifest,
+    }),
     artifactStore: createArtifactStore({root: './results'}),
   },
 });
 
 console.log(completed.location);
 ```
+
+Pass the loaded manifest to the directory input provider to check the exact
+bytes returned to setup against their declared sizes and hashes and enforce
+the declared directory inventory. The public CLI enables these checks
+automatically. A root-only provider supplies path-safe access without content
+pinning.
 
 When a programmatic host loads an experiment with `platform: native`, it must
 materialize the Docker server platform before resolving the plan. The public
@@ -1149,7 +1161,7 @@ Forge persists the canonical agent trajectory as a standalone
   such as an invalid timestamp remains an explicit partial-evidence warning.
   Unsupported-record fallback diagnostics identify a safe record category and
   line number, never native payload values.
-- Result schema v1 records the normalization source kind, native format, source
+- Result schema v2 records the normalization source kind, native format, source
   session, and adapter identity for every completed agent interaction. Forge
   rejects adapter evidence which omits or contradicts the selected session.
 - `verifyCompletedRun` independently parses `trajectory.json` and applies the
@@ -1251,7 +1263,8 @@ CLI cannot execute an external descriptor on its own. Wrappers using `runCli`
 receive the selected descriptor in the factory's `options.runtime` field and
 explicitly choose their implementation.
 
-The complete descriptor participates in the resolved plan digest. Verification
+The complete descriptor participates in the canonical `plan.json` artifact
+checksum. Verification
 binds runtime identity and platform to the plan without loading the private
 adapter. Offline verification checks the recorded artifacts and descriptor,
 not the private adapter's configuration semantics or actual isolation
@@ -1261,9 +1274,10 @@ Keep declared behavior, constraints, and policies, such as resources and
 network policy, in the resolved configuration. Pin an immutable tool build
 there when that exact build is part of the intended experiment. When setup
 intentionally resolves changing external state, retain its actual non-sensitive
-identity, version, and digest in `setup.json` instead of treating it as though
-the plan pinned it. Keep credentials and infrastructure clients in the
-composition. An adapter may record actual build and deployment identity in
+identity and version in `setup.json` instead of treating it as though the plan
+pinned it. Compute a content digest only when an expected-content check or a
+specific identity consumer uses it. Keep credentials and infrastructure clients
+in the composition. An adapter may record actual build and deployment identity in
 sealed runtime metadata. A worker deployment is distinct from its
 command-execution mechanism; hosts can reuse an adapter when moving a worker
 without changing that mechanism.
@@ -1437,6 +1451,8 @@ identity or content digest.
 
 - Datasets are exact-manifest, hash-verified trees. Forge rejects symbolic
   links, special files, traversal, undeclared payloads, and unsafe roots.
+  Manifest-backed input providers recheck each returned file buffer and
+  directory inventory before setup consumes them.
 - The Docker build context contains only Forge's packaged Dockerfile and
   entrypoint. The Node base image is pinned by OCI digest; Claude Code is
   installed at exact version `2.1.273` and Codex at `0.149.0`.

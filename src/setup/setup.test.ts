@@ -156,17 +156,9 @@ describe('portable setup actions', () => {
               adapter: context.selection.adapter,
               plugin: distribution.plugin,
               marketplace: distribution.marketplace,
-              marketplace_commit: 'a'.repeat(40),
               native_plugin_id: 'formatter@forge-test',
               version: '1.0.0',
               source: {kind: 'marketplace-path'},
-              installed_tree: {
-                format: 'forge-plugin-tree-v1',
-                sha256: `sha256:${'b'.repeat(64)}`,
-                entry_count: 1,
-                file_count: 1,
-                size_bytes: 1,
-              },
             };
           },
         };
@@ -226,17 +218,9 @@ describe('portable setup actions', () => {
           adapter: 'test-agent',
           plugin: 'formatter@example-marketplace',
           marketplace: 'example/marketplace',
-          marketplace_commit: 'a'.repeat(40),
           native_plugin_id: 'formatter@forge-test',
           version: '1.0.0',
           source: {kind: 'marketplace-path'},
-          installed_tree: {
-            format: 'forge-plugin-tree-v1',
-            sha256: `sha256:${'b'.repeat(64)}`,
-            entry_count: 1,
-            file_count: 1,
-            size_bytes: 1,
-          },
         },
       },
     ]);

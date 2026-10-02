@@ -1,5 +1,7 @@
-/** Wire schema version shared by Forge's initial benchmark artifacts. */
+/** Wire schema version for authored benchmark inputs. */
 export const BENCHMARK_SCHEMA_VERSION = 1 as const;
+/** Wire schema version for complete generated run plans. */
+export const RESOLVED_RUN_PLAN_SCHEMA_VERSION = 2 as const;
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -210,7 +212,6 @@ export interface ExperimentConfigV1 {
 export interface LoadedEvalCaseV1 {
   definition: EvalCaseV1;
   path: string;
-  sha256: Sha256Digest;
 }
 
 export interface LoadedDatasetV1 {
@@ -226,7 +227,6 @@ export interface LoadedExperimentConfigV1 {
   path: string;
   root: string;
   raw: string;
-  sha256: Sha256Digest;
   config: ExperimentConfigV1;
 }
 
@@ -242,20 +242,18 @@ export type InitialPromptSourceV1 =
   | 'case.task'
   | 'case.initial_prompt';
 
-export interface ResolvedRunPlanV1 {
-  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
+export interface ResolvedRunPlanV2 {
+  schema_version: typeof RESOLVED_RUN_PLAN_SCHEMA_VERSION;
   selection: RunSelection;
   provenance: {
     dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
     experiment: {
       id: string;
       version: string;
-      sha256: Sha256Digest;
     };
     case: {
       id: CaseId;
       path: DatasetRelativePath;
-      sha256: Sha256Digest;
     };
     forge: {
       version: string;

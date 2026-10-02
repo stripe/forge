@@ -2,15 +2,14 @@ import {runInNewContext} from 'node:vm';
 
 import type {AtifTrajectoryV1_8} from '../atif/index.js';
 import type {ReadonlyWorkspace} from '../contracts/runtime.js';
-import {sha256Digest} from '../model/hashes.js';
-import type {ChecksV1, ResolvedRunPlanV1} from '../model/types.js';
+import type {ChecksV1, ResolvedRunPlanV2} from '../model/types.js';
 import {
   WORKSPACE_EVIDENCE_SCHEMA_VERSION,
   type CheckResultV1,
   type EvaluationResultV1,
   type GuidelineResultV1,
-  type WorkspaceEvidenceEntryV1,
-  type WorkspaceEvidenceV1,
+  type WorkspaceEvidenceEntryV2,
+  type WorkspaceEvidenceV2,
 } from '../results/index.js';
 import {scoreEvaluation} from './score.js';
 
@@ -19,7 +18,7 @@ const MAX_REGEX_BYTES = 1_024;
 const MAX_REGEX_EXECUTION_MS = 100;
 
 export interface EvaluateRunEvidenceInput {
-  readonly plan: ResolvedRunPlanV1;
+  readonly plan: ResolvedRunPlanV2;
   readonly trajectory: AtifTrajectoryV1_8;
   readonly workspace: ReadonlyWorkspace;
   /** Results produced by the configured judge for the plan's exact guidelines. */
@@ -29,7 +28,7 @@ export interface EvaluateRunEvidenceInput {
 
 export interface EvaluatedRunEvidence {
   readonly evaluation: EvaluationResultV1;
-  readonly workspaceEvidence: WorkspaceEvidenceV1;
+  readonly workspaceEvidence: WorkspaceEvidenceV2;
 }
 
 /** Evaluate canonical ATIF and sealed-workspace evidence. */
@@ -78,12 +77,12 @@ export async function collectWorkspaceEvidence(
   workspace: ReadonlyWorkspace,
   checks: ChecksV1 | undefined,
   signal?: AbortSignal,
-): Promise<WorkspaceEvidenceV1> {
+): Promise<WorkspaceEvidenceV2> {
   const requestedPaths = new Set<string>([
     ...(checks?.files_created ?? []),
     ...(checks?.file_checks ?? []).map(({file}) => file),
   ]);
-  const entries: WorkspaceEvidenceEntryV1[] = [];
+  const entries: WorkspaceEvidenceEntryV2[] = [];
   const warnings: Array<{code: string; message: string; path?: string}> = [];
   let complete = true;
 
@@ -116,7 +115,6 @@ export async function collectWorkspaceEvidence(
         exists: true,
         kind: 'file',
         size_bytes: body.byteLength,
-        sha256: sha256Digest(body),
         content_base64: Buffer.from(body).toString('base64'),
       });
     } catch (error) {
@@ -142,7 +140,7 @@ export async function collectWorkspaceEvidence(
 
 export function runWorkspaceChecks(
   checks: ChecksV1 | undefined,
-  evidence: WorkspaceEvidenceV1,
+  evidence: WorkspaceEvidenceV2,
 ): CheckResultV1[] {
   if (!checks) return [];
   const byPath = new Map(evidence.entries.map((entry) => [entry.path, entry]));
@@ -197,7 +195,7 @@ export class UnsupportedEvaluationCapabilityError extends Error {
 }
 
 function evaluateContains(
-  entry: WorkspaceEvidenceEntryV1 | undefined,
+  entry: WorkspaceEvidenceEntryV2 | undefined,
   pattern: string,
 ): {passed: boolean; detail?: string} {
   if (!entry || entry.kind !== 'file' || entry.content_base64 === undefined) {

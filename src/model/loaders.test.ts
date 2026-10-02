@@ -7,6 +7,7 @@ import {expect} from '../../test/support/expect.js';
 
 import {sha256Digest, sha256Hex} from './hashes.js';
 import {loadDataset, loadExperimentConfig} from './loaders.js';
+import {expandExperiment, resolveRunPlan, serializeResolvedRunPlan} from '../planning/planner.js';
 
 const temporaryRoots: string[] = [];
 
@@ -25,9 +26,7 @@ describe('benchmark filesystem loaders', () => {
     expect(loaded.cases.get('smoke/write')?.definition.task).toBe(
       'Create greeting.txt',
     );
-    expect(loaded.cases.get('smoke/write')?.sha256).toBe(
-      sha256Digest(fixture.caseYaml),
-    );
+    expect('sha256' in loaded.cases.get('smoke/write')!).toBe(false);
   });
 
   it('fails closed for tampered, extra, and symlinked payloads', async () => {
@@ -50,15 +49,50 @@ describe('benchmark filesystem loaders', () => {
     });
   });
 
-  it('loads an experiment config with an exact source digest', async () => {
+  it('loads an experiment config without an unused source digest', async () => {
     const root = await temporaryDirectory();
     const experimentPath = path.join(root, 'default.yaml');
     const raw = experimentConfigYaml('a'.repeat(64));
     await fs.writeFile(experimentPath, raw);
 
     const loaded = await loadExperimentConfig(experimentPath);
-    expect(loaded.sha256).toBe(sha256Digest(raw));
+    expect(loaded.raw).toBe(raw);
+    expect('sha256' in loaded).toBe(false);
     expect(loaded.config.id).toBe('forge-smoke');
+  });
+
+  it('resolves the same selected plan after a comment-only experiment edit', async () => {
+    const fixture = await createDataset();
+    const dataset = await loadDataset(fixture.root);
+    const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
+    await fs.writeFile(experimentPath, experimentConfigYaml(dataset.manifestSha256.slice(7)));
+    const original = await loadExperimentConfig(experimentPath);
+    await fs.appendFile(experimentPath, '\n# Clarify the experiment without changing it.\n');
+    const edited = await loadExperimentConfig(experimentPath);
+    const selection = expandExperiment(original)[0]!;
+    expect(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: edited, selection})))
+      .toBe(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: original, selection})));
+  });
+
+  it('rejects malformed UTF-8 instead of replacing bytes before parsing', async () => {
+    const fixture = await createDataset();
+    await fs.writeFile(path.join(fixture.root, 'manifest.json'), Buffer.concat([
+      Buffer.from(fixture.manifestRaw), Buffer.from([0x80]),
+    ]));
+    await expect(loadDataset(fixture.root)).rejects.toMatchObject({
+      code: 'invalid_manifest', message: expect.stringContaining('valid UTF-8'),
+    });
+
+    const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
+    for (const invalidByte of [0x80, 0x81]) {
+      await fs.writeFile(experimentPath, Buffer.concat([
+        Buffer.from(`${experimentConfigYaml('a'.repeat(64))}\n# `),
+        Buffer.from([invalidByte]), Buffer.from('\n'),
+      ]));
+      await expect(loadExperimentConfig(experimentPath)).rejects.toMatchObject({
+        code: 'invalid_yaml', message: expect.stringContaining('valid UTF-8'),
+      });
+    }
   });
 });
 
@@ -74,6 +108,7 @@ async function createDataset(): Promise<{
   const caseYaml = `
 schema_version: 1
 id: smoke/write
+execution_mode: one_shot
 task: Create greeting.txt
 setup:
   - uses: forge/write

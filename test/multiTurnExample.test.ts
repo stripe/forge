@@ -56,7 +56,10 @@ describe('checked-in multi-turn example', () => {
       experiment,
       selection: selections[0]!,
     });
-    assert.equal(plan.provenance.case.sha256, CASE_SHA256);
+    assert.deepEqual(plan.provenance.case, {
+      id: 'examples/release-summary',
+      path: 'cases/examples/release-summary.yaml',
+    });
     assert.deepEqual(plan.role_player, {
       provider: 'anthropic',
       model: 'claude-sonnet-4-6',

@@ -40,6 +40,25 @@ describe('Forge CLI', () => {
     expect(stdout).toBe(`${FORGE_VERSION}\n`);
   });
 
+  it('checks default-composition input bytes against the manifest loaded for the run', async () => {
+    const fixture = await createBenchmarkFixture();
+    const exitCode = await runCli([
+      'run', '--experiment', fixture.experimentPath, '--dataset', fixture.datasetRoot,
+    ], {
+      environment: {},
+      stdout: () => undefined,
+      execute: async ({runId, composition}) => {
+        const original = await fs.readFile(fixture.caseFilePath, 'utf8');
+        await fs.writeFile(fixture.caseFilePath, original.replace('Do the thing', 'Do bad thing'));
+        await expect(composition.inputProvider.read('cases/example.yaml')).rejects.toThrow(/SHA-256/);
+        await fs.writeFile(path.join(fixture.datasetRoot, 'cases/extra.yaml'), 'extra');
+        await expect(composition.inputProvider.listFiles('cases')).rejects.toThrow(/manifest inventory/);
+        return {runId, location: '/results/verified-input', result: {status: 'passed'} as never};
+      },
+    });
+    expect(exitCode).toBe(0);
+  });
+
   it('supplies the selected external runtime to the host factory for validation and execution', async () => {
     const fixture = await createBenchmarkFixture();
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
@@ -59,6 +78,7 @@ describe('Forge CLI', () => {
         compositionFactory: async (options) => {
           factoryCalls += 1;
           expect(options.runtime).toEqual(descriptor);
+          expect(options.datasetManifest?.dataset.id).toBe('example-dataset');
           return {
             runtime: runtime.adapter,
             agents: new Map([[agent.adapter.id, agent.adapter]]),
@@ -314,7 +334,7 @@ describe('Forge CLI', () => {
     expect(exitCode).toBe(0);
     expect(stdout.endsWith('\n')).toBe(true);
     expect(JSON.parse(stdout)).toMatchObject({
-      schema_version: 1,
+      schema_version: 2,
       selection: {
         case_id: 'case/example',
         treatment: 'baseline',

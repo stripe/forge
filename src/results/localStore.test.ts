@@ -9,11 +9,8 @@ import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
-import type {ResolvedRunPlanV1} from '../model/types.js';
-import {
-  resolvedRunPlanSha256,
-  serializeResolvedRunPlan,
-} from '../planning/index.js';
+import type {ResolvedRunPlanV2} from '../model/types.js';
+import {serializeResolvedRunPlan} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {createTestResolvedRunPlan} from '../testing/plans.js';
 import {createArtifactStore, verifyCompletedRun} from './localStore.js';
@@ -24,7 +21,7 @@ import {
   type ArtifactDescriptorV1,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
-  type RunResultV1,
+  type RunResultV2,
 } from './types.js';
 
 const roots: string[] = [];
@@ -223,7 +220,90 @@ describe('local artifact store', () => {
     ).rejects.toThrow('Duplicate claimed artifact');
   });
 
-  it('rejects result schema v1 evidence without provenance', () => {
+  it('independently checks claimed digests against staged artifact inputs', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
+    roots.push(root);
+    const transaction = await createArtifactStore({root}).begin('run-1');
+    await transaction.write({
+      path: 'plan.json',
+      body: testPlanBody,
+      mediaType: 'application/json',
+    });
+    const descriptor = {
+      ...descriptorFor('plan.json', testPlanBody),
+      sha256: `sha256:${'f'.repeat(64)}` as const,
+    };
+    await expect(transaction.commit(resultFor([descriptor]) as unknown as Record<string, unknown>))
+      .rejects.toThrow('Result descriptor mismatch: plan.json');
+  });
+
+  it('checks plan artifact bytes and canonicalization without a duplicate plan digest', async () => {
+    const canonical = [
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+    ];
+    const location = await commitArtifacts(canonical);
+    await expect(verifyCompletedRun(location)).resolves.toMatchObject({runId: 'run-1'});
+    const alteredPlan = testPlanBody.toString('utf8').replace(
+      '"effective_prompt":"do it"',
+      '"effective_prompt":"go it"',
+    );
+    expect(Buffer.byteLength(alteredPlan)).toBe(testPlanBody.byteLength);
+    expect(alteredPlan).not.toBe(testPlanBody.toString('utf8'));
+    await fs.writeFile(path.join(location, 'plan.json'), alteredPlan);
+    await expect(verifyCompletedRun(location)).rejects.toThrow(
+      'Artifact does not match its descriptor: plan.json',
+    );
+
+    const noncanonical = await commitArtifacts([
+      ...canonical,
+      {path: 'plan.json', body: Buffer.from(JSON.stringify(testPlan, null, 2))},
+    ]);
+    await expect(verifyCompletedRun(noncanonical)).rejects.toThrow(
+      'Completed plan.json is not canonical.',
+    );
+  });
+
+  it('verifies workspace evidence v2 and rejects legacy entry digests', async () => {
+    const canonical = [
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+    ];
+    const entry = {
+      path: 'answer.txt',
+      exists: true,
+      kind: 'file',
+      size_bytes: 4,
+      content_base64: Buffer.from('done').toString('base64'),
+    };
+    const workspace = {schema_version: 2, entries: [entry], complete: true, warnings: []};
+    const valid = await commitArtifacts([
+      ...canonical,
+      {path: 'workspace-evidence.json', body: jsonBody(workspace)},
+    ], withPassingWorkspaceCheck);
+    await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
+    for (const invalidWorkspace of [
+      {...workspace, schema_version: 1},
+      {...workspace, entries: [{...entry, sha256: `sha256:${'a'.repeat(64)}`}]},
+    ]) {
+      const invalid = await commitArtifacts([
+        ...canonical,
+        {path: 'workspace-evidence.json', body: jsonBody(invalidWorkspace)},
+      ], withPassingWorkspaceCheck);
+      await expect(verifyCompletedRun(invalid)).rejects.toThrow(
+        'Completed workspace-evidence.json does not match its schema.',
+      );
+    }
+    await fs.writeFile(path.join(valid, 'workspace-evidence.json'), jsonBody({
+      ...workspace,
+      entries: [{...entry, content_base64: Buffer.from('fail').toString('base64')}],
+    }));
+    await expect(verifyCompletedRun(valid)).rejects.toThrow(
+      'Artifact does not match its descriptor: workspace-evidence.json',
+    );
+  });
+
+  it('rejects result evidence without provenance', () => {
     const result = resultFor([]);
     const evidenceWithoutProvenance: Record<string, unknown> = {
       ...result.evidence,
@@ -236,7 +316,16 @@ describe('local artifact store', () => {
   });
 
   it('rejects unsupported result schema versions', () => {
-    expect(() => parseRunResult({...resultFor([]), schema_version: 2})).toThrow();
+    for (const schema_version of [1, 3]) {
+      expect(() => parseRunResult({...resultFor([]), schema_version})).toThrow();
+    }
+  });
+
+  it('rejects the removed duplicate plan digest', () => {
+    expect(() => parseRunResult({
+      ...resultFor([]),
+      plan_sha256: `sha256:${'a'.repeat(64)}`,
+    })).toThrow();
   });
 
   it('rejects the removed runtime version field', () => {
@@ -295,7 +384,7 @@ describe('local artifact store', () => {
     ).toThrow();
   });
 
-  it('rejects contradictory result-schema-v1 evidence provenance', () => {
+  it('rejects contradictory result-schema-v2 evidence provenance', () => {
     const result = resultFor([]);
     expect(() =>
       parseRunResult({
@@ -392,17 +481,9 @@ describe('local artifact store', () => {
       adapter: 'claude-code',
       plugin: 'stripe@claude-plugins-official',
       marketplace: 'anthropics/claude-plugins-official',
-      marketplace_commit: 'a'.repeat(40),
       native_plugin_id: 'stripe@forge-test',
       version: '0.9.2',
-      source: {kind: 'git-subdir', commit: 'b'.repeat(40)},
-      installed_tree: {
-        format: 'forge-plugin-tree-v1',
-        sha256: `sha256:${'c'.repeat(64)}`,
-        entry_count: 2,
-        file_count: 1,
-        size_bytes: 42,
-      },
+      source: {kind: 'git-subdir'},
     } as const;
     const core = [
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
@@ -410,7 +491,7 @@ describe('local artifact store', () => {
     ];
     const setup = (resolution: unknown) =>
       jsonBody({
-        schema_version: 1,
+        schema_version: 2,
         steps: [{index: 0, uses: 'forge/plugin', resolution}],
       });
 
@@ -426,7 +507,7 @@ describe('local artifact store', () => {
         ...core,
         {
           path: 'setup.json',
-          body: setup({...receipt, marketplace_commit: 'not-a-commit'}),
+          body: setup({...receipt, installed_tree: {sha256: `sha256:${'a'.repeat(64)}`}}),
         },
       ],
       (result) => result,
@@ -1033,7 +1114,7 @@ function codexEvidenceArtifacts(steps: readonly AtifStep[]): TestArtifact[] {
 async function commitCodexEvidence(
   interaction: InteractionArtifactV1,
   steps: readonly AtifStep[],
-  transform: (result: RunResultV1) => RunResultV1 = (result) => result,
+  transform: (result: RunResultV2) => RunResultV2 = (result) => result,
 ): Promise<string> {
   const plan = createTestResolvedRunPlan({
     caseId: 'sample/case',
@@ -1079,11 +1160,11 @@ async function rebindCodexEvidence(
 
 async function commitArtifacts(
   artifacts: readonly TestArtifact[],
-  transform: (result: RunResultV1) => RunResultV1 = (result) => result,
+  transform: (result: RunResultV2) => RunResultV2 = (result) => result,
   options: {
     readonly includePlan?: boolean;
     readonly includeSetup?: boolean;
-    readonly plan?: ResolvedRunPlanV1;
+    readonly plan?: ResolvedRunPlanV2;
   } = {},
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
@@ -1117,7 +1198,7 @@ async function commitArtifacts(
   return committed.location;
 }
 
-function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
+function testPlanForResult(result: RunResultV2): ResolvedRunPlanV2 {
   const multiTurn = result.interaction.mode === 'multi_turn';
   const guidelines = result.evaluation.guidelines.map(({guideline}) => guideline);
   const hasChecks = result.evaluation.checks.length > 0;
@@ -1201,17 +1282,17 @@ function judgeEvidenceBody(): Buffer {
 }
 
 function emptyWorkspaceEvidenceBody(): Buffer {
-  return jsonBody({schema_version: 1, entries: [], complete: true, warnings: []});
+  return jsonBody({schema_version: 2, entries: [], complete: true, warnings: []});
 }
 
-function emptySetupBody(plan: ResolvedRunPlanV1): Buffer {
+function emptySetupBody(plan: ResolvedRunPlanV2): Buffer {
   return jsonBody({
-    schema_version: 1,
+    schema_version: 2,
     steps: plan.setup.map((step, index) => ({index, uses: step.uses})),
   });
 }
 
-function withPassingGuideline(result: RunResultV1): RunResultV1 {
+function withPassingGuideline(result: RunResultV2): RunResultV2 {
   return {
     ...result,
     evaluation: {
@@ -1224,7 +1305,7 @@ function withPassingGuideline(result: RunResultV1): RunResultV1 {
   };
 }
 
-function withPassingWorkspaceCheck(result: RunResultV1): RunResultV1 {
+function withPassingWorkspaceCheck(result: RunResultV2): RunResultV2 {
   return {
     ...result,
     evaluation: {
@@ -1234,14 +1315,14 @@ function withPassingWorkspaceCheck(result: RunResultV1): RunResultV1 {
   };
 }
 
-function withMultiTurnSummary(result: RunResultV1): RunResultV1 {
+function withMultiTurnSummary(result: RunResultV2): RunResultV2 {
   return {
     ...result,
     interaction: {mode: 'multi_turn', turn_count: 2},
   };
 }
 
-function withZeroTurnRolePlayerFailure(result: RunResultV1): RunResultV1 {
+function withZeroTurnRolePlayerFailure(result: RunResultV2): RunResultV2 {
   return {
     ...result,
     agent: {...result.agent, session_id: null},
@@ -1277,13 +1358,12 @@ function withZeroTurnRolePlayerFailure(result: RunResultV1): RunResultV1 {
 
 function resultFor(
   artifacts: ArtifactDescriptorV1[],
-  plan: ResolvedRunPlanV1 = testPlan,
-): RunResultV1 {
+  plan: ResolvedRunPlanV2 = testPlan,
+): RunResultV2 {
   return {
     schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: 'run-1',
     selection: plan.selection,
-    plan_sha256: resolvedRunPlanSha256(plan),
     forge: {version: plan.provenance.forge.version},
     runtime: {
       adapter: 'forge/docker',

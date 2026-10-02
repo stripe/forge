@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {BenchmarkModelError} from './errors.js';
-import {prefixedSha256, sha256Digest} from './hashes.js';
+import {sha256Digest, sha256Hex} from './hashes.js';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
@@ -40,13 +40,14 @@ export async function loadDatasetWithSetupActions(
 ): Promise<LoadedDatasetV1> {
   const root = await resolveRealDirectory(datasetRoot, 'Dataset root');
   const manifestPath = path.join(root, 'manifest.json');
-  const manifestRaw = await readBoundedRegularFile(
+  const manifestBytes = await readBoundedRegularFile(
     manifestPath,
     MAX_DATASET_MANIFEST_BYTES,
     'Dataset manifest',
   );
+  const manifestSha256 = sha256Digest(manifestBytes);
+  const manifestRaw = decodeDocument(manifestBytes, 'Dataset manifest');
   const manifest = parseDatasetManifestJson(manifestRaw);
-  const manifestSha256 = sha256Digest(manifestRaw);
 
   if (manifest.files.some(({path: filePath}) => filePath === 'manifest.json')) {
     throw integrityError('manifest.json must not list or hash itself.');
@@ -69,6 +70,7 @@ export async function loadDatasetWithSetupActions(
 
   let totalBytes = 0;
   const absoluteFiles = new Map<string, string>();
+  const casePaths = new Set(manifest.cases.map(({path: casePath}) => casePath));
   for (const file of manifest.files) {
     totalBytes += file.size;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_DATASET_TOTAL_BYTES) {
@@ -77,11 +79,13 @@ export async function loadDatasetWithSetupActions(
       );
     }
     const absolutePath = await resolveContainedRegularFile(root, file.path);
-    const actual = await hashFile(absolutePath, file.size);
-    if (actual.size !== file.size || actual.sha256 !== file.sha256) {
-      throw integrityError(
-        'A dataset file does not match its declared size or hash.',
-      );
+    if (!casePaths.has(file.path)) {
+      const actual = await hashFile(absolutePath, file.size);
+      if (actual.size !== file.size || actual.sha256 !== file.sha256) {
+        throw integrityError(
+          'A dataset file does not match its declared size or hash.',
+        );
+      }
     }
     absoluteFiles.set(file.path, absolutePath);
   }
@@ -94,11 +98,15 @@ export async function loadDatasetWithSetupActions(
       throw integrityError('An eval case exceeds the benchmark YAML size limit.');
     }
     const absolutePath = absoluteFiles.get(entry.path)!;
-    const raw = await readBoundedRegularFile(
+    const bytes = await readBoundedRegularFile(
       absolutePath,
       MAX_BENCHMARK_YAML_BYTES,
       'Eval case',
     );
+    if (bytes.byteLength !== file.size || sha256Hex(bytes) !== file.sha256) {
+      throw integrityError('An eval case does not match its declared size or hash.');
+    }
+    const raw = decodeDocument(bytes, 'Eval case');
     const definition = parseEvalCaseYamlWithSetupActions(raw, setupActions);
     if (definition.id !== entry.id) {
       throw integrityError('An eval case ID does not match its manifest entry.');
@@ -106,7 +114,6 @@ export async function loadDatasetWithSetupActions(
     cases.set(entry.id, {
       definition,
       path: absolutePath,
-      sha256: prefixedSha256(file.sha256),
     });
   }
 
@@ -120,7 +127,7 @@ export async function loadDatasetWithSetupActions(
   };
 }
 
-/** Load a strict experiment config and retain its exact digest for provenance. */
+/** Load a strict experiment config. */
 export async function loadExperimentConfig(
   experimentPath: string,
 ): Promise<LoadedExperimentConfigV1> {
@@ -143,17 +150,17 @@ export async function loadExperimentConfigWithSetupActions(
       'Experiment config must be a regular, non-symbolic-link file.',
     );
   }
-  const raw = await readBoundedRegularFile(
+  const bytes = await readBoundedRegularFile(
     absolutePath,
     MAX_BENCHMARK_YAML_BYTES,
     'Experiment config',
   );
+  const raw = decodeDocument(bytes, 'Experiment config');
   const config = parseExperimentConfigYamlWithSetupActions(raw, setupActions);
   return {
     path: absolutePath,
     root: path.dirname(absolutePath),
     raw,
-    sha256: sha256Digest(raw),
     config,
   };
 }
@@ -269,7 +276,7 @@ async function readBoundedRegularFile(
   filePath: string,
   maximumBytes: number,
   label: string,
-): Promise<string> {
+): Promise<Buffer> {
   const stat = await lstatOrModelError(filePath, label);
   if (stat.isSymbolicLink() || !stat.isFile()) {
     throw new BenchmarkModelError(
@@ -295,16 +302,33 @@ async function readBoundedRegularFile(
         `${label} changed while it was being opened.`,
       );
     }
-    const body = await handle.readFile('utf8');
-    if (Buffer.byteLength(body, 'utf8') > maximumBytes) {
-      throw new BenchmarkModelError(
-        label === 'Dataset manifest' ? 'invalid_manifest' : 'invalid_yaml',
-        `${label} exceeds the ${maximumBytes}-byte limit.`,
-      );
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of handle.createReadStream({autoClose: false})) {
+      size += chunk.byteLength;
+      if (size > maximumBytes) {
+        throw new BenchmarkModelError(
+          label === 'Dataset manifest' ? 'invalid_manifest' : 'invalid_yaml',
+          `${label} exceeds the ${maximumBytes}-byte limit.`,
+        );
+      }
+      chunks.push(chunk);
     }
-    return body;
+    return Buffer.concat(chunks, size);
   } finally {
     await handle.close();
+  }
+}
+
+function decodeDocument(body: Buffer, label: string): string {
+  try {
+    return new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(body);
+  } catch (error) {
+    throw new BenchmarkModelError(
+      label === 'Dataset manifest' ? 'invalid_manifest' : 'invalid_yaml',
+      `${label} must contain valid UTF-8.`,
+      {cause: error},
+    );
   }
 }
 

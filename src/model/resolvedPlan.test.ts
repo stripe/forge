@@ -4,11 +4,11 @@ import {expect} from '../../test/support/expect.js';
 
 import {BenchmarkModelError} from './errors.js';
 import {parseResolvedRunPlan} from './parse.js';
-import type {ResolvedRunPlanV1} from './types.js';
+import type {ResolvedRunPlanV2} from './types.js';
 
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
-function validPlan(): ResolvedRunPlanV1 {
+function validPlan(): ResolvedRunPlanV2 {
   const setup = [
     {
       uses: 'forge/write' as const,
@@ -22,7 +22,7 @@ function validPlan(): ResolvedRunPlanV1 {
     model: 'claude-test',
   };
   return {
-    schema_version: 1,
+    schema_version: 2,
     selection: {
       case_id: 'sample/write',
       treatment: 'baseline',
@@ -38,12 +38,10 @@ function validPlan(): ResolvedRunPlanV1 {
       experiment: {
         id: 'sample/experiment',
         version: '1.0.0',
-        sha256: DIGEST,
       },
       case: {
         id: 'sample/write',
         path: 'cases/sample/write/eval.yaml',
-        sha256: DIGEST,
       },
       forge: {version: '0.1.0'},
     },
@@ -82,6 +80,21 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('rejects previous plan versions and removed source digest fields', () => {
+    expect(() => parseResolvedRunPlan({...validPlan(), schema_version: 1})).toThrow(
+      BenchmarkModelError,
+    );
+    for (const source of ['experiment', 'case'] as const) {
+      const plan = validPlan();
+      expect(() => parseResolvedRunPlan({
+        ...plan,
+        provenance: {
+          ...plan.provenance,
+          [source]: {...plan.provenance[source], sha256: DIGEST},
+        },
+      })).toThrow(BenchmarkModelError);
+    }
+  });
   it('accepts and projects a complete planner output', () => {
     const input = validPlan();
     const parsed = parseResolvedRunPlan(input);

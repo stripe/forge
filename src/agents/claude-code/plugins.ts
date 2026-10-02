@@ -13,7 +13,7 @@ import {
   isSafeVersion,
 } from '../../model/paths.js';
 import {
-  inspectInstalledPluginTree,
+  assertInstalledPluginTree,
   pluginSourceReceipt,
 } from './pluginReceipt.js';
 import {
@@ -104,7 +104,7 @@ export function createClaudePluginInstaller(
           const marketplaceRelativePath = `marketplaces/${identity.marketplace}`;
           const marketplacePath = `${pluginStatePath}/${marketplaceRelativePath}`;
 
-          const marketplaceCommit = await ensureMarketplaceCheckout({
+          await ensureMarketplaceCheckout({
             commands: installContext.commands,
             distribution: selected,
             executable,
@@ -161,7 +161,7 @@ export function createClaudePluginInstaller(
           if (installed.installPath !== installedLocation.absolute) {
             throw new Error('Claude plugin list returned an invalid installation path.');
           }
-          const sourceCommit = await assertInstalledPluginRecord(
+          await assertInstalledPluginRecord(
             state,
             expectedPluginIds,
             nativePluginId,
@@ -169,7 +169,7 @@ export function createClaudePluginInstaller(
             installedLocation.absolute,
             entry.source,
           );
-          const installedTree = await inspectInstalledPluginTree(
+          await assertInstalledPluginTree(
             state,
             installedLocation.relative,
             installContext.signal,
@@ -178,11 +178,9 @@ export function createClaudePluginInstaller(
             adapter: adapterId,
             plugin: selected.plugin,
             marketplace: selected.marketplace,
-            marketplace_commit: marketplaceCommit,
             native_plugin_id: nativePluginId,
             version: installed.version,
-            source: pluginSourceReceipt(entry.source, sourceCommit),
-            installed_tree: installedTree,
+            source: pluginSourceReceipt(entry.source),
           });
         },
       });
@@ -199,7 +197,7 @@ async function ensureMarketplaceCheckout(input: {
   readonly marketplaceRelativePath: string;
   readonly signal: AbortSignal;
   readonly state: MutableWorkspace;
-}): Promise<string> {
+}): Promise<void> {
   let known = await knownMarketplaces(input.state);
   if (!Object.hasOwn(known, input.identity.marketplace)) {
     await runChecked(
@@ -232,16 +230,6 @@ async function ensureMarketplaceCheckout(input: {
     throw new Error('Plugin marketplace checkout state is malformed.');
   }
 
-  const revision = await runGit(
-    input.commands,
-    input.marketplacePath,
-    ['-C', input.marketplacePath, 'rev-parse', 'HEAD'],
-    input.signal,
-    'Forge could not identify the plugin marketplace snapshot.',
-  );
-  if (!FULL_GIT_COMMIT.test(revision.stdout.trim())) {
-    throw new Error('Plugin marketplace checkout did not resolve to a Git commit.');
-  }
   const remote = await runGit(
     input.commands,
     input.marketplacePath,
@@ -255,7 +243,6 @@ async function ensureMarketplaceCheckout(input: {
   ) {
     throw new Error('Plugin marketplace checkout does not match its repository.');
   }
-  return revision.stdout.trim();
 }
 
 async function readSelectedMarketplaceEntry(input: {
@@ -440,7 +427,7 @@ async function assertInstalledPluginRecord(
   expectedVersion: string,
   expectedInstallPath: string,
   marketplaceSource: unknown,
-): Promise<string | undefined> {
+): Promise<void> {
   const plugins = await installedPluginRecords(state);
   const actualIds = new Set(Object.keys(plugins));
   if (!setsEqual(actualIds, expectedPluginIds)) {
@@ -462,14 +449,6 @@ async function assertInstalledPluginRecord(
   if (expectedCommit !== undefined && record.gitCommitSha !== expectedCommit) {
     throw new Error('Claude installed plugin state does not match the marketplace commit.');
   }
-  if (
-    isGitMarketplaceSource(marketplaceSource) &&
-    (typeof record.gitCommitSha !== 'string' ||
-      !FULL_GIT_COMMIT.test(record.gitCommitSha))
-  ) {
-    throw new Error('Claude installed plugin state omitted its resolved Git commit.');
-  }
-  return typeof record.gitCommitSha === 'string' ? record.gitCommitSha : undefined;
 }
 
 function installedPluginLocation(

@@ -21,11 +21,11 @@ import type {
   Sha256Digest,
 } from '../model/types.js';
 
-export const RUN_RESULT_SCHEMA_VERSION = 1 as const;
+export const RUN_RESULT_SCHEMA_VERSION = 2 as const;
 export const EVALUATION_SCHEMA_VERSION = 1 as const;
-export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 2 as const;
 export const INTERACTION_SCHEMA_VERSION = 1 as const;
-export const SETUP_ARTIFACT_SCHEMA_VERSION = 1 as const;
+export const SETUP_ARTIFACT_SCHEMA_VERSION = 2 as const;
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
 export const JUDGE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 
@@ -53,20 +53,19 @@ export interface EvaluationResultV1 {
   readonly checks: readonly CheckResultV1[];
 }
 
-export interface WorkspaceEvidenceEntryV1 {
+export interface WorkspaceEvidenceEntryV2 {
   readonly path: string;
   readonly exists: boolean;
   readonly kind: 'file' | 'directory' | 'other' | 'missing';
   readonly size_bytes?: number;
-  readonly sha256?: Sha256Digest;
   /** Exact inspected bytes. Base64 avoids lossy UTF-8 decoding. */
   readonly content_base64?: string;
   readonly issue?: string;
 }
 
-export interface WorkspaceEvidenceV1 {
+export interface WorkspaceEvidenceV2 {
   readonly schema_version: typeof WORKSPACE_EVIDENCE_SCHEMA_VERSION;
-  readonly entries: readonly WorkspaceEvidenceEntryV1[];
+  readonly entries: readonly WorkspaceEvidenceEntryV2[];
   readonly complete: boolean;
   readonly warnings: readonly {code: string; message: string; path?: string}[];
 }
@@ -155,7 +154,7 @@ export interface SetupArtifactStepV1 {
 }
 
 /** Ordered audit of the exact setup operations and execution-time resolutions. */
-export interface SetupArtifactV1 {
+export interface SetupArtifactV2 {
   readonly schema_version: typeof SETUP_ARTIFACT_SCHEMA_VERSION;
   readonly steps: readonly SetupArtifactStepV1[];
 }
@@ -254,7 +253,6 @@ export interface RunEvidenceV1 {
 interface RunResultCommon {
   readonly run_id: string;
   readonly selection: RunSelection;
-  readonly plan_sha256: Sha256Digest;
   readonly forge: {
     version: string;
     action_bundles?: readonly SetupActionBundleReferenceV1[];
@@ -289,17 +287,17 @@ interface RunResultCommon {
   readonly warnings: readonly RunWarningV1[];
 }
 
-export interface RunResultV1 extends RunResultCommon {
+export interface RunResultV2 extends RunResultCommon {
   readonly schema_version: typeof RUN_RESULT_SCHEMA_VERSION;
   readonly evidence: RunEvidenceV1;
 }
 
-export type RunResult = RunResultV1;
+export type RunResult = RunResultV2;
 
-export interface CompletedRunV1 {
+export interface CompletedRunV2 {
   readonly runId: string;
   readonly location: string;
-  readonly result: RunResultV1;
+  readonly result: RunResultV2;
 }
 
-export type CompletedRun = CompletedRunV1;
+export type CompletedRun = CompletedRunV2;

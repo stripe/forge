@@ -15,10 +15,8 @@ import type {
   RunSelection,
   SetupActionBundleReferenceV1,
 } from './model/types.js';
-import {
-  resolvedRunPlanSha256,
-  serializeResolvedRunPlan,
-} from './planning/index.js';
+import {serializeResolvedRunPlan} from './planning/index.js';
+import {sha256Digest} from './model/hashes.js';
 import {createArtifactStore, verifyCompletedRun} from './results/index.js';
 import {
   createFakeRuntimeAdapter,
@@ -36,7 +34,6 @@ import {
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const SECOND_DIGEST = `sha256:${'d'.repeat(64)}` as const;
 const CASE_DIGEST = `sha256:${'b'.repeat(64)}` as const;
-const EXPERIMENT_DIGEST = `sha256:${'c'.repeat(64)}` as const;
 const BUNDLE_REFERENCE: SetupActionBundleReferenceV1 = {
   namespace: 'acme-evals',
   version: '2026.9.0',
@@ -402,7 +399,9 @@ describe('ForgeEngine setup action bundles', () => {
       'utf8',
     );
     expect(persistedPlan).toBe(serializeResolvedRunPlan(plan));
-    expect(completed.result.plan_sha256).toBe(resolvedRunPlanSha256(plan));
+    expect(completed.result.artifacts.find(({path}) => path === 'plan.json')?.sha256)
+      .toBe(sha256Digest(persistedPlan));
+    expect(completed.result).not.toHaveProperty('plan_sha256');
 
     await expect(engine.verifyCompletedRun(completed.location)).resolves.toMatchObject({
       runId: 'action-bundle-local-result',
@@ -685,7 +684,6 @@ function planningInputs(
           {
             definition,
             path: '/dataset/cases/testing/action-bundle.yaml',
-            sha256: CASE_DIGEST,
           },
         ],
       ]),
@@ -694,7 +692,6 @@ function planningInputs(
       path: '/experiment.yaml',
       root: '/',
       raw: 'experiment',
-      sha256: EXPERIMENT_DIGEST,
       config,
     },
   };
