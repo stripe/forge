@@ -29,6 +29,287 @@ afterEach(async () => {
 });
 
 describe('resumable CLI campaigns', () => {
+  it('defaults to one active execution at a time', async () => {
+    const fixture = await createFixture();
+    const started = Array.from({length: 3}, createGate);
+    const finish = Array.from({length: 3}, createGate);
+    const calls: number[] = [];
+    const running = fixture.run([], {execute: async (input) => {
+      const index = input.plan.selection.repetition;
+      calls.push(index);
+      started[index]!.resolve();
+      await finish[index]!.promise;
+      return defaultForgeEngine.executeEval(input);
+    }});
+    try {
+      for (let index = 0; index < 3; index += 1) {
+        await waitFor(started[index]!.promise);
+        assert.deepEqual(calls, Array.from({length: index + 1}, (_, i) => i));
+        const checkpoint = await fixture.readCheckpoint();
+        assert.equal(checkpoint.entries[index]!.attempts.at(-1)!.state, 'running');
+        assert.equal(checkpoint.entries[index + 1]?.attempts.length ?? 0, 0);
+        finish[index]!.resolve();
+      }
+      assert.equal((await waitFor(running)).code, 0);
+    } finally {
+      for (const gate of finish) gate.resolve();
+      await running;
+    }
+  });
+
+  it('bounds concurrency, refills free slots, and checkpoints out-of-order completions', async () => {
+    const fixture = await createFixture({repetitions: 5});
+    const started = Array.from({length: 5}, createGate);
+    const finish = Array.from({length: 5}, createGate);
+    const completed = Array.from({length: 5}, createGate);
+    const completionOrder: number[] = [];
+    let active = 0;
+    let maximum = 0;
+    const running = fixture.run(['--jobs', '2'], {
+      stderr: (text) => {
+        const event = JSON.parse(text);
+        if (event.state === 'completed') {
+          completionOrder.push(event.selection.repetition);
+          completed[event.selection.repetition]!.resolve();
+        }
+      },
+      execute: async (input) => {
+        const index = input.plan.selection.repetition;
+        maximum = Math.max(maximum, ++active);
+        started[index]!.resolve();
+        try {
+          await finish[index]!.promise;
+          return await defaultForgeEngine.executeEval(input);
+        } finally {
+          active -= 1;
+        }
+      },
+    });
+    try {
+      await waitFor(Promise.all([started[0]!.promise, started[1]!.promise]));
+      assert.equal(active, 2);
+      for (let index = 1; index < 4; index += 1) {
+        finish[index]!.resolve();
+        await waitFor(started[index + 1]!.promise);
+        const checkpoint = await fixture.readCheckpoint();
+        assert.equal(checkpoint.entries[0]!.attempts.at(-1)!.state, 'running');
+        assert.equal(checkpoint.entries[index]!.attempts.at(-1)!.state, 'completed');
+        assert.equal(checkpoint.entries[index + 1]!.attempts.at(-1)!.state, 'running');
+        assert.equal(active, 2);
+      }
+      finish[4]!.resolve();
+      await waitFor(completed[4]!.promise);
+      finish[0]!.resolve();
+      const result = await waitFor(running);
+      assert.equal(result.code, 0);
+      assert.equal(result.summary.completed, 5);
+      assert.equal(maximum, 2);
+      assert.deepEqual(completionOrder, [1, 2, 3, 4, 0]);
+      const checkpoint = await fixture.readCheckpoint();
+      for (const entry of checkpoint.entries) {
+        assert.equal(entry.attempts.length, 1);
+        assert.equal(entry.attempts[0]!.state, 'completed');
+        await verifyCompletedRun(path.join(fixture.root, 'runs', entry.attempts[0]!.run_id));
+      }
+    } finally {
+      for (const gate of finish) gate.resolve();
+      await running;
+    }
+  });
+
+  it('caps the workers at pending entries even when jobs is larger', async () => {
+    const fixture = await createFixture();
+    let calls = 0;
+    const result = await fixture.run(['-j', '100'], {execute: async (input) => {
+      calls += 1;
+      return defaultForgeEngine.executeEval(input);
+    }});
+    assert.equal(result.code, 0);
+    assert.equal(calls, 3);
+    assert.equal(result.summary.completed, 3);
+  });
+
+  it('rejects invalid jobs and jobs on non-run commands before loading inputs', async () => {
+    const fixture = await createFixture();
+    let loads = 0;
+    const engine = {...defaultForgeEngine, async loadExperimentConfig() {
+      loads += 1;
+      throw new Error('must not load');
+    }};
+    for (const value of ['', '0', '-1', '1.5', 'NaN', 'Infinity', '1e2', '01', ' 2', '9007199254740992']) {
+      const result = await fixture.run([`--jobs=${value}`], {engine});
+      assert.equal(result.code, 2, value);
+      assert.match(result.stderr, /--jobs must be a positive safe integer/);
+    }
+    for (const command of ['plan', 'validate']) {
+      assert.equal(await runCli([command, '--jobs', '2'], {engine, stderr: () => undefined}), 2);
+    }
+    assert.equal(await runCli(['run', '--jobs'], {engine, stderr: () => undefined}), 2);
+    assert.equal(loads, 0);
+    await assert.rejects(fs.stat(fixture.output), {code: 'ENOENT'});
+  });
+
+  it('cancels active workers, waits for cleanup under the lock, and resumes unfinished entries', async () => {
+    const fixture = await createFixture();
+    const controller = new AbortController();
+    const started = [createGate(), createGate()];
+    const aborted = [createGate(), createGate()];
+    const cleanup = createGate();
+    const calls: number[] = [];
+    let cleaned = 0;
+    const running = fixture.run(['--jobs', '2'], {
+      signal: controller.signal,
+      execute: async (input) => {
+        const index = input.plan.selection.repetition;
+        calls.push(index);
+        started[index]!.resolve();
+        try {
+          await new Promise<void>((resolve) => {
+            if (input.signal!.aborted) resolve();
+            else input.signal!.addEventListener('abort', () => resolve(), {once: true});
+          });
+          aborted[index]!.resolve();
+          throw new ForgeExecutionError('aborted', 'interaction', 'stopped');
+        } finally {
+          await cleanup.promise;
+          cleaned += 1;
+        }
+      },
+    });
+    try {
+      await waitFor(Promise.all(started.map((gate) => gate.promise)));
+      controller.abort();
+      await waitFor(Promise.all(aborted.map((gate) => gate.promise)));
+      const contender = await fixture.run(['--resume', 'exp-1', '--jobs', '3']);
+      assert.equal(contender.code, 1);
+      assert.match(contender.stderr, /Another campaign process/);
+      assert.equal(cleaned, 0);
+      assert.deepEqual(calls, [0, 1]);
+      cleanup.resolve();
+      assert.equal((await waitFor(running)).code, 1);
+      assert.equal(cleaned, 2);
+      const checkpoint = await fixture.readCheckpoint();
+      assert.equal(checkpoint.entries[2]!.attempts.length, 0);
+      assert.deepEqual(checkpoint.entries.slice(0, 2).map((entry) => entry.attempts.at(-1)!.error_code),
+        ['aborted', 'aborted']);
+      const resumed = await fixture.run(['--resume', 'exp-1', '--jobs', '3']);
+      assert.equal(resumed.code, 0);
+      assert.equal(resumed.summary.executed, 3);
+      assert.deepEqual((await fixture.readCheckpoint()).entries.map((entry) => entry.attempts.length), [2, 2, 1]);
+    } finally {
+      controller.abort();
+      cleanup.resolve();
+      await running;
+    }
+  });
+
+  it('aborts and drains active workers after a duplicate run ID stops the coordinator', async () => {
+    const fixture = await createFixture();
+    const started = createGate();
+    const aborted = createGate();
+    const cleanup = createGate();
+    let cleaned = false;
+    let calls = 0;
+    const running = fixture.run(['--jobs', '2'], {
+      runIdFactory: () => 'duplicate',
+      execute: async (input) => {
+        calls += 1;
+        started.resolve();
+        try {
+          await new Promise<void>((resolve) => {
+            if (input.signal!.aborted) resolve();
+            else input.signal!.addEventListener('abort', () => resolve(), {once: true});
+          });
+          aborted.resolve();
+          throw new ForgeExecutionError('aborted', 'interaction', 'stopped');
+        } finally {
+          await cleanup.promise;
+          cleaned = true;
+        }
+      },
+    });
+    try {
+      await waitFor(started.promise);
+      await waitFor(aborted.promise);
+      const contender = await fixture.run(['--resume', 'exp-1']);
+      assert.match(contender.stderr, /Another campaign process/);
+      assert.equal(cleaned, false);
+      cleanup.resolve();
+      const result = await waitFor(running);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /Campaign run ID already exists/);
+      assert.equal(calls, 1);
+      assert.equal(cleaned, true);
+      assert.deepEqual((await fixture.readCheckpoint()).entries.map((entry) => entry.attempts.length), [1, 0, 0]);
+      const resumed = await fixture.run(['--resume', 'exp-1', '--jobs', '2']);
+      assert.equal(resumed.code, 0);
+      assert.equal(resumed.summary.completed, 3);
+    } finally {
+      cleanup.resolve();
+      await running;
+    }
+  });
+
+  it('stops scheduling on checkpoint failure and recovers a sibling committed before cancellation', async (context) => {
+    const fixture = await createFixture();
+    const started = [createGate(), createGate()];
+    const commit = createGate();
+    const aborted = createGate();
+    const cleanup = createGate();
+    let failWrites = false;
+    const originalRename = fsPromises.rename;
+    context.mock.method(fsPromises, 'rename', async (...args: Parameters<typeof originalRename>) => {
+      if (args[1] === fixture.checkpoint && failWrites) throw new Error('checkpoint disk failure');
+      return originalRename(...args);
+    });
+    syncBuiltinESMExports();
+    const running = fixture.run(['--jobs', '2'], {execute: async (input) => {
+      const index = input.plan.selection.repetition;
+      started[index]!.resolve();
+      if (index === 1) {
+        await commit.promise;
+        return defaultForgeEngine.executeEval(input);
+      }
+      try {
+        await new Promise<void>((resolve) => {
+          if (input.signal!.aborted) resolve();
+          else input.signal!.addEventListener('abort', () => resolve(), {once: true});
+        });
+        aborted.resolve();
+        throw new ForgeExecutionError('aborted', 'interaction', 'stopped');
+      } finally {
+        await cleanup.promise;
+      }
+    }});
+    try {
+      await waitFor(Promise.all(started.map((gate) => gate.promise)));
+      failWrites = true;
+      commit.resolve();
+      await waitFor(aborted.promise);
+      const contender = await fixture.run(['--resume', 'exp-1']);
+      assert.match(contender.stderr, /Another campaign process/);
+      cleanup.resolve();
+      const failed = await waitFor(running);
+      assert.equal(failed.code, 1);
+      assert.match(failed.stderr, /checkpoint disk failure/);
+      assert.deepEqual((await fixture.readCheckpoint()).entries.map((entry) => entry.attempts.length), [1, 1, 0]);
+      await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-2'));
+      failWrites = false;
+      const resumed = await fixture.run(['--resume', 'exp-1', '--jobs', '2']);
+      assert.equal(resumed.code, 0);
+      assert.equal(resumed.summary.executed, 2);
+      assert.equal(resumed.summary.skipped, 1);
+      assert.deepEqual((await fixture.readCheckpoint()).entries.map((entry) => entry.attempts.length), [2, 1, 1]);
+    } finally {
+      failWrites = false;
+      commit.resolve();
+      cleanup.resolve();
+      await running;
+      context.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  });
+
   it('creates three independent executions and resumes the first by its ID', async () => {
     const fixture = await createFixture();
     const first = await fixture.run([], {execute: async (input) => {
@@ -87,7 +368,7 @@ describe('resumable CLI campaigns', () => {
         return defaultForgeEngine.executeEval(input);
       },
     };
-    const first = await fixture.run([], options);
+    const first = await fixture.run(['--jobs', '2'], options);
     assert.equal(first.code, 1);
     assert.deepEqual(executed, [0, 1, 2]);
     assert.deepEqual(first.summary, {
@@ -104,7 +385,7 @@ describe('resumable CLI campaigns', () => {
 
     fail = false;
     executed.length = 0;
-    const resumed = await fixture.run(['--resume', 'exp-1'], options);
+    const resumed = await fixture.run(['--resume', 'exp-1', '--jobs', '3'], options);
     assert.equal(resumed.code, 0);
     assert.deepEqual(executed, [1]);
     assert.equal(resumed.summary.skipped, 2);
@@ -558,7 +839,7 @@ async function createDeadOwnerLock(root: string) {
   return {lock, ownerFile};
 }
 
-async function createFixture(options: {anotherCase?: boolean} = {}) {
+async function createFixture(options: {anotherCase?: boolean; repetitions?: number} = {}) {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-campaign-'));
   temporaryDirectories.push(temporary);
   const output = path.join(temporary, 'results');
@@ -566,7 +847,7 @@ async function createFixture(options: {anotherCase?: boolean} = {}) {
   const example = path.resolve('examples/quickstart');
   const experiment = path.join(temporary, 'experiment.yaml');
   const config = parseExperimentConfigYaml(await fs.readFile(path.join(example, 'experiment.yaml'), 'utf8'));
-  config.matrix.repetitions = 3;
+  config.matrix.repetitions = options.repetitions ?? 3;
   const dataset = path.join(temporary, 'dataset');
   await fs.cp(path.join(example, 'dataset'), dataset, {recursive: true});
   config.dataset.path = './dataset';

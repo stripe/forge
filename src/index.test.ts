@@ -1,6 +1,7 @@
 import {describe, it} from 'node:test';
 
 import {expect} from '../test/support/expect.js';
+import * as rootExports from './index.js';
 
 import {
   FORGE_VERSION,
@@ -46,6 +47,11 @@ import {
 } from './index.js';
 
 describe('@stripe/forge package root', () => {
+  it('keeps campaign orchestration on its documented subpath', () => {
+    expect('runCampaign' in rootExports).toBe(false);
+    expect('readCampaignSelections' in rootExports).toBe(false);
+  });
+
   it('exports the engine, wire model, persistence, and composition contracts', () => {
     expect(FORGE_VERSION).toBeTypeOf('string');
     expect(RESOLVED_RUN_PLAN_SCHEMA_VERSION).toBe(1);

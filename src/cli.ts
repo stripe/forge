@@ -58,6 +58,7 @@ const CLI_OPTIONS = {
   output: {type: 'string', short: 'o'},
   'run-id': {type: 'string'},
   resume: {type: 'string'},
+  jobs: {type: 'string', short: 'j'},
   'credential-env': {type: 'string', multiple: true},
   host: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
@@ -95,6 +96,7 @@ Run options:
   --output <directory> Write experiment executions below this directory (default: ./results)
   --run-id <id>        Use an explicit eval ID when exactly one combination is selected
   --resume <id>        Resume this experiment execution; an ID is required
+  --jobs <count>       Maximum simultaneous evals (default: 1)
   --credential-env <reference>=<environment-name>
                         Bind an opaque credential reference for this run
 
@@ -102,7 +104,7 @@ Validation options:
   --host                Build and inspect the selected Docker runtime image
 
 The experiment's dataset.path locates the dataset relative to the experiment file.
-The run command executes every matching matrix entry sequentially.
+The run command executes every matching matrix entry with bounded concurrency.
 Each new invocation creates results/experiments/<experiment-run-id>/.
 The plan command requires exactly one matching matrix entry.
 `;
@@ -228,10 +230,11 @@ export async function runCli(
       'experiment',
       ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
-        ? (['output', 'run-id', 'credential-env', 'resume'] as const)
+        ? (['output', 'run-id', 'credential-env', 'resume', 'jobs'] as const)
         : []),
     ];
     assertAllowedOptions(parsed.values, allowed);
+    const jobs = parseJobs(parsed.values.jobs);
     if (parsed.values.resume !== undefined) {
       assertRunId(parsed.values.resume, '--resume');
       if (parsed.values['run-id'] !== undefined || SELECTOR_OPTIONS.some((name) => parsed.values[name] !== undefined)) {
@@ -434,6 +437,7 @@ export async function runCli(
       composition,
       engine,
       resume: parsed.values.resume !== undefined,
+      jobs,
       signal: options.signal ?? new AbortController().signal,
       execute: options.execute ?? engine.executeEval,
       runIdFactory: explicitRunId === undefined ? options.runIdFactory ?? randomUUID : () => explicitRunId,
@@ -498,6 +502,14 @@ function parseRepetition(value: string | undefined): number | undefined {
     throw new CliUsageError('repetition must be a safe integer.');
   }
   return repetition;
+}
+
+function parseJobs(value: string | undefined): number {
+  if (value === undefined) return 1;
+  if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw new CliUsageError('--jobs must be a positive safe integer.');
+  }
+  return Number(value);
 }
 
 function resolveRequiredPath(

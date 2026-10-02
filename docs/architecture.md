@@ -184,19 +184,22 @@ campaign runner is responsible for retrying that selection.
 A `RunSelection` chooses exactly one case, treatment, agent/provider/model
 triple, and zero-based repetition. The CLI requires filters to resolve to one
 entry for `plan`. `run` resolves and purely preflights every matching plan
-before executing them sequentially. The CLI loads the dataset from the
-experiment config and permits selectors such as `--case` to restrict execution.
+before executing them with bounded concurrency. The CLI loads the dataset from
+the experiment config and permits selectors such as `--case` to restrict execution.
 
-The CLI-owned campaign controller checkpoints attempts in a strict,
-schema-version-1 `campaign.json` under
+The shared controller exposed through `@stripe/forge/campaign` checkpoints
+attempts in a strict, schema-version-1 `campaign.json` under
 `results/experiments/<experiment-run-id>/`, outside the immutable eval run
 directories. Every new invocation receives a distinct experiment execution ID.
 The checkpoint binds that ID to its directory. Each entry records its selection,
 canonical plan SHA-256, and ordered attempts with
 a unique run ID and `running`, `completed`, or `errored` state. Errored attempts
-retain only a stable error code. Checkpoint updates use synced temporary files
-and atomic rename. A local lock directory is published with a unique owner
-marker to prevent simultaneous writers. Recovery removes only the exited
+retain only a stable error code. A bounded worker pool executes pending plans;
+one coordinator serializes reservations, checkpoint mutations, and writes so
+out-of-order completions cannot overwrite one another. `jobs` defaults to one
+and is scheduling policy, excluded from plan identities. Checkpoint updates use
+synced temporary files and atomic rename. A local lock directory is published
+with a unique owner marker to prevent simultaneous writers. Recovery removes only the exited
 owner's marker and an empty lock directory, so delayed cleanup cannot remove
 a replacement owner's lock. Committed artifact locations are compared after
 resolving filesystem aliases, including symlinked output directories.
@@ -208,8 +211,17 @@ artifacts and their plan checksum before
 skipping an entry, including recovery after a commit/checkpoint interruption.
 Execution errors, committed role-player failures, missing results, and invalid
 artifacts receive new attempt IDs. Completed failed or partial evaluations are
-kept. One errored entry does not stop other entries, while cancellation stops
-the campaign. This controller does not alter `executeEval` or its scoring
+kept. One errored entry does not stop other entries. Cancellation or coordinator
+failure stops new scheduling and signals active callbacks; the controller waits
+for every callback to finish cleanup before releasing its lock.
+
+Embedding hosts supply resolved plans, an engine, a pure preflight composition,
+and an execution callback. The callback may construct per-run host resources
+and composition around execution by that same engine, honoring cancellation and
+finishing cleanup before settling. The host retains input loading, command
+grammar, execution ID selection, and evaluation exit policy. The shared
+controller requires verified local artifacts below its selected root; it is
+not a remote worker protocol. It does not alter `executeEval` or its scoring
 semantics. See the README's [campaign workflow](../README.md#running-and-resuming-an-experiment).
 
 ### Plan resolution
@@ -956,6 +968,7 @@ Specialized subpaths expose:
 - `@stripe/forge/atif` and `@stripe/forge/atif/v1.8`;
 - `@stripe/forge/setup`;
 - `@stripe/forge/testing`;
+- `@stripe/forge/campaign`;
 - `@stripe/forge/cli`; and
 - `@stripe/forge/package.json`.
 
@@ -966,7 +979,7 @@ engine APIs:
   the default composition, and runs pure preflight;
 - `plan` selects one entry and prints canonical plan JSON; and
 - `run` selects every matching entry, constructs a composition, and delegates
-  sequential execution and explicit resume to the CLI campaign controller.
+  bounded execution and explicit resume to the shared campaign controller.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
 Codex agent adapters, the Anthropic host completion provider, an explicit
@@ -1001,7 +1014,7 @@ external runtime without changing core lifecycle semantics.
 The current architecture leaves several responsibilities outside the public
 engine:
 
-- parallel campaign scheduling and automatic experiment-level retries;
+- distributed campaign scheduling and automatic experiment-level retries;
 - remote result publication and access control;
 - interactive or human-driven execution;
 - dynamic setup plugin discovery or imports named by YAML;
