@@ -1217,8 +1217,10 @@ after merging agent and setup requirements, before resolving any credentials
 or allocating resources. It must reject unknown config fields, missing
 effective settings, unsupported requirements, and incompatible limits. It must
 not inspect ambient state, normalize defaults, allocate, or return a promise.
-Physical executable and environment checks belong in `prepare()`. The
-implementation ID must match the plan exactly.
+Environment checks belong in `prepare()`. A runtime with a host-import phase
+may defer physical executable checks until those imports finish, but must
+complete them before interaction. The implementation ID must match the plan
+exactly.
 The preflight environment contains plain variables and opaque credential
 names, references, and scopes. Use it to reject incompatible environment policy
 before secret resolution; secret values are supplied only to `prepare()`.

@@ -359,24 +359,6 @@ export function createDockerRuntimeAdapter(
           }),
         });
 
-      try {
-        await assertExecutablesAvailable(
-          uncredentialedCommands,
-          executableRequirements,
-          input.signal,
-        );
-      } catch (error) {
-        try {
-          await dispose();
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            'Runtime executable validation failed and cleanup also failed.',
-          );
-        }
-        throw error;
-      }
-
       return Object.freeze({
         runtimeId: input.runId,
         workspace,
@@ -442,8 +424,16 @@ export function createDockerRuntimeAdapter(
           if (disposePromise || sealedPromise) {
             throw new Error('Docker runtime cannot finalize setup after shutdown.');
           }
+          if (setupFinalized) {
+            throw new Error('Docker runtime setup has already been finalized.');
+          }
           importsOpen = false;
           await waitForImports();
+          await assertExecutablesAvailable(
+            uncredentialedCommands,
+            executableRequirements,
+            input.signal,
+          );
           await controller.finalizeSetupAndWait();
           setupFinalized = true;
           if (!stateMounts.some(({sealAfterSetup}) => sealAfterSetup)) return;

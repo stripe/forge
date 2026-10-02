@@ -38,6 +38,7 @@ interface RecordedCall {
 function fakeDocker(
   fixtureOptions: {
     missingExecutable?: string;
+    executableAvailable?: (executable: string) => boolean | Promise<boolean>;
     hostProbeExitCode?: number;
     hostProbeError?: Error;
   } = {},
@@ -72,9 +73,11 @@ function fakeDocker(
           assert.match(dockerfile, /USER 10001:10001/);
         }
         calls.push(call);
-        const missingExecutable =
+        const namedMissingExecutable =
           argv.includes('forge-executable-check') &&
           argv.at(-1) === fixtureOptions.missingExecutable;
+        const missingExecutable = namedMissingExecutable &&
+          !(await fixtureOptions.executableAvailable?.(argv.at(-1)!) ?? false);
         const hostProbe =
           argv[1] === 'run' && argv.includes('--entrypoint');
         if (hostProbe && fixtureOptions.hostProbeError) {
@@ -438,6 +441,7 @@ describe('Forge Docker runtime', () => {
     )!;
     assert.ok(codexMount);
     assert.doesNotMatch(codexMount, /,readonly$/);
+    await prepared.finalizeSetup();
     const executableCheck = docker.calls.find((call) =>
       call.argv.includes('forge-executable-check'),
     )!;
@@ -445,7 +449,6 @@ describe('Forge Docker runtime', () => {
     assert.match(executableCheck.environmentBody!, /CODEX_HOME=\/home\/forge\/\.codex/);
     assert.doesNotMatch(executableCheck.environmentBody!, /CODEX_API_KEY/);
 
-    await prepared.finalizeSetup();
     await prepared.commands.agent.run(['codex', '--version']);
     const agent = docker.calls.find((call) => call.argv.includes('--version'))!;
     assert.match(agent.environmentBody!, /CODEX_API_KEY=codex-test-secret/);
@@ -539,7 +542,11 @@ describe('Forge Docker runtime', () => {
     const bytes = Buffer.alloc(129 * 1024, 0x5a);
     await fs.writeFile(source, bytes);
     const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-    const docker = fakeDocker();
+    let importCompleted = false;
+    const docker = fakeDocker({
+      missingExecutable: '/opt/example-tool/bin/tool',
+      executableAvailable: () => importCompleted,
+    });
     const temporaryAlias = path.join(temporaryRoot, 'alias');
     await fs.symlink(temporaryRoot, temporaryAlias);
     const adapter = createDockerRuntimeAdapter({
@@ -548,7 +555,7 @@ describe('Forge Docker runtime', () => {
     });
     const prepareTool = () => adapter.prepare(preparation({
       requirements: {
-        executables: [],
+        executables: ['/opt/example-tool/bin/tool'],
         stateDirectories: [{
           id: 'tool-bin',
           containerPath: '/opt/example-tool/bin',
@@ -567,7 +574,12 @@ describe('Forge Docker runtime', () => {
       mode: 0o755,
       verifyAfterSetup: true,
     } as const;
+    assert.equal(
+      docker.calls.some((call) => call.argv.includes('forge-executable-check')),
+      false,
+    );
     await prepared.importHostFile!(request);
+    importCompleted = true;
     const mount = docker.calls.find((call) => call.argv[1] === 'run')!.argv.find(
       (argument) => argument.includes('target=/opt/example-tool/bin'),
     )!;
@@ -697,7 +709,7 @@ describe('Forge Docker runtime', () => {
     await prepared.dispose();
   });
 
-  it('rejects missing executable requirements and disposes the runtime', async () => {
+  it('rejects missing executable requirements when setup is finalized', async () => {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
     roots.push(temporaryRoot);
     const docker = fakeDocker({missingExecutable: 'missing-agent'});
@@ -707,17 +719,19 @@ describe('Forge Docker runtime', () => {
       temporaryRoot,
     });
 
+    const prepared = await adapter.prepare(
+      preparation({
+        requirements: {
+          executables: ['missing-agent'],
+          stateDirectories: [],
+        },
+      }),
+    );
     await assert.rejects(
-      adapter.prepare(
-        preparation({
-          requirements: {
-            executables: ['missing-agent'],
-            stateDirectories: [],
-          },
-        }),
-      ),
+      prepared.finalizeSetup(),
       /Required runtime executable is unavailable/,
     );
+    await prepared.dispose();
     assert.equal(
       docker.calls.filter((call) => call.argv[1] === 'rm').length,
       1,

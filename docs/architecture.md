@@ -510,14 +510,16 @@ ownership and mode checks.
   state target must be a canonical child of `/home/forge`, or a canonical child
   of `/opt` with `sealAfterSetup: true`.
 - **Agent interaction without sealed state:** `finalizeSetup` closes imports
-  and setup commands, then keeps the existing container. Workspace, home, and
-  state remain mounted read/write.
+  and waits for them, verifies every declared executable, closes setup commands,
+  then keeps the existing container. Workspace, home, and state remain mounted
+  read/write.
 - **Agent interaction with sealed state:** `finalizeSetup` closes imports and
-  setup commands, stops and removes the setup container, optionally rechecks
-  imported-file hashes, and starts a replacement container over the same host
-  directories. Only state mounts marked `sealAfterSetup` become read-only; the
-  workspace, home, and unsealed state stay read/write. No files are copied
-  between containers because both see the same host directories.
+  waits for them, verifies every declared executable, closes setup commands,
+  stops and removes the setup container, optionally rechecks imported-file
+  hashes, and starts a replacement container over the same host directories.
+  Only state mounts marked `sealAfterSetup` become read-only; the workspace,
+  home, and unsealed state stay read/write. No files are copied between
+  containers because both see the same host directories.
 - **Finish:** `quiesce` closes command authority, waits for active commands, and
   stops the container before Forge reads evidence. `dispose` removes the
   container and `R`.
