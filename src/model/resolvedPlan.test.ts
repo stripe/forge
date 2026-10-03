@@ -1,6 +1,5 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import {BenchmarkModelError} from './errors.js';
 import {parseResolvedRunPlan} from './parse.js';
@@ -81,18 +80,16 @@ function validPlan(): ResolvedRunPlanV1 {
 
 describe('parseResolvedRunPlan', () => {
   it('rejects unsupported plan versions and removed source digest fields', () => {
-    expect(() => parseResolvedRunPlan({...validPlan(), schema_version: 2})).toThrow(
-      BenchmarkModelError,
-    );
+    assert.throws(() => parseResolvedRunPlan({...validPlan(), schema_version: 2}), BenchmarkModelError);
     for (const source of ['experiment', 'case'] as const) {
       const plan = validPlan();
-      expect(() => parseResolvedRunPlan({
+      assert.throws(() => parseResolvedRunPlan({
         ...plan,
         provenance: {
           ...plan.provenance,
           [source]: {...plan.provenance[source], sha256: DIGEST},
         },
-      })).toThrow(BenchmarkModelError);
+      }), BenchmarkModelError);
     }
   });
 
@@ -100,30 +97,26 @@ describe('parseResolvedRunPlan', () => {
     const input = validPlan();
     const parsed = parseResolvedRunPlan(input);
 
-    expect(parsed).toEqual(input);
-    expect(parsed).not.toBe(input);
-    expect(Object.isFrozen(parsed)).toBe(true);
-    expect(Object.isFrozen(parsed.setup)).toBe(true);
-    expect(Object.isFrozen(parsed.case)).toBe(true);
-    expect('resources' in parsed.runtime && Object.isFrozen(parsed.runtime.resources)).toBe(true);
-    expect(Object.isFrozen(input)).toBe(false);
+    assert.deepEqual(parsed, input);
+    assert.notEqual(parsed, input);
+    assert.equal(Object.isFrozen(parsed), true);
+    assert.equal(Object.isFrozen(parsed.setup), true);
+    assert.equal(Object.isFrozen(parsed.case), true);
+    assert.equal('resources' in parsed.runtime && Object.isFrozen(parsed.runtime.resources), true);
+    assert.equal(Object.isFrozen(input), false);
     input.case.setup[0]!.with.target = 'changed.txt';
-    expect(parsed.case.setup[0]!.with.target).toBe('prompt.txt');
-    expect(parsed.setup[0]!.with.target).toBe('prompt.txt');
+    assert.equal(parsed.case.setup[0]!.with.target, 'prompt.txt');
+    assert.equal(parsed.setup[0]!.with.target, 'prompt.txt');
   });
 
   it('rejects selection identity drift from the resolved case and agent', () => {
     const input = validPlan();
     input.selection.case_id = 'sample/other';
-    expect(() => parseResolvedRunPlan(input)).toThrow(expect.objectContaining({
-      code: 'invalid_plan', message: expect.stringContaining('case IDs must match'),
-    }));
+    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /case IDs must match/});
 
     const changedAgent = validPlan();
     changedAgent.selection.agent.model = 'other-model';
-    expect(() => parseResolvedRunPlan(changedAgent)).toThrow(expect.objectContaining({
-      code: 'invalid_plan', message: expect.stringContaining('selection agent must match'),
-    }));
+    assert.throws(() => parseResolvedRunPlan(changedAgent), {code: 'invalid_plan', message: /selection agent must match/});
   });
 
   it('rejects reordered case and treatment setup in a serialized plan', () => {
@@ -135,19 +128,15 @@ describe('parseResolvedRunPlan', () => {
     input.selection.treatment = 'with-file';
     input.treatment = {id: 'with-file', setup: [treatmentStep]};
     input.setup = [...input.case.setup, treatmentStep];
-    expect(parseResolvedRunPlan(input).setup).toEqual(input.setup);
+    assert.deepEqual(parseResolvedRunPlan(input).setup, input.setup);
     input.setup = [...input.setup].reverse();
-    expect(() => parseResolvedRunPlan(input)).toThrow(expect.objectContaining({
-      code: 'invalid_plan', message: expect.stringContaining('case setup followed by treatment setup'),
-    }));
+    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /case setup followed by treatment setup/});
   });
 
   it('rejects evaluation checks edited independently of the selected case', () => {
     const input = validPlan();
     input.evaluation.checks = {files_created: ['other.txt']};
-    expect(() => parseResolvedRunPlan(input)).toThrow(expect.objectContaining({
-      code: 'invalid_plan', message: expect.stringContaining('evaluation checks must match'),
-    }));
+    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /evaluation checks must match/});
   });
 
   it('rejects inconsistent duplicated execution fields', () => {
@@ -158,12 +147,11 @@ describe('parseResolvedRunPlan', () => {
       parseResolvedRunPlan(input);
       throw new Error('Expected the resolved plan to be rejected.');
     } catch (error) {
-      expect(error).toBeInstanceOf(BenchmarkModelError);
-      expect((error as BenchmarkModelError).code).toBe('invalid_plan');
-      expect(error).toHaveProperty(
-        'message',
-        expect.stringContaining('effective prompt'),
-      );
+      assert.ok((error instanceof BenchmarkModelError));
+      assert.equal((error as BenchmarkModelError).code, 'invalid_plan');
+      assert.ok(error !== null && typeof error === 'object' && 'message' in error);
+      assert.equal(typeof error['message'], 'string');
+      assert.ok((error['message'] as string).includes('effective prompt'));
     }
   });
 
@@ -174,13 +162,10 @@ describe('parseResolvedRunPlan', () => {
       id: 'sample/write',
       initial_prompt: 'Create the requested file.',
     };
-    expect(() => parseResolvedRunPlan(missingDefaults)).toThrow(
-      BenchmarkModelError,
-    );
+    assert.throws(() => parseResolvedRunPlan(missingDefaults), BenchmarkModelError);
 
-    expect(() =>
-      parseResolvedRunPlan({...validPlan(), private_overlay: true}),
-    ).toThrow(BenchmarkModelError);
+    assert.throws(() =>
+      parseResolvedRunPlan({...validPlan(), private_overlay: true}), BenchmarkModelError);
   });
 
   it('rejects completion models when their score-affecting behavior is unused', () => {
@@ -189,22 +174,14 @@ describe('parseResolvedRunPlan', () => {
       provider: 'anthropic',
       model: 'claude-role-player',
     };
-    expect(() => parseResolvedRunPlan(withRolePlayer)).toThrow(
-      expect.objectContaining({
-        message: expect.stringContaining('cannot include a role_player model'),
-      }),
-    );
+    assert.throws(() => parseResolvedRunPlan(withRolePlayer), {message: /cannot include a role_player model/});
 
     const withJudge = validPlan();
     withJudge.evaluation.judge = {
       provider: 'anthropic',
       model: 'claude-judge',
     };
-    expect(() => parseResolvedRunPlan(withJudge)).toThrow(
-      expect.objectContaining({
-        message: expect.stringContaining('cannot include a judge model'),
-      }),
-    );
+    assert.throws(() => parseResolvedRunPlan(withJudge), {message: /cannot include a judge model/});
   });
 
   it('classifies structural failures as invalid plans', () => {
@@ -215,8 +192,8 @@ describe('parseResolvedRunPlan', () => {
       parseResolvedRunPlan(cyclic);
       throw new Error('Expected the cyclic plan to be rejected.');
     } catch (error) {
-      expect(error).toBeInstanceOf(BenchmarkModelError);
-      expect((error as BenchmarkModelError).code).toBe('invalid_plan');
+      assert.ok((error instanceof BenchmarkModelError));
+      assert.equal((error as BenchmarkModelError).code, 'invalid_plan');
     }
   });
 });

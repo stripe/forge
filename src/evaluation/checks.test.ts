@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
 import type {AtifTrajectoryV1_8} from '../atif/index.js';
 import type {ReadonlyWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
 import type {GuidelineResultV1} from '../results/types.js';
@@ -49,8 +48,8 @@ describe('workspace checks', () => {
       workspace({'greeting.txt': view}),
       checks,
     );
-    expect(evidence.schema_version).toBe(1);
-    expect(evidence.entries[0]).toEqual({
+    assert.equal(evidence.schema_version, 1);
+    assert.deepEqual(evidence.entries[0], {
       path: 'greeting.txt',
       exists: true,
       kind: 'file',
@@ -58,7 +57,7 @@ describe('workspace checks', () => {
       content_base64: body.toString('base64'),
     });
     assert.deepEqual(Buffer.from(evidence.entries[0]!.content_base64!, 'base64'), body);
-    expect(runWorkspaceChecks(checks, evidence).every(({passed}) => passed)).toBe(true);
+    assert.equal(runWorkspaceChecks(checks, evidence).every(({passed}) => passed), true);
   });
 
   it('reads only distinct requested paths in lexical order with the grading byte limit', async () => {

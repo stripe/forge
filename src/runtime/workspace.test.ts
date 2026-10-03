@@ -69,7 +69,7 @@ describe('owned workspace', () => {
   });
 
   it(
-    'assigns configured ownership to host-written files and parents',
+    'preserves the current owner and requested mode for host-written files',
     {skip: typeof process.getuid !== 'function' || typeof process.getgid !== 'function'},
     async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-workspace-test-'));

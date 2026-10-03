@@ -5,15 +5,23 @@ import {ClaudeStreamError, parseClaudeStream} from './stream.js';
 it('ignores bounded banner and primitive noise while retaining terminal text, calls, and valid cost', () => {
   const stream = [
     'Claude banner', '', 'null', '42',
-    JSON.stringify({type: 'assistant', message: {content: [
-      {type: 'text', text: 'intermediate text'},
-      {type: 'tool_use', name: 'Read'},
-    ]}}),
-    JSON.stringify({type: 'result', session_id: 'selected', result: 'final text', total_cost_usd: 0}),
+    JSON.stringify({
+      type: 'assistant', message: {
+        content: [
+          {type: 'text', text: 'intermediate text'},
+          {type: 'tool_use', name: 'Read'},
+          {type: 'tool_use', id: 'call-1', name: 'Write', input: {file: 'x'}},
+        ]
+      }
+    }),
+    JSON.stringify({type: 'result', session_id: 'selected', result: 'final text', total_cost_usd: 0.01}),
   ].join('\n');
   assert.deepEqual(parseClaudeStream(stream), {
-    text: 'final text', sessionId: 'selected', toolCalls: [{name: 'Read'}], costUsd: 0,
+    text: 'final text', sessionId: 'selected', toolCalls: [{name: 'Read'}, {id: 'call-1', name: 'Write', input: {file: 'x'}}], costUsd: 0.01,
   });
+  assert.equal(parseClaudeStream(JSON.stringify({
+    type: 'result', session_id: 'selected', result: 'done', total_cost_usd: 0,
+  })).costUsd, 0);
   assert.deepEqual(parseClaudeStream([
     JSON.stringify({type: 'assistant', message: {content: [{type: 'text', text: 'fallback text'}]}}),
     JSON.stringify({type: 'result', session_id: 'selected', total_cost_usd: -1}),
@@ -46,8 +54,12 @@ it('bounds line count and UTF-8 line bytes before consuming untrusted output', (
 });
 
 it('rejects excess tool calls rather than truncating the observed driver activity', () => {
-  const stdout = JSON.stringify({type: 'assistant', message: {content: Array.from({length: 2_001},
-    (_, index) => ({type: 'tool_use', name: 'Read', id: `call-${index}`}))}});
+  const stdout = JSON.stringify({
+    type: 'assistant', message: {
+      content: Array.from({length: 2_001},
+        (_, index) => ({type: 'tool_use', name: 'Read', id: `call-${index}`}))
+    }
+  });
   assert.throws(() => parseClaudeStream(stdout), {
     name: 'ClaudeStreamError', code: 'invalid_claude_stream', message: 'Claude output exceeded its tool-call limit.',
   });

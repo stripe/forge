@@ -1,9 +1,8 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import {sha256Digest, sha256Hex} from './hashes.js';
 import {loadDataset, loadExperimentConfig} from './loaders.js';
@@ -23,74 +22,53 @@ describe('benchmark filesystem loaders', () => {
     const fixture = await createDataset();
     const loaded = await loadDataset(fixture.root);
 
-    expect(loaded.manifestSha256).toBe(sha256Digest(fixture.manifestRaw));
-    expect(loaded.cases.get('smoke/write')?.definition.task).toBe(
-      'Create greeting.txt',
-    );
-    expect('sha256' in loaded.cases.get('smoke/write')!).toBe(false);
+    assert.equal(loaded.manifestSha256, sha256Digest(fixture.manifestRaw));
+    assert.equal(loaded.cases.get('smoke/write')?.definition.task, 'Create greeting.txt');
+    assert.equal('sha256' in loaded.cases.get('smoke/write')!, false);
   });
 
   it('fails closed for tampered, extra, and symlinked payloads', async () => {
     const tampered = await createDataset();
     await fs.appendFile(tampered.casePath, '\n# changed');
-    await expect(loadDataset(tampered.root)).rejects.toMatchObject({
-      code: 'dataset_integrity_mismatch',
-    });
+    await assert.rejects(loadDataset(tampered.root), {code: 'dataset_integrity_mismatch'});
 
     const extra = await createDataset();
     await fs.writeFile(path.join(extra.root, 'extra.txt'), 'not declared');
-    await expect(loadDataset(extra.root)).rejects.toMatchObject({
-      code: 'dataset_integrity_mismatch',
-    });
+    await assert.rejects(loadDataset(extra.root), {code: 'dataset_integrity_mismatch'});
 
     const linked = await createDataset();
     await fs.symlink(linked.casePath, path.join(linked.root, 'linked.yaml'));
-    await expect(loadDataset(linked.root)).rejects.toMatchObject({
-      code: 'unsafe_path',
-    });
+    await assert.rejects(loadDataset(linked.root), {code: 'unsafe_path'});
   });
 
   it('checks hashes for same-size case and fixture corruption', async () => {
     const caseFixture = await createDataset();
     const changedCase = caseFixture.caseYaml.replace('greeting.txt', 'farewell.txt');
-    expect(Buffer.byteLength(changedCase)).toBe(Buffer.byteLength(caseFixture.caseYaml));
+    assert.equal(Buffer.byteLength(changedCase), Buffer.byteLength(caseFixture.caseYaml));
     await fs.writeFile(caseFixture.casePath, changedCase);
-    await expect(loadDataset(caseFixture.root)).rejects.toMatchObject({
-      code: 'dataset_integrity_mismatch',
-      message: expect.stringContaining('declared size or hash'),
-    });
+    await assert.rejects(loadDataset(caseFixture.root), {code: 'dataset_integrity_mismatch', message: /declared size or hash/});
 
     const inputFixture = await createDataset();
     await fs.writeFile(path.join(inputFixture.root, 'fixtures', 'seed.txt'), 'reed');
-    await expect(loadDataset(inputFixture.root)).rejects.toMatchObject({
-      code: 'dataset_integrity_mismatch',
-      message: expect.stringContaining('declared size or hash'),
-    });
+    await assert.rejects(loadDataset(inputFixture.root), {code: 'dataset_integrity_mismatch', message: /declared size or hash/});
   });
 
   it('rejects a correctly hashed case with a different manifest ID', async () => {
     const fixture = await createDataset();
     const changedCase = fixture.caseYaml.replace('id: smoke/write', 'id: smoke/other');
     await replaceCasePayload(fixture, Buffer.from(changedCase));
-    await expect(loadDataset(fixture.root)).rejects.toMatchObject({
-      code: 'dataset_integrity_mismatch',
-      message: expect.stringContaining('ID does not match'),
-    });
+    await assert.rejects(loadDataset(fixture.root), {code: 'dataset_integrity_mismatch', message: /ID does not match/});
   });
 
   it('rejects oversized documents before parsing their bytes', async () => {
     const fixture = await createDataset();
     await fs.truncate(path.join(fixture.root, 'manifest.json'), MAX_DATASET_MANIFEST_BYTES + 1);
-    await expect(loadDataset(fixture.root)).rejects.toMatchObject({
-      code: 'invalid_manifest', message: expect.stringContaining('byte limit'),
-    });
+    await assert.rejects(loadDataset(fixture.root), {code: 'invalid_manifest', message: /byte limit/});
 
     const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
     await fs.writeFile(experimentPath, '');
     await fs.truncate(experimentPath, MAX_BENCHMARK_YAML_BYTES + 1);
-    await expect(loadExperimentConfig(experimentPath)).rejects.toMatchObject({
-      code: 'invalid_yaml', message: expect.stringContaining('byte limit'),
-    });
+    await assert.rejects(loadExperimentConfig(experimentPath), {code: 'invalid_yaml', message: /byte limit/});
   });
 
   it('requires a present regular experiment file without following symlinks', async () => {
@@ -99,9 +77,8 @@ describe('benchmark filesystem loaders', () => {
     const link = path.join(root, 'linked.yaml');
     await fs.writeFile(target, experimentConfigYaml('a'.repeat(64)));
     await fs.symlink(target, link);
-    await expect(loadExperimentConfig(link)).rejects.toMatchObject({code: 'unsafe_path'});
-    await expect(loadExperimentConfig(path.join(root, 'missing.yaml')))
-      .rejects.toMatchObject({code: 'unsafe_path'});
+    await assert.rejects(loadExperimentConfig(link), {code: 'unsafe_path'});
+    await assert.rejects(loadExperimentConfig(path.join(root, 'missing.yaml')), {code: 'unsafe_path'});
   });
 
   it('loads an experiment config without an unused source digest', async () => {
@@ -111,9 +88,9 @@ describe('benchmark filesystem loaders', () => {
     await fs.writeFile(experimentPath, raw);
 
     const loaded = await loadExperimentConfig(experimentPath);
-    expect(loaded.raw).toBe(raw);
-    expect('sha256' in loaded).toBe(false);
-    expect(loaded.config.id).toBe('forge-smoke');
+    assert.equal(loaded.raw, raw);
+    assert.equal('sha256' in loaded, false);
+    assert.equal(loaded.config.id, 'forge-smoke');
   });
 
   it('resolves the same selected plan after a comment-only experiment edit', async () => {
@@ -125,8 +102,7 @@ describe('benchmark filesystem loaders', () => {
     await fs.appendFile(experimentPath, '\n# Clarify the experiment without changing it.\n');
     const edited = await loadExperimentConfig(experimentPath);
     const selection = expandExperiment(original)[0]!;
-    expect(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: edited, selection})))
-      .toBe(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: original, selection})));
+    assert.equal(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: edited, selection})), serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: original, selection})));
   });
 
   it('rejects malformed UTF-8 instead of replacing bytes before parsing', async () => {
@@ -134,26 +110,20 @@ describe('benchmark filesystem loaders', () => {
     await fs.writeFile(path.join(fixture.root, 'manifest.json'), Buffer.concat([
       Buffer.from(fixture.manifestRaw), Buffer.from([0x80]),
     ]));
-    await expect(loadDataset(fixture.root)).rejects.toMatchObject({
-      code: 'invalid_manifest', message: expect.stringContaining('valid UTF-8'),
-    });
+    await assert.rejects(loadDataset(fixture.root), {code: 'invalid_manifest', message: /valid UTF-8/});
 
     const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
     await fs.writeFile(experimentPath, Buffer.concat([
       Buffer.from(`${experimentConfigYaml('a'.repeat(64))}\n# `),
       Buffer.from([0x80]), Buffer.from('\n'),
     ]));
-    await expect(loadExperimentConfig(experimentPath)).rejects.toMatchObject({
-      code: 'invalid_yaml', message: expect.stringContaining('valid UTF-8'),
-    });
+    await assert.rejects(loadExperimentConfig(experimentPath), {code: 'invalid_yaml', message: /valid UTF-8/});
 
     const caseFixture = await createDataset();
     await replaceCasePayload(caseFixture, Buffer.concat([
       Buffer.from(`${caseFixture.caseYaml}\n# `), Buffer.from([0x80]), Buffer.from('\n'),
     ]));
-    await expect(loadDataset(caseFixture.root)).rejects.toMatchObject({
-      code: 'invalid_yaml', message: expect.stringContaining('valid UTF-8'),
-    });
+    await assert.rejects(loadDataset(caseFixture.root), {code: 'invalid_yaml', message: /valid UTF-8/});
   });
 });
 

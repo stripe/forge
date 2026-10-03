@@ -4,8 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
-
 import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
 import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
@@ -177,24 +175,24 @@ describe('local artifact store', () => {
       descriptorFor('trajectory.json', trajectoryBody),
     ];
     const result = resultFor(artifacts);
-    expect(await fs.readdir(path.join(root, 'runs'))).toEqual([]);
+    assert.deepEqual(await fs.readdir(path.join(root, 'runs')), []);
     const committed = await transaction.commit(
       result as unknown as Readonly<Record<string, unknown>>,
     );
-    expect(await fs.readdir(path.join(root, '.staging'))).toEqual([]);
-    expect(await fs.readFile(path.join(committed.location, 'result.json'), 'utf8'))
-      .toBe(serializeCanonicalJson(result));
-    await expect(transaction.commit(result as unknown as Record<string, unknown>))
-      .rejects.toThrow('Artifact transaction is closed.');
+    assert.deepEqual(await fs.readdir(path.join(root, '.staging')), []);
+    assert.equal(await fs.readFile(path.join(committed.location, 'result.json'), 'utf8'), serializeCanonicalJson(result));
+    await assert.rejects(transaction.commit(result as unknown as Record<string, unknown>), /Artifact transaction is closed\./);
     await transaction.rollback();
-    await expect(verifyCompletedRun(committed.location)).resolves.toMatchObject({runId: 'run-1'});
+    {
+      const actual = (await verifyCompletedRun(committed.location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
     await fs.writeFile(path.join(committed.location, 'result.json'), JSON.stringify({
       ...result,
       runtime: {...result.runtime, adapter: 'docker'},
     }));
-    await expect(verifyCompletedRun(committed.location)).rejects.toThrow(
-      'plan.json runtime does not match',
-    );
+    await assert.rejects(verifyCompletedRun(committed.location), /plan\.json runtime does not match/);
   });
 
   it('rolls back staged bytes idempotently and permits reuse of the run ID', async () => {
@@ -204,16 +202,15 @@ describe('local artifact store', () => {
     const transaction = await store.begin('run-1');
     const artifact = {path: 'extensions/test/nested/report.txt', body: Buffer.from('staged'), mediaType: 'text/plain'};
     await transaction.write(artifact);
-    expect(await fs.readdir(path.join(root, '.staging'))).toHaveLength(1);
-    expect(await fs.readdir(path.join(root, 'runs'))).toEqual([]);
+    assert.equal((await fs.readdir(path.join(root, '.staging'))).length, 1);
+    assert.deepEqual(await fs.readdir(path.join(root, 'runs')), []);
 
     await transaction.rollback();
     await transaction.rollback();
-    expect(await fs.readdir(path.join(root, '.staging'))).toEqual([]);
-    expect(await fs.readdir(path.join(root, 'runs'))).toEqual([]);
-    await expect(transaction.write(artifact)).rejects.toThrow('Artifact transaction is closed.');
-    await expect(transaction.commit(resultFor([]) as unknown as Record<string, unknown>))
-      .rejects.toThrow('Artifact transaction is closed.');
+    assert.deepEqual(await fs.readdir(path.join(root, '.staging')), []);
+    assert.deepEqual(await fs.readdir(path.join(root, 'runs')), []);
+    await assert.rejects(transaction.write(artifact), /Artifact transaction is closed\./);
+    await assert.rejects(transaction.commit(resultFor([]) as unknown as Record<string, unknown>), /Artifact transaction is closed\./);
     await (await store.begin('run-1')).rollback();
   });
 
@@ -231,9 +228,9 @@ describe('local artifact store', () => {
       name: 'RunIdConflictError', runId: 'run-1', conflictCode: 'run_id_conflict',
     });
     await assert.rejects(store.begin('run-1'), RunIdConflictError);
-    expect(await fs.readdir(path.join(root, '.staging'))).toEqual([]);
-    expect(await fs.readFile(path.join(committed.location, 'result.json'))).toEqual(winnerBytes);
-    await expect(loser.commit(value)).rejects.toThrow('Artifact transaction is closed.');
+    assert.deepEqual(await fs.readdir(path.join(root, '.staging')), []);
+    assert.deepEqual(await fs.readFile(path.join(committed.location, 'result.json')), winnerBytes);
+    await assert.rejects(loser.commit(value), /Artifact transaction is closed\./);
   });
 
   it('rejects a result for a different run without publishing staged bytes', async () => {
@@ -245,8 +242,8 @@ describe('local artifact store', () => {
     await assert.rejects(transaction.commit({
       ...resultFor([descriptorFor('plan.json', testPlanBody)]), run_id: 'run-2',
     } as unknown as Record<string, unknown>), RunIdConflictError);
-    expect(await fs.readdir(path.join(root, '.staging'))).toEqual([]);
-    expect(await fs.readdir(path.join(root, 'runs'))).toEqual([]);
+    assert.deepEqual(await fs.readdir(path.join(root, '.staging')), []);
+    assert.deepEqual(await fs.readdir(path.join(root, 'runs')), []);
     await (await store.begin('run-1')).rollback();
   });
 
@@ -255,15 +252,13 @@ describe('local artifact store', () => {
     roots.push(root);
     const transaction = await createArtifactStore({root}).begin('run-1');
     const artifact = {path: 'plan.json', body: testPlanBody, mediaType: 'application/json'};
-    await expect(transaction.write({...artifact, path: '../outside.json'}))
-      .rejects.toThrow('Invalid artifact path: ../outside.json');
-    await expect(transaction.write({...artifact, path: 'result.json'}))
-      .rejects.toThrow('result.json is reserved for atomic commit.');
+    await assert.rejects(transaction.write({...artifact, path: '../outside.json'}), /Invalid artifact path: \.\.\/outside\.json/);
+    await assert.rejects(transaction.write({...artifact, path: 'result.json'}), /result\.json is reserved for atomic commit\./);
     await transaction.write(artifact);
-    await expect(transaction.write(artifact)).rejects.toThrow('Duplicate artifact path: plan.json');
+    await assert.rejects(transaction.write(artifact), /Duplicate artifact path: plan\.json/);
     await transaction.rollback();
-    expect(await fs.readdir(path.join(root, '.staging'))).toEqual([]);
-    expect(await fs.readdir(path.join(root, 'runs'))).toEqual([]);
+    assert.deepEqual(await fs.readdir(path.join(root, '.staging')), []);
+    assert.deepEqual(await fs.readdir(path.join(root, 'runs')), []);
   });
 
   it('rejects duplicate descriptors that omit a staged artifact', async () => {
@@ -290,11 +285,9 @@ describe('local artifact store', () => {
     };
     const duplicated = [descriptor, descriptor];
 
-    await expect(
-      transaction.commit(
-        resultFor(duplicated) as unknown as Readonly<Record<string, unknown>>,
-      ),
-    ).rejects.toThrow('Duplicate claimed artifact');
+    await assert.rejects(transaction.commit(
+      resultFor(duplicated) as unknown as Readonly<Record<string, unknown>>,
+    ), /Duplicate claimed artifact/);
   });
 
   it('independently checks claimed digests against staged artifact inputs', async () => {
@@ -310,12 +303,10 @@ describe('local artifact store', () => {
       ...descriptorFor('plan.json', testPlanBody),
       sha256: `sha256:${'f'.repeat(64)}` as const,
     };
-    await expect(transaction.commit(resultFor([descriptor]) as unknown as Record<string, unknown>))
-      .rejects.toThrow('Result descriptor mismatch: plan.json');
-    expect(await fs.readdir(path.join(root, '.staging'))).toEqual([]);
-    expect(await fs.readdir(path.join(root, 'runs'))).toEqual([]);
-    await expect(transaction.write({path: 'other.json', body: Buffer.from('{}'), mediaType: 'application/json'}))
-      .rejects.toThrow('Artifact transaction is closed.');
+    await assert.rejects(transaction.commit(resultFor([descriptor]) as unknown as Record<string, unknown>), /Result descriptor mismatch: plan\.json/);
+    assert.deepEqual(await fs.readdir(path.join(root, '.staging')), []);
+    assert.deepEqual(await fs.readdir(path.join(root, 'runs')), []);
+    await assert.rejects(transaction.write({path: 'other.json', body: Buffer.from('{}'), mediaType: 'application/json'}), /Artifact transaction is closed\./);
     await transaction.rollback();
     await (await createArtifactStore({root}).begin('run-1')).rollback();
   });
@@ -326,25 +317,25 @@ describe('local artifact store', () => {
       {path: 'trajectory.json', body: oneShotTrajectory},
     ];
     const location = await commitArtifacts(canonical);
-    await expect(verifyCompletedRun(location)).resolves.toMatchObject({runId: 'run-1'});
+    {
+      const actual = (await verifyCompletedRun(location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
     const alteredPlan = testPlanBody.toString('utf8').replace(
       '"effective_prompt":"do it"',
       '"effective_prompt":"go it"',
     );
-    expect(Buffer.byteLength(alteredPlan)).toBe(testPlanBody.byteLength);
-    expect(alteredPlan).not.toBe(testPlanBody.toString('utf8'));
+    assert.equal(Buffer.byteLength(alteredPlan), testPlanBody.byteLength);
+    assert.notEqual(alteredPlan, testPlanBody.toString('utf8'));
     await fs.writeFile(path.join(location, 'plan.json'), alteredPlan);
-    await expect(verifyCompletedRun(location)).rejects.toThrow(
-      'Artifact does not match its descriptor: plan.json',
-    );
+    await assert.rejects(verifyCompletedRun(location), /Artifact does not match its descriptor: plan\.json/);
 
     const noncanonical = await commitArtifacts([
       ...canonical,
       {path: 'plan.json', body: Buffer.from(JSON.stringify(testPlan, null, 2))},
     ]);
-    await expect(verifyCompletedRun(noncanonical)).rejects.toThrow(
-      'Completed plan.json is not canonical.',
-    );
+    await assert.rejects(verifyCompletedRun(noncanonical), /Completed plan\.json is not canonical\./);
   });
 
   it('rejects unclaimed files and symlinks even when the claimed artifact bytes match', async () => {
@@ -354,18 +345,18 @@ describe('local artifact store', () => {
     ]);
     await fs.mkdir(path.join(location, 'extra'));
     await fs.writeFile(path.join(location, 'extra/unclaimed.txt'), 'unclaimed');
-    await expect(verifyCompletedRun(location)).rejects.toThrow('Completed run contains an unclaimed file.');
+    await assert.rejects(verifyCompletedRun(location), /Completed run contains an unclaimed file\./);
     await fs.rm(path.join(location, 'extra'), {recursive: true});
 
     await fs.symlink(path.join(location, 'plan.json'), path.join(location, 'unclaimed-link'));
-    await expect(verifyCompletedRun(location)).rejects.toThrow('Completed run contains a symbolic link.');
+    await assert.rejects(verifyCompletedRun(location), /Completed run contains a symbolic link\./);
     await fs.unlink(path.join(location, 'unclaimed-link'));
 
     const copy = path.join(path.dirname(location), 'trajectory-copy.json');
     await fs.writeFile(copy, oneShotTrajectory);
     await fs.unlink(path.join(location, 'trajectory.json'));
     await fs.symlink(copy, path.join(location, 'trajectory.json'));
-    await expect(verifyCompletedRun(location)).rejects.toThrow('Artifact is unsafe or exceeds its declared size.');
+    await assert.rejects(verifyCompletedRun(location), /Artifact is unsafe or exceeds its declared size\./);
   });
 
   it('requires restricted classification and a single root native source', async () => {
@@ -388,9 +379,13 @@ describe('local artifact store', () => {
       supplemental_artifacts: result.artifacts.filter(({path}) => path.startsWith('native/') || path.startsWith('extensions/')),
     });
     const valid = await commitArtifacts([...core, native, contribution], classifySupplemental);
-    await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
-    expect((await fs.stat(path.join(valid, native.path))).mode & 0o777).toBe(0o600);
-    expect((await fs.stat(path.join(valid, contribution.path))).mode & 0o777).toBe(0o644);
+    {
+      const actual = (await verifyCompletedRun(valid));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
+    assert.equal((await fs.stat(path.join(valid, native.path))).mode & 0o777, 0o600);
+    assert.equal((await fs.stat(path.join(valid, contribution.path))).mode & 0o777, 0o644);
 
     // Rebind the result descriptor while leaving the exact source bytes and digest intact.
     const resultPath = path.join(valid, 'result.json');
@@ -403,12 +398,12 @@ describe('local artifact store', () => {
         return unclassified;
       }),
     }));
-    await expect(verifyCompletedRun(valid)).rejects.toThrow('unsupported path or classification');
+    await assert.rejects(verifyCompletedRun(valid), /unsupported path or classification/);
 
     const duplicateNative = await commitArtifacts([
       ...core, native, {...native, path: 'native/claude-code/session.log'},
     ], classifySupplemental);
-    await expect(verifyCompletedRun(duplicateNative)).rejects.toThrow('more than one root native artifact');
+    await assert.rejects(verifyCompletedRun(duplicateNative), /more than one root native artifact/);
   });
 
   it('strictly verifies workspace evidence schema and removed fields', async () => {
@@ -428,7 +423,11 @@ describe('local artifact store', () => {
       ...canonical,
       {path: 'workspace-evidence.json', body: jsonBody(workspace)},
     ], withPassingWorkspaceCheck);
-    await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
+    {
+      const actual = (await verifyCompletedRun(valid));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
     for (const invalidWorkspace of [
       {...workspace, schema_version: 2},
       {...workspace, entries: [{...entry, sha256: `sha256:${'a'.repeat(64)}`}]},
@@ -437,17 +436,13 @@ describe('local artifact store', () => {
         ...canonical,
         {path: 'workspace-evidence.json', body: jsonBody(invalidWorkspace)},
       ], withPassingWorkspaceCheck);
-      await expect(verifyCompletedRun(invalid)).rejects.toThrow(
-        'Completed workspace-evidence.json does not match its schema.',
-      );
+      await assert.rejects(verifyCompletedRun(invalid), /Completed workspace-evidence\.json does not match its schema\./);
     }
     await fs.writeFile(path.join(valid, 'workspace-evidence.json'), jsonBody({
       ...workspace,
       entries: [{...entry, content_base64: Buffer.from('fail').toString('base64')}],
     }));
-    await expect(verifyCompletedRun(valid)).rejects.toThrow(
-      'Artifact does not match its descriptor: workspace-evidence.json',
-    );
+    await assert.rejects(verifyCompletedRun(valid), /Artifact does not match its descriptor: workspace-evidence\.json/);
   });
 
   it('rejects result evidence without provenance', () => {
@@ -457,13 +452,12 @@ describe('local artifact store', () => {
     };
     delete evidenceWithoutProvenance.provenance;
 
-    expect(() =>
-      parseRunResult({...result, evidence: evidenceWithoutProvenance}),
-    ).toThrow();
+    assert.throws(() =>
+      parseRunResult({...result, evidence: evidenceWithoutProvenance}));
   });
 
   it('rejects unsupported result schema versions', () => {
-    expect(() => parseRunResult({...resultFor([]), schema_version: 2})).toThrow();
+    assert.throws(() => parseRunResult({...resultFor([]), schema_version: 2}));
   });
 
   it('requires ordered completion-call summaries with matching status and error codes', () => {
@@ -474,29 +468,26 @@ describe('local artifact store', () => {
     } as const;
     const result = resultFor([]);
     const calls = [call, {...call, sequence: 2, status: 'failed', stop_reason: null, error_code: 'request_error'}];
-    expect(parseRunResult({...result, completion_calls: calls}).completion_calls).toEqual(calls);
-    expect(() => parseRunResult({...result, completion_calls: [{...call, sequence: 2}]}))
-      .toThrow('Completion-call sequence must be contiguous and one-based.');
-    expect(() => parseRunResult({...result, completion_calls: [{...call, error_code: 'request_error'}]}))
-      .toThrow('Successful completion calls cannot record an error code.');
-    expect(() => parseRunResult({...result, completion_calls: [{...call, status: 'failed'}]}))
-      .toThrow('Failed completion calls require an error code.');
+    assert.deepEqual(parseRunResult({...result, completion_calls: calls}).completion_calls, calls);
+    assert.throws(() => parseRunResult({...result, completion_calls: [{...call, sequence: 2}]}), /Completion-call sequence must be contiguous and one-based\./);
+    assert.throws(() => parseRunResult({...result, completion_calls: [{...call, error_code: 'request_error'}]}), /Successful completion calls cannot record an error code\./);
+    assert.throws(() => parseRunResult({...result, completion_calls: [{...call, status: 'failed'}]}), /Failed completion calls require an error code\./);
   });
 
   it('rejects removed root and runtime fields in strict result objects', () => {
     const result = resultFor([]);
-    expect(() => parseRunResult({
+    assert.throws(() => parseRunResult({
       ...result,
       plan_sha256: `sha256:${'a'.repeat(64)}`,
-    })).toThrow();
-    expect(() => parseRunResult({
+    }));
+    assert.throws(() => parseRunResult({
       ...result,
       artifact_set_sha256: `sha256:${'a'.repeat(64)}`,
-    })).toThrow();
-    expect(() => parseRunResult({
+    }));
+    assert.throws(() => parseRunResult({
       ...result,
       runtime: {...result.runtime, adapter_version: '1'},
-    })).toThrow();
+    }));
   });
 
   it('requires non-empty, unique, canonically ordered action bundle provenance', () => {
@@ -512,35 +503,30 @@ describe('local artifact store', () => {
     };
     const result = resultFor([]);
 
-    expect(() =>
+    assert.throws(() =>
       parseRunResult({
         ...result,
         forge: {...result.forge, action_bundles: []},
-      }),
-    ).toThrow();
-    expect(() =>
+      }));
+    assert.throws(() =>
       parseRunResult({
         ...result,
         forge: {...result.forge, action_bundles: [first, first]},
-      }),
-    ).toThrow(/unique/);
-    expect(() =>
+      }), /unique/);
+    assert.throws(() =>
       parseRunResult({
         ...result,
         forge: {...result.forge, action_bundles: [second, first]},
-      }),
-    ).toThrow(/canonical namespace order/);
-    expect(
-      parseRunResult({
-        ...result,
-        forge: {...result.forge, action_bundles: [first, second]},
-      }).forge.action_bundles,
-    ).toEqual([first, second]);
+      }), /canonical namespace order/);
+    assert.deepEqual(parseRunResult({
+      ...result,
+      forge: {...result.forge, action_bundles: [first, second]},
+    }).forge.action_bundles, [first, second]);
   });
 
   it('rejects contradictory result evidence provenance', () => {
     const result = resultFor([]);
-    expect(() =>
+    assert.throws(() =>
       parseRunResult({
         ...result,
         evidence: {
@@ -550,8 +536,7 @@ describe('local artifact store', () => {
             adapter: {id: 'other-agent', version: '1'},
           },
         },
-      }),
-    ).toThrow('Evidence provenance does not match the recorded agent adapter');
+      }), /Evidence provenance does not match the recorded agent adapter/);
   });
 
   it('requires the exact canonical core artifact inventory', async () => {
@@ -564,40 +549,30 @@ describe('local artifact store', () => {
       (result) => result,
       {includePlan: false},
     );
-    await expect(verifyCompletedRun(missingPlan)).rejects.toThrow(
-      'missing canonical artifact plan.json',
-    );
+    await assert.rejects(verifyCompletedRun(missingPlan), /missing canonical artifact plan\.json/);
 
     const missingSetup = await commitArtifacts(canonical, (result) => result, {
       includeSetup: false,
     });
-    await expect(verifyCompletedRun(missingSetup)).rejects.toThrow(
-      'missing canonical artifact setup.json',
-    );
+    await assert.rejects(verifyCompletedRun(missingSetup), /missing canonical artifact setup\.json/);
 
     const legacyEvaluation = await commitArtifacts([
       ...canonical,
       {path: 'evaluation.json', body: jsonBody({schema_version: 1})},
     ]);
-    await expect(verifyCompletedRun(legacyEvaluation)).rejects.toThrow(
-      'noncanonical core artifact evaluation.json',
-    );
+    await assert.rejects(verifyCompletedRun(legacyEvaluation), /noncanonical core artifact evaluation\.json/);
 
     const unexpectedWorkspace = await commitArtifacts([
       ...canonical,
       {path: 'workspace-evidence.json', body: emptyWorkspaceEvidenceBody()},
     ]);
-    await expect(verifyCompletedRun(unexpectedWorkspace)).rejects.toThrow(
-      'noncanonical core artifact workspace-evidence.json',
-    );
+    await assert.rejects(verifyCompletedRun(unexpectedWorkspace), /noncanonical core artifact workspace-evidence\.json/);
 
     const missingWorkspace = await commitArtifacts(
       canonical,
       withPassingWorkspaceCheck,
     );
-    await expect(verifyCompletedRun(missingWorkspace)).rejects.toThrow(
-      'missing canonical artifact workspace-evidence.json',
-    );
+    await assert.rejects(verifyCompletedRun(missingWorkspace), /missing canonical artifact workspace-evidence\.json/);
 
     const checkedRun = await commitArtifacts(
       [
@@ -606,9 +581,11 @@ describe('local artifact store', () => {
       ],
       withPassingWorkspaceCheck,
     );
-    await expect(verifyCompletedRun(checkedRun)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(checkedRun));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
   });
 
   it('strictly verifies plugin resolutions against the completed plan', async () => {
@@ -662,10 +639,14 @@ describe('local artifact store', () => {
       (result) => result,
       {plan: pluginPlan},
     );
-    await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
+    {
+      const actual = (await verifyCompletedRun(valid));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
 
     const missingResolution = await commitArtifacts(core, (result) => result, {plan: pluginPlan});
-    await expect(verifyCompletedRun(missingResolution)).rejects.toThrow('omitted a plugin installation resolution');
+    await assert.rejects(verifyCompletedRun(missingResolution), /omitted a plugin installation resolution/);
 
     const malformed = await commitArtifacts(
       [
@@ -678,9 +659,7 @@ describe('local artifact store', () => {
       (result) => result,
       {plan: pluginPlan},
     );
-    await expect(verifyCompletedRun(malformed)).rejects.toThrow(
-      'invalid plugin installation resolution',
-    );
+    await assert.rejects(verifyCompletedRun(malformed), /invalid plugin installation resolution/);
 
     const mismatched = await commitArtifacts(
       [
@@ -693,9 +672,7 @@ describe('local artifact store', () => {
       (result) => result,
       {plan: pluginPlan},
     );
-    await expect(verifyCompletedRun(mismatched)).rejects.toThrow(
-      'does not match the completed run plan',
-    );
+    await assert.rejects(verifyCompletedRun(mismatched), /does not match the completed run plan/);
   });
 
   it('binds canonical setup receipts to the plan and disallows static resolutions', async () => {
@@ -710,29 +687,31 @@ describe('local artifact store', () => {
     ];
     const setup = {schema_version: 1, steps: [{index: 0, uses: 'forge/write'}]};
     const valid = await commitArtifacts(core, (result) => result, {plan});
-    await expect(verifyCompletedRun(valid)).resolves.toMatchObject({runId: 'run-1'});
+    {
+      const actual = (await verifyCompletedRun(valid));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
 
     const noncanonical = await commitArtifacts([
       ...core, {path: 'setup.json', body: Buffer.from(JSON.stringify(setup, null, 2))},
     ], (result) => result, {plan});
-    await expect(verifyCompletedRun(noncanonical)).rejects.toThrow('Completed setup.json is not canonical.');
+    await assert.rejects(verifyCompletedRun(noncanonical), /Completed setup\.json is not canonical\./);
 
     const mismatched = await commitArtifacts([
       ...core, {path: 'setup.json', body: jsonBody({schema_version: 1, steps: [{index: 0, uses: 'forge/command'}]})},
     ], (result) => result, {plan});
-    await expect(verifyCompletedRun(mismatched)).rejects.toThrow('setup.json does not match the completed run plan.');
+    await assert.rejects(verifyCompletedRun(mismatched), /setup\.json does not match the completed run plan\./);
 
     const inventedResolution = await commitArtifacts([
       ...core, {path: 'setup.json', body: jsonBody({schema_version: 1, steps: [{index: 0, uses: 'forge/write', resolution: {path: 'elsewhere'}}]})},
     ], (result) => result, {plan});
-    await expect(verifyCompletedRun(inventedResolution)).rejects.toThrow('Static setup action forge/write cannot record a resolution.');
+    await assert.rejects(verifyCompletedRun(inventedResolution), /Static setup action forge\/write cannot record a resolution\./);
   });
 
   it('strictly parses interaction.json and verifies its result summary', async () => {
     const missingLocation = await commitArtifacts([]);
-    await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
-      'missing canonical artifact interaction.json',
-    );
+    await assert.rejects(verifyCompletedRun(missingLocation), /missing canonical artifact interaction\.json/);
 
     const invalidLocation = await commitArtifacts([
       {
@@ -740,9 +719,7 @@ describe('local artifact store', () => {
         body: jsonBody({...oneShotInteraction, undeclared: true}),
       },
     ]);
-    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
-      'Completed interaction.json does not match its schema.',
-    );
+    await assert.rejects(verifyCompletedRun(invalidLocation), /Completed interaction\.json does not match its schema\./);
 
     const mismatchedLocation = await commitArtifacts(
       [{path: 'interaction.json', body: jsonBody(oneShotInteraction)}],
@@ -751,18 +728,14 @@ describe('local artifact store', () => {
         interaction: {...result.interaction, turn_count: 2},
       }),
     );
-    await expect(verifyCompletedRun(mismatchedLocation)).rejects.toThrow(
-      'interaction.json does not match the completed result summary.',
-    );
+    await assert.rejects(verifyCompletedRun(mismatchedLocation), /interaction\.json does not match the completed result summary\./);
   });
 
   it('always requires a valid trajectory with the completed session identity', async () => {
     const missingLocation = await commitArtifacts([
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
     ]);
-    await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
-      'missing canonical artifact trajectory.json',
-    );
+    await assert.rejects(verifyCompletedRun(missingLocation), /missing canonical artifact trajectory\.json/);
 
     const invalidLocation = await commitArtifacts([
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
@@ -776,9 +749,7 @@ describe('local artifact store', () => {
         }),
       },
     ]);
-    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
-      'Completed trajectory.json does not match its schema.',
-    );
+    await assert.rejects(verifyCompletedRun(invalidLocation), /Completed trajectory\.json does not match its schema\./);
 
     const mismatchedSessionLocation = await commitArtifacts([
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
@@ -793,9 +764,7 @@ describe('local artifact store', () => {
         ),
       },
     ]);
-    await expect(verifyCompletedRun(mismatchedSessionLocation)).rejects.toThrow(
-      'trajectory.json session identity does not match the completed run.',
-    );
+    await assert.rejects(verifyCompletedRun(mismatchedSessionLocation), /trajectory\.json session identity does not match the completed run\./);
   });
 
   it('accepts projection differences while requiring every ordered prompt and response', async () => {
@@ -823,9 +792,11 @@ describe('local artifact store', () => {
       ],
       withMultiTurnSummary,
     );
-    await expect(verifyCompletedRun(compatibleLocation)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(compatibleLocation));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
 
     const incompatibleSteps = [
       [
@@ -871,9 +842,7 @@ describe('local artifact store', () => {
         ],
         withMultiTurnSummary,
       );
-      await expect(verifyCompletedRun(location)).rejects.toThrow(
-        'trajectory.json does not cover every completed interaction turn.',
-      );
+      await assert.rejects(verifyCompletedRun(location), /trajectory\.json does not cover every completed interaction turn\./);
     }
   });
 
@@ -882,9 +851,11 @@ describe('local artifact store', () => {
       codexInteraction(),
       codexNativeSteps(),
     );
-    await expect(verifyCompletedRun(location)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
   });
 
   for (const [nativeName, liveName] of [
@@ -908,7 +879,11 @@ describe('local artifact store', () => {
           observation: {results: [{source_call_id: 'native-mcp', content: 'success'}]},
         },
       ]);
-      await expect(verifyCompletedRun(location)).resolves.toMatchObject({runId: 'run-1'});
+      {
+        const actual = (await verifyCompletedRun(location));
+        assert.ok(actual);
+        assert.equal(actual.runId, 'run-1');
+      }
     });
   }
 
@@ -917,18 +892,22 @@ describe('local artifact store', () => {
       {step_id: 1, source: 'user', message: 'do it'},
       {step_id: 2, source: 'agent', message: 'different native response'},
     ]);
-    await expect(verifyCompletedRun(location)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
   });
 
   for (const missing of ['command pair', 'assistant text'] as const) {
     it(`rejects complete Codex evidence missing ${missing} even after rebinding hashes and judge projection`, async () => {
       const steps = codexNativeSteps();
       const location = await commitCodexEvidence(codexInteraction(), steps);
-      await expect(verifyCompletedRun(location)).resolves.toMatchObject({
-        runId: 'run-1',
-      });
+      {
+        const actual = (await verifyCompletedRun(location));
+        assert.ok(actual);
+        assert.equal(actual.runId, 'run-1');
+      }
 
       // Removing a command's whole step drops both its call and output, leaving
       // valid ATIF. The unrelated tool_search remains, so raw total counts are
@@ -941,9 +920,7 @@ describe('local artifact store', () => {
         .map((step, index) => ({...step, step_id: index + 1}));
       await rebindCodexEvidence(location, tampered);
 
-      await expect(verifyCompletedRun(location)).rejects.toThrow(
-        'trajectory.json does not cover every completed interaction turn.',
-      );
+      await assert.rejects(verifyCompletedRun(location), /trajectory\.json does not cover every completed interaction turn\./);
     });
   }
 
@@ -963,9 +940,7 @@ describe('local artifact store', () => {
             },
       );
       const location = await commitCodexEvidence(codexInteraction(), steps);
-      await expect(verifyCompletedRun(location)).rejects.toThrow(
-        'trajectory.json does not cover every completed interaction turn.',
-      );
+      await assert.rejects(verifyCompletedRun(location), /trajectory\.json does not cover every completed interaction turn\./);
     }
   });
 
@@ -1011,9 +986,11 @@ describe('local artifact store', () => {
         ],
       },
     }));
-    await expect(verifyCompletedRun(location)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
   });
 
   it('accepts only the system fallback for a zero-turn role-player failure', async () => {
@@ -1035,9 +1012,11 @@ describe('local artifact store', () => {
       ],
       withZeroTurnRolePlayerFailure,
     );
-    await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(validLocation));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
 
     const invalidLocation = await commitArtifacts(
       [
@@ -1053,9 +1032,7 @@ describe('local artifact store', () => {
       ],
       withZeroTurnRolePlayerFailure,
     );
-    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
-      'Zero-turn interaction requires the system-only role-player-error trajectory.',
-    );
+    await assert.rejects(verifyCompletedRun(invalidLocation), /Zero-turn interaction requires the system-only role-player-error trajectory\./);
   });
 
   it('requires judge evidence exactly when guidelines were judged', async () => {
@@ -1066,9 +1043,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await expect(verifyCompletedRun(missingLocation)).rejects.toThrow(
-      'missing judge-evidence.json',
-    );
+    await assert.rejects(verifyCompletedRun(missingLocation), /missing judge-evidence\.json/);
 
     const trajectory = oneShotTrajectory;
     const unexpectedLocation = await commitArtifacts([
@@ -1076,9 +1051,7 @@ describe('local artifact store', () => {
       {path: 'trajectory.json', body: trajectory},
       {path: 'judge-evidence.json', body: judgeEvidenceBody()},
     ]);
-    await expect(verifyCompletedRun(unexpectedLocation)).rejects.toThrow(
-      'without judged guidelines contains judge-evidence.json',
-    );
+    await assert.rejects(verifyCompletedRun(unexpectedLocation), /without judged guidelines contains judge-evidence\.json/);
   });
 
   it('verifies judge evidence and its projection declaration', async () => {
@@ -1101,9 +1074,11 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(validLocation));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
 
     const unsupportedPromptLocation = await commitArtifacts(
       [
@@ -1116,9 +1091,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await expect(verifyCompletedRun(unsupportedPromptLocation)).rejects.toThrow(
-      'prompt_version is not supported by this Forge build',
-    );
+    await assert.rejects(verifyCompletedRun(unsupportedPromptLocation), /prompt_version is not supported by this Forge build/);
 
     const unsupportedProjectionLocation = await commitArtifacts(
       [
@@ -1137,9 +1110,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await expect(verifyCompletedRun(unsupportedProjectionLocation)).rejects.toThrow(
-      'Completed judge-evidence.json does not match its schema.',
-    );
+    await assert.rejects(verifyCompletedRun(unsupportedProjectionLocation), /Completed judge-evidence\.json does not match its schema\./);
 
     const invalidLocation = await commitArtifacts(
       [
@@ -1155,9 +1126,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await expect(verifyCompletedRun(invalidLocation)).rejects.toThrow(
-      'Completed judge-evidence.json does not match its schema.',
-    );
+    await assert.rejects(verifyCompletedRun(invalidLocation), /Completed judge-evidence\.json does not match its schema\./);
   });
 
   it('binds embedded judge steps to the trajectory even if artifact hashes are valid', async () => {
@@ -1180,9 +1149,11 @@ describe('local artifact store', () => {
       withPassingGuideline,
     );
     const validLocation = await commitEvidence(judgeEvidence);
-    await expect(verifyCompletedRun(validLocation)).resolves.toMatchObject({
-      runId: 'run-1',
-    });
+    {
+      const actual = (await verifyCompletedRun(validLocation));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-1');
+    }
 
     const {steps: _steps, ...policyOnly} = judgeEvidence.transcript;
     const missingStepsLocation = await commitArtifacts(
@@ -1196,9 +1167,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await expect(verifyCompletedRun(missingStepsLocation)).rejects.toThrow(
-      'Completed judge-evidence.json does not match its schema.',
-    );
+    await assert.rejects(verifyCompletedRun(missingStepsLocation), /Completed judge-evidence\.json does not match its schema\./);
 
     for (const steps of [
       [],
@@ -1210,9 +1179,7 @@ describe('local artifact store', () => {
         ...judgeEvidence,
         transcript: {...judgeEvidence.transcript, steps},
       });
-      await expect(verifyCompletedRun(location)).rejects.toThrow(
-        'judge-evidence.json transcript steps do not match the projection of trajectory.json.',
-      );
+      await assert.rejects(verifyCompletedRun(location), /judge-evidence\.json transcript steps do not match the projection of trajectory\.json\./);
     }
   });
 });
@@ -1260,10 +1227,12 @@ function codexNativeSteps(): AtifStep[] {
         function_name: tool.name,
         arguments: tool.input,
       }],
-      observation: {results: [{
-        source_call_id: `native-call-${index}`,
-        content: 'native tool output',
-      }]},
+      observation: {
+        results: [{
+          source_call_id: `native-call-${index}`,
+          content: 'native tool output',
+        }]
+      },
     })),
     {step_id: tools.length + 2, source: 'agent', message: 'different native response'},
   ];

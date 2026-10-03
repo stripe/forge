@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
 import {
   REDACTED_SECRET,
   SecretLeakError,
@@ -18,12 +17,12 @@ describe('credential redaction', () => {
     });
     const result = redactSecrets(input, ['sk-secret']);
 
-    expect(result.value).toEqual({
+    assert.deepEqual(result.value, {
       message: `token=${REDACTED_SECRET}`,
       nested: {[REDACTED_SECRET]: [REDACTED_SECRET, null, true, false, 7]},
     });
-    expect(result.replacements).toBe(3);
-    expect(input).toEqual({
+    assert.equal(result.replacements, 3);
+    assert.deepEqual(input, {
       message: 'token=sk-secret',
       nested: {'sk-secret': ['sk-secret', null, true, false, 7]},
     });
@@ -93,11 +92,11 @@ describe('credential redaction', () => {
     const input = JSON.parse('{"__proto__":{"token":"sk-secret"}}') as unknown;
     const result = redactSecrets(input, ['sk-secret']);
 
-    expect(Object.hasOwn(result.value as object, '__proto__')).toBe(true);
-    expect(result.value).toEqual({
+    assert.equal(Object.hasOwn(result.value as object, '__proto__'), true);
+    assert.deepEqual(result.value, {
       ['__proto__']: {token: REDACTED_SECRET},
     });
-    expect(({} as {token?: string}).token).toBeUndefined();
+    assert.equal(({} as {token?: string}).token, undefined);
   });
 
   it('rejects text and UTF-8 bytes without exposing the credential in the error', () => {
@@ -135,8 +134,7 @@ describe('credential redaction', () => {
     const secret = 'quoted"credential\\suffix';
     const value = {resolution: {message: `before ${secret} after`}};
 
-    expect(JSON.stringify(value)).not.toContain(secret);
-    expect(() => assertNoSecretsInJsonValue(value, [secret], 'setup.json'))
-      .toThrow(SecretLeakError);
+    assert.ok(!(JSON.stringify(value)).includes(secret));
+    assert.throws(() => assertNoSecretsInJsonValue(value, [secret], 'setup.json'), SecretLeakError);
   });
 });

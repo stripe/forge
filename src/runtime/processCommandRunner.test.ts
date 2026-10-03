@@ -89,13 +89,25 @@ describe('host command runner with real subprocesses', () => {
     await assert.rejects(fs.stat(marker), {code: 'ENOENT'});
   });
 
-  it('times out a running command and waits for it to exit', async () => {
+  it('times out a ready command and waits for the real process to exit', {timeout: 10_000}, async (t) => {
+    t.mock.timers.enable({apis: ['setTimeout']});
+    let markReady!: (pid: number) => void;
+    const ready = new Promise<number>((resolve) => {markReady = resolve;});
+    const command = runner.run(node('console.log(process.pid); setInterval(() => {}, 1000);'),
+      {...options, timeoutMs: 500, onStdoutLine(line) {markReady(Number(line));}});
+    const rejected = assert.rejects(command, {code: 'command_timeout'});
     let pid: number | undefined;
-    await assert.rejects(runner.run(node('console.log(process.pid); setInterval(() => {}, 1000);'),
-      {...options, timeoutMs: 500, onStdoutLine(line) {pid = Number(line);}}),
-    {code: 'command_timeout'});
-    assert.ok(pid !== undefined, 'The command must have started before its timeout');
-    assert.equal(await running(pid), false);
+    try {
+      pid = await ready;
+      assert.equal(await running(pid), true);
+      t.mock.timers.tick(500);
+      await rejected;
+      assert.equal(await running(pid), false);
+    } finally {
+      if (pid !== undefined) {
+        try {process.kill(pid, 'SIGKILL');} catch { /* Already exited. */ }
+      }
+    }
   });
 
   it('aborts the process group and escalates when the parent ignores SIGTERM',

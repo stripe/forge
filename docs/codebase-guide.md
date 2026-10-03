@@ -647,13 +647,20 @@ CLI, package, and runnable-example tests live under [`test`](https://github.com/
   through a fake command transport and verified local artifacts;
 - `cliProcess.test.ts` and `campaignProcess.test.ts`: real CLI subprocesses and
   campaign recovery after process death;
-- `liveE2eScript.test.ts`: live-suite command behavior; and
-- `support/expect.ts`: shared assertions.
+- `liveE2eScript.test.ts`: live configuration, orchestration, verification, and
+  real gateway sockets, using importable helpers under `scripts/live/`.
+
+Tests use `node:assert/strict` with explicit field assertions for partial objects.
+Keep native parser inputs and expected canonical bytes independent of the
+implementation being tested.
 
 The normal suite combines focused unit tests, deterministic integration tests,
 real local subprocesses, and loopback HTTP transport tests. It requires no
 Docker, provider credentials, or external network access. The live script under [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
-is explicitly opt-in.
+is explicitly opt-in. Its helpers under `scripts/live/` are safe to import;
+Docker or model calls begin only when the entry point runs a selected mode.
+Both modes verify that containers and host runtime files are removed; completed
+evals with cleanup warnings fail live verification.
 
 ## Other top-level directories and files
 

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {watch} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -45,20 +44,26 @@ describe('host import publication', () => {
     assert.deepEqual(await fs.readdir(test.staging), []);
   });
 
-  it('cleans up an allocated staging file when cancellation interrupts the transfer', async () => {
+  it('cleans up an allocated staging file when cancellation interrupts the first read', async (t) => {
     const test = await fixture(Buffer.alloc(1024 * 1024, 'a'));
     const controller = new AbortController();
     const reason = new Error('cancel staged transfer');
-    const watcher = watch(test.staging, (_event, filename) => {
-      if (filename?.toString().startsWith('.forge-import-')) controller.abort(reason);
+    const handle = await fs.open(test.request.sourcePath, 'r');
+    const prototype = Object.getPrototypeOf(handle) as typeof handle;
+    const createReadStream = prototype.createReadStream;
+    await handle.close();
+    let started = false;
+    t.mock.method(prototype, 'createReadStream', function(this: typeof handle, ...args: Parameters<typeof createReadStream>) {
+      const stream = createReadStream.apply(this, args);
+      // The source stream is created only after the staging file is allocated.
+      // Abort synchronously on its first chunk, before async iteration resumes.
+      stream.once('data', () => {started = true; controller.abort(reason);});
+      return stream;
     });
-    try {
-      await assert.rejects(importHostFileIntoState(test.state, test.staging, test.request, controller.signal),
-        (error) => error === reason);
-      assert.equal(await fs.readFile(test.destination, 'utf8'), 'original bytes');
-      assert.deepEqual(await fs.readdir(test.staging), []);
-    } finally {
-      watcher.close();
-    }
+    await assert.rejects(importHostFileIntoState(test.state, test.staging, test.request, controller.signal),
+      (error) => error === reason);
+    assert.equal(started, true);
+    assert.equal(await fs.readFile(test.destination, 'utf8'), 'original bytes');
+    assert.deepEqual(await fs.readdir(test.staging), []);
   });
 });

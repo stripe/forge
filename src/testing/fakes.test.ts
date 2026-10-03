@@ -1,6 +1,6 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
 import {credentialReference} from '../contracts/credentials.js';
 import {
   createFakeRuntimeAdapter,
@@ -19,26 +19,23 @@ describe('createMemoryArtifactStore', () => {
     await transaction.write({path: 'nested/data.bin', mediaType: 'application/octet-stream', body,
       sensitivity: 'restricted'});
     body.fill(0);
-    expect(fixture.runs.size).toBe(0);
-    await expect(fixture.store.begin('run/1')).rejects.toThrow(/already exists/);
-    await expect(transaction.write({path: 'nested/data.bin', mediaType: 'text/plain', body}))
-      .rejects.toThrow(/Duplicate/);
+    assert.equal(fixture.runs.size, 0);
+    await assert.rejects(fixture.store.begin('run/1'), /already exists/);
+    await assert.rejects(transaction.write({path: 'nested/data.bin', mediaType: 'text/plain', body}), /Duplicate/);
     const result = {nested: {status: 'passed'}};
     const committed = await transaction.commit(result);
     result.nested.status = 'changed';
     (committed.result.nested as {status: string}).status = 'also changed';
     const stored = fixture.runs.get('run/1')!;
-    expect(stored.result).toEqual({nested: {status: 'passed'}});
-    expect(committed.location).toBe('memory://forge/runs/run%2F1');
-    expect(Buffer.from(stored.artifacts.get('nested/data.bin')!.body).toString())
-      .toBe('artifact');
-    expect(stored.artifacts.get('nested/data.bin')!.sensitivity).toBe('restricted');
-    await expect(transaction.write({path: 'late.txt', mediaType: 'text/plain', body}))
-      .rejects.toThrow(/closed/);
-    await expect(transaction.commit({})).rejects.toThrow(/closed/);
+    assert.deepEqual(stored.result, {nested: {status: 'passed'}});
+    assert.equal(committed.location, 'memory://forge/runs/run%2F1');
+    assert.equal(Buffer.from(stored.artifacts.get('nested/data.bin')!.body).toString(), 'artifact');
+    assert.equal(stored.artifacts.get('nested/data.bin')!.sensitivity, 'restricted');
+    await assert.rejects(transaction.write({path: 'late.txt', mediaType: 'text/plain', body}), /closed/);
+    await assert.rejects(transaction.commit({}), /closed/);
     await transaction.rollback();
-    await expect(fixture.store.begin('run/1')).rejects.toThrow(/already exists/);
-    expect(fixture.events).toEqual([
+    await assert.rejects(fixture.store.begin('run/1'), /already exists/);
+    assert.deepEqual(fixture.events, [
       'begin:run/1', 'write:run/1:nested/data.bin', 'commit:run/1',
     ]);
   });
@@ -49,11 +46,11 @@ describe('createMemoryArtifactStore', () => {
     await transaction.write({path: 'old.txt', mediaType: 'text/plain', body: Buffer.from('old')});
     await transaction.rollback();
     await transaction.rollback();
-    await expect(transaction.commit({})).rejects.toThrow(/closed/);
+    await assert.rejects(transaction.commit({}), /closed/);
     const retry = await fixture.store.begin('retry');
     await retry.commit({status: 'passed'});
-    expect(fixture.runs.get('retry')!.artifacts.size).toBe(0);
-    expect(fixture.events).toEqual([
+    assert.equal(fixture.runs.get('retry')!.artifacts.size, 0);
+    assert.deepEqual(fixture.events, [
       'begin:retry', 'write:retry:old.txt', 'rollback:retry', 'begin:retry', 'commit:retry',
     ]);
   });
@@ -74,20 +71,19 @@ describe('createScriptedAgentAdapter', () => {
       runId: 'agent-test', plan, selection: plan.agent, inputs: createMemoryRunInputProvider(),
       runtime, signal: new AbortController().signal,
     });
-    expect(session.sessionId()).toBeUndefined();
+    assert.equal(session.sessionId(), undefined);
     const cancelled = new AbortController();
     cancelled.abort(new Error('agent cancelled'));
-    await expect(session.send('unused', {signal: cancelled.signal})).rejects.toThrow('agent cancelled');
-    expect(fixture.messages).toEqual([]);
+    await assert.rejects(session.send('unused', {signal: cancelled.signal}), /agent cancelled/);
+    assert.deepEqual(fixture.messages, []);
     const completed = await session.send('task', {signal: new AbortController().signal});
-    expect(completed).toEqual({
+    assert.deepEqual(completed, {
       text: 'first', sessionId: 'session-1', toolCalls: [{name: 'write'}], costUsd: 0.1,
     });
-    expect(session.sessionId()).toBe('session-1');
-    await expect(session.send('extra', {signal: new AbortController().signal}))
-      .rejects.toThrow(/no remaining turn/);
-    expect(fixture.messages).toEqual(['task']);
-    expect(fixture.events).toEqual(['open-session', 'send:1']);
+    assert.equal(session.sessionId(), 'session-1');
+    await assert.rejects(session.send('extra', {signal: new AbortController().signal}), /no remaining turn/);
+    assert.deepEqual(fixture.messages, ['task']);
+    assert.deepEqual(fixture.events, ['open-session', 'send:1']);
     await runtime.dispose();
   });
 });
@@ -101,16 +97,14 @@ describe('createStaticCredentialResolver', () => {
     });
     values['test.token'] = 'changed';
     const context = {runId: 'credential-test', purpose: 'agent', signal: new AbortController().signal};
-    await expect(resolver.resolve(credentialReference('test.token'), context))
-      .resolves.toBe('synthetic-value');
-    await expect(resolver.resolve(credentialReference('test.missing'), context))
-      .rejects.toThrow(/No test credential/);
+    assert.equal((await resolver.resolve(credentialReference('test.token'), context)), 'synthetic-value');
+    await assert.rejects(resolver.resolve(credentialReference('test.missing'), context), /No test credential/);
     const controller = new AbortController();
     controller.abort(new Error('credentials cancelled'));
-    await expect(resolver.resolve(credentialReference('test.token'), {
+    await assert.rejects(resolver.resolve(credentialReference('test.token'), {
       ...context, signal: controller.signal,
-    })).rejects.toThrow('credentials cancelled');
-    expect(calls).toEqual(['test.token:agent', 'test.missing:agent']);
+    }), /credentials cancelled/);
+    assert.deepEqual(calls, ['test.token:agent', 'test.missing:agent']);
   });
 });
 
@@ -126,26 +120,23 @@ describe('createFakeRuntimeAdapter command barriers', () => {
     const finalizing = prepared.finalizeSetup().then(() => { finalized = true; });
     try {
       await nextTurn();
-      expect(finalized).toBe(false);
-      await expect(prepared.commands.uncredentialed.run(['late']))
-        .rejects.toThrow(/finalized/);
-      await expect(prepared.commands.setup([]).run(['late']))
-        .rejects.toThrow(/finalized/);
+      assert.equal(finalized, false);
+      await assert.rejects(prepared.commands.uncredentialed.run(['late']), /finalized/);
+      await assert.rejects(prepared.commands.setup([]).run(['late']), /finalized/);
       setup.release();
       await activeSetup;
       await finalizing;
-      expect(agentSettled).toBe(false);
+      assert.equal(agentSettled, false);
       const state = prepared.stateDirectories.get('setup-state')!;
-      expect(Buffer.from(await state.readFile('completed.txt')).toString()).toBe('setup-wait');
-      await expect(state.writeFile('late.txt', Buffer.from('late'))).rejects.toThrow(/sealed/);
+      assert.equal(Buffer.from(await state.readFile('completed.txt')).toString(), 'setup-wait');
+      await assert.rejects(state.writeFile('late.txt', Buffer.from('late')), /sealed/);
     } finally {
       setup.release();
       agent.release();
       await Promise.allSettled([activeSetup, activeAgent, finalizing]);
       await prepared.dispose();
     }
-    expect(fixture.runs[0]!.events.filter((event) => event === 'finalizeSetup'))
-      .toHaveLength(1);
+    assert.equal((fixture.runs[0]!.events.filter((event) => event === 'finalizeSetup')).length, 1);
   });
 
   it('shares quiescence while draining all admitted commands before exposing sealed bytes', async () => {
@@ -158,34 +149,31 @@ describe('createFakeRuntimeAdapter command barriers', () => {
     const second = prepared.quiesce().then((sealed) => { settled += 1; return sealed; });
     try {
       await nextTurn();
-      expect(settled).toBe(0);
+      assert.equal(settled, 0);
       for (const commands of [
         prepared.commands.uncredentialed, prepared.commands.setup([]), prepared.commands.agent,
       ]) {
-        await expect(commands.run(['late'])).rejects.toThrow(/closed/);
+        await assert.rejects(commands.run(['late']), /closed/);
       }
       setup.release();
       await activeSetup;
       await nextTurn();
-      expect(settled).toBe(0);
+      assert.equal(settled, 0);
       agent.release();
       await activeAgent;
       const [sealed, concurrent] = await Promise.all([first, second]);
-      expect(concurrent).toBe(sealed);
-      expect(Buffer.from(await sealed.workspace.readFile('agent-wait.txt')).toString())
-        .toBe('agent-wait');
-      expect(Buffer.from(await sealed.stateDirectories.get('setup-state')!
-        .readFile('completed.txt')).toString()).toBe('setup-wait');
-      await expect(prepared.workspace.writeFile('late.txt', Buffer.from('late')))
-        .rejects.toThrow(/sealed/);
+      assert.equal(concurrent, sealed);
+      assert.equal(Buffer.from(await sealed.workspace.readFile('agent-wait.txt')).toString(), 'agent-wait');
+      assert.equal(Buffer.from(await sealed.stateDirectories.get('setup-state')!
+        .readFile('completed.txt')).toString(), 'setup-wait');
+      await assert.rejects(prepared.workspace.writeFile('late.txt', Buffer.from('late')), /sealed/);
     } finally {
       setup.release();
       agent.release();
       await Promise.allSettled([activeSetup, activeAgent, first, second]);
       await prepared.dispose();
     }
-    expect(fixture.runs[0]!.events.filter((event) => event === 'quiesce'))
-      .toHaveLength(1);
+    assert.equal((fixture.runs[0]!.events.filter((event) => event === 'quiesce')).length, 1);
   });
 
   it('shares disposal and drains active command writes before completing cleanup', async () => {
@@ -198,27 +186,24 @@ describe('createFakeRuntimeAdapter command barriers', () => {
     const second = prepared.dispose().then(() => { settled += 1; });
     try {
       await nextTurn();
-      expect(settled).toBe(0);
-      await expect(prepared.commands.agent.run(['late'])).rejects.toThrow(/closed/);
+      assert.equal(settled, 0);
+      await assert.rejects(prepared.commands.agent.run(['late']), /closed/);
       setup.release();
       await activeSetup;
       await nextTurn();
-      expect(settled).toBe(0);
+      assert.equal(settled, 0);
       agent.release();
       await activeAgent;
       await Promise.all([first, second]);
-      expect(Buffer.from(await prepared.workspace.readFile('agent-wait.txt')).toString())
-        .toBe('agent-wait');
-      await expect(prepared.workspace.writeFile('late.txt', Buffer.from('late')))
-        .rejects.toThrow(/sealed/);
-      await expect(prepared.quiesce()).rejects.toThrow(/disposed before quiescence/);
+      assert.equal(Buffer.from(await prepared.workspace.readFile('agent-wait.txt')).toString(), 'agent-wait');
+      await assert.rejects(prepared.workspace.writeFile('late.txt', Buffer.from('late')), /sealed/);
+      await assert.rejects(prepared.quiesce(), /disposed before quiescence/);
     } finally {
       setup.release();
       agent.release();
       await Promise.allSettled([activeSetup, activeAgent, first, second]);
     }
-    expect(fixture.runs[0]!.events.filter((event) => event === 'dispose'))
-      .toHaveLength(1);
+    assert.equal((fixture.runs[0]!.events.filter((event) => event === 'dispose')).length, 1);
   });
 });
 

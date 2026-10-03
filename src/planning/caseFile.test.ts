@@ -1,9 +1,8 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import {sha256Hex} from '../model/hashes.js';
 import {loadDataset} from '../model/loaders.js';
@@ -27,16 +26,12 @@ describe('resolveManifestCaseIdFromFile', () => {
   it('selects only the exact manifest-backed case target', async () => {
     const {dataset, caseFile} = await createDataset();
 
-    await expect(
-      resolveManifestCaseIdFromFile(dataset, caseFile),
-    ).resolves.toBe('sample/write');
+    assert.equal((await resolveManifestCaseIdFromFile(dataset, caseFile)), 'sample/write');
 
     const alias = `${dataset.root}-case-alias`;
     cleanupPaths.push(alias);
     await fs.symlink(caseFile, alias);
-    await expect(
-      resolveManifestCaseIdFromFile(dataset, alias),
-    ).resolves.toBe('sample/write');
+    assert.equal((await resolveManifestCaseIdFromFile(dataset, alias)), 'sample/write');
   });
 
   it('rejects payload files, files outside the dataset, and non-files', async () => {
@@ -184,7 +179,7 @@ async function expectCode(
     await promise;
     throw new Error(`Expected ${code}.`);
   } catch (error) {
-    expect(error).toBeInstanceOf(ManifestCaseFileError);
-    expect((error as ManifestCaseFileError).code).toBe(code);
+    assert.ok((error instanceof ManifestCaseFileError));
+    assert.equal((error as ManifestCaseFileError).code, code);
   }
 }

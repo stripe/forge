@@ -1,9 +1,8 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from '../test/support/expect.js';
 
 import {createDefaultCliComposition, runCli as invokeCli, type RunCliOptions} from './cli.js';
 import {credentialReference} from './contracts/credentials.js';
@@ -55,8 +54,8 @@ describe('Forge CLI', () => {
       stdout: (text) => { stdout += text; },
       stderr: () => undefined,
     });
-    expect(exitCode).toBe(0);
-    expect(stdout).toBe(`${FORGE_VERSION}\n`);
+    assert.equal(exitCode, 0);
+    assert.equal(stdout, `${FORGE_VERSION}\n`);
   });
 
   it('checks default-composition input bytes against the manifest loaded for the run', async () => {
@@ -70,15 +69,15 @@ describe('Forge CLI', () => {
         const {composition} = input;
         const original = await fs.readFile(fixture.caseFilePath, 'utf8');
         await fs.writeFile(fixture.caseFilePath, original.replace('Do the thing', 'Do bad thing'));
-        await expect(composition.inputProvider.read('cases/example.yaml')).rejects.toThrow(/SHA-256/);
+        await assert.rejects(composition.inputProvider.read('cases/example.yaml'), /SHA-256/);
         await fs.writeFile(path.join(fixture.datasetRoot, 'cases/extra.yaml'), 'extra');
-        await expect(composition.inputProvider.listFiles('cases')).rejects.toThrow(/manifest inventory/);
+        await assert.rejects(composition.inputProvider.listFiles('cases'), /manifest inventory/);
         await fs.writeFile(fixture.caseFilePath, original);
         await fs.rm(path.join(fixture.datasetRoot, 'cases/extra.yaml'));
         return executeOffline(input);
       },
     });
-    expect(exitCode).toBe(0);
+    assert.equal(exitCode, 0);
   });
 
   it('supplies the selected external runtime to the host factory for validation and execution', async () => {
@@ -99,8 +98,8 @@ describe('Forge CLI', () => {
       ], {
         compositionFactory: async (options) => {
           factoryCalls += 1;
-          expect(options.runtime).toEqual(descriptor);
-          expect(options.datasetManifest?.dataset.id).toBe('example-dataset');
+          assert.deepEqual(options.runtime, descriptor);
+          assert.equal(options.datasetManifest?.dataset.id, 'example-dataset');
           return {
             runtime: runtime.adapter,
             agents: new Map([[agent.adapter.id, agent.adapter]]),
@@ -112,17 +111,17 @@ describe('Forge CLI', () => {
         stdout: () => undefined,
         stderr: (text) => {stderr += text;},
       });
-      expect(stderr).not.toContain('forge:');
-      expect(exitCode).toBe(0);
+      assert.ok(!(stderr).includes('forge:'));
+      assert.equal(exitCode, 0);
     }
-    expect(factoryCalls).toBe(2);
-    expect(runtime.runs.length).toBe(1);
+    assert.equal(factoryCalls, 2);
+    assert.equal(runtime.runs.length, 1);
     let stderr = '';
     const exitCode = await runCli([
       'validate', '--experiment', fixture.experimentPath,
     ], {stdout: () => undefined, stderr: (text) => {stderr += text;}});
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain('host-supplied compositionFactory');
+    assert.notEqual(exitCode, 0);
+    assert.ok((stderr).includes('host-supplied compositionFactory'));
   });
 
   it('validates a dataset/experiment pair and emits its resolved run count', async () => {
@@ -143,14 +142,18 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(JSON.parse(stdout)).toMatchObject({
-      dataset: {id: 'example-dataset', version: '2026.09.0'},
-      experiment: {id: 'experiment/default', version: '2026.09.0'},
-      run_count: 1,
-      valid: true,
-    });
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    {
+      const actual = JSON.parse(stdout);
+      assert.ok(actual);
+      assert.equal(actual.dataset.id, 'example-dataset');
+      assert.equal(actual.dataset.version, '2026.09.0');
+      assert.equal(actual.experiment.id, 'experiment/default');
+      assert.equal(actual.experiment.version, '2026.09.0');
+      assert.equal(actual.run_count, 1);
+      assert.equal(actual.valid, true);
+    }
   });
 
   it('validates both native platforms without contacting Docker', async () => {
@@ -186,9 +189,9 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(platforms).toEqual(['linux/amd64', 'linux/arm64']);
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    assert.deepEqual(platforms, ['linux/amd64', 'linux/arm64']);
   });
 
   it('validates Docker host readiness only when requested', async () => {
@@ -227,10 +230,10 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(validatedPlatforms).toEqual(['linux/arm64']);
-    expect(JSON.parse(stdout).host).toEqual({
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    assert.deepEqual(validatedPlatforms, ['linux/arm64']);
+    assert.deepEqual(JSON.parse(stdout).host, {
       docker_platform: 'linux/arm64',
       image_id: `sha256:${'a'.repeat(64)}`,
       runtime_platform: 'linux/arm64',
@@ -269,9 +272,9 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('agent adapter');
-    expect(hostValidationCalled).toBe(false);
+    assert.equal(exitCode, 1);
+    assert.ok((stderr).includes('agent adapter'));
+    assert.equal(hostValidationCalled, false);
   });
 
   it('purely validates a latest Claude plugin treatment without fetching it', async () => {
@@ -311,9 +314,14 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(JSON.parse(stdout)).toMatchObject({valid: true, run_count: 1});
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    {
+      const actual = JSON.parse(stdout);
+      assert.ok(actual);
+      assert.equal(actual.valid, true);
+      assert.equal(actual.run_count, 1);
+    }
   });
 
   it('prints the canonical resolved plan for one matrix selection', async () => {
@@ -341,22 +349,21 @@ describe('Forge CLI', () => {
       {stdout: (text) => { stdout += text; }},
     );
 
-    expect(exitCode).toBe(0);
-    expect(stdout).toBe(serializeResolvedRunPlan(defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout))));
-    expect(JSON.parse(stdout)).toMatchObject({
-      schema_version: 1,
-      selection: {
-        case_id: 'case/example',
-        treatment: 'baseline',
-        agent: {
-          adapter: 'claude-code',
-          provider: 'anthropic',
-          model: 'claude-sonnet',
-        },
-        repetition: 0,
-      },
-      interaction: {mode: 'one_shot', effective_prompt: 'Do the thing'},
-    });
+    assert.equal(exitCode, 0);
+    assert.equal(stdout, serializeResolvedRunPlan(defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout))));
+    {
+      const actual = JSON.parse(stdout);
+      assert.ok(actual);
+      assert.equal(actual.schema_version, 1);
+      assert.equal(actual.selection.case_id, 'case/example');
+      assert.equal(actual.selection.treatment, 'baseline');
+      assert.equal(actual.selection.agent.adapter, 'claude-code');
+      assert.equal(actual.selection.agent.provider, 'anthropic');
+      assert.equal(actual.selection.agent.model, 'claude-sonnet');
+      assert.equal(actual.selection.repetition, 0);
+      assert.equal(actual.interaction.mode, 'one_shot');
+      assert.equal(actual.interaction.effective_prompt, 'Do the thing');
+    }
   });
 
   it('materializes a native Docker platform before printing a plan', async () => {
@@ -386,9 +393,9 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(JSON.parse(stdout).runtime.platform).toBe('linux/arm64');
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    assert.equal(JSON.parse(stdout).runtime.platform, 'linux/arm64');
   });
 
   it('uses an explicitly supplied engine for host action bundles', async () => {
@@ -452,18 +459,16 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(JSON.parse(stdout)).toMatchObject({
-      setup: [{uses: 'acme-evals/tool', with: {name: 'formatter'}}],
-      provenance: {
-        forge: {
-          action_bundles: [
-            {namespace: 'acme-evals', version: '1.0.0'},
-          ],
-        },
-      },
-    });
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    {
+      const actual = JSON.parse(stdout);
+      assert.ok(actual);
+      assert.deepEqual(actual.setup.map((item: {uses: string; with: {name: string}}) => ({uses: item.uses, with: {name: item.with.name}})), [{uses: 'acme-evals/tool', with: {name: 'formatter'}}]);
+      assert.deepEqual(actual.provenance.forge.action_bundles.map((item: {namespace: string; version: string}) => ({namespace: item.namespace, version: item.version})), [
+        {namespace: 'acme-evals', version: '1.0.0'},
+      ]);
+    }
   });
 
   it('runs a host action bundle through an explicitly supplied engine', async () => {
@@ -544,20 +549,18 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(applied).toBe(true);
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    assert.equal(applied, true);
     const completed = await engine.verifyCompletedRun(path.join(JSON.parse(stdout).location, 'runs', 'host-action-run'));
-    expect(completed).toMatchObject({
-      runId: 'host-action-run',
-      result: {
-        forge: {
-          action_bundles: [
-            {namespace: 'acme-evals', version: '1.0.0'},
-          ],
-        },
-      },
-    });
+    {
+      const actual = completed;
+      assert.ok(actual);
+      assert.equal(actual.runId, 'host-action-run');
+      assert.deepEqual(actual.result.forge.action_bundles!.map((item) => ({namespace: item.namespace, version: item.version})), [
+        {namespace: 'acme-evals', version: '1.0.0'},
+      ]);
+    }
   });
 
   it('selects a manifest case by file within the configured dataset', async () => {
@@ -583,12 +586,15 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
-    expect(JSON.parse(stdout).selection).toMatchObject({
-      case_id: 'case/example',
-      agent: {adapter: 'claude-code', model: 'claude-sonnet'},
-    });
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
+    {
+      const actual = JSON.parse(stdout).selection;
+      assert.ok(actual);
+      assert.equal(actual.case_id, 'case/example');
+      assert.equal(actual.agent.adapter, 'claude-code');
+      assert.equal(actual.agent.model, 'claude-sonnet');
+    }
   });
 
   it('resolves dataset.path relative to the experiment file', async () => {
@@ -609,8 +615,8 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(stdout).selection.case_id).toBe('case/example');
+    assert.equal(exitCode, 0);
+    assert.equal(JSON.parse(stdout).selection.case_id, 'case/example');
   });
 
   it('accepts case-file selection for run without changing plan provenance', async () => {
@@ -638,17 +644,22 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(selectedCaseId).toBe('case/example');
-    expect(JSON.parse(stdout)).toMatchObject({completed: 1, errored: 0});
+    assert.equal(exitCode, 0);
+    assert.equal(selectedCaseId, 'case/example');
+    {
+      const actual = JSON.parse(stdout);
+      assert.ok(actual);
+      assert.equal(actual.completed, 1);
+      assert.equal(actual.errored, 0);
+    }
     let expectedPlan = '';
-    expect(await runCli(['plan', '--experiment', fixture.experimentPath, '--case', 'case/example'], {
+    assert.equal(await runCli(['plan', '--experiment', fixture.experimentPath, '--case', 'case/example'], {
       stdout: (text) => {expectedPlan += text;},
-    })).toBe(0);
+    }), 0);
     const campaign = JSON.parse(stdout) as {location: string};
     const storedPlan = await fs.readFile(path.join(campaign.location, 'runs', 'case-file-run', 'plan.json'), 'utf8');
-    expect(storedPlan).toBe(expectedPlan);
-    expect(storedPlan).not.toContain(fixture.caseFilePath);
+    assert.equal(storedPlan, expectedPlan);
+    assert.ok(!(storedPlan).includes(fixture.caseFilePath));
   });
 
   it('rejects combining case ID and case file selectors', async () => {
@@ -668,8 +679,8 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('--case and --case-file cannot be combined');
+    assert.equal(exitCode, 2);
+    assert.ok((stderr).includes('--case and --case-file cannot be combined'));
   });
 
   it('rejects a case-file traversal that resolves outside the dataset', async () => {
@@ -689,8 +700,8 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toMatch(/outside.*dataset/i);
+    assert.equal(exitCode, 2);
+    assert.match(stderr, /outside.*dataset/i);
   });
 
   it('rejects a file that is not a case entry in the manifest', async () => {
@@ -708,8 +719,8 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toMatch(/manifest.*case|case.*manifest/i);
+    assert.equal(exitCode, 2);
+    assert.match(stderr, /manifest.*case|case.*manifest/i);
   });
 
   it('rejects a manifest case that is not an experiment matrix member', async () => {
@@ -727,8 +738,8 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('Selection does not match the benchmark matrix');
+    assert.equal(exitCode, 2);
+    assert.ok((stderr).includes('Selection does not match the benchmark matrix'));
   });
 
   it('assembles the public Docker/Claude/Codex defaults with explicit credentials', async () => {
@@ -739,27 +750,22 @@ describe('Forge CLI', () => {
       environment: {ANTHROPIC_API_KEY: 'test-api-key'},
     });
 
-    expect(composition.runtime.id).toBe('forge/docker');
-    expect([...composition.agents.keys()]).toEqual(['claude-code', 'codex']);
-    expect(composition.agents.get('claude-code')?.version).toBe('2');
-    expect(composition.agents.get('codex')?.version).toBe('1');
-    expect([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()])
-      .toEqual(['anthropic']);
-    expect(
-      (composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
-        'anthropic',
-      )?.version,
-    ).toBe('1');
-    await expect(
-      composition.credentialResolver.resolve(
-        credentialReference('anthropic.api-key'),
-        {
-          runId: 'run-1',
-          purpose: 'agent',
-          signal: new AbortController().signal,
-        },
-      ),
-    ).resolves.toBe('test-api-key');
+    assert.equal(composition.runtime.id, 'forge/docker');
+    assert.deepEqual([...composition.agents.keys()], ['claude-code', 'codex']);
+    assert.equal(composition.agents.get('claude-code')?.version, '2');
+    assert.equal(composition.agents.get('codex')?.version, '1');
+    assert.deepEqual([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()], ['anthropic']);
+    assert.equal((composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
+      'anthropic',
+    )?.version, '1');
+    assert.equal((await composition.credentialResolver.resolve(
+      credentialReference('anthropic.api-key'),
+      {
+        runId: 'run-1',
+        purpose: 'agent',
+        signal: new AbortController().signal,
+      },
+    )), 'test-api-key');
   });
 
   it('validates and plans the checked-in Codex example without credentials or Docker', async () => {
@@ -773,10 +779,10 @@ describe('Forge CLI', () => {
         stdout: (value) => {stdout += value;},
         stderr: (value) => {stderr += value;},
       });
-      expect(stderr).not.toContain('forge:');
-      expect(code).toBe(0);
-      if (command === 'validate') expect(JSON.parse(stdout).valid).toBe(true);
-      else expect(JSON.parse(stdout).selection.agent).toEqual({
+      assert.ok(!(stderr).includes('forge:'));
+      assert.equal(code, 0);
+      if (command === 'validate') assert.equal(JSON.parse(stdout).valid, true);
+      else assert.deepEqual(JSON.parse(stdout).selection.agent, {
         adapter: 'codex', provider: 'openai', model: 'gpt-5.4',
       });
     }
@@ -795,15 +801,16 @@ describe('Forge CLI', () => {
         },
       });
       const codex = composition.agents.get('codex')!;
-      expect(codex.version).toBe(compatible ? '1+responses-compatible' : '1');
-      expect(codex.requirements({adapter: 'codex', provider: 'openai', model: 'gpt-5.4'}))
-        .toMatchObject({environment: {
-          variables: {CODEX_HOME: '/home/forge/.codex'},
-          credentials: {CODEX_API_KEY: {reference: 'openai.api-key'}},
-        }});
-      await expect(composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
+      assert.equal(codex.version, compatible ? '1+responses-compatible' : '1');
+      {
+        const actual = codex.requirements({adapter: 'codex', provider: 'openai', model: 'gpt-5.4'});
+        assert.ok(actual);
+        assert.equal(actual.environment.variables!.CODEX_HOME, '/home/forge/.codex');
+        assert.equal(actual.environment.credentials!.CODEX_API_KEY!.reference, 'openai.api-key');
+      }
+      assert.equal((await composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
         runId: 'codex-cli', purpose: 'agent', signal: new AbortController().signal,
-      })).resolves.toBe('codex-test-key');
+      })), 'codex-test-key');
     }
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
@@ -811,9 +818,9 @@ describe('Forge CLI', () => {
       credentialBindings: {'openai.api-key': 'MY_CODEX_KEY'},
       environment: {MY_CODEX_KEY: 'explicit-key'},
     });
-    await expect(composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
+    assert.equal((await composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
       runId: 'codex-cli', purpose: 'agent', signal: new AbortController().signal,
-    })).resolves.toBe('explicit-key');
+    })), 'explicit-key');
   });
 
   it('selects standard gateway authentication when ANTHROPIC_BASE_URL is set', async () => {
@@ -828,50 +835,42 @@ describe('Forge CLI', () => {
       },
     });
     const claude = composition.agents.get('claude-code');
-    expect(claude).toBeDefined();
-    expect(claude!.version).toBe('2+gateway');
-    expect(
-      (composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
-        'anthropic',
-      )?.version,
-    ).toBe('1+messages-compatible');
+    assert.notEqual(claude, undefined);
+    assert.equal(claude!.version, '2+gateway');
+    assert.equal((composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
+      'anthropic',
+    )?.version, '1+messages-compatible');
     const requirements = claude!.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',
       model: 'claude-sonnet',
     });
 
-    expect(requirements.environment.variables).toEqual({
+    assert.deepEqual(requirements.environment.variables, {
       ANTHROPIC_BASE_URL: 'https://gateway.example.test/anthropic/',
     });
-    expect(requirements.environment.credentials).toEqual({
+    assert.deepEqual(requirements.environment.credentials, {
       ANTHROPIC_AUTH_TOKEN: {
         reference: 'anthropic.auth-token',
       },
     });
-    expect(requirements.environment.credentials).not.toHaveProperty(
-      'ANTHROPIC_API_KEY',
-    );
-    await expect(
-      composition.credentialResolver.resolve(
-        credentialReference('anthropic.auth-token'),
-        {
-          runId: 'run-1',
-          purpose: 'agent',
-          signal: new AbortController().signal,
-        },
-      ),
-    ).resolves.toBe('gateway-token');
-    await expect(
-      composition.credentialResolver.resolve(
-        credentialReference('anthropic.api-key'),
-        {
-          runId: 'run-1',
-          purpose: 'agent',
-          signal: new AbortController().signal,
-        },
-      ),
-    ).rejects.toThrow('No environment binding exists');
+    assert.ok(!('ANTHROPIC_API_KEY' in (requirements.environment.credentials)));
+    assert.equal((await composition.credentialResolver.resolve(
+      credentialReference('anthropic.auth-token'),
+      {
+        runId: 'run-1',
+        purpose: 'agent',
+        signal: new AbortController().signal,
+      },
+    )), 'gateway-token');
+    await assert.rejects(composition.credentialResolver.resolve(
+      credentialReference('anthropic.api-key'),
+      {
+        runId: 'run-1',
+        purpose: 'agent',
+        signal: new AbortController().signal,
+      },
+    ), /No environment binding exists/);
   });
 
   it('binds explicit credential references to host environment variables for run', async () => {
@@ -908,8 +907,8 @@ describe('Forge CLI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(resolved).toBe('mcp-secret');
+    assert.equal(exitCode, 0);
+    assert.equal(resolved, 'mcp-secret');
   });
 
   it('allows an explicit credential binding to override the CLI default', async () => {
@@ -924,16 +923,14 @@ describe('Forge CLI', () => {
       },
     });
 
-    await expect(
-      composition.credentialResolver.resolve(
-        credentialReference('anthropic.api-key'),
-        {
-          runId: 'run-override',
-          purpose: 'test',
-          signal: new AbortController().signal,
-        },
-      ),
-    ).resolves.toBe('alternate-key');
+    assert.equal((await composition.credentialResolver.resolve(
+      credentialReference('anthropic.api-key'),
+      {
+        runId: 'run-override',
+        purpose: 'test',
+        signal: new AbortController().signal,
+      },
+    )), 'alternate-key');
   });
 
   it('rejects malformed credential mappings without echoing their value', async () => {
@@ -949,12 +946,12 @@ describe('Forge CLI', () => {
         '--credential-env',
         `stripe.token=${accidentalSecret}`,
       ],
-      {stderr: (text) => { stderr += text; }},
+      {stderr: (text) => {stderr += text;}},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('--credential-env must be');
-    expect(stderr).not.toContain(accidentalSecret);
+    assert.equal(exitCode, 2);
+    assert.ok((stderr).includes('--credential-env must be'));
+    assert.ok(!(stderr).includes(accidentalSecret));
   });
 
   it('rejects conflicting credential mappings without echoing host variable names', async () => {
@@ -974,10 +971,10 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('stripe.token');
-    expect(stderr).not.toContain('FIRST_SECRET_NAME');
-    expect(stderr).not.toContain('SECOND_SECRET_NAME');
+    assert.equal(exitCode, 2);
+    assert.ok((stderr).includes('stripe.token'));
+    assert.ok(!(stderr).includes('FIRST_SECRET_NAME'));
+    assert.ok(!(stderr).includes('SECOND_SECRET_NAME'));
   });
 
   it('returns a usage exit code when a selection is ambiguous', async () => {
@@ -992,8 +989,8 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('Selection matches 2 matrix entries');
+    assert.equal(exitCode, 2);
+    assert.ok((stderr).includes('Selection matches 2 matrix entries'));
   });
 
   it('keeps ambiguity checks after resolving a case file', async () => {
@@ -1010,8 +1007,8 @@ describe('Forge CLI', () => {
       {stderr: (text) => { stderr += text; }},
     );
 
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('Selection matches 2 matrix entries');
+    assert.equal(exitCode, 2);
+    assert.ok((stderr).includes('Selection matches 2 matrix entries'));
   });
 });
 

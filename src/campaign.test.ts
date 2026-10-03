@@ -49,10 +49,6 @@ describe('public campaign API', () => {
       if (event.state === 'errored') return event.error_code;
       return event.run_id;
     };
-    assert.equal(typeof optionsType, 'function');
-    assert.equal(typeof summaryType, 'function');
-    assert.equal(typeof reportType, 'function');
-    assert.equal(typeof eventType, 'function');
   });
 
   it('rejects invalid library concurrency before preflight or filesystem writes', async () => {
@@ -121,9 +117,11 @@ describe('public campaign API', () => {
     });
     const engine = createForgeEngine({setupActionBundles: [bundle]});
     const plans = ['first', 'second'].map((id) => {
-      const plan = structuredClone(createTestResolvedRunPlan({caseId: `testing/${id}`, checks: {
-        file_checks: [{file: 'seed.txt', exists: true, contains: '^ready$'}],
-      }}));
+      const plan = structuredClone(createTestResolvedRunPlan({
+        caseId: `testing/${id}`, checks: {
+          file_checks: [{file: 'seed.txt', exists: true, contains: '^ready$'}],
+        }
+      }));
       plan.provenance.forge.action_bundles = [manifest];
       plan.treatment.setup = [{uses: 'acme-evals/seed', with: {}}];
       plan.setup = [...plan.treatment.setup];

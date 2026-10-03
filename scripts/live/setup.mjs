@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
-import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
 import {stringify} from 'yaml';
 
 import {
@@ -13,17 +11,17 @@ import {
   defaultForgeEngine as engine,
   expandExperiment,
   parseSetupArtifact,
-} from '../dist/index.js';
+} from '../../dist/index.js';
 import {
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudeCodeAdapter,
-} from '../dist/agents/claude-code/index.js';
+} from '../../dist/agents/claude-code/index.js';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
-} from '../dist/runtime/docker/index.js';
+} from '../../dist/runtime/docker/index.js';
 
-const runHostCommand = promisify(execFile);
+import {assertNoCleanupWarnings, assertRuntimeCleanup} from './cleanup.mjs';
 const PLUGIN = 'stripe@claude-plugins-official';
 const MARKETPLACE = 'anthropics/claude-plugins-official';
 const literalArguments = ['a value with spaces', '$HOME', '$(touch expanded.txt)', '*', 'line\nbreak'];
@@ -31,26 +29,42 @@ const write = (target, source) => ({uses: 'forge/write', with: {target, source}}
 const command = (argv, options = {}) => ({uses: 'forge/command', with: {argv, ...options}});
 
 const cases = [
-  {id: 'write-inline', setup: [write('nested/inline.txt', {content: 'hello, Forge — 世界\n'})],
-    files: {'nested/inline.txt': 'hello, Forge — 世界\n'}},
-  {id: 'write-file', setup: [write('copied.txt', {dataset_path: 'fixtures/seed.txt'})],
-    files: {'copied.txt': 'dataset seed\n'}},
-  {id: 'command', setup: [
-    command(['node', '-e', 'require("node:fs").mkdirSync("nested")']),
-    command(['node', '-e', 'require("node:fs").writeFileSync("argv.json", JSON.stringify(process.argv.slice(1)))',
-      ...literalArguments], {cwd: 'nested', timeout_ms: 30_000}),
-  ], files: {'nested/argv.json': JSON.stringify(literalArguments)}},
-  {id: 'command-exit', setup: [
-    command(['node', '-e', 'process.exit(7)']),
-    command(['node', '-e', 'require("node:fs").writeFileSync("unexpected.txt", "must not run")']),
-  ], failure: 'exit'},
-  {id: 'command-timeout', setup: [
-    command(['node', '-e', 'setInterval(() => {}, 1000)'], {timeout_ms: 500}),
-    command(['node', '-e', 'require("node:fs").writeFileSync("unexpected.txt", "must not run")']),
-  ], failure: 'timeout'},
-  {id: 'plugin', setup: [{uses: 'forge/plugin', with: {agents: {
-    'claude-code': {plugin: PLUGIN, marketplace: MARKETPLACE},
-  }}}], files: {'plugin-verified.txt': 'native plugin verified\n'}},
+  {
+    id: 'write-inline', setup: [write('nested/inline.txt', {content: 'hello, Forge — 世界\n'})],
+    files: {'nested/inline.txt': 'hello, Forge — 世界\n'}
+  },
+  {
+    id: 'write-file', setup: [write('copied.txt', {dataset_path: 'fixtures/seed.txt'})],
+    files: {'copied.txt': 'dataset seed\n'}
+  },
+  {
+    id: 'command', setup: [
+      command(['node', '-e', 'require("node:fs").mkdirSync("nested")']),
+      command(['node', '-e', 'require("node:fs").writeFileSync("argv.json", JSON.stringify(process.argv.slice(1)))',
+        ...literalArguments], {cwd: 'nested', timeout_ms: 30_000}),
+    ], files: {'nested/argv.json': JSON.stringify(literalArguments)}
+  },
+  {
+    id: 'command-exit', setup: [
+      command(['node', '-e', 'process.exit(7)']),
+      command(['node', '-e', 'require("node:fs").writeFileSync("unexpected.txt", "must not run")']),
+    ], failure: 'exit'
+  },
+  {
+    id: 'command-timeout', setup: [
+      command(['node', '-e', 'setInterval(() => {}, 1000)'], {timeout_ms: 500}),
+      command(['node', '-e', 'require("node:fs").writeFileSync("unexpected.txt", "must not run")']),
+    ], failure: 'timeout'
+  },
+  {
+    id: 'plugin', setup: [{
+      uses: 'forge/plugin', with: {
+        agents: {
+          'claude-code': {plugin: PLUGIN, marketplace: MARKETPLACE},
+        }
+      }
+    }], files: {'plugin-verified.txt': 'native plugin verified\n'}
+  },
 ];
 
 /** Real setup/execution/artifacts; interaction is a deterministic local probe. */
@@ -74,11 +88,13 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
             return runner.run(argv, options);
           },
         });
-        return {...prepared, commands: {
-          uncredentialed: record(prepared.commands.uncredentialed),
-          setup: (names) => record(prepared.commands.setup(names)),
-          agent: record(prepared.commands.agent),
-        }};
+        return {
+          ...prepared, commands: {
+            uncredentialed: record(prepared.commands.uncredentialed),
+            setup: (names) => record(prepared.commands.setup(names)),
+            agent: record(prepared.commands.agent),
+          }
+        };
       },
     };
     const {dataset, experiment} = await createFixture(fixtureRoot, platform);
@@ -93,7 +109,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
       requirements() {
         return {executables: ['node', 'claude'], environment: {}, stateDirectories: []};
       },
-      evidenceIdentity() { return {name: 'forge-setup-probe', version: '1'}; },
+      evidenceIdentity() {return {name: 'forge-setup-probe', version: '1'};},
       prepare: (context) => nativeAgent.prepare(context),
       async openSession(context) {
         openedSessions.add(context.plan.selection.case_id);
@@ -127,15 +143,17 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
       },
       async collectEvidence({signal}) {
         signal.throwIfAborted();
-        return {kind: 'unavailable', reason: {
-          code: 'source_unavailable', message: 'The setup probe makes no model calls or native agent session.',
-        }};
+        return {
+          kind: 'unavailable', reason: {
+            code: 'source_unavailable', message: 'The setup probe makes no model calls or native agent session.',
+          }
+        };
       },
     };
     const composition = {
       runtime, agents: new Map([[agent.id, agent]]), inputProvider,
       artifactStore: createArtifactStore({root: resultsRoot}),
-      credentialResolver: {async resolve() {throw new Error('Setup integration must never resolve credentials');}},
+      credentialResolver: {async resolve() {throw new Error('Setup integration must never resolve credentials');} },
     };
     const plans = expandExperiment(experiment).map((selection) =>
       engine.resolveRunPlan({dataset, experiment, selection}));
@@ -149,8 +167,8 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
       try {
         if (spec.failure) {
           let error;
-          try { await engine.executeEval({runId, plan, composition, signal}); }
-          catch (caught) { error = caught; }
+          try {await engine.executeEval({runId, plan, composition, signal});}
+          catch (caught) {error = caught;}
           assert.equal(error?.code, 'setup_failed');
           assert.equal(error.phase, 'setup');
           assert.equal(error.cause?.code, 'setup_action_failed');
@@ -159,7 +177,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
           assert.equal(openedSessions.has(plan.selection.case_id), false);
           assert.equal(issuedCommands.get(plan.selection.case_id)
             .some((argv) => argv.some((value) => value.includes('unexpected.txt'))), false,
-          'Setup continued after a failed command');
+            'Setup continued after a failed command');
           await assert.rejects(fs.stat(path.join(resultsRoot, 'runs', runId)), {code: 'ENOENT'});
           reports.push({case_id: plan.selection.case_id, verified: true, expected_error: error.code});
         } else {
@@ -170,7 +188,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
           assert.ok(verified.result.evaluation.checks.every(({passed}) => passed));
           assert.equal(verified.result.completion_calls.length, 0);
           assert.equal(verified.result.evidence.completeness, 'fallback');
-          assert.equal(verified.result.warnings.some(({code}) => code === 'runtime_cleanup_failed'), false);
+          assertNoCleanupWarnings(verified.result, completed.location);
           const setup = parseSetupArtifact(JSON.parse(await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8')));
           assert.deepEqual(setup.steps.map(({index, uses}) => ({index, uses})),
             spec.setup.map(({uses}, index) => ({index, uses})));
@@ -185,17 +203,15 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
             assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
             assert.ok(receipt.installed_tree.file_count > 0);
           } else assert.ok(setup.steps.every((step) => step.resolution === undefined));
-          reports.push({case_id: plan.selection.case_id, verified: true,
-            run_id: runId, location: completed.location, uses: spec.setup[0].uses});
+          reports.push({
+            case_id: plan.selection.case_id, verified: true,
+            run_id: runId, location: completed.location, uses: spec.setup[0].uses
+          });
         }
       } finally {
         // Check actual resources, including stopped containers, after both
         // success and expected failure. Cleanup is independent of the signal.
-        const {stdout} = await runHostCommand(dockerExecutable, [
-          'ps', '--all', '--filter', `name=stripe-forge-${runId}-`, '--format', '{{.ID}}',
-        ], {timeout: 30_000, maxBuffer: 64 * 1024});
-        assert.equal(stdout.trim(), '', `Container leaked for ${spec.id}`);
-        assert.deepEqual(await fs.readdir(runtimeRoot), [], `Runtime files leaked for ${spec.id}`);
+        await assertRuntimeCleanup({dockerExecutable, runtimeRoot, runId});
       }
     }
     return {verified: true, model_calls: 0, platform, cases: reports};
@@ -227,7 +243,7 @@ async function verifyNativePlugin(runtime, signal) {
     assert.equal(settings.enabledPlugins[id], true);
     fs.writeFileSync('plugin-verified.txt', 'native plugin verified\\n');
   `, installed.installPath, runtime.paths.home, installed.id],
-  {signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024});
+    {signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024});
   assert.equal(probe.exitCode, 0, 'Native plugin files/settings are not available after setup');
   return installed;
 }
@@ -241,10 +257,12 @@ async function createFixture(root, platform) {
     files[`cases/setup/${spec.id}.yaml`] = stringify({
       schema_version: 1, id: `setup/${spec.id}`, initial_prompt: `Verify ${spec.id} setup.`,
       execution_mode: 'one_shot', setup: spec.setup, success_guidelines: [],
-      checks: {file_checks: Object.entries(spec.files ?? {}).map(([file, body]) => ({
-        file, exists: true, contains: `^${body.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/\n/g, '\\n').replace(/\r/g, '\\r')}$`,
-      }))},
+      checks: {
+        file_checks: Object.entries(spec.files ?? {}).map(([file, body]) => ({
+          file, exists: true, contains: `^${body.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/\n/g, '\\n').replace(/\r/g, '\\r')}$`,
+        }))
+      },
     });
   }
   const manifest = {
@@ -265,12 +283,16 @@ async function createFixture(root, platform) {
   await fs.writeFile(experimentPath, stringify({
     schema_version: 1, id: 'testing/setup-integration', version: '1.0.0',
     dataset: {...manifest.dataset, path: './dataset', manifest_sha256: `sha256:${sha256(manifestBody)}`},
-    runtime: {adapter: 'docker', image: {kind: 'forge'}, platform,
-      resources: {memory_bytes: 4 * 1024 ** 3, cpu_count: 2, process_count: 512}},
+    runtime: {
+      adapter: 'docker', image: {kind: 'forge'}, platform,
+      resources: {memory_bytes: 4 * 1024 ** 3, cpu_count: 2, process_count: 512}
+    },
     models: {}, treatments: {baseline: {setup: []}},
-    matrix: {cases: cases.map(({id}) => `setup/${id}`), treatments: ['baseline'],
+    matrix: {
+      cases: cases.map(({id}) => `setup/${id}`), treatments: ['baseline'],
       agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'setup-probe'}],
-      repetitions: 1, retries: 0},
+      repetitions: 1, retries: 0
+    },
     limits: {run_timeout_ms: 5 * 60_000},
   }));
   return {

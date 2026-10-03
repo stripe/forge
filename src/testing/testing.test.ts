@@ -1,6 +1,6 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
 import {
   CommandExecutionError,
   type CommandResult,
@@ -12,32 +12,12 @@ import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
   createMemoryRunInputProvider,
-  createMemoryWorkspace,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
 } from './index.js';
 
 describe('@stripe/forge/testing', () => {
-  it('provides isolated in-memory workspace bytes and a sealed read-only view', async () => {
-    const workspace = createMemoryWorkspace({'src/a.txt': 'alpha'});
-    const firstRead = await workspace.mutable.readFile('src/a.txt');
-    firstRead[0] = 0;
-    expect(Buffer.from(await workspace.readonly.readFile('src/a.txt')).toString())
-      .toBe('alpha');
-    await workspace.mutable.writeFile('src/b.txt', Buffer.from('beta'));
-    workspace.seal();
-    await expect(
-      workspace.mutable.writeFile('src/c.txt', Buffer.from('gamma')),
-    ).rejects.toThrow(/sealed/);
-    await expect(workspace.readonly.listFiles()).resolves.toEqual([
-      {path: 'src', kind: 'directory'},
-      {path: 'src/a.txt', kind: 'file', size: 5},
-      {path: 'src/b.txt', kind: 'file', size: 4},
-    ]);
-
-  });
-
   it('runs the runtime lifecycle conformance probe against the fake adapter', async () => {
     const runtime = createFakeRuntimeAdapter();
     const plan = createTestResolvedRunPlan();
@@ -60,11 +40,11 @@ describe('@stripe/forge/testing', () => {
       signal,
     });
 
-    expect(report).toEqual({
+    assert.deepEqual(report, {
       runtimeId: 'conformance-1',
       stateDirectoryIds: ['agent-state', 'setup-state'],
     });
-    expect(runtime.runs[0]?.events).toEqual([
+    assert.deepEqual(runtime.runs[0]?.events, [
       'prepare',
       'finalizeSetup',
       'quiesce',
@@ -99,12 +79,12 @@ describe('@stripe/forge/testing', () => {
       now: incrementingClock(),
     });
 
-    expect(completed.result.evaluation.status).toBe('passed');
-    expect(agent.messages).toEqual(['Complete the test task.']);
-    expect(runtime.runs[0]?.events).toContain('quiesce');
-    expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
-    expect(artifacts.runs.get('unit-run-1')?.artifacts.size).toBe(5);
-    expect(artifacts.events.at(-1)).toBe('commit:unit-run-1');
+    assert.equal(completed.result.evaluation.status, 'passed');
+    assert.deepEqual(agent.messages, ['Complete the test task.']);
+    assert.ok((runtime.runs[0]!.events).includes('quiesce'));
+    assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
+    assert.equal(artifacts.runs.get('unit-run-1')?.artifacts.size, 5);
+    assert.equal(artifacts.events.at(-1), 'commit:unit-run-1');
   });
 
   it('probes successful commands with exactly the selected credential scopes', async () => {
@@ -134,7 +114,7 @@ describe('@stripe/forge/testing', () => {
         },
       ],
     });
-    expect(runtime.runs[0]?.events).toEqual([
+    assert.deepEqual(runtime.runs[0]?.events, [
       'prepare',
       'command:uncredentialed',
       'command:setup',
@@ -149,19 +129,19 @@ describe('@stripe/forge/testing', () => {
     const runtime = createFakeRuntimeAdapter({
       command: () => commandResult('synthetic-secret-must-not-appear'),
     });
-    await expect(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+    await assert.rejects(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
       commandProbes: [{
         scope: 'uncredentialed',
         argv: ['probe-environment'],
         expectedStdout: '{}',
       }],
-    })).rejects.toThrow('expected uncredentialed result');
-    expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
+    }), /expected uncredentialed result/);
+    assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('checks that credentialed setup projections close after finalization', async () => {
     const runtime = createFakeRuntimeAdapter();
-    await expect(assertRuntimeAdapterConforms({
+    await assert.rejects(assertRuntimeAdapterConforms({
       ...runtime.adapter,
       async prepare(input) {
         const prepared = await runtime.adapter.prepare(input);
@@ -185,8 +165,8 @@ describe('@stripe/forge/testing', () => {
         argv: ['probe-environment'],
         expectedStdout: 'setup-visible',
       }],
-    })).rejects.toThrow('Probed setup command runner still accepted work after finalization');
-    expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
+    }), /Probed setup command runner still accepted work after finalization/);
+    assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('probes cancellation only after the command reports readiness', async () => {
@@ -203,8 +183,8 @@ describe('@stripe/forge/testing', () => {
     await assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
       cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready'},
     });
-    expect(observedAbort).toBe(true);
-    expect(runtime.runs[0]?.events).toEqual([
+    assert.equal(observedAbort, true);
+    assert.deepEqual(runtime.runs[0]?.events, [
       'prepare', 'finalizeSetup', 'command:agent', 'quiesce', 'dispose',
     ]);
   });
@@ -215,10 +195,10 @@ describe('@stripe/forge/testing', () => {
         throw new CommandExecutionError('Probe could not start.', 'command_start_failed');
       },
     });
-    await expect(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+    await assert.rejects(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
       cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready'},
-    })).rejects.toThrow('never reported readiness');
-    expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
+    }), /never reported readiness/);
+    assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('rejects commands which resolve or time out after cancellation', async () => {
@@ -232,12 +212,12 @@ describe('@stripe/forge/testing', () => {
           return commandResult('');
         },
       });
-      await expect(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+      await assert.rejects(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
         cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready'},
-      })).rejects.toThrow(behavior === 'resolve'
-        ? 'resolved after cancellation'
-        : 'reason other than cancellation');
-      expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
+      }), behavior === 'resolve'
+        ? /resolved after cancellation/
+        : /reason other than cancellation/);
+      assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
     }
   });
 
@@ -264,15 +244,15 @@ describe('@stripe/forge/testing', () => {
         };
       },
     };
-    await expect(assertRuntimeAdapterConforms(ignoresCancellation, conformanceInput(), {
+    await assert.rejects(assertRuntimeAdapterConforms(ignoresCancellation, conformanceInput(), {
       cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready', deadlineMs: 10},
-    })).rejects.toThrow('did not settle before its deadline');
-    expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
+    }), /did not settle before its deadline/);
+    assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('detects changed sealed bytes and still disposes the runtime', async () => {
     const runtime = createFakeRuntimeAdapter();
-    await expect(assertRuntimeAdapterConforms({
+    await assert.rejects(assertRuntimeAdapterConforms({
       ...runtime.adapter,
       async prepare(input) {
         const prepared = await runtime.adapter.prepare(input);
@@ -290,8 +270,8 @@ describe('@stripe/forge/testing', () => {
           },
         };
       },
-    }, conformanceInput())).rejects.toThrow('Sealed workspace did not preserve probe bytes');
-    expect(runtime.runs[0]?.events).toEqual([
+    }, conformanceInput()), /Sealed workspace did not preserve probe bytes/);
+    assert.deepEqual(runtime.runs[0]?.events, [
       'prepare', 'finalizeSetup', 'quiesce', 'dispose',
     ]);
   });

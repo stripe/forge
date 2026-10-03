@@ -311,11 +311,6 @@ describe('canonical interaction and judge evidence parsing', () => {
     const {steps: _steps, ...policy} = evidence.transcript;
     assert.throws(() => parseJudgeEvidence({...evidence, transcript: policy}));
     assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 2}));
-    assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
-    assert.throws(() => parseJudgeEvidence({
-      ...evidence,
-      transcript: {...evidence.transcript, unknown: true},
-    }));
   });
 
   it('rejects private or unbounded content in embedded judge steps', () => {

@@ -1,6 +1,6 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
 import {createMemoryRunInputProvider} from './memoryInputs.js';
 
 describe('createMemoryRunInputProvider', () => {
@@ -13,16 +13,16 @@ describe('createMemoryRunInputProvider', () => {
     });
     bytes.fill(0);
     const read = await inputs.read('fixtures/z.txt');
-    expect(Buffer.from(read).toString()).toBe('alpha');
+    assert.equal(Buffer.from(read).toString(), 'alpha');
     read.fill(0);
-    expect(Buffer.from(await inputs.read('fixtures/z.txt')).toString()).toBe('alpha');
-    await expect(inputs.inspect('fixtures')).resolves.toEqual({
+    assert.equal(Buffer.from(await inputs.read('fixtures/z.txt')).toString(), 'alpha');
+    assert.deepEqual((await inputs.inspect('fixtures')), {
       path: 'fixtures', kind: 'directory',
     });
-    await expect(inputs.inspect('fixtures/z.txt')).resolves.toEqual({
+    assert.deepEqual((await inputs.inspect('fixtures/z.txt')), {
       path: 'fixtures/z.txt', kind: 'file', size: 5,
     });
-    await expect(inputs.listFiles('fixtures', {maxEntries: 2})).resolves.toEqual([
+    assert.deepEqual((await inputs.listFiles('fixtures', {maxEntries: 2})), [
       {path: 'fixtures/nested/a.txt', kind: 'file', size: 4},
       {path: 'fixtures/z.txt', kind: 'file', size: 5},
     ]);
@@ -32,29 +32,23 @@ describe('createMemoryRunInputProvider', () => {
     const inputs = createMemoryRunInputProvider({
       'fixtures/a.txt': 'alpha', 'fixtures/b.txt': 'beta',
     }, {maxBytes: 4});
-    await expect(inputs.read('fixtures/a.txt')).rejects.toThrow(/4 byte limit/);
-    await expect(inputs.read('fixtures/a.txt', {maxBytes: 5})).resolves.toEqual(
-      Uint8Array.from(Buffer.from('alpha')),
-    );
-    await expect(inputs.listFiles('fixtures', {maxEntries: 1})).rejects.toThrow(/entry limit/);
-    await expect(inputs.read('fixtures/b.txt', {maxBytes: 0})).rejects.toThrow(/positive/);
+    await assert.rejects(inputs.read('fixtures/a.txt'), /4 byte limit/);
+    assert.deepEqual((await inputs.read('fixtures/a.txt', {maxBytes: 5})), Uint8Array.from(Buffer.from('alpha')));
+    await assert.rejects(inputs.listFiles('fixtures', {maxEntries: 1}), /entry limit/);
+    await assert.rejects(inputs.read('fixtures/b.txt', {maxBytes: 0}), /positive/);
     const controller = new AbortController();
     controller.abort(new Error('input cancelled'));
-    await expect(inputs.read('fixtures/b.txt', {signal: controller.signal}))
-      .rejects.toThrow('input cancelled');
-    await expect(inputs.listFiles('fixtures', {signal: controller.signal}))
-      .rejects.toThrow('input cancelled');
+    await assert.rejects(inputs.read('fixtures/b.txt', {signal: controller.signal}), /input cancelled/);
+    await assert.rejects(inputs.listFiles('fixtures', {signal: controller.signal}), /input cancelled/);
   });
 
   it('rejects unsafe paths, missing inputs, and conflicting file/directory fixtures', async () => {
-    expect(() => createMemoryRunInputProvider({'../outside': 'unsafe'}))
-      .toThrow(/dataset-relative/);
-    expect(() => createMemoryRunInputProvider({'a': 'file', 'a/b': 'child'}))
-      .toThrow(/both a file and directory/);
+    assert.throws(() => createMemoryRunInputProvider({'../outside': 'unsafe'}), /dataset-relative/);
+    assert.throws(() => createMemoryRunInputProvider({'a': 'file', 'a/b': 'child'}), /both a file and directory/);
     const inputs = createMemoryRunInputProvider({'fixtures/a.txt': 'alpha'});
-    await expect(inputs.inspect('missing')).rejects.toThrow(/does not exist/);
-    await expect(inputs.read('fixtures')).rejects.toThrow(/file does not exist/);
-    await expect(inputs.listFiles('fixtures/a.txt')).rejects.toThrow(/directory does not exist/);
-    await expect(inputs.read('fixtures/../a.txt')).rejects.toThrow(/dataset-relative/);
+    await assert.rejects(inputs.inspect('missing'), /does not exist/);
+    await assert.rejects(inputs.read('fixtures'), /file does not exist/);
+    await assert.rejects(inputs.listFiles('fixtures/a.txt'), /directory does not exist/);
+    await assert.rejects(inputs.read('fixtures/../a.txt'), /dataset-relative/);
   });
 });

@@ -5,7 +5,6 @@ import {createJudgeTranscriptProjection} from './judgeTranscript.js';
 import {scoreEvaluation} from './score.js';
 import {
   GUIDELINE_JUDGMENT_RESPONSE_SCHEMA,
-  GUIDELINE_JUDGE_RETRY_DELAYS_MS,
   MAX_GUIDELINE_EXPLANATION_CHARACTERS,
   MAX_GUIDELINE_JUDGE_ATTEMPTS,
   MAX_GUIDELINE_JUDGE_PROMPT_BYTES,
@@ -436,19 +435,28 @@ describe('judgeGuidelines', () => {
     assert.equal(calls, 0);
   });
 
-  it('uses the fixed one-second and five-second retry schedule', async () => {
-    const waits: number[] = [];
-    const results = await judgeGuidelines(
+  it('uses the default one-second and five-second retry waits', async (t) => {
+    t.mock.timers.enable({apis: ['setTimeout']});
+    let calls = 0;
+    const pending = judgeGuidelines(
       {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
-      async () => '{}',
-      {
-        waitBeforeRetry: async (attempt) => {
-          waits.push(GUIDELINE_JUDGE_RETRY_DELAYS_MS[attempt - 1]!);
-        },
-      },
+      async () => {calls += 1; return '{}';},
     );
-
-    assert.deepEqual(waits, [1_000, 5_000]);
+    const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+    await nextTurn();
+    assert.equal(calls, 1);
+    t.mock.timers.tick(999);
+    await nextTurn();
+    assert.equal(calls, 1);
+    t.mock.timers.tick(1);
+    await nextTurn();
+    assert.equal(calls, 2);
+    t.mock.timers.tick(4_999);
+    await nextTurn();
+    assert.equal(calls, 2);
+    t.mock.timers.tick(1);
+    const results = await pending;
+    assert.equal(calls, 3);
     assert.equal(results[0]?.passed, false);
   });
 });
