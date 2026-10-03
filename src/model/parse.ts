@@ -301,7 +301,13 @@ const ModelRefSchema = z
 
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
-}).strict();
+  hook_trust: z.enum(['native', 'automation']).optional(),
+}).strict().superRefine((agent, context) => {
+  if (agent.adapter === 'claude-code' && agent.hook_trust !== undefined) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ['hook_trust'],
+      message: 'hook_trust is not supported by Claude Code'});
+  }
+});
 
 const RunSelectionSchema = z
   .object({
@@ -1153,8 +1159,10 @@ function agentKey(agent: {
   adapter: string;
   provider: string;
   model: string;
+  hook_trust?: 'native' | 'automation' | undefined;
 }): string {
-  return JSON.stringify([agent.adapter, agent.provider, agent.model]);
+  return JSON.stringify([agent.adapter, agent.provider, agent.model,
+    agent.hook_trust ?? (agent.adapter === 'codex' ? 'native' : null)]);
 }
 
 function deepFreeze<T>(value: T): T {

@@ -39,11 +39,13 @@ export function createTestResolvedRunPlan(
   const prompt = options.prompt ?? 'Complete the test task.';
   const mode = options.mode ?? 'one_shot';
   const treatment = options.treatment ?? 'baseline';
-  const agent = options.agent ?? {
+  const selectedAgent = options.agent ?? {
     adapter: 'test-agent',
     provider: 'test-provider',
     model: 'test-model',
   };
+  const agent = {...selectedAgent, ...(selectedAgent.adapter === 'codex'
+    ? {hook_trust: selectedAgent.hook_trust ?? 'native'} : {})};
   const caseSetup = [...(options.caseSetup ?? [])];
   const treatmentSetup = [...(options.treatmentSetup ?? [])];
   const setup = [...caseSetup, ...treatmentSetup];

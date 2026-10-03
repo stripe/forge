@@ -181,10 +181,11 @@ The experiment-level `retries` value is campaign policy and does not create a
 new semantic selection. `executeEval` executes one resolved plan once; a
 campaign runner is responsible for retrying that selection.
 
-A `RunSelection` chooses exactly one case, treatment, agent/provider/model
-triple, and zero-based repetition. The CLI requires filters to resolve to one
-entry for `plan`. `run` resolves and purely preflights every matching plan
-before executing them with bounded concurrency. The CLI loads the dataset from
+A `RunSelection` chooses exactly one case, treatment, complete agent selection,
+and zero-based repetition. Codex selections include `hook_trust`; new plans
+materialize its `native` default, while saved plans may omit it. The CLI requires
+filters to resolve to one entry for `plan`. `run` resolves and purely preflights
+every matching plan before executing them with bounded concurrency. The CLI loads the dataset from
 the experiment config and permits selectors such as `--case` to restrict execution.
 
 The shared controller exposed through `@stripe/forge/campaign` checkpoints
@@ -627,7 +628,7 @@ The built-ins are:
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials; and
 - `forge/plugin`: delegate native plugin installation to the selected agent
-  adapter, currently Claude Code, and retain a verified installation receipt.
+  adapter, currently Claude Code or Codex, and retain a verified installation receipt.
 
 Action IDs are namespaced but have no individual version suffix. Breaking
 changes to their payload or behavior require updating affected benchmark
@@ -666,9 +667,14 @@ Forge ships two adapters:
   logs in declared run-owned state, and supports native marketplace plugin
   installation.
 - **Codex** verifies the pinned CLI, creates an isolated `CODEX_HOME`, explicitly
-  selects its Responses-compatible provider and credential, ignores user
-  config, uses `codex exec --json`, resumes the exact session ID, and reads the
-  matching rollout file from run-owned state.
+  selects its Responses-compatible provider and credential, supports native
+  marketplace plugins, uses `codex exec --json`, resumes the exact session ID,
+  and reads the matching rollout file from run-owned state. Before every send,
+  it filters the run-owned user config to validated marketplace/plugin
+  settings, project trust, and hook enablement/review state, then loads those
+  settings. Plugins and sessions share the same writable home state. The
+  selected hook policy applies on every turn; see
+  [Marketplace plugin treatments](plugin-action.md) for its scope.
 
 Both adapters support explicit logical layouts for external runtimes and reject
 runtime paths that do not match the pinned adapter layout.

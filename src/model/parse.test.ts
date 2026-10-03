@@ -13,6 +13,21 @@ import {
 const HASH = 'a'.repeat(64);
 
 describe('public benchmark parsing', () => {
+  it('accepts Codex hook trust, rejects it for Claude, and treats omitted/native policies as duplicate coordinates', () => {
+    const yaml = experimentConfigYaml();
+    const codex = yaml.replace('adapter: claude-code', 'adapter: codex');
+    for (const hook_trust of ['native', 'automation']) {
+      const config = parseExperimentConfigYaml(codex.replace('adapter: codex', `adapter: codex\n      hook_trust: ${hook_trust}`));
+      assert.equal(config.matrix.agents[0]!.hook_trust, hook_trust);
+    }
+    assert.throws(() => parseExperimentConfigYaml(yaml.replace('adapter: claude-code', 'adapter: claude-code\n      hook_trust: native')), /hook_trust/);
+    assert.throws(() => parseExperimentConfigYaml(codex.replace('adapter: codex', 'adapter: codex\n      hook_trust: unknown')), /Invalid enum/);
+    const config = parseExperimentConfigYaml(codex);
+    const duplicate = {...config, matrix: {...config.matrix, agents: [config.matrix.agents[0]!,
+      {...config.matrix.agents[0]!, hook_trust: 'native'}]}};
+    // Exercise the strict JSON boundary through YAML, retaining authored defaults.
+    assert.throws(() => parseExperimentConfigYaml(JSON.stringify(duplicate)), /unique/);
+  });
   it('preserves multi-turn prompt semantics and materializes defaults', () => {
     const definition = parseEvalCaseYaml(`
 schema_version: 1

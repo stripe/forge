@@ -89,7 +89,10 @@ export function createClaudeCodeAdapter(
   if (credentialEnvironmentName === 'CLAUDE_CONFIG_DIR') {
     throw new TypeError('Claude configuration directory cannot be supplied as a credential.');
   }
-  const requirements = (selection: {adapter: string; provider: string}): AgentRuntimeRequirements => {
+  const requirements = (selection: {adapter: string; provider: string; hook_trust?: string}): AgentRuntimeRequirements => {
+    if (selection.hook_trust !== undefined) {
+      throw new TypeError('hook_trust is not supported by Claude Code.');
+    }
     if (selection.adapter !== id || selection.provider !== provider) {
       throw new TypeError('Claude adapter does not match the selected adapter/provider.');
     }

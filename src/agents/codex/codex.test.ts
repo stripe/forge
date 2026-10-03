@@ -43,6 +43,7 @@ function fixture(options: {
   adapterOptions?: CodexAdapterOptions;
   paths?: RuntimeLogicalPaths;
   missingState?: boolean;
+  hookTrust?: 'native' | 'automation';
   command?: (call: Call) => CommandResult | Promise<CommandResult>;
 } = {}) {
   const adapter = createCodexAdapter(options.adapterOptions);
@@ -50,6 +51,7 @@ function fixture(options: {
     ...selection,
     adapter: adapter.id,
     provider: options.adapterOptions?.provider ?? selection.provider,
+    ...(options.hookTrust === undefined ? {} : {hook_trust: options.hookTrust}),
   }});
   const calls: Call[] = [];
   const runner = (scope: Call['scope']): CommandRunner => ({
@@ -94,7 +96,7 @@ function assertIsolatedCommand(argv: readonly string[]): void {
     'check_for_update_on_startup=false']) {
     assert.ok(config.includes(value), `Missing isolated Codex configuration: ${value}`);
   }
-  assert.ok(argv.includes('--ignore-user-config'));
+  assert.equal(argv.includes('--ignore-user-config'), false);
   assert.ok(argv.includes('--dangerously-bypass-approvals-and-sandbox'));
 }
 
@@ -109,6 +111,31 @@ function deferred<T>() {
 }
 
 describe('Codex adapter', () => {
+  it('applies hook policy and refreshed native plugin settings on initial and resumed turns', async () => {
+    for (const hookTrust of ['native', 'automation'] as const) {
+      const test = fixture({hookTrust});
+      const home = test.sessionContext.runtime.stateDirectories.get(CODEX_HOME_STATE_ID)!;
+      const writeConfig = (enabled: boolean) => home.writeFile('config.toml', Buffer.from(`
+[plugins."fixture@test"]
+enabled=${enabled}
+[model_providers.forge]
+http_headers={"X-Wrong"="synthetic-secret"}
+`));
+      await writeConfig(true);
+      const session = await test.adapter.openSession(test.sessionContext);
+      await session.send('First', {signal: test.sessionContext.signal});
+      assert.match(Buffer.from(await home.readFile('config.toml')).toString(), /enabled = true/);
+      await writeConfig(false);
+      await session.send('Second', {signal: test.sessionContext.signal});
+      assert.match(Buffer.from(await home.readFile('config.toml')).toString(), /enabled = false/);
+      assert.doesNotMatch(Buffer.from(await home.readFile('config.toml')).toString(), /synthetic-secret/);
+      for (const call of test.calls) {
+        assert.equal(call.argv.includes('--dangerously-bypass-hook-trust'), hookTrust === 'automation');
+        assert.equal(call.argv.includes('--ignore-user-config'), false);
+      }
+      assert.ok(test.calls[1]!.argv.includes('resume'));
+    }
+  });
   it('declares run-owned configuration and opaque credentials for engine-assigned scope', () => {
     const adapter = createCodexAdapter();
     assert.equal(adapter.id, 'codex');
@@ -122,7 +149,7 @@ describe('Codex adapter', () => {
       stateDirectories: [{id: CODEX_HOME_STATE_ID, containerPath: '/home/forge/.codex'}],
     });
     assert.deepEqual(adapter.evidenceIdentity(selection), {name: 'codex', version: FORGE_CODEX_VERSION});
-    assert.equal(adapter.pluginInstaller, undefined);
+    assert.ok(adapter.pluginInstaller);
     assert.ok(Object.isFrozen(adapter));
   });
 

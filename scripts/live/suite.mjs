@@ -3,6 +3,7 @@ import {MODEL, CODEX_MODEL, parseGatewayUrl, isLoopbackHostname} from './configu
 import {startLoopbackGatewayBridge, assertDockerCanReachBridge} from './gateway.mjs';
 import {createRunVerifiers} from './verification.mjs';
 import {assertRuntimeCleanup} from './cleanup.mjs';
+import {runCodexPluginIntegrationSuite} from './codex.mjs';
 
 export function createFullSuite(forge, options, overrides = {}) {
   const {
@@ -30,7 +31,7 @@ export function createFullSuite(forge, options, overrides = {}) {
   let bridge;
   const checks = {
     assertRuntimeCleanup, startLoopbackGatewayBridge, assertDockerCanReachBridge, runDockerConformance,
-    runClaudePluginConformance, runSelection, ...createRunVerifiers(forge), ...overrides
+    runClaudePluginConformance, runCodexPluginIntegrationSuite, runSelection, ...createRunVerifiers(forge), ...overrides
   };
   return {run: async () => {try {return await run();} finally {await bridge?.close();} }, runDockerConformance};
 
@@ -113,6 +114,8 @@ export function createFullSuite(forge, options, overrides = {}) {
         runId: runIds.plugin,
         signal,
       }));
+    } else {
+      pluginReport = await checks.runCodexPluginIntegrationSuite(options);
     }
     if (bridge !== undefined) {
       progress('checking the container-to-loopback gateway bridge');

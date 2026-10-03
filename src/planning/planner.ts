@@ -60,7 +60,7 @@ export function expandExperiment(
           selections.push({
             case_id: caseId,
             treatment,
-            agent: {...agent},
+            agent: resolveAgentSelection(agent),
             repetition,
           });
         }
@@ -170,7 +170,7 @@ export function resolveRunPlanWithSetupActions(
 
   const plan: ResolvedRunPlanV1 = {
     schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
-    selection: cloneJson(selection),
+    selection: {...cloneJson(selection), agent: resolveAgentSelection(selection.agent)},
     provenance: {
       dataset: {
         ...cloneJson(dataset.manifest.dataset),
@@ -228,7 +228,7 @@ export function resolveRunPlanWithSetupActions(
     config.models.role_player === undefined
       ? {}
       : {role_player: cloneJson(config.models.role_player)}),
-    agent: cloneJson(selection.agent),
+    agent: resolveAgentSelection(selection.agent),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),
   };
@@ -357,8 +357,14 @@ function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {
   return (
     left.adapter === right.adapter &&
     left.provider === right.provider &&
-    left.model === right.model
+    left.model === right.model &&
+    (left.hook_trust ?? 'native') === (right.hook_trust ?? 'native')
   );
+}
+
+function resolveAgentSelection(agent: AgentSelectionV1): AgentSelectionV1 {
+  return {...cloneJson(agent), ...(agent.adapter === 'codex'
+    ? {hook_trust: agent.hook_trust ?? 'native'} : {})};
 }
 
 function cloneJson<T>(value: T): T {

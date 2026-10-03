@@ -39,7 +39,8 @@ describe('unified live end-to-end suite', () => {
       'pnpm build && node scripts/live-e2e.mjs',
     );
 
-    for (const script of [liveScript, path.join(repositoryRoot, 'scripts', 'live', 'setup.mjs')]) {
+    for (const script of [liveScript, path.join(repositoryRoot, 'scripts', 'live', 'setup.mjs'),
+      path.join(repositoryRoot, 'scripts', 'live', 'codex.mjs')]) {
       const syntax = spawnSync(process.execPath, ['--check', script], {
         cwd: repositoryRoot,
         encoding: 'utf8',
@@ -97,13 +98,14 @@ describe('unified live end-to-end suite', () => {
     assert.equal(setup.gatewayBaseUrl, undefined);
   });
 
-  it('rejects invalid live modes and unsupported setup agents before credential lookup', async () => {
+  it('rejects invalid live modes and permits Codex setup without provider credentials', async () => {
     assert.throws(() => configuration({
       FORGE_LIVE: '1', FORGE_LIVE_MODE: 'unknown',
     }), /FORGE_LIVE_MODE must be full or setup/);
-    assert.throws(() => configuration({
+    assert.equal(configuration({
       FORGE_LIVE: '1', FORGE_LIVE_MODE: 'setup', FORGE_LIVE_AGENT: 'codex',
-    }), /Setup mode requires claude-code/);
+      CODEX_API_KEY: '\0', OPENAI_BASE_URL: '\0',
+    }).upstreamCredential, undefined);
   });
 
   for (const protocol of ['responses', 'messages'] as const) {
@@ -281,6 +283,7 @@ describe('unified live end-to-end suite', () => {
         },
         async runDockerConformance() {order.push('docker'); return {platform: 'linux/amd64', image_id: 'immutable-image'};},
         async runClaudePluginConformance() {order.push('plugin'); return {verified: true};},
+        async runCodexPluginIntegrationSuite() {order.push('codex-plugin'); return {verified: true};},
         async assertDockerCanReachBridge(input: {imageId: string}) {
           order.push('bridge-probe'); assert.equal(input.imageId, 'immutable-image');
         },
@@ -328,7 +331,7 @@ describe('unified live end-to-end suite', () => {
       const report = await suite.run();
       output = JSON.stringify(report);
       assert.deepEqual(order, [
-        ...(scenario.bridged ? ['bridge'] : []), 'docker', ...(codex ? [] : ['plugin']),
+        ...(scenario.bridged ? ['bridge'] : []), 'docker', ...(codex ? ['codex-plugin'] : ['plugin']),
         ...(scenario.bridged ? ['bridge-probe'] : []), 'one-shot', ...(codex ? [] : ['multi-turn']), ...(scenario.bridged ? ['bridge-close'] : []),
       ]);
 

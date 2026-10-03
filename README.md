@@ -21,7 +21,7 @@ file-by-file map and concrete call paths, see the
 
 > **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
 > Ava multi-turn Claude Code and Codex runs, with file checks, model-judged success
-> guidelines, latest-marketplace Claude plugin treatments, ATIF v1.8 evidence,
+> guidelines, latest-marketplace Claude Code and Codex plugin treatments, ATIF v1.8 evidence,
 > and local results. The public CLI supports
 > direct Anthropic and OpenAI, or explicitly configured compatible endpoints.
 > Host-side Ava and judging currently use Anthropic, independently of the coding
@@ -526,7 +526,7 @@ The strict, schema-version-1 report contains:
 | --- | --- |
 | `experiment_run_id`, `generated_at`, `checkpoint_sha256` | Execution ID, UTC snapshot time, and SHA-256 of the exact checkpoint bytes used for this report. |
 | `summary` | Statistics across every saved selection. |
-| `cases` | Statistics grouped by case ID, treatment, and exact adapter/provider/model, combining repetitions. Groups appear in first-selection order. |
+| `cases` | Statistics grouped by case ID, treatment, and complete agent selection (including Codex hook trust), combining repetitions. Groups appear in first-selection order. |
 | `runs` | One row per saved selection in original order: zero-based `selection_index`, full `selection`, latest `run_id`, effective `state`, stable `error_code`, `attempt_count`, relative `result_path`, and `evaluation`. |
 
 Each statistics object counts `selections`, `completed`, `errored`, `pending`,
@@ -570,6 +570,7 @@ matrix:
     - adapter: codex
       provider: openai
       model: gpt-5.4
+      hook_trust: native
 ```
 
 The [checked-in Codex example](https://github.com/stripe/forge/blob/main/examples/codex/README.md) is a complete runnable
@@ -597,10 +598,14 @@ Forge pins Codex CLI `0.149.0` and checks the binary version before setup. Each
 run receives an isolated `CODEX_HOME`. Forge uses `codex exec --json` for the
 first turn and `codex exec resume <exact-session-id>` for later Ava turns; it
 never resumes the newest ambient session. The adapter explicitly chooses its
-provider, endpoint, and credential environment name, ignores user config, and
-does not mount a developer's Codex state or login. Codex's own approvals and
-sandbox are disabled inside the externally isolated runtime; a custom runtime
-must provide suitable isolation itself. A prompt consisting solely of `-` is
+provider, endpoint, and credential environment name. Before each turn, it
+filters the run-owned `config.toml` to validated native marketplace/plugin
+settings, project trust, and hook enablement/review state, then loads that file
+so installed plugins and workspace hooks retain their state across turns.
+Provider, login, and other user settings are removed. Forge does not mount a
+developer's Codex state or login. Codex's own approvals and sandbox are disabled
+inside the externally isolated runtime; a custom runtime must provide suitable
+isolation itself. A prompt consisting solely of `-` is
 rejected because Codex treats it as its stdin sentinel.
 
 The CLI maps `openai.api-key` to host `CODEX_API_KEY`. Override the host binding
@@ -611,6 +616,15 @@ endpoint; the service must support the Responses protocol used by Codex. Use
 HTTPS for remote services. Endpoints must be reachable from inside the runtime.
 The adapter records version `1`, or `1+responses-compatible` for an explicitly
 configured endpoint; endpoint URLs and credentials are not added to results.
+
+`hook_trust` belongs on the Codex entry in `matrix.agents`. It defaults to
+`native`, which lets Codex enforce its normal hook review requirements. Set
+`automation` when enabled hooks should run without review in the isolated
+runtime. Forge then passes `--dangerously-bypass-hook-trust` on every initial
+and resumed turn. This applies to all enabled hooks, including workspace hooks.
+New resolved plans explicitly record the policy, and matrix identity and
+report grouping distinguish it. Saved plans that omit the field use `native`.
+Claude Code rejects this field and retains its native hook behavior.
 
 Programmatic hosts import `createCodexAdapter` from
 `@stripe/forge/agents/codex` and register it in `composition.agents`. Options
@@ -626,8 +640,9 @@ Codex is a coding-agent adapter, not a host completion provider. For a
 multi-turn Codex experiment, still declare `models.role_player`; for success
 guidelines, declare `models.judge`. The CLI currently supplies Anthropic for
 those roles, or embedding hosts can supply their own `CompletionProvider`.
-Codex plugin installation is not implemented; `forge/plugin` remains
-Claude-only and unsupported Codex treatments fail before allocation.
+Codex implements `forge/plugin`; add a `codex` distribution branch to the
+treatment. See [Marketplace plugin treatments](docs/plugin-action.md) for
+native catalog selection, supported sources, and receipts.
 
 See the official Codex [non-interactive guide](https://developers.openai.com/codex/noninteractive/)
 and [CLI reference](https://developers.openai.com/codex/cli/reference/) for the
@@ -869,25 +884,29 @@ treatments:
             claude-code:
               plugin: example-plugin@example-marketplace
               marketplace: example-org/example-marketplace
+            codex:
+              plugin: example-plugin@example-marketplace
+              marketplace: example-org/example-marketplace
 ```
 
 The marketplace and plugin names above are illustrative and must be replaced
 with real identifiers.
 
-Forge registers the current marketplace through Claude's native CLI, validates
-the selected entry, and installs it with user scope in the isolated run home.
+Forge registers the current marketplace through the selected agent's native
+CLI, validates the selected entry, and installs it in the isolated run home.
 The marketplace decides
 the plugin source and resolved version. The action rejects authored `version`,
 `marketplace.commit`, and `source` fields: identical plans can intentionally
 install different releases on different dates.
 
-Claude uses its normal `~/.claude/plugins` directory, original marketplace and
-plugin identities, and native user settings. Plugin files, settings, and hook
+Claude uses its normal `~/.claude/plugins` directory and native user settings;
+Codex uses its run-owned `CODEX_HOME` for both plugins and sessions. Both retain
+the original marketplace and plugin identities. Plugin files, settings, and hook
 data remain writable during interaction, matching normal plugin use. Each run
 has its own home and plugin state. Plugin setup does not require a container
 restart or forced session settings. The `setup.json` receipt identifies the
 contents at installation time; it does not attest that those contents remained
-unchanged during the run. Claude or the agent may edit, disable, update, or
+unchanged during the run. The agent may edit, disable, update, or
 install plugins under the runtime's ordinary permissions and network policy.
 
 Forge installs the whole plugin—including skills, commands, hooks, and MCP
@@ -1810,8 +1829,7 @@ proxy, or an offline execution mode.
   regular-expression content checks; there are no built-in test-command,
   static-analysis, or custom deterministic check plugins.
 - Claude Code and Codex are built-in agents. Cursor is not included. Codex
-  supports non-interactive API-key execution, not ChatGPT login or plugin
-  installation.
+  supports non-interactive API-key execution; ChatGPT login is not included.
 - Anthropic is the only built-in completion provider. It supports direct
   Anthropic and Anthropic Messages-compatible endpoints and requires Claude
   4.5-or-newer model identifiers for strict structured output. OpenAI host completions,
@@ -1826,12 +1844,14 @@ proxy, or an offline execution mode.
   run retry loop; experiment-level `retries` is not acted on by the CLI. Ava and
   guideline completion attempts have their own fixed retry policy and do not implement
   the experiment config's campaign retry field.
-- Built-in setup includes `forge/write`, `forge/command`, and Claude-backed
+- Built-in setup includes `forge/write`, `forge/command`, and agent-native
   `forge/plugin`. The plugin action installs the current entry from a public
   GitHub marketplace named as `owner/repository`. Exact plugin-version pins,
   remote MCP-service pins, private repository authentication, npm and command
-  sources, plugin configuration, transitive plugin dependencies, and non-Claude
-  native realizations are not included.
+  sources, user-defined plugin options, and transitive plugin dependencies are
+  not included. Codex also rejects archives and SHA-pinned Git source metadata;
+  its pinned CLI does not report installed source commits. See the
+  [plugin contract](docs/plugin-action.md) for adapter-specific source support.
 - Results are local. There is no remote publisher, worker/control plane, hosted
   execution service, or human-result policy in the public package.
 - Each CLI process asks Docker to build and verify the Forge image; Docker's
@@ -1885,13 +1905,17 @@ FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
 
 Setup mode tests `forge/write` with inline UTF-8 and dataset files;
 `forge/command` with literal argv, a working directory, nonzero exits,
-and timeouts; and `forge/plugin` with a real native Claude installation. Each
-case runs through Forge's normal parser, planner, setup, and execution
-lifecycle in its own real Docker runtime. A deterministic interaction probe
+and timeouts; and `forge/plugin` with a real native installation for the
+selected agent. Each case runs through Forge's normal parser, planner, setup,
+and execution lifecycle in its own real Docker runtime. A deterministic interaction probe
 checks the setup effects after finalization. Completed artifacts and
 `setup.json` receipts are verified, and both successful and failed setup must
-leave no containers or runtime files. This mode requires `claude-code`, since
-Codex does not implement plugin installation.
+leave no containers or runtime files. Select `FORGE_LIVE_AGENT=codex` to test
+Codex setup. That mode also exercises a local marketplace fixture with the
+pinned Codex CLI, skills, MCP, native and automated hook policies, exact-session
+resume, plugin disabling between turns, provider isolation, and native
+evidence. Its Responses server and role-player are deterministic fixtures;
+it makes no upstream model calls and requires no model credentials.
 
 Full mode makes potentially billable model calls. Direct Anthropic uses a
 dedicated API key:
@@ -1938,9 +1962,10 @@ pnpm test:live
 ```
 
 Omit `OPENAI_BASE_URL` for direct OpenAI. Codex mode runs Docker conformance,
-the checked-in Codex one-shot experiment, and full artifact verification,
-including native rollout evidence. It does not run Claude plugins, Ava, or
-guideline judging and needs no Anthropic credential. The selected model is
+the plugin fixture suite described above, the checked-in Codex one-shot
+experiment, and full artifact verification, including native rollout evidence.
+It needs no Anthropic credential; its multi-turn fixture uses a scripted
+host completion provider. The selected model for upstream inference is
 `gpt-5.4`, as pinned by the example experiment.
 
 For this live-suite mode, a temporary authenticated host bridge forwards only

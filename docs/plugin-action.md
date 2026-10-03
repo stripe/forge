@@ -7,8 +7,8 @@ agent-native plugin from a GitHub marketplace. It is intended for experiments
 that deliberately evaluate the plugin currently published by that marketplace.
 
 The action's schema and lifecycle are public Forge behavior. Agent-specific
-commands stay behind the narrow `AgentPluginInstaller` capability; Claude Code
-is currently the only built-in adapter that implements it.
+commands stay behind the narrow `AgentPluginInstaller` capability, implemented
+by the built-in Claude Code and Codex adapters.
 
 This action is distinct from a [setup action bundle](setup-action-bundles.md):
 `forge/plugin` ships with Forge, while bundles let an embedding host add its
@@ -26,6 +26,9 @@ treatments:
         with:
           agents:
             claude-code:
+              plugin: example-plugin@example-marketplace
+              marketplace: example-org/example-marketplace
+            codex:
               plugin: example-plugin@example-marketplace
               marketplace: example-org/example-marketplace
 ```
@@ -50,7 +53,7 @@ The plugin action intentionally follows the marketplace's current default branch
 2. Forge registers the authored marketplace through the agent's native CLI.
 3. The marketplace entry selects the plugin source and installed version.
 4. Forge validates the native installation and records its IDs, version,
-   catalog commit, reported source commit, and installed-content fingerprint.
+   catalog commit, source commit when reported, and installed-content fingerprint.
 5. Plugin state remains writable during interaction.
 
 The experiment therefore has no plugin-version, marketplace-commit, or source
@@ -71,21 +74,71 @@ Plugin files may name remote services that change independently of the installed
 plugin version. These services remain mutable dependencies governed by the
 runtime's network policy.
 
-The action accepts credential-free marketplace source forms supported by the
-native installer:
+Source support depends on the selected native installer. Claude Code accepts:
 
 - a canonical relative path within the fetched marketplace;
 - an HTTPS Git URL, GitHub `owner/repository`, or Git subdirectory, optionally
   accompanied by `ref` and full Git SHA metadata; or
 - an HTTPS archive, optionally accompanied by a 64-hex SHA-256 digest.
 
-When a Git-backed entry supplies a commit SHA, Forge requires the native
+When a Claude Git-backed entry supplies a commit SHA, Forge requires the native
 installed-state record to contain that commit. An archive SHA is accepted as
 native marketplace metadata; Forge does not independently rehash the downloaded
 archive or mirror its checksum into the installation receipt. Authenticated
-archives, npm or command sources,
-embedded URL credentials, URL query parameters or fragments, and transitive
-plugin dependencies are not supported by this action.
+archives, npm or command sources, embedded URL credentials, URL query
+parameters or fragments, and transitive plugin dependencies are not supported
+by this action.
+
+Codex accepts a string or `{source: local, path: ./...}` marketplace-relative
+path, or a credential-free HTTPS `url` or `git-subdir` source with optional
+`ref` and subdirectory. It rejects archives, npm, `github` source objects,
+dependencies, and SHA-pinned Git metadata. The pinned Codex CLI does not report
+installed source commits, so Codex receipts omit that optional field and use
+the installed-tree fingerprint to identify observed bytes.
+
+Codex selects the first native catalog present in this order:
+
+1. `.agents/plugins/marketplace.json`
+2. `.agents/plugins/api_marketplace.json`
+3. `.claude-plugin/marketplace.json`
+4. `.cursor-plugin/marketplace.json`
+
+The pinned CLI does not recognize `.codex-plugin/marketplace.json`. A repository
+with that file and a compatible Claude catalog therefore installs from the
+Claude catalog. Forge validates the catalog the CLI actually selects.
+Installed manifests may use the native `.codex-plugin`, `.claude-plugin`, or
+`.cursor-plugin` format, or Agent Plugins 1.0's schema-qualified root
+`plugin.json`. Forge checks the native manifest's identity and version.
+
+## Hook policy and writable state
+
+Codex plugin installation and interaction share the run-owned `CODEX_HOME`.
+Before installation and every initial or resumed turn, Forge filters its
+`config.toml` to validated native marketplace/plugin settings, project trust,
+and hook enablement/review state. This lets Codex load enabled skills, hooks,
+and MCP configuration without inheriting user-level provider or authentication
+settings. Changes to plugin enablement
+remain effective on subsequent turns. Codex's recorded workspace trust is
+retained because its resume path does not repeat first-turn trust initialization.
+
+Hook trust is an agent coordinate in the experiment:
+
+```yaml
+matrix:
+  agents:
+    - adapter: codex
+      provider: openai
+      model: gpt-5.4
+      hook_trust: automation
+```
+
+`native` is the default and leaves hook review to Codex. `automation` passes
+`--dangerously-bypass-hook-trust` on every turn and permits all enabled hooks,
+including workspace hooks, to run without review. New resolved plans record
+the default explicitly; saved plans without the field use `native`. The policy
+participates in matrix identity, plan hashes, and report grouping. It is not a
+plugin option. Claude Code rejects `hook_trust` and retains its native settings
+and hook execution behavior.
 
 ## Execution and receipt
 
@@ -133,7 +186,7 @@ therefore work only for credential-free HTTPS sources accepted by the action.
 
 Current limitations are:
 
-- only the built-in Claude Code adapter implements plugin installation;
+- native source support differs between Claude Code and Codex;
 - marketplace and plugin versions resolve at execution time;
 - installed state remains writable during interaction;
 - remote services referenced by a plugin are not pinned;

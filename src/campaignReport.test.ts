@@ -21,6 +21,15 @@ afterEach(async () => {
 });
 
 describe('campaign scorecards', () => {
+  it('keeps Codex hook policies in report coordinates and separates their score groups', () => {
+    const runs = [row(0), row(1)];
+    runs[0]!.selection.agent = {adapter: 'codex', provider: 'openai', model: 'gpt', hook_trust: 'native'};
+    runs[1]!.selection.agent = {...runs[0]!.selection.agent, hook_trust: 'automation'};
+    const report = build(runs);
+    assert.equal(report.cases.length, 2);
+    assert.deepEqual(report.cases.map(({agent}) => agent.hook_trust), ['native', 'automation']);
+    assert.deepEqual(parseCampaignReport(report), report);
+  });
   it('groups repetitions by exact case/treatment/agent coordinates and separates execution coverage from scores', () => {
     const runs = [row(0), row(1), row(2), row(3), row(4), row(5)];
     runs[0]!.evaluation = evaluation(2, 2, 'passed');

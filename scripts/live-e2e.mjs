@@ -22,8 +22,11 @@ try {
   let report;
   if (mode === 'setup') {
     const {runSetupIntegrationSuite} = await import('./live/setup.mjs');
-    const setup = await runSetupIntegrationSuite({dockerExecutable, resultsRoot, suiteId, signal, progress});
-    report = {verified: true, suite_id: suiteId, mode, setup};
+    const setup = await runSetupIntegrationSuite({...configuration, signal, progress});
+    const codex = configuration.codexSelected
+      ? await (await import('./live/codex.mjs')).runCodexPluginIntegrationSuite({...configuration, signal, progress})
+      : undefined;
+    report = {verified: true, suite_id: suiteId, mode, setup, ...(codex === undefined ? {} : {codex})};
   } else {
     runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-live-runtime-'));
     const modules = await Promise.all([

@@ -14,6 +14,13 @@ import {
 } from './index.js';
 
 describe('Claude Code adapter', () => {
+  it('rejects Codex hook policy even when registered with a custom adapter ID', () => {
+    for (const id of ['claude-code', 'custom-claude']) {
+      const adapter = createClaudeCodeAdapter({id});
+      assert.throws(() => adapter.requirements({adapter: id, provider: 'anthropic', model: 'claude-test', hook_trust: 'native'}), /hook_trust is not supported/);
+    }
+  });
+
   const customLayout: ClaudeCodeLayout = {
     workspace: '/tmp/run_123/project.name',
     home: '/tmp/run_123/home',

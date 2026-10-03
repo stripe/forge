@@ -187,6 +187,7 @@ function normalizeRecords(
   let userInTurn = false;
   let assistantInTurn = false;
   let lastAssistantMessage: string | undefined;
+  let worldState: RecordValue | undefined;
 
   const add = (step: Omit<AtifStep, 'step_id'>, record: RolloutRecord, index: number): AtifStep => {
     const value = {...step, ...timestamp(record.timestamp, warnings, index), step_id: steps.length + 1} as AtifStep;
@@ -207,7 +208,7 @@ function normalizeRecords(
     if (record.type === 'compacted') throw new IncompleteRolloutError();
     if (record.type === 'world_state') {
       if (activeTurn === undefined || userInTurn) throw new IncompleteRolloutError();
-      validateWorldState(payload, input.model);
+      worldState = validateWorldState(payload, input.model, worldState);
       continue;
     }
     if (record.type === 'turn_context') {
@@ -563,11 +564,12 @@ function completedMessage(item: RecordValue, textType: 'text' | 'Text'): string 
   }).join('\n');
 }
 
-/** The pinned recorder snapshot duplicates context rendered in response items. */
-function validateWorldState(payload: RecordValue, model: string): void {
+/** The pinned recorder uses full snapshots followed by RFC 7386 merge patches. */
+function validateWorldState(payload: RecordValue, model: string, previous?: RecordValue): RecordValue {
   assertKeys(payload, ['full', 'state']);
-  if (payload.full !== true) throw new IncompleteRolloutError();
-  const state = object(payload.state);
+  if (typeof payload.full !== 'boolean' || (!payload.full && previous === undefined)) throw new IncompleteRolloutError();
+  const state = payload.full ? object(payload.state) : mergeWorldState(previous!, object(payload.state));
+  assertBoundedJson(state, {nodes: 0});
   assertKeys(state, ['agents_md', 'apps_instructions', 'collaboration_mode', 'environments', 'environments_instructions', 'git_attribution', 'host_skills', 'model', 'multi_agent_mode', 'orchestrator_skills', 'permissions', 'personality', 'plugins_instructions', 'realtime', 'skills']);
   if (state.model !== model) throw new IncompleteRolloutError();
   for (const key of ['apps_instructions', 'environments_instructions', 'git_attribution', 'plugins_instructions']) {
@@ -600,6 +602,25 @@ function validateWorldState(payload: RecordValue, model: string): void {
   const skills = object(state.skills);
   assertKeys(skills, ['includeInstructions']);
   boolean(skills.includeInstructions);
+  return state;
+}
+
+function mergeWorldState(previous: RecordValue, patch: RecordValue): RecordValue {
+  const result: RecordValue = Object.assign(Object.create(null), previous);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      // Unknown deletions must not bypass validation of the resulting snapshot.
+      if (!Object.hasOwn(previous, key)) throw new IncompleteRolloutError();
+      delete result[key];
+    } else if (typeof value === 'object' && !Array.isArray(value)) {
+      const before = previous[key];
+      result[key] = mergeWorldState(before !== null && typeof before === 'object' && !Array.isArray(before)
+        ? object(before) : {}, object(value));
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 function validateThreadSettings(payload: RecordValue, model: string): void {

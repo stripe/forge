@@ -783,7 +783,7 @@ describe('Forge CLI', () => {
       assert.equal(code, 0);
       if (command === 'validate') assert.equal(JSON.parse(stdout).valid, true);
       else assert.deepEqual(JSON.parse(stdout).selection.agent, {
-        adapter: 'codex', provider: 'openai', model: 'gpt-5.4',
+        adapter: 'codex', provider: 'openai', model: 'gpt-5.4', hook_trust: 'native',
       });
     }
   });

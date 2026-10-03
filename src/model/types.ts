@@ -141,6 +141,8 @@ export interface ModelRefV1 {
 
 export interface AgentSelectionV1 extends ModelRefV1 {
   adapter: string;
+  /** Codex hook review: native by default; automation permits all enabled hooks. */
+  hook_trust?: 'native' | 'automation';
 }
 
 export interface TreatmentV1 {
