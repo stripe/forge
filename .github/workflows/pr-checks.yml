@@ -34,5 +34,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check package
-        run: pnpm check
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check documentation
+        run: pnpm check:docs:built
+
+      - name: Validate package and exported types
+        run: pnpm check:package

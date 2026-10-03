@@ -98,11 +98,13 @@ repository live-suite path.
 FORGE_LIVE=1 ANTHROPIC_API_KEY=... pnpm test:live
 ```
 
-The live suite requires Docker, network access, and provider credentials and
-makes potentially billable model calls. Run it only when appropriate to the
-changed surface and the task permits credentialed, billable execution. If it is
-relevant but cannot be run, say so explicitly in the handoff. See the README
-for gateway and Codex variants.
+The live suite requires Docker and network access. Its default full mode also
+requires provider credentials and makes potentially billable model calls; run
+that mode only when appropriate to the changed surface and the task permits
+credentialed, billable execution. `FORGE_LIVE_MODE=setup` exercises built-in
+setup actions without model credentials or model calls. If relevant live
+coverage cannot be run, say so explicitly in the handoff. See the README for
+setup, gateway, and Codex variants.
 
 ## Documentation maintenance
 

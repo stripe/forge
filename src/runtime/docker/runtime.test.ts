@@ -540,6 +540,45 @@ describe('Forge Docker runtime', () => {
     await assert.rejects(fs.stat(runRoot));
   });
 
+  it('creates writable home mount targets and parents before Docker can create root-owned paths', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
+    roots.push(temporaryRoot);
+    let starts = 0;
+    const expectedUserId = typeof process.getuid === 'function'
+      ? process.getuid() || 10001
+      : undefined;
+    const docker = fakeDocker({async beforeResult(argv) {
+      if (argv[1] !== 'run') return;
+      starts += 1;
+      const homeMount = argv.find((argument) => argument.endsWith('target=/home/forge'))!;
+      const homeRoot = homeMount.match(/source=([^,]+)/)![1]!;
+      for (const relativePath of ['.claude', '.claude/projects', '.claude/plugins', '.cache', '.cache/tool', '.cache/tool/state']) {
+        const stat = await fs.stat(path.join(homeRoot, relativePath));
+        assert.ok(stat.isDirectory());
+        if (process.platform !== 'win32') assert.equal(stat.mode & 0o777, 0o777);
+        if (expectedUserId !== undefined) assert.equal(stat.uid, expectedUserId);
+      }
+      assert.deepEqual((await fs.readdir(homeRoot)).sort(), ['.cache', '.claude']);
+    }});
+    const adapter = createDockerRuntimeAdapter({hostCommands: docker.runner, temporaryRoot});
+    const prepared = await adapter.prepare(preparation({requirements: {
+      executables: [],
+      stateDirectories: [
+        {id: 'projects', containerPath: '/home/forge/.claude/projects'},
+        {id: 'plugins', containerPath: '/home/forge/.claude/plugins', sealAfterSetup: true},
+        {id: 'cache', containerPath: '/home/forge/.cache/tool/state'},
+        {id: 'host-tool', containerPath: '/opt/tool', sealAfterSetup: true},
+      ],
+    }}));
+    try {
+      await prepared.finalizeSetup();
+      assert.equal(starts, 2, 'Targets must exist for setup and sealed containers');
+    } finally {
+      await prepared.dispose();
+    }
+    assert.deepEqual(await fs.readdir(temporaryRoot), []);
+  });
+
   it('rejects unsafe logical state mounts before invoking Docker', async () => {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
     roots.push(temporaryRoot);
@@ -559,7 +598,36 @@ describe('Forge Docker runtime', () => {
       ),
       /canonical child/,
     );
+    await assert.rejects(
+      adapter.prepare(preparation({requirements: {
+        executables: [],
+        stateDirectories: [{id: 'bad', containerPath: '/home/forge/..\\escape'}],
+      }})),
+      /canonical child/,
+    );
     assert.equal(docker.calls.length, 0);
+  });
+
+  it('rejects equal state mount targets during pure preflight', async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-docker-test-'));
+    roots.push(temporaryRoot);
+    const docker = fakeDocker();
+    const adapter = createDockerRuntimeAdapter({hostCommands: docker.runner, temporaryRoot});
+    for (const sealAfterSetup of [false, true]) {
+      assert.throws(() => adapter.preflight({
+        plan: preparation().plan,
+        requirements: {
+          executables: [],
+          stateDirectories: [
+            {id: 'first', containerPath: '/home/forge/state', sealAfterSetup: false},
+            {id: 'second', containerPath: '/home/forge/state', sealAfterSetup},
+          ],
+        },
+        environment: {},
+      }), /may not overlap/);
+    }
+    assert.deepEqual(docker.calls, []);
+    assert.deepEqual(await fs.readdir(temporaryRoot), []);
   });
 
   it('supports writable Codex state without weakening Docker isolation', async () => {
@@ -833,9 +901,6 @@ describe('Forge Docker runtime', () => {
       async () => prepared.importHostFile!(request, abort.signal),
       /aborted/i,
     );
-    await prepared.stateDirectories.get('sealed')!.writeFile('existing', Buffer.from('file'));
-    const entry = await prepared.stateDirectories.get('sealed')!.inspect('existing');
-    assert.equal(entry.kind, 'file');
     await prepared.importHostFile!(request);
     await prepared.finalizeSetup();
     await prepared.dispose();

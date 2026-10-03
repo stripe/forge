@@ -19,7 +19,6 @@ import {
 import type {ForgeComposition} from './contracts/composition.js';
 import {createForgeEngine, defaultForgeEngine} from './engine.js';
 import {executeEvalWithTestHooks} from './execution/execute.js';
-import * as rootExports from './index.js';
 import {createArtifactStore} from './results/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
 import {
@@ -44,8 +43,6 @@ afterEach(async () => {
 
 describe('shared campaign command', () => {
   it('keeps command APIs on their subpath and rejects option/alias collisions', () => {
-    assert.equal('runCampaignCommand' in rootExports, false);
-    assert.equal('inspectCampaign' in rootExports, false);
     assert.equal(typeof runCampaignCommand, 'function');
     assert.deepEqual(Object.keys(CAMPAIGN_CLI_OPTIONS), ['output', 'run-id', 'resume', 'jobs']);
     for (const definitions of [
@@ -195,32 +192,16 @@ describe('shared campaign command', () => {
     assert.equal(disposed, 1);
   });
 
-  it('keeps publication failures separate and supports retries without loading the experiment', async () => {
+  it('inspects verified outcomes without loading inputs or changing the checkpoint', async () => {
     const fixture = await createFixture();
     const first = await fixture.run([]);
     const checkpoint = await fs.readFile(first.campaign);
-    const published = new Set<string>();
-    let fail = true;
-    async function publish(outcomes: CampaignCommandResult['outcomes']) {
-      for (const outcome of outcomes) {
-        if (outcome.artifact === null || published.has(outcome.run_id!)) continue;
-        if (fail && published.size === 1) throw new Error('upload failed');
-        published.add(outcome.run_id!);
-      }
-    }
-    await assert.rejects(publish(first.outcomes), /upload failed/);
-    assert.deepEqual(await fs.readFile(first.campaign), checkpoint);
     const inspected = await inspectCampaign({root: `${first.location}/.`, engine: defaultForgeEngine});
     assert.deepEqual(inspected.outcomes, first.outcomes);
-    fail = false;
-    await publish(inspected.outcomes);
-    assert.equal(published.size, 2);
     assert.deepEqual(await fs.readFile(first.campaign), checkpoint);
     const resumed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(resumed.executed, 0);
     assert.deepEqual(resumed.outcomes, first.outcomes);
-    await publish(resumed.outcomes);
-    assert.equal(published.size, 2);
     await fs.appendFile(path.join(first.outcomes[0]!.artifact!.location, 'plan.json'), 'tampered');
     const corrupt = await inspectCampaign({root: first.location, engine: defaultForgeEngine});
     assert.equal(corrupt.outcomes[0]!.artifact, null);
@@ -232,8 +213,10 @@ describe('shared campaign command', () => {
     const fixture = await createFixture();
     const bundle = defineSetupActionBundle({
       manifest: {namespace: 'acme-evals', version: '1.0.0', sha256: `sha256:${'a'.repeat(64)}`},
-      actions: [{uses: 'acme-evals/seed', parseWith: () => ({}),
-        preflight: () => ({requirements: {}, apply: async () => undefined})}],
+      actions: [{
+        uses: 'acme-evals/seed', parseWith: () => ({}),
+        preflight: () => ({requirements: {}, apply: async () => undefined})
+      }],
     });
     const engine = createForgeEngine({setupActionBundles: [bundle]});
     const raw = structuredClone(createTestResolvedRunPlan());

@@ -1,9 +1,8 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from './support/expect.js';
 
 import {runCli} from '../src/cli.js';
 import type {AgentAdapter} from '../src/contracts/agent.js';
@@ -97,26 +96,31 @@ describe('checked-in quickstart', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toContain('forge:');
+    assert.equal(exitCode, 0);
+    assert.ok(!(stderr).includes('forge:'));
     const summary = JSON.parse(stdout) as {location: string; completed: number};
-    expect(summary.completed).toBe(1);
+    assert.equal(summary.completed, 1);
     const completed = await verifyCompletedRun(path.join(summary.location, 'runs', 'quickstart-e2e'));
-    expect(completed.runId).toBe('quickstart-e2e');
-    expect(completed.result.evaluation).toMatchObject({score: 0, status: 'passed'});
+    assert.equal(completed.runId, 'quickstart-e2e');
+    {
+      const actual = completed.result.evaluation;
+      assert.ok(actual);
+      assert.equal(actual.score, 0);
+      assert.equal(actual.status, 'passed');
+    }
 
-    expect(completed.result.runtime.adapter).toBe('forge/docker');
-    expect(Object.hasOwn(completed.result.runtime, 'adapter_version')).toBe(false);
-    expect(completed.result.selection).toMatchObject({
-      case_id: 'examples/hello-file',
-      treatment: 'baseline',
-      agent: {
-        adapter: 'claude-code',
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-6',
-      },
-    });
-    expect(completed.result.artifacts.map(({path: artifactPath}) => artifactPath)).toEqual([
+    assert.equal(completed.result.runtime.adapter, 'forge/docker');
+    assert.equal(Object.hasOwn(completed.result.runtime, 'adapter_version'), false);
+    {
+      const actual = completed.result.selection;
+      assert.ok(actual);
+      assert.equal(actual.case_id, 'examples/hello-file');
+      assert.equal(actual.treatment, 'baseline');
+      assert.equal(actual.agent.adapter, 'claude-code');
+      assert.equal(actual.agent.provider, 'anthropic');
+      assert.equal(actual.agent.model, 'claude-sonnet-4-6');
+    }
+    assert.deepEqual(completed.result.artifacts.map(({path: artifactPath}) => artifactPath), [
       'plan.json',
       'setup.json',
       'trajectory.json',
@@ -133,10 +137,8 @@ describe('checked-in quickstart', () => {
     const hello = workspaceEvidence.entries.find(({path: filePath}) =>
       filePath === 'hello.txt',
     );
-    expect(Buffer.from(hello?.content_base64 ?? '', 'base64').toString('utf8')).toBe(
-      'hello, forge!\n',
-    );
-    expect(runtime.runs[0]?.events).toEqual([
+    assert.equal(Buffer.from(hello?.content_base64 ?? '', 'base64').toString('utf8'), 'hello, forge!\n');
+    assert.deepEqual(runtime.runs[0]?.events, [
       'prepare',
       'finalizeSetup',
       'quiesce',

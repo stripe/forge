@@ -1,6 +1,5 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import {BenchmarkModelError} from './errors.js';
 import {
@@ -23,14 +22,16 @@ initial_prompt: "  I need help with Checkout.  "
 context: Existing integration
 `);
 
-    expect(definition).toMatchObject({
-      id: 'payments/checkout',
-      task: 'Help the user integrate Checkout.',
-      initial_prompt: 'I need help with Checkout.',
-      execution_mode: 'multi_turn',
-      setup: [],
-      success_guidelines: [],
-    });
+    {
+      const actual = definition;
+      assert.ok(actual);
+      assert.equal(actual.id, 'payments/checkout');
+      assert.equal(actual.task, 'Help the user integrate Checkout.');
+      assert.equal(actual.initial_prompt, 'I need help with Checkout.');
+      assert.equal(actual.execution_mode, 'multi_turn');
+      assert.deepEqual(actual.setup, []);
+      assert.deepEqual(actual.success_guidelines, []);
+    }
   });
 
   it('accepts exactly one effective prompt in one-shot mode', () => {
@@ -42,25 +43,26 @@ initial_prompt: Create greeting.txt
 checks:
   files_created: [greeting.txt]
 `);
-    expect(oneShot).toMatchObject({
-      initial_prompt: 'Create greeting.txt',
-      execution_mode: 'one_shot',
-    });
-    expect(oneShot.task).toBeUndefined();
+    {
+      const actual = oneShot;
+      assert.ok(actual);
+      assert.equal(actual.initial_prompt, 'Create greeting.txt');
+      assert.equal(actual.execution_mode, 'one_shot');
+    }
+    assert.equal(oneShot.task, undefined);
 
-    expect(() =>
+    assert.throws(() =>
       parseEvalCaseYaml(`
 schema_version: 1
 id: smoke/invalid
 execution_mode: one_shot
 task: One
 initial_prompt: Two
-`),
-    ).toThrow(BenchmarkModelError);
+`), BenchmarkModelError);
   });
 
   it('bounds success guidelines to the persisted result contract', () => {
-    expect(() =>
+    assert.throws(() =>
       parseEvalCase({
         schema_version: 1,
         id: 'safe/oversized-guideline',
@@ -68,46 +70,39 @@ initial_prompt: Two
         execution_mode: 'multi_turn',
         setup: [],
         success_guidelines: ['x'.repeat(64 * 1024 + 1)],
-      }),
-    ).toThrow(BenchmarkModelError);
+      }), BenchmarkModelError);
   });
 
   it('strictly validates built-in setup payloads and rejects unknown actions', () => {
-    expect(
-      parseSetupStep({
+    {
+      const actual = parseSetupStep({
         uses: 'forge/write',
         with: {target: 'src/config.json', source: {dataset_path: 'fixtures/a.json'}},
-      }),
-    ).toMatchObject({uses: 'forge/write'});
-    expect(() =>
+      });
+      assert.ok(actual);
+      assert.equal(actual.uses, 'forge/write');
+    }
+    assert.throws(() =>
       parseSetupStep({
         uses: 'acme/link-cli',
         with: {channel: 'stable'},
-      }),
-    ).toThrow(/unknown setup action/);
-    expect(() =>
+      }), /unknown setup action/);
+    assert.throws(() =>
       parseSetupStep({
         uses: 'forge/command',
         with: {command: 'echo unsafe implicit shell'},
-      }),
-    ).toThrow(BenchmarkModelError);
-    expect(() =>
-      parseSetupStep({uses: 'forge/future', with: {}}),
-    ).toThrow(/unknown setup action/);
-    expect(() =>
-      parseSetupStep({uses: 'stripe/future', with: {}}),
-    ).toThrow(/unknown setup action/);
-    expect(() =>
-      parseSetupStep({uses: 'not-namespaced', with: {}}),
-    ).toThrow(/namespaced/);
-    expect(() =>
-      parseSetupStep({uses: 'forge/write@1', with: {}}),
-    ).toThrow(/without a version suffix/);
+      }), BenchmarkModelError);
+    assert.throws(() =>
+      parseSetupStep({uses: 'forge/future', with: {}}), /unknown setup action/);
+    assert.throws(() =>
+      parseSetupStep({uses: 'not-namespaced', with: {}}), /namespaced/);
+    assert.throws(() =>
+      parseSetupStep({uses: 'forge/write@1', with: {}}), /without a version suffix/);
   });
 
   it('parses only latest-marketplace forge/plugin selections', () => {
-    expect(
-      parseSetupStep({
+    {
+      const actual = parseSetupStep({
         uses: 'forge/plugin',
         with: {
           agents: {
@@ -117,18 +112,16 @@ initial_prompt: Two
             },
           },
         },
-      }),
-    ).toMatchObject({
-      uses: 'forge/plugin',
-      with: {
-        agents: {
-          'claude-code': {
-            plugin: 'stripe@claude-plugins-official',
-            marketplace: 'anthropics/claude-plugins-official',
-          },
-        },
-      },
-    });
+      });
+      assert.ok(actual);
+      assert.equal(actual.uses, 'forge/plugin');
+      const agents = actual.with.agents;
+      assert.ok(agents && typeof agents === 'object' && !Array.isArray(agents));
+      const claude = agents['claude-code'];
+      assert.ok(claude && typeof claude === 'object' && !Array.isArray(claude));
+      assert.equal(claude.plugin, 'stripe@claude-plugins-official');
+      assert.equal(claude.marketplace, 'anthropics/claude-plugins-official');
+    }
 
     for (const withValue of [
       {agents: {}},
@@ -158,29 +151,26 @@ initial_prompt: Two
         },
       },
     ]) {
-      expect(() =>
-        parseSetupStep({uses: 'forge/plugin', with: withValue}),
-      ).toThrow(BenchmarkModelError);
+      assert.throws(() =>
+        parseSetupStep({uses: 'forge/plugin', with: withValue}), BenchmarkModelError);
     }
   });
 
   it('rejects unsafe paths, unknown keys, malformed regex, and duplicate YAML keys', () => {
-    expect(() =>
+    assert.throws(() =>
       parseEvalCaseYaml(`
 schema_version: 1
 id: ../escape
 task: unsafe
-`),
-    ).toThrow(/case ID/);
-    expect(() =>
+`), /case ID/);
+    assert.throws(() =>
       parseEvalCaseYaml(`
 schema_version: 1
 id: safe/case
 task: safe
 typo: true
-`),
-    ).toThrow(BenchmarkModelError);
-    expect(() =>
+`), BenchmarkModelError);
+    assert.throws(() =>
       parseEvalCaseYaml(`
 schema_version: 1
 id: safe/case
@@ -189,47 +179,51 @@ checks:
   file_checks:
     - file: output.txt
       contains: "["
-`),
-    ).toThrow(/regular expression/);
-    expect(() =>
+`), /regular expression/);
+    assert.throws(() =>
       parseEvalCaseYaml(`
 schema_version: 1
 id: safe/case
 id: safe/other
 task: safe
-`),
-    ).toThrow(/Invalid eval case YAML/);
+`), /Invalid eval case YAML/);
   });
 
   it('parses a checks-only experiment config without harness completion models', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
-    expect(config.forge).toBeUndefined();
-    expect(config.models).toEqual({});
-    expect(config.treatments).toEqual({baseline: {setup: []}});
-    expect(config.matrix).toMatchObject({repetitions: 1, retries: 0});
-    expect('resources' in config.runtime && config.runtime.resources).toMatchObject({
-      memory_bytes: 4 * 1024 * 1024 * 1024,
-      cpu_count: 2,
-      process_count: 512,
-    });
+    assert.equal(config.forge, undefined);
+    assert.deepEqual(config.models, {});
+    assert.deepEqual(config.treatments, {baseline: {setup: []}});
+    {
+      const actual = config.matrix;
+      assert.ok(actual);
+      assert.equal(actual.repetitions, 1);
+      assert.equal(actual.retries, 0);
+    }
+    {
+      const actual = 'resources' in config.runtime && config.runtime.resources;
+      assert.ok(actual);
+      assert.deepEqual(actual.memory_bytes, 4 * 1024 * 1024 * 1024);
+      assert.equal(actual.cpu_count, 2);
+      assert.equal(actual.process_count, 512);
+    }
   });
 
   it('rejects an authored Forge package version', () => {
-    expect(() => parseExperimentConfigYaml(
+    assert.throws(() => parseExperimentConfigYaml(
       experimentConfigYaml().replace(
         'runtime:',
         'forge:\n  version: 0.1.0\nruntime:',
       ),
-    )).toThrow(BenchmarkModelError);
+    ), BenchmarkModelError);
   });
 
   it('accepts a dataset location and rejects empty or unsafe locations', () => {
     const source = experimentConfigYaml();
     const config = parseExperimentConfigYaml(source.replace('dataset:', 'dataset:\n  path: ../dataset'));
-    expect(config.dataset.path).toBe('../dataset');
+    assert.equal(config.dataset.path, '../dataset');
     for (const location of ['""', '" "', '"bad\\0path"']) {
-      expect(() => parseExperimentConfigYaml(source.replace('dataset:', `dataset:\n  path: ${location}`)))
-        .toThrow(BenchmarkModelError);
+      assert.throws(() => parseExperimentConfigYaml(source.replace('dataset:', `dataset:\n  path: ${location}`)), BenchmarkModelError);
     }
   });
 
@@ -237,11 +231,11 @@ task: safe
     const config = parseExperimentConfigYaml(
       experimentConfigYaml().replace('platform: linux/amd64', 'platform: native'),
     );
-    expect(config.runtime.platform).toBe('native');
+    assert.equal(config.runtime.platform, 'native');
   });
 
   it('rejects mutable baseline setup and undefined matrix treatments', () => {
-    expect(() =>
+    assert.throws(() =>
       parseExperimentConfigYaml(
         experimentConfigYaml(`
 treatments:
@@ -250,41 +244,67 @@ treatments:
       - uses: forge/command
         with: {argv: [echo, changed]}
 `),
-      ),
-    ).toThrow(/baseline setup must be empty/);
-    expect(() =>
+      ), /baseline setup must be empty/);
+    assert.throws(() =>
       parseExperimentConfigYaml(
         experimentConfigYaml().replace(
           'treatments: [baseline]',
           'treatments: [missing]',
         ),
-      ),
-    ).toThrow(/undefined treatment/);
+      ), /undefined treatment/);
   });
 
   it('validates manifest hashes, path inventory, and uniqueness', () => {
-    expect(
-      parseDatasetManifestJson(
-        JSON.stringify({
-          schema_version: 1,
-          dataset: {id: 'forge-smoke', version: '2026.09.0'},
-          cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
-          files: [
-            {path: 'cases/smoke/write/eval.yaml', size: 100, sha256: HASH},
-          ],
-        }),
-      ),
-    ).toMatchObject({dataset: {id: 'forge-smoke'}});
-    expect(() =>
-      parseDatasetManifestJson(
-        JSON.stringify({
-          schema_version: 1,
-          dataset: {id: 'forge-smoke', version: '1'},
-          cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
-          files: [],
-        }),
-      ),
-    ).toThrow(BenchmarkModelError);
+    const manifest = {
+      schema_version: 1,
+      dataset: {id: 'forge-smoke', version: '2026.09.0'},
+      cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
+      files: [{path: 'cases/smoke/write/eval.yaml', size: 100, sha256: HASH}],
+    };
+    {
+      const actual = parseDatasetManifestJson(JSON.stringify(manifest));
+      assert.ok(actual);
+      assert.equal(actual.dataset.id, 'forge-smoke');
+    }
+
+    const invalidManifests = [
+      {value: {...manifest, files: []}, reason: 'at least 1'},
+      {
+        value: {...manifest, files: [{...manifest.files[0], sha256: HASH.toUpperCase()}]},
+        reason: 'lowercase SHA-256 hex',
+      },
+      {
+        value: {...manifest, files: [{...manifest.files[0], path: 'fixtures/other.txt'}]},
+        reason: 'case path must be present',
+      },
+      {
+        value: {...manifest, files: [...manifest.files, {...manifest.files[0]}]},
+        reason: 'path values must be unique',
+      },
+      {
+        value: {
+          ...manifest,
+          cases: [...manifest.cases, {id: 'smoke/write', path: 'cases/other.yaml'}],
+          files: [...manifest.files, {path: 'cases/other.yaml', size: 100, sha256: HASH}],
+        },
+        reason: 'id values must be unique',
+      },
+      {
+        value: {
+          ...manifest,
+          cases: [...manifest.cases, {id: 'smoke/other', path: manifest.cases[0]!.path}],
+        },
+        reason: 'path values must be unique',
+      },
+    ];
+    for (const {value, reason} of invalidManifests) {
+      assert.throws(() => parseDatasetManifestJson(JSON.stringify(value)), (error: unknown) => {
+        assert.ok(error instanceof Error && 'code' in error);
+        assert.equal(error.code, 'invalid_manifest');
+        assert.ok(error.message.includes(reason));
+        return true;
+      });
+    }
   });
 });
 

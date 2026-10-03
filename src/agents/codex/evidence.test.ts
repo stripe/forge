@@ -925,6 +925,26 @@ describe('Codex exact rollout evidence', () => {
     assert.equal(await loadCodexNativeArtifact(context(home)), undefined);
   });
 
+  it('rejects native version, model, and turn contradictions while retaining the exact root source', async () => {
+    const records = capturedTurn();
+    for (const [description, candidate] of [
+      ['different CLI version', [record('session_meta', {...METADATA.payload, cli_version: '0.0.0'}), ...records]],
+      ['different model', [METADATA, ...records.map((entry, index) => index === 1
+        ? record('turn_context', {...entry.payload, model: 'other-model'}) : entry)]],
+      ['different turn', [METADATA, ...records.map((entry, index) => index === 1
+        ? record('turn_context', {...entry.payload, turn_id: 'other-turn'}) : entry)]],
+      ['repeated session metadata', [METADATA, records[0], METADATA, ...records.slice(1)]],
+    ] as const) {
+      const raw = jsonl(candidate);
+      const home = createMemoryWorkspace({[PATH]: raw}).readonly;
+      const evidence = await loadCodexEvidence(context(home));
+      assert.equal(evidence.kind, 'unavailable', description);
+      if (evidence.kind !== 'unavailable') throw new Error(`Expected invalid ${description} evidence.`);
+      assert.equal(evidence.reason.code, 'source_invalid', description);
+      assert.equal(Buffer.from((await loadCodexNativeArtifact(context(home)))!.body).toString(), raw);
+    }
+  });
+
   for (const [description, metadata] of [
     ['different session', {...METADATA.payload, id: OTHER_SESSION}],
     ['TUI session', {...METADATA.payload, source: 'cli'}],
@@ -1024,6 +1044,41 @@ describe('Codex exact rollout evidence', () => {
     let nested: unknown = 'leaf';
     for (let depth = 0; depth < 70; depth += 1) nested = {nested};
     assert.equal((await load([record('session_meta', {...METADATA.payload, nested}), ...turn()])).kind, 'unavailable');
+  });
+
+  it('checks actual read bytes and cumulative line and JSON budgets', async () => {
+    const valid = jsonl([METADATA, ...turn()]);
+    const memory = createMemoryWorkspace({[PATH]: valid}).readonly;
+    const overflow = new Uint8Array(16 * 1024 * 1024 + 1).fill(10);
+    overflow.set(Buffer.from(valid));
+    const oversized: ReadonlyWorkspace = {...memory, async readFile(relative, options) {
+      assert.equal(relative, PATH);
+      assert.equal(options?.maxBytes, 16 * 1024 * 1024);
+      return overflow;
+    }};
+    const evidence = await loadCodexEvidence(context(oversized));
+    assert.equal(evidence.kind, 'unavailable');
+    if (evidence.kind !== 'unavailable') throw new Error('Expected incomplete oversized evidence.');
+    assert.equal(evidence.reason.code, 'source_incomplete');
+    assert.equal(await loadCodexNativeArtifact(context(oversized)), undefined);
+
+    const nodes = record('event_msg', {type: 'token_count', info: {values: Array.from({length: 60_000}, () => 0)}});
+    const single = turn();
+    single.splice(4, 0, nodes);
+    assert.equal((await load([METADATA, ...single])).kind, 'available');
+    const aggregate = turn();
+    aggregate.splice(4, 0, nodes, nodes);
+    for (const raw of [
+      valid + '\n'.repeat(100_001),
+      jsonl([METADATA, ...aggregate]),
+    ]) {
+      const home = createMemoryWorkspace({[PATH]: raw}).readonly;
+      const bounded = await loadCodexEvidence(context(home));
+      assert.equal(bounded.kind, 'unavailable');
+      if (bounded.kind !== 'unavailable') throw new Error('Expected incomplete aggregate evidence.');
+      assert.equal(bounded.reason.code, 'source_incomplete');
+      assert.equal(Buffer.from((await loadCodexNativeArtifact(context(home)))!.body).toString(), raw);
+    }
   });
 
   it('does not hide cancellation as a missing-source fallback', async () => {

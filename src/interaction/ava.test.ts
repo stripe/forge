@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
+import {setImmediate as nextEventLoopTurn} from 'node:timers/promises';
 
 import type {
   InteractionCompletionInvoker,
@@ -78,7 +79,10 @@ const noRetryWait = {
 describe('AvaRolePlayer', () => {
   it('initializes bounded private needs with a strict structured request', async () => {
     const completion = scriptedCompletion(
-      initialResponse(TWO_NEEDS, 'What should the checkout feel like?'),
+      initialResponse(
+        TWO_NEEDS.map((need) => ({...need, status: 'satisfied'})),
+        'What should the checkout feel like?',
+      ),
     );
     const ava = new AvaRolePlayer(
       {task: 'Add Checkout', context: 'A developer upgrading an application'},
@@ -204,12 +208,15 @@ describe('AvaRolePlayer', () => {
     assert.deepEqual(terminal.remainingNeeds, []);
   });
 
-  it('retries parse failures without committing invalid private state', async () => {
+  it('retries invalid output without duplicating or resurrecting satisfied needs', async () => {
     const completion = scriptedCompletion(
       '{not json',
       initialResponse(TWO_NEEDS, 'How should checkout work?'),
       continuationResponse(['need_99'], 'Invalid follow-up'),
       continuationResponse(['need_2'], 'How did you verify the result?'),
+      continuationResponse(['need_1', 'need_2'], 'Invalid resurrected need'),
+      continuationResponse(['need_2', 'need_2'], 'Invalid duplicate need'),
+      continuationResponse(['need_2'], 'Could you verify the result?'),
     );
     const ava = new AvaRolePlayer(
       {task: 'Add Checkout'},
@@ -223,7 +230,71 @@ describe('AvaRolePlayer', () => {
     assert.deepEqual(followUp.remainingNeeds, [
       {id: 'need_2', description: TWO_NEEDS[1]!.description},
     ]);
-    assert.equal(completion.calls.length, 4);
+    const retried = await ava.nextTurn('I have not verified it yet.');
+    assert.equal(retried.message, 'Could you verify the result?');
+    assert.deepEqual(retried.remainingNeeds, followUp.remainingNeeds);
+    assert.equal(completion.calls.length, 7);
+    assert.deepEqual(completion.calls[2]!.messages, completion.calls[3]!.messages);
+    const retryRequest = completion.calls[4]!;
+    assert.deepEqual(retryRequest.messages, [
+      {role: 'assistant', content: 'How should checkout work?'},
+      {role: 'user', content: 'Implemented checkout.'},
+      {role: 'assistant', content: 'How did you verify the result?'},
+      {role: 'user', content: 'I have not verified it yet.'},
+    ]);
+    const schema = retryRequest.responseSchema.schema as {
+      properties: {remaining_need_ids: {items: {enum: string[]}}};
+    };
+    assert.deepEqual(schema.properties.remaining_need_ids.items.enum, ['need_2']);
+    for (const request of completion.calls.slice(5)) {
+      assert.deepEqual(request.messages, retryRequest.messages);
+      assert.deepEqual(request.responseSchema, retryRequest.responseSchema);
+    }
+  });
+
+  it('uses the fixed one- and five-second retry waits', async (testContext) => {
+    testContext.mock.timers.enable({apis: ['setTimeout']});
+    const completion = scriptedCompletion(
+      new Error('temporary request failure'),
+      '{invalid json',
+      initialResponse(TWO_NEEDS, 'How should checkout work?'),
+    );
+    const pending = new AvaRolePlayer(
+      {task: 'Add Checkout'},
+      completion.invoke,
+    ).nextTurn();
+    await nextEventLoopTurn();
+
+    testContext.mock.timers.tick(999);
+    await nextEventLoopTurn();
+    assert.equal(completion.calls.length, 1);
+    testContext.mock.timers.tick(1);
+    await nextEventLoopTurn();
+    assert.equal(completion.calls.length, 2);
+    testContext.mock.timers.tick(4_999);
+    await nextEventLoopTurn();
+    assert.equal(completion.calls.length, 2);
+    testContext.mock.timers.tick(1);
+
+    assert.equal((await pending).message, 'How should checkout work?');
+    assert.equal(completion.calls.length, MAX_AVA_ATTEMPTS);
+  });
+
+  it('cancels the production retry wait without another completion attempt', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('cancelled during backoff', 'AbortError');
+    const completion = scriptedCompletion(new Error('temporary request failure'));
+    const pending = new AvaRolePlayer(
+      {task: 'Add Checkout', signal: controller.signal},
+      completion.invoke,
+    ).nextTurn();
+    await nextEventLoopTurn();
+
+    assert.equal(completion.calls.length, 1);
+    assert.equal(completion.calls[0]!.signal, controller.signal);
+    controller.abort(reason);
+    await assert.rejects(pending, (error: unknown) => error === reason);
+    assert.equal(completion.calls.length, 1);
   });
 
   it('fails closed after bounded invalid structured outputs', async (testContext) => {

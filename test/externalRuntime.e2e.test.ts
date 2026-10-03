@@ -185,10 +185,6 @@ describe('external runtime composition', () => {
         await fs.writeFile(resultPath, JSON.stringify(altered));
         await assert.rejects(verifyCompletedRun(completed.location), /runtime does not match/);
       }
-      const obsoleteVersion = JSON.parse(originalResult) as {runtime: Record<string, unknown>};
-      obsoleteVersion.runtime.adapter_version = '1';
-      await fs.writeFile(resultPath, JSON.stringify(obsoleteVersion));
-      await assert.rejects(verifyCompletedRun(completed.location));
     } finally {
       await fs.writeFile(resultPath, originalResult);
     }

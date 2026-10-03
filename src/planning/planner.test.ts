@@ -1,6 +1,5 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import {sha256Digest} from '../model/hashes.js';
 import type {
@@ -25,11 +24,11 @@ describe('experiment expansion and run planning', () => {
   it('expands deterministically in case/treatment/agent/repetition order', () => {
     const experiment = experimentConfig({
       matrix: {
-        cases: ['case/a', 'case/b'],
-        treatments: ['baseline', 'with-seed'],
+        cases: ['case/b', 'case/a'],
+        treatments: ['with-seed', 'baseline'],
         agents: [
-          {adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'},
           {adapter: 'codex', provider: 'openai', model: 'gpt'},
+          {adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'},
         ],
         repetitions: 2,
         retries: 1,
@@ -37,14 +36,29 @@ describe('experiment expansion and run planning', () => {
     });
 
     const selections = expandExperiment(experiment);
-    expect(selections).toHaveLength(16);
-    expect(selections.slice(0, 5)).toEqual([
-      selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
-      selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 1),
+    assert.deepEqual(selections, [
+      selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 0),
+      selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 1),
+      selection('case/b', 'with-seed', 'claude-code', 'anthropic', 'sonnet', 0),
+      selection('case/b', 'with-seed', 'claude-code', 'anthropic', 'sonnet', 1),
+      selection('case/b', 'baseline', 'codex', 'openai', 'gpt', 0),
+      selection('case/b', 'baseline', 'codex', 'openai', 'gpt', 1),
+      selection('case/b', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
+      selection('case/b', 'baseline', 'claude-code', 'anthropic', 'sonnet', 1),
+      selection('case/a', 'with-seed', 'codex', 'openai', 'gpt', 0),
+      selection('case/a', 'with-seed', 'codex', 'openai', 'gpt', 1),
+      selection('case/a', 'with-seed', 'claude-code', 'anthropic', 'sonnet', 0),
+      selection('case/a', 'with-seed', 'claude-code', 'anthropic', 'sonnet', 1),
       selection('case/a', 'baseline', 'codex', 'openai', 'gpt', 0),
       selection('case/a', 'baseline', 'codex', 'openai', 'gpt', 1),
-      selection('case/a', 'with-seed', 'claude-code', 'anthropic', 'sonnet', 0),
+      selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
+      selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 1),
     ]);
+    const loaded = inputs({experiment});
+    assert.deepEqual(expandExperiment(loaded.experiment), selections);
+    selections[0]!.agent.model = 'changed-model';
+    assert.equal(selections[1]!.agent.model, 'gpt');
+    assert.equal(experiment.matrix.agents[0]!.model, 'gpt');
   });
 
   it('materializes current multi-turn prompt semantics and ordered setup', () => {
@@ -61,7 +75,7 @@ describe('experiment expansion and run planning', () => {
       ),
     });
 
-    expect(plan.interaction).toEqual({
+    assert.deepEqual(plan.interaction, {
       mode: 'multi_turn',
       task: 'Complete the task',
       context: 'Existing application',
@@ -70,23 +84,68 @@ describe('experiment expansion and run planning', () => {
       effective_prompt: 'Please start here',
       max_turns: 7,
     });
-    expect(plan.setup.map(({uses}) => uses)).toEqual([
-      'forge/command',
-      'forge/write',
+    assert.deepEqual(plan.setup, [
+      ...loaded.dataset.cases.get('case/a')!.definition.setup,
+      ...loaded.experiment.config.treatments['with-seed']!.setup,
     ]);
-    expect(plan.role_player).toEqual({provider: 'anthropic', model: 'role-model'});
-    expect(plan.evaluation.judge).toEqual({
+    assert.deepEqual(plan.role_player, {provider: 'anthropic', model: 'role-model'});
+    assert.deepEqual(plan.evaluation.judge, {
       provider: 'anthropic',
       model: 'judge-model',
     });
-    expect(plan.provenance).toMatchObject({
-      dataset: {manifest_sha256: MANIFEST_DIGEST},
-      experiment: {id: 'experiment/default', version: '2026.09.0'},
-      case: {id: 'case/a', path: 'cases/case/a/eval.yaml'},
-      forge: {version: FORGE_VERSION},
+    {
+      const actual = plan.provenance;
+      assert.ok(actual);
+      assert.equal(actual.dataset.manifest_sha256, MANIFEST_DIGEST);
+      assert.equal(actual.experiment.id, 'experiment/default');
+      assert.equal(actual.experiment.version, '2026.09.0');
+      assert.equal(actual.case.id, 'case/a');
+      assert.equal(actual.case.path, 'cases/case/a/eval.yaml');
+      assert.equal(actual.forge.version, FORGE_VERSION);
+    }
+  });
+
+  it('clones and deeply freezes plans without freezing or retaining caller inputs', () => {
+    const loaded = inputs({
+      caseDefinition: {
+        ...evalCase(),
+        checks: {files_created: ['answer.txt']},
+        example_answer: 'A complete answer',
+      },
     });
-    expect(Object.isFrozen(plan)).toBe(true);
-    expect(Object.isFrozen(plan.setup)).toBe(true);
+    const selected = expandExperiment(loaded.experiment)[1]!;
+    const plan = resolveRunPlan({...loaded, selection: selected});
+    const serialized = serializeResolvedRunPlan(plan);
+    const definition = loaded.dataset.cases.get('case/a')!.definition;
+    const config = loaded.experiment.config;
+
+    assert.equal(Object.isFrozen(plan), true);
+    assert.equal(Object.isFrozen(plan.setup[0]!.with), true);
+    assert.equal(Object.isFrozen(plan.evaluation.checks!.files_created), true);
+    assert.throws(() => {
+      plan.evaluation.checks!.files_created!.push('extra.txt');
+    }, TypeError);
+    assert.throws(() => {
+      plan.selection.agent.model = 'changed-model';
+    }, TypeError);
+    assert.equal(Object.isFrozen(definition), false);
+    assert.equal(Object.isFrozen(config), false);
+    assert.equal(Object.isFrozen(selected.agent), false);
+
+    definition.setup[0]!.with.argv = ['changed-command'];
+    definition.checks!.files_created!.push('changed.txt');
+    definition.success_guidelines.push('Changed guideline');
+    config.treatments['with-seed']!.setup[0]!.with.target = 'changed-seed.txt';
+    config.models.role_player!.model = 'changed-role-player';
+    config.models.judge!.model = 'changed-judge';
+    assert.ok('resources' in config.runtime);
+    config.runtime.resources.cpu_count = 8;
+    config.limits.run_timeout_ms = 1;
+    selected.agent.model = 'changed-agent';
+
+    assert.equal(serializeResolvedRunPlan(plan), serialized);
+    assert.equal(plan.evaluation.example_answer, 'A complete answer');
+    assert.deepEqual(plan.evaluation.checks, {files_created: ['answer.txt']});
   });
 
   it('keeps dataset locations out of resolved plans and their checksums', () => {
@@ -95,8 +154,8 @@ describe('experiment expansion and run planning', () => {
     const before = resolveRunPlan({...loaded, selection: selected});
     loaded.experiment.config.dataset.path = '../relocated-dataset';
     const after = resolveRunPlan({...loaded, selection: selected});
-    expect(serializeResolvedRunPlan(after)).toBe(serializeResolvedRunPlan(before));
-    expect(resolvedRunPlanSha256(after)).toBe(resolvedRunPlanSha256(before));
+    assert.equal(serializeResolvedRunPlan(after), serializeResolvedRunPlan(before));
+    assert.equal(resolvedRunPlanSha256(after), resolvedRunPlanSha256(before));
   });
 
   it('supports one-shot checks-only plans without role-player or judge models', () => {
@@ -112,6 +171,7 @@ describe('experiment expansion and run planning', () => {
         initial_prompt: 'Create greeting.txt',
         execution_mode: 'one_shot',
         success_guidelines: [],
+        checks: {files_created: ['greeting.txt']},
       },
       // Configured but unused harness models must not enter a one-shot,
       // checks-only resolved plan.
@@ -129,14 +189,17 @@ describe('experiment expansion and run planning', () => {
       ),
     });
 
-    expect(plan.interaction).toMatchObject({
-      mode: 'one_shot',
-      initial_prompt_source: 'case.initial_prompt',
-      effective_prompt: 'Create greeting.txt',
-      max_turns: 1,
-    });
-    expect(plan.role_player).toBeUndefined();
-    expect(plan.evaluation.judge).toBeUndefined();
+    {
+      const actual = plan.interaction;
+      assert.ok(actual);
+      assert.equal(actual.mode, 'one_shot');
+      assert.equal(actual.initial_prompt_source, 'case.initial_prompt');
+      assert.equal(actual.effective_prompt, 'Create greeting.txt');
+      assert.equal(actual.max_turns, 1);
+    }
+    assert.equal(plan.role_player, undefined);
+    assert.equal(plan.evaluation.judge, undefined);
+    assert.deepEqual(plan.evaluation.checks, {files_created: ['greeting.txt']});
   });
 
   it('materializes an authored native Docker platform in the resolved plan', () => {
@@ -163,21 +226,18 @@ describe('experiment expansion and run planning', () => {
       0,
     );
 
-    expect(
-      resolveRunPlan({
-        ...loaded,
-        selection: selected,
-        runtimePlatform: 'linux/arm64',
-      }).runtime.platform,
-    ).toBe('linux/arm64');
-    expect(() =>
-      resolveRunPlan({...loaded, selection: selected}),
-    ).toThrow(/requires a concrete runtimePlatform/);
+    assert.equal(resolveRunPlan({
+      ...loaded,
+      selection: selected,
+      runtimePlatform: 'linux/arm64',
+    }).runtime.platform, 'linux/arm64');
+    assert.throws(() =>
+      resolveRunPlan({...loaded, selection: selected}), /requires a concrete runtimePlatform/);
   });
 
   it('requires harness models only when their behavior is selected', () => {
     const noModels = inputs({experiment: experimentConfig({models: {}})});
-    expect(() =>
+    assert.throws(() =>
       resolveRunPlan({
         ...noModels,
         selection: selection(
@@ -188,15 +248,14 @@ describe('experiment expansion and run planning', () => {
           'sonnet',
           0,
         ),
-      }),
-    ).toThrowError(expect.objectContaining({code: 'missing_role_player'}));
+      }), {code: 'missing_role_player'});
 
     const noJudge = inputs({
       experiment: experimentConfig({
         models: {role_player: {provider: 'anthropic', model: 'role-model'}},
       }),
     });
-    expect(() =>
+    assert.throws(() =>
       resolveRunPlan({
         ...noJudge,
         selection: selection(
@@ -207,11 +266,32 @@ describe('experiment expansion and run planning', () => {
           'sonnet',
           0,
         ),
-      }),
-    ).toThrowError(expect.objectContaining({code: 'missing_judge'}));
+      }), {code: 'missing_judge'});
   });
 
-  it('rejects experiment/dataset drift, selections outside the matrix, and missing inputs', () => {
+  it('requires every component of a programmatic selection to match the matrix', () => {
+    const loaded = inputs();
+    const selected = expandExperiment(loaded.experiment)[0]!;
+    const invalid: [string, Partial<RunSelection>, PlanningError['code']][] = [
+      ['case', {case_id: 'case/other'}, 'unknown_case'],
+      ['treatment', {treatment: 'other'}, 'unknown_treatment'],
+      ['adapter', {agent: {...selected.agent, adapter: 'codex'}}, 'unknown_agent'],
+      ['provider', {agent: {...selected.agent, provider: 'openai'}}, 'unknown_agent'],
+      ['model', {agent: {...selected.agent, model: 'other-model'}}, 'unknown_agent'],
+      ['negative repetition', {repetition: -1}, 'invalid_repetition'],
+      ['fractional repetition', {repetition: 0.5}, 'invalid_repetition'],
+      ['repetition upper bound', {repetition: 1}, 'invalid_repetition'],
+    ];
+    for (const [label, changed, code] of invalid) {
+      assert.throws(
+        () => resolveRunPlan({...loaded, selection: {...selected, ...changed}}),
+        (error) => error instanceof PlanningError && error.code === code,
+        label,
+      );
+    }
+  });
+
+  it('rejects experiment/dataset drift and missing manifest inputs', () => {
     const loaded = inputs();
     const selected = selection(
       'case/a',
@@ -221,30 +301,27 @@ describe('experiment expansion and run planning', () => {
       'sonnet',
       0,
     );
-    expect(() =>
-      resolveRunPlan({
-        ...loaded,
-        experiment: {
-          ...loaded.experiment,
-          config: {
-            ...loaded.experiment.config,
-            dataset: {
-              ...loaded.experiment.config.dataset,
-              manifest_sha256: `sha256:${'0'.repeat(64)}`,
+    for (const changed of [
+      {id: 'other-dataset'},
+      {version: 'other-version'},
+      {manifest_sha256: `sha256:${'0'.repeat(64)}` as const},
+    ]) {
+      assert.throws(() =>
+        resolveRunPlan({
+          ...loaded,
+          experiment: {
+            ...loaded.experiment,
+            config: {
+              ...loaded.experiment.config,
+              dataset: {...loaded.experiment.config.dataset, ...changed},
             },
           },
-        },
-        selection: selected,
-      }),
-    ).toThrowError(
-      expect.objectContaining({code: 'dataset_experiment_mismatch'}),
-    );
-    expect(() =>
-      resolveRunPlan({...loaded, selection: {...selected, repetition: 2}}),
-    ).toThrowError(expect.objectContaining({code: 'invalid_repetition'}));
+          selection: selected,
+        }), {code: 'dataset_experiment_mismatch'});
+    }
 
     const missingInput = inputs({manifestFiles: []});
-    expect(() =>
+    assert.throws(() =>
       resolveRunPlan({
         ...missingInput,
         selection: selection(
@@ -255,8 +332,7 @@ describe('experiment expansion and run planning', () => {
           'sonnet',
           0,
         ),
-      }),
-    ).toThrowError(expect.objectContaining({code: 'missing_dataset_input'}));
+      }), {code: 'missing_dataset_input'});
 
     const directoryInput = inputs({
       experiment: experimentConfig({
@@ -279,7 +355,7 @@ describe('experiment expansion and run planning', () => {
         },
       }),
     });
-    expect(() =>
+    assert.throws(() =>
       resolveRunPlan({
         ...directoryInput,
         selection: selection(
@@ -290,8 +366,7 @@ describe('experiment expansion and run planning', () => {
           'sonnet',
           0,
         ),
-      }),
-    ).toThrowError(expect.objectContaining({code: 'missing_dataset_input'}));
+      }), {code: 'missing_dataset_input'});
   });
 
   it('serializes plans canonically and hashes equivalent object key order equally', () => {
@@ -300,7 +375,7 @@ describe('experiment expansion and run planning', () => {
       ...loaded,
       selection: selection(
         'case/a',
-        'baseline',
+        'with-seed',
         'claude-code',
         'anthropic',
         'sonnet',
@@ -308,9 +383,29 @@ describe('experiment expansion and run planning', () => {
       ),
     });
     const serialized = serializeResolvedRunPlan(plan);
-    expect(serialized.endsWith('\n')).toBe(true);
-    expect(resolvedRunPlanSha256(plan)).toBe(sha256Digest(serialized));
-    expect(resolvedRunPlanSha256({...plan})).toBe(resolvedRunPlanSha256(plan));
+    assert.equal(serialized.endsWith('\n'), true);
+    assert.equal(resolvedRunPlanSha256(plan), sha256Digest(serialized));
+    const reordered = {
+      ...plan,
+      agent: {
+        model: plan.agent.model,
+        provider: plan.agent.provider,
+        adapter: plan.agent.adapter,
+      },
+      selection: {
+        repetition: plan.selection.repetition,
+        agent: {...plan.agent},
+        treatment: plan.selection.treatment,
+        case_id: plan.selection.case_id,
+      },
+    };
+    assert.notEqual(JSON.stringify(reordered), JSON.stringify(plan));
+    assert.equal(serializeResolvedRunPlan(reordered), serialized);
+    assert.equal(resolvedRunPlanSha256(reordered), resolvedRunPlanSha256(plan));
+
+    const reversedSetup = {...plan, setup: [...plan.setup].reverse()};
+    // Ordered arrays are semantic; object-key canonicalization must not sort them.
+    assert.notEqual(resolvedRunPlanSha256(reversedSetup), resolvedRunPlanSha256(plan));
   });
 });
 
@@ -440,6 +535,3 @@ function inputs(
     },
   };
 }
-
-// Keep the public error class reachable in this test module's type graph.
-void PlanningError;

@@ -1247,7 +1247,8 @@ The built-in completion provider is exported from
 the Anthropic Messages API, supports strict JSON-schema output, and never reads
 ambient credentials itself. A custom `baseUrl` selects a Messages-compatible
 service root; Forge appends `/v1/messages`. HTTPS is required except for a
-loopback development endpoint.
+loopback development endpoint. Host-side completions reject HTTP redirects
+with `http_error`, keeping credentials and requests at the configured endpoint.
 
 The public CLI selects its authentication mode from the environment. With no
 `ANTHROPIC_BASE_URL`, Claude Code and host-side completions use direct Anthropic
@@ -1855,13 +1856,15 @@ pnpm test:package
 pnpm check
 ```
 
-Pull requests targeting `main`, including drafts, automatically run `pnpm check`
-on Node.js 22 through the [PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
-It runs when a PR opens, receives new commits, or reopens, and cancels obsolete
-runs when a newer commit arrives. The `Forge checks` job covers automated tests,
-type checking, build, documentation validation, and package checks without
-Docker or model credentials. Development snapshots are published by the
-separate workflow after pushes to `main`.
+Pull requests targeting `main`, including drafts, automatically run the same
+validation as `pnpm check` on Node.js 22 through the
+[PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
+The single `Forge checks` job has named steps for type checking, automated tests,
+build, documentation validation, and package checks, using the same package
+scripts as the local command without Docker or model credentials. It runs when
+a PR opens, receives new commits, or reopens, and cancels obsolete runs when a
+newer commit arrives. Development snapshots are published by the separate
+workflow after pushes to `main`.
 
 Maintainers can require `Forge checks` in the branch rules for `main` to block
 merging until it passes for the current commits. Adding the workflow reports
@@ -1869,10 +1872,29 @@ results on PRs; requiring its status check is a separate repository setting.
 
 ### Opt-in live tests
 
-The repository has one live suite. It is separate from `pnpm test` and
-`pnpm check` because it needs a running Docker daemon, may build the packaged
-image, and makes several potentially billable model calls. Direct Anthropic
-uses a dedicated API key:
+The repository has one live suite with `full` (default) and `setup` modes. Both
+need a running Docker daemon and network access to build the packaged image;
+plugin checks additionally contact the public marketplace. The suite is
+separate from `pnpm test` and `pnpm check`.
+
+Run setup action integration without model credentials or model calls:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
+```
+
+Setup mode tests `forge/write` with inline UTF-8 and dataset files;
+`forge/command` with literal argv, a working directory, nonzero exits,
+and timeouts; and `forge/plugin` with a real native Claude installation. Each
+case runs through Forge's normal parser, planner, setup, and execution
+lifecycle in its own real Docker runtime. A deterministic interaction probe
+checks the setup effects after finalization. Completed artifacts and
+`setup.json` receipts are verified, and both successful and failed setup must
+leave no containers or runtime files. This mode requires `claude-code`, since
+Codex does not implement plugin installation.
+
+Full mode makes potentially billable model calls. Direct Anthropic uses a
+dedicated API key:
 
 ```sh
 FORGE_LIVE=1 \
@@ -1889,7 +1911,7 @@ ANTHROPIC_AUTH_TOKEN=your-restricted-token \
 pnpm test:live
 ```
 
-One invocation builds once and runs the following checks in order:
+One full-mode invocation builds once and runs the following checks in order:
 
 1. The real Docker adapter conformance probe, including bidirectional bind-mount
    writes, private file ownership, sealing, cleanup, and idempotent disposal.
@@ -1940,7 +1962,7 @@ loopback bridge requires a Docker implementation which provides
 preflight before making model calls when that route is unavailable.
 
 Results remain under `results/live` by default. `FORGE_LIVE_RUN_ID` selects the
-suite ID used as the prefix for its four run IDs,
+suite ID used as the prefix for its run IDs,
 `FORGE_LIVE_RESULTS_ROOT` selects another results directory,
 `FORGE_LIVE_TIMEOUT_MS` sets the overall positive millisecond timeout (30
 minutes by default), and `FORGE_DOCKER_EXECUTABLE` selects another Docker CLI.

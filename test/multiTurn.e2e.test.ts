@@ -5,9 +5,9 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {runCli} from '../src/cli.js';
+import type {AgentAdapter} from '../src/contracts/agent.js';
 import {createDirectoryRunInputProvider} from '../src/contracts/inputs.js';
-import {sha256Digest, sha256Hex} from '../src/model/index.js';
-import {createArtifactStore, verifyCompletedRun} from '../src/results/index.js';
+import {createArtifactStore, parseInteractionArtifact, parseJudgeEvidence, verifyCompletedRun} from '../src/results/index.js';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
@@ -26,29 +26,59 @@ afterEach(async () => {
 });
 
 describe('multi-turn CLI end to end', () => {
-  it('purely validates and then runs Ava plus guideline judging', async () => {
-    const fixture = await benchmarkFixture();
+  it('validates and executes the shipped two-turn handoff with agent-produced work', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-multi-e2e-'));
+    temporaryDirectories.push(root);
+    const example = path.join(process.cwd(), 'examples', 'multi-turn');
+    const fixture = {
+      experimentPath: path.join(example, 'experiment.yaml'),
+      casePath: path.join(example, 'dataset', 'cases', 'examples', 'release-summary.yaml'),
+      resultsRoot: path.join(root, 'results'),
+    };
+    const deliverable = 'Forge is ready for multi-turn evaluation.\n';
     const runtime = createFakeRuntimeAdapter();
     const agent = createScriptedAgentAdapter({
-      id: 'test-agent',
+      id: 'claude-code',
       turns: [
         {
-          text: 'The requested answer is complete.',
+          text: 'What exact status sentence should the release summary contain?',
+          sessionId: 'cli-multi-session',
+          toolCalls: [],
+        },
+        {
+          text: 'Created release-summary.txt with the status sentence you supplied.',
           sessionId: 'cli-multi-session',
           toolCalls: [],
         },
       ],
     });
+    const runtimeAgent: AgentAdapter = {
+      ...agent.adapter,
+      async openSession(context) {
+        const session = await agent.adapter.openSession(context);
+        let turn = 0;
+        return {...session, async send(message, sendOptions) {
+          assert.equal((await context.runtime.workspace.inspect('release-summary.txt')).kind, 'absent');
+          if (turn++ === 0) {
+            assert.equal(message, context.plan.case.initial_prompt);
+          } else {
+            assert.ok(message.includes(deliverable.trim()));
+            await context.runtime.workspace.writeFile('release-summary.txt', Buffer.from(deliverable));
+          }
+          return session.send(message, sendOptions);
+        }};
+      },
+    };
     const completion = createScriptedCompletionProvider({
-      id: 'test-provider',
+      id: 'anthropic',
       responses: [
         JSON.stringify({
-          user_needs: [{description: 'Complete the answer', status: 'remaining'}],
-          message: 'Please complete the answer.',
+          user_needs: [{description: 'Create the requested release summary', status: 'remaining'}],
+          message: `Use this exact status sentence: ${deliverable.trim()}`,
         }),
         JSON.stringify({remaining_need_ids: [], message: ''}),
         JSON.stringify({
-          results: [{index: 0, passed: true, explanation: 'The answer is complete.'}],
+          results: [{index: 0, passed: true, explanation: 'The conversation supplied the exact status sentence.'}],
         }),
       ],
     });
@@ -60,7 +90,7 @@ describe('multi-turn CLI end to end', () => {
       resultsRoot: string;
     }) => ({
       runtime: runtime.adapter,
-      agents: new Map([[agent.adapter.id, agent.adapter]]),
+      agents: new Map([[runtimeAgent.id, runtimeAgent]]),
       completionProviders: new Map([
         [completion.provider.id, completion.provider],
       ]),
@@ -100,9 +130,9 @@ describe('multi-turn CLI end to end', () => {
         '--case-file',
         fixture.casePath,
         '--agent',
-        'test-agent',
+        'claude-code',
         '--model',
-        'test-agent-model',
+        'claude-sonnet-4-6',
         '--output',
         fixture.resultsRoot,
         '--run-id',
@@ -120,28 +150,22 @@ describe('multi-turn CLI end to end', () => {
     const campaign = JSON.parse(stdout) as {location: string; completed: number};
     assert.equal(campaign.completed, 1);
     const summary = await verifyCompletedRun(path.join(campaign.location, 'runs', 'cli-multi-1'));
-    assert.deepEqual(summary.result.evaluation, {
-      schema_version: 1,
-      score: 1,
-      status: 'passed',
-      guidelines_passed: 1,
-      guidelines_total: 1,
-      guidelines: [
-        {
-          guideline: 'The answer is complete.',
-          passed: true,
-          explanation: 'The answer is complete.',
-        },
-      ],
-      checks: [
-        {name: 'file_created: answer.txt', passed: true},
-        {name: 'file_exists: answer.txt', passed: true},
-        {name: 'file_contains: answer.txt /^complete\\n?$/', passed: true},
-      ],
-    });
+    assert.equal(summary.result.evaluation.score, 1);
+    assert.equal(summary.result.evaluation.status, 'passed');
+    assert.equal(summary.result.evaluation.guidelines_passed, 1);
+    assert.equal(summary.result.evaluation.checks.length, 3);
+    assert.ok(summary.result.evaluation.checks.every(({passed}) => passed));
     assert.equal(summary.result.stop_reason, 'task_complete');
-    const completed = await verifyCompletedRun(summary.location);
-    assert.deepEqual(completed.result.artifacts.map(({path: artifactPath}) => artifactPath), [
+    const interaction = parseInteractionArtifact(JSON.parse(await fs.readFile(path.join(summary.location, 'interaction.json'), 'utf8')));
+    assert.equal(interaction.turns.length, 2);
+    assert.equal(agent.messages.length, 2);
+    const judge = parseJudgeEvidence(JSON.parse(await fs.readFile(path.join(summary.location, 'judge-evidence.json'), 'utf8')));
+    assert.deepEqual(judge.transcript.steps.filter((step) => step.source === 'agent').map(({message}) => message), [
+      'What exact status sentence should the release summary contain?',
+      'Created release-summary.txt with the status sentence you supplied.',
+    ]);
+    assert.equal(completion.calls.length, 3);
+    assert.deepEqual(summary.result.artifacts.map(({path: artifactPath}) => artifactPath), [
       'plan.json',
       'setup.json',
       'trajectory.json',
@@ -151,97 +175,3 @@ describe('multi-turn CLI end to end', () => {
     ]);
   });
 });
-
-async function benchmarkFixture(): Promise<{
-  readonly root: string;
-  readonly datasetRoot: string;
-  readonly experimentPath: string;
-  readonly casePath: string;
-  readonly resultsRoot: string;
-}> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-multi-e2e-'));
-  temporaryDirectories.push(root);
-  const datasetRoot = path.join(root, 'dataset');
-  const casePath = path.join(datasetRoot, 'cases', 'multi.yaml');
-  await fs.mkdir(path.dirname(casePath), {recursive: true});
-  const caseBody = `schema_version: 1
-id: examples/multi
-task: Complete the answer through conversation.
-context: A developer checking an answer.
-execution_mode: multi_turn
-max_turns: 3
-setup:
-  - uses: forge/write
-    with:
-      target: answer.txt
-      source:
-        content: "complete\\n"
-success_guidelines:
-  - The answer is complete.
-checks:
-  files_created: [answer.txt]
-  file_checks:
-    - file: answer.txt
-      exists: true
-      contains: '^complete\\n?$'
-`;
-  await fs.writeFile(casePath, caseBody);
-  const manifestRaw = `${JSON.stringify({
-    schema_version: 1,
-    dataset: {id: 'multi-e2e', version: '1.0.0'},
-    cases: [{id: 'examples/multi', path: 'cases/multi.yaml'}],
-    files: [
-      {
-        path: 'cases/multi.yaml',
-        size: Buffer.byteLength(caseBody),
-        sha256: sha256Hex(caseBody),
-      },
-    ],
-  }, null, 2)}\n`;
-  await fs.writeFile(path.join(datasetRoot, 'manifest.json'), manifestRaw);
-
-  const experimentPath = path.join(root, 'experiment.yaml');
-  await fs.writeFile(
-    experimentPath,
-    `schema_version: 1
-id: examples/multi-experiment
-version: 1.0.0
-dataset:
-  path: ./dataset
-  id: multi-e2e
-  version: 1.0.0
-  manifest_sha256: ${sha256Digest(manifestRaw)}
-runtime:
-  adapter: docker
-  image: {kind: forge}
-  platform: linux/amd64
-  resources:
-    memory_bytes: 4294967296
-    cpu_count: 2
-    process_count: 512
-models:
-  role_player: {provider: test-provider, model: role-model}
-  judge: {provider: test-provider, model: judge-model}
-treatments:
-  baseline: {setup: []}
-matrix:
-  cases: [examples/multi]
-  treatments: [baseline]
-  agents:
-    - adapter: test-agent
-      provider: test-agent-provider
-      model: test-agent-model
-  repetitions: 1
-  retries: 0
-limits:
-  run_timeout_ms: 30000
-`,
-  );
-  return {
-    root,
-    datasetRoot,
-    experimentPath,
-    casePath,
-    resultsRoot: path.join(root, 'results'),
-  };
-}

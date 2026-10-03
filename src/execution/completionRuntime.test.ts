@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import type {CompletionResponse} from '../contracts/completion.js';
+import type {
+  CompletionProvider,
+  CompletionResponse,
+} from '../contracts/completion.js';
+import {credentialReference} from '../contracts/credentials.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
@@ -19,6 +23,147 @@ import {
 const MODEL = {provider: 'test-provider', model: 'judge-model'} as const;
 
 describe('completion runtime', () => {
+  it('resolves shared credential references independently by purpose and redacts every resolved value', async () => {
+    const secretsByPurpose = {
+      role_player: 'role-player-authorized-secret',
+      judge: 'judge-authorized-secret',
+    };
+    const agentSecret = 'independent-agent-secret';
+    const secretText = `${agentSecret} ${secretsByPurpose.role_player} ${secretsByPurpose.judge}`;
+    const requirements: string[] = [];
+    const resolutions: string[] = [];
+    const preflights: string[] = [];
+    const dispatched: string[] = [];
+    const provider: CompletionProvider = {
+      id: 'test-provider',
+      version: '1',
+      requirements({purpose}) {
+        requirements.push(purpose);
+        return {credentials: {token: {reference: credentialReference('shared.token')}}};
+      },
+      async preflight({purpose, credentials}) {
+        assert.ok(Object.isFrozen(credentials));
+        assert.deepEqual(credentials, {token: secretsByPurpose[purpose]});
+        preflights.push(purpose);
+      },
+      async complete(request, {credentials}) {
+        assert.ok(Object.isFrozen(credentials));
+        assert.deepEqual(credentials, {token: secretsByPurpose[request.purpose]});
+        assert.equal(request.systemPrompt, '[REDACTED] [REDACTED] [REDACTED]');
+        assert.deepEqual(request.messages, [
+          {role: 'user', content: '[REDACTED] [REDACTED] [REDACTED]'},
+        ]);
+        dispatched.push(request.purpose);
+        return {...response(1), content: secretText};
+      },
+    };
+    const bindings = completionBindingsForPlan(
+      createTestResolvedRunPlan({
+        mode: 'multi_turn',
+        rolePlayer: MODEL,
+        successGuidelines: ['One guideline'],
+        judge: MODEL,
+      }),
+      composition(provider),
+    );
+    assert.deepEqual(requirements, ['role_player', 'judge']);
+    assert.equal(resolutions.length, 0);
+    assert.equal(preflights.length, 0);
+    const signal = new AbortController().signal;
+    const prepared = await prepareCompletionRuntime({
+      runId: 'purpose-credentials-1',
+      bindings,
+      credentialResolver: {
+        async resolve(reference, {runId, purpose}) {
+          assert.equal(reference, 'shared.token');
+          assert.equal(runId, 'purpose-credentials-1');
+          resolutions.push(purpose);
+          return purpose === 'forge-eval:completion:role_player:token'
+            ? secretsByPurpose.role_player
+            : secretsByPurpose.judge;
+        },
+      },
+      redactionSecrets: [agentSecret],
+      signal,
+    });
+    assert.deepEqual(resolutions, [
+      'forge-eval:completion:role_player:token',
+      'forge-eval:completion:judge:token',
+    ]);
+    assert.deepEqual(preflights, ['role_player', 'judge']);
+    assert.deepEqual(prepared.secrets, [agentSecret, secretsByPurpose.role_player, secretsByPurpose.judge]);
+
+    const originalPrompt = {systemPrompt: secretText, ...prompt(secretText)};
+    for (const purpose of ['role_player', 'judge'] as const) {
+      assert.equal(prepared.has(purpose), true);
+      assert.equal(prepared.provider(purpose), provider);
+      assert.deepEqual(prepared.model(purpose), MODEL);
+      const completed = await prepared.invoke(purpose, originalPrompt, signal);
+      assert.equal(completed.content, '[REDACTED] [REDACTED] [REDACTED]');
+    }
+    assert.deepEqual(dispatched, ['role_player', 'judge']);
+    assert.equal(originalPrompt.systemPrompt, secretText);
+    assert.equal(originalPrompt.messages[0]?.content, secretText);
+    assert.deepEqual(prepared.calls.map(({purpose, status}) => ({purpose, status})), [
+      {purpose: 'role_player', status: 'succeeded'},
+      {purpose: 'judge', status: 'succeeded'},
+    ]);
+    for (const secret of prepared.secrets) {
+      assert.equal(JSON.stringify(prepared.calls).includes(secret), false);
+    }
+  });
+
+  it('rejects a provider response arriving after cancellation without recording successful usage', async () => {
+    const controller = new AbortController();
+    const reason = new Error('caller cancelled the completion');
+    let deliverResponse!: (response: CompletionResponse) => void;
+    let invocations = 0;
+    const scripted = createScriptedCompletionProvider({id: 'test-provider'});
+    const provider: CompletionProvider = {
+      ...scripted.provider,
+      // The engine must enforce cancellation even when a provider does not.
+      async complete() {
+        invocations += 1;
+        return new Promise((resolve) => {deliverResponse = resolve;});
+      },
+    };
+    const prepared = await prepareCompletionRuntime({
+      runId: 'cancelled-completion-1',
+      bindings: completionBindingsForPlan(
+        createTestResolvedRunPlan({successGuidelines: ['One guideline'], judge: MODEL}),
+        composition(provider),
+      ),
+      credentialResolver: createStaticCredentialResolver(),
+      signal: controller.signal,
+    });
+
+    const pending = prepared.invoke('judge', prompt('pending'), controller.signal);
+    controller.abort(reason);
+    deliverResponse(response(1));
+    await assert.rejects(pending, (error: unknown) => error === reason);
+    await assert.rejects(
+      prepared.invoke('judge', prompt('already cancelled'), controller.signal),
+      (error: unknown) => error === reason,
+    );
+    assert.equal(invocations, 1);
+    assert.deepEqual(prepared.calls, [
+      {
+        sequence: 1,
+        purpose: 'judge',
+        provider: 'test-provider',
+        provider_version: '1',
+        model: 'judge-model',
+        status: 'failed',
+        stop_reason: null,
+        input_tokens: null,
+        output_tokens: null,
+        cached_tokens: null,
+        cost_usd: null,
+        error_code: 'completion_failed',
+      },
+    ]);
+  });
+
   it('records concurrent calls in invocation order rather than settlement order', async () => {
     let resolveFirst!: (response: CompletionResponse) => void;
     let resolveSecond!: (response: CompletionResponse) => void;
@@ -151,7 +296,7 @@ describe('completion runtime', () => {
   });
 });
 
-function composition(provider: ReturnType<typeof createScriptedCompletionProvider>['provider']) {
+function composition(provider: CompletionProvider) {
   const runtime = createFakeRuntimeAdapter();
   const agent = createScriptedAgentAdapter();
   return {

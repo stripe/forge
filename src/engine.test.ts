@@ -1,9 +1,9 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from '../test/support/expect.js';
+import {stringify} from 'yaml';
 
 import {credentialReference} from './contracts/credentials.js';
 import type {ForgeComposition} from './contracts/composition.js';
@@ -55,18 +55,38 @@ afterEach(async () => {
 });
 
 describe('ForgeEngine setup action bundles', () => {
+  it('dispatches YAML case and experiment parsing through the selected action registry', () => {
+    const engine = createForgeEngine({setupActionBundles: [testBundle()]});
+    const caseValue = {
+      schema_version: 1, id: 'testing/yaml-extension', initial_prompt: 'Complete the task.',
+      execution_mode: 'one_shot', success_guidelines: [],
+      setup: [{uses: 'acme-evals/skill', with: {name: ' case-skill '}}],
+    };
+    const experiment = experimentValue();
+    const caseYaml = stringify(caseValue);
+    const experimentYaml = stringify(experiment);
+    const parsedCase = engine.parseEvalCaseYaml(caseYaml);
+    assert.deepEqual(parsedCase, engine.parseEvalCase(caseValue));
+    assert.equal(parsedCase.setup[0]!.with.name, 'case-skill');
+    assert.equal(Object.isFrozen(parsedCase.setup[0]!.with), true);
+    assert.deepEqual(engine.parseExperimentConfigYaml(experimentYaml), engine.parseExperimentConfig(experiment));
+    assert.throws(() => defaultForgeEngine.parseEvalCaseYaml(caseYaml), /unknown setup action/);
+    assert.throws(() => defaultForgeEngine.parseExperimentConfigYaml(experimentYaml), /bundle|unknown setup action/);
+    experiment.forge.action_bundles[0]!.version = 'different-version';
+    assert.throws(() => engine.parseExperimentConfigYaml(stringify(experiment)), /bundle|pin/);
+  });
+
   it('keeps extension names absent from and unavailable to the default engine', () => {
-    expect(defaultForgeEngine.setupActionIds).toEqual([
+    assert.deepEqual(defaultForgeEngine.setupActionIds, [
       'forge/command',
       'forge/plugin',
       'forge/write',
     ]);
-    expect(() =>
+    assert.throws(() =>
       defaultForgeEngine.parseSetupStep({
         uses: 'acme-evals/skill',
         with: {name: 'example'},
-      }),
-    ).toThrow(/unknown setup action/);
+      }), /unknown setup action/);
   });
 
   it('validates, normalizes, clones, and freezes extension payloads', () => {
@@ -77,15 +97,15 @@ describe('ForgeEngine setup action bundles', () => {
       with: input,
     });
 
-    expect(parsed).toEqual({
+    assert.deepEqual(parsed, {
       uses: 'acme-evals/skill',
       with: {name: 'example-skill'},
     });
-    expect(parsed.with).not.toBe(input);
-    expect(Object.isFrozen(parsed)).toBe(true);
-    expect(Object.isFrozen(parsed.with)).toBe(true);
+    assert.notEqual(parsed.with, input);
+    assert.equal(Object.isFrozen(parsed), true);
+    assert.equal(Object.isFrozen(parsed.with), true);
     input.name = 'changed';
-    expect(parsed.with.name).toBe('example-skill');
+    assert.equal(parsed.with.name, 'example-skill');
   });
 
   it('rejects an action normalizer which does not reach a fixed point', () => {
@@ -109,12 +129,11 @@ describe('ForgeEngine setup action bundles', () => {
       ],
     });
 
-    expect(() =>
+    assert.throws(() =>
       engine.parseSetupStep({
         uses: 'acme-evals/skill',
         with: {name: 'example-skill'},
-      }),
-    ).toThrow(/did not produce a stable canonical with payload/);
+      }), /did not produce a stable canonical with payload/);
   });
 
   it('rejects an action parser which cannot accept its canonical output', () => {
@@ -141,12 +160,11 @@ describe('ForgeEngine setup action bundles', () => {
       ],
     });
 
-    expect(() =>
+    assert.throws(() =>
       engine.parseSetupStep({
         uses: 'acme-evals/skill',
         with: {name: 'example-skill'},
-      }),
-    ).toThrow(/did not produce a stable canonical with payload/);
+      }), /did not produce a stable canonical with payload/);
   });
 
   it('pins only the extension bundle used by the selected plan', () => {
@@ -161,14 +179,12 @@ describe('ForgeEngine setup action bundles', () => {
       selection: selection('baseline'),
     });
 
-    expect(extensionPlan.provenance.forge.action_bundles).toEqual([
+    assert.deepEqual(extensionPlan.provenance.forge.action_bundles, [
       BUNDLE_REFERENCE,
     ]);
-    expect(baselinePlan.provenance.forge.action_bundles).toBeUndefined();
-    expect(() => defaultForgeEngine.parseResolvedRunPlan(extensionPlan)).toThrow(
-      /unknown setup action/,
-    );
-    expect(engine.parseResolvedRunPlan(extensionPlan)).toEqual(extensionPlan);
+    assert.equal(baselinePlan.provenance.forge.action_bundles, undefined);
+    assert.throws(() => defaultForgeEngine.parseResolvedRunPlan(extensionPlan), /unknown setup action/);
+    assert.deepEqual(engine.parseResolvedRunPlan(extensionPlan), extensionPlan);
   });
 
   it('binds case-owned extension actions to the experiment pin at planning', () => {
@@ -202,10 +218,10 @@ describe('ForgeEngine setup action bundles', () => {
       selection: selection('baseline'),
     });
 
-    expect(plan.setup).toEqual([
+    assert.deepEqual(plan.setup, [
       {uses: 'acme-evals/skill', with: {name: 'case-skill'}},
     ]);
-    expect(plan.provenance.forge.action_bundles).toEqual([
+    assert.deepEqual(plan.provenance.forge.action_bundles, [
       BUNDLE_REFERENCE,
     ]);
   });
@@ -218,13 +234,12 @@ describe('ForgeEngine setup action bundles', () => {
       {uses: 'other-evals/skill', with: {name: 'example-skill'}},
     ];
 
-    expect(() =>
+    assert.throws(() =>
       engine.resolveRunPlan({
         dataset: inputs.dataset,
         experiment,
         selection: selection('with-skill'),
-      }),
-    ).toThrow(/Selected setup actions do not match/);
+      }), /Selected setup actions do not match/);
   });
 
   it('rejects noncanonical actions in preconstructed planning inputs', () => {
@@ -234,46 +249,41 @@ describe('ForgeEngine setup action bundles', () => {
     experiment.config.treatments['with-skill']!.setup[0]!.with.name =
       ' example-skill ';
 
-    expect(() =>
+    assert.throws(() =>
       engine.resolveRunPlan({
         dataset: inputs.dataset,
         experiment,
         selection: selection('with-skill'),
-      }),
-    ).toThrow(/with payload is not canonical/);
+      }), /with payload is not canonical/);
   });
 
   it('rejects absent or mismatched experiment bundle pins', () => {
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
     const {forge: _forge, ...missingPin} = experimentValue();
-    expect(() => engine.parseExperimentConfig(missingPin)).toThrow(
-      /bundle references do not match/,
-    );
+    assert.throws(() => engine.parseExperimentConfig(missingPin), /bundle references do not match/);
 
     const mismatched = experimentValue();
     mismatched.forge.action_bundles[0]!.sha256 =
       `sha256:${'d'.repeat(64)}`;
-    expect(() => engine.parseExperimentConfig(mismatched)).toThrow(
-      /bundle references do not match/,
-    );
+    assert.throws(() => engine.parseExperimentConfig(mismatched), /bundle references do not match/);
   });
 
   it('rejects malformed and duplicate bundle declarations', () => {
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
     const empty = experimentValue();
     empty.forge.action_bundles = [];
-    expect(() => engine.parseExperimentConfig(empty)).toThrow();
+    assert.throws(() => engine.parseExperimentConfig(empty));
 
     const duplicate = experimentValue();
     duplicate.forge.action_bundles.push({...BUNDLE_REFERENCE});
-    expect(() => engine.parseExperimentConfig(duplicate)).toThrow(/unique/);
+    assert.throws(() => engine.parseExperimentConfig(duplicate), /unique/);
 
     const malformed = experimentValue();
     malformed.forge.action_bundles[0] = {
       ...BUNDLE_REFERENCE,
       version: 'not a version with spaces',
     };
-    expect(() => engine.parseExperimentConfig(malformed)).toThrow();
+    assert.throws(() => engine.parseExperimentConfig(malformed));
   });
 
   it('emits and requires canonical bundle-reference order in resolved plans', () => {
@@ -306,16 +316,14 @@ describe('ForgeEngine setup action bundles', () => {
       selection: selection('with-two-actions'),
     });
 
-    expect(plan.provenance.forge.action_bundles).toEqual([
+    assert.deepEqual(plan.provenance.forge.action_bundles, [
       BUNDLE_REFERENCE,
       SECOND_BUNDLE_REFERENCE,
     ]);
 
     const reordered = structuredClone(plan);
     reordered.provenance.forge.action_bundles!.reverse();
-    expect(() => engine.parseResolvedRunPlan(reordered)).toThrow(
-      /exact canonical set/,
-    );
+    assert.throws(() => engine.parseResolvedRunPlan(reordered), /exact canonical set/);
   });
 
   it('rejects a noncanonical action payload in a resolved plan', () => {
@@ -328,9 +336,7 @@ describe('ForgeEngine setup action bundles', () => {
     noncanonical.treatment.setup[0]!.with.name = ' example-skill ';
     noncanonical.setup[0]!.with.name = ' example-skill ';
 
-    expect(() => engine.parseResolvedRunPlan(noncanonical)).toThrow(
-      /with payload is not canonical/,
-    );
+    assert.throws(() => engine.parseResolvedRunPlan(noncanonical), /with payload is not canonical/);
   });
 
   it('executes a registered action with its exact setup credential projection', async () => {
@@ -358,16 +364,14 @@ describe('ForgeEngine setup action bundles', () => {
       composition,
     });
 
-    expect(completed.result.forge.action_bundles).toEqual([
+    assert.deepEqual(completed.result.forge.action_bundles, [
       BUNDLE_REFERENCE,
     ]);
-    expect(runtime.runs[0]?.commands).toEqual([
-      expect.objectContaining({
-        scope: 'setup',
-        credentialEnvironmentNames: ['ACME_SETUP_TOKEN'],
+    assert.deepEqual(runtime.runs[0]?.commands.map(({scope, credentialEnvironmentNames, argv}) =>
+      ({scope, credentialEnvironmentNames, argv})), [{
+        scope: 'setup', credentialEnvironmentNames: ['ACME_SETUP_TOKEN'],
         argv: ['install-skill', 'example-skill'],
-      }),
-    ]);
+      }]);
   });
 
   it('uses the same action registry when verifying a completed local result', async () => {
@@ -398,17 +402,16 @@ describe('ForgeEngine setup action bundles', () => {
       path.join(completed.location, 'plan.json'),
       'utf8',
     );
-    expect(persistedPlan).toBe(serializeResolvedRunPlan(plan));
-    expect(completed.result.artifacts.find(({path}) => path === 'plan.json')?.sha256)
-      .toBe(sha256Digest(persistedPlan));
-    expect(completed.result).not.toHaveProperty('plan_sha256');
+    assert.equal(persistedPlan, serializeResolvedRunPlan(plan));
+    assert.equal(completed.result.artifacts.find(({path}) => path === 'plan.json')?.sha256, sha256Digest(persistedPlan));
+    assert.ok(!('plan_sha256' in (completed.result)));
 
-    await expect(engine.verifyCompletedRun(completed.location)).resolves.toMatchObject({
-      runId: 'action-bundle-local-result',
-    });
-    await expect(verifyCompletedRun(completed.location)).rejects.toThrow(
-      /Completed plan.json does not match its schema/,
-    );
+    {
+      const actual = (await engine.verifyCompletedRun(completed.location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'action-bundle-local-result');
+    }
+    await assert.rejects(verifyCompletedRun(completed.location), /Completed plan.json does not match its schema/);
   });
 
   it('rejects bundle drift before credential resolution or runtime allocation', async () => {
@@ -423,26 +426,24 @@ describe('ForgeEngine setup action bundles', () => {
     const agent = createScriptedAgentAdapter();
     let credentialResolutions = 0;
 
-    await expect(
-      engine.executeEval({
-        runId: 'action-bundle-drift',
-        plan: drifted,
-        composition: {
-          runtime: runtime.adapter,
-          agents: new Map([[agent.adapter.id, agent.adapter]]),
-          credentialResolver: {
-            async resolve() {
-              credentialResolutions += 1;
-              return 'must-not-resolve';
-            },
+    await assert.rejects(engine.executeEval({
+      runId: 'action-bundle-drift',
+      plan: drifted,
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        credentialResolver: {
+          async resolve() {
+            credentialResolutions += 1;
+            return 'must-not-resolve';
           },
-          inputProvider: createMemoryRunInputProvider(),
-          artifactStore: createMemoryArtifactStore().store,
         },
-      }),
-    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
-    expect(credentialResolutions).toBe(0);
-    expect(runtime.runs).toEqual([]);
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createMemoryArtifactStore().store,
+      },
+    }), {code: 'invalid_plan', phase: 'preflight'});
+    assert.equal(credentialResolutions, 0);
+    assert.deepEqual(runtime.runs, []);
   });
 
   it('snapshots bundle definitions and rejects unsafe ownership', () => {
@@ -456,46 +457,39 @@ describe('ForgeEngine setup action bundles', () => {
     bundle.actions = [];
     mutableAction.parseWith = () => ({name: 'changed'});
 
-    expect(engine.setupActionBundles).toEqual([BUNDLE_REFERENCE]);
-    expect(
-      engine.parseSetupStep({
-        uses: 'acme-evals/skill',
-        with: {name: 'original'},
-      }).with.name,
-    ).toBe('original');
+    assert.deepEqual(engine.setupActionBundles, [BUNDLE_REFERENCE]);
+    assert.equal(engine.parseSetupStep({
+      uses: 'acme-evals/skill',
+      with: {name: 'original'},
+    }).with.name, 'original');
 
-    expect(() =>
+    assert.throws(() =>
       defineSetupActionBundle({
         manifest: {...BUNDLE_REFERENCE, namespace: 'forge'},
         actions: [
           {...skillAction(), uses: 'forge/private'},
         ],
-      }),
-    ).toThrow(/reserved namespace/);
-    expect(() =>
+      }), /reserved namespace/);
+    assert.throws(() =>
       defineSetupActionBundle({
         manifest: BUNDLE_REFERENCE,
         actions: [{...skillAction(), uses: 'other/skill'}],
-      }),
-    ).toThrow(/outside bundle namespace/);
-    expect(() =>
+      }), /outside bundle namespace/);
+    assert.throws(() =>
       defineSetupActionBundle({
         manifest: BUNDLE_REFERENCE,
         actions: [{...skillAction(), uses: 'acme-evals/skill@1'}],
-      }),
-    ).toThrow(/invalid/);
+      }), /invalid/);
   });
 
   it('rejects duplicate bundle namespaces and action IDs', () => {
-    expect(() =>
-      createForgeEngine({setupActionBundles: [testBundle(), testBundle()]}),
-    ).toThrow(/Duplicate setup action bundle namespace/);
-    expect(() =>
+    assert.throws(() =>
+      createForgeEngine({setupActionBundles: [testBundle(), testBundle()]}), /Duplicate setup action bundle namespace/);
+    assert.throws(() =>
       defineSetupActionBundle({
         manifest: BUNDLE_REFERENCE,
         actions: [skillAction(), skillAction()],
-      }),
-    ).toThrow(/Duplicate setup action/);
+      }), /Duplicate setup action/);
   });
 
   it('rejects non-JSON action parser output at the model boundary', () => {
@@ -510,12 +504,11 @@ describe('ForgeEngine setup action bundles', () => {
       ],
     });
 
-    expect(() =>
+    assert.throws(() =>
       engine.parseSetupStep({
         uses: 'acme-evals/skill',
         with: {name: 'example'},
-      }),
-    ).toThrow(/plain JSON objects/);
+      }), /plain JSON objects/);
   });
 
   it('bounds action input before parsing and bounds normalized output', () => {
@@ -534,13 +527,12 @@ describe('ForgeEngine setup action bundles', () => {
         }),
       ],
     });
-    expect(() =>
+    assert.throws(() =>
       inputEngine.parseSetupStep({
         uses: 'acme-evals/skill',
         with: {name: 'x'.repeat(1024 * 1024)},
-      }),
-    ).toThrow(/byte limit/);
-    expect(parseCalls).toBe(0);
+      }), /byte limit/);
+    assert.equal(parseCalls, 0);
 
     const outputAction = skillAction();
     outputAction.parseWith = () => ({name: 'x'.repeat(1024 * 1024)});
@@ -552,12 +544,11 @@ describe('ForgeEngine setup action bundles', () => {
         }),
       ],
     });
-    expect(() =>
+    assert.throws(() =>
       outputEngine.parseSetupStep({
         uses: 'acme-evals/skill',
         with: {name: 'small'},
-      }),
-    ).toThrow(/byte limit/);
+      }), /byte limit/);
   });
 });
 

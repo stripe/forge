@@ -1,6 +1,6 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../test/support/expect.js';
 import * as rootExports from './index.js';
 
 import {
@@ -48,54 +48,54 @@ import {
 
 describe('@stripe/forge package root', () => {
   it('keeps campaign orchestration on its documented subpath', () => {
-    expect('runCampaign' in rootExports).toBe(false);
-    expect('readCampaignSelections' in rootExports).toBe(false);
-    expect('inspectCampaign' in rootExports).toBe(false);
-    expect('runCampaignCommand' in rootExports).toBe(false);
-    expect('parseCampaignReport' in rootExports).toBe(false);
-    expect('CAMPAIGN_REPORT_SCHEMA_VERSION' in rootExports).toBe(false);
-    expect('CampaignReportError' in rootExports).toBe(false);
+    assert.equal('runCampaign' in rootExports, false);
+    assert.equal('readCampaignSelections' in rootExports, false);
+    assert.equal('inspectCampaign' in rootExports, false);
+    assert.equal('runCampaignCommand' in rootExports, false);
+    assert.equal('parseCampaignReport' in rootExports, false);
+    assert.equal('CAMPAIGN_REPORT_SCHEMA_VERSION' in rootExports, false);
+    assert.equal('CampaignReportError' in rootExports, false);
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {
-    expect(FORGE_VERSION).toBeTypeOf('string');
-    expect(RESOLVED_RUN_PLAN_SCHEMA_VERSION).toBe(1);
-    expect(RUN_RESULT_SCHEMA_VERSION).toBe(1);
-    expect(SETUP_ARTIFACT_SCHEMA_VERSION).toBe(1);
-    expect(WORKSPACE_EVIDENCE_SCHEMA_VERSION).toBe(1);
-    expect(executeEval).toBeTypeOf('function');
-    expect(preflightEval).toBeTypeOf('function');
-    expect(parseInteractionArtifact).toBeTypeOf('function');
-    expect(parseJudgeEvidence).toBeTypeOf('function');
-    expect(JUDGE_EVIDENCE_SCHEMA_VERSION).toBe(1);
-    expect(parseSetupArtifact).toBeTypeOf('function');
-    expect(parseAgentPluginInstallationReceipt).toBeTypeOf('function');
-    expect(evaluateRunEvidence).toBeTypeOf('function');
-    expect(resolveRunPlan).toBeTypeOf('function');
-    expect(parseResolvedRunPlan).toBeTypeOf('function');
-    expect(resolveManifestCaseIdFromFile).toBeTypeOf('function');
-    expect(createArtifactStore).toBeTypeOf('function');
-    expect(createForgeEngine).toBeTypeOf('function');
-    expect(createSetupExecutor).toBeTypeOf('function');
-    expect(defineSetupActionBundle).toBeTypeOf('function');
-    expect([...firstPartySetupHandlers.keys()].sort()).toEqual([
+    assert.equal(typeof (FORGE_VERSION), 'string');
+    assert.equal(RESOLVED_RUN_PLAN_SCHEMA_VERSION, 1);
+    assert.equal(RUN_RESULT_SCHEMA_VERSION, 1);
+    assert.equal(SETUP_ARTIFACT_SCHEMA_VERSION, 1);
+    assert.equal(WORKSPACE_EVIDENCE_SCHEMA_VERSION, 1);
+    assert.equal(typeof (executeEval), 'function');
+    assert.equal(typeof (preflightEval), 'function');
+    assert.equal(typeof (parseInteractionArtifact), 'function');
+    assert.equal(typeof (parseJudgeEvidence), 'function');
+    assert.equal(JUDGE_EVIDENCE_SCHEMA_VERSION, 1);
+    assert.equal(typeof (parseSetupArtifact), 'function');
+    assert.equal(typeof (parseAgentPluginInstallationReceipt), 'function');
+    assert.equal(typeof (evaluateRunEvidence), 'function');
+    assert.equal(typeof (resolveRunPlan), 'function');
+    assert.equal(typeof (parseResolvedRunPlan), 'function');
+    assert.equal(typeof (resolveManifestCaseIdFromFile), 'function');
+    assert.equal(typeof (createArtifactStore), 'function');
+    assert.equal(typeof (createForgeEngine), 'function');
+    assert.equal(typeof (createSetupExecutor), 'function');
+    assert.equal(typeof (defineSetupActionBundle), 'function');
+    assert.deepEqual([...firstPartySetupHandlers.keys()].sort(), [
       'forge/command',
       'forge/plugin',
       'forge/write',
     ]);
-    expect(credentialReference).toBeTypeOf('function');
-    expect(normalizeEnvironmentSpecification).toBeTypeOf('function');
-    expect(createJudgeTranscriptProjection).toBeTypeOf('function');
-    expect(parseJudgeTranscriptProjection).toBeTypeOf('function');
-    expect(JUDGE_TRANSCRIPT_SOURCE).toBe('trajectory.json');
-    expect(JUDGE_TRANSCRIPT_PROJECTION_ID).toBe('forge-visible-atif-steps');
-    expect(JUDGE_TRANSCRIPT_PROJECTION_VERSION).toBe(1);
-    expect(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE).toBe('root');
-    expect(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES).toEqual(['user', 'agent']);
-    expect(JUDGE_TRANSCRIPT_COPIED_CONTEXT).toBe('excluded');
-    expect(MAX_JUDGE_TRANSCRIPT_BYTES).toBe(768 * 1024);
-    expect(MAX_GUIDELINE_JUDGE_PROMPT_BYTES).toBe(1024 * 1024);
-    expect(JUDGE_TRANSCRIPT_INCLUDED_FIELDS).toEqual([
+    assert.equal(typeof (credentialReference), 'function');
+    assert.equal(typeof (normalizeEnvironmentSpecification), 'function');
+    assert.equal(typeof (createJudgeTranscriptProjection), 'function');
+    assert.equal(typeof (parseJudgeTranscriptProjection), 'function');
+    assert.equal(JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');
+    assert.equal(JUDGE_TRANSCRIPT_PROJECTION_ID, 'forge-visible-atif-steps');
+    assert.equal(JUDGE_TRANSCRIPT_PROJECTION_VERSION, 1);
+    assert.equal(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE, 'root');
+    assert.deepEqual(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES, ['user', 'agent']);
+    assert.equal(JUDGE_TRANSCRIPT_COPIED_CONTEXT, 'excluded');
+    assert.equal(MAX_JUDGE_TRANSCRIPT_BYTES, 768 * 1024);
+    assert.equal(MAX_GUIDELINE_JUDGE_PROMPT_BYTES, 1024 * 1024);
+    assert.deepEqual(JUDGE_TRANSCRIPT_INCLUDED_FIELDS, [
       'step_id',
       'source',
       'message',
@@ -115,6 +115,5 @@ describe('@stripe/forge package root', () => {
       _externalRuntime: ForgeExternalRuntimeV1,
       _runtimePreflight: RuntimePreflight,
     ): void => undefined;
-    expect(acceptsPublicContracts).toBeTypeOf('function');
   });
 });

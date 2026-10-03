@@ -37,6 +37,9 @@ export async function createOwnedWorkspace(
     const candidate = resolveCandidate(canonicalRoot, relativePath);
     let stat;
     try {
+      if (candidate !== canonicalRoot) {
+        await assertRealParentWithinRoot(canonicalRoot, candidate);
+      }
       stat = await fs.lstat(candidate);
     } catch (error) {
       if (isMissing(error)) return Object.freeze({path: relativePath, kind: 'absent'});
@@ -95,7 +98,7 @@ export async function createOwnedWorkspace(
         const children = await fs.readdir(resolveCandidate(canonicalRoot, directory), {
           withFileTypes: true,
         });
-        children.sort((left, right) => left.name.localeCompare(right.name));
+        children.sort((left, right) => comparePaths(left.name, right.name));
         for (const child of children) {
           const childPath = directory === '.' ? child.name : `${directory}/${child.name}`;
           const childStat = await fs.lstat(resolveCandidate(canonicalRoot, childPath));
@@ -113,7 +116,7 @@ export async function createOwnedWorkspace(
           if (kind === 'directory') pending.push(childPath);
         }
       }
-      entries.sort((left, right) => left.path.localeCompare(right.path));
+      entries.sort((left, right) => comparePaths(left.path, right.path));
       return Object.freeze(entries);
     },
     async writeFile(
@@ -229,6 +232,10 @@ function positiveInteger(value: number, name: string): number {
     throw new TypeError(`${name} must be a positive integer.`);
   }
   return value;
+}
+
+function comparePaths(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function isMissing(error: unknown): boolean {

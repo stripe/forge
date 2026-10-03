@@ -7,7 +7,7 @@ import type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
 } from './completion.js';
-import {runConversation} from './conversation.js';
+import {runConversation, type ConversationTurn} from './conversation.js';
 import {AVA_STOP_SENTINEL} from './prompt.js';
 
 function initialResponse(
@@ -89,7 +89,7 @@ describe('runConversation', () => {
       continuationResponse([], 'Closing prose is discarded.'),
     );
     const controller = new AbortController();
-    const toolInput = {path: 'answer.txt'};
+    const toolInput = {path: 'answer.txt', details: {labels: ['original']}};
     const agent = session([
       {
         text: 'I implemented Checkout.',
@@ -109,6 +109,7 @@ describe('runConversation', () => {
       completion.invoke,
     );
     const events: string[] = [];
+    const validatedSnapshots: Array<readonly ConversationTurn[]> = [];
 
     const result = await runConversation({
       session: agent.value,
@@ -119,6 +120,7 @@ describe('runConversation', () => {
       onAvaResponse: (turn) => events.push(`ava-response:${turn}`),
       onTurn: (turn) => events.push(`agent-start:${turn}`),
       onResponse: (turn) => events.push(`agent-response:${turn}`),
+      validateCompletedTurns: (turns) => validatedSnapshots.push(turns),
     });
 
     assert.equal(result.stopReason, 'task_complete');
@@ -186,7 +188,11 @@ describe('runConversation', () => {
         user: 'How should checkout work?',
         assistant: 'I implemented Checkout.',
         toolCalls: [
-          {id: 'call-1', name: 'Write', input: {path: 'answer.txt'}},
+          {
+            id: 'call-1',
+            name: 'Write',
+            input: {path: 'answer.txt', details: {labels: ['original']}},
+          },
         ],
       },
       {
@@ -197,11 +203,125 @@ describe('runConversation', () => {
       },
     ]);
     toolInput.path = 'mutated-after-completion.txt';
+    toolInput.details.labels.push('adapter mutation');
     assert.deepEqual(result.turns[0]!.toolCalls[0]!.input, {
       path: 'answer.txt',
+      details: {labels: ['original']},
     });
+    assert.deepEqual(validatedSnapshots.map((turns) => turns.length), [1, 2]);
+    assert.deepEqual(validatedSnapshots[0], [result.turns[0]]);
+    assert.ok(validatedSnapshots.every((turns) => Object.isFrozen(turns)));
+    assert.equal(Object.isFrozen(result), true);
     assert.equal(Object.isFrozen(result.turns), true);
     assert.equal(Object.isFrozen(result.turns[0]!.toolCalls), true);
+    assert.throws(() => {
+      const input = result.turns[0]!.toolCalls[0]!.input as typeof toolInput;
+      input.details.labels.push('observer mutation');
+    }, TypeError);
+    assert.equal(Object.isFrozen(result.avaAudit.needs), true);
+    assert.equal(Object.isFrozen(result.avaAudit.needs![0]), true);
+    assert.equal(Object.isFrozen(result.avaAudit.decisions), true);
+    assert.equal(Object.isFrozen(result.avaAudit.decisions[0]), true);
+    assert.equal(Object.isFrozen(result.avaAudit.decisions[0]!.remainingNeedIds), true);
+  });
+
+  it('rejects an invalid turn budget before invoking either participant', async () => {
+    const completion = completions(new Error('must not be called'));
+    const agent = session([]);
+    const signal = new AbortController().signal;
+    let callbacks = 0;
+
+    await assert.rejects(
+      runConversation({
+        session: agent.value,
+        ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+        maxTurns: 0,
+        signal,
+        onAvaStart: () => { callbacks += 1; },
+      }),
+      {name: 'TypeError', message: 'maxTurns must be a positive integer.'},
+    );
+    assert.equal(completion.calls.length, 0);
+    assert.equal(agent.sent.length, 0);
+    assert.equal(callbacks, 0);
+  });
+
+  it('rejects a successful Ava response returned after cancellation before sending', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('cancelled during Ava', 'AbortError');
+    const completion = completions(
+      initialResponse(['Complete the requested work'], 'Please do the work.'),
+    );
+    const cancelAfterResponse: InteractionCompletionInvoker = async (request) => {
+      const response = await completion.invoke(request);
+      controller.abort(reason);
+      return response;
+    };
+    const agent = session([]);
+    const events: string[] = [];
+
+    await assert.rejects(
+      runConversation({
+        session: agent.value,
+        ava: new AvaRolePlayer(
+          {task: 'Do the work', signal: controller.signal},
+          cancelAfterResponse,
+        ),
+        maxTurns: 2,
+        signal: controller.signal,
+        onAvaStart: () => events.push('ava-start'),
+        onAvaResponse: () => events.push('ava-response'),
+        onTurn: () => events.push('agent-start'),
+      }),
+      (error: unknown) => error === reason,
+    );
+    assert.deepEqual(events, ['ava-start']);
+    assert.equal(completion.calls.length, 1);
+    assert.equal(completion.calls[0]!.signal, controller.signal);
+    assert.equal(agent.sent.length, 0);
+  });
+
+  it('rejects a successful agent response returned after cancellation before recording it', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('cancelled during agent send', 'AbortError');
+    const completion = completions(
+      initialResponse(['Complete the requested work'], 'Please do the work.'),
+      continuationResponse([], 'Never assessed.'),
+    );
+    const agent = session([
+      {text: 'Returned after cancellation.', sessionId: 'persistent-session', toolCalls: []},
+    ]);
+    const cancelAfterSend: AgentSession = {
+      sessionId: agent.value.sessionId,
+      async send(message, options) {
+        const response = await agent.value.send(message, options);
+        controller.abort(reason);
+        return response;
+      },
+    };
+    const events: string[] = [];
+
+    await assert.rejects(
+      runConversation({
+        session: cancelAfterSend,
+        ava: new AvaRolePlayer(
+          {task: 'Do the work', signal: controller.signal},
+          completion.invoke,
+        ),
+        maxTurns: 2,
+        signal: controller.signal,
+        onAvaStart: () => events.push('ava-start'),
+        onAvaResponse: () => events.push('ava-response'),
+        onTurn: () => events.push('agent-start'),
+        onResponse: () => events.push('agent-response'),
+        validateCompletedTurns: () => events.push('validated'),
+      }),
+      (error: unknown) => error === reason,
+    );
+    assert.deepEqual(events, ['ava-start', 'ava-response', 'agent-start']);
+    assert.equal(agent.sent.length, 1);
+    assert.equal(agent.sent[0]!.signal, controller.signal);
+    assert.equal(completion.calls.length, 1);
   });
 
   it('performs a final Ava assessment without exceeding maxTurns', async () => {
@@ -296,6 +416,30 @@ describe('runConversation', () => {
     assert.equal(result.totalCostUsd, null);
     assert.equal(result.avaAudit.decisions[1]!.stop, true);
     assert.equal(result.avaAudit.decisions[1]!.codingAgentInvoked, false);
+  });
+
+  it('keeps total cost unknown when a later completed turn supplies its cost', async () => {
+    const completion = completions(
+      initialResponse(['Complete the requested work'], 'Please start.'),
+      continuationResponse(['need_1'], 'Please finish.'),
+      continuationResponse([], ''),
+    );
+    const signal = new AbortController().signal;
+    const agent = session([
+      {text: 'Partial work.', sessionId: 'persistent-session', toolCalls: []},
+      {text: 'Complete.', sessionId: 'persistent-session', toolCalls: [], costUsd: 0.25},
+    ]);
+
+    const result = await runConversation({
+      session: agent.value,
+      ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+      maxTurns: 2,
+      signal,
+    });
+
+    assert.equal(result.stopReason, 'task_complete');
+    assert.equal(result.turns.length, 2);
+    assert.equal(result.totalCostUsd, null);
   });
 
   it('returns a classified role-player failure without another agent call', async () => {

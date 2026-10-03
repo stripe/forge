@@ -305,6 +305,14 @@ export function createFakeRuntimeAdapter(
       let quiesced = false;
       let disposed = false;
       let sealedRuntime: SealedRuntime | undefined;
+      let quiescence: Promise<SealedRuntime> | undefined;
+      let disposal: Promise<void> | undefined;
+      const activeCommands = new Map<Promise<void>, TestCommandScope>();
+
+      const drainCommands = async (setupOnly = false): Promise<void> => {
+        await Promise.all([...activeCommands].filter(([, scope]) =>
+          !setupOnly || scope !== 'agent').map(([done]) => done));
+      };
 
       const commandRunner = (
         scope: TestCommandScope,
@@ -336,26 +344,39 @@ export function createFakeRuntimeAdapter(
             });
             commands.push(command);
             events.push(`command:${scope}`);
-            const result = await (options.command?.(command) ?? {
-              stdout: '',
-              stderr: '',
-              exitCode: 0,
-              durationMs: 0,
-            });
-            emitStdoutLines(result.stdout, commandOptions.onStdoutLine);
-            return {...result};
+            let finish!: () => void;
+            const done = new Promise<void>((resolve) => {finish = resolve;});
+            activeCommands.set(done, scope);
+            try {
+              const result = await (options.command?.(command) ?? {
+                stdout: '',
+                stderr: '',
+                exitCode: 0,
+                durationMs: 0,
+              });
+              emitStdoutLines(result.stdout, commandOptions.onStdoutLine);
+              return {...result};
+            } finally {
+              activeCommands.delete(done);
+              finish();
+            }
           },
         };
         return Object.freeze(runner);
       };
 
       const dispose = async (): Promise<void> => {
-        if (disposed) return;
+        if (disposal !== undefined) return disposal;
         disposed = true;
         quiesced = true;
-        workspace.seal();
-        for (const state of states.values()) state.seal();
-        events.push('dispose');
+        disposal = (async () => {
+          if (quiescence !== undefined) await quiescence;
+          else await drainCommands();
+          workspace.seal();
+          for (const state of states.values()) state.seal();
+          events.push('dispose');
+        })();
+        return disposal;
       };
 
       const prepared: PreparedRuntime = Object.freeze({
@@ -386,33 +407,38 @@ export function createFakeRuntimeAdapter(
             throw new Error('Fake runtime setup cannot be finalized.');
           }
           setupFinalized = true;
+          await drainCommands(true);
           for (const requirement of input.requirements.stateDirectories) {
             if (requirement.sealAfterSetup) states.get(requirement.id)?.seal();
           }
           events.push('finalizeSetup');
         },
         async quiesce(): Promise<SealedRuntime> {
+          if (quiescence !== undefined) return quiescence;
           if (disposed && sealedRuntime === undefined) {
             throw new Error('Fake runtime was disposed before quiescence.');
           }
-          if (sealedRuntime !== undefined) return sealedRuntime;
           quiesced = true;
-          workspace.seal();
-          for (const state of states.values()) state.seal();
-          events.push('quiesce');
-          sealedRuntime = Object.freeze({
-            runtimeId: input.runId,
-            workspace: workspace.readonly,
-            paths: Object.freeze({workspace: '/workspace', home: '/home/forge'}),
-            stateDirectories: new Map(
-              [...states].map(([stateId, state]) => [stateId, state.readonly]),
-            ),
-            metadata: Object.freeze({
-              adapter: id,
-              ...(options.metadata ?? {}),
-            }),
-          });
-          return sealedRuntime;
+          quiescence = (async () => {
+            await drainCommands();
+            workspace.seal();
+            for (const state of states.values()) state.seal();
+            events.push('quiesce');
+            sealedRuntime = Object.freeze({
+              runtimeId: input.runId,
+              workspace: workspace.readonly,
+              paths: Object.freeze({workspace: '/workspace', home: '/home/forge'}),
+              stateDirectories: new Map(
+                [...states].map(([stateId, state]) => [stateId, state.readonly]),
+              ),
+              metadata: Object.freeze({
+                adapter: id,
+                ...(options.metadata ?? {}),
+              }),
+            });
+            return sealedRuntime;
+          })();
+          return quiescence;
         },
         dispose,
       });

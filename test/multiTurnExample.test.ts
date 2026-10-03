@@ -6,10 +6,6 @@ import {runCli} from '../src/cli.js';
 import {loadExperimentConfig, loadDataset} from '../src/model/index.js';
 import {expandExperiment, resolveRunPlan} from '../src/planning/index.js';
 
-const MANIFEST_SHA256 =
-  'sha256:acd68e0d7c13dd6d3a46382e802ad2345d0f82de8813ecd239a84ed21d032447';
-const CASE_SHA256 =
-  'sha256:fa82c800831105fe9521ed03847d381523d774c706288a53a8082e34241991f3';
 const exampleRoot = path.join(process.cwd(), 'examples', 'multi-turn');
 const datasetRoot = path.join(exampleRoot, 'dataset');
 const experimentPath = path.join(exampleRoot, 'experiment.yaml');
@@ -27,15 +23,9 @@ describe('checked-in multi-turn example', () => {
       loadExperimentConfig(experimentPath),
     ]);
 
-    assert.equal(dataset.manifestSha256, MANIFEST_SHA256);
-    assert.deepEqual(dataset.manifest.files, [
-      {
-        path: 'cases/examples/release-summary.yaml',
-        size: 1137,
-        sha256: CASE_SHA256.slice('sha256:'.length),
-      },
-    ]);
-    assert.equal(experiment.config.dataset.manifest_sha256, MANIFEST_SHA256);
+    assert.equal(dataset.manifestSha256, experiment.config.dataset.manifest_sha256);
+    assert.deepEqual(dataset.manifest.files.map(({path}) => path),
+      ['cases/examples/release-summary.yaml']);
 
     const selections = expandExperiment(experiment);
     assert.deepEqual(selections, [

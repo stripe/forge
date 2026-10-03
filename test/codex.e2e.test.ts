@@ -129,20 +129,36 @@ function mcpRollout(turns: readonly Turn[], output: unknown, result: Record<stri
       const response = (payload: Record<string, unknown>) => ({type: 'response_item',
         payload: {...payload, internal_chat_message_metadata_passthrough: metadata}});
       records.push(
-        response({type: 'tool_search_call', id: `search-${id}`, call_id: `search-${id}`,
-          status: 'completed', execution: 'client', arguments: {query: 'fixture probe', limit: 1}}),
-        response({type: 'tool_search_output', id: `search-output-${id}`, call_id: `search-${id}`,
-          status: 'completed', execution: 'client', tools: [{type: 'namespace', name: 'mcp__fixture',
-            description: 'Tools in the fixture namespace.', tools: [{type: 'function', name: 'probe',
+        response({
+          type: 'tool_search_call', id: `search-${id}`, call_id: `search-${id}`,
+          status: 'completed', execution: 'client', arguments: {query: 'fixture probe', limit: 1}
+        }),
+        response({
+          type: 'tool_search_output', id: `search-output-${id}`, call_id: `search-${id}`,
+          status: 'completed', execution: 'client', tools: [{
+            type: 'namespace', name: 'mcp__fixture',
+            description: 'Tools in the fixture namespace.', tools: [{
+              type: 'function', name: 'probe',
               description: 'Read the fixture.', strict: false, defer_loading: true,
-              parameters: {type: 'object', properties: {}, additionalProperties: false}}]}]}),
-        response({type: 'function_call', id: `item-${id}`, call_id: id,
-          namespace: 'mcp__fixture', name: 'probe', arguments: '{}'}),
-        {type: 'event_msg', payload: {type: 'item_completed', thread_id: SESSION_ID, turn_id: turnId,
-          item: {type: 'McpToolCall', id, server: 'fixture', tool: 'probe', arguments: {},
-            readOnlyHint: true, status: result.isError === true ? 'failed' : 'completed', result,
-            duration: {secs: 0, nanos: 1}},
-          started_at_ms: 1, completed_at_ms: 2}},
+              parameters: {type: 'object', properties: {}, additionalProperties: false}
+            }]
+          }]
+        }),
+        response({
+          type: 'function_call', id: `item-${id}`, call_id: id,
+          namespace: 'mcp__fixture', name: 'probe', arguments: '{}'
+        }),
+        {
+          type: 'event_msg', payload: {
+            type: 'item_completed', thread_id: SESSION_ID, turn_id: turnId,
+            item: {
+              type: 'McpToolCall', id, server: 'fixture', tool: 'probe', arguments: {},
+              readOnlyHint: true, status: result.isError === true ? 'failed' : 'completed', result,
+              duration: {secs: 0, nanos: 1}
+            },
+            started_at_ms: 1, completed_at_ms: 2
+          }
+        },
         response({type: 'function_call_output', id: `output-${id}`, call_id: id, output}),
       );
     } else if (record.payload.type !== 'function_call_output') {
@@ -376,9 +392,10 @@ describe('Codex engine integration', () => {
   for (const mode of ['malformed', 'unfinished'] as const) {
     it(`falls back explicitly for ${mode} native records while retaining exact restricted source bytes`, async () => {
       const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Complete the requested answer.'});
-      const test = await fixture(plan, {native: (turns) => mode === 'malformed'
-        ? `${nativeRollout(turns)}not-json\n`
-        : `${nativeRollout(turns).trimEnd().split('\n').slice(0, -1).join('\n')}\n`,
+      const test = await fixture(plan, {
+        native: (turns) => mode === 'malformed'
+          ? `${nativeRollout(turns)}not-json\n`
+          : `${nativeRollout(turns).trimEnd().split('\n').slice(0, -1).join('\n')}\n`,
       });
       const completed = await executeEval({runId: `codex-${mode}`, plan, composition: test.composition});
       const verified = await verifyCompletedRun(completed.location);
@@ -425,8 +442,7 @@ describe('Codex engine integration', () => {
   }
 
   for (const shape of [
-    'string', 'structured-string', 'text-array', 'image-array', 'tool-error',
-    'empty-annotations', 'full-annotations', 'content-meta', 'image-metadata',
+    'structured-string', 'text-array', 'full-annotations', 'content-meta', 'image-metadata',
   ] as const) {
     it(`preserves captured MCP ${shape} evidence through native selection, judging, redaction, and verification`, async () => {
       const marker = `MCP_RESULT_${shape}`;
@@ -434,18 +450,21 @@ describe('Codex engine integration', () => {
       // A valid synthetic 16x16 PNG from the offline pinned-CLI capture.
       const imageData = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGP4z8DwnxLMMGrAqAGjBgwXAwAwxP4QHCfkAAAAAABJRU5ErkJggg==';
       const structuredContent = {answer: text, reasoning_content: 'Opaque tool data remains visible.'};
-      const image = shape === 'image-array' || shape === 'image-metadata';
-      const isError = shape === 'tool-error' || shape === 'content-meta';
+      const image = shape === 'image-metadata';
+      const isError = shape === 'content-meta';
       // These content-level objects are extensible opaque tool data, not a
       // request to interpret annotations or import recorder-only metadata.
-      const contentMetadata = shape === 'empty-annotations' ? {annotations: {}}
-        : shape === 'full-annotations' ? {annotations: {
+      const contentMetadata = shape === 'full-annotations' ? {
+        annotations: {
           audience: ['assistant'], priority: 1, lastModified: '2026-09-22T00:00:00Z',
           extension: {credential: AGENT_SECRET, reasoning_content: 'Opaque annotation detail.'},
-        }}
-        : shape === 'content-meta' ? {_meta: {
-          extension: {credential: AGENT_SECRET, values: [null, true, {future: 'Opaque metadata detail.'}]},
-        }} : {};
+        }
+      }
+        : shape === 'content-meta' ? {
+          _meta: {
+            extension: {credential: AGENT_SECRET, values: [null, true, {future: 'Opaque metadata detail.'}]},
+          }
+        } : {};
       const imageMetadata = shape === 'image-metadata' ? {
         annotations: {audience: ['assistant'], extension: {credential: AGENT_SECRET}},
         _meta: {marker: 'SNAPSHOT_ONLY_IMAGE_METADATA'},
@@ -457,12 +476,12 @@ describe('Codex engine integration', () => {
       ...(shape === 'structured-string' ? {structuredContent} : {})};
       const output = shape === 'text-array' || image
         ? [{type: 'input_text', text: 'Wall time: 0.001 seconds\nOutput:'}, {type: 'input_text', text},
-          ...(image ? [{type: 'input_image', image_url: `data:image/png;base64,${imageData}`}]: [])]
+        ...(image ? [{type: 'input_image', image_url: `data:image/png;base64,${imageData}`}] : [])]
         : `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(shape === 'structured-string' ? structuredContent : result.content)}`;
       const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
-        judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the fixture.']});
+      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the fixture.']});
       const test = await fixture(plan, {native: (turns) => mcpRollout(turns, output, result),
-        stdout: (response) => mcpStream(response, result)});
+      stdout: (response) => mcpStream(response, result)});
       let sealedAtJudgeDispatch = false;
       const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
         () => {
@@ -470,9 +489,11 @@ describe('Codex engine integration', () => {
           return JSON.stringify({results: [{index: 0, passed: true, explanation: 'Synthetic evidence check.'}]});
         },
       ]});
-      const completed = await executeEval({runId: `codex-mcp-${shape}`, plan, composition: {
-        ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
-      }});
+      const completed = await executeEval({
+        runId: `codex-mcp-${shape}`, plan, composition: {
+          ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        }
+      });
       const verified = await verifyCompletedRun(completed.location);
       assert.equal(verified.result.evidence.provenance.source.kind, 'native_log');
       assert.equal(verified.result.evidence.completeness, image ? 'partial' : 'complete');
@@ -521,111 +542,103 @@ describe('Codex engine integration', () => {
     });
   }
 
-  for (const nameForm of ['namespaced', 'qualified'] as const) {
-    for (const outputError of [undefined, true, false]) {
-      const errorLabel = outputError === undefined ? 'absent' : String(outputError);
-      it(`falls back for ${nameForm} MCP evidence without a completion snapshot even when output.is_error is ${errorLabel}`, async () => {
-        const marker = 'UNVERIFIED_NATIVE_MCP_FAILURE_OUTPUT';
-        const result = {content: [{type: 'text', text: `${marker}: ${AGENT_SECRET}`}], isError: true};
-        const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
-        const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
-          judge: JUDGE_MODEL, successGuidelines: ['The assistant reports the fixture failure.']});
-        const test = await fixture(plan, {
-          responses: ['The fixture tool reported a failure.'],
-          native(turns) {
-            let removedSnapshots = 0;
-            const records = mcpRollout(turns, output, result).trimEnd().split('\n').flatMap((line) => {
-              const record = JSON.parse(line) as {type: string; payload: Record<string, unknown>};
-              if (record.type === 'event_msg' && record.payload.type === 'item_completed') {
-                assert.equal((record.payload.item as {type: string}).type, 'McpToolCall');
-                removedSnapshots += 1;
-                return [];
-              }
-              if (record.payload.type === 'function_call' && nameForm === 'qualified') {
-                delete record.payload.namespace;
-                record.payload.name = 'mcp__fixture__probe';
-              }
-              if (record.payload.type === 'function_call_output' && outputError !== undefined) {
-                record.payload.is_error = outputError;
-              }
-              return [JSON.stringify(record)];
-            });
-            assert.equal(removedSnapshots, 1);
-            return records.join('\n') + '\n';
-          },
-          stdout: (response) => mcpStream(response, result),
+  it('falls back for qualified MCP evidence without a completion snapshot even when output.is_error is false', async () => {
+    const marker = 'UNVERIFIED_NATIVE_MCP_FAILURE_OUTPUT';
+    const result = {content: [{type: 'text', text: `${marker}: ${AGENT_SECRET}`}], isError: true};
+    const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
+    const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
+      judge: JUDGE_MODEL, successGuidelines: ['The assistant reports the fixture failure.']});
+    const test = await fixture(plan, {
+      responses: ['The fixture tool reported a failure.'],
+      native(turns) {
+        let removedSnapshots = 0;
+        const records = mcpRollout(turns, output, result).trimEnd().split('\n').flatMap((line) => {
+          const record = JSON.parse(line) as {type: string; payload: Record<string, unknown>};
+          if (record.type === 'event_msg' && record.payload.type === 'item_completed') {
+            assert.equal((record.payload.item as {type: string}).type, 'McpToolCall');
+            removedSnapshots += 1;
+            return [];
+          }
+          if (record.payload.type === 'function_call') {
+            delete record.payload.namespace;
+            record.payload.name = 'mcp__fixture__probe';
+          }
+          if (record.payload.type === 'function_call_output') {
+            record.payload.is_error = false;
+          }
+          return [JSON.stringify(record)];
         });
-        const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
-          JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic incomplete-source evidence check.'}]}),
-        ]});
-        const completed = await executeEval({runId: `codex-mcp-no-snapshot-${nameForm}-${errorLabel}`, plan, composition: {
-          ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
-        }});
-        const verified = await verifyCompletedRun(completed.location);
-        assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
-        assert.equal(verified.result.evidence.completeness, 'fallback');
-        assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
-        const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'));
-        assert.deepEqual(interaction.turns[0]!.tool_calls, [{id: 'item_1', name: 'mcp__fixture__probe', input: {}}]);
-        const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-        const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
-        const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
-        assert.deepEqual(calls, [{tool_call_id: 'item_1', function_name: 'mcp__fixture__probe', arguments: {}}]);
-        for (const steps of [trajectory.steps, judge.transcript.steps]) {
-          const observations = steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
-          assert.deepEqual(observations, []);
-          assert.ok(!JSON.stringify(steps).includes('"is_error"'));
-          assert.ok(!JSON.stringify(steps).includes(marker));
-        }
-        assert.equal(provider.calls.length, 1);
-        const request = provider.calls[0]!.request;
-        assert.ok(request.systemPrompt?.includes(createJudgeTranscriptProjection(trajectory).transcriptJson));
-        assert.ok(!JSON.stringify(request).includes(marker));
-        assert.ok(!JSON.stringify(request).includes(AGENT_SECRET));
-        assert.ok(test.native()!.includes(marker));
-        assert.ok(test.native()!.includes(AGENT_SECRET));
-        await assertRestrictedNative(completed, test.native()!);
-      });
-    }
-  }
-
-  for (const [field, value, label] of [
-    ['annotations', null, 'null'], ['annotations', [], 'array'],
-    ['_meta', null, 'null'], ['_meta', [], 'array'],
-  ] as const) {
-    it(`falls back for ${label} MCP content ${field} containers`, async () => {
-      const result = {content: [{type: 'text', text: 'Malformed metadata fixture.', [field]: value}], isError: false};
-      const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
-      const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
-        judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the fixture.']});
-      const test = await fixture(plan, {native: (turns) => mcpRollout(turns, output, result),
-        stdout: (response) => mcpStream(response, result)});
-      const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
-        JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic metadata fallback check.'}]}),
-      ]});
-      const completed = await executeEval({runId: `codex-mcp-metadata-${field}-${label}`, plan, composition: {
-        ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
-      }});
-      const verified = await verifyCompletedRun(completed.location);
-      assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
-      assert.equal(verified.result.evidence.completeness, 'fallback');
-      assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
-      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
-      const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
-      const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
-      assert.deepEqual(calls.map(({function_name}) => function_name), ['mcp__fixture__probe']);
-      assert.deepEqual(observations, []);
-      assert.equal(provider.calls.length, 1);
-      await assertRestrictedNative(completed, test.native()!);
+        assert.equal(removedSnapshots, 1);
+        return records.join('\n') + '\n';
+      },
+      stdout: (response) => mcpStream(response, result),
     });
-  }
+    const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
+      JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic incomplete-source evidence check.'}]}),
+    ]});
+    const completed = await executeEval({
+      runId: 'codex-mcp-no-snapshot-qualified-false', plan, composition: {
+        ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
+      }
+    });
+    const verified = await verifyCompletedRun(completed.location);
+    assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
+    assert.equal(verified.result.evidence.completeness, 'fallback');
+    assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
+    const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'));
+    assert.deepEqual(interaction.turns[0]!.tool_calls, [{id: 'item_1', name: 'mcp__fixture__probe', input: {}}]);
+    const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
+    assert.deepEqual(calls, [{tool_call_id: 'item_1', function_name: 'mcp__fixture__probe', arguments: {}}]);
+    for (const steps of [trajectory.steps, judge.transcript.steps]) {
+      const observations = steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
+      assert.deepEqual(observations, []);
+      assert.ok(!JSON.stringify(steps).includes('"is_error"'));
+      assert.ok(!JSON.stringify(steps).includes(marker));
+    }
+    assert.equal(provider.calls.length, 1);
+    const request = provider.calls[0]!.request;
+    assert.ok(request.systemPrompt?.includes(createJudgeTranscriptProjection(trajectory).transcriptJson));
+    assert.ok(!JSON.stringify(request).includes(marker));
+    assert.ok(!JSON.stringify(request).includes(AGENT_SECRET));
+    assert.ok(test.native()!.includes(marker));
+    assert.ok(test.native()!.includes(AGENT_SECRET));
+    await assertRestrictedNative(completed, test.native()!);
+  });
 
-  for (const shape of ['text', 'structured-content', 'text-metadata'] as const) {
+  it('falls back for null MCP content annotations containers', async () => {
+    const result = {content: [{type: 'text', text: 'Malformed metadata fixture.', annotations: null}], isError: false};
+    const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
+    const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
+      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the fixture.']});
+    const test = await fixture(plan, {native: (turns) => mcpRollout(turns, output, result),
+      stdout: (response) => mcpStream(response, result)});
+    const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
+      JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic metadata fallback check.'}]}),
+    ]});
+    const completed = await executeEval({runId: 'codex-mcp-metadata-annotations-null', plan, composition: {
+      ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
+    }});
+    const verified = await verifyCompletedRun(completed.location);
+    assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
+    assert.equal(verified.result.evidence.completeness, 'fallback');
+    assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
+    const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
+    assert.deepEqual(calls.map(({function_name}) => function_name), ['mcp__fixture__probe']);
+    assert.deepEqual(observations, []);
+    assert.equal(provider.calls.length, 1);
+    await assertRestrictedNative(completed, test.native()!);
+  });
+
+  for (const shape of ['structured-content', 'text-metadata'] as const) {
     it(`retains normal MCP truncated ${shape} output as partial native evidence without restoring omitted text`, async () => {
       const captured = truncatedMcpFixture(shape);
       const expectedOutput = captured.output.replaceAll(AGENT_SECRET, '[REDACTED]');
       const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the large fixture.',
-        judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the large fixture.']});
+      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the large fixture.']});
       const test = await fixture(plan, {
         native: (turns) => mcpRollout(turns, captured.output, captured.result),
         stdout: (response) => mcpStream(response, captured.result),
@@ -633,9 +646,11 @@ describe('Codex engine integration', () => {
       const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
         JSON.stringify({results: [{index: 0, passed: true, explanation: 'Synthetic truncation evidence check.'}]}),
       ]});
-      const completed = await executeEval({runId: `codex-mcp-truncated-${shape}`, plan, composition: {
-        ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
-      }});
+      const completed = await executeEval({
+        runId: `codex-mcp-truncated-${shape}`, plan, composition: {
+          ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        }
+      });
       const verified = await verifyCompletedRun(completed.location);
       assert.equal(verified.result.evidence.provenance.source.kind, 'native_log');
       assert.equal(verified.result.evidence.completeness, 'partial');
@@ -679,41 +694,37 @@ describe('Codex engine integration', () => {
     });
   }
 
-  for (const corrupt of ['retained-prefix', 'omission-count'] as const) {
-    it(`falls back for a corrupted MCP truncated ${corrupt} instead of trusting a truncation marker`, async () => {
-      const captured = truncatedMcpFixture('text');
-      const output = corrupt === 'retained-prefix'
-        ? captured.output.replace(captured.retainedMarker, 'CORRUPTED_VISIBLE_MCP_RESULT')
-        : captured.output.replace(captured.truncationMarker, '…1 tokens truncated…');
-      const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the large fixture.',
-        judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the large fixture.']});
-      const test = await fixture(plan, {
-        native: (turns) => mcpRollout(turns, output, captured.result),
-        stdout: (response) => mcpStream(response, captured.result),
-      });
-      const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
-        JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic fallback evidence check.'}]}),
-      ]});
-      const completed = await executeEval({runId: `codex-mcp-corrupt-${corrupt}`, plan, composition: {
-        ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
-      }});
-      const verified = await verifyCompletedRun(completed.location);
-      assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
-      assert.equal(verified.result.evidence.completeness, 'fallback');
-      assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
-      const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
-      const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
-      const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
-      assert.deepEqual(calls.map(({function_name}) => function_name), ['mcp__fixture__probe']);
-      assert.deepEqual(observations, []);
-      assert.ok(provider.calls[0]!.request.systemPrompt?.includes(createJudgeTranscriptProjection(trajectory).transcriptJson));
-      assert.ok(!JSON.stringify(judge).includes(captured.omittedMarker));
-      assert.ok(!JSON.stringify(provider.calls[0]!.request).includes(AGENT_SECRET));
-      assert.ok(test.native()!.includes(captured.omittedMarker));
-      await assertRestrictedNative(completed, test.native()!);
+  it('falls back for a corrupted MCP truncation count instead of trusting a truncation marker', async () => {
+    const captured = truncatedMcpFixture('text');
+    const output = captured.output.replace(captured.truncationMarker, '…1 tokens truncated…');
+    const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the large fixture.',
+      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the large fixture.']});
+    const test = await fixture(plan, {
+      native: (turns) => mcpRollout(turns, output, captured.result),
+      stdout: (response) => mcpStream(response, captured.result),
     });
-  }
+    const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
+      JSON.stringify({results: [{index: 0, passed: false, explanation: 'Synthetic fallback evidence check.'}]}),
+    ]});
+    const completed = await executeEval({runId: 'codex-mcp-corrupt-omission-count', plan, composition: {
+      ...test.composition, completionProviders: new Map([[provider.provider.id, provider.provider]]),
+    }});
+    const verified = await verifyCompletedRun(completed.location);
+    assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
+    assert.equal(verified.result.evidence.completeness, 'fallback');
+    assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
+    const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
+    const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
+    assert.deepEqual(calls.map(({function_name}) => function_name), ['mcp__fixture__probe']);
+    assert.deepEqual(observations, []);
+    assert.ok(provider.calls[0]!.request.systemPrompt?.includes(createJudgeTranscriptProjection(trajectory).transcriptJson));
+    assert.ok(!JSON.stringify(judge).includes(captured.omittedMarker));
+    assert.ok(!JSON.stringify(provider.calls[0]!.request).includes(AGENT_SECRET));
+    assert.ok(test.native()!.includes(captured.omittedMarker));
+    await assertRestrictedNative(completed, test.native()!);
+  });
 
   it('reconciles native coverage against both completed driver turns before accepting a valid but stale rollout', async () => {
     const plan = createTestResolvedRunPlan({

@@ -1,9 +1,8 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import {sha256Hex} from '../model/hashes.js';
 import {loadDataset} from '../model/loaders.js';
@@ -27,16 +26,12 @@ describe('resolveManifestCaseIdFromFile', () => {
   it('selects only the exact manifest-backed case target', async () => {
     const {dataset, caseFile} = await createDataset();
 
-    await expect(
-      resolveManifestCaseIdFromFile(dataset, caseFile),
-    ).resolves.toBe('sample/write');
+    assert.equal((await resolveManifestCaseIdFromFile(dataset, caseFile)), 'sample/write');
 
     const alias = `${dataset.root}-case-alias`;
     cleanupPaths.push(alias);
     await fs.symlink(caseFile, alias);
-    await expect(
-      resolveManifestCaseIdFromFile(dataset, alias),
-    ).resolves.toBe('sample/write');
+    assert.equal((await resolveManifestCaseIdFromFile(dataset, alias)), 'sample/write');
   });
 
   it('rejects payload files, files outside the dataset, and non-files', async () => {
@@ -63,7 +58,7 @@ describe('resolveManifestCaseIdFromFile', () => {
   });
 
   it('rejects ambiguous or inconsistent loaded-dataset indexes', async () => {
-    const {dataset, caseFile} = await createDataset();
+    const {dataset, caseFile, fixtureFile} = await createDataset();
     const duplicate: LoadedDatasetV1 = {
       ...dataset,
       manifest: {
@@ -79,12 +74,34 @@ describe('resolveManifestCaseIdFromFile', () => {
       'ambiguous_case_file',
     );
 
-    const inconsistent: LoadedDatasetV1 = {
-      ...dataset,
-      cases: new Map(),
-    };
+    const loadedCase = dataset.cases.get('sample/write')!;
+    for (const cases of [
+      new Map(),
+      new Map([['sample/write', {
+        ...loadedCase,
+        definition: {...loadedCase.definition, id: 'sample/other'},
+      }]]),
+      new Map([['sample/write', {...loadedCase, path: fixtureFile}]]),
+    ]) {
+      await expectCode(
+        resolveManifestCaseIdFromFile({...dataset, cases}, caseFile),
+        'invalid_loaded_dataset',
+      );
+    }
+  });
+
+  it('requires a canonical dataset root even when the case target is valid', async () => {
+    const {dataset, caseFile} = await createDataset();
+    const rootAlias = `${dataset.root}-root-alias`;
+    cleanupPaths.push(rootAlias);
+    await fs.symlink(dataset.root, rootAlias, 'dir');
     await expectCode(
-      resolveManifestCaseIdFromFile(inconsistent, caseFile),
+      resolveManifestCaseIdFromFile({...dataset, root: rootAlias}, caseFile),
+      'invalid_loaded_dataset',
+    );
+
+    await expectCode(
+      resolveManifestCaseIdFromFile({...dataset, root: caseFile}, caseFile),
       'invalid_loaded_dataset',
     );
   });
@@ -162,7 +179,7 @@ async function expectCode(
     await promise;
     throw new Error(`Expected ${code}.`);
   } catch (error) {
-    expect(error).toBeInstanceOf(ManifestCaseFileError);
-    expect((error as ManifestCaseFileError).code).toBe(code);
+    assert.ok((error instanceof ManifestCaseFileError));
+    assert.equal((error as ManifestCaseFileError).code, code);
   }
 }

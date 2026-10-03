@@ -246,17 +246,110 @@ describe('selectAgentEvidence', () => {
     );
   });
 
+  it('reserves fallback tool activity for every turn at the ledger limit', () => {
+    const completedTurns = Array.from({length: 100}, (_, turn) => ({
+      user: `Prompt ${turn}`,
+      assistant: '',
+      toolCalls: Array.from({length: 4}, (_, call) => ({
+        id: `turn-${turn}-call-${call}`, name: 'Tool', input: {turn, call},
+      })),
+    }));
+    const selected = selectAgentEvidence({
+      agent, identity, model: 'test-model', sessionId: SESSION_ID, completedTurns,
+      collected: {
+        kind: 'unavailable',
+        reason: {code: 'source_unavailable', message: 'No native source.'},
+      },
+    });
+
+    assert.equal(selected.trajectory.steps.length, 200);
+    const agentSteps = selected.trajectory.steps.filter(({source}) => source === 'agent');
+    assert.equal(agentSteps.reduce((total, step) => total + (step.tool_calls?.length ?? 0), 0), 256);
+    for (const [turn, step] of agentSteps.entries()) {
+      assert.equal(step.tool_calls?.[0]?.tool_call_id, `turn-${turn}-call-0`);
+    }
+    assert.equal(trajectoryCoversCompletedTurns(
+      selected.trajectory, completedTurns, selected.provenance.source,
+    ), true);
+    assert.deepEqual(selected.warnings.map(({code}) => code), [
+      'source_unavailable', 'value_omitted', 'fallback_used',
+    ]);
+
+    for (const turns of [[], [...completedTurns, completedTurns[0]!]]) {
+      assert.throws(() => selectAgentEvidence({
+        agent, identity, model: 'test-model', sessionId: SESSION_ID,
+        completedTurns: turns,
+        collected: {kind: 'unavailable', reason: {code: 'source_unavailable', message: 'No source.'}},
+      }), /between 1 and 100 completed turns/);
+    }
+  });
+
+  it('preserves safe fallback arguments and explicitly omits unsafe tool input', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const deep = Array.from({length: 17}).reduce<unknown>((value) => ({value}), null);
+    const cases: readonly {
+      input: unknown;
+      expected: Record<string, unknown>;
+      omitted: boolean;
+    }[] = [
+      {input: undefined, expected: {}, omitted: false},
+      {input: {path: 'safe.txt', options: [true, null, 3]}, expected: {path: 'safe.txt', options: [true, null, 3]}, omitted: false},
+      {input: 'argument', expected: {value: 'argument'}, omitted: false},
+      {input: [1, 2], expected: {value: [1, 2]}, omitted: false},
+      {input: cyclic, expected: {}, omitted: true},
+      {input: {value: Number.POSITIVE_INFINITY}, expected: {}, omitted: true},
+      {input: {value: 1n}, expected: {}, omitted: true},
+      {input: {value: undefined}, expected: {}, omitted: true},
+      {input: {value: new Map([['key', 'value']])}, expected: {}, omitted: true},
+      {input: JSON.parse('{"__proto__":{"polluted":true},"path":"safe.txt"}'), expected: {}, omitted: true},
+      {input: deep, expected: {}, omitted: true},
+    ];
+
+    for (const [index, {input, expected, omitted}] of cases.entries()) {
+      const selected = select(completeNativeSteps(), {
+        kind: 'unavailable',
+        reason: {code: 'source_unavailable', message: 'No native source.'},
+      }, [{name: 'Tool', input}]);
+      assert.deepEqual(selected.trajectory.steps[1]?.tool_calls?.[0]?.arguments, expected, `input ${index}`);
+      assert.equal(selected.warnings.some(({code}) => code === 'value_omitted'), omitted, `input ${index}`);
+      assert.equal(selected.completeness, 'fallback');
+    }
+  });
+
+  it('ignores system and copied context but requires an agent step for an empty completed response', () => {
+    const completedTurns = [{user: 'Prompt', assistant: '', toolCalls: []}];
+    const steps = [
+      {step_id: 1, source: 'system', message: 'Runtime context'},
+      {step_id: 2, source: 'user', message: 'Old prompt', is_copied_context: true},
+      {step_id: 3, source: 'agent', message: 'Old response', is_copied_context: true},
+      {step_id: 4, source: 'user', message: 'Prompt'},
+      {step_id: 5, source: 'agent', message: ''},
+    ];
+    assert.equal(selectCodex(steps, completedTurns, 'claude-code-jsonl').completeness, 'complete');
+    assert.equal(selectCodex(steps.slice(0, -1), completedTurns, 'claude-code-jsonl').completeness, 'fallback');
+    assert.equal(selectCodex([
+      {step_id: 1, source: 'agent', message: 'Unattributed response'},
+      {step_id: 2, source: 'user', message: 'Prompt'},
+      {step_id: 3, source: 'agent', message: ''},
+    ], completedTurns, 'claude-code-jsonl').completeness, 'fallback');
+  });
+
   it('rejects an available candidate which contradicts the selected session', () => {
-    assert.throws(
-      () =>
-        select(completeNativeSteps(), {
+    for (const [trajectorySession, sourceSession] of [
+      ['other', SESSION_ID],
+      [SESSION_ID, 'other'],
+    ]) {
+      assert.throws(
+        () => select(completeNativeSteps(), {
           kind: 'available',
-          trajectory: {...trajectory(completeNativeSteps()), session_id: 'other'},
-          source: nativeSource(),
+          trajectory: {...trajectory(completeNativeSteps()), session_id: trajectorySession},
+          source: {...nativeSource(), sessionId: sourceSession!},
           warnings: [],
         }),
-      /selected agent session/,
-    );
+        /selected agent session/,
+      );
+    }
   });
 
   it('rejects source-state warnings on an available native candidate', () => {
@@ -385,6 +478,15 @@ describe('Codex native completed-turn coverage', () => {
     assert.equal(selected.completeness, 'complete');
   });
 
+  it('accepts visible assistant text content parts alongside native tool activity', () => {
+    const selected = selectCodex(codexSteps(['exec_command'], [
+      {type: 'text', text: ''},
+      {type: 'text', text: 'Native answer'},
+    ]));
+
+    assert.equal(selected.completeness, 'complete');
+  });
+
   it('does not let a later turn compensate for an earlier missing tool pair', () => {
     const selected = selectCodex([
       ...codexSteps([]),
@@ -446,12 +548,29 @@ describe('Codex native completed-turn coverage', () => {
 });
 
 describe('parseAgentEvidenceIdentity', () => {
-  it('strictly snapshots a safe identity', () => {
-    assert.deepEqual(parseAgentEvidenceIdentity(identity), identity);
-    assert.throws(
-      () => parseAgentEvidenceIdentity({...identity, extra: true}),
-      /safe name and version/,
-    );
+  it('freezes a detached identity snapshot', () => {
+    const input = {...identity};
+    const parsed = parseAgentEvidenceIdentity(input);
+    input.name = 'Changed after validation';
+
+    assert.deepEqual(parsed, identity);
+    assert.equal(Object.isFrozen(parsed), true);
+    assert.notEqual(parsed, input);
+  });
+
+  it('rejects malformed and unsafe identities at the pure declaration boundary', () => {
+    for (const input of [
+      null, [], new Map(), Object.create(identity),
+      {name: identity.name}, {...identity, extra: true},
+      {...identity, name: ''}, {...identity, name: 123},
+      {...identity, name: 'line\nbreak'}, {...identity, version: 'nul\u0000byte'},
+      {...identity, version: 'delete\u007fbyte'},
+      {...identity, name: 'x'.repeat(4_097)},
+    ]) {
+      assert.throws(() => parseAgentEvidenceIdentity(input), TypeError);
+    }
+    assert.equal(parseAgentEvidenceIdentity({...identity, name: 'x'.repeat(4_096)}).name.length, 4_096);
+    assert.deepEqual(parseAgentEvidenceIdentity(Object.assign(Object.create(null), identity)), identity);
   });
 });
 

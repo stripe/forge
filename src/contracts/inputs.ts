@@ -98,7 +98,13 @@ export async function createDirectoryRunInputProvider(
         throw new Error(`Dataset input exceeds its ${limit} byte limit: ${datasetPath}`);
       }
       const file = assertDeclaredFile(datasetPath, Number(inputStat.size));
-      const body = await readBoundedInput(canonicalPath, limit, readOptions.signal);
+      const body = await readBoundedInput(
+        canonicalPath,
+        inputStat,
+        () => resolveSafeInput(canonicalRoot, datasetPath),
+        limit,
+        readOptions.signal,
+      );
       if (file && (body.byteLength !== file.size || sha256Hex(body) !== file.sha256)) {
         throw new Error(`Dataset input does not match its manifest size or SHA-256: ${datasetPath}`);
       }
@@ -122,7 +128,7 @@ export async function createDirectoryRunInputProvider(
         listOptions.signal?.throwIfAborted();
         const current = pending.pop()!;
         const children = await fs.readdir(current.absolute, {withFileTypes: true});
-        children.sort((left, right) => left.name.localeCompare(right.name));
+        children.sort((left, right) => compareStrings(left.name, right.name));
         for (const child of children) {
           const childPath = `${current.relative}/${child.name}`;
           const childAbsolute = path.join(current.absolute, child.name);
@@ -146,7 +152,7 @@ export async function createDirectoryRunInputProvider(
           }
         }
       }
-      entries.sort((left, right) => left.path.localeCompare(right.path));
+      entries.sort((left, right) => compareStrings(left.path, right.path));
       if (manifestFiles !== undefined) {
         const expected = [...manifestFiles.keys()].filter(
           (filePath) => filePath.startsWith(`${datasetPath}/`),
@@ -162,6 +168,8 @@ export async function createDirectoryRunInputProvider(
 
 async function readBoundedInput(
   filePath: string,
+  expectedStat: Awaited<ReturnType<typeof fs.lstat>>,
+  revalidate: () => Promise<unknown>,
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<Buffer> {
@@ -171,6 +179,11 @@ async function readBoundedInput(
     if (!stat.isFile() || stat.size > maxBytes) {
       throw new Error(`Dataset input is not a regular file within its ${maxBytes} byte limit.`);
     }
+    if (stat.dev !== expectedStat.dev || stat.ino !== expectedStat.ino) {
+      throw new Error('Dataset input changed while opening its verified file.');
+    }
+    await revalidate();
+    signal?.throwIfAborted();
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of handle.createReadStream({
@@ -249,4 +262,8 @@ function positiveLimit(value: number): number {
     throw new TypeError('Run input byte limits must be positive integers.');
   }
   return value;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

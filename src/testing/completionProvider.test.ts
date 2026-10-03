@@ -1,6 +1,6 @@
+import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
-import {expect} from '../../test/support/expect.js';
 import type {
   CompletionProviderCallContext,
   CompletionRequest,
@@ -25,34 +25,32 @@ describe('createScriptedCompletionProvider', () => {
     });
     const context = completionContext({token: 'test-secret'});
 
-    await expect(
-      fixture.provider.complete(completionRequest(), context),
-    ).resolves.toEqual({
+    assert.deepEqual((await fixture.provider.complete(completionRequest(), context)), {
       content: 'first',
       stopReason: 'end_turn',
       usage: {inputTokens: 0, outputTokens: 0, cachedInputTokens: 0},
     });
-    await expect(
-      fixture.provider.complete(completionRequest({purpose: 'judge'}), context),
-    ).resolves.toEqual({
+    assert.deepEqual((await fixture.provider.complete(completionRequest({purpose: 'judge'}), context)), {
       content: 'second',
       stopReason: 'max_tokens',
       usage: {inputTokens: 3, outputTokens: 2, cachedInputTokens: 1},
       costUsd: 0.004,
     });
-    await expect(
-      fixture.provider.complete(completionRequest(), context),
-    ).resolves.toMatchObject({content: 'role_player:hello:test-secret'});
+    {
+      const actual = (await fixture.provider.complete(completionRequest(), context));
+      assert.ok(actual);
+      assert.equal(actual.content, 'role_player:hello:test-secret');
+    }
 
-    expect(fixture.calls).toHaveLength(3);
-    expect(fixture.calls[0]?.request.systemPrompt).toBe('test system');
-    expect(fixture.calls[0]?.context.credentials).toEqual({token: 'test-secret'});
-    expect(fixture.events).toEqual([
+    assert.equal((fixture.calls).length, 3);
+    assert.equal(fixture.calls[0]?.request.systemPrompt, 'test system');
+    assert.deepEqual(fixture.calls[0]?.context.credentials, {token: 'test-secret'});
+    assert.deepEqual(fixture.events, [
       'complete:role_player',
       'complete:judge',
       'complete:role_player',
     ]);
-    expect(fixture.remainingResponses).toBe(0);
+    assert.equal(fixture.remainingResponses, 0);
   });
 
   it('records pure requirements and an optional preflight hook', async () => {
@@ -72,7 +70,7 @@ describe('createScriptedCompletionProvider', () => {
     const signal = new AbortController().signal;
     const model = {provider: 'test-provider', model: 'test-model'};
 
-    expect(fixture.provider.requirements({model, purpose: 'judge'})).toEqual({
+    assert.deepEqual(fixture.provider.requirements({model, purpose: 'judge'}), {
       credentials: {token: {reference: 'test.judge'}},
     });
     await fixture.provider.preflight?.({
@@ -83,41 +81,39 @@ describe('createScriptedCompletionProvider', () => {
       signal,
     });
 
-    expect(fixture.requirementCalls).toEqual([{model, purpose: 'judge'}]);
-    expect(fixture.preflightCalls[0]).toMatchObject({
-      runId: 'run-1',
-      model,
-      purpose: 'judge',
-      credentials: {token: 'resolved-secret'},
-    });
-    expect(observedCredential).toBe('resolved-secret');
-    expect(fixture.events).toEqual(['requirements:judge', 'preflight:judge']);
+    assert.deepEqual(fixture.requirementCalls, [{model, purpose: 'judge'}]);
+    {
+      const actual = fixture.preflightCalls[0];
+      assert.ok(actual);
+      assert.deepEqual({runId: actual.runId, model: actual.model, purpose: actual.purpose, credentials: {token: actual.credentials.token}}, {
+        runId: 'run-1',
+        model,
+        purpose: 'judge',
+        credentials: {token: 'resolved-secret'},
+      });
+    }
+    assert.equal(observedCredential, 'resolved-secret');
+    assert.deepEqual(fixture.events, ['requirements:judge', 'preflight:judge']);
   });
 
   it('propagates scripted failures, fails on exhaustion, and preserves an aborted step', async () => {
     const failure = new Error('provider unavailable');
     const fixture = createScriptedCompletionProvider({responses: [failure]});
 
-    await expect(
-      fixture.provider.complete(completionRequest(), completionContext()),
-    ).rejects.toThrow('provider unavailable');
-    await expect(
-      fixture.provider.complete(completionRequest(), completionContext()),
-    ).rejects.toThrow(/no remaining response/);
-    expect(fixture.calls).toHaveLength(2);
-    expect(fixture.remainingResponses).toBe(0);
+    await assert.rejects(fixture.provider.complete(completionRequest(), completionContext()), /provider unavailable/);
+    await assert.rejects(fixture.provider.complete(completionRequest(), completionContext()), /no remaining response/);
+    assert.equal((fixture.calls).length, 2);
+    assert.equal(fixture.remainingResponses, 0);
 
     const aborted = createScriptedCompletionProvider({responses: ['unused']});
     const controller = new AbortController();
     controller.abort();
-    await expect(
-      aborted.provider.complete(
-        completionRequest({signal: controller.signal}),
-        completionContext(),
-      ),
-    ).rejects.toThrow();
-    expect(aborted.calls).toHaveLength(0);
-    expect(aborted.remainingResponses).toBe(1);
+    await assert.rejects(aborted.provider.complete(
+      completionRequest({signal: controller.signal}),
+      completionContext(),
+    ));
+    assert.equal((aborted.calls).length, 0);
+    assert.equal(aborted.remainingResponses, 1);
   });
 
   it('rechecks cancellation after an asynchronous scripted handler settles', async () => {
@@ -141,7 +137,40 @@ describe('createScriptedCompletionProvider', () => {
     controller.abort(new DOMException('cancelled', 'AbortError'));
     release();
 
-    await expect(pending).rejects.toThrow();
+    await assert.rejects(pending);
+  });
+
+  it('records isolated request and credential snapshots and returns copied response usage', async () => {
+    const schema = {type: 'object', properties: {answer: {type: 'string'}}};
+    const messages = [{role: 'user' as const, content: 'original'}];
+    const model = {provider: 'test-provider', model: 'original-model'};
+    const credentials = {token: 'synthetic-value'};
+    const response = {
+      content: 'answer', stopReason: 'end_turn' as const,
+      usage: {inputTokens: 3, outputTokens: 2, cachedInputTokens: 1},
+    };
+    const fixture = createScriptedCompletionProvider({responses: [response]});
+    const request = completionRequest({
+      model, messages, responseSchema: {name: 'answer', strict: true, schema},
+    });
+    const completed = await fixture.provider.complete(request, {credentials});
+    messages[0]!.content = 'changed';
+    model.model = 'changed';
+    credentials.token = 'changed';
+    schema.properties.answer.type = 'number';
+    response.usage.inputTokens = 999;
+
+    const recorded = fixture.calls[0]!;
+    assert.deepEqual(recorded.request.messages, [{role: 'user', content: 'original'}]);
+    assert.equal(recorded.request.model.model, 'original-model');
+    assert.deepEqual(recorded.request.responseSchema?.schema, {
+      type: 'object', properties: {answer: {type: 'string'}},
+    });
+    assert.equal(recorded.request.signal, request.signal);
+    assert.deepEqual(recorded.context.credentials, {token: 'synthetic-value'});
+    assert.equal(completed.usage.inputTokens, 3);
+    assert.equal(Object.isFrozen(recorded.request.messages[0]), true);
+    assert.equal(Object.isFrozen(completed.usage), true);
   });
 });
 

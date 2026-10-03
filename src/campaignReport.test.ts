@@ -86,12 +86,23 @@ describe('campaign scorecards', () => {
       (value: typeof report) => {value.runs[0]!.result_path = '../other/result.json';},
       (value: typeof report) => {value.runs[0]!.evaluation = null;},
       (value: typeof report) => {value.runs[0]!.evaluation!.checks_passed = 2;},
+      (value: typeof report) => {Object.assign(value.runs[0]!, {extra: true});},
+      (value: typeof report) => {Object.assign(value.runs[0]!.evaluation!, {extra: true});},
+      (value: typeof report) => {value.runs[0]!.evaluation!.guidelines_passed = 1;},
+      (value: typeof report) => {value.runs[0]!.error_code = 'execution_error';},
+      (value: typeof report) => {value.runs[0]!.state = 'errored';},
+      (value: typeof report) => {value.runs[0]!.state = 'pending'; value.runs[0]!.run_id = null;},
+      (value: typeof report) => {value.runs[0]!.run_id = '../unsafe'; value.runs[0]!.result_path = 'runs/../unsafe/result.json';},
     ]) {
       const changed = structuredClone(report);
       mutate(changed);
       assert.throws(() => parseCampaignReport(changed));
     }
     assert.deepEqual(parseCampaignReport(report), report);
+    const duplicate = build([row(0), row(1)]);
+    duplicate.runs[1]!.run_id = duplicate.runs[0]!.run_id;
+    duplicate.runs[1]!.result_path = duplicate.runs[0]!.result_path;
+    assert.throws(() => parseCampaignReport(duplicate), /duplicate run IDs/);
   });
 
   it('writes partial results after execution errors and refreshes only latest attempts on resume', async () => {

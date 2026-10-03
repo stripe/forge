@@ -1,9 +1,8 @@
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-
-import {expect} from '../../test/support/expect.js';
 
 import type {
   AgentAdapter,
@@ -17,6 +16,7 @@ import type {
 import type {ForgeComposition} from '../contracts/composition.js';
 import {credentialReference} from '../contracts/credentials.js';
 import type {RunInputProvider} from '../contracts/inputs.js';
+import type {RunEvent} from '../contracts/observability.js';
 import type {
   PreparedRuntime,
   RuntimeAdapter,
@@ -66,33 +66,31 @@ describe('executeEval', () => {
       now: monotonicClock(),
     });
 
-    expect(completed.result).toMatchObject({
-      schema_version: 1,
-      run_id: 'run-1',
-      forge: {version: FORGE_VERSION},
-      agent: {session_id: 'canonical-session'},
-      evidence: {
-        redaction_count: 1,
-        completeness: 'complete',
-        provenance: {
-          source: {
-            kind: 'native_log',
-            format: 'claude-code-jsonl',
-            session_id: 'canonical-session',
-          },
-          adapter: {id: 'claude-code', version: 'test-adapter'},
-        },
-      },
-      supplemental_artifacts: [
+    {
+      const actual = completed.result;
+      assert.ok(actual);
+      assert.ok(actual.evidence.provenance.source.kind === 'native_log');
+      assert.equal(actual.schema_version, 1);
+      assert.equal(actual.run_id, 'run-1');
+      assert.equal(actual.forge.version, FORGE_VERSION);
+      assert.equal(actual.agent.session_id, 'canonical-session');
+      assert.equal(actual.evidence.redaction_count, 1);
+      assert.equal(actual.evidence.completeness, 'complete');
+      assert.equal(actual.evidence.provenance.source.format, 'claude-code-jsonl');
+      assert.equal(actual.evidence.provenance.source.session_id, 'canonical-session');
+      assert.equal(actual.evidence.provenance.adapter.id, 'claude-code');
+      assert.equal(actual.evidence.provenance.adapter.version, 'test-adapter');
+      assert.deepEqual(actual.supplemental_artifacts.map((item) => ({path: item.path, media_type: item.media_type, sensitivity: item.sensitivity})), [
         {
           path: 'native/claude-code/session.jsonl',
           media_type: 'application/x-ndjson',
           sensitivity: 'restricted',
         },
-      ],
-      evaluation: {status: 'passed', score: 0},
-    });
-    expect(fixture.calls).toEqual([
+      ]);
+      assert.equal(actual.evaluation.status, 'passed');
+      assert.equal(actual.evaluation.score, 0);
+    }
+    assert.deepEqual(fixture.calls, [
       'credential:anthropic.api-key',
       'runtime:prepare',
       'agent:prepare',
@@ -114,16 +112,16 @@ describe('executeEval', () => {
     ]);
 
     const verified = await verifyCompletedRun(completed.location);
-    expect(verified.result).toMatchObject({
-      schema_version: 1,
-      evidence: {
-        provenance: {
-          source: {kind: 'native_log', format: 'claude-code-jsonl'},
-          adapter: {id: 'claude-code', version: 'test-adapter'},
-        },
-      },
-    });
-    expect(verified.result.evaluation.checks).toEqual([
+    {
+      const actual = verified.result;
+      assert.ok(actual);
+      assert.equal(actual.schema_version, 1);
+      assert.equal(actual.evidence.provenance.source.kind, 'native_log');
+      assert.equal(actual.evidence.provenance.source.format, 'claude-code-jsonl');
+      assert.equal(actual.evidence.provenance.adapter.id, 'claude-code');
+      assert.equal(actual.evidence.provenance.adapter.version, 'test-adapter');
+    }
+    assert.deepEqual(verified.result.evaluation.checks, [
       {name: 'file_created: greeting.txt', passed: true},
       {name: 'file_exists: greeting.txt', passed: true},
       {name: 'file_contains: greeting.txt /hello/', passed: true},
@@ -132,21 +130,83 @@ describe('executeEval', () => {
       path.join(completed.location, 'trajectory.json'),
       'utf8',
     );
-    expect(trajectory).toContain('[REDACTED]');
-    expect(trajectory).not.toContain(SECRET);
+    assert.ok((trajectory).includes('[REDACTED]'));
+    assert.ok(!(trajectory).includes(SECRET));
     const nativePath = path.join(
       completed.location,
       'native/claude-code/session.jsonl',
     );
-    expect(await fs.readFile(nativePath, 'utf8')).toBe(RAW_NATIVE_SESSION);
-    expect((await fs.stat(nativePath)).mode & 0o777).toBe(0o600);
-    expect(completed.result).not.toHaveProperty('plan_sha256');
+    assert.equal(await fs.readFile(nativePath, 'utf8'), RAW_NATIVE_SESSION);
+    assert.equal((await fs.stat(nativePath)).mode & 0o777, 0o600);
+    assert.ok(!('plan_sha256' in (completed.result)));
     const workspaceEvidence = JSON.parse(await fs.readFile(
       path.join(completed.location, 'workspace-evidence.json'),
       'utf8',
     )) as {schema_version: number; entries: Array<Record<string, unknown>>};
-    expect(workspaceEvidence.schema_version).toBe(1);
-    expect(workspaceEvidence.entries[0]).not.toHaveProperty('sha256');
+    assert.equal(workspaceEvidence.schema_version, 1);
+    assert.ok(!('sha256' in (workspaceEvidence.entries[0]!)));
+  });
+
+  it('commits completed scoring with a safe warning when runtime cleanup fails', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({root: path.join(fixture.root, 'cleanup-warning')});
+    const composition = fixture.composition(recordingStore(store, fixture.calls));
+    const observed: RunEvent[] = [];
+    const warning = {
+      code: 'runtime_cleanup_failed',
+      message: 'Runtime cleanup failed after canonical artifacts were staged.',
+    };
+    const completed = await executeEval({
+      runId: 'run-cleanup-warning',
+      plan: fixture.plan,
+      composition: {
+        ...composition,
+        runtime: {
+          ...composition.runtime,
+          async prepare(input) {
+            const prepared = await composition.runtime.prepare(input);
+            return {
+              ...prepared,
+              async dispose() {
+                await prepared.dispose();
+                throw new Error(`private cleanup detail: ${SECRET}`);
+              },
+            };
+          },
+        },
+        observer: {
+          observe(event) {
+            observed.push(event);
+            throw new Error('synchronous observation failure');
+          },
+        },
+      },
+      now: monotonicClock(),
+    });
+
+    {
+      const actual = completed.result.evaluation;
+      assert.ok(actual);
+      assert.equal(actual.status, 'passed');
+      assert.equal(actual.score, 0);
+    }
+    assert.deepEqual(completed.result.warnings, [warning]);
+    const observedWarnings = observed.filter(({type}) => type === 'warning');
+    assert.equal((observedWarnings).length, 1);
+    {
+      const actual = observedWarnings[0];
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-cleanup-warning');
+      assert.equal(actual.type, 'warning');
+      assert.equal(actual.phase, 'runtime_dispose');
+      assert.deepEqual(actual.message, warning.message);
+    }
+    assert.ok(!(JSON.stringify(observed)).includes(SECRET));
+    assert.deepEqual(fixture.calls.slice(-2), ['runtime:dispose', 'artifact:commit']);
+    assert.deepEqual(fixture.calls.filter((call) => call === 'runtime:dispose'), ['runtime:dispose']);
+    const verified = await verifyCompletedRun(completed.location);
+    assert.deepEqual(verified.result.warnings, [warning]);
+    assert.deepEqual(verified.result.evaluation, completed.result.evaluation);
   });
 
   it('isolates contributor result snapshots and captures returned artifact bytes', async () => {
@@ -180,9 +240,12 @@ describe('executeEval', () => {
         {
           id: 'second',
           async contribute({result}) {
-            expect((result.supplemental_artifacts as Array<{sha256: string}>)[0]?.sha256)
-              .toBe(nativeDigest);
-            expect(result.evaluation).toMatchObject({status: 'passed'});
+            assert.equal((result.supplemental_artifacts as Array<{sha256: string}>)[0]?.sha256, nativeDigest);
+            {
+              const actual = result.evaluation as {status: string};
+              assert.ok(actual);
+              assert.equal(actual.status, 'passed');
+            }
             nativeBody.fill(0);
             contributionBody.fill(0);
             contributed.path = 'extensions/second/replaced.txt';
@@ -198,19 +261,21 @@ describe('executeEval', () => {
       composition,
       now: monotonicClock(),
     });
-    expect(completed.result.evaluation.status).toBe('passed');
-    expect(completed.result.supplemental_artifacts[0]?.sha256).toBe(nativeDigest);
-    expect(await fs.readFile(
+    assert.equal(completed.result.evaluation.status, 'passed');
+    assert.equal(completed.result.supplemental_artifacts[0]?.sha256, nativeDigest);
+    assert.equal(await fs.readFile(
       path.join(completed.location, 'native/claude-code/session.jsonl'),
       'utf8',
-    )).toBe(RAW_NATIVE_SESSION);
-    expect(await fs.readFile(
+    ), RAW_NATIVE_SESSION);
+    assert.equal(await fs.readFile(
       path.join(completed.location, 'extensions/first/report.txt'),
       'utf8',
-    )).toBe('first contribution\n');
-    await expect(verifyCompletedRun(completed.location)).resolves.toMatchObject({
-      runId: 'run-contributor-snapshots',
-    });
+    ), 'first contribution\n');
+    {
+      const actual = (await verifyCompletedRun(completed.location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-contributor-snapshots');
+    }
   });
 
   it('omits standalone evaluation and empty workspace evidence artifacts', async () => {
@@ -250,47 +315,50 @@ describe('executeEval', () => {
         now: monotonicClock(),
       });
 
-      expect(completed.result.evaluation).toMatchObject({status: 'passed', score: 0});
-      expect(completed.result.artifacts.map(({path: artifactPath}) => artifactPath)).toEqual([
+      {
+        const actual = completed.result.evaluation;
+        assert.ok(actual);
+        assert.equal(actual.status, 'passed');
+        assert.equal(actual.score, 0);
+      }
+      assert.deepEqual(completed.result.artifacts.map(({path: artifactPath}) => artifactPath), [
         'plan.json',
         'setup.json',
         'trajectory.json',
         'interaction.json',
       ]);
-      await expect(verifyCompletedRun(completed.location)).resolves.toMatchObject({
-        runId: `run-minimal-artifacts-${suffix}`,
-      });
+      {
+        const actual = (await verifyCompletedRun(completed.location));
+        assert.ok(actual);
+        assert.deepEqual(actual.runId, `run-minimal-artifacts-${suffix}`);
+      }
     }
   });
 
   it('rejects adapter-produced fallback evidence', async () => {
     const fixture = await executionFixture({adapterFallbackEvidence: true});
 
-    await expect(
-      executeEval({
-        runId: 'run-bad-evidence',
-        plan: fixture.plan,
-        composition: fixture.composition(inertStore()),
-        now: monotonicClock(),
-      }),
-    ).rejects.toMatchObject({code: 'evidence_failed', phase: 'evidence'});
-    expect(fixture.calls).not.toContain('artifact:begin');
-    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+    await assert.rejects(executeEval({
+      runId: 'run-bad-evidence',
+      plan: fixture.plan,
+      composition: fixture.composition(inertStore()),
+      now: monotonicClock(),
+    }), {code: 'evidence_failed', phase: 'evidence'});
+    assert.ok(!(fixture.calls).includes('artifact:begin'));
+    assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
   it('rejects completed evidence without exact session provenance', async () => {
     const fixture = await executionFixture({omitEvidenceSession: true});
 
-    await expect(
-      executeEval({
-        runId: 'run-unowned-evidence',
-        plan: fixture.plan,
-        composition: fixture.composition(inertStore()),
-        now: monotonicClock(),
-      }),
-    ).rejects.toMatchObject({code: 'evidence_failed', phase: 'evidence'});
-    expect(fixture.calls).not.toContain('artifact:begin');
-    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+    await assert.rejects(executeEval({
+      runId: 'run-unowned-evidence',
+      plan: fixture.plan,
+      composition: fixture.composition(inertStore()),
+      now: monotonicClock(),
+    }), {code: 'evidence_failed', phase: 'evidence'});
+    assert.ok(!(fixture.calls).includes('artifact:begin'));
+    assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
   it('rejects a native artifact for a different session before staging', async () => {
@@ -299,16 +367,14 @@ describe('executeEval', () => {
       nativeArtifactSessionId: 'other-session',
     });
 
-    await expect(
-      executeEval({
-        runId: 'run-mismatched-native-artifact',
-        plan: fixture.plan,
-        composition: fixture.composition(inertStore()),
-        now: monotonicClock(),
-      }),
-    ).rejects.toMatchObject({code: 'evidence_failed', phase: 'evidence'});
-    expect(fixture.calls).not.toContain('artifact:begin');
-    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+    await assert.rejects(executeEval({
+      runId: 'run-mismatched-native-artifact',
+      plan: fixture.plan,
+      composition: fixture.composition(inertStore()),
+      now: monotonicClock(),
+    }), {code: 'evidence_failed', phase: 'evidence'});
+    assert.ok(!(fixture.calls).includes('artifact:begin'));
+    assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
   it('retains exact native bytes when normalization uses driver fallback', async () => {
@@ -325,22 +391,24 @@ describe('executeEval', () => {
       now: monotonicClock(),
     });
 
-    expect(completed.result.evidence).toMatchObject({
-      completeness: 'fallback',
-      provenance: {source: {kind: 'driver_fallback'}},
-    });
-    expect(
-      await fs.readFile(
-        path.join(
-          completed.location,
-          'native/claude-code/session.jsonl',
-        ),
-        'utf8',
+    {
+      const actual = completed.result.evidence;
+      assert.ok(actual);
+      assert.equal(actual.completeness, 'fallback');
+      assert.equal(actual.provenance.source.kind, 'driver_fallback');
+    }
+    assert.equal(await fs.readFile(
+      path.join(
+        completed.location,
+        'native/claude-code/session.jsonl',
       ),
-    ).toBe(RAW_NATIVE_SESSION);
-    await expect(verifyCompletedRun(completed.location)).resolves.toMatchObject({
-      runId: 'run-native-fallback',
-    });
+      'utf8',
+    ), RAW_NATIVE_SESSION);
+    {
+      const actual = (await verifyCompletedRun(completed.location));
+      assert.ok(actual);
+      assert.equal(actual.runId, 'run-native-fallback');
+    }
   });
 
   it('rolls back an opened artifact transaction when staging fails', async () => {
@@ -371,15 +439,49 @@ describe('executeEval', () => {
       composition: fixture.composition(failingStore),
       now: monotonicClock(),
     });
-    await expect(rejected).rejects.toMatchObject({
-      code: 'artifact_failed',
-      phase: 'artifact_stage',
-    });
-    expect(rollbacks).toBe(1);
-    expect(fixture.calls.slice(-2)).toEqual([
+    await assert.rejects(rejected, {code: 'artifact_failed', phase: 'artifact_stage'});
+    assert.equal(rollbacks, 1);
+    assert.deepEqual(fixture.calls.slice(-2), [
       'artifact:rollback',
       'runtime:dispose',
     ]);
+  });
+
+  it('preserves a commit failure through failed rollback without disposing twice', async () => {
+    const fixture = await executionFixture();
+    const commitFailure = new Error('primary commit failure');
+    const failingStore: RunArtifactStore = {
+      async begin() {
+        fixture.calls.push('artifact:begin');
+        return {
+          async write(artifact) {
+            fixture.calls.push(`artifact:write:${artifact.path}`);
+          },
+          async commit() {
+            fixture.calls.push('artifact:commit');
+            throw commitFailure;
+          },
+          async rollback() {
+            fixture.calls.push('artifact:rollback');
+            throw new Error('secondary rollback failure');
+          },
+        };
+      },
+    };
+
+    await assert.rejects(executeEval({
+      runId: 'run-commit-failure',
+      plan: fixture.plan,
+      composition: fixture.composition(failingStore),
+      now: monotonicClock(),
+    }), {code: 'artifact_failed', phase: 'result_commit', message: 'Forge failed during result_commit.', cause: commitFailure});
+    assert.deepEqual(fixture.calls.slice(-3), [
+      'runtime:dispose',
+      'artifact:commit',
+      'artifact:rollback',
+    ]);
+    assert.deepEqual(fixture.calls.filter((call) => call === 'runtime:dispose'), ['runtime:dispose']);
+    assert.deepEqual(fixture.calls.filter((call) => call === 'artifact:rollback'), ['artifact:rollback']);
   });
 
   it('classifies session startup failures as agent failures', async () => {
@@ -396,9 +498,14 @@ describe('executeEval', () => {
     } catch (error) {
       captured = error;
     }
-    expect(captured).toBeInstanceOf(ForgeExecutionError);
-    expect(captured).toMatchObject({code: 'agent_failed', phase: 'interaction'});
-    expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+    assert.ok((captured instanceof ForgeExecutionError));
+    {
+      const actual = captured;
+      assert.ok(actual);
+      assert.equal(actual.code, 'agent_failed');
+      assert.equal(actual.phase, 'interaction');
+    }
+    assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
   it('assigns credential scope from a first-party setup capability', async () => {
@@ -437,9 +544,9 @@ describe('executeEval', () => {
             }),
           }),
           async apply(context: SetupExecutionContext) {
-            expect(context.stepIndex).toBe(0);
-            expect(context.selection.adapter).toBe('claude-code');
-            expect(context.paths.workspace).toBe('/workspace');
+            assert.equal(context.stepIndex, 0);
+            assert.equal(context.selection.adapter, 'claude-code');
+            assert.equal(context.paths.workspace, '/workspace');
           },
         });
       },
@@ -459,16 +566,16 @@ describe('executeEval', () => {
           runtime: {
             ...runtime,
             async prepare(input) {
-              expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
+              assert.deepEqual(input.environment.credentials.ANTHROPIC_API_KEY?.scopes, [
                 'agent',
               ]);
-              expect(input.environment.credentials.SETUP_TOKEN?.scopes).toEqual([
+              assert.deepEqual(input.environment.credentials.SETUP_TOKEN?.scopes, [
                 'setup',
               ]);
-              expect(input.environment.credentials.SERVICE_TOKEN?.scopes).toEqual([
+              assert.deepEqual(input.environment.credentials.SERVICE_TOKEN?.scopes, [
                 'agent',
               ]);
-              expect(input.environment.credentials.SHARED_TOKEN?.scopes).toEqual([
+              assert.deepEqual(input.environment.credentials.SHARED_TOKEN?.scopes, [
                 'setup',
                 'agent',
               ]);
@@ -493,14 +600,14 @@ describe('executeEval', () => {
     it(`rejects a setup resolution containing ${description} before interaction`, async () => {
       const fixture = await executionFixture({credentialValue: credential});
       const step: ResolvedRunPlanV1['setup'][number] = {
-        uses: 'forge/command',
-        with: {argv: ['true']},
-      };
+      uses: 'forge/command',
+      with: {argv: ['true']},
+    };
       const plan: ResolvedRunPlanV1 = {
-        ...fixture.plan,
-        treatment: {id: fixture.plan.treatment.id, setup: [step]},
-        setup: [step],
-      };
+      ...fixture.plan,
+      treatment: {id: fixture.plan.treatment.id, setup: [step]},
+      setup: [step],
+    };
       const handler: SetupStepHandler = {
         uses: step.uses,
         preflight() {
@@ -513,23 +620,21 @@ describe('executeEval', () => {
         },
       };
 
-      await expect(
-        executeEvalWithTestHooks(
-          {
-            runId: 'run-secret-setup-resolution',
-            plan,
-            composition: fixture.composition(inertStore()),
-            now: monotonicClock(),
-          },
-          {
-            setupExecutor: createSetupExecutorWithHandlers(
-              new Map([[handler.uses, handler]]),
-            ),
-          },
-        ),
-      ).rejects.toMatchObject({code: 'setup_failed', phase: 'setup'});
-      expect(fixture.calls).not.toContain('agent:open');
-      expect(fixture.calls.at(-1)).toBe('runtime:dispose');
+      await assert.rejects(executeEvalWithTestHooks(
+        {
+          runId: 'run-secret-setup-resolution',
+          plan,
+          composition: fixture.composition(inertStore()),
+          now: monotonicClock(),
+        },
+        {
+          setupExecutor: createSetupExecutorWithHandlers(
+            new Map([[handler.uses, handler]]),
+          ),
+        },
+      ), {code: 'setup_failed', phase: 'setup'});
+      assert.ok(!(fixture.calls).includes('agent:open'));
+      assert.equal(fixture.calls.at(-1), 'runtime:dispose');
     });
   }
 
@@ -554,37 +659,35 @@ describe('executeEval', () => {
     let credentialResolved = false;
     let runtimePrepared = false;
 
-    await expect(
-      executeEvalWithTestHooks(
-        {
-          runId: 'run-invalid-setup-preflight',
-          plan,
-          composition: {
-            ...composition,
-            credentialResolver: {
-              async resolve() {
-                credentialResolved = true;
-                return 'must-not-resolve';
-              },
+    await assert.rejects(executeEvalWithTestHooks(
+      {
+        runId: 'run-invalid-setup-preflight',
+        plan,
+        composition: {
+          ...composition,
+          credentialResolver: {
+            async resolve() {
+              credentialResolved = true;
+              return 'must-not-resolve';
             },
-            runtime: {
-              ...composition.runtime,
-              async prepare(input) {
-                runtimePrepared = true;
-                return composition.runtime.prepare(input);
-              },
+          },
+          runtime: {
+            ...composition.runtime,
+            async prepare(input) {
+              runtimePrepared = true;
+              return composition.runtime.prepare(input);
             },
           },
         },
-        {
-          setupExecutor: createSetupExecutorWithHandlers(
-            new Map([[handler.uses, handler]]),
-          ),
-        },
-      ),
-    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
-    expect(credentialResolved).toBe(false);
-    expect(runtimePrepared).toBe(false);
+      },
+      {
+        setupExecutor: createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ),
+      },
+    ), {code: 'invalid_plan', phase: 'preflight'});
+    assert.equal(credentialResolved, false);
+    assert.equal(runtimePrepared, false);
   });
 
   it('rejects a plan stamped by another package version', async () => {
@@ -596,8 +699,7 @@ describe('executeEval', () => {
         forge: {...fixture.plan.provenance.forge, version: '0.0.0'},
       },
     };
-    expect(() => preflightEval({plan, composition: fixture.composition(inertStore())}))
-      .toThrow(`Run plan requires Forge 0.0.0; this build is ${FORGE_VERSION}.`);
+    assert.throws(() => preflightEval({plan, composition: fixture.composition(inertStore())}), {message: `Run plan requires Forge 0.0.0; this build is ${FORGE_VERSION}.`});
   });
 
   it('rejects malformed agent environment declarations during pure preflight', async () => {
@@ -625,15 +727,14 @@ describe('executeEval', () => {
           } as unknown as ReturnType<AgentAdapter['requirements']>;
         },
       };
-      expect(() =>
+      assert.throws(() =>
         preflightEval({
           plan: fixture.plan,
           composition: {
             ...composition,
             agents: new Map([[unsafeAgent.id, unsafeAgent]]),
           },
-        }),
-      ).toThrow(ForgeExecutionError);
+        }), ForgeExecutionError);
     }
 
     let credentialResolved = false;
@@ -649,31 +750,29 @@ describe('executeEval', () => {
         } as unknown as ReturnType<AgentAdapter['requirements']>;
       },
     };
-    await expect(
-      executeEval({
-        runId: 'run-invalid-agent-environment',
-        plan: fixture.plan,
-        composition: {
-          ...composition,
-          agents: new Map([[unsafeAgent.id, unsafeAgent]]),
-          credentialResolver: {
-            async resolve() {
-              credentialResolved = true;
-              return 'must-not-resolve';
-            },
-          },
-          runtime: {
-            ...composition.runtime,
-            async prepare(input) {
-              runtimePrepared = true;
-              return composition.runtime.prepare(input);
-            },
+    await assert.rejects(executeEval({
+      runId: 'run-invalid-agent-environment',
+      plan: fixture.plan,
+      composition: {
+        ...composition,
+        agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+        credentialResolver: {
+          async resolve() {
+            credentialResolved = true;
+            return 'must-not-resolve';
           },
         },
-      }),
-    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
-    expect(credentialResolved).toBe(false);
-    expect(runtimePrepared).toBe(false);
+        runtime: {
+          ...composition.runtime,
+          async prepare(input) {
+            runtimePrepared = true;
+            return composition.runtime.prepare(input);
+          },
+        },
+      },
+    }), {code: 'invalid_plan', phase: 'preflight'});
+    assert.equal(credentialResolved, false);
+    assert.equal(runtimePrepared, false);
   });
 
   it('rejects capability-assigned credential scopes before resolving authority', async () => {
@@ -700,31 +799,29 @@ describe('executeEval', () => {
       },
     };
 
-    await expect(
-      executeEval({
-        runId: 'run-unsafe-scope',
-        plan: fixture.plan,
-        composition: {
-          ...composition,
-          agents: new Map([[unsafeAgent.id, unsafeAgent]]),
-          credentialResolver: {
-            async resolve() {
-              credentialResolved = true;
-              return 'must-not-resolve';
-            },
-          },
-          runtime: {
-            ...composition.runtime,
-            async prepare(input) {
-              runtimePrepared = true;
-              return composition.runtime.prepare(input);
-            },
+    await assert.rejects(executeEval({
+      runId: 'run-unsafe-scope',
+      plan: fixture.plan,
+      composition: {
+        ...composition,
+        agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+        credentialResolver: {
+          async resolve() {
+            credentialResolved = true;
+            return 'must-not-resolve';
           },
         },
-      }),
-    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
-    expect(credentialResolved).toBe(false);
-    expect(runtimePrepared).toBe(false);
+        runtime: {
+          ...composition.runtime,
+          async prepare(input) {
+            runtimePrepared = true;
+            return composition.runtime.prepare(input);
+          },
+        },
+      },
+    }), {code: 'invalid_plan', phase: 'preflight'});
+    assert.equal(credentialResolved, false);
+    assert.equal(runtimePrepared, false);
   });
 
   it('validates the fallback agent identity before resolving authority', async () => {
@@ -740,31 +837,29 @@ describe('executeEval', () => {
       },
     };
 
-    await expect(
-      executeEval({
-        runId: 'run-unsafe-evidence-identity',
-        plan: fixture.plan,
-        composition: {
-          ...composition,
-          agents: new Map([[unsafeAgent.id, unsafeAgent]]),
-          credentialResolver: {
-            async resolve() {
-              credentialResolved = true;
-              return 'must-not-resolve';
-            },
-          },
-          runtime: {
-            ...composition.runtime,
-            async prepare(input) {
-              runtimePrepared = true;
-              return composition.runtime.prepare(input);
-            },
+    await assert.rejects(executeEval({
+      runId: 'run-unsafe-evidence-identity',
+      plan: fixture.plan,
+      composition: {
+        ...composition,
+        agents: new Map([[unsafeAgent.id, unsafeAgent]]),
+        credentialResolver: {
+          async resolve() {
+            credentialResolved = true;
+            return 'must-not-resolve';
           },
         },
-      }),
-    ).rejects.toMatchObject({code: 'invalid_plan', phase: 'preflight'});
-    expect(credentialResolved).toBe(false);
-    expect(runtimePrepared).toBe(false);
+        runtime: {
+          ...composition.runtime,
+          async prepare(input) {
+            runtimePrepared = true;
+            return composition.runtime.prepare(input);
+          },
+        },
+      },
+    }), {code: 'invalid_plan', phase: 'preflight'});
+    assert.equal(credentialResolved, false);
+    assert.equal(runtimePrepared, false);
   });
 });
 
@@ -827,13 +922,11 @@ async function executionFixture(
     preflight() {},
     async prepare(input) {
       calls.push('runtime:prepare');
-      expect(input.environment.credentials.ANTHROPIC_API_KEY?.value).toBe(
-        credentialValue,
-      );
-      expect(input.environment.credentials.ANTHROPIC_API_KEY?.scopes).toEqual([
+      assert.equal(input.environment.credentials.ANTHROPIC_API_KEY?.value, credentialValue);
+      assert.deepEqual(input.environment.credentials.ANTHROPIC_API_KEY?.scopes, [
         'agent',
       ]);
-      expect(input.requirements.executables).toEqual(['claude']);
+      assert.deepEqual(input.requirements.executables, ['claude']);
       return prepared;
     },
   };
@@ -857,20 +950,20 @@ async function executionFixture(
       return {name: 'claude-code', version: 'test'};
     },
     async prepare(context) {
-      expect(Object.keys(context.runtime.commands)).toEqual(['uncredentialed']);
-      expect('quiesce' in context.runtime).toBe(false);
-      expect('dispose' in context.runtime).toBe(false);
-      expect('setup' in context.runtime.commands).toBe(false);
-      expect('set' in context.runtime.stateDirectories).toBe(false);
+      assert.deepEqual(Object.keys(context.runtime.commands), ['uncredentialed']);
+      assert.equal('quiesce' in context.runtime, false);
+      assert.equal('dispose' in context.runtime, false);
+      assert.equal('setup' in context.runtime.commands, false);
+      assert.equal('set' in context.runtime.stateDirectories, false);
       await context.runtime.commands.uncredentialed.run(['agent-version-check']);
       calls.push('agent:prepare');
     },
     async openSession(context) {
-      expect(Object.keys(context.runtime.commands)).toEqual(['agent']);
-      expect('quiesce' in context.runtime).toBe(false);
-      expect('dispose' in context.runtime).toBe(false);
-      expect('setup' in context.runtime.commands).toBe(false);
-      expect('set' in context.runtime.stateDirectories).toBe(false);
+      assert.deepEqual(Object.keys(context.runtime.commands), ['agent']);
+      assert.equal('quiesce' in context.runtime, false);
+      assert.equal('dispose' in context.runtime, false);
+      assert.equal('setup' in context.runtime.commands, false);
+      assert.equal('set' in context.runtime.stateDirectories, false);
       calls.push('agent:open');
       if (options.openSessionFailure) throw new Error('could not start agent');
       return {
@@ -890,11 +983,11 @@ async function executionFixture(
     },
     ...(options.nativeArtifact === true
       ? {
-          async collectNativeArtifact(context) {
-            expect('commands' in context.runtime).toBe(false);
-            expect('writeFile' in context.runtime.workspace).toBe(false);
-            calls.push(`agent:native:${context.sessionId}`);
-            return {
+        async collectNativeArtifact(context) {
+          assert.equal('commands' in context.runtime, false);
+          assert.equal('writeFile' in context.runtime.workspace, false);
+          calls.push(`agent:native:${context.sessionId}`);
+          return {
               format: 'claude-code-jsonl',
               sessionId:
                 options.nativeArtifactSessionId ?? context.sessionId,
@@ -902,14 +995,14 @@ async function executionFixture(
               extension: 'jsonl',
               body: options.nativeArtifactBody ?? Buffer.from(RAW_NATIVE_SESSION, 'utf8'),
             };
-          },
-        }
+        },
+      }
       : {}),
     async collectEvidence(context) {
-      expect('commands' in context.runtime).toBe(false);
-      expect('dispose' in context.runtime).toBe(false);
-      expect('writeFile' in context.runtime.workspace).toBe(false);
-      expect('set' in context.runtime.stateDirectories).toBe(false);
+      assert.equal('commands' in context.runtime, false);
+      assert.equal('dispose' in context.runtime, false);
+      assert.equal('writeFile' in context.runtime.workspace, false);
+      assert.equal('set' in context.runtime.stateDirectories, false);
       calls.push(`agent:evidence:${context.sessionId}`);
       if (options.nativeEvidenceUnavailable === true) {
         return {

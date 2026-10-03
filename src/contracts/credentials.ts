@@ -369,6 +369,11 @@ function assertPlainRecord(
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError(`${label} must be a plain object.`);
   }
+  if (Reflect.ownKeys(input).some((key) =>
+    typeof key !== 'string' || !Object.prototype.propertyIsEnumerable.call(input, key),
+  )) {
+    throw new TypeError(`${label} must contain only enumerable string fields.`);
+  }
 }
 
 function assertExactKeys(

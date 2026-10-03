@@ -63,6 +63,7 @@ export const writeSetupHandler: SetupStepHandler =
                   signal: context.signal,
                   maxBytes: MAX_WRITE_BYTES,
                 });
+                context.signal.throwIfAborted();
                 await context.workspace.writeFile(entryTarget, entryBody);
               }
               return;
