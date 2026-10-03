@@ -109,10 +109,22 @@ try {
       assert.equal(typeof codex.createCodexAdapter, 'function');
       assert.equal(typeof codex.parseCodexStream, 'function');
       assert.equal(typeof codex.loadCodexEvidence, 'function');
-      assert.equal(codex.CODEX_ADAPTER_VERSION, '1');
+      assert.equal(codex.createCodexAdapter().version, forge.FORGE_VERSION);
       assert.equal(docker.FORGE_CODEX_VERSION, '0.149.0');
-      assert.equal(claude.CLAUDE_CODE_GATEWAY_ADAPTER_VERSION, '2+gateway');
+      assert.equal(claude.createClaudeCodeAdapter({baseUrl: 'https://gateway.example.com'}).version, forge.FORGE_VERSION);
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
+      assert.equal(anthropic.createAnthropicCompletionProvider().version, forge.FORGE_VERSION);
+      assert.deepEqual(codex.createCodexAdapter().metadata, {endpoint_mode: 'default', layout_mode: 'default'});
+      assert.deepEqual(anthropic.createAnthropicCompletionProvider({baseUrl: 'https://gateway.example.com'}).metadata, {endpoint_mode: 'custom'});
+      for (const [surface, names] of [
+        [forge, ['GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
+        [atif, ['ATIF_NORMALIZATION_VERSION']],
+        [claude, ['CLAUDE_CODE_ADAPTER_VERSION', 'CLAUDE_CODE_GATEWAY_ADAPTER_VERSION']],
+        [codex, ['CODEX_ADAPTER_VERSION', 'CODEX_RESPONSES_ADAPTER_VERSION']],
+        [anthropic, ['ANTHROPIC_COMPLETION_PROVIDER_VERSION', 'ANTHROPIC_MESSAGES_COMPATIBLE_PROVIDER_VERSION']],
+      ]) {
+        for (const name of names) assert.equal(name in surface, false);
+      }
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');
       assert.equal(typeof setup.defineSetupActionBundle, 'function');

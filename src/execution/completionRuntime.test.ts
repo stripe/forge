@@ -23,6 +23,39 @@ import {
 const MODEL = {provider: 'test-provider', model: 'judge-model'} as const;
 
 describe('completion runtime', () => {
+  it('snapshots independently versioned provider identity and configuration during preflight', async () => {
+    const metadata = {endpoint_mode: 'custom' as 'default' | 'custom'};
+    const scripted = createScriptedCompletionProvider({id: MODEL.provider, version: '3.4.1', responses: [response(1)]});
+    const provider = {...scripted.provider, metadata};
+    const bindings = completionBindingsForPlan(
+      createTestResolvedRunPlan({successGuidelines: ['One guideline'], judge: MODEL}),
+      composition(provider),
+    );
+    metadata.endpoint_mode = 'default';
+    provider.version = '3.4.2';
+    const signal = new AbortController().signal;
+    const prepared = await prepareCompletionRuntime({
+      runId: 'provider-metadata-snapshot', bindings,
+      credentialResolver: createStaticCredentialResolver(), signal,
+    });
+    await prepared.invoke('judge', prompt('judge it'), signal);
+    assert.equal(prepared.calls[0]!.provider_version, '3.4.1');
+    assert.deepEqual(prepared.calls[0]!.provider_metadata, {endpoint_mode: 'custom'});
+    assert.equal(Object.isFrozen(prepared.calls[0]!.provider_metadata), true);
+  });
+
+  it('rejects malformed provider metadata before resolving credentials', () => {
+    const scripted = createScriptedCompletionProvider({id: MODEL.provider});
+    for (const metadata of [null, {endpoint_mode: 'unknown'}, {endpoint_mode: 'custom', endpoint: 'https://private.example.com'}]) {
+      const provider = {...scripted.provider, metadata} as CompletionProvider;
+      assert.throws(() => completionBindingsForPlan(
+        createTestResolvedRunPlan({successGuidelines: ['One guideline'], judge: MODEL}),
+        composition(provider),
+      ));
+      assert.deepEqual(scripted.calls, []);
+    }
+  });
+
   it('resolves shared credential references independently by purpose and redacts every resolved value', async () => {
     const secretsByPurpose = {
       role_player: 'role-player-authorized-secret',

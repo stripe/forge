@@ -1,3 +1,4 @@
+import type {AgentAdapterMetadata, CompletionProviderMetadata} from '../contracts/metadata.js';
 import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
@@ -7,7 +8,6 @@ import type {
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   JudgeVisibleStepV1,
@@ -86,6 +86,7 @@ export interface CompletionCallSummaryV1 {
   readonly purpose: CompletionPurposeV1;
   readonly provider: string;
   readonly provider_version: string;
+  readonly provider_metadata?: CompletionProviderMetadata;
   readonly model: string;
   readonly status: 'succeeded' | 'failed';
   readonly stop_reason: CompletionStopReasonV1 | null;
@@ -140,7 +141,6 @@ export interface InteractionArtifactV1 {
   readonly turns: readonly InteractionTurnV1[];
   readonly role_player?: {
     readonly model: ModelRefV1;
-    readonly prompt_version: string;
     readonly needs: readonly AvaNeedV1[] | null;
     readonly decisions: readonly AvaDecisionV1[];
   };
@@ -168,11 +168,9 @@ export interface JudgeWorkspaceEntryV1 {
 /** Judge audit with the exact reduced transcript supplied to every guideline. */
 export interface JudgeEvidenceV1 {
   readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
-  readonly prompt_version: string;
   readonly transcript: {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
     readonly projection_id: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
-    readonly projection_version: typeof JUDGE_TRANSCRIPT_PROJECTION_VERSION;
     readonly trajectory_scope: typeof JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE;
     readonly included_step_sources: typeof JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES;
     readonly copied_context: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
@@ -243,7 +241,6 @@ export interface AtifEvidenceProvenanceV1 {
 export interface RunEvidenceV1 {
   readonly format: 'atif';
   readonly schema_version: 'ATIF-v1.8';
-  readonly normalization_version: 1;
   readonly provenance: AtifEvidenceProvenanceV1;
   readonly completeness: AtifNormalizationCompleteness;
   readonly warnings: readonly AtifNormalizationWarning[];
@@ -266,6 +263,7 @@ interface RunResultCommon {
   readonly agent: {
     adapter: string;
     adapter_version: string;
+    metadata?: AgentAdapterMetadata;
     provider: string;
     model: string;
     session_id: string | null;

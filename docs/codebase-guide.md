@@ -332,6 +332,7 @@ implementations.
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code and Codex; selected by `setup/forgePlugin.ts` |
 | [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
+| [`metadata.ts`](https://github.com/stripe/forge/blob/main/src/contracts/metadata.ts) | Adapter/provider configuration metadata types and strict internal snapshot schemas | Shared by pure execution preflight and result parsing |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
 
 ### Capability narrowing
@@ -417,7 +418,7 @@ the main `try/catch`.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`prompt.ts`](https://github.com/stripe/forge/blob/main/src/interaction/prompt.ts) | Ava prompt builders, prompt version, stop sentinel | Pure rendering of initialization and continuation system prompts |
+| [`prompt.ts`](https://github.com/stripe/forge/blob/main/src/interaction/prompt.ts) | Ava prompt builders and stop sentinel | Pure rendering of initialization and continuation system prompts |
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/interaction/completion.ts) | Provider-neutral interaction request/invoker types | Connects Ava to `PreparedCompletionRuntime.invoke` without exposing provider or credentials |
 | [`ava.ts`](https://github.com/stripe/forge/blob/main/src/interaction/ava.ts) | `AvaRolePlayer`, `AvaTurn`, need/error types | Maintains private needs/history, requests strict structured completions, validates messages, and implements retry/terminal decisions |
 | [`conversation.ts`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) | `runConversation`, audit/result types, `snapshotAgentToolCalls` | Alternates Ava decisions with one persistent `AgentSession`, enforces max-turn semantics, aggregates cost, and produces the driver ledger/audit |
@@ -537,7 +538,7 @@ changing `interaction` or `evaluation`.
 | [`types.ts`](https://github.com/stripe/forge/blob/main/src/atif/types.ts) | Exact ATIF v1.8 TypeScript wire types | Used by agent evidence, selection, evaluation, and result provenance |
 | [`schema.ts`](https://github.com/stripe/forge/blob/main/src/atif/schema.ts) | Recursive Zod implementation of ATIF v1.8 invariants | Called by `parser.ts` |
 | [`parser.ts`](https://github.com/stripe/forge/blob/main/src/atif/parser.ts) | Bounded-JSON graph preflight plus schema parsing and structured errors | Called by normalization, judge projection, results, and adapter helpers |
-| [`normalization.ts`](https://github.com/stripe/forge/blob/main/src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness, warnings, normalization version | Constructed by `evidence/selection.ts`; summarized in `result.json` |
+| [`normalization.ts`](https://github.com/stripe/forge/blob/main/src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness and warnings | Constructed by `evidence/selection.ts`; summarized in `result.json` |
 | [`serializer.ts`](https://github.com/stripe/forge/blob/main/src/atif/serializer.ts) | Canonical trajectory serialization | Called before writing `trajectory.json` |
 | [`timestamp.ts`](https://github.com/stripe/forge/blob/main/src/atif/timestamp.ts) | ATIF timestamp validation | Used by the schema and adapter normalization |
 | [`upstream.ts`](https://github.com/stripe/forge/blob/main/src/atif/upstream.ts) | Pinned upstream provenance metadata | Exported for consumers and conformance |
@@ -609,7 +610,7 @@ The verifier deliberately imports:
 - strict plan parsing and canonical serialization from `model` and `planning`;
 - turn coverage from `evidence/selection.ts`;
 - ATIF parsing from `atif`;
-- judge projection/prompt versions from `evaluation`; and
+- judge projection policy from `evaluation`; and
 - plugin receipt validation from `contracts`.
 
 Those dependencies make verification a second semantic boundary rather than a
@@ -789,15 +790,15 @@ Treat these changes as cross-cutting and score-affecting. Review together:
 
 - adapter native parsing;
 - `evidence/selection.ts` coverage/fallback;
-- `atif` schema and normalization version;
-- `evaluation/judgeTranscript.ts` projection version;
-- `evaluation/guidelineJudge.ts` prompt version;
+- `atif` schema and normalization behavior;
+- `evaluation/judgeTranscript.ts` projection policy;
+- `evaluation/guidelineJudge.ts` prompt behavior;
 - result wire schemas and conditional artifacts;
 - `results/localStore.ts` verification; and
 - README/architecture documentation and end-to-end tests.
 
-Changing what the judge sees without versioning the projection is not a local
-refactor.
+Changing what the judge sees requires reviewing judge-evidence schema
+compatibility and stored-run verification; it is not a local refactor.
 
 ### Add or change an artifact
 

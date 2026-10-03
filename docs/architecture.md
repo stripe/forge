@@ -476,7 +476,7 @@ full process is detailed in [Evidence architecture](#evidence-architecture).
 ### 8. Evaluate
 
 Deterministic file checks read the sealed workspace. If guidelines exist, Forge
-builds a positive, versioned projection of the redacted ATIF trajectory,
+builds a positive projection of the redacted ATIF trajectory with an explicit policy,
 collects bounded workspace text, invokes the judge provider, and records the
 exact evidence made available to it.
 
@@ -677,7 +677,12 @@ Forge ships two adapters:
   [Marketplace plugin treatments](plugin-action.md) for its scope.
 
 Both adapters support explicit logical layouts for external runtimes and reject
-runtime paths that do not match the pinned adapter layout.
+runtime paths that do not match the pinned adapter layout. Built-in adapters and
+completion providers use the Forge package version as their implementation
+identity; independently released integrations supply their own versions. Narrow
+configuration metadata records endpoint and layout modes separately. Preflight
+validates and snapshots this metadata before any credentials or resources are
+resolved; results retain the snapshots rather than rereading mutable host objects.
 
 ### One-shot mode
 
@@ -770,7 +775,7 @@ aborts the evidence phase. Optional native detail loss may instead produce
 
 ### ATIF normalization
 
-Forge pins ATIF v1.8 and a separate normalization version. The ATIF parser
+Forge pins ATIF v1.8; its package release identifies normalization behavior. The ATIF parser
 rejects cyclic, exotic, sparse, non-finite, overly deep, or oversized JSON
 graphs before recursive schema validation. The canonical trajectory may retain
 agent messages, reasoning, tool calls/results, metrics, copied context, system
@@ -803,9 +808,10 @@ Opaque tool arguments and results remain because they are observable behavior,
 even when a nested key is named `reasoning_content`. Image and audio references
 remain, but their bytes are not loaded into the text-only judge request.
 
-The projection policy is versioned in
+The projection policy is declared in
 [`src/evaluation/judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts).
-`judge-evidence.json` stores both that policy and the exact projected steps. The
+`judge-evidence.json` stores both that policy and the exact projected steps; its
+schema version governs their interpretation and verification. The
 verifier recreates the projection from `trajectory.json` and requires bytewise
 canonical equivalence.
 
@@ -831,7 +837,7 @@ through evidence collection.
 
 Each success guideline is judged independently against:
 
-- the versioned judge-visible transcript projection;
+- the judge-visible transcript projection with its declared policy;
 - bounded, eligible text collected from the sealed workspace; and
 - the optional authored example answer.
 
@@ -1089,8 +1095,8 @@ Changes that cross module boundaries should preserve these properties:
 6. One persistent, exactly identified coding-agent session backs a run.
 7. Mutation stops before evidence selection or evaluation.
 8. Native evidence must cover the driver ledger or explicitly fall back.
-9. Judge-visible transcript data is a positive, versioned projection of the
-   redacted canonical trajectory.
+9. Judge-visible transcript data is a positive projection of the redacted
+   canonical trajectory; its declared policy is part of the judge-evidence schema.
 10. Every persisted companion file is described, path-validated, and committed
    atomically; core and native artifacts retain their explicit size bounds.
 11. Cleanup, observation, and publication cannot reorder or redefine scoring

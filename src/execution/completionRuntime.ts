@@ -1,3 +1,4 @@
+import {completionProviderMetadataSchema, type CompletionProviderMetadata} from '../contracts/metadata.js';
 import type {
   CompletionProvider,
   CompletionProviderCredentials,
@@ -44,6 +45,11 @@ export interface CompletionBinding {
   readonly purpose: CompletionPurpose;
   readonly model: ModelRefV1;
   readonly provider: CompletionProvider;
+  readonly identity: {
+    readonly id: string;
+    readonly version: string;
+    readonly metadata?: CompletionProviderMetadata;
+  };
   readonly requirements: CompletionProviderRequirements;
 }
 
@@ -94,10 +100,16 @@ export function completionBindingsForPlan(
     requested.map(({purpose, model}) => {
       const provider = resolveProvider(collection, model);
       assertProvider(provider, model);
+      const metadata = completionProviderMetadataSchema.optional().parse(provider.metadata);
+      const identity = Object.freeze({
+        id: provider.id,
+        version: provider.version,
+        ...(metadata === undefined ? {} : {metadata}),
+      });
       const requirements = normalizeRequirements(
         provider.requirements({model, purpose}),
       );
-      return Object.freeze({purpose, model: Object.freeze({...model}), provider, requirements});
+      return Object.freeze({purpose, model: Object.freeze({...model}), provider, identity, requirements});
     }),
   );
 }
@@ -360,8 +372,9 @@ function completionCallSummary(
   return Object.freeze({
     sequence,
     purpose: binding.purpose,
-    provider: binding.provider.id,
-    provider_version: binding.provider.version,
+    provider: binding.identity.id,
+    provider_version: binding.identity.version,
+    ...(binding.identity.metadata === undefined ? {} : {provider_metadata: binding.identity.metadata}),
     model: binding.model.model,
     status,
     stop_reason: response?.stopReason ?? null,

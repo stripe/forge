@@ -2,8 +2,6 @@ import type {
   ReadonlyWorkspace,
   WorkspaceEntry,
 } from '../contracts/runtime.js';
-
-export const JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const MAX_JUDGE_WORKSPACE_ENTRIES = 10_000;
 export const MAX_JUDGE_WORKSPACE_DEPTH = 32;
 export const MAX_JUDGE_WORKSPACE_COLLECTION_MS = 2_000;
@@ -82,7 +80,6 @@ export interface JudgeWorkspaceEvidenceEntryV1 {
 
 /** JSON-safe evidence which can be persisted beside the judge result. */
 export interface JudgeWorkspaceEvidenceV1 {
-  readonly schema_version: typeof JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION;
   readonly entries: readonly JudgeWorkspaceEvidenceEntryV1[];
   readonly complete: boolean;
   readonly truncated: boolean;
@@ -323,7 +320,6 @@ function collected(
   maxTotalCharacters = MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
 ): CollectedJudgeWorkspaceEvidence {
   const unboundedEvidence: JudgeWorkspaceEvidenceV1 = Object.freeze({
-    schema_version: JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION,
     entries: Object.freeze([...entries]),
     complete: warnings.length === 0,
     truncated,

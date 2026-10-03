@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 
+import {FORGE_VERSION} from '../../version.js';
 import type {
   AgentAdapter,
   AgentRuntimeRequirements,
@@ -25,8 +26,6 @@ import {
   type ClaudeCodeLayout,
 } from './layout.js';
 
-export const CLAUDE_CODE_ADAPTER_VERSION = '2' as const;
-export const CLAUDE_CODE_GATEWAY_ADAPTER_VERSION = '2+gateway' as const;
 export const CLAUDE_PROJECTS_STATE_ID = 'claude-projects' as const;
 
 export interface ClaudeCodeAdapterOptions {
@@ -57,12 +56,6 @@ export function createClaudeCodeAdapter(
   const baseUrl =
     options.baseUrl === undefined ? undefined : validateBaseUrl(options.baseUrl);
   const layout = resolveClaudeCodeLayout(options.layout);
-  const defaultAdapterVersion = baseUrl === undefined
-    ? CLAUDE_CODE_ADAPTER_VERSION
-    : CLAUDE_CODE_GATEWAY_ADAPTER_VERSION;
-  const adapterVersion = usesDefaultClaudeCodeLayout(layout)
-    ? defaultAdapterVersion
-    : `${defaultAdapterVersion}${baseUrl === undefined ? '+' : '.'}layout`;
   const credential = typeof options.credential === 'string'
     ? credentialReference(options.credential)
     : (options.credential ?? credentialReference('anthropic.api-key'));
@@ -117,7 +110,11 @@ export function createClaudeCodeAdapter(
 
   const adapter: AgentAdapter = {
     id,
-    version: adapterVersion,
+    version: FORGE_VERSION,
+    metadata: Object.freeze({
+      endpoint_mode: baseUrl === undefined ? 'default' : 'custom',
+      layout_mode: usesDefaultClaudeCodeLayout(layout) ? 'default' : 'custom',
+    }),
     pluginInstaller,
     requirements,
     evidenceIdentity(selection) {

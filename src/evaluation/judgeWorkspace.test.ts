@@ -81,7 +81,6 @@ describe('collectJudgeWorkspaceEvidence', () => {
 
     assert.deepEqual(collected, {
       evidence: {
-        schema_version: 1,
         entries: [],
         complete: true,
         truncated: false,
@@ -344,7 +343,6 @@ describe('collectJudgeWorkspaceEvidence', () => {
 
   it('re-bounds per-file and total text after a redaction-like expansion', () => {
     const expanded = boundJudgeWorkspaceEvidence({
-      schema_version: 1,
       entries: [
         {
           path: 'expanded.txt',
@@ -378,7 +376,6 @@ describe('collectJudgeWorkspaceEvidence', () => {
   it('uses completeness flags when a tightened limit cannot fit a warning', () => {
     const bounded = boundJudgeWorkspaceEvidence(
       {
-        schema_version: 1,
         entries: [
           {
             path: 'file.txt',

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {FORGE_VERSION} from '../../version.js';
 import type {AgentPrepareContext, AgentSessionContext} from '../../contracts/agent.js';
 import type {CommandOptions, CommandResult, CommandRunner} from '../../contracts/command.js';
 import type {MutableWorkspace, RuntimeLogicalPaths} from '../../contracts/runtime.js';
@@ -9,9 +10,7 @@ import {createMemoryRunInputProvider} from '../../testing/memoryInputs.js';
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
 import {createTestResolvedRunPlan} from '../../testing/plans.js';
 import {
-  CODEX_ADAPTER_VERSION,
   CODEX_HOME_STATE_ID,
-  CODEX_RESPONSES_ADAPTER_VERSION,
   createCodexAdapter,
   type CodexAdapterOptions,
 } from './index.js';
@@ -139,7 +138,8 @@ http_headers={"X-Wrong"="synthetic-secret"}
   it('declares run-owned configuration and opaque credentials for engine-assigned scope', () => {
     const adapter = createCodexAdapter();
     assert.equal(adapter.id, 'codex');
-    assert.equal(adapter.version, CODEX_ADAPTER_VERSION);
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'default', layout_mode: 'default'});
     assert.deepEqual(adapter.requirements(selection), {
       executables: ['codex'],
       environment: {
@@ -170,7 +170,8 @@ http_headers={"X-Wrong"="synthetic-secret"}
       baseUrl: 'https://gateway.example.test/openai/v1',
       credential: 'gateway.routing-token', credentialEnvironmentName: 'GATEWAY_TOKEN',
     }});
-    assert.equal(test.adapter.version, CODEX_RESPONSES_ADAPTER_VERSION);
+    assert.equal(test.adapter.version, FORGE_VERSION);
+    assert.deepEqual(test.adapter.metadata, {endpoint_mode: 'custom', layout_mode: 'default'});
     assert.deepEqual(test.adapter.requirements(test.sessionContext.selection).environment, {
       variables: {CODEX_HOME: '/home/forge/.codex'},
       credentials: {GATEWAY_TOKEN: {reference: 'gateway.routing-token'}},

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
 import {
-  ATIF_NORMALIZATION_VERSION,
   ATIF_SCHEMA_VERSION,
   AtifValidationError,
   createNormalizedTrajectory,
@@ -553,7 +552,7 @@ describe('serializeAtifTrajectory', () => {
 });
 
 describe('createNormalizedTrajectory', () => {
-  it('records format and normalization versions outside the ATIF document', () => {
+  it('records the ATIF format and source provenance outside the trajectory', () => {
     const normalized = createNormalizedTrajectory({
       trajectory: minimalTrajectory(),
       provenance: {
@@ -574,10 +573,7 @@ describe('createNormalizedTrajectory', () => {
     });
 
     assert.equal(normalized.schemaVersion, ATIF_SCHEMA_VERSION);
-    assert.equal(
-      normalized.normalizationVersion,
-      ATIF_NORMALIZATION_VERSION,
-    );
+    assert.equal(Object.hasOwn(normalized, 'normalizationVersion'), false);
     assert.equal(normalized.format, 'atif');
     assert.equal(normalized.completeness, 'partial');
     assert.equal(normalized.warnings[0]?.code, 'source_incomplete');
@@ -607,7 +603,7 @@ describe('createNormalizedTrajectory', () => {
     );
     for (const [field, value] of [
       ['schemaVersion', 'ATIF-v1.7'],
-      ['normalizationVersion', 2],
+      ['normalizationVersion', 1],
       ['undeclared', true],
     ] as const) {
       assert.throws(

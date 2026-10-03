@@ -3,6 +3,7 @@ import {createServer, type IncomingHttpHeaders, type Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
 import {describe, it} from 'node:test';
 
+import {FORGE_VERSION} from '../../version.js';
 import type {
   CompletionRequest,
   CompletionResponse,
@@ -11,7 +12,6 @@ import type {
 import {
   ANTHROPIC_API_KEY_CREDENTIAL,
   ANTHROPIC_AUTH_TOKEN_CREDENTIAL,
-  ANTHROPIC_COMPLETION_PROVIDER_VERSION,
   ANTHROPIC_DEFAULT_BASE_URL,
   ANTHROPIC_DEFAULT_MAX_TOKENS,
   ANTHROPIC_MAX_MESSAGE_BYTES,
@@ -19,7 +19,6 @@ import {
   ANTHROPIC_MAX_TOKENS,
   ANTHROPIC_MAX_RESPONSE_BYTES,
   ANTHROPIC_MESSAGES_API_VERSION,
-  ANTHROPIC_MESSAGES_COMPATIBLE_PROVIDER_VERSION,
   ANTHROPIC_STRUCTURED_OUTPUT_FORMAT,
   AnthropicCompletionError,
   createAnthropicCompletionProvider,
@@ -49,7 +48,8 @@ describe('Anthropic completion provider', () => {
     });
 
     assert.equal(provider.id, 'anthropic');
-    assert.equal(provider.version, ANTHROPIC_COMPLETION_PROVIDER_VERSION);
+    assert.equal(provider.version, FORGE_VERSION);
+    assert.deepEqual(provider.metadata, {endpoint_mode: 'default'});
     assert.deepEqual(
       provider.requirements({
         model: {provider: 'anthropic', model: 'claude-sonnet-4-6'},
@@ -232,8 +232,9 @@ describe('Anthropic completion provider', () => {
 
     assert.equal(
       provider.version,
-      ANTHROPIC_MESSAGES_COMPATIBLE_PROVIDER_VERSION,
+      FORGE_VERSION,
     );
+    assert.deepEqual(provider.metadata, {endpoint_mode: 'custom'});
     assert.deepEqual(
       provider.requirements({
         model: {provider: 'stripe-gateway', model: 'claude-opus-4-6'},

@@ -11,7 +11,6 @@ import {
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_JUDGE_TRANSCRIPT_BYTES,
@@ -318,7 +317,7 @@ describe('parseJudgeTranscriptProjection', () => {
     for (const changed of [
       {...valid, source: 'interaction.json'},
       {...valid, projectionId: 'another-projection'},
-      {...valid, projectionVersion: 2},
+      {...valid, projectionVersion: 1},
       {...valid, trajectoryScope: 'all'},
       {...valid, includedStepSources: ['agent', 'user']},
       {...valid, copiedContext: 'included'},
@@ -669,7 +668,6 @@ function expectedMetadata(): Omit<
   return {
     source: JUDGE_TRANSCRIPT_SOURCE,
     projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
-    projectionVersion: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
     trajectoryScope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
     includedStepSources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
     copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,

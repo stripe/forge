@@ -14,10 +14,8 @@ import {
 } from '../../contracts/credentials.js';
 import {isSafeMetadata, isSafeSimpleIdentifier} from '../../model/paths.js';
 import type {ModelRefV1} from '../../model/types.js';
+import {FORGE_VERSION} from '../../version.js';
 
-export const ANTHROPIC_COMPLETION_PROVIDER_VERSION = '1' as const;
-export const ANTHROPIC_MESSAGES_COMPATIBLE_PROVIDER_VERSION =
-  '1+messages-compatible' as const;
 export const ANTHROPIC_MESSAGES_API_VERSION = '2023-06-01' as const;
 export const ANTHROPIC_STRUCTURED_OUTPUT_FORMAT = 'json_schema' as const;
 export const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com' as const;
@@ -137,9 +135,8 @@ export function createAnthropicCompletionProvider(
 
   return Object.freeze({
     id,
-    version: compatibleEndpoint
-      ? ANTHROPIC_MESSAGES_COMPATIBLE_PROVIDER_VERSION
-      : ANTHROPIC_COMPLETION_PROVIDER_VERSION,
+    version: FORGE_VERSION,
+    metadata: Object.freeze({endpoint_mode: compatibleEndpoint ? 'custom' : 'default'}),
     requirements(input: CompletionProviderRequirementInput) {
       validateCapability(input);
       return requirements;

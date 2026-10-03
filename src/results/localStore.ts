@@ -10,7 +10,6 @@ import type {
 import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
 import {parseAtifTrajectory, type AtifTrajectoryV1_8} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
-import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {sha256Digest} from '../model/hashes.js';
@@ -595,11 +594,6 @@ function verifyJudgeEvidence(
     );
   }
   const judgeEvidence = parseJsonArtifact(path, body, parseJudgeEvidence);
-  if (judgeEvidence.prompt_version !== GUIDELINE_JUDGE_PROMPT_VERSION) {
-    throw new ArtifactStoreError(
-      'judge-evidence.json prompt_version is not supported by this Forge build.',
-    );
-  }
   if (
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
       createJudgeTranscriptProjection(trajectory).transcriptJson

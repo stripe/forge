@@ -7,7 +7,6 @@ import {
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_JUDGE_TRANSCRIPT_BYTES,
 } from '../evaluation/judgeTranscript.js';
@@ -97,7 +96,6 @@ describe('canonical interaction and judge evidence parsing', () => {
         turns: [],
         role_player: {
           model: {provider: 'anthropic', model: 'claude-sonnet-4-6'},
-          prompt_version: '1',
           needs: null,
           decisions: [
             {
@@ -162,7 +160,6 @@ describe('canonical interaction and judge evidence parsing', () => {
       turns: [{turn: 1, user: 'do it', assistant: 'done', tool_calls: []}],
       role_player: {
         model: {provider: 'test-provider', model: 'role-model'},
-        prompt_version: '1',
         needs: null,
         decisions: [{
           sequence: 1, after_agent_turn: null, message: 'do it', stop: false,
@@ -173,6 +170,9 @@ describe('canonical interaction and judge evidence parsing', () => {
       failure: null,
     };
     assert.deepEqual(parseInteractionArtifact(interaction), interaction);
+    assert.throws(() => parseInteractionArtifact({
+      ...interaction, role_player: {...interaction.role_player, prompt_version: '1'},
+    }));
     const {role_player, ...withoutAudit} = interaction;
     assert.throws(() => parseInteractionArtifact(withoutAudit), /require role-player audit state/);
     assert.throws(() => parseInteractionArtifact({
@@ -192,11 +192,9 @@ describe('canonical interaction and judge evidence parsing', () => {
   it('strictly parses judge evidence and its projection declaration', () => {
     const evidence = {
       schema_version: 1,
-      prompt_version: '1',
       transcript: {
         source: 'trajectory.json',
         projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
-        projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
         trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
         included_step_sources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
         copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -215,6 +213,7 @@ describe('canonical interaction and judge evidence parsing', () => {
       },
     };
     assert.deepEqual(parseJudgeEvidence(evidence), evidence);
+    assert.throws(() => parseJudgeEvidence({...evidence, prompt_version: '1'}));
     assert.throws(() =>
       parseJudgeEvidence({...evidence, trajectory_sha256: DIGEST}),
     );
@@ -233,7 +232,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(() =>
       parseJudgeEvidence({
         ...evidence,
-        transcript: {...evidence.transcript, projection_version: 2},
+        transcript: {...evidence.transcript, projection_version: 1},
       }),
     );
     assert.throws(() =>
@@ -347,11 +346,9 @@ describe('canonical interaction and judge evidence parsing', () => {
 function judgeEvidenceWithSteps(steps: readonly unknown[]) {
   return {
     schema_version: 1,
-    prompt_version: '1',
     transcript: {
       source: 'trajectory.json',
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
-      projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
       trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
       included_step_sources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
       copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,

@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 
+import {agentAdapterMetadataSchema, type AgentAdapterMetadata} from '../contracts/metadata.js';
 import {
-  ATIF_NORMALIZATION_VERSION,
   ATIF_SCHEMA_VERSION,
   createNormalizedTrajectory,
   parseNormalizedTrajectory,
@@ -46,7 +46,6 @@ import type {
   WorkspaceWriteOptions,
 } from '../contracts/runtime.js';
 import {
-  GUIDELINE_JUDGE_PROMPT_VERSION,
   collectJudgeWorkspaceEvidence,
   evaluateRunEvidence,
   judgeGuidelines,
@@ -57,7 +56,6 @@ import {
 import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {
-  AVA_PROMPT_VERSION,
   AvaRolePlayer,
   runConversation,
   type AvaConversationAudit,
@@ -160,6 +158,7 @@ export interface PreflightEvalInput {
 
 interface EvalPreflight {
   readonly agent: AgentAdapter;
+  readonly agentMetadata: AgentAdapterMetadata | undefined;
   readonly agentEvidenceIdentity: AgentEvidenceIdentity;
   readonly setup: PreparedSetup;
   readonly requirements: RuntimeRequirements;
@@ -469,11 +468,9 @@ export async function executeEvalWithTestHooks(
         );
         judgeEvidence = parseJudgeEvidence({
           schema_version: 1,
-          prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
           transcript: {
             source: judgeTranscript.source,
             projection_id: judgeTranscript.projectionId,
-            projection_version: judgeTranscript.projectionVersion,
             trajectory_scope: judgeTranscript.trajectoryScope,
             included_step_sources: [...judgeTranscript.includedStepSources],
             copied_context: judgeTranscript.copiedContext,
@@ -527,6 +524,7 @@ export async function executeEvalWithTestHooks(
       const contributorResult = buildResult({
         input,
         agent: preflight.agent,
+        agentMetadata: preflight.agentMetadata,
         runtime: sealed,
         interaction,
         completionCalls: completions.calls,
@@ -580,6 +578,7 @@ export async function executeEvalWithTestHooks(
     const result = buildResult({
       input,
       agent: preflight.agent,
+      agentMetadata: preflight.agentMetadata,
       runtime: sealed,
       interaction,
       completionCalls: completions.calls,
@@ -852,6 +851,7 @@ function buildEvalPreflight(
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
+  const agentMetadata = agentAdapterMetadataSchema.optional().parse(agent.metadata);
   const agentEvidenceIdentity = parseAgentEvidenceIdentity(
     agent.evidenceIdentity(plan.agent),
   );
@@ -901,6 +901,7 @@ function buildEvalPreflight(
   preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
     agent,
+    agentMetadata,
     agentEvidenceIdentity,
     setup,
     requirements,
@@ -1443,7 +1444,6 @@ function buildInteractionArtifact(
     : {
         role_player: {
           model: {...plan.role_player},
-          prompt_version: AVA_PROMPT_VERSION,
           needs: interaction.avaAudit.needs?.map((need) => ({...need})) ?? null,
           decisions: interaction.avaAudit.decisions.map(avaDecisionRecord),
         },
@@ -1673,6 +1673,7 @@ async function buildSupplementalArtifacts(
 function buildResult(input: {
   input: ExecuteEvalInput;
   agent: AgentAdapter;
+  agentMetadata: AgentAdapterMetadata | undefined;
   runtime: SealedRuntime;
   interaction: ExecutedInteraction;
   completionCalls: readonly CompletionCallSummaryV1[];
@@ -1709,6 +1710,7 @@ function buildResult(input: {
     agent: {
       adapter: input.agent.id,
       adapter_version: input.agent.version,
+      ...(input.agentMetadata === undefined ? {} : {metadata: input.agentMetadata}),
       provider: input.input.plan.agent.provider,
       model: input.input.plan.agent.model,
       session_id: input.interaction.sessionId,
@@ -1723,7 +1725,6 @@ function buildResult(input: {
     evidence: {
       format: 'atif',
       schema_version: ATIF_SCHEMA_VERSION,
-      normalization_version: ATIF_NORMALIZATION_VERSION,
       provenance: resultEvidenceProvenance(input.evidence.provenance),
       completeness: input.evidence.completeness,
       warnings: input.evidence.warnings,

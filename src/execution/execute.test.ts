@@ -52,6 +52,46 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({root: path.join(fixture.root, 'artifacts')});
+    const composition = fixture.composition(store);
+    const agent = composition.agents.get('claude-code')!;
+    const metadata = {endpoint_mode: 'custom' as const, layout_mode: 'custom' as 'default' | 'custom'};
+    const configuredAgent: AgentAdapter = {
+      ...agent,
+      metadata,
+      async prepare(context) {
+        metadata.layout_mode = 'default';
+        await agent.prepare(context);
+      },
+    };
+    const completed = await executeEval({
+      runId: 'metadata-snapshot',
+      plan: fixture.plan,
+      composition: {...composition, agents: new Map([[agent.id, configuredAgent]])},
+    });
+    assert.equal(completed.result.agent.adapter_version, 'test-adapter');
+    assert.deepEqual(completed.result.agent.metadata, {endpoint_mode: 'custom', layout_mode: 'custom'});
+    assert.equal(Object.hasOwn(completed.result.evidence, 'normalization_version'), false);
+    assert.deepEqual((await verifyCompletedRun(completed.location)).result.agent.metadata, completed.result.agent.metadata);
+  });
+
+  it('rejects undeclared adapter metadata before resolving credentials or allocating a runtime', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const agent = composition.agents.get('claude-code')!;
+    const configuredAgent = {
+      ...agent,
+      metadata: {endpoint_mode: 'custom', layout_mode: 'default', endpoint: 'https://private.example.com'},
+    } as AgentAdapter;
+    assert.throws(() => preflightEval({
+      plan: fixture.plan,
+      composition: {...composition, agents: new Map([[agent.id, configuredAgent]])},
+    }), ForgeExecutionError);
+    assert.deepEqual(fixture.calls, []);
+  });
+
   it('runs the shared lifecycle, redacts credentials, and atomically commits', async () => {
     const fixture = await executionFixture({nativeArtifact: true});
     const localStore = createArtifactStore({

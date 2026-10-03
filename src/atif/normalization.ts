@@ -6,11 +6,6 @@ import {
   type AtifTrajectoryV1_8,
 } from './types.js';
 
-/**
- * Version of Forge's native-log-to-ATIF mapping semantics. It is deliberately
- * independent from the upstream ATIF schema version.
- */
-export const ATIF_NORMALIZATION_VERSION = 1 as const;
 
 const MAX_METADATA_TEXT_LENGTH = 4_096;
 const MAX_WARNING_MESSAGE_LENGTH = 64 * 1_024;
@@ -68,7 +63,6 @@ const NormalizedTrajectorySchema = z
   .object({
     format: z.literal('atif'),
     schemaVersion: z.literal(ATIF_SCHEMA_VERSION),
-    normalizationVersion: z.literal(ATIF_NORMALIZATION_VERSION),
     trajectory: z.unknown(),
     provenance: z
       .object({
@@ -192,7 +186,6 @@ export type AtifNormalizationCompleteness =
 export interface NormalizedTrajectory {
   format: 'atif';
   schemaVersion: typeof ATIF_SCHEMA_VERSION;
-  normalizationVersion: typeof ATIF_NORMALIZATION_VERSION;
   trajectory: AtifTrajectoryV1_8;
   provenance: AtifNormalizationProvenance;
   completeness: AtifNormalizationCompleteness;
@@ -247,7 +240,6 @@ export function parseNormalizedTrajectory(input: unknown): NormalizedTrajectory 
   return {
     format: result.data.format,
     schemaVersion: result.data.schemaVersion,
-    normalizationVersion: result.data.normalizationVersion,
     trajectory: parseAtifTrajectory(result.data.trajectory),
     provenance: result.data.provenance as AtifNormalizationProvenance,
     completeness: result.data.completeness,
@@ -262,7 +254,6 @@ export function createNormalizedTrajectory(
   return parseNormalizedTrajectory({
     format: 'atif',
     schemaVersion: ATIF_SCHEMA_VERSION,
-    normalizationVersion: ATIF_NORMALIZATION_VERSION,
     trajectory: input.trajectory,
     provenance: input.provenance,
     completeness: input.completeness,

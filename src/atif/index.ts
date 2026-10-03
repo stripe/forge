@@ -40,7 +40,6 @@ export {serializeAtifTrajectory} from './serializer.js';
 export {isAtifTimestamp} from './timestamp.js';
 
 export {
-  ATIF_NORMALIZATION_VERSION,
   createNormalizedTrajectory,
   NormalizedTrajectoryValidationError,
   parseNormalizedTrajectory,

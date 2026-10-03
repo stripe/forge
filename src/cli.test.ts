@@ -752,12 +752,12 @@ describe('Forge CLI', () => {
 
     assert.equal(composition.runtime.id, 'forge/docker');
     assert.deepEqual([...composition.agents.keys()], ['claude-code', 'codex']);
-    assert.equal(composition.agents.get('claude-code')?.version, '2');
-    assert.equal(composition.agents.get('codex')?.version, '1');
+    assert.equal(composition.agents.get('claude-code')?.version, FORGE_VERSION);
+    assert.equal(composition.agents.get('codex')?.version, FORGE_VERSION);
     assert.deepEqual([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()], ['anthropic']);
     assert.equal((composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
       'anthropic',
-    )?.version, '1');
+    )?.version, FORGE_VERSION);
     assert.equal((await composition.credentialResolver.resolve(
       credentialReference('anthropic.api-key'),
       {
@@ -801,7 +801,7 @@ describe('Forge CLI', () => {
         },
       });
       const codex = composition.agents.get('codex')!;
-      assert.equal(codex.version, compatible ? '1+responses-compatible' : '1');
+      assert.equal(codex.version, FORGE_VERSION);
       {
         const actual = codex.requirements({adapter: 'codex', provider: 'openai', model: 'gpt-5.4'});
         assert.ok(actual);
@@ -836,10 +836,10 @@ describe('Forge CLI', () => {
     });
     const claude = composition.agents.get('claude-code');
     assert.notEqual(claude, undefined);
-    assert.equal(claude!.version, '2+gateway');
+    assert.equal(claude!.version, FORGE_VERSION);
     assert.equal((composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
       'anthropic',
-    )?.version, '1+messages-compatible');
+    )?.version, FORGE_VERSION);
     const requirements = claude!.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',

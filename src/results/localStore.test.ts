@@ -5,7 +5,6 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
-import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
 import type {ResolvedRunPlanV1} from '../model/types.js';
@@ -66,7 +65,6 @@ const multiTurnInteraction = {
   ],
   role_player: {
     model: {provider: 'test-provider', model: 'test-role-player'},
-    prompt_version: '1',
     needs: [{id: 'need_1', description: 'Complete the requested task.'}],
     decisions: [
       {
@@ -116,7 +114,6 @@ const zeroTurnInteraction = {
   turns: [],
   role_player: {
     model: {provider: 'test-provider', model: 'test-role-player'},
-    prompt_version: '1',
     needs: null,
     decisions: [
       {
@@ -458,6 +455,28 @@ describe('local artifact store', () => {
 
   it('rejects unsupported result schema versions', () => {
     assert.throws(() => parseRunResult({...resultFor([]), schema_version: 2}));
+  });
+
+  it('strictly parses configuration metadata and rejects removed normalization counters', () => {
+    const result = resultFor([]);
+    const metadata = {endpoint_mode: 'custom', layout_mode: 'default'};
+    const providerMetadata = {endpoint_mode: 'custom'};
+    const call = {
+      sequence: 1, purpose: 'judge', provider: 'test-provider', provider_version: '3.4.1', model: 'judge-model',
+      status: 'succeeded', stop_reason: 'end_turn', input_tokens: 10, output_tokens: 2,
+      cached_tokens: null, cost_usd: null, error_code: null, provider_metadata: providerMetadata,
+    };
+    const parsed = parseRunResult({...result, agent: {...result.agent, metadata}, completion_calls: [call]});
+    metadata.endpoint_mode = 'default';
+    providerMetadata.endpoint_mode = 'default';
+    assert.deepEqual(parsed.agent.metadata, {endpoint_mode: 'custom', layout_mode: 'default'});
+    assert.deepEqual(parsed.completion_calls[0]!.provider_metadata, {endpoint_mode: 'custom'});
+    assert.equal(parsed.completion_calls[0]!.provider_version, '3.4.1');
+    assert.throws(() => parseRunResult({...result, evidence: {...result.evidence, normalization_version: 1}}));
+    for (const invalid of [null, {endpoint_mode: 'unknown'}, {endpoint_mode: 'custom', layout_mode: 'default', endpoint: 'private'}]) {
+      assert.throws(() => parseRunResult({...result, agent: {...result.agent, metadata: invalid}}));
+      assert.throws(() => parseRunResult({...result, completion_calls: [{...call, provider_metadata: invalid}]}));
+    }
   });
 
   it('requires ordered completion-call summaries with matching status and error codes', () => {
@@ -1080,7 +1099,7 @@ describe('local artifact store', () => {
       assert.equal(actual.runId, 'run-1');
     }
 
-    const unsupportedPromptLocation = await commitArtifacts(
+    const unexpectedPromptVersionLocation = await commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
         {path: 'trajectory.json', body: trajectory},
@@ -1091,7 +1110,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await assert.rejects(verifyCompletedRun(unsupportedPromptLocation), /prompt_version is not supported by this Forge build/);
+    await assert.rejects(verifyCompletedRun(unexpectedPromptVersionLocation), /Completed judge-evidence\.json does not match its schema\./);
 
     const unsupportedProjectionLocation = await commitArtifacts(
       [
@@ -1397,11 +1416,9 @@ function trajectoryBody(
 function judgeEvidenceValue(): JudgeEvidenceV1 {
   return {
     schema_version: 1,
-    prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
     transcript: {
       source: 'trajectory.json',
       projection_id: 'forge-visible-atif-steps',
-      projection_version: 1,
       trajectory_scope: 'root',
       included_step_sources: ['user', 'agent'],
       copied_context: 'excluded',
@@ -1533,7 +1550,6 @@ function resultFor(
     evidence: {
       format: 'atif',
       schema_version: 'ATIF-v1.8',
-      normalization_version: 1,
       provenance: {
         source: {
           kind: 'native_log',

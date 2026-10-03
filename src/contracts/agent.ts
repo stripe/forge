@@ -1,3 +1,5 @@
+import type {AgentAdapterMetadata} from './metadata.js';
+
 import type {AgentSelectionV1, ResolvedRunPlanV1} from '../model/types.js';
 import type {RunInputProvider} from './inputs.js';
 import type {EnvironmentSpecification} from './credentials.js';
@@ -173,6 +175,8 @@ export interface AgentEvidenceContext {
 export interface AgentAdapter {
   readonly id: string;
   readonly version: string;
+  /** Optional configuration distinctions snapshotted during pure preflight. */
+  readonly metadata?: AgentAdapterMetadata;
   /** Native realization for the public `forge/plugin` action, when supported. */
   readonly pluginInstaller?: AgentPluginInstaller;
   /** Pure declaration used before credentials resolve or a runtime allocates. */

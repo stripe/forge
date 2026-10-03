@@ -1,8 +1,6 @@
 /** Private sentinel retained for configured-opening compatibility. */
 export const AVA_STOP_SENTINEL = '###STOP###';
 
-/** Persisted identifier for the engine-owned Ava prompt semantics. */
-export const AVA_PROMPT_VERSION = '1' as const;
 
 export interface AvaPromptInputs {
   readonly task: string;

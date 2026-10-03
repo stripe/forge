@@ -388,7 +388,7 @@ paths, and unrelated ambient state do not belong in either file.
 bytes for the paths inspected by configured deterministic file checks. Its
 artifact checksum covers the whole file; entries do not carry separate digests.
 `judge-evidence.json` exists only when judging ran. Schema version 1 records the
-judge prompt version, positive transcript-projection policy, and the exact
+positive transcript-projection policy and the exact
 reduced, redacted steps supplied to the judge at `transcript.steps`, alongside
 the bounded workspace text and warnings. These two evidence artifacts have
 different scopes and are independently conditional.
@@ -415,14 +415,13 @@ For native Claude evidence, the result contains an evidence descriptor like:
 {
   "format": "atif",
   "schema_version": "ATIF-v1.8",
-  "normalization_version": 1,
   "provenance": {
     "source": {
       "kind": "native_log",
       "format": "claude-code-jsonl",
       "session_id": "session-123"
     },
-    "adapter": {"id": "claude-code", "version": "1"}
+    "adapter": {"id": "claude-code", "version": "0.1.1-dev.0"}
   },
   "completeness": "complete",
   "warnings": [],
@@ -614,8 +613,9 @@ implicitly read `OPENAI_API_KEY`. Optional `OPENAI_BASE_URL` is the complete API
 root (for example, `https://gateway.example.com/v1`), not a Chat Completions
 endpoint; the service must support the Responses protocol used by Codex. Use
 HTTPS for remote services. Endpoints must be reachable from inside the runtime.
-The adapter records version `1`, or `1+responses-compatible` for an explicitly
-configured endpoint; endpoint URLs and credentials are not added to results.
+The adapter version is the installed Forge package version.
+`result.json.agent.metadata.endpoint_mode` records `default` or `custom`;
+endpoint URLs and credentials are not added to results.
 
 `hook_trust` belongs on the Codex entry in `matrix.agents`. It defaults to
 `native`, which lets Codex enforce its normal hook review requirements. Set
@@ -632,9 +632,9 @@ include explicit `id`, `provider`, `executable`, `expectedVersion`, `credential`
 `credentialEnvironmentName`, `baseUrl`, and `layout`. Changing the CLI version
 requires validating its stream and rollout formats against the adapter. A
 custom layout specifies `workspace`, `home`, and `configDirectory` (the
-run-owned `CODEX_HOME`) just like the Claude layout below, and records version
-`1+layout` or `1+responses-compatible.layout`. No Docker-specific mechanism is
-required by the agent contract.
+run-owned `CODEX_HOME`) just like the Claude layout below.
+`result.json.agent.metadata.layout_mode` records `default` or `custom`.
+No Docker-specific mechanism is required by the agent contract.
 
 Codex is a coding-agent adapter, not a host completion provider. For a
 multi-turn Codex experiment, still declare `models.role_player`; for success
@@ -778,7 +778,7 @@ are excluded from judging.
 
 Programmatic consumers can reproduce the exact judge transcript bytes and
 policy with `createJudgeTranscriptProjection` from `@stripe/forge`. The exported
-projection ID, version, source, and positive included-field policy describe the
+projection ID, source, and positive included-field policy describe the
 policy recorded in `judge-evidence.json`. Its `transcript.steps` array is decoded
 directly from the same canonical transcript JSON passed to `judgeGuidelines`;
 canonical serialization of that array reproduces the transcript bytes in every
@@ -806,7 +806,7 @@ sent to the judge. It is an audit artifact, not an input to a later judge call.
 completed-turn coverage, projection-policy declaration, and equality of the
 embedded steps with the projection of `trajectory.json`. Embedded steps are
 required; artifacts containing only the projection policy are rejected. The
-artifact schema, judge prompt, and projection versions remain at 1. Forge
+artifact schema remains at 1; its contract includes the projection policy. Forge
 refuses to dispatch a judge request if its final defensive
 credential-redaction pass would rewrite the selected prompt evidence.
 
@@ -1259,6 +1259,14 @@ The `provider` in `models.role_player` or `models.judge` must match the resolved
 provider's `id`. The field is optional only when the plan needs neither Ava nor
 guideline judging.
 
+Built-in implementations use `FORGE_VERSION` as their adapter/provider version.
+Independently released integrations supply their own `version`. Optional
+`AgentAdapter.metadata` contains `endpoint_mode` and `layout_mode`; optional
+`CompletionProvider.metadata` contains `endpoint_mode`. Each value is `default`
+or `custom`, with no additional fields. Forge validates and freezes fresh
+snapshots during pure preflight and persists them in `agent.metadata` and
+`completion_calls[].provider_metadata`.
+
 ### Anthropic-compatible endpoints
 
 The built-in completion provider is exported from
@@ -1272,14 +1280,12 @@ with `http_error`, keeping credentials and requests at the configured endpoint.
 The public CLI selects its authentication mode from the environment. With no
 `ANTHROPIC_BASE_URL`, Claude Code and host-side completions use direct Anthropic
 and resolve `ANTHROPIC_API_KEY`. With `ANTHROPIC_BASE_URL`, both use that URL and
-resolve `ANTHROPIC_AUTH_TOKEN` instead. Completed result metadata records the
-gateway variant as Claude adapter version `2+gateway` and completion-provider
-version `1+messages-compatible`, without adding endpoint or token fields;
-direct runs record Claude adapter version `2` and completion-provider version
-`1`.
-
-Claude adapter version `2` uses native writable plugin installation and user
-settings. Version `1` used a custom plugin seed and setup-sealed state.
+resolve `ANTHROPIC_AUTH_TOKEN` instead. Built-in adapter and completion-provider
+versions use the installed Forge package version.
+`result.json.agent.metadata.endpoint_mode` and
+`completion_calls[].provider_metadata.endpoint_mode` record `default` or
+`custom`, without adding endpoint URLs or token values. Claude uses native
+writable plugin installation and user settings.
 
 A programmatic host makes the same choice explicitly on its agent adapter.
 Declare the non-secret base URL and bind the token through an opaque credential
@@ -1639,8 +1645,8 @@ a type from `@stripe/forge/agents/claude-code`. The layout is validated and
 snapshotted without filesystem access. The runtime must report the same home
 and workspace paths. Claude config, plugin installation, and native project
 paths share the effective configuration root, including when it is separate
-from HOME. Custom layouts record adapter version `2+layout` or
-`2+gateway.layout`; default Docker paths and versions remain unchanged.
+from HOME. The adapter records `layout_mode: custom` in
+`result.json.agent.metadata`; the standard Docker layout records `default`.
 
 Use `assertRuntimeAdapterConforms` from `@stripe/forge/testing` to exercise an
 adapter. Its optional `commandProbes` check scoped command results using

@@ -1,5 +1,4 @@
 import {
-  ATIF_NORMALIZATION_VERSION,
   ATIF_SCHEMA_VERSION,
   isAtifTimestamp,
   parseAtifTrajectory,
@@ -230,7 +229,7 @@ function recordsToAtif(
     input.signal.throwIfAborted();
     if (record.isCompactSummary === true || record.subtype === 'compact_boundary') {
       throw new ClaudeSessionIncompleteError(
-        `Compacted Claude sessions are not supported by normalization v${ATIF_NORMALIZATION_VERSION}.`,
+        'Compacted Claude sessions are not supported by Forge normalization.',
       );
     }
     if (record.isSidechain === true) {

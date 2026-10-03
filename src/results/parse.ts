@@ -1,12 +1,13 @@
 import {z} from 'zod';
 
+import {agentAdapterMetadataSchema, completionProviderMetadataSchema} from '../contracts/metadata.js';
+
 import {assertBoundedJsonValue} from '../atif/parser.js';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
@@ -178,7 +179,6 @@ const interactionArtifactSchema = z.object({
   turns: z.array(interactionTurn).max(100),
   role_player: z.object({
     model: z.object({provider: safeText, model: safeText}).strict(),
-    prompt_version: safeText,
     needs: z.array(avaNeed).max(6).nullable(),
     decisions: z.array(avaDecision).max(101),
   }).strict().optional(),
@@ -244,11 +244,9 @@ const interactionArtifactSchema = z.object({
 
 const judgeEvidenceSchema = z.object({
   schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
-  prompt_version: safeText,
   transcript: z.object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
     projection_id: z.literal(JUDGE_TRANSCRIPT_PROJECTION_ID),
-    projection_version: z.literal(JUDGE_TRANSCRIPT_PROJECTION_VERSION),
     trajectory_scope: z.literal(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE),
     included_step_sources: z.tuple([
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES[0]),
@@ -289,6 +287,7 @@ const completionCallSummary = z.object({
   purpose: z.enum(['role_player', 'judge']),
   provider: safeText,
   provider_version: safeText,
+  provider_metadata: completionProviderMetadataSchema.optional(),
   model: safeText,
   status: z.enum(['succeeded', 'failed']),
   stop_reason: z.enum([
@@ -352,7 +351,6 @@ const normalizationProvenance = z.object({
 const evidenceV1 = z.object({
   format: z.literal('atif'),
   schema_version: z.literal('ATIF-v1.8'),
-  normalization_version: z.literal(1),
   provenance: normalizationProvenance,
   completeness: z.enum(['complete', 'partial', 'fallback']),
   warnings: z.array(normalizationWarning),
@@ -464,6 +462,7 @@ const runResultFields = {
   agent: z.object({
     adapter: safeText,
     adapter_version: safeText,
+    metadata: agentAdapterMetadataSchema.optional(),
     provider: safeText,
     model: safeText,
     session_id: z.string().max(4096).nullable(),
@@ -584,7 +583,6 @@ export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {
   const projection = parseJudgeTranscriptProjection({
     source: transcript.source,
     projectionId: transcript.projection_id,
-    projectionVersion: transcript.projection_version,
     trajectoryScope: transcript.trajectory_scope,
     includedStepSources: transcript.included_step_sources,
     copiedContext: transcript.copied_context,

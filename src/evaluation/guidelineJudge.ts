@@ -15,7 +15,6 @@ export const MAX_GUIDELINE_JUDGE_ATTEMPTS = 3;
 export const MAX_GUIDELINE_EXPLANATION_CHARACTERS = 64 * 1024;
 export const MAX_GUIDELINE_JUDGE_PROMPT_BYTES = 1024 * 1024;
 export const GUIDELINE_JUDGE_RETRY_DELAYS_MS = [1_000, 5_000] as const;
-export const GUIDELINE_JUDGE_PROMPT_VERSION = '1' as const;
 
 export const GUIDELINE_JUDGMENT_RESPONSE_SCHEMA: StrictCompletionResponseSchema =
   Object.freeze({

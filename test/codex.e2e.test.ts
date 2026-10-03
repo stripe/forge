@@ -9,6 +9,7 @@ import {
   createJudgeTranscriptProjection,
   credentialReference,
   executeEval,
+  FORGE_VERSION,
   parseInteractionArtifact,
   parseJudgeEvidence,
   preflightEval,
@@ -315,7 +316,7 @@ describe('Codex engine integration', () => {
     assert.equal(verified.result.agent.session_id, SESSION_ID);
     assert.equal(verified.result.evidence.completeness, 'complete');
     assert.deepEqual(verified.result.evidence.provenance, {
-      adapter: {id: 'codex', version: '1'},
+      adapter: {id: 'codex', version: FORGE_VERSION},
       source: {kind: 'native_log', format: 'codex-rollout-jsonl', session_id: SESSION_ID},
     });
     const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
