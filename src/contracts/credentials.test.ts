@@ -207,6 +207,142 @@ describe('credential and environment resolution', () => {
     }
   });
 
+  it('bounds opaque references in UTF-8 bytes and rejects control characters', () => {
+    const maximum = 'é'.repeat(512);
+    assert.equal(credentialReference(maximum), maximum);
+    assert.equal(credentialReference('provider/key with spaces'), 'provider/key with spaces');
+    for (const reference of ['', 'é'.repeat(513), 'key\0', 'key\r', 'key\n', 'key\u001f', 'key\u007f']) {
+      assert.throws(() => credentialReference(reference), /bounded non-empty strings/);
+    }
+  });
+
+  it('snapshots scopes in canonical order and preserves explicit prototype-named variables', () => {
+    const input = {
+      variables: JSON.parse('{"__proto__":"plain","constructor":"explicit"}'),
+      credentials: JSON.parse('{"toString":{"reference":"token","scopes":["agent","setup","agent"]}}'),
+    };
+    const normalized = normalizeScopedEnvironmentSpecification(input);
+    input.variables.__proto__ = 'changed';
+    input.credentials.toString.scopes.splice(0);
+
+    assert.deepEqual(normalized.variables, JSON.parse('{"__proto__":"plain","constructor":"explicit"}'));
+    assert.equal(Object.getPrototypeOf(normalized.variables), Object.prototype);
+    const credentialName: string = 'toString';
+    assert.deepEqual(normalized.credentials[credentialName], {reference: 'token', scopes: ['setup', 'agent']});
+    assert.ok(Object.isFrozen(normalized.credentials[credentialName]!.scopes));
+  });
+
+  it('rejects hidden and symbol declaration fields before resolving any credentials', async () => {
+    const resolved: string[] = [];
+    const resolver = createEnvironmentResolver({
+      async resolve(reference) {
+        resolved.push(reference);
+        return 'private-token';
+      },
+    });
+    for (const field of ['variables', 'credentials']) {
+      for (const makeDictionary of [
+        (value: unknown) => ({[Symbol('TOKEN')]: value}),
+        (value: unknown) => Object.defineProperty({}, 'TOKEN', {value}),
+      ]) {
+        const rawValue = field === 'variables' ? 'plain' : {reference: 'token'};
+        assert.throws(() => normalizeEnvironmentSpecification({[field]: makeDictionary(rawValue)}), /enumerable string fields/);
+        const scopedValue = field === 'variables' ? 'plain' : {reference: 'token', scopes: ['agent']};
+        const dictionary = makeDictionary(scopedValue);
+        if (field === 'credentials') {
+          Object.defineProperty(dictionary, 'FIRST_TOKEN', {
+            enumerable: true,
+            value: {reference: credentialReference('first'), scopes: ['agent']},
+          });
+        }
+        const input = {
+          credentials: {FIRST_TOKEN: {reference: credentialReference('first'), scopes: ['agent'] as const}},
+          [field]: dictionary,
+        };
+        assert.throws(() => normalizeScopedEnvironmentSpecification(input), /enumerable string fields/);
+        await assert.rejects(resolver.resolve(input, {
+          runId: 'malformed-dictionary', purpose: 'runtime', signal: new AbortController().signal,
+        }), /enumerable string fields/);
+      }
+    }
+    assert.deepEqual(resolved, []);
+  });
+
+  it('rejects invalid resolved values without exposing them or resolving later credentials', async () => {
+    for (const value of [undefined, null, 123, '', 'private-token\0', 'private-token\r', 'private-token\n']) {
+      const resolved: string[] = [];
+      const resolver = createEnvironmentResolver({
+        async resolve(reference) {
+          resolved.push(reference);
+          return value as string;
+        },
+      });
+      await assert.rejects(resolver.resolve({
+        credentials: {
+          FIRST_TOKEN: {reference: credentialReference('first'), scopes: ['setup']},
+          SECOND_TOKEN: {reference: credentialReference('second'), scopes: ['agent']},
+        },
+      }, {
+        runId: 'invalid-value', purpose: 'runtime', signal: new AbortController().signal,
+      }), (error: unknown) => {
+        assert.ok(error instanceof TypeError);
+        assert.match(error.message, /invalid value for FIRST_TOKEN/);
+        assert.equal(error.message.includes('private-token'), false);
+        return true;
+      });
+      assert.deepEqual(resolved, ['first']);
+    }
+  });
+
+  it('does not resolve credentials after cancellation has already fired', async () => {
+    const controller = new AbortController();
+    const reason = new Error('cancelled before lookup');
+    controller.abort(reason);
+    const resolved: string[] = [];
+    const resolver = createEnvironmentResolver({
+      async resolve(reference) {
+        resolved.push(reference);
+        return 'private-token';
+      },
+    });
+    await assert.rejects(resolver.resolve({
+      credentials: {TOKEN: {reference: credentialReference('token'), scopes: ['agent']}},
+    }, {
+      runId: 'already-aborted', purpose: 'runtime', signal: controller.signal,
+    }), (error: unknown) => error === reason);
+    assert.deepEqual(resolved, []);
+  });
+
+  it('rechecks cancellation after lookup before returning secrets or resolving the next binding', async () => {
+    for (const reason of [new Error('cancelled during lookup'), 'cancelled']) {
+      const controller = new AbortController();
+      const resolved: string[] = [];
+      const resolver = createEnvironmentResolver({
+        async resolve(reference, context) {
+          assert.equal(context.signal, controller.signal);
+          assert.equal(context.runId, 'lookup-cancelled');
+          assert.equal(context.purpose, 'runtime:FIRST_TOKEN');
+          resolved.push(reference);
+          controller.abort(reason);
+          return 'private-token';
+        },
+      });
+      await assert.rejects(resolver.resolve({
+        credentials: {
+          FIRST_TOKEN: {reference: credentialReference('first'), scopes: ['setup']},
+          SECOND_TOKEN: {reference: credentialReference('second'), scopes: ['agent']},
+        },
+      }, {
+        runId: 'lookup-cancelled', purpose: 'runtime', signal: controller.signal,
+      }), (error: unknown) => {
+        if (reason instanceof Error) assert.equal(error, reason);
+        else assert.ok(error instanceof DOMException && error.name === 'AbortError');
+        return true;
+      });
+      assert.deepEqual(resolved, ['first']);
+    }
+  });
+
   it('rejects runtime-incompatible credential values before returning them', async () => {
     const credentials = createEnvironmentCredentialResolver({
       bindings: {'provider/key': 'FORGE_TEST_TOKEN'},

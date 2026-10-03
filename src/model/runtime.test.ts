@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
+import {BenchmarkModelError} from './errors.js';
 import {parseExperimentConfig, parseResolvedRunPlan} from './parse.js';
 import type {ForgeExternalRuntimeV1} from './types.js';
 import {resolvedRunPlanSha256, serializeResolvedRunPlan} from '../planning/planner.js';
@@ -75,8 +76,12 @@ describe('external runtime wire configuration', () => {
       invalid.push(missing);
     }
     for (const selected of invalid) {
-      assert.throws(() => parseExperimentConfig(experiment(selected)));
-      assert.throws(() => parseResolvedRunPlan({...createTestResolvedRunPlan(), runtime: selected}));
+      assert.throws(() => parseExperimentConfig(experiment(selected)), {
+        name: BenchmarkModelError.name, code: 'invalid_experiment_config',
+      });
+      assert.throws(() => parseResolvedRunPlan({...createTestResolvedRunPlan(), runtime: selected}), {
+        name: BenchmarkModelError.name, code: 'invalid_plan',
+      });
     }
   });
 

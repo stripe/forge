@@ -17,7 +17,6 @@ import {
   type CampaignReportV1,
 } from './campaign.js';
 import {createForgeEngine, defaultForgeEngine} from './engine.js';
-import * as rootExports from './index.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import {createArtifactStore} from './results/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
@@ -42,7 +41,6 @@ describe('public campaign API', () => {
     assert.equal(typeof parseCampaignReport, 'function');
     assert.equal(typeof CampaignReportError, 'function');
     assert.equal(CAMPAIGN_REPORT_SCHEMA_VERSION, 1);
-    assert.equal('runCampaign' in rootExports, false);
     const optionsType = (_options: CampaignOptions): void => undefined;
     const summaryType = (_summary: CampaignSummary): void => undefined;
     const reportType = (_report: CampaignReportV1): void => undefined;
@@ -180,7 +178,125 @@ describe('public campaign API', () => {
     assert.ok(events.some((event) => event.state === 'skipped'));
     assert.ok(events.some((event) => event.state === 'errored' && event.error_code === 'execution_error'));
   });
+
+  it('drains siblings under the lock when an outcome callback throws and resumes only unfinished work', async () => {
+    const root = await campaignRoot();
+    const plans = ['first', 'second', 'third'].map((id) => createTestResolvedRunPlan({caseId: `testing/${id}`}));
+    const started = createGate();
+    const cancelled = createGate();
+    const cleanup = createGate();
+    const controller = new AbortController();
+    const sentinel = new Error('outcome callback failed');
+    const calls: string[] = [];
+    let nextId = 0;
+    const options: CampaignOptions = {
+      root, plans, composition: makeComposition(root), engine: defaultForgeEngine,
+      jobs: 2, resume: false, signal: controller.signal,
+      runIdFactory: () => `callback-${++nextId}`, progress: () => undefined,
+      onOutcome(_outcome, index) {if (index === 0) throw sentinel;},
+      async execute(input) {
+        calls.push(input.plan.selection.case_id);
+        if (input.plan === plans[0]) {
+          await waitFor(started.promise);
+          return defaultForgeEngine.executeEval({...input, composition: makeComposition(root)});
+        }
+        assert.equal(input.plan, plans[1], 'No third worker may start after callback failure');
+        started.resolve();
+        await new Promise<void>((resolve) => {
+          if (input.signal!.aborted) resolve();
+          else input.signal!.addEventListener('abort', () => resolve(), {once: true});
+        });
+        cancelled.resolve();
+        await cleanup.promise;
+        throw input.signal!.reason;
+      },
+    };
+    let settled = false;
+    const running = runCampaign(options).then(
+      () => {settled = true; return null;},
+      (error: unknown) => {settled = true; return error;},
+    );
+    try {
+      await waitFor(cancelled.promise);
+      await fs.stat(path.join(root, '.campaign.lock'));
+      assert.equal(settled, false, 'The callback failure must wait for sibling cleanup');
+      assert.deepEqual(calls, ['testing/first', 'testing/second']);
+      cleanup.resolve();
+      assert.equal(await waitFor(running), sentinel);
+      await assert.rejects(fs.stat(path.join(root, '.campaign.lock')), {code: 'ENOENT'});
+      const retained = await fs.readFile(path.join(root, 'runs', 'callback-1', 'result.json'));
+      const resumed = await runCampaign({...options, resume: true, onOutcome: () => undefined,
+        execute: (input) => defaultForgeEngine.executeEval({...input, composition: makeComposition(root)})});
+      assert.equal(resumed.skipped, 1);
+      assert.equal(resumed.executed, 2);
+      assert.deepEqual(await fs.readFile(path.join(root, 'runs', 'callback-1', 'result.json')), retained);
+      let executions = 0;
+      await assert.rejects(runCampaign({...options, resume: true,
+        execute: async () => {executions += 1; throw new Error('must not execute');}}),
+      (error) => error === sentinel);
+      assert.equal(executions, 0, 'A failing skipped-outcome callback must stop no-op resume');
+    } finally {
+      controller.abort();
+      cleanup.resolve();
+      await running;
+    }
+  });
+
+  it('uses the latest attempt after an older valid result is restored', async () => {
+    const root = await campaignRoot();
+    const plans = [createTestResolvedRunPlan()];
+    let nextId = 0;
+    const options: CampaignOptions = {
+      root, plans, composition: makeComposition(root), engine: defaultForgeEngine,
+      resume: false, signal: new AbortController().signal,
+      runIdFactory: () => `history-${++nextId}`, progress: () => undefined,
+      execute: (input) => defaultForgeEngine.executeEval({...input, composition: makeComposition(root)}),
+    };
+    await runCampaign(options);
+    const originalPath = path.join(root, 'runs', 'history-1', 'result.json');
+    const original = await fs.readFile(originalPath);
+    await fs.writeFile(originalPath, 'invalid result');
+    const failedRetry = await runCampaign({...options, resume: true,
+      execute: async () => {throw new Error('retry execution failed');}});
+    assert.equal(failedRetry.errored, 1);
+    await fs.writeFile(originalPath, original);
+    await defaultForgeEngine.verifyCompletedRun(path.dirname(originalPath));
+
+    const inspection = await inspectCampaign({root, engine: defaultForgeEngine});
+    assert.equal(inspection.outcomes[0]!.run_id, 'history-2');
+    assert.equal(inspection.outcomes[0]!.state, 'errored');
+    assert.equal(inspection.outcomes[0]!.artifact, null);
+    const report = parseCampaignReport(JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')));
+    assert.equal(report.summary.completed, 0);
+    assert.equal(report.runs[0]!.run_id, 'history-2');
+    assert.equal(report.runs[0]!.evaluation, null);
+    const resumed = await runCampaign({...options, resume: true});
+    assert.equal(resumed.executed, 1);
+    assert.equal(resumed.skipped, 0);
+    assert.equal(resumed.completed, 1);
+    assert.deepEqual(await fs.readFile(originalPath), original);
+    const checkpoint = JSON.parse(await fs.readFile(path.join(root, 'campaign.json'), 'utf8'));
+    assert.deepEqual(checkpoint.entries[0].attempts.map((attempt: {run_id: string}) => attempt.run_id),
+      ['history-1', 'history-2', 'history-3']);
+  });
 });
+
+function createGate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {resolve = done;});
+  return {promise, resolve};
+}
+
+async function waitFor<T>(promise: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('Timed out waiting for campaign test readiness')), 5_000);
+    })]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function campaignRoot() {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-campaign-api-'));

@@ -174,6 +174,7 @@ export function createAnthropicCompletionProvider(
       try {
         response = await fetchImplementation(endpoint, {
           method: 'POST',
+          redirect: 'manual',
           headers,
           body,
           signal,

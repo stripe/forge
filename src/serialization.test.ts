@@ -22,10 +22,29 @@ describe('serializeCanonicalJson', () => {
     expect(({} as {polluted?: boolean}).polluted).toBeUndefined();
   });
 
-  it('rejects undefined and cycles', () => {
-    expect(() => serializeCanonicalJson({missing: undefined})).toThrow('Undefined');
+  it('rejects unsupported JSON values rather than silently projecting them', () => {
+    for (const value of [undefined, NaN, Infinity, -Infinity, 1n, Symbol('value'),
+      () => undefined, new Date(), [undefined], Array(1), {missing: undefined}]) {
+      expect(() => serializeCanonicalJson(value)).toThrow(TypeError);
+    }
+    expect(() => serializeCanonicalJson({nested: Array(1)})).toThrow(/\$\.nested\[0\]/);
+  });
+
+  it('rejects object and array cycles while allowing shared child objects', () => {
     const cyclic: {self?: unknown} = {};
     cyclic.self = cyclic;
     expect(() => serializeCanonicalJson(cyclic)).toThrow('Cyclic');
+    const cyclicArray: unknown[] = [];
+    cyclicArray.push(cyclicArray);
+    expect(() => serializeCanonicalJson(cyclicArray)).toThrow('Cyclic');
+    const shared = {value: null};
+    expect(serializeCanonicalJson([shared, shared])).toBe('[{"value":null},{"value":null}]\n');
+  });
+
+  it('accepts null-prototype records and canonicalizes negative zero without mutating input', () => {
+    const input = Object.assign(Object.create(null) as Record<string, unknown>, {z: -0, a: null});
+    expect(serializeCanonicalJson(input)).toBe('{"a":null,"z":0}\n');
+    expect(Object.is(input.z, -0)).toBe(true);
+    expect(Object.getPrototypeOf(input)).toBe(null);
   });
 });

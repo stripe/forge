@@ -78,6 +78,7 @@ export async function collectWorkspaceEvidence(
   checks: ChecksV1 | undefined,
   signal?: AbortSignal,
 ): Promise<WorkspaceEvidenceV1> {
+  signal?.throwIfAborted();
   const requestedPaths = new Set<string>([
     ...(checks?.files_created ?? []),
     ...(checks?.file_checks ?? []).map(({file}) => file),
@@ -88,8 +89,10 @@ export async function collectWorkspaceEvidence(
 
   for (const requestedPath of [...requestedPaths].sort(compareStrings)) {
     signal?.throwIfAborted();
+    let inspected: Awaited<ReturnType<ReadonlyWorkspace['inspect']>> | undefined;
     try {
-      const inspected = await workspace.inspect(requestedPath);
+      inspected = await workspace.inspect(requestedPath);
+      signal?.throwIfAborted();
       if (inspected.kind !== 'file') {
         entries.push({
           path: requestedPath,
@@ -110,6 +113,7 @@ export async function collectWorkspaceEvidence(
       const body = await workspace.readFile(requestedPath, {
         maxBytes: MAX_CHECK_FILE_BYTES,
       });
+      signal?.throwIfAborted();
       entries.push({
         path: requestedPath,
         exists: true,
@@ -118,12 +122,14 @@ export async function collectWorkspaceEvidence(
         content_base64: Buffer.from(body).toString('base64'),
       });
     } catch (error) {
+      signal?.throwIfAborted();
       complete = false;
       const message = safeEvidenceError(error);
       entries.push({
         path: requestedPath,
-        exists: false,
-        kind: 'missing',
+        exists: inspected?.kind === 'file',
+        kind: inspected?.kind === 'file' ? 'file' : 'missing',
+        ...(inspected?.size === undefined ? {} : {size_bytes: inspected.size}),
         issue: message,
       });
       warnings.push({code: 'workspace_evidence_unavailable', message, path: requestedPath});
@@ -161,7 +167,9 @@ export function runWorkspaceChecks(
     const expectedExists = check.exists;
     const exists = entry?.exists === true;
     const label = check.description ?? check.file;
-    const existencePasses = expectedExists === exists;
+    const existencePasses = entry !== undefined && (expectedExists
+      ? exists
+      : !exists && entry.issue === undefined);
     results.push({
       name: expectedExists ? `file_exists: ${label}` : `file_absent: ${label}`,
       passed: existencePasses,
@@ -170,7 +178,7 @@ export function runWorkspaceChecks(
         : {
             detail: expectedExists
               ? (entry?.issue ?? `Not found: ${check.file}`)
-              : `Should not exist: ${check.file}`,
+              : (entry?.issue ?? `Should not exist: ${check.file}`),
           }),
     });
 

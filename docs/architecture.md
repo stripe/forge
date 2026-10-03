@@ -577,10 +577,13 @@ Forge sets these directory modes on the host:
 | Host directories | Mode | Why |
 | --- | --- | --- |
 | `R`, `R/state` | `0700` | Other host users cannot reach the run's files. |
-| `R/workspace`, `R/home`, each `R/state/{id}` | `0777` | The run-owned mount leaves remain writable across native Linux and Docker file-sharing implementations. Their private `0700` ancestor prevents access by other host users. |
+| `R/workspace`, `R/home`, nested home mount targets and their parents, each `R/state/{id}` | `0777` | The run-owned directories remain writable across native Linux and Docker file-sharing implementations. Their private `0700` ancestor prevents access by other host users. |
 
 The container sees the mounted directories' modes. A sealed state mount becomes
 read-only to the container even though its host directory remains `0777`.
+Forge creates nested home mount targets and their parents before starting
+Docker, so the daemon cannot leave root-owned directories that block agent
+settings writes or host cleanup.
 
 - **Setup:** All bind mounts are writable. A state mount goes under
   `/home/forge`, or under `/opt` when it will be sealed.
@@ -813,6 +816,10 @@ bytes in `workspace-evidence.json`, and executes regular expressions in a
 bounded VM context. The containing artifact checksum protects this evidence;
 individual entries have no digest. This artifact is emitted only when at least
 one deterministic file check exists; it is not a workspace snapshot.
+An absence check requires a successful inspection establishing that the path
+is missing. Failed reads retain any inspected file existence, with an issue;
+unavailable content cannot pass a content check. Cancellation propagates
+through evidence collection.
 
 ### Guideline judging
 

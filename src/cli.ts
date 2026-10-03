@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import * as path from 'node:path';
+import {realpathSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 
@@ -610,7 +611,12 @@ function errorMessage(error: unknown): string {
 
 function isMainModule(): boolean {
   const entry = process.argv[1];
-  return entry !== undefined && pathToFileURL(path.resolve(entry)).href === import.meta.url;
+  if (entry === undefined) return false;
+  try {
+    return pathToFileURL(realpathSync(entry)).href === import.meta.url;
+  } catch {
+    return false;
+  }
 }
 
 if (isMainModule()) {

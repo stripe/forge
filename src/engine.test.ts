@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
+import {stringify} from 'yaml';
 
 import {expect} from '../test/support/expect.js';
 
@@ -55,6 +56,27 @@ afterEach(async () => {
 });
 
 describe('ForgeEngine setup action bundles', () => {
+  it('dispatches YAML case and experiment parsing through the selected action registry', () => {
+    const engine = createForgeEngine({setupActionBundles: [testBundle()]});
+    const caseValue = {
+      schema_version: 1, id: 'testing/yaml-extension', initial_prompt: 'Complete the task.',
+      execution_mode: 'one_shot', success_guidelines: [],
+      setup: [{uses: 'acme-evals/skill', with: {name: ' case-skill '}}],
+    };
+    const experiment = experimentValue();
+    const caseYaml = stringify(caseValue);
+    const experimentYaml = stringify(experiment);
+    const parsedCase = engine.parseEvalCaseYaml(caseYaml);
+    expect(parsedCase).toEqual(engine.parseEvalCase(caseValue));
+    expect(parsedCase.setup[0]!.with.name).toBe('case-skill');
+    expect(Object.isFrozen(parsedCase.setup[0]!.with)).toBe(true);
+    expect(engine.parseExperimentConfigYaml(experimentYaml)).toEqual(engine.parseExperimentConfig(experiment));
+    expect(() => defaultForgeEngine.parseEvalCaseYaml(caseYaml)).toThrow(/unknown setup action/);
+    expect(() => defaultForgeEngine.parseExperimentConfigYaml(experimentYaml)).toThrow(/bundle|unknown setup action/);
+    experiment.forge.action_bundles[0]!.version = 'different-version';
+    expect(() => engine.parseExperimentConfigYaml(stringify(experiment))).toThrow(/bundle|pin/);
+  });
+
   it('keeps extension names absent from and unavailable to the default engine', () => {
     expect(defaultForgeEngine.setupActionIds).toEqual([
       'forge/command',

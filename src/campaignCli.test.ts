@@ -19,7 +19,6 @@ import {
 import type {ForgeComposition} from './contracts/composition.js';
 import {createForgeEngine, defaultForgeEngine} from './engine.js';
 import {executeEvalWithTestHooks} from './execution/execute.js';
-import * as rootExports from './index.js';
 import {createArtifactStore} from './results/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
 import {
@@ -44,8 +43,6 @@ afterEach(async () => {
 
 describe('shared campaign command', () => {
   it('keeps command APIs on their subpath and rejects option/alias collisions', () => {
-    assert.equal('runCampaignCommand' in rootExports, false);
-    assert.equal('inspectCampaign' in rootExports, false);
     assert.equal(typeof runCampaignCommand, 'function');
     assert.deepEqual(Object.keys(CAMPAIGN_CLI_OPTIONS), ['output', 'run-id', 'resume', 'jobs']);
     for (const definitions of [

@@ -143,6 +143,39 @@ describe('createScriptedCompletionProvider', () => {
 
     await expect(pending).rejects.toThrow();
   });
+
+  it('records isolated request and credential snapshots and returns copied response usage', async () => {
+    const schema = {type: 'object', properties: {answer: {type: 'string'}}};
+    const messages = [{role: 'user' as const, content: 'original'}];
+    const model = {provider: 'test-provider', model: 'original-model'};
+    const credentials = {token: 'synthetic-value'};
+    const response = {
+      content: 'answer', stopReason: 'end_turn' as const,
+      usage: {inputTokens: 3, outputTokens: 2, cachedInputTokens: 1},
+    };
+    const fixture = createScriptedCompletionProvider({responses: [response]});
+    const request = completionRequest({
+      model, messages, responseSchema: {name: 'answer', strict: true, schema},
+    });
+    const completed = await fixture.provider.complete(request, {credentials});
+    messages[0]!.content = 'changed';
+    model.model = 'changed';
+    credentials.token = 'changed';
+    schema.properties.answer.type = 'number';
+    response.usage.inputTokens = 999;
+
+    const recorded = fixture.calls[0]!;
+    expect(recorded.request.messages).toEqual([{role: 'user', content: 'original'}]);
+    expect(recorded.request.model.model).toBe('original-model');
+    expect(recorded.request.responseSchema?.schema).toEqual({
+      type: 'object', properties: {answer: {type: 'string'}},
+    });
+    expect(recorded.request.signal).toBe(request.signal);
+    expect(recorded.context.credentials).toEqual({token: 'synthetic-value'});
+    expect(completed.usage.inputTokens).toBe(3);
+    expect(Object.isFrozen(recorded.request.messages[0])).toBe(true);
+    expect(Object.isFrozen(completed.usage)).toBe(true);
+  });
 });
 
 function completionRequest(

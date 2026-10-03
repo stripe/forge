@@ -311,6 +311,24 @@ export function createDockerRuntimeAdapter(
         sealAfterSetup: boolean;
       }> = [];
       for (const requirement of stateRequirements) {
+        if (requirement.containerPath.startsWith(`${CONTAINER_HOME}/`)) {
+          // Docker otherwise creates missing nested mount targets as root in
+          // the home bind mount, preventing the agent from writing settings
+          // beside them and the host user from cleaning up the run.
+          let target = homeRoot;
+          for (const segment of requirement.containerPath.slice(CONTAINER_HOME.length + 1).split('/')) {
+            target = path.join(target, segment);
+            await fs.mkdir(target, {recursive: true, mode: 0o777});
+            await fs.chmod(target, 0o777);
+            if (filesystemIdentity.hostWriteOwner !== undefined) {
+              await fs.chown(
+                target,
+                filesystemIdentity.hostWriteOwner.uid,
+                filesystemIdentity.hostWriteOwner.gid,
+              );
+            }
+          }
+        }
         const source = path.join(stateRoot, requirement.id);
         await fs.mkdir(source, {mode: 0o777});
         await fs.chmod(source, 0o777);
@@ -982,6 +1000,7 @@ function validateStateRequirements(
           requirement.containerPath.startsWith('/opt/'))
       ) ||
       requirement.containerPath.includes('\0') ||
+      requirement.containerPath.includes('\\') ||
       path.posix.normalize(requirement.containerPath) !== requirement.containerPath
     ) {
       throw new TypeError(
@@ -991,6 +1010,7 @@ function validateStateRequirements(
     if (
       paths.some(
         (existing) =>
+          existing === requirement.containerPath ||
           existing.startsWith(`${requirement.containerPath}/`) ||
           requirement.containerPath.startsWith(`${existing}/`),
       )

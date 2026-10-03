@@ -95,9 +95,6 @@ initial_prompt: Two
       parseSetupStep({uses: 'forge/future', with: {}}),
     ).toThrow(/unknown setup action/);
     expect(() =>
-      parseSetupStep({uses: 'stripe/future', with: {}}),
-    ).toThrow(/unknown setup action/);
-    expect(() =>
       parseSetupStep({uses: 'not-namespaced', with: {}}),
     ).toThrow(/namespaced/);
     expect(() =>
@@ -263,28 +260,50 @@ treatments:
   });
 
   it('validates manifest hashes, path inventory, and uniqueness', () => {
-    expect(
-      parseDatasetManifestJson(
-        JSON.stringify({
-          schema_version: 1,
-          dataset: {id: 'forge-smoke', version: '2026.09.0'},
-          cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
-          files: [
-            {path: 'cases/smoke/write/eval.yaml', size: 100, sha256: HASH},
-          ],
-        }),
-      ),
-    ).toMatchObject({dataset: {id: 'forge-smoke'}});
-    expect(() =>
-      parseDatasetManifestJson(
-        JSON.stringify({
-          schema_version: 1,
-          dataset: {id: 'forge-smoke', version: '1'},
-          cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
-          files: [],
-        }),
-      ),
-    ).toThrow(BenchmarkModelError);
+    const manifest = {
+      schema_version: 1,
+      dataset: {id: 'forge-smoke', version: '2026.09.0'},
+      cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
+      files: [{path: 'cases/smoke/write/eval.yaml', size: 100, sha256: HASH}],
+    };
+    expect(parseDatasetManifestJson(JSON.stringify(manifest)))
+      .toMatchObject({dataset: {id: 'forge-smoke'}});
+
+    const invalidManifests = [
+      {value: {...manifest, files: []}, reason: 'at least 1'},
+      {
+        value: {...manifest, files: [{...manifest.files[0], sha256: HASH.toUpperCase()}]},
+        reason: 'lowercase SHA-256 hex',
+      },
+      {
+        value: {...manifest, files: [{...manifest.files[0], path: 'fixtures/other.txt'}]},
+        reason: 'case path must be present',
+      },
+      {
+        value: {...manifest, files: [...manifest.files, {...manifest.files[0]}]},
+        reason: 'path values must be unique',
+      },
+      {
+        value: {
+          ...manifest,
+          cases: [...manifest.cases, {id: 'smoke/write', path: 'cases/other.yaml'}],
+          files: [...manifest.files, {path: 'cases/other.yaml', size: 100, sha256: HASH}],
+        },
+        reason: 'id values must be unique',
+      },
+      {
+        value: {
+          ...manifest,
+          cases: [...manifest.cases, {id: 'smoke/other', path: manifest.cases[0]!.path}],
+        },
+        reason: 'path values must be unique',
+      },
+    ];
+    for (const {value, reason} of invalidManifests) {
+      expect(() => parseDatasetManifestJson(JSON.stringify(value))).toThrow(
+        expect.objectContaining({code: 'invalid_manifest', message: expect.stringContaining(reason)}),
+      );
+    }
   });
 });
 

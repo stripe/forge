@@ -77,22 +77,29 @@ const repositoryRoot = path.resolve(
 
 if (process.env.FORGE_LIVE !== '1') {
   throw new Error(
-    'The live suite uses Docker and makes potentially billable model calls. Set FORGE_LIVE=1 to acknowledge both.',
+    'The live suite uses Docker; full mode makes potentially billable model calls. Set FORGE_LIVE=1 to opt in.',
   );
 }
 
+const mode = optionalEnvironment('FORGE_LIVE_MODE') ?? 'full';
+if (mode !== 'full' && mode !== 'setup') {
+  throw new Error('FORGE_LIVE_MODE must be full or setup.');
+}
 const liveAgent = optionalEnvironment('FORGE_LIVE_AGENT') ?? 'claude-code';
 if (liveAgent !== 'claude-code' && liveAgent !== 'codex') {
   throw new Error('FORGE_LIVE_AGENT must be claude-code or codex.');
 }
 const codexSelected = liveAgent === 'codex';
+if (mode === 'setup' && codexSelected) {
+  throw new Error('Setup mode requires claude-code; Codex plugin installation is not supported.');
+}
 const gatewayEnvironmentName = codexSelected ? 'OPENAI_BASE_URL' : 'ANTHROPIC_BASE_URL';
-const gatewayBaseUrl = optionalEnvironment(gatewayEnvironmentName);
+const gatewayBaseUrl = mode === 'setup' ? undefined : optionalEnvironment(gatewayEnvironmentName);
 const gatewaySelected = gatewayBaseUrl !== undefined;
 const credentialEnvironmentName = codexSelected
   ? 'CODEX_API_KEY'
   : gatewaySelected ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
-const upstreamCredential = requiredEnvironment(credentialEnvironmentName);
+const upstreamCredential = mode === 'setup' ? undefined : requiredEnvironment(credentialEnvironmentName);
 const timeoutMs = positiveIntegerEnvironment(
   'FORGE_LIVE_TIMEOUT_MS',
   DEFAULT_TIMEOUT_MS,
@@ -124,6 +131,20 @@ process.once('SIGTERM', abort);
 
 let bridge;
 try {
+  if (mode === 'setup') {
+    const {runSetupIntegrationSuite} = await import('./live-setup.mjs');
+    const setup = await runSetupIntegrationSuite({dockerExecutable, resultsRoot, suiteId, signal, progress});
+    process.stdout.write(`${JSON.stringify({verified: true, suite_id: suiteId, mode, setup}, null, 2)}\n`);
+  } else {
+    await runFullSuite();
+  }
+} finally {
+  process.removeListener('SIGINT', abort);
+  process.removeListener('SIGTERM', abort);
+  await bridge?.close().catch(() => undefined);
+}
+
+async function runFullSuite() {
   const gatewayUrl = gatewayBaseUrl === undefined && !codexSelected
     ? undefined
     : parseGatewayUrl(gatewayBaseUrl ?? 'https://api.openai.com/v1', gatewayEnvironmentName);
@@ -261,10 +282,6 @@ try {
       2,
     )}\n`,
   );
-} finally {
-  process.removeListener('SIGINT', abort);
-  process.removeListener('SIGTERM', abort);
-  await bridge?.close().catch(() => undefined);
 }
 
 async function runClaudePluginConformance({

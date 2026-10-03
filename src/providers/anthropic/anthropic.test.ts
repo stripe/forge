@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {createServer, type IncomingHttpHeaders, type Server} from 'node:http';
+import type {AddressInfo} from 'node:net';
 import {describe, it} from 'node:test';
 
 import type {
@@ -13,6 +15,7 @@ import {
   ANTHROPIC_DEFAULT_BASE_URL,
   ANTHROPIC_DEFAULT_MAX_TOKENS,
   ANTHROPIC_MAX_MESSAGE_BYTES,
+  ANTHROPIC_MAX_REQUEST_BYTES,
   ANTHROPIC_MAX_TOKENS,
   ANTHROPIC_MAX_RESPONSE_BYTES,
   ANTHROPIC_MESSAGES_API_VERSION,
@@ -293,6 +296,130 @@ describe('Anthropic completion provider', () => {
     assert.equal(headers.has('authorization'), false);
   });
 
+  it('uses native HTTP transport and reconstructs fragmented UTF-8 text blocks', async (t) => {
+    let recordedRequest: {
+      method: string | undefined;
+      url: string | undefined;
+      headers: IncomingHttpHeaders;
+      body: unknown;
+    } | undefined;
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      recordedRequest = {
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+      };
+      const bytes = Buffer.from(JSON.stringify({
+        type: 'message',
+        role: 'assistant',
+        content: [
+          {type: 'text', text: '{"message":"'},
+          {type: 'text', text: '漢字"}'},
+        ],
+        stop_reason: 'end_turn',
+        usage: {input_tokens: 3, output_tokens: 2},
+      }));
+      const split = bytes.indexOf(Buffer.from('漢')) + 1;
+      response.writeHead(200, {'content-type': 'application/json'});
+      response.write(bytes.subarray(0, split));
+      setImmediate(() => response.end(bytes.subarray(split)));
+    });
+    const baseUrl = await listenLoopback(server);
+    t.after(() => closeServer(server));
+    const provider = createAnthropicCompletionProvider({
+      baseUrl: `${baseUrl}/gateway/`,
+      auth: 'api-key',
+      timeoutMs: 5_000,
+    });
+    const result = await provider.complete(completionRequest({responseSchema: schema}), {
+      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'synthetic-local-key'},
+    });
+
+    assert.deepEqual(result, {
+      content: '{"message":"漢字"}',
+      stopReason: 'end_turn',
+      usage: {inputTokens: 3, outputTokens: 2, cachedInputTokens: 0},
+    });
+    assert.equal(recordedRequest?.method, 'POST');
+    assert.equal(recordedRequest?.url, '/gateway/v1/messages');
+    assert.equal(recordedRequest?.headers['x-api-key'], 'synthetic-local-key');
+    assert.equal(recordedRequest?.headers.authorization, undefined);
+    assert.deepEqual(recordedRequest?.body, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+      messages: completionRequest().messages,
+      output_config: {format: {type: 'json_schema', schema: schema.schema}},
+    });
+  });
+
+  it('aborts native HTTP body reads after response headers arrive', async (t) => {
+    let responseStarted!: () => void;
+    const started = new Promise<void>((resolve) => { responseStarted = resolve; });
+    const server = createServer((_request, response) => {
+      response.writeHead(200, {'content-type': 'application/json'});
+      response.write('{"type":"message",');
+    });
+    const baseUrl = await listenLoopback(server);
+    t.after(() => closeServer(server));
+    const controller = new AbortController();
+    const provider = createAnthropicCompletionProvider({
+      baseUrl,
+      timeoutMs: 5_000,
+      fetch: async (input, init) => {
+        const response = await globalThis.fetch(input, init);
+        responseStarted();
+        return response;
+      },
+    });
+    const completion = provider.complete(completionRequest({signal: controller.signal}), {
+      credentials: {[ANTHROPIC_AUTH_TOKEN_CREDENTIAL]: 'synthetic-local-token'},
+    });
+
+    await started;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort(new Error('private caller cancellation reason'));
+    const error = await captureRejection(completion);
+    assert.equal(hasCode(error, 'aborted'), true);
+    assert.doesNotMatch(String(error), /private caller cancellation reason/);
+  });
+
+  it('rejects native HTTP redirects without forwarding either credential scheme', async (t) => {
+    let destinationRequests = 0;
+    const destination = createServer((_request, response) => {
+      destinationRequests += 1;
+      response.end('unexpected redirected request');
+    });
+    const destinationUrl = await listenLoopback(destination);
+    t.after(() => closeServer(destination));
+    let sourceRequests = 0;
+    const source = createServer((_request, response) => {
+      sourceRequests += 1;
+      response.writeHead(307, {location: `${destinationUrl}/different-origin`});
+      response.end('private redirect response body');
+    });
+    const baseUrl = await listenLoopback(source);
+    t.after(() => closeServer(source));
+
+    for (const auth of ['api-key', 'bearer'] as const) {
+      const credentialName = auth === 'api-key'
+        ? ANTHROPIC_API_KEY_CREDENTIAL
+        : ANTHROPIC_AUTH_TOKEN_CREDENTIAL;
+      const provider = createAnthropicCompletionProvider({baseUrl, auth, timeoutMs: 5_000});
+      const error = await captureRejection(provider.complete(completionRequest(), {
+        credentials: {[credentialName]: 'synthetic-scoped-secret'},
+      }));
+
+      assert.equal(hasCode(error, 'http_error'), true);
+      assert.match(String(error), /HTTP 307/);
+      assert.doesNotMatch(String(error), /synthetic-scoped-secret|private redirect response body/);
+    }
+    assert.equal(sourceRequests, 2);
+    assert.equal(destinationRequests, 0);
+  });
+
   it('rejects provider mismatches and unsupported structured-output models before fetch', async () => {
     const transport = recordingFetch(() => messageResponse());
     const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
@@ -326,13 +453,60 @@ describe('Anthropic completion provider', () => {
       provider.complete(
         completionRequest({
           messages: [
-            {role: 'user', content: 'x'.repeat(ANTHROPIC_MAX_MESSAGE_BYTES + 1)},
+            {role: 'user', content: 'é'.repeat(ANTHROPIC_MAX_MESSAGE_BYTES / 2 + 1)},
           ],
         }),
         {credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'}},
       ),
       'invalid_request',
     );
+    assert.equal(transport.calls.length, 0);
+  });
+
+  it('bounds the complete serialized request after individually bounded messages', async () => {
+    const transport = recordingFetch(() => messageResponse());
+    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
+    const messages = Array.from({length: 4}, () => ({
+      role: 'user' as const,
+      content: 'x'.repeat(ANTHROPIC_MAX_MESSAGE_BYTES),
+    }));
+    messages[3]!.content = '';
+    const overhead = Buffer.byteLength(JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+      messages,
+    }));
+    messages[3]!.content = 'x'.repeat(ANTHROPIC_MAX_REQUEST_BYTES - overhead);
+    await provider.complete(completionRequest({messages}), {
+      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+    });
+    assert.equal(
+      Buffer.byteLength(String(transport.calls[0]?.init.body)),
+      ANTHROPIC_MAX_REQUEST_BYTES,
+    );
+
+    messages[3]!.content += 'x';
+    await rejectsWithCode(provider.complete(completionRequest({messages}), {
+      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+    }), 'invalid_request');
+    assert.equal(transport.calls.length, 1);
+  });
+
+  it('rejects cyclic and excessively nested response schemas before fetch', async () => {
+    const transport = recordingFetch(() => messageResponse());
+    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
+    const cyclic: Record<string, unknown> = {type: 'object'};
+    cyclic.properties = {self: cyclic};
+    let nested: Record<string, unknown> = {type: 'string'};
+    for (let depth = 0; depth < 101; depth += 1) nested = {items: nested};
+
+    for (const invalid of [cyclic, nested]) {
+      await rejectsWithCode(provider.complete(completionRequest({
+        responseSchema: {...schema, schema: invalid},
+      }), {
+        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+      }), 'invalid_request');
+    }
     assert.equal(transport.calls.length, 0);
   });
 
@@ -395,11 +569,19 @@ describe('Anthropic completion provider', () => {
   });
 
   it('bounds streamed response bytes before parsing', async () => {
+    let pulledChunks = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulledChunks += 1;
+        controller.enqueue(new Uint8Array(
+          pulledChunks === 1 ? ANTHROPIC_MAX_RESPONSE_BYTES : 1,
+        ));
+      },
+      cancel() { cancelled = true; },
+    }, {highWaterMark: 0});
     const provider = createAnthropicCompletionProvider({
-      fetch: async () =>
-        new Response('x'.repeat(ANTHROPIC_MAX_RESPONSE_BYTES + 1), {
-          status: 200,
-        }),
+      fetch: async () => new Response(stream, {status: 200}),
     });
 
     await rejectsWithCode(
@@ -408,6 +590,8 @@ describe('Anthropic completion provider', () => {
       }),
       'response_too_large',
     );
+    assert.equal(cancelled, true);
+    assert.equal(pulledChunks, 2);
   });
 
   it('keeps HTTP, transport, and malformed-response errors body and secret safe', async () => {
@@ -536,6 +720,21 @@ function completionRequest(
     signal: new AbortController().signal,
     ...overrides,
   };
+}
+
+async function listenLoopback(server: Server): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+async function closeServer(server: Server): Promise<void> {
+  server.closeAllConnections();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
 }
 
 function messageResponse(

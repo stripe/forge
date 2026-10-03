@@ -401,6 +401,10 @@ function isEqual(actual: unknown, expected: unknown): boolean {
     return (
       isPlainObject(actual) &&
       ownKeys(actual).length === ownKeys(expected).length &&
+      ownKeys(expected).every((key) =>
+        Object.hasOwn(actual, key) &&
+        Object.prototype.propertyIsEnumerable.call(actual, key),
+      ) &&
       isObjectSubset(actual, expected)
     );
   }

@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import type {CommandResult} from '../contracts/command.js';
 import {CommandExecutionError} from '../contracts/command.js';
 
@@ -37,6 +38,7 @@ export function createHostCommandRunner(): HostCommandRunner {
         const stderr: Buffer[] = [];
         let outputBytes = 0;
         let lineBuffer = '';
+        const stdoutDecoder = new StringDecoder('utf8');
         let failure: CommandExecutionError | undefined;
         let finished = false;
 
@@ -59,7 +61,7 @@ export function createHostCommandRunner(): HostCommandRunner {
           }
           target.push(chunk);
           if (stdoutChunk && options.onStdoutLine) {
-            lineBuffer += chunk.toString('utf8');
+            lineBuffer += stdoutDecoder.write(chunk);
             const lines = lineBuffer.split(/\r?\n/);
             lineBuffer = lines.pop() ?? '';
             for (const line of lines) options.onStdoutLine(line);
@@ -99,7 +101,10 @@ export function createHostCommandRunner(): HostCommandRunner {
           finished = true;
           clearTimeout(timer);
           options.signal?.removeEventListener('abort', abort);
-          if (lineBuffer && options.onStdoutLine) options.onStdoutLine(lineBuffer);
+          if (options.onStdoutLine) {
+            lineBuffer += stdoutDecoder.end();
+            if (lineBuffer) options.onStdoutLine(lineBuffer);
+          }
           if (failure) {
             reject(failure);
             return;

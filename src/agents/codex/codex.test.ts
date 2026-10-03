@@ -88,6 +88,16 @@ function configArguments(argv: readonly string[]): readonly string[] {
   return argv.flatMap((argument, index) => argument === '-c' ? [argv[index + 1]!] : []);
 }
 
+function assertIsolatedCommand(argv: readonly string[]): void {
+  const config = configArguments(argv);
+  for (const value of ['cli_auth_credentials_store="ephemeral"', 'analytics.enabled=false',
+    'check_for_update_on_startup=false']) {
+    assert.ok(config.includes(value), `Missing isolated Codex configuration: ${value}`);
+  }
+  assert.ok(argv.includes('--ignore-user-config'));
+  assert.ok(argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -142,6 +152,7 @@ describe('Codex adapter', () => {
     await session.send('First', {signal: test.sessionContext.signal});
     await session.send('Continue', {signal: test.sessionContext.signal});
     for (const call of test.calls) {
+      assertIsolatedCommand(call.argv);
       const config = configArguments(call.argv);
       assert.ok(config.includes('model_provider="forge"'));
       assert.ok(config.includes('model_providers.forge.base_url="https://gateway.example.test/openai/v1"'));
@@ -201,6 +212,7 @@ describe('Codex adapter', () => {
       assert.equal(turn.text, 'Done');
       assert.equal(session.sessionId(), SESSION_ID);
       const call = test.calls.at(-1)!;
+      assertIsolatedCommand(call.argv);
       assert.deepEqual(call.argv.slice(0, 2), ['/opt/bin/codex', 'exec']);
       assert.equal(call.argv.at(-1), prompt);
       assert.ok(call.argv.indexOf('--') >= 0 && call.argv.indexOf('--') < call.argv.length - 1);

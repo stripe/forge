@@ -107,6 +107,47 @@ describe('parseResolvedRunPlan', () => {
     expect(Object.isFrozen(parsed.case)).toBe(true);
     expect('resources' in parsed.runtime && Object.isFrozen(parsed.runtime.resources)).toBe(true);
     expect(Object.isFrozen(input)).toBe(false);
+    input.case.setup[0]!.with.target = 'changed.txt';
+    expect(parsed.case.setup[0]!.with.target).toBe('prompt.txt');
+    expect(parsed.setup[0]!.with.target).toBe('prompt.txt');
+  });
+
+  it('rejects selection identity drift from the resolved case and agent', () => {
+    const input = validPlan();
+    input.selection.case_id = 'sample/other';
+    expect(() => parseResolvedRunPlan(input)).toThrow(expect.objectContaining({
+      code: 'invalid_plan', message: expect.stringContaining('case IDs must match'),
+    }));
+
+    const changedAgent = validPlan();
+    changedAgent.selection.agent.model = 'other-model';
+    expect(() => parseResolvedRunPlan(changedAgent)).toThrow(expect.objectContaining({
+      code: 'invalid_plan', message: expect.stringContaining('selection agent must match'),
+    }));
+  });
+
+  it('rejects reordered case and treatment setup in a serialized plan', () => {
+    const input = validPlan();
+    const treatmentStep = {
+      uses: 'forge/write',
+      with: {target: 'treatment.txt', source: {content: 'treatment'}},
+    };
+    input.selection.treatment = 'with-file';
+    input.treatment = {id: 'with-file', setup: [treatmentStep]};
+    input.setup = [...input.case.setup, treatmentStep];
+    expect(parseResolvedRunPlan(input).setup).toEqual(input.setup);
+    input.setup = [...input.setup].reverse();
+    expect(() => parseResolvedRunPlan(input)).toThrow(expect.objectContaining({
+      code: 'invalid_plan', message: expect.stringContaining('case setup followed by treatment setup'),
+    }));
+  });
+
+  it('rejects evaluation checks edited independently of the selected case', () => {
+    const input = validPlan();
+    input.evaluation.checks = {files_created: ['other.txt']};
+    expect(() => parseResolvedRunPlan(input)).toThrow(expect.objectContaining({
+      code: 'invalid_plan', message: expect.stringContaining('evaluation checks must match'),
+    }));
   });
 
   it('rejects inconsistent duplicated execution fields', () => {

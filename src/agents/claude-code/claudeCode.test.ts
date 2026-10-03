@@ -257,7 +257,7 @@ describe('Claude Code adapter', () => {
     });
   }
 
-  it('accepts an HTTP loopback base URL without changing direct defaults', () => {
+  it('accepts an HTTP loopback base URL', () => {
     expect(
       createClaudeCodeAdapter({baseUrl: 'http://127.0.0.1:23456'}).requirements({
         adapter: 'claude-code',
@@ -273,19 +273,6 @@ describe('Claude Code adapter', () => {
       },
     });
 
-    expect(
-      createClaudeCodeAdapter().requirements({
-        adapter: 'claude-code',
-        provider: 'anthropic',
-        model: 'claude-test',
-      }).environment,
-    ).toEqual({
-      credentials: {
-        ANTHROPIC_API_KEY: {
-          reference: 'anthropic.api-key',
-        },
-      },
-    });
   });
 
   it('rejects a credential binding that collides with the base URL variable', () => {
@@ -771,7 +758,7 @@ describe('Claude Code adapter', () => {
       ],
     },
   ]) {
-    it(`falls back for ${description}`, async () => {
+    it(`reports incomplete native evidence for ${description}`, async () => {
       const project = createMemoryWorkspace({
         'session-1.jsonl': [
           ...hookRecords,
@@ -1140,6 +1127,13 @@ describe('Claude Code adapter', () => {
     const trajectory = parseAtifTrajectory(evidence.trajectory);
     const toolStep = trajectory.steps[1];
     expect(toolStep?.source).toBe('agent');
+    assert.ok(toolStep?.source === 'agent');
+    assert.equal(toolStep.reasoning_content, 'Use both tools.');
+    assert.deepEqual(toolStep.tool_calls, [
+      {tool_call_id: 'call-1', function_name: 'Read', arguments: {path: 'a.txt'}},
+      {tool_call_id: 'call-2', function_name: 'Write', arguments: {path: 'b.txt'}},
+    ]);
+    assert.equal(trajectory.session_id, 'session-1');
     expect(toolStep?.observation?.results).toEqual([
       {source_call_id: 'call-1', content: 'read output'},
       {

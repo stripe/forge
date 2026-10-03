@@ -144,9 +144,10 @@ export class DockerCommandController {
       'maxOutputBytes',
     );
 
-    const environment: Record<string, string> = {
-      ...this.options.environment.variables,
-    };
+    const environment: Record<string, string> = Object.assign(
+      Object.create(null) as Record<string, string>,
+      this.options.environment.variables,
+    );
     for (const [name, binding] of Object.entries(
       this.options.environment.credentials,
     )) {

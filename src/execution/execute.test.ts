@@ -17,6 +17,7 @@ import type {
 import type {ForgeComposition} from '../contracts/composition.js';
 import {credentialReference} from '../contracts/credentials.js';
 import type {RunInputProvider} from '../contracts/inputs.js';
+import type {RunEvent} from '../contracts/observability.js';
 import type {
   PreparedRuntime,
   RuntimeAdapter,
@@ -147,6 +148,61 @@ describe('executeEval', () => {
     )) as {schema_version: number; entries: Array<Record<string, unknown>>};
     expect(workspaceEvidence.schema_version).toBe(1);
     expect(workspaceEvidence.entries[0]).not.toHaveProperty('sha256');
+  });
+
+  it('commits completed scoring with a safe warning when runtime cleanup fails', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({root: path.join(fixture.root, 'cleanup-warning')});
+    const composition = fixture.composition(recordingStore(store, fixture.calls));
+    const observed: RunEvent[] = [];
+    const warning = {
+      code: 'runtime_cleanup_failed',
+      message: 'Runtime cleanup failed after canonical artifacts were staged.',
+    };
+    const completed = await executeEval({
+      runId: 'run-cleanup-warning',
+      plan: fixture.plan,
+      composition: {
+        ...composition,
+        runtime: {
+          ...composition.runtime,
+          async prepare(input) {
+            const prepared = await composition.runtime.prepare(input);
+            return {
+              ...prepared,
+              async dispose() {
+                await prepared.dispose();
+                throw new Error(`private cleanup detail: ${SECRET}`);
+              },
+            };
+          },
+        },
+        observer: {
+          observe(event) {
+            observed.push(event);
+            throw new Error('synchronous observation failure');
+          },
+        },
+      },
+      now: monotonicClock(),
+    });
+
+    expect(completed.result.evaluation).toMatchObject({status: 'passed', score: 0});
+    expect(completed.result.warnings).toEqual([warning]);
+    const observedWarnings = observed.filter(({type}) => type === 'warning');
+    expect(observedWarnings).toHaveLength(1);
+    expect(observedWarnings[0]).toMatchObject({
+      runId: 'run-cleanup-warning',
+      type: 'warning',
+      phase: 'runtime_dispose',
+      message: warning.message,
+    });
+    expect(JSON.stringify(observed)).not.toContain(SECRET);
+    expect(fixture.calls.slice(-2)).toEqual(['runtime:dispose', 'artifact:commit']);
+    expect(fixture.calls.filter((call) => call === 'runtime:dispose')).toEqual(['runtime:dispose']);
+    const verified = await verifyCompletedRun(completed.location);
+    expect(verified.result.warnings).toEqual([warning]);
+    expect(verified.result.evaluation).toEqual(completed.result.evaluation);
   });
 
   it('isolates contributor result snapshots and captures returned artifact bytes', async () => {
@@ -380,6 +436,48 @@ describe('executeEval', () => {
       'artifact:rollback',
       'runtime:dispose',
     ]);
+  });
+
+  it('preserves a commit failure through failed rollback without disposing twice', async () => {
+    const fixture = await executionFixture();
+    const commitFailure = new Error('primary commit failure');
+    const failingStore: RunArtifactStore = {
+      async begin() {
+        fixture.calls.push('artifact:begin');
+        return {
+          async write(artifact) {
+            fixture.calls.push(`artifact:write:${artifact.path}`);
+          },
+          async commit() {
+            fixture.calls.push('artifact:commit');
+            throw commitFailure;
+          },
+          async rollback() {
+            fixture.calls.push('artifact:rollback');
+            throw new Error('secondary rollback failure');
+          },
+        };
+      },
+    };
+
+    await expect(executeEval({
+      runId: 'run-commit-failure',
+      plan: fixture.plan,
+      composition: fixture.composition(failingStore),
+      now: monotonicClock(),
+    })).rejects.toMatchObject({
+      code: 'artifact_failed',
+      phase: 'result_commit',
+      message: 'Forge failed during result_commit.',
+      cause: commitFailure,
+    });
+    expect(fixture.calls.slice(-3)).toEqual([
+      'runtime:dispose',
+      'artifact:commit',
+      'artifact:rollback',
+    ]);
+    expect(fixture.calls.filter((call) => call === 'runtime:dispose')).toEqual(['runtime:dispose']);
+    expect(fixture.calls.filter((call) => call === 'artifact:rollback')).toEqual(['artifact:rollback']);
   });
 
   it('classifies session startup failures as agent failures', async () => {

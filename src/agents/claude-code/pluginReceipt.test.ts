@@ -22,7 +22,15 @@ describe('Claude installed plugin snapshots', () => {
       },
     }, 'plugin', signal);
     assert.deepEqual(first, reversed);
-    assert.match(first.sha256, /^sha256:[a-f0-9]{64}$/);
+    // Fixed independently from the documented canonical tree framing, including
+    // its directory record and case-sensitive relative paths.
+    assert.deepEqual(first, {
+      format: 'forge-plugin-tree-v1',
+      sha256: 'sha256:e09a1d5e565d6e25b1378a468f7391e7c8d738b1097ad736ec793f94ef9c9a08',
+      entry_count: 4,
+      file_count: 3,
+      size_bytes: 36,
+    });
   });
 
   it('distinguishes different installed contents under the same version', async () => {

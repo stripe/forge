@@ -643,12 +643,16 @@ CLI, package, and runnable-example tests live under [`test`](https://github.com/
 - `quickstart.e2e.test.ts`: checked-in one-shot example;
 - `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava and example flow;
 - `externalRuntime.e2e.test.ts`: external runtime composition;
-- `codex.e2e.test.ts`: Codex adapter integration through a fake runtime;
+- `claudeCode.e2e.test.ts` and `codex.e2e.test.ts`: actual adapter integration
+  through a fake command transport and verified local artifacts;
+- `cliProcess.test.ts` and `campaignProcess.test.ts`: real CLI subprocesses and
+  campaign recovery after process death;
 - `liveE2eScript.test.ts`: live-suite command behavior; and
 - `support/expect.ts`: shared assertions.
 
-The normal unit suite uses fakes and does not require Docker, credentials, or
-network access. The live script under [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
+The normal suite combines focused unit tests, deterministic integration tests,
+real local subprocesses, and loopback HTTP transport tests. It requires no
+Docker, provider credentials, or external network access. The live script under [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
 is explicitly opt-in.
 
 ## Other top-level directories and files

@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe('owned workspace', () => {
-  it('writes atomically and exposes bounded, stable inspection', async () => {
+  it('writes exact bytes and exposes bounded inspection', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-workspace-test-'));
     roots.push(root);
     const workspace = await createOwnedWorkspace(root);
@@ -34,13 +34,38 @@ describe('owned workspace', () => {
   it('reports but never follows symlinks and rejects traversal', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-workspace-test-'));
     roots.push(root);
-    await fs.symlink(os.tmpdir(), path.join(root, 'escape'));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-workspace-outside-'));
+    roots.push(outside);
+    await fs.writeFile(path.join(outside, 'sentinel.txt'), 'outside');
+    await fs.symlink(outside, path.join(root, 'escape'));
     const workspace = await createOwnedWorkspace(root);
 
     assert.deepEqual(await workspace.inspect('escape'), {path: 'escape', kind: 'symlink'});
     assert.deepEqual(await workspace.listFiles(), [{path: 'escape', kind: 'symlink'}]);
-    await assert.rejects(workspace.readFile('escape/anything'), /symlink|not a file|ENOENT/);
+    await assert.rejects(workspace.inspect('escape/sentinel.txt'), /outside its owned root/);
+    await assert.rejects(workspace.readFile('escape/sentinel.txt'), /outside its owned root/);
+    await assert.rejects(workspace.listFiles({under: 'escape'}), /symlink/);
+    await assert.rejects(workspace.writeFile('escape/sentinel.txt', Buffer.from('changed')), /not a real directory/);
+    assert.equal(await fs.readFile(path.join(outside, 'sentinel.txt'), 'utf8'), 'outside');
     await assert.rejects(workspace.writeFile('../escape', new Uint8Array()), /Invalid workspace/);
+  });
+
+  it('lists paths in code-unit order and applies subtree, entry and cancellation bounds', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-workspace-test-'));
+    roots.push(root);
+    const workspace = await createOwnedWorkspace(root);
+    for (const file of ['b', 'Z', 'B', 'a', 'nested/z', 'nested/A']) {
+      await workspace.writeFile(file, Buffer.from(file));
+    }
+    assert.deepEqual((await workspace.listFiles()).map(({path}) => path),
+      ['B', 'Z', 'a', 'b', 'nested', 'nested/A', 'nested/z']);
+    assert.deepEqual((await workspace.listFiles({under: 'nested'})).map(({path}) => path),
+      ['nested/A', 'nested/z']);
+    assert.deepEqual(await workspace.inspect('.'), {path: '.', kind: 'directory'});
+    assert.deepEqual(await workspace.inspect('missing/child'), {path: 'missing/child', kind: 'absent'});
+    await assert.rejects(workspace.listFiles({maxEntries: 2}), /entry limit/);
+    const reason = new Error('cancel listing');
+    await assert.rejects(workspace.listFiles({signal: AbortSignal.abort(reason)}), (error) => error === reason);
   });
 
   it(

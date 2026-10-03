@@ -190,18 +190,18 @@ export async function prepareCompletionRuntime(input: {
       const sequence = callSlots.length + 1;
       callSlots.push(undefined);
       try {
-        const response = validateCompletionResponse(
-          await selected.binding.provider.complete(
-            {
-              runId: input.runId,
-              purpose,
-              model: selected.binding.model,
-              ...redactedPrompt,
-              signal,
-            },
-            {credentials: selected.credentials},
-          ),
+        const completed = await selected.binding.provider.complete(
+          {
+            runId: input.runId,
+            purpose,
+            model: selected.binding.model,
+            ...redactedPrompt,
+            signal,
+          },
+          {credentials: selected.credentials},
         );
+        signal.throwIfAborted();
+        const response = validateCompletionResponse(completed);
         const redactedResponse = redactSecrets(response.content, secrets);
         const safeResponse = Object.freeze({...response, content: redactedResponse.value});
         callSlots[sequence - 1] = completionCallSummary(

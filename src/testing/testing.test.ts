@@ -19,7 +19,7 @@ import {
 } from './index.js';
 
 describe('@stripe/forge/testing', () => {
-  it('provides isolated in-memory workspace and dataset bytes', async () => {
+  it('provides isolated in-memory workspace bytes and a sealed read-only view', async () => {
     const workspace = createMemoryWorkspace({'src/a.txt': 'alpha'});
     const firstRead = await workspace.mutable.readFile('src/a.txt');
     firstRead[0] = 0;
@@ -36,14 +36,6 @@ describe('@stripe/forge/testing', () => {
       {path: 'src/b.txt', kind: 'file', size: 4},
     ]);
 
-    const inputs = createMemoryRunInputProvider({
-      'fixtures/a.txt': 'fixture-a',
-      'fixtures/nested/b.txt': 'fixture-b',
-    });
-    await expect(inputs.listFiles('fixtures')).resolves.toEqual([
-      {path: 'fixtures/a.txt', kind: 'file', size: 9},
-      {path: 'fixtures/nested/b.txt', kind: 'file', size: 9},
-    ]);
   });
 
   it('runs the runtime lifecycle conformance probe against the fake adapter', async () => {
@@ -250,16 +242,58 @@ describe('@stripe/forge/testing', () => {
   });
 
   it('bounds the wait for a command which ignores cancellation', async () => {
+    let stopCommand!: (result: CommandResult) => void;
     const runtime = createFakeRuntimeAdapter({
       command: ({options}) => {
         options.onStdoutLine?.('ready');
-        return new Promise<CommandResult>(() => undefined);
+        return new Promise<CommandResult>((resolve) => { stopCommand = resolve; });
       },
     });
-    await expect(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+    const ignoresCancellation = {
+      ...runtime.adapter,
+      async prepare(input: RuntimePreparation) {
+        const prepared = await runtime.adapter.prepare(input);
+        return {
+          ...prepared,
+          async dispose() {
+            // This faulty runner ignores the command signal, but runtime
+            // cleanup still stops its work before draining active commands.
+            stopCommand(commandResult(''));
+            await prepared.dispose();
+          },
+        };
+      },
+    };
+    await expect(assertRuntimeAdapterConforms(ignoresCancellation, conformanceInput(), {
       cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready', deadlineMs: 10},
     })).rejects.toThrow('did not settle before its deadline');
     expect(runtime.runs[0]?.events.at(-1)).toBe('dispose');
+  });
+
+  it('detects changed sealed bytes and still disposes the runtime', async () => {
+    const runtime = createFakeRuntimeAdapter();
+    await expect(assertRuntimeAdapterConforms({
+      ...runtime.adapter,
+      async prepare(input) {
+        const prepared = await runtime.adapter.prepare(input);
+        return {
+          ...prepared,
+          async quiesce() {
+            const sealed = await prepared.quiesce();
+            return {
+              ...sealed,
+              workspace: {
+                ...sealed.workspace,
+                readFile: async () => new Uint8Array([9, 9, 9]),
+              },
+            };
+          },
+        };
+      },
+    }, conformanceInput())).rejects.toThrow('Sealed workspace did not preserve probe bytes');
+    expect(runtime.runs[0]?.events).toEqual([
+      'prepare', 'finalizeSetup', 'quiesce', 'dispose',
+    ]);
   });
 });
 

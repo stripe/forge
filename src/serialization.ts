@@ -39,9 +39,11 @@ function normalize(
   if (Array.isArray(value)) {
     enter(value, seen, path);
     try {
-      return value.map((item, index) =>
-        normalize(item, seen, `${path}[${index}]`),
-      );
+      const output: SerializableJson[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        output.push(normalize(value[index], seen, `${path}[${index}]`));
+      }
+      return output;
     } finally {
       seen.delete(value);
     }

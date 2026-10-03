@@ -13,6 +13,7 @@ import {createArtifactStore} from './results/index.js';
 import {FORGE_VERSION} from './execution/index.js';
 import {parseExperimentConfigYaml, sha256Digest, sha256Hex} from './model/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
+import {serializeResolvedRunPlan} from './planning/index.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -341,7 +342,7 @@ describe('Forge CLI', () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout.endsWith('\n')).toBe(true);
+    expect(stdout).toBe(serializeResolvedRunPlan(defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout))));
     expect(JSON.parse(stdout)).toMatchObject({
       schema_version: 1,
       selection: {
@@ -640,6 +641,14 @@ describe('Forge CLI', () => {
     expect(exitCode).toBe(0);
     expect(selectedCaseId).toBe('case/example');
     expect(JSON.parse(stdout)).toMatchObject({completed: 1, errored: 0});
+    let expectedPlan = '';
+    expect(await runCli(['plan', '--experiment', fixture.experimentPath, '--case', 'case/example'], {
+      stdout: (text) => {expectedPlan += text;},
+    })).toBe(0);
+    const campaign = JSON.parse(stdout) as {location: string};
+    const storedPlan = await fs.readFile(path.join(campaign.location, 'runs', 'case-file-run', 'plan.json'), 'utf8');
+    expect(storedPlan).toBe(expectedPlan);
+    expect(storedPlan).not.toContain(fixture.caseFilePath);
   });
 
   it('rejects combining case ID and case file selectors', async () => {

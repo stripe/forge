@@ -27,9 +27,14 @@ describe('plugin installation receipts', () => {
 
     assert.deepEqual(parsed, RECEIPT);
     assert.notEqual(parsed, input);
+    assert.notEqual(parsed.source, input.source);
+    assert.notEqual(parsed.installed_tree, input.installed_tree);
     assert.ok(Object.isFrozen(parsed));
     assert.ok(Object.isFrozen(parsed.source));
     assert.ok(Object.isFrozen(parsed.installed_tree));
+    Object.assign(input.source, {kind: 'archive'});
+    Object.assign(input.installed_tree, {size_bytes: 99});
+    assert.deepEqual(parsed, RECEIPT);
   });
 
   it('accepts each supported source kind when no source commit is reported', () => {
@@ -75,9 +80,54 @@ describe('plugin installation receipts', () => {
       {...RECEIPT.installed_tree, file_count: 0},
       {...RECEIPT.installed_tree, file_count: 3},
       {...RECEIPT.installed_tree, size_bytes: -1},
+      {...RECEIPT.installed_tree, entry_count: 1.5},
+      {...RECEIPT.installed_tree, entry_count: Number.MAX_SAFE_INTEGER + 1},
+      {...RECEIPT.installed_tree, file_count: Number.POSITIVE_INFINITY},
+      {...RECEIPT.installed_tree, size_bytes: Number.NaN},
+      {...RECEIPT.installed_tree, size_bytes: Number.MAX_SAFE_INTEGER + 1},
       {...RECEIPT.installed_tree, extra: true},
     ]) {
       assert.throws(() => parseAgentPluginInstallationReceipt({...RECEIPT, installed_tree}));
+    }
+    assert.equal(parseAgentPluginInstallationReceipt({
+      ...RECEIPT,
+      installed_tree: {...RECEIPT.installed_tree, size_bytes: 0},
+    }).installed_tree.size_bytes, 0);
+  });
+
+  it('rejects missing or unsafe plugin provenance identities', () => {
+    for (const [field, value] of [
+      ['adapter', '../adapter'],
+      ['plugin', 'unqualified'],
+      ['plugin', 'plugin@marketplace@extra'],
+      ['plugin', '../plugin@marketplace'],
+      ['native_plugin_id', 'plugin@../marketplace'],
+      ['marketplace', 'https://github.com/owner/repository'],
+      ['marketplace', 'owner/repository/extra'],
+      ['version', 'release\n'],
+    ] as const) {
+      assert.throws(() => parseAgentPluginInstallationReceipt({...RECEIPT, [field]: value}));
+    }
+    for (const field of ['adapter', 'plugin', 'marketplace', 'native_plugin_id', 'source', 'installed_tree']) {
+      const input: Record<string, unknown> = {...RECEIPT};
+      delete input[field];
+      assert.throws(() => parseAgentPluginInstallationReceipt(input));
+    }
+  });
+
+  it('accepts explicit null-prototype records and rejects hidden, symbol, and inherited fields', () => {
+    assert.deepEqual(parseAgentPluginInstallationReceipt(Object.assign(Object.create(null), RECEIPT, {
+      source: Object.assign(Object.create(null), RECEIPT.source),
+      installed_tree: Object.assign(Object.create(null), RECEIPT.installed_tree),
+    })), RECEIPT);
+    for (const makeMalformed of [
+      (input: object) => Object.defineProperty(input, 'hidden', {value: true}),
+      (input: object) => Object.assign(input, {[Symbol('extra')]: true}),
+      (input: object) => Object.create(input),
+    ]) {
+      assert.throws(() => parseAgentPluginInstallationReceipt(makeMalformed({...RECEIPT})));
+      assert.throws(() => parseAgentPluginInstallationReceipt({...RECEIPT, source: makeMalformed({...RECEIPT.source})}));
+      assert.throws(() => parseAgentPluginInstallationReceipt({...RECEIPT, installed_tree: makeMalformed({...RECEIPT.installed_tree})}));
     }
   });
 });

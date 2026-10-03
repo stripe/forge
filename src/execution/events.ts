@@ -30,7 +30,7 @@ export function createRunEventEmitter(
       phase,
       ...(message === undefined ? {} : {message}),
     };
-    await Promise.allSettled(observers.map((observer) => observer.observe(event)));
+    await Promise.allSettled(observers.map(async (observer) => observer.observe(event)));
   };
 
   return {

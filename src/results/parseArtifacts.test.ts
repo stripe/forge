@@ -12,6 +12,7 @@ import {
   MAX_JUDGE_TRANSCRIPT_BYTES,
 } from '../evaluation/judgeTranscript.js';
 import {
+  parseEvaluationResult,
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseSetupArtifact,
@@ -40,9 +41,30 @@ describe('canonical interaction and judge evidence parsing', () => {
       }),
     );
     assert.throws(() => parseSetupArtifact({...artifact, unknown: true}));
-    for (const schema_version of [2, 3]) {
-      assert.throws(() => parseSetupArtifact({...artifact, schema_version}));
-    }
+    assert.throws(() => parseSetupArtifact({...artifact, schema_version: 2}));
+  });
+
+  it('parses evaluation snapshots and rejects contradictory guideline totals', () => {
+    const evaluation = {
+      schema_version: 1,
+      score: 0.5,
+      status: 'partial',
+      guidelines_passed: 1,
+      guidelines_total: 2,
+      guidelines: [
+        {guideline: 'Complete the task.', passed: true, explanation: 'Done.'},
+        {guideline: 'Explain the result.', passed: false, explanation: 'Missing.'},
+      ],
+      checks: [{name: 'file_exists: answer.txt', passed: true}],
+    };
+    const parsed = parseEvaluationResult(evaluation);
+    assert.deepEqual(parsed, evaluation);
+    evaluation.guidelines[0]!.explanation = 'changed after parsing';
+    assert.equal(parsed.guidelines[0]?.explanation, 'Done.');
+    assert.throws(() => parseEvaluationResult({...evaluation, guidelines_total: 1}), /Guideline totals do not match/);
+    assert.throws(() => parseEvaluationResult({...evaluation, guidelines_passed: 2}), /Guideline totals do not match/);
+    assert.throws(() => parseEvaluationResult({...evaluation, score: Infinity}));
+    assert.throws(() => parseEvaluationResult({...evaluation, unknown: true}));
   });
 
   it('strictly parses one-shot and multi-turn interaction audits', () => {
@@ -130,6 +152,41 @@ describe('canonical interaction and judge evidence parsing', () => {
         extra: true,
       }),
     );
+  });
+
+  it('binds multi-turn audit decisions to completed turns and failure state', () => {
+    const interaction = {
+      schema_version: 1,
+      mode: 'multi_turn',
+      stop_reason: 'task_complete',
+      turns: [{turn: 1, user: 'do it', assistant: 'done', tool_calls: []}],
+      role_player: {
+        model: {provider: 'test-provider', model: 'role-model'},
+        prompt_version: '1',
+        needs: null,
+        decisions: [{
+          sequence: 1, after_agent_turn: null, message: 'do it', stop: false,
+          remaining_need_ids: null, focus_need_id: null, coding_agent_invoked: true,
+          source: 'configured_initial_prompt',
+        }],
+      },
+      failure: null,
+    };
+    assert.deepEqual(parseInteractionArtifact(interaction), interaction);
+    const {role_player, ...withoutAudit} = interaction;
+    assert.throws(() => parseInteractionArtifact(withoutAudit), /require role-player audit state/);
+    assert.throws(() => parseInteractionArtifact({
+      ...interaction, mode: 'one_shot',
+    }), /cannot contain role-player state/);
+    assert.throws(() => parseInteractionArtifact({
+      ...interaction, role_player: {...role_player, decisions: [{...role_player.decisions[0], sequence: 2}]},
+    }), /Ava decisions must be contiguous/);
+    assert.throws(() => parseInteractionArtifact({
+      ...interaction, role_player: {...role_player, decisions: [{...role_player.decisions[0], coding_agent_invoked: false}]},
+    }), /invocation decisions must match completed agent turns/);
+    assert.throws(() => parseInteractionArtifact({
+      ...interaction, stop_reason: 'role_player_error',
+    }), /Interaction failure must match its stop reason/);
   });
 
   it('strictly parses judge evidence and its projection declaration', () => {
@@ -254,7 +311,6 @@ describe('canonical interaction and judge evidence parsing', () => {
     const {steps: _steps, ...policy} = evidence.transcript;
     assert.throws(() => parseJudgeEvidence({...evidence, transcript: policy}));
     assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 2}));
-    assert.throws(() => parseJudgeEvidence({...evidence, schema_version: 3}));
     assert.throws(() => parseJudgeEvidence({...evidence, unknown: true}));
     assert.throws(() => parseJudgeEvidence({
       ...evidence,
