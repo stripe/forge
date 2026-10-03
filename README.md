@@ -1856,13 +1856,15 @@ pnpm test:package
 pnpm check
 ```
 
-Pull requests targeting `main`, including drafts, automatically run `pnpm check`
-on Node.js 22 through the [PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
-It runs when a PR opens, receives new commits, or reopens, and cancels obsolete
-runs when a newer commit arrives. The `Forge checks` job covers automated tests,
-type checking, build, documentation validation, and package checks without
-Docker or model credentials. Development snapshots are published by the
-separate workflow after pushes to `main`.
+Pull requests targeting `main`, including drafts, automatically run the same
+validation as `pnpm check` on Node.js 22 through the
+[PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
+The single `Forge checks` job has named steps for type checking, automated tests,
+build, documentation validation, and package checks, using the same package
+scripts as the local command without Docker or model credentials. It runs when
+a PR opens, receives new commits, or reopens, and cancels obsolete runs when a
+newer commit arrives. Development snapshots are published by the separate
+workflow after pushes to `main`.
 
 Maintainers can require `Forge checks` in the branch rules for `main` to block
 merging until it passes for the current commits. Adding the workflow reports
