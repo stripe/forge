@@ -176,6 +176,20 @@ async function loadToolSequence(sequence: readonly ReturnType<typeof capturedRes
 }
 
 describe('Codex exact rollout evidence', () => {
+  it('accepts captured native plugin MCP attribution and rejects malformed identities', async () => {
+    for (const pluginId of ['fixture@forge-fixture', '', 'fixture', '../fixture@test', null, 1]) {
+      const sequence = capturedMcp();
+      sequence[3]!.payload.item = {...sequence[3]!.payload.item as object, pluginId};
+      const evidence = await loadToolSequence(sequence);
+      assert.equal(evidence.kind, pluginId === 'fixture@forge-fixture' ? 'available' : 'unavailable');
+      if (evidence.kind === 'available') {
+        assert.deepEqual(evidence.warnings, []);
+        const calls = parseAtifTrajectory(evidence.trajectory).steps.flatMap((step) => step.tool_calls ?? []);
+        assert.equal(calls.at(-1)?.function_name, 'mcp__fixture.probe');
+      }
+    }
+  });
+
   it('requires MCP completion snapshots regardless of naming form or explicit output error flags', async () => {
     for (const server of ['fixture', '__fixture', 'fixture__nested']) {
       for (const naming of ['namespaced', 'qualified', 'empty-namespace-qualified']) {
@@ -723,6 +737,52 @@ describe('Codex exact rollout evidence', () => {
       {user: 'First prompt.', assistant: 'First response.', toolCalls: []},
       {user: 'Second prompt.', assistant: 'Second response.', toolCalls: []},
     ], evidence.source), true);
+  });
+
+  it('retains resumed plugin context changes from captured world-state merge patches', async () => {
+    const first = capturedTurn();
+    first.splice(1, 0, capturedWorldState());
+    first.splice(5, 0, ...capturedMcp());
+    const resumed = capturedTurn('Second prompt.', 'Second response.', 'turn-2');
+    resumed.splice(1, 0,
+      capturedResponse({type: 'message', id: 'updated-skills', role: 'developer',
+        content: [{type: 'input_text', text: 'Updated skills without the disabled plugin.'}]}, 'turn-2'),
+      record('world_state', {full: false, state: {
+        host_skills: {body: 'Updated skills without the disabled plugin.'}, plugins_instructions: false,
+      }}));
+    const records = [METADATA, ...first, capturedThreadSettings(), ...resumed];
+    const original = jsonl(records);
+    const evidence = await load(records);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') throw new Error('Expected resumed native plugin evidence.');
+    assert.deepEqual(evidence.warnings, []);
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    assert.equal(trajectory.steps.filter(({source, message}) => source === 'system' &&
+      message === 'Updated skills without the disabled plugin.').length, 1);
+    assert.equal(trajectory.steps.flatMap((step) => step.tool_calls ?? []).filter(({function_name}) =>
+      function_name === 'mcp__fixture.probe').length, 1);
+    assert.equal(trajectoryCoversCompletedTurns(trajectory, [
+      {user: 'First prompt.', assistant: 'First response.', toolCalls: []},
+      {user: 'Second prompt.', assistant: 'Second response.', toolCalls: []},
+    ], evidence.source), true);
+    assert.equal(jsonl(records), original);
+  });
+
+  it('validates merged world-state shape and rejects orphaned or unsafe context patches', async () => {
+    for (const state of [
+      {model: 'another-model'}, {model: null}, {host_skills: {body: 1}},
+      {host_skills: {future: 'unknown'}}, {host_skills: {future: null}},
+      {future: null}, {realtime: {active: true}}, {permissions: {approved_command_prefixes: ['unsafe']}},
+    ]) {
+      const first = capturedTurn();
+      first.splice(1, 0, capturedWorldState());
+      const resumed = capturedTurn('Second prompt.', 'Second response.', 'turn-2');
+      resumed.splice(1, 0, record('world_state', {full: false, state}));
+      assert.equal((await load([METADATA, ...first, capturedThreadSettings(), ...resumed])).kind, 'unavailable');
+    }
+    const orphaned = capturedTurn();
+    orphaned.splice(1, 0, record('world_state', {full: false, state: {plugins_instructions: false}}));
+    assert.equal((await load([METADATA, ...orphaned])).kind, 'unavailable');
   });
 
   it('normalizes captured reasoning, add/update/delete patches, and command shapes once each', async () => {

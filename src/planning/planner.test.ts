@@ -21,6 +21,25 @@ import {FORGE_VERSION} from '../version.js';
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
 describe('experiment expansion and run planning', () => {
+  it('records Codex hook trust explicitly and separates policies in selection and plan identity', () => {
+    const experiment = experimentConfig();
+    experiment.matrix.agents = [
+      {adapter: 'codex', provider: 'openai', model: 'gpt'},
+      {adapter: 'codex', provider: 'openai', model: 'gpt', hook_trust: 'automation'},
+    ];
+    const loaded = inputs({experiment});
+    const selections = expandExperiment(experiment);
+    const plans = selections.map((selected) => resolveRunPlan({...loaded, selection: selected}));
+    assert.equal(plans[0]!.agent.hook_trust, 'native');
+    assert.equal(plans[1]!.agent.hook_trust, 'automation');
+    assert.deepEqual(plans[1]!.agent, plans[1]!.selection.agent);
+    assert.notEqual(resolvedRunPlanSha256(plans[0]!), resolvedRunPlanSha256(plans[1]!));
+    assert.equal(experiment.matrix.agents[0]!.hook_trust, undefined);
+    const implicit = {...selections[0]!, agent: {adapter: 'codex', provider: 'openai', model: 'gpt'}};
+    assert.deepEqual(resolveRunPlan({...loaded, selection: implicit}), plans[0]);
+    experiment.matrix.agents.pop();
+    assert.throws(() => resolveRunPlan({...loaded, selection: selections[1]!}), /not in the benchmark matrix/);
+  });
   it('expands deterministically in case/treatment/agent/repetition order', () => {
     const experiment = experimentConfig({
       matrix: {
@@ -420,7 +439,7 @@ function selection(
   return {
     case_id: caseId,
     treatment,
-    agent: {adapter, provider, model},
+    agent: {adapter, provider, model, ...(adapter === 'codex' ? {hook_trust: 'native' as const} : {})},
     repetition,
   };
 }

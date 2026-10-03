@@ -62,6 +62,7 @@ const coordinates = z.object({
     adapter: z.string().min(1).max(4096),
     provider: z.string().min(1).max(4096),
     model: z.string().min(1).max(4096),
+    hook_trust: z.enum(['native', 'automation']).optional(),
   }).strict(),
 }).strict();
 const caseSchema = coordinates.merge(statisticsSchema);

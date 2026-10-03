@@ -47,8 +47,11 @@ This one-shot, checks-only case needs no Anthropic key. Multi-turn cases use
 the same Codex session through exact-ID resume, but require an explicit
 `models.role_player`; guidelines similarly require `models.judge`. The public
 CLI currently uses the Anthropic completion provider for those two roles,
-independently of the Codex agent and its key. Codex plugin installation is not
-implemented.
+independently of the Codex agent and its key. Codex supports native
+[`forge/plugin` treatments](../../docs/plugin-action.md). Set `hook_trust` on
+its `matrix.agents` entry: `native` is the default; `automation` permits all
+enabled hooks, including workspace hooks, without review on initial and
+resumed turns.
 
 The experiment uses `dataset.path: ../quickstart/dataset`. Each CLI invocation
 creates a new execution ID; resume a specific execution with
@@ -63,8 +66,15 @@ unredacted restricted artifact that may contain sensitive data. Use
 
 ## Opt-in live suite
 
-Run the Docker lifecycle, this experiment, and full native-evidence/artifact
-verification through the repository's single live suite:
+Run native setup, plugin, hook, MCP, resume, and evidence fixtures without
+model credentials or upstream model calls:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup FORGE_LIVE_AGENT=codex pnpm test:live
+```
+
+Run those fixtures, Docker conformance, this experiment, and artifact
+verification through the same live suite:
 
 ```sh
 FORGE_LIVE=1 \
@@ -75,8 +85,9 @@ pnpm test:live
 ```
 
 The endpoint must support Codex's Responses requests. Omit `OPENAI_BASE_URL` for
-direct OpenAI. This mode makes potentially billable calls but does not run
-Claude, Ava, or judging. It keeps the upstream key in a temporary host bridge
+direct OpenAI. This mode makes potentially billable calls for the example;
+the plugin fixtures use local scripted Responses and host completions. It
+keeps the upstream key in a temporary host bridge
 and gives the container an ephemeral token instead. Docker must provide
 `host.docker.internal`; connectivity is checked before inference. Results are
 written below `results/live` unless `FORGE_LIVE_RESULTS_ROOT` selects another

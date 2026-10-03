@@ -21,6 +21,7 @@ interface StreamItem {
 export function parseCodexStream(
   stdout: string,
   expectedSessionId?: string,
+  options: {readonly hookAutomation?: boolean; readonly workspacePath?: string} = {},
 ): AgentTurn {
   if (expectedSessionId !== undefined && !isSafeCodexSessionId(expectedSessionId)) {
     throw new CodexStreamError('The expected Codex session ID is invalid.');
@@ -82,13 +83,26 @@ export function parseCodexStream(
       case 'item.updated':
       case 'item.completed': {
         onlyKeys(event, ['type', 'item']);
-        if (!started) invalidStream();
         const raw = requiredRecord(event.item);
         const id = requiredString(raw.id);
         if (
           id.length > 128 || !/^[A-Za-z0-9]/.test(id) ||
           /[^A-Za-z0-9._-]/.test(id)
         ) invalidStream();
+        // The pinned CLI emits this advisory twice before turn.started. It is
+        // accepted only for an invocation which explicitly selected automation.
+        const hookAdvisory = options.hookAutomation &&
+          raw.message === '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.';
+        const configAdvisory = options.workspacePath !== undefined &&
+          raw.message === `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`;
+        if ((hookAdvisory || configAdvisory) && sessionId !== undefined && !started &&
+            event.type === 'item.completed' && raw.type === 'error') {
+          onlyKeys(raw, ['id', 'type', 'message']);
+          if (completedItems.has(id)) invalidStream();
+          completedItems.set(id, raw);
+          break;
+        }
+        if (!started || completedItems.has(id) && !items.has(id)) invalidStream();
         const item = parseItem(raw);
         const previous = items.get(id);
         if (previous !== undefined && previous.type !== item.type) invalidStream();

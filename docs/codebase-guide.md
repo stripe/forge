@@ -330,7 +330,7 @@ implementations.
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; manifest-backed directory providers check returned bytes and inventory |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
-| [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented only by the Claude adapter; selected by `setup/forgePlugin.ts` |
+| [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code and Codex; selected by `setup/forgePlugin.ts` |
 | [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
 
@@ -487,7 +487,7 @@ index.ts
 | [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/stream.ts) | Parse Claude `stream-json` stdout into bounded `AgentTurn` | Called by `AgentSession.send` in `index.ts` |
 | [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/evidence.ts) | Read the exact session JSONL, classify native records, render context/tool behavior, and build ATIF or an unavailable result | Called after quiescence by adapter methods; returns contract types to `evidence/selection.ts` |
 | [`plugins.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/plugins.ts) | Implement `AgentPluginInstaller`: register marketplace, validate source, install through native CLI, verify installed state | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
-| [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/pluginReceipt.ts) | Inspect installed plugin tree, reject unsafe entries, compute tree/source receipt | Called by `plugins.ts` while constructing the setup resolution |
+| [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/agents/claude-code/pluginReceipt.ts) | Map Claude source receipts and re-export shared installed-tree verification | Called by `plugins.ts` while constructing the setup resolution |
 
 Claude's live stream and persisted JSONL are parsed independently. The live
 stream produces the driver turn immediately; the JSONL parser runs only after
@@ -498,8 +498,10 @@ selector.
 
 | File | Main responsibility | Called by / calls into |
 | --- | --- | --- |
-| [`index.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, explicit Responses provider configuration, CLI verification, exec/resume, and evidence | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
+| [`index.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, Responses provider configuration, hook policy, CLI verification, exec/resume, evidence, and plugin installer | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
 | [`layout.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
+| [`pluginConfig.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/pluginConfig.ts) | Bound and filter run-owned TOML to native plugin, project trust, and hook state | Called before native installation and every session send |
+| [`plugins.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/plugins.ts) | Implement `AgentPluginInstaller`: native commands, catalog/source verification, installed inventory and receipt | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
 | [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
 | [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
 | [`toolEvidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/toolEvidence.ts) | Normalize command/file/MCP/search outputs and validate native MCP snapshots | Used only by `evidence.ts` |
@@ -509,6 +511,11 @@ selector.
 Codex has extra evidence helpers because its rollout protocol contains several
 representations of tool activity. `evidence.ts` is the coordinator; the helper
 files should remain unaware of Forge lifecycle or result storage.
+
+Both plugin installers use
+[`src/agents/pluginTree.ts`](https://github.com/stripe/forge/blob/main/src/agents/pluginTree.ts)
+to bound installed contents, reject unsafe entries, and compute the shared
+tree receipt.
 
 ## `src/providers`: host-side model transport
 

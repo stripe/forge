@@ -16,6 +16,7 @@ import {
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudeCodeAdapter,
 } from '../../dist/agents/claude-code/index.js';
+import {CODEX_HOME_STATE_ID, createCodexAdapter} from '../../dist/agents/codex/index.js';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
@@ -68,7 +69,13 @@ const cases = [
 ];
 
 /** Real setup/execution/artifacts; interaction is a deterministic local probe. */
-export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, suiteId, signal, progress}) {
+export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, suiteId, signal, progress, liveAgent = 'claude-code'}) {
+  const codex = liveAgent === 'codex';
+  const selectedPlugin = codex ? 'stripe@stripe' : PLUGIN;
+  const selectedMarketplace = codex ? 'stripe/ai' : MARKETPLACE;
+  const specs = cases.map((spec) => spec.id !== 'plugin' ? spec : {...spec, setup: [{
+    uses: 'forge/plugin', with: {agents: {[liveAgent]: {plugin: selectedPlugin, marketplace: selectedMarketplace}}},
+  }]});
   const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-live-setup-'));
   try {
     const platform = await detectDockerRuntimePlatform({dockerExecutable, signal});
@@ -97,17 +104,19 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
         };
       },
     };
-    const {dataset, experiment} = await createFixture(fixtureRoot, platform);
+    const {dataset, experiment} = await createFixture(fixtureRoot, platform, specs, liveAgent);
     const inputProvider = await createDirectoryRunInputProvider(dataset.root, {manifest: dataset.manifest});
-    const nativeAgent = createClaudeCodeAdapter();
+    const nativeAgent = codex ? createCodexAdapter() : createClaudeCodeAdapter();
     const observations = new Map();
     const openedSessions = new Set();
     const agent = {
-      id: 'claude-code',
+      id: liveAgent,
       version: 'setup-integration-1',
       pluginInstaller: nativeAgent.pluginInstaller,
-      requirements() {
-        return {executables: ['node', 'claude'], environment: {}, stateDirectories: []};
+      requirements(selection) {
+        const requirements = nativeAgent.requirements(selection);
+        return {...requirements, executables: [...new Set([...requirements.executables, 'node'])],
+          environment: {variables: requirements.environment.variables ?? {}}};
       },
       evidenceIdentity() {return {name: 'forge-setup-probe', version: '1'};},
       prepare: (context) => nativeAgent.prepare(context),
@@ -117,10 +126,12 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
         return {
           sessionId: () => sessionId,
           async send(_message, {signal}) {
-            const spec = cases.find(({id}) => `setup/${id}` === context.plan.selection.case_id);
+            const spec = specs.find(({id}) => `setup/${id}` === context.plan.selection.case_id);
             assert.ok(spec && !spec.failure, 'Failed setup must never open an agent session');
             if (spec.id === 'plugin') {
-              observations.set(spec.id, await verifyNativePlugin(context.runtime, signal));
+              observations.set(spec.id, codex
+                ? await verifyCodexPlugin(context.runtime, signal, selectedPlugin)
+                : await verifyNativePlugin(context.runtime, signal));
             }
             // Read via a real container command, proving host-written and
             // command-produced bytes are visible after setup finalization.
@@ -161,7 +172,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
 
     const reports = [];
     for (const [index, plan] of plans.entries()) {
-      const spec = cases[index];
+      const spec = specs[index];
       const runId = `${suiteId}-setup-${spec.id}`;
       progress(`checking ${spec.setup[0].uses}: ${spec.id}`);
       try {
@@ -195,8 +206,8 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
           if (spec.id === 'plugin') {
             const receipt = setup.steps[0].resolution;
             const installed = observations.get(spec.id);
-            assert.equal(receipt.plugin, PLUGIN);
-            assert.equal(receipt.marketplace, MARKETPLACE);
+            assert.equal(receipt.plugin, selectedPlugin);
+            assert.equal(receipt.marketplace, selectedMarketplace);
             assert.equal(receipt.native_plugin_id, installed.id);
             assert.equal(receipt.version, installed.version);
             assert.match(receipt.marketplace_commit, /^[a-f0-9]{40}$/);
@@ -248,12 +259,28 @@ async function verifyNativePlugin(runtime, signal) {
   return installed;
 }
 
-async function createFixture(root, platform) {
+async function verifyCodexPlugin(runtime, signal, pluginId) {
+  const listed = await runtime.commands.agent.run(['codex', 'plugin', 'list', '--json'],
+    {signal, timeoutMs: 60_000, maxOutputBytes: 1024 * 1024});
+  assert.equal(listed.exitCode, 0);
+  const {installed} = JSON.parse(listed.stdout);
+  assert.equal(installed.length, 1);
+  assert.equal(installed[0].pluginId, pluginId);
+  assert.equal(installed[0].enabled, true);
+  const home = runtime.stateDirectories.get(CODEX_HOME_STATE_ID);
+  assert.ok(home);
+  const manifest = JSON.parse(Buffer.from(await home.readFile(`plugins/cache/stripe/stripe/${installed[0].version}/.claude-plugin/plugin.json`)).toString());
+  assert.equal(manifest.name, 'stripe');
+  await runtime.workspace.writeFile('plugin-verified.txt', Buffer.from('native plugin verified\n'));
+  return {id: installed[0].pluginId, version: installed[0].version};
+}
+
+async function createFixture(root, platform, specs, liveAgent) {
   const datasetRoot = path.join(root, 'dataset');
   const files = {
     'fixtures/seed.txt': 'dataset seed\n',
   };
-  for (const spec of cases) {
+  for (const spec of specs) {
     files[`cases/setup/${spec.id}.yaml`] = stringify({
       schema_version: 1, id: `setup/${spec.id}`, initial_prompt: `Verify ${spec.id} setup.`,
       execution_mode: 'one_shot', setup: spec.setup, success_guidelines: [],
@@ -267,7 +294,7 @@ async function createFixture(root, platform) {
   }
   const manifest = {
     schema_version: 1, dataset: {id: 'forge-live-setup', version: '1.0.0'},
-    cases: cases.map(({id}) => ({id: `setup/${id}`, path: `cases/setup/${id}.yaml`})),
+    cases: specs.map(({id}) => ({id: `setup/${id}`, path: `cases/setup/${id}.yaml`})),
     files: Object.entries(files).map(([file, body]) => ({
       path: file, size: Buffer.byteLength(body), sha256: sha256(body),
     })),
@@ -289,8 +316,8 @@ async function createFixture(root, platform) {
     },
     models: {}, treatments: {baseline: {setup: []}},
     matrix: {
-      cases: cases.map(({id}) => `setup/${id}`), treatments: ['baseline'],
-      agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'setup-probe'}],
+      cases: specs.map(({id}) => `setup/${id}`), treatments: ['baseline'],
+      agents: [{adapter: liveAgent, provider: liveAgent === 'codex' ? 'openai' : 'anthropic', model: 'setup-probe'}],
       repetitions: 1, retries: 0
     },
     limits: {run_timeout_ms: 5 * 60_000},

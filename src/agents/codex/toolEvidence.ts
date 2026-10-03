@@ -3,6 +3,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {assertBoundedJsonValue} from '../../atif/parser.js';
 import type {AtifContent, JsonObject} from '../../atif/index.js';
 import type {AgentNativeEvidenceWarning} from '../../contracts/agent.js';
+import {isSafeSimpleIdentifier} from '../../model/paths.js';
 import {nativeJsonValue} from './nativeJson.js';
 import {codexTruncationBudget} from './truncation.js';
 
@@ -80,7 +81,7 @@ export function validateCodexMcpSnapshot(
   output: NativeObject,
   rawRecord: string,
 ): {isError: boolean; truncated: boolean} {
-  onlyKeys(item, ['type', 'id', 'server', 'tool', 'arguments', 'readOnlyHint', 'status', 'result', 'error', 'duration']);
+  onlyKeys(item, ['type', 'id', 'server', 'tool', 'arguments', 'readOnlyHint', 'pluginId', 'status', 'result', 'error', 'duration']);
   const server = nonempty(item.server);
   const tool = nonempty(item.tool);
   if (item.type !== 'McpToolCall' || call.type !== 'function_call' || output.type !== 'function_call_output' ||
@@ -92,6 +93,11 @@ export function validateCodexMcpSnapshot(
   assertBoundedJsonValue(arguments_);
   if (!isDeepStrictEqual(object(item.arguments), object(arguments_))) fail();
   if (item.readOnlyHint !== undefined) boolean(item.readOnlyHint);
+  // The pinned CLI attaches the qualified plugin identity to plugin MCP calls.
+  if (item.pluginId !== undefined) {
+    const parts = nonempty(item.pluginId).split('@');
+    if (parts.length !== 2 || !parts.every(isSafeSimpleIdentifier)) fail();
+  }
   validateDuration(item.duration);
 
   let failed: boolean;

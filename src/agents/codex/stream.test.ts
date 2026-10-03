@@ -38,6 +38,26 @@ function assertInvalid(stdout: string, expectedSessionId?: string): CodexStreamE
 }
 
 describe('Codex exec stream', () => {
+  it('accepts only captured pre-turn hook automation and ignored-provider advisories for the selected invocation', () => {
+    const warning = '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.';
+    const advisory = (id: string, message = warning) => ({type: 'item.completed', item: {id, type: 'error', message}});
+    const answer = item('agent_message', {id: 'item_3', text: 'Done'});
+    const stdout = jsonl(started, advisory('item_0'), advisory('item_1'), turnStarted, answer, completed);
+    assert.equal(parseCodexStream(stdout, undefined, {hookAutomation: true}).text, 'Done');
+    assert.equal(parseCodexStream(stdout, SESSION_ID, {hookAutomation: true}).sessionId, SESSION_ID);
+    assertInvalid(stdout);
+    for (const events of [
+      [advisory('item_0'), started, turnStarted, completed],
+      [started, turnStarted, advisory('item_0'), completed],
+      [started, advisory('item_0', 'synthetic-secret failed'), turnStarted, completed],
+      [started, advisory('item_0'), advisory('item_0'), turnStarted, completed],
+      [started, advisory('item_0'), turnStarted, item('agent_message', {id: 'item_0', text: 'collision'}), completed],
+    ]) assert.throws(() => parseCodexStream(jsonl(...events), undefined, {hookAutomation: true}), CodexStreamError);
+    const ignoredProvider = 'Ignored unsupported project-local config keys in /workspace/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.';
+    const configured = jsonl(started, advisory('item_0', ignoredProvider), turnStarted, answer, completed);
+    assert.equal(parseCodexStream(configured, undefined, {workspacePath: '/workspace'}).text, 'Done');
+    assertInvalid(configured);
+  });
   it('parses the documented JSONL invocation with an exact UUID session', () => {
     const stdout = jsonl(
       started,

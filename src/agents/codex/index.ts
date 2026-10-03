@@ -4,10 +4,13 @@ import {FORGE_CODEX_VERSION} from '../../runtime/docker/assets.js';
 import {loadCodexEvidence, loadCodexNativeArtifact} from './evidence.js';
 import {assertCodexRuntimeLayout, resolveCodexLayout, usesDefaultCodexLayout, type CodexLayout} from './layout.js';
 import {parseCodexStream} from './stream.js';
+import {CODEX_HOME_STATE_ID} from './layout.js';
+import {prepareCodexPluginConfiguration} from './pluginConfig.js';
+import {createCodexPluginInstaller} from './plugins.js';
 
 export const CODEX_ADAPTER_VERSION = '1' as const;
 export const CODEX_RESPONSES_ADAPTER_VERSION = '1+responses-compatible' as const;
-export const CODEX_HOME_STATE_ID = 'codex-home' as const;
+export {CODEX_HOME_STATE_ID} from './layout.js';
 
 export interface CodexAdapterOptions {
   readonly id?: string;
@@ -55,9 +58,12 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
     'analytics.enabled=false',
     'check_for_update_on_startup=false',
   ].flatMap((value) => ['-c', value]);
-  const requirements = (selection: {adapter: string; provider: string}): AgentRuntimeRequirements => {
+  const requirements = (selection: {adapter: string; provider: string; hook_trust?: string}): AgentRuntimeRequirements => {
     if (selection.adapter !== id || selection.provider !== provider) {
       throw new TypeError('Codex adapter does not match the selected adapter/provider.');
+    }
+    if (selection.hook_trust !== undefined && !['native', 'automation'].includes(selection.hook_trust)) {
+      throw new TypeError('Codex hook_trust must be native or automation.');
     }
     return {
       executables: [executable],
@@ -71,6 +77,7 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
   return Object.freeze({
     id,
     version,
+    pluginInstaller: createCodexPluginInstaller({adapterId: id, executable, layout}),
     requirements,
     evidenceIdentity(selection) {
       requirements(selection);
@@ -103,11 +110,15 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
           if (sending) throw new Error('Codex session cannot accept concurrent turns.');
           sending = true;
           try {
+            const home = context.runtime.stateDirectories.get(CODEX_HOME_STATE_ID);
+            if (!home) throw new TypeError('Codex run-owned state is unavailable.');
+            await prepareCodexPluginConfiguration(home);
+            const automation = context.selection.hook_trust === 'automation';
             const result = await context.runtime.commands.agent.run([
               executable, 'exec', ...configuration,
               '--json', '--skip-git-repo-check',
               '--dangerously-bypass-approvals-and-sandbox',
-              '--ignore-user-config',
+              ...(automation ? ['--dangerously-bypass-hook-trust'] : []),
               '--model', context.selection.model,
               ...(currentSessionId === undefined ? [] : ['resume', currentSessionId]),
               '--', message,
@@ -117,7 +128,9 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
               maxOutputBytes: 16 * 1024 * 1024,
             });
             if (result.exitCode !== 0) throw new Error('Codex exited without a successful completed turn.');
-            const turn = parseCodexStream(result.stdout, currentSessionId);
+            const turn = parseCodexStream(result.stdout, currentSessionId, {
+              hookAutomation: automation, workspacePath: layout.workspace,
+            });
             currentSessionId = turn.sessionId;
             return turn;
           } finally {

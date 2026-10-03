@@ -21,9 +21,6 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     throw new Error('FORGE_LIVE_AGENT must be claude-code or codex.');
   }
   const codexSelected = liveAgent === 'codex';
-  if (mode === 'setup' && codexSelected) {
-    throw new Error('Setup mode requires claude-code; Codex plugin installation is not supported.');
-  }
   const gatewayEnvironmentName = codexSelected ? 'OPENAI_BASE_URL' : 'ANTHROPIC_BASE_URL';
   const gatewayBaseUrl = mode === 'setup' ? undefined : optionalEnvironment(gatewayEnvironmentName);
   const gatewaySelected = gatewayBaseUrl !== undefined;

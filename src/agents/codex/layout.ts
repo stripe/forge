@@ -2,6 +2,8 @@ import path from 'node:path';
 
 import type {RuntimeLogicalPaths} from '../../contracts/runtime.js';
 
+export const CODEX_HOME_STATE_ID = 'codex-home' as const;
+
 /** Run-owned Linux paths visible to Codex, independent of the host filesystem. */
 export interface CodexLayout {
   readonly workspace: string;

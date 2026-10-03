@@ -79,6 +79,21 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('preserves saved Codex plans without a hook policy and rejects policy drift', () => {
+    const input = validPlan();
+    input.agent = {adapter: 'codex', provider: 'openai', model: 'gpt-test'};
+    input.selection.agent = {...input.agent};
+    assert.deepEqual(parseResolvedRunPlan(input), input);
+    assert.equal(parseResolvedRunPlan(input).agent.hook_trust, undefined);
+
+    input.agent.hook_trust = 'native';
+    assert.throws(() => parseResolvedRunPlan(input), {message: /selection agent must match/});
+    input.selection.agent.hook_trust = 'native';
+    assert.deepEqual(parseResolvedRunPlan(input), input);
+    input.selection.agent.hook_trust = 'automation';
+    assert.throws(() => parseResolvedRunPlan(input), {message: /selection agent must match/});
+  });
+
   it('rejects unsupported plan versions and removed source digest fields', () => {
     assert.throws(() => parseResolvedRunPlan({...validPlan(), schema_version: 2}), BenchmarkModelError);
     for (const source of ['experiment', 'case'] as const) {
