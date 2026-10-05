@@ -115,7 +115,7 @@ export async function runCodexPluginIntegrationSuite({dockerExecutable, resultsR
         }
         if (scenario.trust === 'automation') assert.match(native, /FORGE_WORKSPACE_HOOK_CONTEXT/);
         if (scenario.plugin && scenario.trust === 'automation') assert.match(native, /FORGE_PLUGIN_HOOK_CONTEXT/);
-        const setup = forge.parseSetupArtifact(JSON.parse(await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8')));
+        const setup = forge.parseSetupArtifact(JSON.parse(await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8')), {forgeVersion: completed.result.forge.version});
         if (scenario.plugin) {
           const receipt = setup.steps.at(-1).resolution;
           assert.equal(receipt.native_plugin_id, PLUGIN);

@@ -16,7 +16,7 @@ import {
   resolvedRunPlanSha256,
   serializeResolvedRunPlan,
 } from './planner.js';
-import {FORGE_VERSION} from '../version.js';
+import {FORGE_BUILD_IDENTITY} from '../version.js';
 
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
@@ -120,7 +120,7 @@ describe('experiment expansion and run planning', () => {
       assert.equal(actual.experiment.version, '2026.09.0');
       assert.equal(actual.case.id, 'case/a');
       assert.equal(actual.case.path, 'cases/case/a/eval.yaml');
-      assert.equal(actual.forge.version, FORGE_VERSION);
+      assert.deepEqual(actual.forge, FORGE_BUILD_IDENTITY);
     }
   });
 
@@ -446,7 +446,6 @@ function selection(
 
 function evalCase(): EvalCaseV1 {
   return {
-    schema_version: 1,
     id: 'case/a',
     task: 'Complete the task',
     initial_prompt: 'Please start here',
@@ -464,7 +463,6 @@ function experimentConfig(
   overrides: Partial<ExperimentConfigV1> = {},
 ): ExperimentConfigV1 {
   const config: ExperimentConfigV1 = {
-    schema_version: 1,
     id: 'experiment/default',
     version: '2026.09.0',
     dataset: {
@@ -534,7 +532,6 @@ function inputs(
       manifestRaw: '{}',
       manifestSha256: MANIFEST_DIGEST,
       manifest: {
-        schema_version: 1,
         dataset: {id: 'dataset', version: '2026.09.0'},
         cases: [{id: 'case/a', path: 'cases/case/a/eval.yaml'}],
         files: manifestFiles,

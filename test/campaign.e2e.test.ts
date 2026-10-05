@@ -540,7 +540,7 @@ describe('resumable CLI campaigns', () => {
     await fs.writeFile(fixture.checkpoint, JSON.stringify({...journal, unknown: true}));
     const invalid = await fixture.run(['--resume', 'exp-1']);
     assert.equal(invalid.code, 1);
-    assert.match(invalid.stderr, /valid schema-version-1/);
+    assert.match(invalid.stderr, /compatible Forge campaign/);
   });
 
   it('rejects invalid flag combinations and filters the initial campaign', async () => {
@@ -830,7 +830,6 @@ describe('resumable CLI campaigns', () => {
 });
 
 interface Checkpoint {
-  schema_version: number;
   entries: Array<{
     selection: {repetition: number};
     plan_sha256: string;

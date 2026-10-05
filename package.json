@@ -81,7 +81,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && node scripts/build-info.mjs",
     "check:docs": "pnpm build && pnpm check:docs:built",
     "check:docs:built": "node scripts/check-docs.mjs",
     "check:package": "publint && pnpm test:types && pnpm test:package",

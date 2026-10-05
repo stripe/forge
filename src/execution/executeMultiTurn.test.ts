@@ -600,7 +600,6 @@ describe('executeEval multi-turn and judging integration', () => {
     }
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      schema_version: number;
       transcript: {
         source: string;
         projection_id: string;
@@ -611,7 +610,7 @@ describe('executeEval multi-turn and judging integration', () => {
         steps: unknown[];
       };
     };
-    assert.equal(judgeEvidence.schema_version, 1);
+    assert.ok(!('schema_version' in judgeEvidence));
     assert.deepEqual(judgeEvidence.transcript, {
       source: JUDGE_TRANSCRIPT_SOURCE,
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,

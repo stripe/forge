@@ -229,7 +229,7 @@ describe('createDirectoryRunInputProvider', () => {
 async function verifiedDatasetInputs() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-verified-input-test-'));
   temporaryRoots.push(root);
-  const caseBody = 'schema_version: 1\nid: test/example\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
+  const caseBody = 'id: test/example\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
   const payloads = [
     {path: 'cases/example.yaml', body: caseBody},
     {path: 'fixtures/hello.txt', body: 'hello'},
@@ -240,7 +240,6 @@ async function verifiedDatasetInputs() {
     await fs.writeFile(target, file.body);
   }
   await fs.writeFile(path.join(root, 'manifest.json'), JSON.stringify({
-    schema_version: 1,
     dataset: {id: 'test', version: '1'},
     cases: [{id: 'test/example', path: 'cases/example.yaml'}],
     files: payloads.map(({path: filePath, body}) => ({

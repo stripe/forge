@@ -27,6 +27,9 @@ try {
   await fs.mkdir(consumerRoot);
 
   run('pnpm', ['pack', '--pack-destination', packRoot], projectRoot);
+  const packagedBuildIdentity = JSON.parse(
+    await fs.readFile(path.join(projectRoot, 'dist', 'build-info.json'), 'utf8'),
+  );
   const archives = (await fs.readdir(packRoot)).filter((entry) =>
     entry.endsWith('.tgz'),
   );
@@ -75,20 +78,17 @@ try {
 
       assert.equal(typeof forge.executeEval, 'function');
       assert.equal(forge.FORGE_VERSION, packageMetadata.version);
+      assert.deepEqual(forge.FORGE_BUILD_IDENTITY, ${JSON.stringify(packagedBuildIdentity)});
+      assert.equal(Object.isFrozen(forge.FORGE_BUILD_IDENTITY), true);
       assert.equal(typeof forge.createForgeEngine, 'function');
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseJudgeEvidence, 'function');
-      assert.equal(forge.JUDGE_EVIDENCE_SCHEMA_VERSION, 1);
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
       assert.equal(typeof docker.detectDockerRuntimePlatform, 'function');
       assert.equal(typeof docker.validateDockerRuntimeHost, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
       assert.equal(typeof forge.parseJudgeTranscriptProjection, 'function');
-      assert.equal(forge.RUN_RESULT_SCHEMA_VERSION, 1);
-      assert.equal(forge.RESOLVED_RUN_PLAN_SCHEMA_VERSION, 1);
-      assert.equal(forge.SETUP_ARTIFACT_SCHEMA_VERSION, 1);
-      assert.equal(forge.WORKSPACE_EVIDENCE_SCHEMA_VERSION, 1);
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
       assert.equal(atif.isAtifTimestamp('2024-02-29T00:00:00Z'), true);
       assert.equal(typeof atif.parseNormalizedTrajectory, 'function');
@@ -119,7 +119,6 @@ try {
       assert.equal(typeof campaign.inspectCampaign, 'function');
       assert.equal(typeof campaign.parseCampaignReport, 'function');
       assert.equal(typeof campaign.CampaignReportError, 'function');
-      assert.equal(campaign.CAMPAIGN_REPORT_SCHEMA_VERSION, 1);
       assert.equal(typeof campaignCli.runCampaignCommand, 'function');
       assert.equal(typeof campaignCli.parseCampaignArgs, 'function');
       assert.equal(typeof campaignCli.createCampaignCliOptions, 'function');
@@ -137,7 +136,8 @@ try {
       assert.deepEqual(codex.createCodexAdapter().metadata, {endpoint_mode: 'default', layout_mode: 'default'});
       assert.deepEqual(anthropic.createAnthropicCompletionProvider({baseUrl: 'https://gateway.example.com'}).metadata, {endpoint_mode: 'custom'});
       for (const [surface, names] of [
-        [forge, ['EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
+        [forge, ['BENCHMARK_SCHEMA_VERSION', 'RESOLVED_RUN_PLAN_SCHEMA_VERSION', 'RUN_RESULT_SCHEMA_VERSION', 'SETUP_ARTIFACT_SCHEMA_VERSION', 'WORKSPACE_EVIDENCE_SCHEMA_VERSION', 'INTERACTION_SCHEMA_VERSION', 'JUDGE_EVIDENCE_SCHEMA_VERSION', 'EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
+        [campaign, ['CAMPAIGN_REPORT_SCHEMA_VERSION']],
         [atif, ['ATIF_NORMALIZATION_VERSION']],
         [claude, ['CLAUDE_CODE_ADAPTER_VERSION', 'CLAUDE_CODE_GATEWAY_ADAPTER_VERSION']],
         [codex, ['CODEX_ADAPTER_VERSION', 'CODEX_RESPONSES_ADAPTER_VERSION']],

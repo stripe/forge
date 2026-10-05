@@ -1,6 +1,5 @@
-import {RESOLVED_RUN_PLAN_SCHEMA_VERSION} from '../model/types.js';
 import {parseResolvedRunPlan} from '../model/parse.js';
-import {FORGE_VERSION} from '../version.js';
+import {FORGE_BUILD_IDENTITY} from '../version.js';
 import type {
   AgentSelectionV1,
   ChecksV1,
@@ -55,7 +54,6 @@ export function createTestResolvedRunPlan(
   const maxTurns = mode === 'one_shot' ? 1 : (options.maxTurns ?? 10);
 
   return parseResolvedRunPlan({
-    schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
     selection: {
       case_id: caseId,
       treatment,
@@ -76,10 +74,9 @@ export function createTestResolvedRunPlan(
         id: caseId,
         path: `cases/${caseId}/eval.yaml`,
       },
-      forge: {version: options.forgeVersion ?? FORGE_VERSION},
+      forge: {...FORGE_BUILD_IDENTITY, ...(options.forgeVersion === undefined ? {} : {version: options.forgeVersion})},
     },
     case: {
-      schema_version: 1,
       id: caseId,
       ...(mode === 'one_shot' ? {initial_prompt: initialPrompt!} : {task: prompt}),
       ...(mode === 'multi_turn' && initialPrompt !== undefined

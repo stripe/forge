@@ -64,7 +64,6 @@ import {
 import {snapshotAgentToolCalls} from '../interaction/conversation.js';
 import {
   isSafeSimpleIdentifier,
-  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
@@ -74,8 +73,6 @@ import {sha256Digest} from '../model/hashes.js';
 import {serializeResolvedRunPlan} from '../planning/index.js';
 import {
   MAX_SETUP_ARTIFACT_BYTES,
-  RUN_RESULT_SCHEMA_VERSION,
-  SETUP_ARTIFACT_SCHEMA_VERSION,
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
@@ -95,7 +92,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
-import {FORGE_VERSION} from '../version.js';
+import {assertCompatibleForgeVersion, FORGE_BUILD_IDENTITY, FORGE_VERSION} from '../version.js';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
@@ -467,7 +464,6 @@ export async function executeEvalWithTestHooks(
               },
         );
         judgeEvidence = parseJudgeEvidence({
-          schema_version: 1,
           transcript: {
             source: judgeTranscript.source,
             projection_id: judgeTranscript.projectionId,
@@ -486,7 +482,7 @@ export async function executeEvalWithTestHooks(
             complete: safeWorkspace.complete,
             warnings: safeWorkspace.warnings.map((warning) => ({...warning})),
           },
-        });
+        }, {forgeVersion: FORGE_VERSION});
       }
       const result = await evaluateRunEvidence({
         plan: input.plan,
@@ -601,9 +597,6 @@ export async function executeEvalWithTestHooks(
     });
     transaction = undefined;
     const committedResult = parseRunResult(committed.result);
-    if (committedResult.schema_version !== RUN_RESULT_SCHEMA_VERSION) {
-      throw new TypeError('Artifact store returned an unexpected result schema version.');
-    }
     return {
       runId: committed.runId,
       location: committed.location,
@@ -911,14 +904,14 @@ function buildEvalPreflight(
 }
 
 function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
-  if (plan.schema_version !== RESOLVED_RUN_PLAN_SCHEMA_VERSION) {
-    throw new ForgeExecutionError('invalid_plan', 'preflight', 'Unsupported run-plan version.');
-  }
-  if (plan.provenance.forge.version !== FORGE_VERSION) {
+  try {
+    assertCompatibleForgeVersion(plan.provenance.forge.version);
+  } catch (error) {
     throw new ForgeExecutionError(
       'invalid_plan',
       'preflight',
-      `Run plan requires Forge ${plan.provenance.forge.version}; this build is ${FORGE_VERSION}.`,
+      error instanceof Error ? error.message : 'Unsupported Forge producer version.',
+      {cause: error},
     );
   }
   // Defensive JSON/canonicalization check before any credential or runtime use.
@@ -1449,7 +1442,6 @@ function buildInteractionArtifact(
         },
       };
   return {
-    schema_version: 1,
     mode: plan.interaction.mode,
     stop_reason: interaction.stopReason,
     turns,
@@ -1480,7 +1472,9 @@ function redactInteractionArtifact(
   artifact: InteractionArtifactV1,
   secrets: readonly string[],
 ): InteractionArtifactV1 {
-  return parseInteractionArtifact(redactSecrets(artifact, secrets).value);
+  return parseInteractionArtifact(redactSecrets(artifact, secrets).value, {
+    forgeVersion: FORGE_VERSION,
+  });
 }
 
 function jsonValue(value: unknown): JsonValue {
@@ -1611,13 +1605,12 @@ function buildSetupArtifact(
     throw new TypeError('Applied setup does not match the resolved run plan.');
   }
   const artifact = parseSetupArtifact({
-    schema_version: SETUP_ARTIFACT_SCHEMA_VERSION,
     steps: applied.steps.map((step) => ({
       index: step.index,
       uses: step.uses,
       ...(step.resolution === undefined ? {} : {resolution: step.resolution}),
     })),
-  });
+  }, {forgeVersion: FORGE_VERSION});
   if (
     Buffer.byteLength(serializeCanonicalJson(artifact), 'utf8') >
     MAX_SETUP_ARTIFACT_BYTES
@@ -1687,11 +1680,10 @@ function buildResult(input: {
   completedAt: Date;
 }): RunResultV1 {
   return {
-    schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: input.input.runId,
     selection: input.input.plan.selection,
     forge: {
-      version: FORGE_VERSION,
+      ...FORGE_BUILD_IDENTITY,
       ...(input.input.plan.provenance.forge.action_bundles === undefined
         ? {}
         : {

@@ -1,4 +1,5 @@
 import type {AgentAdapterMetadata, CompletionProviderMetadata} from '../contracts/metadata.js';
+import type {ForgeBuildIdentity} from '../version.js';
 import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
@@ -21,12 +22,12 @@ import type {
   Sha256Digest,
 } from '../model/types.js';
 
-export const RUN_RESULT_SCHEMA_VERSION = 1 as const;
-export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const INTERACTION_SCHEMA_VERSION = 1 as const;
-export const SETUP_ARTIFACT_SCHEMA_VERSION = 1 as const;
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
-export const JUDGE_EVIDENCE_SCHEMA_VERSION = 1 as const;
+
+/** Producer release for a companion artifact interpreted by this package. */
+export interface ForgeArtifactParseContext {
+  readonly forgeVersion: string;
+}
 
 export type EvalStatus = 'passed' | 'partial' | 'failed';
 
@@ -62,7 +63,6 @@ export interface WorkspaceEvidenceEntryV1 {
 }
 
 export interface WorkspaceEvidenceV1 {
-  readonly schema_version: typeof WORKSPACE_EVIDENCE_SCHEMA_VERSION;
   readonly entries: readonly WorkspaceEvidenceEntryV1[];
   readonly complete: boolean;
   readonly warnings: readonly {code: string; message: string; path?: string}[];
@@ -133,7 +133,6 @@ export interface AvaDecisionV1 {
 }
 
 export interface InteractionArtifactV1 {
-  readonly schema_version: typeof INTERACTION_SCHEMA_VERSION;
   readonly mode: 'multi_turn' | 'one_shot';
   readonly stop_reason: RunStopReasonV1;
   readonly turns: readonly InteractionTurnV1[];
@@ -153,7 +152,6 @@ export interface SetupArtifactStepV1 {
 
 /** Ordered audit of the exact setup operations and execution-time resolutions. */
 export interface SetupArtifactV1 {
-  readonly schema_version: typeof SETUP_ARTIFACT_SCHEMA_VERSION;
   readonly steps: readonly SetupArtifactStepV1[];
 }
 
@@ -165,7 +163,6 @@ export interface JudgeWorkspaceEntryV1 {
 
 /** Judge audit with the exact reduced transcript supplied to every guideline. */
 export interface JudgeEvidenceV1 {
-  readonly schema_version: typeof JUDGE_EVIDENCE_SCHEMA_VERSION;
   readonly transcript: {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
     readonly projection_id: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
@@ -248,9 +245,8 @@ export interface RunEvidenceV1 {
 interface RunResultCommon {
   readonly run_id: string;
   readonly selection: RunSelection;
-  readonly forge: {
-    version: string;
-    action_bundles?: readonly SetupActionBundleReferenceV1[];
+  readonly forge: ForgeBuildIdentity & {
+    readonly action_bundles?: readonly SetupActionBundleReferenceV1[];
   };
   readonly runtime: {
     adapter: string;
@@ -284,7 +280,6 @@ interface RunResultCommon {
 }
 
 export interface RunResultV1 extends RunResultCommon {
-  readonly schema_version: typeof RUN_RESULT_SCHEMA_VERSION;
   readonly evidence: RunEvidenceV1;
 }
 

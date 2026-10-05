@@ -4,7 +4,7 @@ export {
   preflightEval,
   type PreflightEvalInput,
 } from './execute.js';
-export {FORGE_VERSION} from '../version.js';
+export {FORGE_VERSION, FORGE_BUILD_IDENTITY, type ForgeBuildIdentity} from '../version.js';
 export {
   ForgeExecutionError,
   type ForgeExecutionErrorCode,

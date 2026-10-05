@@ -440,7 +440,7 @@ export function createFullSuite(forge, options, overrides = {}) {
       }
       return Object.freeze({
         valid: true,
-        adapter: {id: runtime.id, version: runtime.version},
+        adapter: {id: runtime.id},
         platform: plan.runtime.platform,
         image_id: imageId,
         run_id: report.runtimeId,

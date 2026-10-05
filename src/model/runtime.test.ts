@@ -14,7 +14,6 @@ const runtime: ForgeExternalRuntimeV1 = {
 
 function experiment(selectedRuntime: unknown): unknown {
   return {
-    schema_version: 1,
     id: 'example/external',
     version: '1',
     dataset: {id: 'test', version: '1', manifest_sha256: `sha256:${'a'.repeat(64)}`},

@@ -354,7 +354,7 @@ describe('Forge CLI', () => {
     {
       const actual = JSON.parse(stdout);
       assert.ok(actual);
-      assert.equal(actual.schema_version, 1);
+      assert.equal(Object.hasOwn(actual, 'schema_version'), false);
       assert.equal(actual.selection.case_id, 'case/example');
       assert.equal(actual.selection.treatment, 'baseline');
       assert.equal(actual.selection.agent.adapter, 'claude-code');
@@ -686,7 +686,7 @@ describe('Forge CLI', () => {
   it('rejects a case-file traversal that resolves outside the dataset', async () => {
     const fixture = await createBenchmarkFixture();
     const outside = path.join(fixture.root, 'outside.yaml');
-    await fs.writeFile(outside, 'schema_version: 1\n');
+    await fs.writeFile(outside, 'id: outside\n');
     let stderr = '';
 
     const exitCode = await runCli(
@@ -1031,8 +1031,7 @@ async function createBenchmarkFixture(
     fs.mkdir(experimentsRoot, {recursive: true}),
   ]);
 
-  const caseBody = `schema_version: 1
-id: case/example
+  const caseBody = `id: case/example
 task: Do the thing
 execution_mode: one_shot
 setup: []
@@ -1043,8 +1042,7 @@ success_guidelines: []
   await fs.writeFile(caseFilePath, caseBody);
   const unselectedCasePath = 'cases/unselected.yaml';
   const unselectedCaseFilePath = path.join(datasetRoot, unselectedCasePath);
-  const unselectedCaseBody = `schema_version: 1
-id: case/unselected
+  const unselectedCaseBody = `id: case/unselected
 task: Do another thing
 execution_mode: one_shot
 setup: []
@@ -1076,7 +1074,6 @@ success_guidelines: []
       : []),
   ];
   const manifestRaw = `${JSON.stringify({
-    schema_version: 1,
     dataset: {id: 'example-dataset', version: '2026.09.0'},
     cases,
     files,
@@ -1086,8 +1083,7 @@ success_guidelines: []
   const experimentPath = path.join(experimentsRoot, 'default.yaml');
   await fs.writeFile(
     experimentPath,
-    `schema_version: 1
-id: experiment/default
+    `id: experiment/default
 version: 2026.09.0
 dataset:
   path: ../dataset

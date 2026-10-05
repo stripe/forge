@@ -1,6 +1,7 @@
 import {parseDocument} from 'yaml';
 import {z} from 'zod';
 
+import {assertCompatibleForgeVersion, parseForgeBuildIdentity} from '../version.js';
 import {
   BenchmarkModelError,
   type BenchmarkModelErrorCode,
@@ -21,8 +22,6 @@ import {
   type SetupActionRegistry,
 } from '../setup/registry.js';
 import {
-  BENCHMARK_SCHEMA_VERSION,
-  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
   DEFAULT_DOCKER_PROCESS_COUNT,
@@ -139,8 +138,20 @@ const AuthoredForgeSchema = z.object({
 
 const ForgeProvenanceSchema = z.object({
   version: VersionSchema,
+  commit_sha: z.string().optional(),
+  dirty: z.boolean().optional(),
   action_bundles: ActionBundleReferencesSchema.optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  try {
+    parseForgeBuildIdentity({
+      version: value.version,
+      ...(value.commit_sha === undefined ? {} : {commit_sha: value.commit_sha}),
+      ...(value.dirty === undefined ? {} : {dirty: value.dirty}),
+    });
+  } catch {
+    context.addIssue({code: z.ZodIssueCode.custom, message: 'Invalid Forge build identity.'});
+  }
+});
 
 const FilesystemCheckSchema = z
   .object({
@@ -176,7 +187,6 @@ const ChecksSchema = z
 
 const EvalCaseSchema = z
   .object({
-    schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
     id: CaseIdSchema,
     display_name: TrimmedTextSchema.optional(),
     task: TrimmedTextSchema.optional(),
@@ -255,7 +265,6 @@ const ManifestFileSchema = z
 
 const DatasetManifestSchema = z
   .object({
-    schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
     dataset: DatasetIdentitySchema,
     cases: z.array(ManifestCaseSchema).min(1).max(10_000),
     files: z.array(ManifestFileSchema).min(1).max(50_000),
@@ -407,7 +416,6 @@ function assertRuntimeConfigBytes(value: unknown): void {
 
 const ExperimentConfigSchema = z
   .object({
-    schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
     id: CaseIdSchema,
     version: VersionSchema,
     dataset: DatasetIdentitySchema.extend({
@@ -503,7 +511,6 @@ const ExperimentConfigSchema = z
 const MaterializedEvalCaseSchema = z.intersection(
   z
     .object({
-      schema_version: z.literal(BENCHMARK_SCHEMA_VERSION),
       id: CaseIdSchema,
       execution_mode: z.enum(['multi_turn', 'one_shot']),
       setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
@@ -535,7 +542,6 @@ const ResolvedRuntimeSchema = z.union([
 
 const ResolvedRunPlanSchema = z
   .object({
-    schema_version: z.literal(RESOLVED_RUN_PLAN_SCHEMA_VERSION),
     selection: RunSelectionSchema,
     provenance: z
       .object({
@@ -915,6 +921,16 @@ export function parseResolvedRunPlanWithSetupActions(
   value: unknown,
   setupActions: SetupActionRegistry,
 ): ResolvedRunPlanV1 {
+  // Check the producer before interpreting a release-owned plan format.
+  try {
+    assertBoundedDataGraph(value, 'resolved run plan');
+    const envelope = z.object({
+      provenance: z.object({forge: z.object({version: VersionSchema}).passthrough()}).passthrough(),
+    }).passthrough().parse(value);
+    assertCompatibleForgeVersion(envelope.provenance.forge.version);
+  } catch (error) {
+    throw new BenchmarkModelError('invalid_plan', 'Invalid resolved run plan: incompatible Forge release or missing provenance.', {cause: error});
+  }
   const parsed = parseWithSchema(
     ResolvedRunPlanSchema,
     value,

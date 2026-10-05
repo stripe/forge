@@ -380,6 +380,7 @@ describe('unified live end-to-end suite', () => {
       },
     }, 'probe', signal);
     assert.equal(report.image_id, imageId);
+    assert.deepEqual(report.adapter, {id: 'forge/docker'});
     const calls: string[][] = [];
     const runCommand = async (executable: string, argv: readonly string[]) => {
       assert.equal(executable, 'docker');

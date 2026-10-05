@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {FORGE_VERSION} from '../version.js';
 import {BenchmarkModelError} from './errors.js';
 import {parseResolvedRunPlan} from './parse.js';
 import type {ResolvedRunPlanV1} from './types.js';
@@ -21,7 +22,6 @@ function validPlan(): ResolvedRunPlanV1 {
     model: 'claude-test',
   };
   return {
-    schema_version: 1,
     selection: {
       case_id: 'sample/write',
       treatment: 'baseline',
@@ -42,10 +42,9 @@ function validPlan(): ResolvedRunPlanV1 {
         id: 'sample/write',
         path: 'cases/sample/write/eval.yaml',
       },
-      forge: {version: '0.1.0'},
+      forge: {version: FORGE_VERSION},
     },
     case: {
-      schema_version: 1,
       id: 'sample/write',
       initial_prompt: 'Create the requested file.',
       execution_mode: 'one_shot',
@@ -94,7 +93,7 @@ describe('parseResolvedRunPlan', () => {
     assert.throws(() => parseResolvedRunPlan(input), {message: /selection agent must match/});
   });
 
-  it('rejects unsupported plan versions and removed source digest fields', () => {
+  it('rejects removed plan schema and source digest fields', () => {
     assert.throws(() => parseResolvedRunPlan({...validPlan(), schema_version: 2}), BenchmarkModelError);
     for (const source of ['experiment', 'case'] as const) {
       const plan = validPlan();
@@ -105,6 +104,33 @@ describe('parseResolvedRunPlan', () => {
           [source]: {...plan.provenance[source], sha256: DIGEST},
         },
       }), BenchmarkModelError);
+    }
+  });
+
+  it('checks official producer compatibility before interpreting the plan payload', () => {
+    assert.throws(() => parseResolvedRunPlan({provenance: {forge: {version: '99.0.0'}}}),
+      (error: unknown) => error instanceof BenchmarkModelError &&
+        error.cause instanceof TypeError && /Forge 99\.0\.0 is incompatible/.test(error.cause.message));
+    const input = validPlan();
+    assert.throws(() => parseResolvedRunPlan({...input, provenance: {...input.provenance, forge: {}}}), BenchmarkModelError);
+  });
+
+  it('preserves source provenance without using development commit identity as a compatibility gate', () => {
+    for (const length of [40, 64]) {
+      const input = validPlan();
+      input.provenance.forge = {version: FORGE_VERSION, commit_sha: 'a'.repeat(length), dirty: true};
+      const parsed = parseResolvedRunPlan(input);
+      assert.deepEqual(parsed.provenance.forge, input.provenance.forge);
+      assert.equal(Object.isFrozen(parsed.provenance.forge), true);
+      assert.throws(() => parseResolvedRunPlan({...input, provenance: {...input.provenance,
+        forge: {...input.provenance.forge, commit_sha: 'short'}}}), BenchmarkModelError);
+      assert.throws(() => parseResolvedRunPlan({...input, provenance: {...input.provenance,
+        forge: {...input.provenance.forge, unexpected: true}}}), BenchmarkModelError);
+    }
+    if (FORGE_VERSION.includes('-dev.')) {
+      const input = validPlan();
+      input.provenance.forge = {version: '0.0.0-dev.1', commit_sha: 'b'.repeat(40), dirty: false};
+      assert.deepEqual(parseResolvedRunPlan(input).provenance.forge, input.provenance.forge);
     }
   });
 
@@ -173,7 +199,6 @@ describe('parseResolvedRunPlan', () => {
   it('requires materialized defaults and rejects unknown fields', () => {
     const missingDefaults = validPlan() as unknown as Record<string, unknown>;
     missingDefaults.case = {
-      schema_version: 1,
       id: 'sample/write',
       initial_prompt: 'Create the requested file.',
     };

@@ -10,6 +10,7 @@ import {CampaignReportError, parseCampaignReport, runCampaign, type CampaignOpti
 import {buildCampaignReport, type CampaignReportRunV1} from './campaignReport.js';
 import {defaultForgeEngine} from './engine.js';
 import {sha256Digest} from './model/hashes.js';
+import {FORGE_BUILD_IDENTITY, FORGE_VERSION} from './version.js';
 import {createArtifactStore} from './results/index.js';
 import {createFakeRuntimeAdapter, createMemoryRunInputProvider, createScriptedAgentAdapter,
   createScriptedCompletionProvider, createStaticCredentialResolver, createTestResolvedRunPlan} from './testing/index.js';
@@ -21,6 +22,34 @@ afterEach(async () => {
 });
 
 describe('campaign scorecards', () => {
+  it('records the producing Forge build and reads standalone pending scorecards', () => {
+    const pending = row(0);
+    Object.assign(pending, {state: 'pending', run_id: null, result_path: null,
+      evaluation: null, attempt_count: 0});
+    const report = build([pending]);
+    assert.deepEqual(report.forge, FORGE_BUILD_IDENTITY);
+    assert.equal(Object.hasOwn(report, 'schema_version'), false);
+    assert.equal(parseCampaignReport(report).summary.pending, 1);
+    assert.throws(() => parseCampaignReport({...report, forge: undefined}));
+    assert.throws(() => parseCampaignReport({...report, forge: {...report.forge, unknown: true}}));
+    assert.throws(() => parseCampaignReport({...report, schema_version: 1}));
+    assert.throws(() => parseCampaignReport({forge: {version: '9999.0.0'}, runs: 'invalid'}),
+      /incompatible with installed Forge/);
+    const diagnosticIdentity = {version: FORGE_VERSION, commit_sha: 'b'.repeat(40), dirty: true};
+    assert.deepEqual(parseCampaignReport({...report, forge: diagnosticIdentity}).forge, diagnosticIdentity);
+  });
+
+  it('permits different development releases only when the reader is also a development build', () => {
+    const report = {...build([row(0)]), forge: {
+      version: '9999.0.0-dev.123', commit_sha: 'c'.repeat(40), dirty: false,
+    }};
+    if (/^\d+\.\d+\.\d+-dev(?:\.|$)/.test(FORGE_VERSION)) {
+      assert.deepEqual(parseCampaignReport(report).forge, report.forge);
+    } else {
+      assert.throws(() => parseCampaignReport(report), /incompatible with installed Forge/);
+    }
+  });
+
   it('keeps Codex hook policies in report coordinates and separates their score groups', () => {
     const runs = [row(0), row(1)];
     runs[0]!.selection.agent = {adapter: 'codex', provider: 'openai', model: 'gpt', hook_trust: 'native'};
@@ -84,10 +113,10 @@ describe('campaign scorecards', () => {
     assert.equal(report.runs[0]!.evaluation!.checks_passed, 1);
   });
 
-  it('rejects unsupported versions, unknown fields, false aggregates and invalid run references', () => {
+  it('rejects unknown fields, false aggregates and invalid run references', () => {
     const report = build([row(0)]);
     for (const mutate of [
-      (value: typeof report) => {value.schema_version = 2 as 1;},
+      (value: typeof report) => {Object.assign(value, {schema_version: 1});},
       (value: typeof report) => {Object.assign(value, {transcript: 'not scorecard data'});},
       (value: typeof report) => {value.summary.passed = 0;},
       (value: typeof report) => {value.cases[0]!.agent.model = 'different';},

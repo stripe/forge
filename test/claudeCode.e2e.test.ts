@@ -135,7 +135,7 @@ it('runs the real Claude adapter through two turns, native selection, redaction,
   assert.equal(trajectory.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []).length, 2);
   assert.match(JSON.stringify(trajectory), /\[REDACTED\]/);
   assert.doesNotMatch(JSON.stringify(trajectory), /UNRELATED_SESSION/);
-  const interaction = parseInteractionArtifact(await artifact(completed.location, 'interaction.json'));
+  const interaction = parseInteractionArtifact(await artifact(completed.location, 'interaction.json'), {forgeVersion: completed.result.forge.version});
   assert.equal(interaction.turns.length, 2);
   for (const descriptor of completed.result.artifacts) {
     assert.ok(!(await fs.readFile(path.join(completed.location, descriptor.path), 'utf8')).includes(SECRET));

@@ -95,7 +95,6 @@ Create `quickstart/dataset/cases/examples/hello-file.yaml`:
 
 <!-- quickstart-case:start -->
 ```yaml
-schema_version: 1
 id: examples/hello-file
 display_name: Hello file
 initial_prompt: Create hello.txt containing exactly "hello, forge!" followed by a newline.
@@ -125,7 +124,6 @@ Create `quickstart/dataset/manifest.json`:
 <!-- quickstart-manifest:start -->
 ```json
 {
-  "schema_version": 1,
   "dataset": {
     "id": "forge-quickstart",
     "version": "0.1.0"
@@ -139,8 +137,8 @@ Create `quickstart/dataset/manifest.json`:
   "files": [
     {
       "path": "cases/examples/hello-file.yaml",
-      "size": 350,
-      "sha256": "3debb427a8120d54dc9e4a68590996bdc9945e4c25d225c98c2d821e51339017"
+      "size": 332,
+      "sha256": "cb3529be16df91394a179a7111703e72e7bd2e0d315752f5b444497407bb8c16"
     }
   ]
 }
@@ -157,14 +155,13 @@ Create `quickstart/experiment.yaml`:
 
 <!-- quickstart-experiment:start -->
 ```yaml
-schema_version: 1
 id: examples/quickstart
 version: 0.1.0
 dataset:
   path: ./dataset
   id: forge-quickstart
   version: 0.1.0
-  manifest_sha256: sha256:2d75e3a65ff5c3b6c9612a572f078e6dd496c0b63007cf3c6e6da94c62fcd4e0
+  manifest_sha256: sha256:2ce8cb5dbcbb01f4d3f626109608ae9e0a0c91381f2dbf857eb677654ea7a187
 runtime:
   adapter: docker
   image:
@@ -196,13 +193,30 @@ limits:
 
 The experiment config independently pins the dataset identity and SHA-256 digest
 of the raw `manifest.json` bytes. The installed Forge package version is not an
-authored experiment field. Forge records it in each resolved plan and result;
-execution rejects a serialized plan made by a different package version. To
-run an older dataset with a newer Forge release, resolve a fresh plan with that
-release. The dataset and experiment versions identify those inputs independently
-of the Forge package version. `dataset.path` is a CLI location hint, resolved
-relative to the experiment file; it is excluded from resolved plans and their
-checksums. Programmatic hosts may omit it and supply a loaded dataset directly.
+authored experiment field. It defines Forge's input schemas, execution behavior,
+and generated formats; authored inputs do not carry a `schema_version` field.
+Official releases freeze Forge code and Forge-owned datasets together. Dataset
+and experiment versions identify input definitions, rather than Forge format
+compatibility. ATIF, coding
+agent CLIs, native plugins, action bundles, and independently released
+integrations retain their own version identities.
+
+Resolved plans, results, campaign checkpoints, and reports record their producing
+Forge version. Readers require an exact package-version match whenever either
+version is outside the `X.Y.Z-dev.*` development channel. Different development
+versions may be read with the current strict schemas on a best-effort basis,
+without a compatibility or reproducibility guarantee. Use the corresponding
+official Forge release to inspect its saved artifacts, or resolve a fresh plan
+to execute inputs with a newer release.
+
+`FORGE_BUILD_IDENTITY` includes `version` and, when available during the package
+build, optional `commit_sha` and `dirty` diagnostics. Plans record this identity
+under `provenance.forge`; results, checkpoints, and reports use `forge`. Source
+diagnostics do not add a compatibility check. Installed packages use the captured
+build metadata rather than inspecting the consumer's Git checkout.
+`dataset.path` is a CLI location hint, resolved relative to the experiment file;
+it is excluded from resolved plans and their checksums. Programmatic hosts may
+omit it and supply a loaded dataset directly.
 
 `models: {}` is intentional for this one-shot, checks-only case. An experiment
 config must set `models.role_player` for every selected `multi_turn` case and
@@ -353,7 +367,7 @@ extensions/<contributor-id>/...    # optional host-contributed artifacts
 
 The checked-in quickstart includes `workspace-evidence.json` because its case
 defines file checks. `result.json.evaluation` is the sole canonical evaluation
-record, governed by the enclosing result schema; Forge does not write a
+record, governed by the producing Forge release; Forge does not write a
 duplicate `evaluation.json`.
 
 `result.json` is the atomic commit marker and is not listed in its own artifact
@@ -361,8 +375,8 @@ array. Its `artifacts` and `supplemental_artifacts` arrays claim the media type,
 size, and digest of every accompanying file. Forge quiesces the runtime, stages
 the artifacts, disposes the runtime, then uses a directory rename as the atomic
 completion boundary. Use
-`verifyCompletedRun(location)` to re-read and verify a committed result. Result
-schema version 1 records the evidence source and adapter provenance.
+`verifyCompletedRun(location)` to re-read and verify a committed result. The result
+records the evidence source and adapter provenance.
 The `plan.json` artifact descriptor is the stored plan checksum.
 
 `plan.json` is the exact resolved execution plan. `setup.json` is the ordered
@@ -388,7 +402,7 @@ paths, and unrelated ambient state do not belong in either file.
 `workspace-evidence.json` contains bounded evidence and exact base64-encoded
 bytes for the paths inspected by configured deterministic file checks. Its
 artifact checksum covers the whole file; entries do not carry separate digests.
-`judge-evidence.json` exists only when judging ran. Schema version 1 records the
+`judge-evidence.json` exists only when judging ran. It records the
 positive transcript-projection policy and the exact
 reduced, redacted steps supplied to the judge at `transcript.steps`, alongside
 the bounded workspace text and warnings. These two evidence artifacts have
@@ -513,6 +527,8 @@ combination is selected; it cannot be combined with resume.
 run or resume invocation settles. `campaign.json` remains the execution
 checkpoint with plan identities and attempt history; reports are derived from
 verified eval artifacts and are never used to decide what to resume.
+Both files carry a `forge` producer identity, so their release can be checked
+even when no eval has completed.
 To view scores by case and configuration:
 
 ```sh
@@ -520,10 +536,11 @@ jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, guidel
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
-The strict, schema-version-1 report contains:
+The strict report contains:
 
 | Field | Meaning |
 | --- | --- |
+| `forge` | Producing Forge package version and optional build diagnostics. |
 | `experiment_run_id`, `generated_at`, `checkpoint_sha256` | Execution ID, UTC snapshot time, and SHA-256 of the exact checkpoint bytes used for this report. |
 | `summary` | Statistics across every saved selection. |
 | `cases` | Statistics grouped by case ID, treatment, and complete agent selection (including Codex hook trust), combining repetitions. Groups appear in first-selection order. |
@@ -675,7 +692,6 @@ A multi-turn case describes the developer's goal and optional background while
 leaving the agent, role-player model, and judge model in the experiment config:
 
 ```yaml
-schema_version: 1
 id: examples/design-review
 task: Work with the coding assistant to finish the requested design.
 context: You are a developer maintaining this project.
@@ -807,7 +823,7 @@ sent to the judge. It is an audit artifact, not an input to a later judge call.
 completed-turn coverage, projection-policy declaration, and equality of the
 embedded steps with the projection of `trajectory.json`. Embedded steps are
 required; artifacts containing only the projection policy are rejected. The
-artifact schema remains at 1; its contract includes the projection policy. Forge
+producing Forge release defines the artifact contract and projection policy. Forge
 refuses to dispatch a judge request if its final defensive
 credential-redaction pass would rewrite the selected prompt evidence.
 
@@ -1036,6 +1052,24 @@ const completed = await executeEval({
 console.log(completed.location);
 ```
 
+`parseRunResult` checks the producer's Forge version before interpreting a
+stored result. Public companion parsers `parseSetupArtifact`,
+`parseInteractionArtifact`, and `parseJudgeEvidence` require a
+`ForgeArtifactParseContext` containing that producer version:
+
+```js check
+import {parseRunResult, parseSetupArtifact} from '@stripe/forge';
+
+function parseStoredSetup(resultJson, setupJson) {
+  const result = parseRunResult(resultJson);
+  return parseSetupArtifact(setupJson, {forgeVersion: result.forge.version});
+}
+```
+
+Companion files inherit the result's Forge release instead of carrying separate
+format counters. `verifyCompletedRun` supplies this context and verifies the
+binding between stored files automatically.
+
 Pass the loaded manifest to the directory input provider to check the exact
 bytes returned to setup against their declared sizes and hashes and enforce
 the declared directory inventory. The public CLI enables these checks
@@ -1115,8 +1149,8 @@ types from the same subpath.
 Both `runCampaign` and `runCampaignCommand` automatically write the
 [experiment scorecard](#running-and-resuming-an-experiment) under their selected
 root and return its path as `summary.report`. `parseCampaignReport` validates
-loaded report JSON, including agreement between run rows and aggregate
-statistics. `CAMPAIGN_REPORT_SCHEMA_VERSION`, `CampaignReportV1`, and its
+loaded report JSON, including producer-release compatibility and agreement
+between run rows and aggregate statistics. `CampaignReportV1` and its
 evaluation, run, statistics, and case types are exported from
 `@stripe/forge/campaign`. A reporting failure after normal execution makes
 `runCampaign` reject with `CampaignReportError`, which carries the report path
@@ -1476,7 +1510,7 @@ Forge persists the canonical agent trajectory as a standalone
   such as an invalid timestamp remains an explicit partial-evidence warning.
   Unsupported-record fallback diagnostics identify a safe record category and
   line number, never native payload values.
-- Result schema v1 records the normalization source kind, native format, source
+- `result.json` records the normalization source kind, native format, source
   session, and adapter identity for every completed agent interaction. Forge
   rejects adapter evidence which omits or contradicts the selected session.
 - `verifyCompletedRun` independently parses `trajectory.json` and applies the
@@ -1891,8 +1925,9 @@ The single `Forge checks` job has named steps for type checking, automated tests
 build, documentation validation, and package checks, using the same package
 scripts as the local command without Docker or model credentials. It runs when
 a PR opens, receives new commits, or reopens, and cancels obsolete runs when a
-newer commit arrives. Development snapshots are published by the separate
-workflow after pushes to `main`.
+newer commit arrives. The development-publishing workflow assigns its snapshot
+version before checking and publishing the package after pushes to `main`.
+Stable release commits are skipped by that workflow.
 
 Maintainers can require `Forge checks` in the branch rules for `main` to block
 merging until it passes for the current commits. Adding the workflow reports

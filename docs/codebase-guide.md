@@ -116,7 +116,7 @@ If you are following the public executable, start instead at
 | [`src/campaignModel.ts`](https://github.com/stripe/forge/blob/main/src/campaignModel.ts) | Checkpoint schemas and attempt types | Strict execution checkpoint model shared by the controller and report schemas. |
 | [`src/campaignReport.ts`](https://github.com/stripe/forge/blob/main/src/campaignReport.ts) | `parseCampaignReport`, report types, internal builder/serializer | Bounded scorecard schema, case/configuration aggregation, and verification that statistics match run rows. Public parser/types are re-exported through the campaign subpath. |
 | [`src/campaignCli.ts`](https://github.com/stripe/forge/blob/main/src/campaignCli.ts) | `runCampaignCommand`, `parseCampaignArgs`, `createCampaignCliOptions` | Shared operational options, execution IDs/roots, saved selection restoration, host loading, and prepared-input cleanup. Used by the public CLI and available to other command hosts. |
-| [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION` | Reads the exact installed package version from its exported `package.json` for CLI output and plan/result provenance. |
+| [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION`, `FORGE_BUILD_IDENTITY`, release compatibility helpers | Reads package and build metadata without host Git discovery. Shared by planning, execution, artifact readers, and campaigns. |
 | [`src/serialization.ts`](https://github.com/stripe/forge/blob/main/src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
 
 ### `ForgeEngine` as the semantic facade
@@ -311,7 +311,7 @@ composition.
 credentials, inspect the runtime, or select a composition adapter. Its setup
 registry dependency exists only to bind the plan to registered action
 implementations and their bundle identities. It stamps the resolved plan with
-the installed Forge package version; experiments do not author that version.
+the installed Forge build identity; experiments do not author that identity.
 
 ## `src/contracts`: host capability boundaries
 
@@ -592,8 +592,8 @@ different.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/audit wire types and schema versions; embedded evaluation types | Used by execution, evaluation, storage, and consumers |
-| [`parse.ts`](https://github.com/stripe/forge/blob/main/src/results/parse.ts) | Strict Zod parsers for result and audit artifacts | Called before commit and during verification; imports judge projection constants to bind schema policy |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/audit wire types and embedded evaluation types | Used by execution, evaluation, storage, and consumers |
+| [`parse.ts`](https://github.com/stripe/forge/blob/main/src/results/parse.ts) | Strict parsers for result and audit artifacts | Checks Forge release compatibility before interpretation; companion parsers receive the parent run's release context. |
 | [`localStore.ts`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) | `createArtifactStore`, `verifyCompletedRun`, store errors | Implements two-phase local commit and independent cross-artifact verification |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/results/index.ts) | Public results barrel | Re-exported by package root |
 
@@ -608,6 +608,7 @@ different.
 The verifier deliberately imports:
 
 - strict plan parsing and canonical serialization from `model` and `planning`;
+- release compatibility from `version.ts`;
 - turn coverage from `evidence/selection.ts`;
 - ATIF parsing from `atif`;
 - judge projection policy from `evaluation`; and
@@ -678,6 +679,7 @@ evals with cleanup warnings fail live verification.
 | [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
+| [`scripts/build-info.mjs`](https://github.com/stripe/forge/blob/main/scripts/build-info.mjs) | Captures source commit and dirty state into packaged build metadata when Git is available. |
 | [`scripts/package-smoke.mjs`](https://github.com/stripe/forge/blob/main/scripts/package-smoke.mjs) | Verifies published package entry points and assets. |
 | [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs) | Opt-in real Docker/agent/provider suite. |
 | [`package.json`](../package.json) | Public exports, binary, Node/package-manager pins, scripts, and package file inventory. |
@@ -765,7 +767,7 @@ Implement `RuntimeAdapter` and run `assertRuntimeAdapterConforms`. Pay special
 attention to:
 
 - pure synchronous preflight;
-- exact plan adapter/version/config validation;
+- exact plan adapter/config validation;
 - command scope isolation;
 - workspace and state-directory path safety;
 - finalization of setup authority;
@@ -797,8 +799,8 @@ Treat these changes as cross-cutting and score-affecting. Review together:
 - `results/localStore.ts` verification; and
 - README/architecture documentation and end-to-end tests.
 
-Changing what the judge sees requires reviewing judge-evidence schema
-compatibility and stored-run verification; it is not a local refactor.
+Changing what the judge sees requires reviewing Forge release compatibility
+and stored-run verification; it is not a local refactor.
 
 ### Add or change an artifact
 

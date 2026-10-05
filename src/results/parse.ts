@@ -19,12 +19,9 @@ import {
   isSafeVersion,
 } from '../model/paths.js';
 import {serializeCanonicalJson} from '../serialization.js';
+import {assertCompatibleForgeVersion, parseForgeBuildIdentity} from '../version.js';
 import {
-  INTERACTION_SCHEMA_VERSION,
-  JUDGE_EVIDENCE_SCHEMA_VERSION,
-  RUN_RESULT_SCHEMA_VERSION,
-  SETUP_ARTIFACT_SCHEMA_VERSION,
-  WORKSPACE_EVIDENCE_SCHEMA_VERSION,
+  type ForgeArtifactParseContext,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   type RunResult,
@@ -51,7 +48,6 @@ const jsonValue: z.ZodType<unknown> = z.lazy(() =>
 );
 
 const setupArtifactSchema = z.object({
-  schema_version: z.literal(SETUP_ARTIFACT_SCHEMA_VERSION),
   steps: z
     .array(
       z
@@ -76,7 +72,6 @@ const setupArtifactSchema = z.object({
 });
 
 const workspaceEvidenceSchema = z.object({
-  schema_version: z.literal(WORKSPACE_EVIDENCE_SCHEMA_VERSION),
   entries: z.array(z.object({
     path: safeText,
     exists: z.boolean(),
@@ -171,7 +166,6 @@ const avaDecision = z.object({
 }).strict();
 
 const interactionArtifactSchema = z.object({
-  schema_version: z.literal(INTERACTION_SCHEMA_VERSION),
   mode: z.enum(['multi_turn', 'one_shot']),
   stop_reason: z.enum(['task_complete', 'max_turns', 'role_player_error']),
   turns: z.array(interactionTurn).max(100),
@@ -241,7 +235,6 @@ const interactionArtifactSchema = z.object({
 });
 
 const judgeEvidenceSchema = z.object({
-  schema_version: z.literal(JUDGE_EVIDENCE_SCHEMA_VERSION),
   transcript: z.object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
     projection_id: z.literal(JUDGE_TRANSCRIPT_PROJECTION_ID),
@@ -414,6 +407,8 @@ const runResultFields = {
   }),
   forge: z.object({
     version: safeVersion,
+    commit_sha: z.string().optional(),
+    dirty: z.boolean().optional(),
     action_bundles: z
       .array(
         z
@@ -507,7 +502,6 @@ const runResultFields = {
 };
 
 const runResultSchema = z.object({
-  schema_version: z.literal(RUN_RESULT_SCHEMA_VERSION),
   ...runResultFields,
   evidence: evidenceV1,
 }).strict()
@@ -553,6 +547,10 @@ const runResultSchema = z.object({
   });
 
 export function parseRunResult(input: unknown): RunResult {
+  const {forge} = z.object({forge: z.record(z.string(), z.unknown())}).passthrough().parse(input);
+  const {action_bundles: _actionBundles, ...identityFields} = forge;
+  const identity = parseForgeBuildIdentity(identityFields);
+  assertCompatibleForgeVersion(identity.version);
   return runResultSchema.parse(input) as RunResult;
 }
 
@@ -560,20 +558,36 @@ export function parseEvaluationResult(input: unknown) {
   return evaluationResultSchema.parse(input);
 }
 
-export function parseInteractionArtifact(input: unknown): InteractionArtifactV1 {
+export function parseInteractionArtifact(
+  input: unknown,
+  context: ForgeArtifactParseContext,
+): InteractionArtifactV1 {
+  assertArtifactContext(context);
   return interactionArtifactSchema.parse(input) as InteractionArtifactV1;
 }
 
-export function parseSetupArtifact(input: unknown): SetupArtifactV1 {
+export function parseSetupArtifact(
+  input: unknown,
+  context: ForgeArtifactParseContext,
+): SetupArtifactV1 {
+  assertArtifactContext(context);
   return setupArtifactSchema.parse(input) as SetupArtifactV1;
 }
 
 /** @internal Strict wire parser used by completed-run verification. */
-export function parseWorkspaceEvidence(input: unknown): WorkspaceEvidenceV1 {
+export function parseWorkspaceEvidence(
+  input: unknown,
+  context: ForgeArtifactParseContext,
+): WorkspaceEvidenceV1 {
+  assertArtifactContext(context);
   return workspaceEvidenceSchema.parse(input) as WorkspaceEvidenceV1;
 }
 
-export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {
+export function parseJudgeEvidence(
+  input: unknown,
+  context: ForgeArtifactParseContext,
+): JudgeEvidenceV1 {
+  assertArtifactContext(context);
   const evidence = judgeEvidenceSchema.parse(input);
 
   const transcript = evidence.transcript;
@@ -594,4 +608,9 @@ export function parseJudgeEvidence(input: unknown): JudgeEvidenceV1 {
       steps: JSON.parse(projection.transcriptJson),
     },
   } as JudgeEvidenceV1;
+}
+
+function assertArtifactContext(context: ForgeArtifactParseContext): void {
+  const parsed = z.object({forgeVersion: safeVersion}).strict().parse(context);
+  assertCompatibleForgeVersion(parsed.forgeVersion);
 }

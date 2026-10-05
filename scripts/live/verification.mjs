@@ -9,7 +9,6 @@ export function createRunVerifiers(forge) {
     parseInteractionArtifact,
     parseJudgeEvidence,
     FORGE_CLAUDE_CODE_VERSION,
-    JUDGE_EVIDENCE_SCHEMA_VERSION,
     JUDGE_TRANSCRIPT_COPIED_CONTEXT,
     JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
     JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
@@ -60,7 +59,7 @@ export function createRunVerifiers(forge) {
     );
 
     const [interaction, trajectory] = await Promise.all([
-      readJsonArtifact(completed.location, 'interaction.json', parseInteractionArtifact),
+      readJsonArtifact(completed.location, 'interaction.json', (value) => parseInteractionArtifact(value, {forgeVersion: result.forge.version})),
       readJsonArtifact(completed.location, 'trajectory.json', parseAtifTrajectory),
     ]);
     requireCondition(
@@ -127,9 +126,9 @@ export function createRunVerifiers(forge) {
     );
 
     const [interaction, trajectory, judgeEvidence] = await Promise.all([
-      readJsonArtifact(completed.location, 'interaction.json', parseInteractionArtifact),
+      readJsonArtifact(completed.location, 'interaction.json', (value) => parseInteractionArtifact(value, {forgeVersion: result.forge.version})),
       readJsonArtifact(completed.location, 'trajectory.json', parseAtifTrajectory),
-      readJsonArtifact(completed.location, 'judge-evidence.json', parseJudgeEvidence),
+      readJsonArtifact(completed.location, 'judge-evidence.json', (value) => parseJudgeEvidence(value, {forgeVersion: result.forge.version})),
     ]);
     const invokedDecisions = interaction.role_player?.decisions.filter(
       ({coding_agent_invoked: invoked}) => invoked,
@@ -161,7 +160,6 @@ export function createRunVerifiers(forge) {
       ({path: evidencePath}) => evidencePath === 'release-summary.txt',
     );
     requireCondition(
-      judgeEvidence.schema_version === JUDGE_EVIDENCE_SCHEMA_VERSION &&
       judgeEvidence.transcript.steps.length > 0 &&
       judgeEvidence.transcript.source === JUDGE_TRANSCRIPT_SOURCE &&
       judgeEvidence.transcript.projection_id ===
