@@ -1,5 +1,6 @@
 import path from 'node:path';
-import {parse, stringify} from '@iarna/toml';
+import {stringify} from '@iarna/toml';
+import {parse} from 'toml';
 
 import type {MutableWorkspace} from '../../contracts/runtime.js';
 import {isSha256Digest} from '../../model/hashes.js';
@@ -16,7 +17,10 @@ export async function prepareCodexPluginConfiguration(home: MutableWorkspace): P
   if (inspected.kind !== 'file') throw new Error('Codex configuration must be a regular file.');
   let config: Record<string, unknown>;
   try {
-    config = parse(Buffer.from(await home.readFile('config.toml', {maxBytes: MAX_CONFIG_BYTES})).toString('utf8'));
+    const source = Buffer.from(await home.readFile('config.toml', {maxBytes: MAX_CONFIG_BYTES})).toString('utf8');
+    assertBoundedKeyPaths(source);
+    // This parser counts the scalar leaf as a level as well as its containers.
+    config = parse(source, {maxDepth: MAX_CONFIG_DEPTH + 1, bigint: true}) as Record<string, unknown>;
     assertSafeConfiguration(config);
   } catch {
     // Parser errors may quote credential-bearing source lines.
@@ -65,6 +69,40 @@ export async function prepareCodexPluginConfiguration(home: MutableWorkspace): P
     ...(Object.keys(projects).length ? {projects} : {}),
     ...(Object.keys(hookStates).length ? {hooks: {state: hookStates}} : {}),
   })), {mode: 0o600});
+}
+
+/** Bound dotted keys before the parser expands them into nested tables. */
+function assertBoundedKeyPaths(source: string): void {
+  let segments = 1;
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index]!;
+    if (character === '#') {
+      const newline = source.indexOf('\n', index);
+      if (newline === -1) return;
+      index = newline;
+      segments = 1;
+    } else if (character === '"' || character === "'") {
+      // Ignore quoted key contents and strings, including multiline strings.
+      // Invalid or unterminated strings are left for the TOML parser to reject.
+      const delimiter = source.startsWith(character.repeat(3), index) ? character.repeat(3) : character;
+      index += delimiter.length;
+      while (index < source.length) {
+        if (character === '"' && source[index] === '\\') {
+          index += 2;
+        } else if (source.startsWith(delimiter, index)) {
+          index += delimiter.length - 1;
+          if (delimiter.length === 3) {
+            while (source[index + 1] === character) index++;
+          }
+          break;
+        } else index++;
+      }
+    } else if (character === '.') {
+      if (++segments > MAX_CONFIG_DEPTH) invalid();
+    } else if ('=[]{},\n\r'.includes(character)) {
+      segments = 1;
+    }
+  }
 }
 
 /** Check discarded settings too, before selecting or rewriting native state. */

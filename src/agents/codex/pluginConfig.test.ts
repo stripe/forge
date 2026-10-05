@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
-import {parse} from '@iarna/toml';
+import {parse} from 'toml';
 
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
 import {prepareCodexPluginConfiguration} from './pluginConfig.js';
@@ -114,10 +114,16 @@ enabled=true
     const valid = createMemoryWorkspace({'config.toml': atLimit});
     await prepareCodexPluginConfiguration(valid.mutable);
     assert.doesNotMatch(Buffer.from(valid.snapshot().get('config.toml')!).toString(), /synthetic-secret/);
+    const tableAtLimit = createMemoryWorkspace({'config.toml':
+      '[' + Array.from({length: 64}, (_, index) => `level${index}`).join('.') + ']\nvalue = "synthetic-secret"'});
+    await prepareCodexPluginConfiguration(tableAtLimit.mutable);
 
     for (const config of [
       'discarded = ' + '['.repeat(65) + '"synthetic-secret"' + ']'.repeat(65),
       '[' + Array.from({length: 65}, (_, index) => `level${index}`).join('.') + ']\nvalue = "synthetic-secret"',
+      'discarded = ' + '['.repeat(100_000) + '"synthetic-secret"' + ']'.repeat(100_000),
+      '[' + Array.from({length: 100_000}, () => 'a').join('.') + ']\nvalue = "synthetic-secret"',
+      Array.from({length: 100_000}, () => 'a').join('.') + ' = "synthetic-secret"',
     ]) {
       const state = createMemoryWorkspace({'config.toml': config});
       await assert.rejects(prepareCodexPluginConfiguration(state.mutable), (error: unknown) => {
@@ -128,5 +134,34 @@ enabled=true
       });
       assert.equal(Buffer.from(state.snapshot().get('config.toml')!).toString(), config);
     }
+  });
+
+  it('accepts mixed arrays and lossless integers in discarded TOML settings', async () => {
+    const state = createMemoryWorkspace({'config.toml': `
+discarded = [1, "synthetic-secret", true, { nested = [2, "two"] }]
+large_integer = 9223372036854775807
+[plugins."fixture@test"]
+enabled = true
+`});
+    await prepareCodexPluginConfiguration(state.mutable);
+    const source = Buffer.from(await state.readonly.readFile('config.toml')).toString();
+    assert.equal(parse(source).plugins['fixture@test'].enabled, true);
+    assert.doesNotMatch(source, /discarded|large_integer|synthetic-secret/);
+  });
+
+  it('ignores dots in comments, quoted keys, and single or multiline strings', async () => {
+    const dots = '.'.repeat(100);
+    const state = createMemoryWorkspace({'config.toml': `
+# ${dots}
+"${dots}" = "${dots}"
+literal = '${dots}'
+multiline_basic = """${dots}\n${dots}"""
+multiline_literal = '''${dots}\n${dots}'''
+escaped = "a\\\"${dots}"
+[plugins."fixture@test"]
+enabled = true
+`});
+    await prepareCodexPluginConfiguration(state.mutable);
+    assert.equal(parse(Buffer.from(await state.readonly.readFile('config.toml')).toString()).plugins['fixture@test'].enabled, true);
   });
 });
