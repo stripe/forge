@@ -48,7 +48,7 @@ describe('workspace checks', () => {
       workspace({'greeting.txt': view}),
       checks,
     );
-    assert.equal(evidence.schema_version, 1);
+    assert.ok(!('schema_version' in evidence));
     assert.deepEqual(evidence.entries[0], {
       path: 'greeting.txt',
       exists: true,

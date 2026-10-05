@@ -1,8 +1,7 @@
-import {
-  EVALUATION_SCHEMA_VERSION,
-  type CheckResultV1,
-  type EvaluationResultV1,
-  type GuidelineResultV1,
+import type {
+  CheckResultV1,
+  EvaluationResultV1,
+  GuidelineResultV1,
 } from '../results/index.js';
 
 /** Use a guideline-ratio score and gate a clean pass on invariant checks. */
@@ -27,7 +26,6 @@ export function scoreEvaluation(
   }
 
   return {
-    schema_version: EVALUATION_SCHEMA_VERSION,
     score,
     status,
     guidelines_passed: guidelinesPassed,

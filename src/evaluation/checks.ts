@@ -4,7 +4,6 @@ import type {AtifTrajectoryV1_8} from '../atif/index.js';
 import type {ReadonlyWorkspace} from '../contracts/runtime.js';
 import type {ChecksV1, ResolvedRunPlanV1} from '../model/types.js';
 import {
-  WORKSPACE_EVIDENCE_SCHEMA_VERSION,
   type CheckResultV1,
   type EvaluationResultV1,
   type GuidelineResultV1,
@@ -137,7 +136,6 @@ export async function collectWorkspaceEvidence(
   }
 
   return {
-    schema_version: WORKSPACE_EVIDENCE_SCHEMA_VERSION,
     entries,
     complete,
     warnings,

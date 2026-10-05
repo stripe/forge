@@ -131,6 +131,10 @@ Forge keeps four related objects distinct.
 
 The wire types live in [`src/model/types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts); strict
 parsing lives in [`src/model/parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts).
+The installed Forge release defines their schemas; authored inputs have no
+separate `schema_version` field. Official releases freeze Forge code and
+Forge-owned datasets together, while independently owned dataset and experiment
+versions continue identifying those inputs.
 
 ### Dataset loading and integrity
 
@@ -189,10 +193,11 @@ every matching plan before executing them with bounded concurrency. The CLI load
 the experiment config and permits selectors such as `--case` to restrict execution.
 
 The shared controller exposed through `@stripe/forge/campaign` checkpoints
-attempts in a strict, schema-version-1 `campaign.json` under
+attempts in a strict `campaign.json` under
 `results/experiments/<experiment-run-id>/`, outside the immutable eval run
 directories. Every new invocation receives a distinct experiment execution ID.
-The checkpoint binds that ID to its directory. Each entry records its selection,
+The checkpoint records its producing `forge` build identity and binds that ID
+to its directory. Each entry records its selection,
 canonical plan SHA-256, and ordered attempts with
 a unique run ID and `running`, `completed`, or `errored` state. Errored attempts
 retain only a stable error code. A bounded worker pool executes pending plans;
@@ -216,7 +221,8 @@ kept. One errored entry does not stop other entries. Cancellation or coordinator
 failure stops new scheduling and signals active callbacks; the controller waits
 for every callback to finish cleanup before releasing its lock.
 
-The controller also writes a derived, versioned `report.json` after workers
+The controller also writes a derived `report.json` with its producing `forge`
+build identity after workers
 drain, while still holding the campaign lock. It reads the last durable
 checkpoint and uses the same verified latest-attempt recovery as resume,
 reusing bounded inspection metadata from the invocation. The scorecard groups
@@ -359,11 +365,13 @@ sequenceDiagram
 
 ### 1. Parse and pure preflight
 
-Forge reparses the supplied resolved plan against the engine's action registry,
-checks that its recorded Forge package version matches the installed package,
-and reserializes it canonically. The authored experiment does not pin a Forge
-version; a newer package can resolve a fresh plan for an older dataset. Forge
-then:
+Forge checks the supplied plan's recorded Forge package version before parsing
+its contents against the engine's action registry and reserializing it
+canonically. Versions must match exactly whenever either producer or reader is
+outside the `X.Y.Z-dev.*` channel. Two development versions may use current
+strict shapes on a best-effort basis, without a compatibility or reproducibility
+guarantee. The authored experiment does not pin a Forge version; a newer package
+can resolve a fresh plan for an older dataset. Forge then:
 
 - selects the agent adapter by exact ID;
 - obtains and validates the agent's pure evidence identity;
@@ -476,7 +484,7 @@ full process is detailed in [Evidence architecture](#evidence-architecture).
 ### 8. Evaluate
 
 Deterministic file checks read the sealed workspace. If guidelines exist, Forge
-builds a positive, versioned projection of the redacted ATIF trajectory,
+builds a positive projection of the redacted ATIF trajectory with an explicit policy,
 collects bounded workspace text, invokes the judge provider, and records the
 exact evidence made available to it.
 
@@ -677,7 +685,12 @@ Forge ships two adapters:
   [Marketplace plugin treatments](plugin-action.md) for its scope.
 
 Both adapters support explicit logical layouts for external runtimes and reject
-runtime paths that do not match the pinned adapter layout.
+runtime paths that do not match the pinned adapter layout. Built-in adapters and
+completion providers use the Forge package version as their implementation
+identity; independently released integrations supply their own versions. Narrow
+configuration metadata records endpoint and layout modes separately. Preflight
+validates and snapshots this metadata before any credentials or resources are
+resolved; results retain the snapshots rather than rereading mutable host objects.
 
 ### One-shot mode
 
@@ -770,7 +783,7 @@ aborts the evidence phase. Optional native detail loss may instead produce
 
 ### ATIF normalization
 
-Forge pins ATIF v1.8 and a separate normalization version. The ATIF parser
+Forge pins ATIF v1.8; its package release identifies normalization behavior. The ATIF parser
 rejects cyclic, exotic, sparse, non-finite, overly deep, or oversized JSON
 graphs before recursive schema validation. The canonical trajectory may retain
 agent messages, reasoning, tool calls/results, metrics, copied context, system
@@ -803,9 +816,10 @@ Opaque tool arguments and results remain because they are observable behavior,
 even when a nested key is named `reasoning_content`. Image and audio references
 remain, but their bytes are not loaded into the text-only judge request.
 
-The projection policy is versioned in
+The projection policy is declared in
 [`src/evaluation/judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts).
-`judge-evidence.json` stores both that policy and the exact projected steps. The
+`judge-evidence.json` stores both that policy and the exact projected steps; its
+producing Forge release governs their interpretation and verification. The
 verifier recreates the projection from `trajectory.json` and requires bytewise
 canonical equivalence.
 
@@ -831,7 +845,7 @@ through evidence collection.
 
 Each success guideline is judged independently against:
 
-- the versioned judge-visible transcript projection;
+- the judge-visible transcript projection with its declared policy;
 - bounded, eligible text collected from the sealed workspace; and
 - the optional authored example answer.
 
@@ -885,12 +899,22 @@ native/<adapter-id>/session.<ext>    # exact restricted root-session source
 extensions/<contributor-id>/...     # optional host contribution
 ```
 
-Core plans, results, setup receipts, interaction, evaluation, and evidence
-artifacts use schema version 1. The trajectory uses ATIF v1.8. Parsers accept
-only the current version of each format.
+The Forge package version defines core plans, results, setup receipts,
+interaction, and evidence formats. Plans record their producer under
+`provenance.forge`; results use `forge`. Standalone campaign checkpoints and
+reports also carry `forge`, while companion files inherit their release from
+the result. Readers check release compatibility before interpreting generated
+contents. ATIF trajectories retain their upstream `ATIF-v1.8` discriminator.
 
-`result.json.evaluation` is the sole canonical evaluation result. The other
-core files serve distinct audit roles:
+`FORGE_BUILD_IDENTITY` contains the installed package version and optional
+`commit_sha` and `dirty` diagnostics captured at package build time. A build
+without Git provenance still records its package version. Consumers never
+derive producer identity from their own Git checkout. Source diagnostics are
+provenance, not another compatibility gate; canonical hashes still bind the
+exact recorded plan and artifact bytes.
+
+`result.json.evaluation` is the sole canonical evaluation result, governed by
+the producing Forge release. The other core files serve distinct audit roles:
 
 - `plan.json`: exact canonical declared execution input;
 - `setup.json`: ordered action audit and bounded material setup resolutions;
@@ -929,11 +953,12 @@ mode `0600`; ordinary artifacts are mode `0644`.
 [`verifyCompletedRun`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) does more than verify
 hashes. It also requires:
 
+- producer-release compatibility before parsing result or companion contents;
 - the directory name to match `run_id`;
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
 - canonical plan bytes to match their artifact descriptor and result summary;
-- schema-version-1 workspace evidence with no unknown fields;
+- workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
 - trajectory session identity and completed-turn coverage to match the
@@ -944,6 +969,10 @@ hashes. It also requires:
 
 Publication is deliberately outside `executeEval`. A caller should verify the
 committed local run before passing it to a host-owned publisher.
+Standalone public setup, interaction, and judge-evidence parsers require
+`{forgeVersion: result.forge.version}` as their explicit parse context. This
+context inherits the producer release without repeating it in every companion
+file; stored-run verification supplies it automatically.
 
 ## Security and trust boundaries
 
@@ -954,7 +983,7 @@ and authority explicit.
 | --- | --- | --- |
 | Authored YAML/JSON and dataset bytes | Untrusted data | Strict schemas, bounded input, canonical paths, exact inventory and hashes |
 | Setup action bundle code | Trusted host code | Explicit import, pinned identity, namespace isolation, pure preflight, constrained apply capabilities |
-| Runtime adapter | Trusted mechanism | Exact plan identity/version match, pure preflight, lifecycle-shaped capability projections |
+| Runtime adapter | Trusted mechanism | Exact plan adapter ID/config validation, pure preflight, lifecycle-shaped capability projections |
 | Agent adapter | Trusted integration, untrusted output | Exact selection match, bounded turns, stable session ID, native-evidence parsing and coverage |
 | Completion provider | Trusted transport, untrusted response | Purpose-specific credentials, bounded requests/responses, strict output parsing and retries |
 | Workspace and native logs | Untrusted evidence | Read only after quiescence, path and byte limits, no symlink traversal; normalized outputs are redacted while exact native bytes are restricted |
@@ -1037,7 +1066,7 @@ external runtime without changing core lifecycle semantics.
 
 | Path | Responsibility |
 | --- | --- |
-| [`src/model`](https://github.com/stripe/forge/tree/main/src/model) | Versioned wire types, strict parsing, hashes, path policy, and safe loaders |
+| [`src/model`](https://github.com/stripe/forge/tree/main/src/model) | Wire types, strict parsing, hashes, path policy, and safe loaders |
 | [`src/planning`](https://github.com/stripe/forge/tree/main/src/planning) | Matrix expansion, case-file selection, and canonical resolved plans |
 | [`src/contracts`](https://github.com/stripe/forge/tree/main/src/contracts) | Public capability interfaces and authority boundaries |
 | [`src/setup`](https://github.com/stripe/forge/tree/main/src/setup) | Built-in actions, immutable registries, requirement aggregation, and ordered execution |
@@ -1089,8 +1118,8 @@ Changes that cross module boundaries should preserve these properties:
 6. One persistent, exactly identified coding-agent session backs a run.
 7. Mutation stops before evidence selection or evaluation.
 8. Native evidence must cover the driver ledger or explicitly fall back.
-9. Judge-visible transcript data is a positive, versioned projection of the
-   redacted canonical trajectory.
+9. Judge-visible transcript data is a positive projection of the redacted
+   canonical trajectory; its declared policy is part of the judge-evidence schema.
 10. Every persisted companion file is described, path-validated, and committed
    atomically; core and native artifacts retain their explicit size bounds.
 11. Cleanup, observation, and publication cannot reorder or redefine scoring

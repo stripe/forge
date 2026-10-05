@@ -5,18 +5,16 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
-import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {serializeResolvedRunPlan} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {createTestResolvedRunPlan} from '../testing/plans.js';
+import {FORGE_BUILD_IDENTITY, FORGE_VERSION} from '../version.js';
 import {createArtifactStore, RunIdConflictError, verifyCompletedRun} from './localStore.js';
 import {parseRunResult} from './parse.js';
 import {
-  EVALUATION_SCHEMA_VERSION,
-  RUN_RESULT_SCHEMA_VERSION,
   type ArtifactDescriptorV1,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
@@ -31,7 +29,6 @@ const testPlan = createTestResolvedRunPlan({
 });
 const testPlanBody = Buffer.from(serializeResolvedRunPlan(testPlan), 'utf8');
 const oneShotInteraction = {
-  schema_version: 1,
   mode: 'one_shot',
   stop_reason: 'task_complete',
   turns: [{turn: 1, user: 'do it', assistant: 'done', tool_calls: []}],
@@ -47,7 +44,6 @@ const oneShotTrajectory = jsonBody({
   ],
 });
 const multiTurnInteraction = {
-  schema_version: 1,
   mode: 'multi_turn',
   stop_reason: 'task_complete',
   turns: [
@@ -66,7 +62,6 @@ const multiTurnInteraction = {
   ],
   role_player: {
     model: {provider: 'test-provider', model: 'test-role-player'},
-    prompt_version: '1',
     needs: [{id: 'need_1', description: 'Complete the requested task.'}],
     decisions: [
       {
@@ -110,13 +105,11 @@ const rolePlayerFailure = {
   explanation: 'Ava request failed after 3 attempts.',
 } as const;
 const zeroTurnInteraction = {
-  schema_version: 1,
   mode: 'multi_turn',
   stop_reason: 'role_player_error',
   turns: [],
   role_player: {
     model: {provider: 'test-provider', model: 'test-role-player'},
-    prompt_version: '1',
     needs: null,
     decisions: [
       {
@@ -338,6 +331,58 @@ describe('local artifact store', () => {
     await assert.rejects(verifyCompletedRun(noncanonical), /Completed plan\.json is not canonical\./);
   });
 
+  it('checks the result release before reading its companion artifacts', async () => {
+    const location = await commitArtifacts([
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+    ]);
+    const resultPath = path.join(location, 'result.json');
+    const result = JSON.parse(await fs.readFile(resultPath, 'utf8')) as RunResultV1;
+    await fs.writeFile(resultPath, jsonBody({...result, forge: {version: '99.0.0'}}));
+    await fs.unlink(path.join(location, 'trajectory.json'));
+    await assert.rejects(verifyCompletedRun(location), /incompatible with installed Forge/);
+  });
+
+  it('retains source provenance and exact action bundle matching under the reader release policy', async () => {
+    const plan = {
+      ...testPlan,
+      provenance: {
+        ...testPlan.provenance,
+        forge: {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: true},
+      },
+    };
+    const artifacts = [
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+    ];
+    const producer = {version: FORGE_VERSION, commit_sha: 'b'.repeat(40), dirty: false};
+    const location = await commitArtifacts(artifacts, (result) => ({...result, forge: producer}), {plan});
+    assert.deepEqual((await verifyCompletedRun(location)).result.forge, producer);
+
+    const developmentPlan = {
+      ...plan,
+      provenance: {
+        ...plan.provenance,
+        forge: {...plan.provenance.forge, version: '0.0.0-dev.42'},
+      },
+    };
+    const developmentLocation = await commitArtifacts(artifacts, (result) => ({...result, forge: producer}), {plan: developmentPlan});
+    if (FORGE_VERSION.includes('-dev.')) {
+      assert.deepEqual((await verifyCompletedRun(developmentLocation)).result.forge, producer);
+    } else {
+      await assert.rejects(verifyCompletedRun(developmentLocation), /Completed plan\.json does not match its schema/);
+    }
+
+    const mismatched = await commitArtifacts(artifacts, (result) => ({
+      ...result,
+      forge: {
+        ...producer,
+        action_bundles: [{namespace: 'acme-evals', version: '1.0.0', sha256: `sha256:${'a'.repeat(64)}`}],
+      },
+    }), {plan});
+    await assert.rejects(verifyCompletedRun(mismatched), /plan\.json does not match the completed result summary/);
+  });
+
   it('rejects unclaimed files and symlinks even when the claimed artifact bytes match', async () => {
     const location = await commitArtifacts([
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
@@ -418,7 +463,7 @@ describe('local artifact store', () => {
       size_bytes: 4,
       content_base64: Buffer.from('done').toString('base64'),
     };
-    const workspace = {schema_version: 1, entries: [entry], complete: true, warnings: []};
+    const workspace = {entries: [entry], complete: true, warnings: []};
     const valid = await commitArtifacts([
       ...canonical,
       {path: 'workspace-evidence.json', body: jsonBody(workspace)},
@@ -456,8 +501,57 @@ describe('local artifact store', () => {
       parseRunResult({...result, evidence: evidenceWithoutProvenance}));
   });
 
-  it('rejects unsupported result schema versions', () => {
+  it('rejects removed result schema counters', () => {
     assert.throws(() => parseRunResult({...resultFor([]), schema_version: 2}));
+    assert.throws(() => parseRunResult({...resultFor([]), schema_version: 1}));
+  });
+
+  it('checks the producer release before interpreting the result payload', () => {
+    assert.throws(() => parseRunResult({forge: {version: '99.0.0'}}), /incompatible with installed Forge/);
+    const result = resultFor([]);
+    for (const invalidIdentity of [
+      {version: FORGE_VERSION, commit_sha: 'abc'},
+      {version: FORGE_VERSION, dirty: 'true'},
+      {version: FORGE_VERSION, unknown: true},
+      {version: `${FORGE_VERSION}\n`},
+    ]) {
+      assert.throws(() => parseRunResult({...result, forge: invalidIdentity}));
+    }
+    const identity = {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: true};
+    const parsed = parseRunResult({...result, forge: identity});
+    identity.commit_sha = 'b'.repeat(40);
+    identity.dirty = false;
+    assert.deepEqual(parsed.forge, {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: true});
+  });
+
+  it('uses the result schema for evaluation and rejects a nested version', () => {
+    const result = resultFor([]);
+    assert.deepEqual(parseRunResult(result).evaluation, result.evaluation);
+    assert.throws(() => parseRunResult({
+      ...result, evaluation: {...result.evaluation, schema_version: 1},
+    }));
+  });
+
+  it('strictly parses configuration metadata and rejects removed normalization counters', () => {
+    const result = resultFor([]);
+    const metadata = {endpoint_mode: 'custom', layout_mode: 'default'};
+    const providerMetadata = {endpoint_mode: 'custom'};
+    const call = {
+      sequence: 1, purpose: 'judge', provider: 'test-provider', provider_version: '3.4.1', model: 'judge-model',
+      status: 'succeeded', stop_reason: 'end_turn', input_tokens: 10, output_tokens: 2,
+      cached_tokens: null, cost_usd: null, error_code: null, provider_metadata: providerMetadata,
+    };
+    const parsed = parseRunResult({...result, agent: {...result.agent, metadata}, completion_calls: [call]});
+    metadata.endpoint_mode = 'default';
+    providerMetadata.endpoint_mode = 'default';
+    assert.deepEqual(parsed.agent.metadata, {endpoint_mode: 'custom', layout_mode: 'default'});
+    assert.deepEqual(parsed.completion_calls[0]!.provider_metadata, {endpoint_mode: 'custom'});
+    assert.equal(parsed.completion_calls[0]!.provider_version, '3.4.1');
+    assert.throws(() => parseRunResult({...result, evidence: {...result.evidence, normalization_version: 1}}));
+    for (const invalid of [null, {endpoint_mode: 'unknown'}, {endpoint_mode: 'custom', layout_mode: 'default', endpoint: 'private'}]) {
+      assert.throws(() => parseRunResult({...result, agent: {...result.agent, metadata: invalid}}));
+      assert.throws(() => parseRunResult({...result, completion_calls: [{...call, provider_metadata: invalid}]}));
+    }
   });
 
   it('requires ordered completion-call summaries with matching status and error codes', () => {
@@ -630,7 +724,6 @@ describe('local artifact store', () => {
     ];
     const setup = (resolution: unknown) =>
       jsonBody({
-        schema_version: 1,
         steps: [{index: 0, uses: 'forge/plugin', resolution}],
       });
 
@@ -685,7 +778,7 @@ describe('local artifact store', () => {
       {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
       {path: 'trajectory.json', body: oneShotTrajectory},
     ];
-    const setup = {schema_version: 1, steps: [{index: 0, uses: 'forge/write'}]};
+    const setup = {steps: [{index: 0, uses: 'forge/write'}]};
     const valid = await commitArtifacts(core, (result) => result, {plan});
     {
       const actual = (await verifyCompletedRun(valid));
@@ -699,12 +792,12 @@ describe('local artifact store', () => {
     await assert.rejects(verifyCompletedRun(noncanonical), /Completed setup\.json is not canonical\./);
 
     const mismatched = await commitArtifacts([
-      ...core, {path: 'setup.json', body: jsonBody({schema_version: 1, steps: [{index: 0, uses: 'forge/command'}]})},
+      ...core, {path: 'setup.json', body: jsonBody({steps: [{index: 0, uses: 'forge/command'}]})},
     ], (result) => result, {plan});
     await assert.rejects(verifyCompletedRun(mismatched), /setup\.json does not match the completed run plan\./);
 
     const inventedResolution = await commitArtifacts([
-      ...core, {path: 'setup.json', body: jsonBody({schema_version: 1, steps: [{index: 0, uses: 'forge/write', resolution: {path: 'elsewhere'}}]})},
+      ...core, {path: 'setup.json', body: jsonBody({steps: [{index: 0, uses: 'forge/write', resolution: {path: 'elsewhere'}}]})},
     ], (result) => result, {plan});
     await assert.rejects(verifyCompletedRun(inventedResolution), /Static setup action forge\/write cannot record a resolution\./);
   });
@@ -1080,7 +1173,7 @@ describe('local artifact store', () => {
       assert.equal(actual.runId, 'run-1');
     }
 
-    const unsupportedPromptLocation = await commitArtifacts(
+    const unexpectedPromptVersionLocation = await commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
         {path: 'trajectory.json', body: trajectory},
@@ -1091,7 +1184,7 @@ describe('local artifact store', () => {
       ],
       withPassingGuideline,
     );
-    await assert.rejects(verifyCompletedRun(unsupportedPromptLocation), /prompt_version is not supported by this Forge build/);
+    await assert.rejects(verifyCompletedRun(unexpectedPromptVersionLocation), /Completed judge-evidence\.json does not match its schema\./);
 
     const unsupportedProjectionLocation = await commitArtifacts(
       [
@@ -1396,12 +1489,9 @@ function trajectoryBody(
 
 function judgeEvidenceValue(): JudgeEvidenceV1 {
   return {
-    schema_version: 1,
-    prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
     transcript: {
       source: 'trajectory.json',
       projection_id: 'forge-visible-atif-steps',
-      projection_version: 1,
       trajectory_scope: 'root',
       included_step_sources: ['user', 'agent'],
       copied_context: 'excluded',
@@ -1430,12 +1520,11 @@ function judgeEvidenceBody(): Buffer {
 }
 
 function emptyWorkspaceEvidenceBody(): Buffer {
-  return jsonBody({schema_version: 1, entries: [], complete: true, warnings: []});
+  return jsonBody({entries: [], complete: true, warnings: []});
 }
 
 function emptySetupBody(plan: ResolvedRunPlanV1): Buffer {
   return jsonBody({
-    schema_version: 1,
     steps: plan.setup.map((step, index) => ({index, uses: step.uses})),
   });
 }
@@ -1509,10 +1598,14 @@ function resultFor(
   plan: ResolvedRunPlanV1 = testPlan,
 ): RunResultV1 {
   return {
-    schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: 'run-1',
     selection: plan.selection,
-    forge: {version: plan.provenance.forge.version},
+    forge: {
+      ...FORGE_BUILD_IDENTITY,
+      ...(plan.provenance.forge.action_bundles === undefined
+        ? {}
+        : {action_bundles: plan.provenance.forge.action_bundles}),
+    },
     runtime: {
       adapter: 'forge/docker',
       runtime_id: 'run-1',
@@ -1533,7 +1626,6 @@ function resultFor(
     evidence: {
       format: 'atif',
       schema_version: 'ATIF-v1.8',
-      normalization_version: 1,
       provenance: {
         source: {
           kind: 'native_log',
@@ -1547,7 +1639,6 @@ function resultFor(
       redaction_count: 0,
     },
     evaluation: {
-      schema_version: EVALUATION_SCHEMA_VERSION,
       score: 0,
       status: 'passed',
       guidelines_passed: 0,

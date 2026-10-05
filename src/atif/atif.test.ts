@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
 import {
-  ATIF_NORMALIZATION_VERSION,
   ATIF_SCHEMA_VERSION,
   AtifValidationError,
   createNormalizedTrajectory,
@@ -553,7 +552,7 @@ describe('serializeAtifTrajectory', () => {
 });
 
 describe('createNormalizedTrajectory', () => {
-  it('records format and normalization versions outside the ATIF document', () => {
+  it('records the ATIF format and source provenance outside the trajectory', () => {
     const normalized = createNormalizedTrajectory({
       trajectory: minimalTrajectory(),
       provenance: {
@@ -573,11 +572,9 @@ describe('createNormalizedTrajectory', () => {
       ],
     });
 
-    assert.equal(normalized.schemaVersion, ATIF_SCHEMA_VERSION);
-    assert.equal(
-      normalized.normalizationVersion,
-      ATIF_NORMALIZATION_VERSION,
-    );
+    assert.equal(normalized.trajectory.schema_version, ATIF_SCHEMA_VERSION);
+    assert.equal(Object.hasOwn(normalized, 'schemaVersion'), false);
+    assert.equal(Object.hasOwn(normalized, 'normalizationVersion'), false);
     assert.equal(normalized.format, 'atif');
     assert.equal(normalized.completeness, 'partial');
     assert.equal(normalized.warnings[0]?.code, 'source_incomplete');
@@ -606,8 +603,8 @@ describe('createNormalizedTrajectory', () => {
       NormalizedTrajectoryValidationError,
     );
     for (const [field, value] of [
-      ['schemaVersion', 'ATIF-v1.7'],
-      ['normalizationVersion', 2],
+      ['schemaVersion', ATIF_SCHEMA_VERSION],
+      ['normalizationVersion', 1],
       ['undeclared', true],
     ] as const) {
       assert.throws(
@@ -617,6 +614,13 @@ describe('createNormalizedTrajectory', () => {
     }
     assert.throws(
       () => parseNormalizedTrajectory({...normalized, trajectory: {}}),
+      AtifValidationError,
+    );
+    assert.throws(
+      () => parseNormalizedTrajectory({
+        ...normalized,
+        trajectory: {...normalized.trajectory, schema_version: 'ATIF-v1.7'},
+      }),
       AtifValidationError,
     );
   });
@@ -669,7 +673,7 @@ describe('createNormalizedTrajectory', () => {
       trajectory: minimalTrajectory(),
       provenance: {
         source: {kind: 'atif' as const, format: 'atif' as const,
-          schemaVersion: 'ATIF-v1.8', sessionId: 'source-session'},
+          schemaVersion: 'ATIF-v1.7', sessionId: 'source-session'},
         adapter: {id: 'test-agent', version: '1'},
       },
       completeness: 'partial' as const,

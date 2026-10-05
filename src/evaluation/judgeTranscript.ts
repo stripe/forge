@@ -17,7 +17,6 @@ import {serializeCanonicalJson} from '../serialization.js';
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
-export const JUDGE_TRANSCRIPT_PROJECTION_VERSION = 1 as const;
 /** Portable upper bound before workspace, guideline, and prompt text are added. */
 export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
@@ -80,11 +79,10 @@ export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
   | JudgeVisibleAgentStepV1;
 
-/** Exact, versioned transcript projection supplied to a guideline judge. */
+/** Exact transcript projection and declared policy supplied to a guideline judge. */
 export interface JudgeTranscriptProjectionV1 {
   readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
   readonly projectionId: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
-  readonly projectionVersion: typeof JUDGE_TRANSCRIPT_PROJECTION_VERSION;
   readonly trajectoryScope: typeof JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE;
   readonly includedStepSources: typeof JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES;
   readonly copiedContext: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
@@ -233,7 +231,6 @@ function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
   return Object.freeze({
     source: JUDGE_TRANSCRIPT_SOURCE,
     projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
-    projectionVersion: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
     trajectoryScope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
     includedStepSources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
     copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -395,7 +392,6 @@ const ProjectionSchema = z
   .object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
     projectionId: z.literal(JUDGE_TRANSCRIPT_PROJECTION_ID),
-    projectionVersion: z.literal(JUDGE_TRANSCRIPT_PROJECTION_VERSION),
     trajectoryScope: z.literal(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE),
     includedStepSources: z.tuple([
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES[0]),

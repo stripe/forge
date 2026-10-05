@@ -1,7 +1,4 @@
-/** Wire schema version for authored benchmark inputs. */
-export const BENCHMARK_SCHEMA_VERSION = 1 as const;
-/** Wire schema version for complete generated run plans. */
-export const RESOLVED_RUN_PLAN_SCHEMA_VERSION = 1 as const;
+import type {ForgeBuildIdentity} from '../version.js';
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -39,7 +36,6 @@ export interface DatasetManifestFileV1 {
 }
 
 export interface DatasetManifestV1 {
-  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
   dataset: DatasetIdentityV1;
   cases: DatasetManifestCaseV1[];
   files: DatasetManifestFileV1[];
@@ -120,7 +116,6 @@ export interface ChecksV1 {
  * Prompt fields intentionally preserve the imported case semantics.
  */
 export interface EvalCaseV1 {
-  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
   id: CaseId;
   display_name?: string;
   task?: string;
@@ -185,7 +180,6 @@ export type ForgeRuntimeConfigV1 =
   | ForgeExternalRuntimeV1;
 
 export interface ExperimentConfigV1 {
-  schema_version: typeof BENCHMARK_SCHEMA_VERSION;
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {
@@ -249,7 +243,6 @@ export type InitialPromptSourceV1 =
   | 'case.initial_prompt';
 
 export interface ResolvedRunPlanV1 {
-  schema_version: typeof RESOLVED_RUN_PLAN_SCHEMA_VERSION;
   selection: RunSelection;
   provenance: {
     dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
@@ -261,8 +254,7 @@ export interface ResolvedRunPlanV1 {
       id: CaseId;
       path: DatasetRelativePath;
     };
-    forge: {
-      version: string;
+    forge: ForgeBuildIdentity & {
       action_bundles?: SetupActionBundleReferenceV1[];
     };
   };

@@ -4,8 +4,8 @@ import {campaignErrorCodeSchema, campaignRunIdSchema} from './campaignModel.js';
 import {sha256Digest} from './model/hashes.js';
 import {parseRunSelection} from './model/parse.js';
 import {serializeCanonicalJson} from './serialization.js';
+import {assertCompatibleForgeVersion, FORGE_BUILD_IDENTITY, parseForgeBuildIdentity} from './version.js';
 
-export const CAMPAIGN_REPORT_SCHEMA_VERSION = 1 as const;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
@@ -67,7 +67,7 @@ const coordinates = z.object({
 }).strict();
 const caseSchema = coordinates.merge(statisticsSchema);
 const reportSchema = z.object({
-  schema_version: z.literal(CAMPAIGN_REPORT_SCHEMA_VERSION),
+  forge: z.unknown().transform(parseForgeBuildIdentity),
   experiment_run_id: campaignRunIdSchema,
   generated_at: z.string().datetime(),
   checkpoint_sha256: digest,
@@ -82,8 +82,11 @@ export type CampaignReportStatisticsV1 = z.infer<typeof statisticsSchema>;
 export type CampaignReportCaseV1 = z.infer<typeof caseSchema>;
 export type CampaignReportV1 = z.infer<typeof reportSchema>;
 
-/** Parse the versioned scorecard and verify every aggregate against its run rows. */
+/** Check the producing release, then verify every aggregate against its run rows. */
 export function parseCampaignReport(input: unknown): CampaignReportV1 {
+  const header = z.object({forge: z.unknown()}).passthrough().parse(input);
+  const forge = parseForgeBuildIdentity(header.forge);
+  assertCompatibleForgeVersion(forge.version);
   const report = reportSchema.parse(input);
   if (report.runs.some((run, index) => run.selection_index !== index)) {
     throw new Error('Report selection indices must be contiguous and zero-based.');
@@ -107,7 +110,7 @@ export function buildCampaignReport(input: {
   runs: CampaignReportRunV1[];
 }): CampaignReportV1 {
   return parseCampaignReport({
-    schema_version: CAMPAIGN_REPORT_SCHEMA_VERSION,
+    forge: FORGE_BUILD_IDENTITY,
     experiment_run_id: input.experimentRunId,
     generated_at: input.generatedAt,
     checkpoint_sha256: sha256Digest(input.checkpointBody),

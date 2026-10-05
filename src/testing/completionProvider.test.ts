@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
 import {describe, it} from 'node:test';
 
 import type {
@@ -9,6 +10,15 @@ import {credentialReference} from '../contracts/credentials.js';
 import {createScriptedCompletionProvider} from './completionProvider.js';
 
 describe('createScriptedCompletionProvider', () => {
+  it('uses the installed package version by default and preserves an explicit version', () => {
+    const metadata = createRequire(import.meta.url)('@stripe/forge/package.json') as {
+      version: string;
+    };
+
+    assert.equal(createScriptedCompletionProvider().provider.version, metadata.version);
+    assert.equal(createScriptedCompletionProvider({version: '9.8.7'}).provider.version, '9.8.7');
+  });
+
   it('returns queued text, full responses, and request-aware responses in order', async () => {
     const fixture = createScriptedCompletionProvider({
       responses: [

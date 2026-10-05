@@ -1,3 +1,5 @@
+import type {CompletionProviderMetadata} from './metadata.js';
+
 import type {CredentialRequirement} from './credentials.js';
 import type {ModelRefV1} from '../model/types.js';
 
@@ -84,6 +86,8 @@ export interface CompletionProviderCallContext {
 export interface CompletionProvider {
   readonly id: string;
   readonly version: string;
+  /** Optional configuration distinctions snapshotted during pure preflight. */
+  readonly metadata?: CompletionProviderMetadata;
   requirements(
     input: CompletionProviderRequirementInput,
   ): CompletionProviderRequirements;

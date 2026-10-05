@@ -4,8 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
+import * as campaignExports from './campaign.js';
 import {
-  CAMPAIGN_REPORT_SCHEMA_VERSION,
   CampaignReportError,
   inspectCampaign,
   parseCampaignReport,
@@ -16,10 +16,12 @@ import {
   type CampaignSummary,
   type CampaignReportV1,
 } from './campaign.js';
+import {parseCampaign} from './campaignModel.js';
 import {createForgeEngine, defaultForgeEngine} from './engine.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import {createArtifactStore} from './results/index.js';
 import {defineSetupActionBundle} from './setup/index.js';
+import {FORGE_BUILD_IDENTITY, FORGE_VERSION} from './version.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -40,7 +42,7 @@ describe('public campaign API', () => {
     assert.equal(typeof inspectCampaign, 'function');
     assert.equal(typeof parseCampaignReport, 'function');
     assert.equal(typeof CampaignReportError, 'function');
-    assert.equal(CAMPAIGN_REPORT_SCHEMA_VERSION, 1);
+    assert.equal('CAMPAIGN_REPORT_SCHEMA_VERSION' in campaignExports, false);
     const optionsType = (_options: CampaignOptions): void => undefined;
     const summaryType = (_summary: CampaignSummary): void => undefined;
     const reportType = (_report: CampaignReportV1): void => undefined;
@@ -49,6 +51,76 @@ describe('public campaign API', () => {
       if (event.state === 'errored') return event.error_code;
       return event.run_id;
     };
+  });
+
+  it('reads a pending-only checkpoint using its Forge identity without companion artifacts', async () => {
+    const root = await campaignRoot();
+    const plan = createTestResolvedRunPlan();
+    const checkpoint = {
+      forge: FORGE_BUILD_IDENTITY,
+      experiment_run_id: path.basename(root),
+      entries: [{selection: plan.selection, plan_sha256: `sha256:${'a'.repeat(64)}`, attempts: []}],
+    };
+    await fs.mkdir(root);
+    const location = path.join(root, 'campaign.json');
+    await fs.writeFile(location, JSON.stringify(checkpoint));
+    assert.deepEqual(await readCampaignSelections(root), [plan.selection]);
+    const inspected = await inspectCampaign({root, engine: defaultForgeEngine});
+    assert.equal(inspected.outcomes[0]!.state, 'pending');
+    assert.equal(inspected.outcomes[0]!.artifact, null);
+    assert.deepEqual(parseCampaign(checkpoint).forge, FORGE_BUILD_IDENTITY);
+    assert.equal(Object.hasOwn(parseCampaign(checkpoint), 'schema_version'), false);
+
+    for (const invalid of [
+      {...checkpoint, forge: undefined},
+      {...checkpoint, forge: {...checkpoint.forge, unknown: true}},
+      {...checkpoint, schema_version: 1},
+      {...checkpoint, forge: {version: '9999.0.0'}},
+    ]) {
+      await fs.writeFile(location, JSON.stringify(invalid));
+      await assert.rejects(readCampaignSelections(root), /compatible Forge campaign/);
+      await assert.rejects(inspectCampaign({root, engine: defaultForgeEngine}), /compatible Forge campaign/);
+    }
+  });
+
+  it('checks a checkpoint release before interpreting its selections and treats diagnostics as provenance', () => {
+    assert.throws(() => parseCampaign({forge: {version: '9999.0.0'}, entries: 'invalid'}),
+      /incompatible with installed Forge/);
+    const checkpoint = {
+      forge: {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: true},
+      experiment_run_id: 'test-checkpoint',
+      entries: [{selection: createTestResolvedRunPlan().selection,
+        plan_sha256: `sha256:${'a'.repeat(64)}`, attempts: []}],
+    };
+    assert.deepEqual(parseCampaign(checkpoint).forge, checkpoint.forge);
+  });
+
+  it('stamps the current build when rewriting a resumed checkpoint without changing committed runs', async () => {
+    const root = await campaignRoot();
+    const options: CampaignOptions = {
+      root, plans: [createTestResolvedRunPlan()], composition: makeComposition(root),
+      engine: defaultForgeEngine, resume: false, signal: new AbortController().signal,
+      runIdFactory: () => 'retained-run', progress: () => undefined,
+      execute: (input) => defaultForgeEngine.executeEval({...input, composition: makeComposition(root)}),
+    };
+    const first = await runCampaign(options);
+    const checkpoint = parseCampaign(JSON.parse(await fs.readFile(first.campaign, 'utf8')));
+    const oldBuild = {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: FORGE_BUILD_IDENTITY.dirty !== true};
+    assert.notDeepEqual(oldBuild, FORGE_BUILD_IDENTITY);
+    await fs.writeFile(first.campaign, JSON.stringify({...checkpoint, forge: oldBuild}));
+    const runRoot = path.join(root, 'runs', 'retained-run');
+    const savedPlan = await fs.readFile(path.join(runRoot, 'plan.json'));
+    const savedResult = await fs.readFile(path.join(runRoot, 'result.json'));
+
+    const resumed = await runCampaign({...options, resume: true,
+      execute: async () => {throw new Error('must skip committed runs');}});
+    assert.equal(resumed.executed, 0);
+    assert.equal(resumed.skipped, 1);
+    const rewritten = parseCampaign(JSON.parse(await fs.readFile(first.campaign, 'utf8')));
+    assert.deepEqual(rewritten.forge, FORGE_BUILD_IDENTITY);
+    assert.deepEqual(rewritten.entries, checkpoint.entries);
+    assert.deepEqual(await fs.readFile(path.join(runRoot, 'plan.json')), savedPlan);
+    assert.deepEqual(await fs.readFile(path.join(runRoot, 'result.json')), savedResult);
   });
 
   it('rejects invalid library concurrency before preflight or filesystem writes', async () => {

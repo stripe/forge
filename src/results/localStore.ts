@@ -10,7 +10,6 @@ import type {
 import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
 import {parseAtifTrajectory, type AtifTrajectoryV1_8} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
-import {GUIDELINE_JUDGE_PROMPT_VERSION} from '../evaluation/guidelineJudge.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {sha256Digest} from '../model/hashes.js';
@@ -22,6 +21,7 @@ import {
 import {isSafeDatasetRelativePath} from '../model/paths.js';
 import {serializeResolvedRunPlan} from '../planning/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
+import {assertCompatibleForgeVersion} from '../version.js';
 import {
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -251,7 +251,8 @@ export async function verifyCompletedRunWithPlanParser(
   verifyJudgeEvidence(result, plan, artifactBodies, trajectory);
   const workspaceBody = artifactBodies.get('workspace-evidence.json');
   if (workspaceBody !== undefined) {
-    parseJsonArtifact('workspace-evidence.json', workspaceBody, parseWorkspaceEvidence);
+    parseJsonArtifact('workspace-evidence.json', workspaceBody, (value) =>
+      parseWorkspaceEvidence(value, {forgeVersion: result.forge.version}));
   }
   verifyCanonicalArtifactInventory(result, plan);
   return {runId: result.run_id, location: runDir, result};
@@ -308,14 +309,15 @@ function verifyPlanArtifact(
   const path = 'plan.json';
   const body = requireCoreArtifact(result, artifactBodies, path);
   const plan = parseJsonArtifact(path, body, parsePlan);
+  assertCompatibleForgeVersion(plan.provenance.forge.version);
   if (body.toString('utf8') !== serializeResolvedRunPlan(plan)) {
     throw new ArtifactStoreError('Completed plan.json is not canonical.');
   }
   if (
     serializeCanonicalJson(plan.selection) !==
       serializeCanonicalJson(result.selection) ||
-    serializeCanonicalJson(plan.provenance.forge) !==
-      serializeCanonicalJson(result.forge)
+    serializeCanonicalJson(plan.provenance.forge.action_bundles ?? []) !==
+      serializeCanonicalJson(result.forge.action_bundles ?? [])
   ) {
     throw new ArtifactStoreError(
       'plan.json does not match the completed result summary.',
@@ -425,7 +427,7 @@ function verifySetupArtifact(
   const setup = parseJsonArtifact(
     artifactPath,
     body,
-    parseSetupArtifact,
+    (value) => parseSetupArtifact(value, {forgeVersion: result.forge.version}),
   );
   if (body.toString('utf8') !== serializeCanonicalJson(setup)) {
     throw new ArtifactStoreError('Completed setup.json is not canonical.');
@@ -498,7 +500,7 @@ function verifyInteractionArtifact(
   const interaction = parseJsonArtifact(
     'interaction.json',
     body,
-    parseInteractionArtifact,
+    (value) => parseInteractionArtifact(value, {forgeVersion: result.forge.version}),
   );
   if (
     interaction.mode !== result.interaction.mode ||
@@ -594,12 +596,8 @@ function verifyJudgeEvidence(
       'Canonical artifact judge-evidence.json must be claimed in result artifacts.',
     );
   }
-  const judgeEvidence = parseJsonArtifact(path, body, parseJudgeEvidence);
-  if (judgeEvidence.prompt_version !== GUIDELINE_JUDGE_PROMPT_VERSION) {
-    throw new ArtifactStoreError(
-      'judge-evidence.json prompt_version is not supported by this Forge build.',
-    );
-  }
+  const judgeEvidence = parseJsonArtifact(path, body, (value) =>
+    parseJudgeEvidence(value, {forgeVersion: result.forge.version}));
   if (
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
       createJudgeTranscriptProjection(trajectory).transcriptJson

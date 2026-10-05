@@ -13,6 +13,21 @@ import {
 const HASH = 'a'.repeat(64);
 
 describe('public benchmark parsing', () => {
+  it('uses the installed grammar and rejects removed authored schema fields', () => {
+    const definition = {id: 'sample/task', task: 'Complete the task.'};
+    assert.equal(Object.hasOwn(parseEvalCase(definition), 'schema_version'), false);
+    assert.throws(() => parseEvalCase({...definition, schema_version: 1}), BenchmarkModelError);
+    const manifest = {
+      dataset: {id: 'sample', version: '1'},
+      cases: [{id: 'sample/task', path: 'cases/sample/task.yaml'}],
+      files: [{path: 'cases/sample/task.yaml', size: 10, sha256: HASH}],
+    };
+    assert.equal(Object.hasOwn(parseDatasetManifestJson(JSON.stringify(manifest)), 'schema_version'), false);
+    assert.throws(() => parseDatasetManifestJson(JSON.stringify({...manifest, schema_version: 1})), BenchmarkModelError);
+    assert.equal(Object.hasOwn(parseExperimentConfigYaml(experimentConfigYaml()), 'schema_version'), false);
+    assert.throws(() => parseExperimentConfigYaml(`schema_version: 1\n${experimentConfigYaml()}`), BenchmarkModelError);
+  });
+
   it('accepts Codex hook trust, rejects it for Claude, and treats omitted/native policies as duplicate coordinates', () => {
     const yaml = experimentConfigYaml();
     const codex = yaml.replace('adapter: claude-code', 'adapter: codex');
@@ -30,7 +45,6 @@ describe('public benchmark parsing', () => {
   });
   it('preserves multi-turn prompt semantics and materializes defaults', () => {
     const definition = parseEvalCaseYaml(`
-schema_version: 1
 id: payments/checkout
 task: "  Help the user integrate Checkout.  "
 initial_prompt: "  I need help with Checkout.  "
@@ -51,7 +65,6 @@ context: Existing integration
 
   it('accepts exactly one effective prompt in one-shot mode', () => {
     const oneShot = parseEvalCaseYaml(`
-schema_version: 1
 id: smoke/write-file
 execution_mode: one_shot
 initial_prompt: Create greeting.txt
@@ -68,7 +81,6 @@ checks:
 
     assert.throws(() =>
       parseEvalCaseYaml(`
-schema_version: 1
 id: smoke/invalid
 execution_mode: one_shot
 task: One
@@ -79,7 +91,6 @@ initial_prompt: Two
   it('bounds success guidelines to the persisted result contract', () => {
     assert.throws(() =>
       parseEvalCase({
-        schema_version: 1,
         id: 'safe/oversized-guideline',
         task: 'Evaluate a bounded guideline.',
         execution_mode: 'multi_turn',
@@ -174,20 +185,17 @@ initial_prompt: Two
   it('rejects unsafe paths, unknown keys, malformed regex, and duplicate YAML keys', () => {
     assert.throws(() =>
       parseEvalCaseYaml(`
-schema_version: 1
 id: ../escape
 task: unsafe
 `), /case ID/);
     assert.throws(() =>
       parseEvalCaseYaml(`
-schema_version: 1
 id: safe/case
 task: safe
 typo: true
 `), BenchmarkModelError);
     assert.throws(() =>
       parseEvalCaseYaml(`
-schema_version: 1
 id: safe/case
 task: safe
 checks:
@@ -197,7 +205,6 @@ checks:
 `), /regular expression/);
     assert.throws(() =>
       parseEvalCaseYaml(`
-schema_version: 1
 id: safe/case
 id: safe/other
 task: safe
@@ -271,7 +278,6 @@ treatments:
 
   it('validates manifest hashes, path inventory, and uniqueness', () => {
     const manifest = {
-      schema_version: 1,
       dataset: {id: 'forge-smoke', version: '2026.09.0'},
       cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
       files: [{path: 'cases/smoke/write/eval.yaml', size: 100, sha256: HASH}],
@@ -325,7 +331,6 @@ treatments:
 
 function experimentConfigYaml(extra = ''): string {
   return `
-schema_version: 1
 id: forge-smoke
 version: 2026.09.0
 dataset:

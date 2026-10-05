@@ -1,11 +1,10 @@
-schema_version: 1
 id: examples/multi-turn
 version: 0.1.0
 dataset:
   path: ./dataset
   id: forge-multi-turn
   version: 0.1.0
-  manifest_sha256: sha256:acd68e0d7c13dd6d3a46382e802ad2345d0f82de8813ecd239a84ed21d032447
+  manifest_sha256: sha256:7c62281fcdea99008348aa1c68562888392d1486aa3d51774892a62274376f00
 runtime:
   adapter: docker
   image:

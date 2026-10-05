@@ -7,6 +7,7 @@ import type {
   CompletionRequest,
   CompletionResponse,
 } from '../contracts/completion.js';
+import {FORGE_VERSION} from '../version.js';
 
 /** A concise response value accepted by the scripted provider. */
 export type ScriptedCompletionValue = string | CompletionResponse;
@@ -37,6 +38,7 @@ export interface RecordedCompletionCall {
 
 export interface ScriptedCompletionProviderOptions {
   readonly id?: string;
+  /** Defaults to the installed Forge package version. */
   readonly version?: string;
   readonly responses?: readonly ScriptedCompletionStep[];
   readonly requirements?:
@@ -63,7 +65,7 @@ export function createScriptedCompletionProvider(
   options: ScriptedCompletionProviderOptions = {},
 ): ScriptedCompletionProviderFixture {
   const id = options.id ?? 'test-provider';
-  const version = options.version ?? '1';
+  const version = options.version ?? FORGE_VERSION;
   const responses = [...(options.responses ?? [])];
   const requirements = options.requirements ?? {credentials: {}};
   const requirementCalls: CompletionProviderRequirementInput[] = [];

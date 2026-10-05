@@ -5,16 +5,11 @@ import * as rootExports from './index.js';
 
 import {
   FORGE_VERSION,
-  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
-  RUN_RESULT_SCHEMA_VERSION,
-  SETUP_ARTIFACT_SCHEMA_VERSION,
-  WORKSPACE_EVIDENCE_SCHEMA_VERSION,
-  JUDGE_EVIDENCE_SCHEMA_VERSION,
+  FORGE_BUILD_IDENTITY,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_GUIDELINE_JUDGE_PROMPT_BYTES,
@@ -58,16 +53,16 @@ describe('@stripe/forge package root', () => {
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {
+    for (const removed of ['BENCHMARK_SCHEMA_VERSION', 'RESOLVED_RUN_PLAN_SCHEMA_VERSION', 'RUN_RESULT_SCHEMA_VERSION', 'SETUP_ARTIFACT_SCHEMA_VERSION', 'INTERACTION_SCHEMA_VERSION', 'WORKSPACE_EVIDENCE_SCHEMA_VERSION', 'JUDGE_EVIDENCE_SCHEMA_VERSION', 'EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']) {
+      assert.equal(removed in rootExports, false);
+    }
     assert.equal(typeof (FORGE_VERSION), 'string');
-    assert.equal(RESOLVED_RUN_PLAN_SCHEMA_VERSION, 1);
-    assert.equal(RUN_RESULT_SCHEMA_VERSION, 1);
-    assert.equal(SETUP_ARTIFACT_SCHEMA_VERSION, 1);
-    assert.equal(WORKSPACE_EVIDENCE_SCHEMA_VERSION, 1);
+    assert.equal(FORGE_BUILD_IDENTITY.version, FORGE_VERSION);
+    assert.equal(Object.isFrozen(FORGE_BUILD_IDENTITY), true);
     assert.equal(typeof (executeEval), 'function');
     assert.equal(typeof (preflightEval), 'function');
     assert.equal(typeof (parseInteractionArtifact), 'function');
     assert.equal(typeof (parseJudgeEvidence), 'function');
-    assert.equal(JUDGE_EVIDENCE_SCHEMA_VERSION, 1);
     assert.equal(typeof (parseSetupArtifact), 'function');
     assert.equal(typeof (parseAgentPluginInstallationReceipt), 'function');
     assert.equal(typeof (evaluateRunEvidence), 'function');
@@ -89,7 +84,6 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof (parseJudgeTranscriptProjection), 'function');
     assert.equal(JUDGE_TRANSCRIPT_SOURCE, 'trajectory.json');
     assert.equal(JUDGE_TRANSCRIPT_PROJECTION_ID, 'forge-visible-atif-steps');
-    assert.equal(JUDGE_TRANSCRIPT_PROJECTION_VERSION, 1);
     assert.equal(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE, 'root');
     assert.deepEqual(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES, ['user', 'agent']);
     assert.equal(JUDGE_TRANSCRIPT_COPIED_CONTEXT, 'excluded');

@@ -37,7 +37,8 @@ truth for feature details; do not duplicate their full specifications here.
 - Record every material, non-sensitive setup-time resolution not fixed by the
   plan in `setup.json`. Changing external state may prevent exact replay, but it
   must not silently change the realized setup.
-- Wire formats are strict and versioned; unknown authored fields remain errors.
+- Wire formats are strict and governed by the Forge package release; unknown
+  authored fields remain errors.
   Do not mutate parsed inputs, and keep resolved plans cloned and deeply frozen.
 - Complete parsing and pure capability preflight before resolving credentials,
   allocating resources, invoking providers, or mutating a workspace.

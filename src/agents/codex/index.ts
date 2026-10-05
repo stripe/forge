@@ -7,9 +7,8 @@ import {parseCodexStream} from './stream.js';
 import {CODEX_HOME_STATE_ID} from './layout.js';
 import {prepareCodexPluginConfiguration} from './pluginConfig.js';
 import {createCodexPluginInstaller} from './plugins.js';
+import {FORGE_VERSION} from '../../version.js';
 
-export const CODEX_ADAPTER_VERSION = '1' as const;
-export const CODEX_RESPONSES_ADAPTER_VERSION = '1+responses-compatible' as const;
 export {CODEX_HOME_STATE_ID} from './layout.js';
 
 export interface CodexAdapterOptions {
@@ -43,8 +42,6 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
   if (['CODEX_HOME', 'HOME', 'PATH', 'PWD', 'TMPDIR', 'TMP', 'TEMP', 'OPENAI_BASE_URL'].includes(credentialEnvironmentName)) {
     throw new TypeError('Codex credentials must not override runtime paths or API routing.');
   }
-  const baseVersion = options.baseUrl === undefined ? CODEX_ADAPTER_VERSION : CODEX_RESPONSES_ADAPTER_VERSION;
-  const version = usesDefaultCodexLayout(layout) ? baseVersion : `${baseVersion}${options.baseUrl === undefined ? '+' : '.'}layout`;
   // Explicit, non-secret command overrides select the endpoint and auth source
   // on every turn. The run-owned home must never inherit a developer login.
   const configuration = [
@@ -76,7 +73,11 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): AgentAdap
   };
   return Object.freeze({
     id,
-    version,
+    version: FORGE_VERSION,
+    metadata: Object.freeze({
+      endpoint_mode: options.baseUrl === undefined ? 'default' : 'custom',
+      layout_mode: usesDefaultCodexLayout(layout) ? 'default' : 'custom',
+    }),
     pluginInstaller: createCodexPluginInstaller({adapterId: id, executable, layout}),
     requirements,
     evidenceIdentity(selection) {

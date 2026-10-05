@@ -156,10 +156,10 @@ describe('multi-turn CLI end to end', () => {
     assert.equal(summary.result.evaluation.checks.length, 3);
     assert.ok(summary.result.evaluation.checks.every(({passed}) => passed));
     assert.equal(summary.result.stop_reason, 'task_complete');
-    const interaction = parseInteractionArtifact(JSON.parse(await fs.readFile(path.join(summary.location, 'interaction.json'), 'utf8')));
+    const interaction = parseInteractionArtifact(JSON.parse(await fs.readFile(path.join(summary.location, 'interaction.json'), 'utf8')), {forgeVersion: summary.result.forge.version});
     assert.equal(interaction.turns.length, 2);
     assert.equal(agent.messages.length, 2);
-    const judge = parseJudgeEvidence(JSON.parse(await fs.readFile(path.join(summary.location, 'judge-evidence.json'), 'utf8')));
+    const judge = parseJudgeEvidence(JSON.parse(await fs.readFile(path.join(summary.location, 'judge-evidence.json'), 'utf8')), {forgeVersion: summary.result.forge.version});
     assert.deepEqual(judge.transcript.steps.filter((step) => step.source === 'agent').map(({message}) => message), [
       'What exact status sentence should the release summary contain?',
       'Created release-summary.txt with the status sentence you supplied.',

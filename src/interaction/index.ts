@@ -24,4 +24,3 @@ export {
   type InteractionCompletionRequest,
   type InteractionHistoryMessage,
 } from './completion.js';
-export {AVA_PROMPT_VERSION} from './prompt.js';

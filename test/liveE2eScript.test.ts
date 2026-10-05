@@ -9,6 +9,7 @@ import {describe, it} from 'node:test';
 import {pathToFileURL} from 'node:url';
 import * as os from 'node:os';
 
+import {FORGE_VERSION} from '../src/version.js';
 import {FORGE_CODEX_VERSION, FORGE_CLAUDE_CODE_VERSION} from '../src/runtime/docker/assets.js';
 import * as forge from '../src/index.js';
 import {parseAtifTrajectory} from '../src/atif/index.js';
@@ -344,7 +345,7 @@ describe('unified live end-to-end suite', () => {
 
   it('requires pinned native Codex evidence rather than accepting a fallback live result', async () => {
     const verify = verifiers.verifyNativeSession;
-    const agent = {adapter: 'codex', adapter_version: '1+responses-compatible', session_id: 'exact-session', model: 'gpt-5.4'};
+    const agent = {adapter: 'codex', adapter_version: FORGE_VERSION, session_id: 'exact-session', model: 'gpt-5.4'};
     const result = {agent, evidence: {completeness: 'complete', provenance: {
       source: {kind: 'native_log', format: 'codex-rollout-jsonl', session_id: agent.session_id},
       adapter: {id: agent.adapter, version: agent.adapter_version},
@@ -379,6 +380,7 @@ describe('unified live end-to-end suite', () => {
       },
     }, 'probe', signal);
     assert.equal(report.image_id, imageId);
+    assert.deepEqual(report.adapter, {id: 'forge/docker'});
     const calls: string[][] = [];
     const runCommand = async (executable: string, argv: readonly string[]) => {
       assert.equal(executable, 'docker');

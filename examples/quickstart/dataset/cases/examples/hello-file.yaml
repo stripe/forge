@@ -1,4 +1,3 @@
-schema_version: 1
 id: examples/hello-file
 display_name: Hello file
 initial_prompt: Create hello.txt containing exactly "hello, forge!" followed by a newline.

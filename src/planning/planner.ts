@@ -1,6 +1,5 @@
 import {sha256Digest} from '../model/hashes.js';
 import {
-  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
   type ExperimentConfigV1,
@@ -16,7 +15,7 @@ import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from '../setup/registry.js';
-import {FORGE_VERSION} from '../version.js';
+import {FORGE_BUILD_IDENTITY} from '../version.js';
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'
@@ -169,7 +168,6 @@ export function resolveRunPlanWithSetupActions(
   }
 
   const plan: ResolvedRunPlanV1 = {
-    schema_version: RESOLVED_RUN_PLAN_SCHEMA_VERSION,
     selection: {...cloneJson(selection), agent: resolveAgentSelection(selection.agent)},
     provenance: {
       dataset: {
@@ -185,7 +183,7 @@ export function resolveRunPlanWithSetupActions(
         path: manifestCase.path,
       },
       forge: {
-        version: FORGE_VERSION,
+        ...FORGE_BUILD_IDENTITY,
         ...(requiredActionBundles.length === 0
           ? {}
           : {action_bundles: cloneJson([...requiredActionBundles])}),

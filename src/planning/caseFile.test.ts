@@ -137,7 +137,6 @@ async function createDataset(): Promise<{
   const fixtureFile = path.join(root, ...fixturePath.split('/'));
   const caseBody = Buffer.from(
     [
-      'schema_version: 1',
       'id: sample/write',
       'execution_mode: one_shot',
       'initial_prompt: Write a file.',
@@ -151,7 +150,6 @@ async function createDataset(): Promise<{
   await fs.writeFile(
     path.join(root, 'manifest.json'),
     JSON.stringify({
-      schema_version: 1,
       dataset: {id: 'case-file-test', version: '1.0.0'},
       cases: [{id: 'sample/write', path: casePath}],
       files: [

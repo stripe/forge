@@ -116,7 +116,7 @@ If you are following the public executable, start instead at
 | [`src/campaignModel.ts`](https://github.com/stripe/forge/blob/main/src/campaignModel.ts) | Checkpoint schemas and attempt types | Strict execution checkpoint model shared by the controller and report schemas. |
 | [`src/campaignReport.ts`](https://github.com/stripe/forge/blob/main/src/campaignReport.ts) | `parseCampaignReport`, report types, internal builder/serializer | Bounded scorecard schema, case/configuration aggregation, and verification that statistics match run rows. Public parser/types are re-exported through the campaign subpath. |
 | [`src/campaignCli.ts`](https://github.com/stripe/forge/blob/main/src/campaignCli.ts) | `runCampaignCommand`, `parseCampaignArgs`, `createCampaignCliOptions` | Shared operational options, execution IDs/roots, saved selection restoration, host loading, and prepared-input cleanup. Used by the public CLI and available to other command hosts. |
-| [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION` | Reads the exact installed package version from its exported `package.json` for CLI output and plan/result provenance. |
+| [`src/version.ts`](https://github.com/stripe/forge/blob/main/src/version.ts) | `FORGE_VERSION`, `FORGE_BUILD_IDENTITY`, release compatibility helpers | Reads package and build metadata without host Git discovery. Shared by planning, execution, artifact readers, and campaigns. |
 | [`src/serialization.ts`](https://github.com/stripe/forge/blob/main/src/serialization.ts) | `serializeCanonicalJson` | Shared deterministic JSON serializer. Sorts object keys, retains array order, appends a newline, and rejects values that are not plain JSON. Used by plans, setup resolutions, ATIF-related artifacts, results, and receipts. |
 
 ### `ForgeEngine` as the semantic facade
@@ -311,7 +311,7 @@ composition.
 credentials, inspect the runtime, or select a composition adapter. Its setup
 registry dependency exists only to bind the plan to registered action
 implementations and their bundle identities. It stamps the resolved plan with
-the installed Forge package version; experiments do not author that version.
+the installed Forge build identity; experiments do not author that identity.
 
 ## `src/contracts`: host capability boundaries
 
@@ -332,6 +332,7 @@ implementations.
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code and Codex; selected by `setup/forgePlugin.ts` |
 | [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
+| [`metadata.ts`](https://github.com/stripe/forge/blob/main/src/contracts/metadata.ts) | Adapter/provider configuration metadata types and strict internal snapshot schemas | Shared by pure execution preflight and result parsing |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
 
 ### Capability narrowing
@@ -417,7 +418,7 @@ the main `try/catch`.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`prompt.ts`](https://github.com/stripe/forge/blob/main/src/interaction/prompt.ts) | Ava prompt builders, prompt version, stop sentinel | Pure rendering of initialization and continuation system prompts |
+| [`prompt.ts`](https://github.com/stripe/forge/blob/main/src/interaction/prompt.ts) | Ava prompt builders and stop sentinel | Pure rendering of initialization and continuation system prompts |
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/interaction/completion.ts) | Provider-neutral interaction request/invoker types | Connects Ava to `PreparedCompletionRuntime.invoke` without exposing provider or credentials |
 | [`ava.ts`](https://github.com/stripe/forge/blob/main/src/interaction/ava.ts) | `AvaRolePlayer`, `AvaTurn`, need/error types | Maintains private needs/history, requests strict structured completions, validates messages, and implements retry/terminal decisions |
 | [`conversation.ts`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) | `runConversation`, audit/result types, `snapshotAgentToolCalls` | Alternates Ava decisions with one persistent `AgentSession`, enforces max-turn semantics, aggregates cost, and produces the driver ledger/audit |
@@ -537,7 +538,7 @@ changing `interaction` or `evaluation`.
 | [`types.ts`](https://github.com/stripe/forge/blob/main/src/atif/types.ts) | Exact ATIF v1.8 TypeScript wire types | Used by agent evidence, selection, evaluation, and result provenance |
 | [`schema.ts`](https://github.com/stripe/forge/blob/main/src/atif/schema.ts) | Recursive Zod implementation of ATIF v1.8 invariants | Called by `parser.ts` |
 | [`parser.ts`](https://github.com/stripe/forge/blob/main/src/atif/parser.ts) | Bounded-JSON graph preflight plus schema parsing and structured errors | Called by normalization, judge projection, results, and adapter helpers |
-| [`normalization.ts`](https://github.com/stripe/forge/blob/main/src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness, warnings, normalization version | Constructed by `evidence/selection.ts`; summarized in `result.json` |
+| [`normalization.ts`](https://github.com/stripe/forge/blob/main/src/atif/normalization.ts) | Forge's evidence envelope: source/adapter provenance, completeness and warnings | Constructed by `evidence/selection.ts`; summarized in `result.json` |
 | [`serializer.ts`](https://github.com/stripe/forge/blob/main/src/atif/serializer.ts) | Canonical trajectory serialization | Called before writing `trajectory.json` |
 | [`timestamp.ts`](https://github.com/stripe/forge/blob/main/src/atif/timestamp.ts) | ATIF timestamp validation | Used by the schema and adapter normalization |
 | [`upstream.ts`](https://github.com/stripe/forge/blob/main/src/atif/upstream.ts) | Pinned upstream provenance metadata | Exported for consumers and conformance |
@@ -591,8 +592,8 @@ different.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/evaluation/audit wire types and schema versions | Used by execution, evaluation, storage, and consumers |
-| [`parse.ts`](https://github.com/stripe/forge/blob/main/src/results/parse.ts) | Strict Zod parsers for result and audit artifacts | Called before commit and during verification; imports judge projection constants to bind schema policy |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/audit wire types and embedded evaluation types | Used by execution, evaluation, storage, and consumers |
+| [`parse.ts`](https://github.com/stripe/forge/blob/main/src/results/parse.ts) | Strict parsers for result and audit artifacts | Checks Forge release compatibility before interpretation; companion parsers receive the parent run's release context. |
 | [`localStore.ts`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) | `createArtifactStore`, `verifyCompletedRun`, store errors | Implements two-phase local commit and independent cross-artifact verification |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/results/index.ts) | Public results barrel | Re-exported by package root |
 
@@ -607,9 +608,10 @@ different.
 The verifier deliberately imports:
 
 - strict plan parsing and canonical serialization from `model` and `planning`;
+- release compatibility from `version.ts`;
 - turn coverage from `evidence/selection.ts`;
 - ATIF parsing from `atif`;
-- judge projection/prompt versions from `evaluation`; and
+- judge projection policy from `evaluation`; and
 - plugin receipt validation from `contracts`.
 
 Those dependencies make verification a second semantic boundary rather than a
@@ -677,6 +679,7 @@ evals with cleanup warnings fail live verification.
 | [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
+| [`scripts/build-info.mjs`](https://github.com/stripe/forge/blob/main/scripts/build-info.mjs) | Captures source commit and dirty state into packaged build metadata when Git is available. |
 | [`scripts/package-smoke.mjs`](https://github.com/stripe/forge/blob/main/scripts/package-smoke.mjs) | Verifies published package entry points and assets. |
 | [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs) | Opt-in real Docker/agent/provider suite. |
 | [`package.json`](../package.json) | Public exports, binary, Node/package-manager pins, scripts, and package file inventory. |
@@ -764,7 +767,7 @@ Implement `RuntimeAdapter` and run `assertRuntimeAdapterConforms`. Pay special
 attention to:
 
 - pure synchronous preflight;
-- exact plan adapter/version/config validation;
+- exact plan adapter/config validation;
 - command scope isolation;
 - workspace and state-directory path safety;
 - finalization of setup authority;
@@ -789,15 +792,15 @@ Treat these changes as cross-cutting and score-affecting. Review together:
 
 - adapter native parsing;
 - `evidence/selection.ts` coverage/fallback;
-- `atif` schema and normalization version;
-- `evaluation/judgeTranscript.ts` projection version;
-- `evaluation/guidelineJudge.ts` prompt version;
+- `atif` schema and normalization behavior;
+- `evaluation/judgeTranscript.ts` projection policy;
+- `evaluation/guidelineJudge.ts` prompt behavior;
 - result wire schemas and conditional artifacts;
 - `results/localStore.ts` verification; and
 - README/architecture documentation and end-to-end tests.
 
-Changing what the judge sees without versioning the projection is not a local
-refactor.
+Changing what the judge sees requires reviewing Forge release compatibility
+and stored-run verification; it is not a local refactor.
 
 ### Add or change an artifact
 

@@ -5,7 +5,7 @@ import {z} from 'zod';
 
 import {
   campaignRunIdSchema as runIdSchema,
-  campaignSchema,
+  parseCampaign,
   type Campaign,
   type CampaignAttempt as Attempt,
   type SettledCampaignAttempt as SettledAttempt,
@@ -24,9 +24,9 @@ import type {ResolvedRunPlanV1, RunSelection} from './model/types.js';
 import {resolvedRunPlanSha256} from './planning/planner.js';
 import type {CompletedRunV1, EvalStatus} from './results/types.js';
 import {serializeCanonicalJson} from './serialization.js';
+import {FORGE_BUILD_IDENTITY} from './version.js';
 
 export {
-  CAMPAIGN_REPORT_SCHEMA_VERSION,
   parseCampaignReport,
   type CampaignReportCaseV1,
   type CampaignReportEvaluationV1,
@@ -177,8 +177,8 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
     plan_sha256: resolvedRunPlanSha256(plan),
   }));
   // Validate the whole campaign before checkpoint writes or any execution.
-  campaignSchema.parse({
-    schema_version: 1,
+  parseCampaign({
+    forge: FORGE_BUILD_IDENTITY,
     experiment_run_id: path.basename(root),
     entries: identities.map((identity) => ({...identity, attempts: []})),
   });
@@ -211,8 +211,8 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
     let campaign = await readCampaign(checkpoint);
     if (campaign === undefined) {
       if (options.resume) throw new Error('No campaign.json to resume in the output directory.');
-      campaign = campaignSchema.parse({
-        schema_version: 1,
+      campaign = parseCampaign({
+        forge: FORGE_BUILD_IDENTITY,
         experiment_run_id: path.basename(root),
         entries: identities.map((identity) => ({...identity, attempts: []})),
       });
@@ -482,15 +482,15 @@ async function readCampaignSource(checkpoint: string): Promise<{campaign: Campai
     if (!stat.isFile() || stat.size > MAX_CAMPAIGN_BYTES) throw new Error('Invalid campaign checkpoint.');
     const body = await fs.readFile(checkpoint, 'utf8');
     if (Buffer.byteLength(body) > MAX_CAMPAIGN_BYTES) throw new Error('Invalid campaign checkpoint.');
-    return {campaign: campaignSchema.parse(JSON.parse(body)), body};
+    return {campaign: parseCampaign(JSON.parse(body)), body};
   } catch (error) {
     if (hasCode(error, 'ENOENT')) return undefined;
-    throw new Error('Cannot read a valid schema-version-1 campaign.json.', {cause: error});
+    throw new Error('Cannot read a compatible Forge campaign.json.', {cause: error});
   }
 }
 
 async function writeCampaign(checkpoint: string, campaign: Campaign): Promise<void> {
-  const body = serializeCanonicalJson(campaignSchema.parse(campaign));
+  const body = serializeCanonicalJson(parseCampaign({...campaign, forge: FORGE_BUILD_IDENTITY}));
   if (Buffer.byteLength(body) > MAX_CAMPAIGN_BYTES) throw new Error('Campaign checkpoint exceeds its byte limit.');
   await writeAtomicDocument(checkpoint, body);
 }

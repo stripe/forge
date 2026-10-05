@@ -151,7 +151,6 @@ async function createDataset(): Promise<{
   const casePath = path.join(root, 'cases', 'smoke', 'write', 'eval.yaml');
   const inputPath = path.join(root, 'fixtures', 'seed.txt');
   const caseYaml = `
-schema_version: 1
 id: smoke/write
 execution_mode: one_shot
 task: Create greeting.txt
@@ -167,7 +166,6 @@ setup:
   await fs.writeFile(casePath, caseYaml);
   await fs.writeFile(inputPath, input);
   const manifestRaw = `${JSON.stringify({
-    schema_version: 1,
     dataset: {id: 'forge-smoke', version: '2026.09.0'},
     cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
     files: [
@@ -195,7 +193,6 @@ async function temporaryDirectory(): Promise<string> {
 
 function experimentConfigYaml(manifestHash: string): string {
   return `
-schema_version: 1
 id: forge-smoke
 version: 2026.09.0
 dataset:

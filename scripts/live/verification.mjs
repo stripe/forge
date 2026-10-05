@@ -9,13 +9,10 @@ export function createRunVerifiers(forge) {
     parseInteractionArtifact,
     parseJudgeEvidence,
     FORGE_CLAUDE_CODE_VERSION,
-    GUIDELINE_JUDGE_PROMPT_VERSION,
-    JUDGE_EVIDENCE_SCHEMA_VERSION,
     JUDGE_TRANSCRIPT_COPIED_CONTEXT,
     JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
     JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
     JUDGE_TRANSCRIPT_PROJECTION_ID,
-    JUDGE_TRANSCRIPT_PROJECTION_VERSION,
     JUDGE_TRANSCRIPT_SOURCE,
     JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   } = forge;
@@ -62,7 +59,7 @@ export function createRunVerifiers(forge) {
     );
 
     const [interaction, trajectory] = await Promise.all([
-      readJsonArtifact(completed.location, 'interaction.json', parseInteractionArtifact),
+      readJsonArtifact(completed.location, 'interaction.json', (value) => parseInteractionArtifact(value, {forgeVersion: result.forge.version})),
       readJsonArtifact(completed.location, 'trajectory.json', parseAtifTrajectory),
     ]);
     requireCondition(
@@ -129,9 +126,9 @@ export function createRunVerifiers(forge) {
     );
 
     const [interaction, trajectory, judgeEvidence] = await Promise.all([
-      readJsonArtifact(completed.location, 'interaction.json', parseInteractionArtifact),
+      readJsonArtifact(completed.location, 'interaction.json', (value) => parseInteractionArtifact(value, {forgeVersion: result.forge.version})),
       readJsonArtifact(completed.location, 'trajectory.json', parseAtifTrajectory),
-      readJsonArtifact(completed.location, 'judge-evidence.json', parseJudgeEvidence),
+      readJsonArtifact(completed.location, 'judge-evidence.json', (value) => parseJudgeEvidence(value, {forgeVersion: result.forge.version})),
     ]);
     const invokedDecisions = interaction.role_player?.decisions.filter(
       ({coding_agent_invoked: invoked}) => invoked,
@@ -163,14 +160,10 @@ export function createRunVerifiers(forge) {
       ({path: evidencePath}) => evidencePath === 'release-summary.txt',
     );
     requireCondition(
-      judgeEvidence.schema_version === JUDGE_EVIDENCE_SCHEMA_VERSION &&
       judgeEvidence.transcript.steps.length > 0 &&
-      judgeEvidence.prompt_version === GUIDELINE_JUDGE_PROMPT_VERSION &&
       judgeEvidence.transcript.source === JUDGE_TRANSCRIPT_SOURCE &&
       judgeEvidence.transcript.projection_id ===
       JUDGE_TRANSCRIPT_PROJECTION_ID &&
-      judgeEvidence.transcript.projection_version ===
-      JUDGE_TRANSCRIPT_PROJECTION_VERSION &&
       judgeEvidence.transcript.trajectory_scope ===
       JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE &&
       judgeEvidence.transcript.included_step_sources.length ===

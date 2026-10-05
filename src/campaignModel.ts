@@ -2,6 +2,7 @@ import {z} from 'zod';
 
 import {isSha256Digest} from './model/hashes.js';
 import {parseRunSelection} from './model/parse.js';
+import {assertCompatibleForgeVersion, parseForgeBuildIdentity} from './version.js';
 
 export const campaignRunIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 export const campaignErrorCodeSchema = z.enum([
@@ -19,8 +20,8 @@ const attemptSchema = z.discriminatedUnion('state', [
     error_code: campaignErrorCodeSchema,
   }).strict(),
 ]);
-export const campaignSchema = z.object({
-  schema_version: z.literal(1),
+const campaignSchema = z.object({
+  forge: z.unknown().transform(parseForgeBuildIdentity),
   experiment_run_id: campaignRunIdSchema,
   entries: z.array(z.object({
     selection: z.unknown().transform(parseRunSelection),
@@ -28,6 +29,14 @@ export const campaignSchema = z.object({
     attempts: z.array(attemptSchema).max(10_000),
   }).strict()).min(1).max(100_000),
 }).strict();
+
+/** Check the producing release before interpreting checkpoint contents. */
+export function parseCampaign(input: unknown): Campaign {
+  const header = z.object({forge: z.unknown()}).passthrough().parse(input);
+  const forge = parseForgeBuildIdentity(header.forge);
+  assertCompatibleForgeVersion(forge.version);
+  return campaignSchema.parse(input);
+}
 
 export type Campaign = z.infer<typeof campaignSchema>;
 export type CampaignAttempt = z.infer<typeof attemptSchema>;

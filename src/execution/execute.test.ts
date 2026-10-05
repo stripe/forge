@@ -24,7 +24,7 @@ import type {
 } from '../contracts/runtime.js';
 import type {ResolvedRunPlanV1} from '../model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../results/index.js';
-import {FORGE_VERSION} from '../version.js';
+import {FORGE_BUILD_IDENTITY, FORGE_VERSION} from '../version.js';
 import {createOwnedWorkspace} from '../runtime/workspace.js';
 import {createSetupExecutorWithHandlers} from '../setup/executor.js';
 import type {
@@ -52,6 +52,46 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({root: path.join(fixture.root, 'artifacts')});
+    const composition = fixture.composition(store);
+    const agent = composition.agents.get('claude-code')!;
+    const metadata = {endpoint_mode: 'custom' as const, layout_mode: 'custom' as 'default' | 'custom'};
+    const configuredAgent: AgentAdapter = {
+      ...agent,
+      metadata,
+      async prepare(context) {
+        metadata.layout_mode = 'default';
+        await agent.prepare(context);
+      },
+    };
+    const completed = await executeEval({
+      runId: 'metadata-snapshot',
+      plan: fixture.plan,
+      composition: {...composition, agents: new Map([[agent.id, configuredAgent]])},
+    });
+    assert.equal(completed.result.agent.adapter_version, 'test-adapter');
+    assert.deepEqual(completed.result.agent.metadata, {endpoint_mode: 'custom', layout_mode: 'custom'});
+    assert.equal(Object.hasOwn(completed.result.evidence, 'normalization_version'), false);
+    assert.deepEqual((await verifyCompletedRun(completed.location)).result.agent.metadata, completed.result.agent.metadata);
+  });
+
+  it('rejects undeclared adapter metadata before resolving credentials or allocating a runtime', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const agent = composition.agents.get('claude-code')!;
+    const configuredAgent = {
+      ...agent,
+      metadata: {endpoint_mode: 'custom', layout_mode: 'default', endpoint: 'https://private.example.com'},
+    } as AgentAdapter;
+    assert.throws(() => preflightEval({
+      plan: fixture.plan,
+      composition: {...composition, agents: new Map([[agent.id, configuredAgent]])},
+    }), ForgeExecutionError);
+    assert.deepEqual(fixture.calls, []);
+  });
+
   it('runs the shared lifecycle, redacts credentials, and atomically commits', async () => {
     const fixture = await executionFixture({nativeArtifact: true});
     const localStore = createArtifactStore({
@@ -70,9 +110,9 @@ describe('executeEval', () => {
       const actual = completed.result;
       assert.ok(actual);
       assert.ok(actual.evidence.provenance.source.kind === 'native_log');
-      assert.equal(actual.schema_version, 1);
+      assert.ok(!('schema_version' in actual));
       assert.equal(actual.run_id, 'run-1');
-      assert.equal(actual.forge.version, FORGE_VERSION);
+      assert.deepEqual(actual.forge, FORGE_BUILD_IDENTITY);
       assert.equal(actual.agent.session_id, 'canonical-session');
       assert.equal(actual.evidence.redaction_count, 1);
       assert.equal(actual.evidence.completeness, 'complete');
@@ -115,7 +155,7 @@ describe('executeEval', () => {
     {
       const actual = verified.result;
       assert.ok(actual);
-      assert.equal(actual.schema_version, 1);
+      assert.ok(!('schema_version' in actual));
       assert.equal(actual.evidence.provenance.source.kind, 'native_log');
       assert.equal(actual.evidence.provenance.source.format, 'claude-code-jsonl');
       assert.equal(actual.evidence.provenance.adapter.id, 'claude-code');
@@ -142,8 +182,8 @@ describe('executeEval', () => {
     const workspaceEvidence = JSON.parse(await fs.readFile(
       path.join(completed.location, 'workspace-evidence.json'),
       'utf8',
-    )) as {schema_version: number; entries: Array<Record<string, unknown>>};
-    assert.equal(workspaceEvidence.schema_version, 1);
+    )) as {entries: Array<Record<string, unknown>>};
+    assert.ok(!('schema_version' in workspaceEvidence));
     assert.ok(!('sha256' in (workspaceEvidence.entries[0]!)));
   });
 
@@ -699,7 +739,39 @@ describe('executeEval', () => {
         forge: {...fixture.plan.provenance.forge, version: '0.0.0'},
       },
     };
-    assert.throws(() => preflightEval({plan, composition: fixture.composition(inertStore())}), {message: `Run plan requires Forge 0.0.0; this build is ${FORGE_VERSION}.`});
+    assert.throws(() => preflightEval({plan, composition: fixture.composition(inertStore())}), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as {code?: string}).code, 'invalid_plan');
+      assert.equal((error as {phase?: string}).phase, 'preflight');
+      assert.ok(error.cause instanceof Error);
+      assert.ok(error.cause.cause instanceof Error);
+      assert.equal(error.cause.cause.message, `Forge 0.0.0 is incompatible with installed Forge ${FORGE_VERSION}; official releases require an exact version match.`);
+      return true;
+    });
+  });
+
+  it('preflights source provenance and applies the reader release policy to development plans', async () => {
+    const fixture = await executionFixture();
+    const plan: ResolvedRunPlanV1 = {
+      ...fixture.plan,
+      provenance: {
+        ...fixture.plan.provenance,
+        forge: {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: true},
+      },
+    };
+    assert.doesNotThrow(() => preflightEval({plan, composition: fixture.composition(inertStore())}));
+    const developmentPlan = {
+      ...plan,
+      provenance: {
+        ...plan.provenance,
+        forge: {...plan.provenance.forge, version: '0.0.0-dev.42'},
+      },
+    };
+    if (FORGE_VERSION.includes('-dev.')) {
+      assert.doesNotThrow(() => preflightEval({plan: developmentPlan, composition: fixture.composition(inertStore())}));
+    } else {
+      assert.throws(() => preflightEval({plan: developmentPlan, composition: fixture.composition(inertStore())}), {code: 'invalid_plan', phase: 'preflight'});
+    }
   });
 
   it('rejects malformed agent environment declarations during pure preflight', async () => {
@@ -1085,7 +1157,6 @@ function resolvedPlan(): ResolvedRunPlanV1 {
     file_checks: [{file: 'greeting.txt', exists: true, contains: 'hello'}],
   };
   return {
-    schema_version: 1,
     selection: {
       case_id: 'sample/case',
       treatment: 'baseline',
@@ -1096,10 +1167,9 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       dataset: {id: 'sample', version: '1', manifest_sha256: DIGEST_A},
       experiment: {id: 'local', version: '1'},
       case: {id: 'sample/case', path: 'cases/case.yaml'},
-      forge: {version: FORGE_VERSION},
+      forge: {...FORGE_BUILD_IDENTITY},
     },
     case: {
-      schema_version: 1,
       id: 'sample/case',
       initial_prompt: 'Create greeting.txt',
       execution_mode: 'one_shot',

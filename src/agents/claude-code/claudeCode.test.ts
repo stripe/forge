@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {FORGE_VERSION} from '../../version.js';
 import {parseAtifTrajectory} from '../../atif/index.js';
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
 import {createMemoryRunInputProvider} from '../../testing/memoryInputs.js';
@@ -35,10 +36,11 @@ describe('Claude Code adapter', () => {
     const plan = createTestResolvedRunPlan({
       agent: {adapter: 'claude-code', provider: 'anthropic', model: 'claude-test'},
     });
-    assert.equal(adapter.version, '2+layout');
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'default', layout_mode: 'custom'});
     assert.equal(createClaudeCodeAdapter({
       layout: customLayout, baseUrl: 'https://gateway.example.test',
-    }).version, '2+gateway.layout');
+    }).version, FORGE_VERSION);
     const requirements = adapter.requirements(plan.agent);
     assert.deepEqual(requirements.environment.variables, {
       CLAUDE_CONFIG_DIR: customLayout.configDirectory,
@@ -143,7 +145,8 @@ describe('Claude Code adapter', () => {
 
   it('declares authentication and exact session state for engine-assigned scope', () => {
     const adapter = createClaudeCodeAdapter({sessionIdFactory: () => 'session-1'});
-    assert.equal(adapter.version, '2');
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'default', layout_mode: 'default'});
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',
@@ -165,7 +168,8 @@ describe('Claude Code adapter', () => {
       credential: 'gateway.routing-token',
       credentialEnvironmentName: 'ANTHROPIC_AUTH_TOKEN',
     });
-    assert.equal(adapter.version, '2+gateway');
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'custom', layout_mode: 'default'});
     const requirements = adapter.requirements({
       adapter: 'claude-code',
       provider: 'anthropic-compatible',

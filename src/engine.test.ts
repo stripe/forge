@@ -58,7 +58,7 @@ describe('ForgeEngine setup action bundles', () => {
   it('dispatches YAML case and experiment parsing through the selected action registry', () => {
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
     const caseValue = {
-      schema_version: 1, id: 'testing/yaml-extension', initial_prompt: 'Complete the task.',
+      id: 'testing/yaml-extension', initial_prompt: 'Complete the task.',
       execution_mode: 'one_shot', success_guidelines: [],
       setup: [{uses: 'acme-evals/skill', with: {name: ' case-skill '}}],
     };
@@ -638,7 +638,6 @@ function planningInputs(
   experiment: LoadedExperimentConfigV1;
 } {
   const definition = engine.parseEvalCase({
-    schema_version: 1,
     id: 'testing/action-bundle',
     initial_prompt: 'Complete the task.',
     execution_mode: 'one_shot',
@@ -653,7 +652,6 @@ function planningInputs(
       manifestRaw: '{}',
       manifestSha256: DIGEST,
       manifest: {
-        schema_version: 1,
         dataset: {id: 'testing', version: '1.0.0'},
         cases: [
           {
@@ -690,7 +688,6 @@ function planningInputs(
 
 function experimentValue() {
   return {
-    schema_version: 1 as const,
     id: 'testing/action-bundles',
     version: '1.0.0',
     dataset: {

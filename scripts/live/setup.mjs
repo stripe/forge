@@ -200,7 +200,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
           assert.equal(verified.result.completion_calls.length, 0);
           assert.equal(verified.result.evidence.completeness, 'fallback');
           assertNoCleanupWarnings(verified.result, completed.location);
-          const setup = parseSetupArtifact(JSON.parse(await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8')));
+          const setup = parseSetupArtifact(JSON.parse(await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8')), {forgeVersion: completed.result.forge.version});
           assert.deepEqual(setup.steps.map(({index, uses}) => ({index, uses})),
             spec.setup.map(({uses}, index) => ({index, uses})));
           if (spec.id === 'plugin') {
@@ -282,7 +282,7 @@ async function createFixture(root, platform, specs, liveAgent) {
   };
   for (const spec of specs) {
     files[`cases/setup/${spec.id}.yaml`] = stringify({
-      schema_version: 1, id: `setup/${spec.id}`, initial_prompt: `Verify ${spec.id} setup.`,
+      id: `setup/${spec.id}`, initial_prompt: `Verify ${spec.id} setup.`,
       execution_mode: 'one_shot', setup: spec.setup, success_guidelines: [],
       checks: {
         file_checks: Object.entries(spec.files ?? {}).map(([file, body]) => ({
@@ -293,7 +293,7 @@ async function createFixture(root, platform, specs, liveAgent) {
     });
   }
   const manifest = {
-    schema_version: 1, dataset: {id: 'forge-live-setup', version: '1.0.0'},
+    dataset: {id: 'forge-live-setup', version: '1.0.0'},
     cases: specs.map(({id}) => ({id: `setup/${id}`, path: `cases/setup/${id}.yaml`})),
     files: Object.entries(files).map(([file, body]) => ({
       path: file, size: Buffer.byteLength(body), sha256: sha256(body),
@@ -308,7 +308,7 @@ async function createFixture(root, platform, specs, liveAgent) {
   await fs.writeFile(path.join(datasetRoot, 'manifest.json'), manifestBody);
   const experimentPath = path.join(root, 'experiment.yaml');
   await fs.writeFile(experimentPath, stringify({
-    schema_version: 1, id: 'testing/setup-integration', version: '1.0.0',
+    id: 'testing/setup-integration', version: '1.0.0',
     dataset: {...manifest.dataset, path: './dataset', manifest_sha256: `sha256:${sha256(manifestBody)}`},
     runtime: {
       adapter: 'docker', image: {kind: 'forge'}, platform,

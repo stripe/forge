@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 
+import {agentAdapterMetadataSchema, type AgentAdapterMetadata} from '../contracts/metadata.js';
 import {
-  ATIF_NORMALIZATION_VERSION,
   ATIF_SCHEMA_VERSION,
   createNormalizedTrajectory,
   parseNormalizedTrajectory,
@@ -46,7 +46,6 @@ import type {
   WorkspaceWriteOptions,
 } from '../contracts/runtime.js';
 import {
-  GUIDELINE_JUDGE_PROMPT_VERSION,
   collectJudgeWorkspaceEvidence,
   evaluateRunEvidence,
   judgeGuidelines,
@@ -57,7 +56,6 @@ import {
 import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {
-  AVA_PROMPT_VERSION,
   AvaRolePlayer,
   runConversation,
   type AvaConversationAudit,
@@ -66,7 +64,6 @@ import {
 import {snapshotAgentToolCalls} from '../interaction/conversation.js';
 import {
   isSafeSimpleIdentifier,
-  RESOLVED_RUN_PLAN_SCHEMA_VERSION,
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
@@ -76,8 +73,6 @@ import {sha256Digest} from '../model/hashes.js';
 import {serializeResolvedRunPlan} from '../planning/index.js';
 import {
   MAX_SETUP_ARTIFACT_BYTES,
-  RUN_RESULT_SCHEMA_VERSION,
-  SETUP_ARTIFACT_SCHEMA_VERSION,
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
@@ -97,7 +92,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
-import {FORGE_VERSION} from '../version.js';
+import {assertCompatibleForgeVersion, FORGE_BUILD_IDENTITY, FORGE_VERSION} from '../version.js';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
@@ -160,6 +155,7 @@ export interface PreflightEvalInput {
 
 interface EvalPreflight {
   readonly agent: AgentAdapter;
+  readonly agentMetadata: AgentAdapterMetadata | undefined;
   readonly agentEvidenceIdentity: AgentEvidenceIdentity;
   readonly setup: PreparedSetup;
   readonly requirements: RuntimeRequirements;
@@ -468,12 +464,9 @@ export async function executeEvalWithTestHooks(
               },
         );
         judgeEvidence = parseJudgeEvidence({
-          schema_version: 1,
-          prompt_version: GUIDELINE_JUDGE_PROMPT_VERSION,
           transcript: {
             source: judgeTranscript.source,
             projection_id: judgeTranscript.projectionId,
-            projection_version: judgeTranscript.projectionVersion,
             trajectory_scope: judgeTranscript.trajectoryScope,
             included_step_sources: [...judgeTranscript.includedStepSources],
             copied_context: judgeTranscript.copiedContext,
@@ -489,7 +482,7 @@ export async function executeEvalWithTestHooks(
             complete: safeWorkspace.complete,
             warnings: safeWorkspace.warnings.map((warning) => ({...warning})),
           },
-        });
+        }, {forgeVersion: FORGE_VERSION});
       }
       const result = await evaluateRunEvidence({
         plan: input.plan,
@@ -527,6 +520,7 @@ export async function executeEvalWithTestHooks(
       const contributorResult = buildResult({
         input,
         agent: preflight.agent,
+        agentMetadata: preflight.agentMetadata,
         runtime: sealed,
         interaction,
         completionCalls: completions.calls,
@@ -580,6 +574,7 @@ export async function executeEvalWithTestHooks(
     const result = buildResult({
       input,
       agent: preflight.agent,
+      agentMetadata: preflight.agentMetadata,
       runtime: sealed,
       interaction,
       completionCalls: completions.calls,
@@ -602,9 +597,6 @@ export async function executeEvalWithTestHooks(
     });
     transaction = undefined;
     const committedResult = parseRunResult(committed.result);
-    if (committedResult.schema_version !== RUN_RESULT_SCHEMA_VERSION) {
-      throw new TypeError('Artifact store returned an unexpected result schema version.');
-    }
     return {
       runId: committed.runId,
       location: committed.location,
@@ -852,6 +844,7 @@ function buildEvalPreflight(
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
+  const agentMetadata = agentAdapterMetadataSchema.optional().parse(agent.metadata);
   const agentEvidenceIdentity = parseAgentEvidenceIdentity(
     agent.evidenceIdentity(plan.agent),
   );
@@ -901,6 +894,7 @@ function buildEvalPreflight(
   preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
     agent,
+    agentMetadata,
     agentEvidenceIdentity,
     setup,
     requirements,
@@ -910,14 +904,14 @@ function buildEvalPreflight(
 }
 
 function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
-  if (plan.schema_version !== RESOLVED_RUN_PLAN_SCHEMA_VERSION) {
-    throw new ForgeExecutionError('invalid_plan', 'preflight', 'Unsupported run-plan version.');
-  }
-  if (plan.provenance.forge.version !== FORGE_VERSION) {
+  try {
+    assertCompatibleForgeVersion(plan.provenance.forge.version);
+  } catch (error) {
     throw new ForgeExecutionError(
       'invalid_plan',
       'preflight',
-      `Run plan requires Forge ${plan.provenance.forge.version}; this build is ${FORGE_VERSION}.`,
+      error instanceof Error ? error.message : 'Unsupported Forge producer version.',
+      {cause: error},
     );
   }
   // Defensive JSON/canonicalization check before any credential or runtime use.
@@ -1443,13 +1437,11 @@ function buildInteractionArtifact(
     : {
         role_player: {
           model: {...plan.role_player},
-          prompt_version: AVA_PROMPT_VERSION,
           needs: interaction.avaAudit.needs?.map((need) => ({...need})) ?? null,
           decisions: interaction.avaAudit.decisions.map(avaDecisionRecord),
         },
       };
   return {
-    schema_version: 1,
     mode: plan.interaction.mode,
     stop_reason: interaction.stopReason,
     turns,
@@ -1480,7 +1472,9 @@ function redactInteractionArtifact(
   artifact: InteractionArtifactV1,
   secrets: readonly string[],
 ): InteractionArtifactV1 {
-  return parseInteractionArtifact(redactSecrets(artifact, secrets).value);
+  return parseInteractionArtifact(redactSecrets(artifact, secrets).value, {
+    forgeVersion: FORGE_VERSION,
+  });
 }
 
 function jsonValue(value: unknown): JsonValue {
@@ -1611,13 +1605,12 @@ function buildSetupArtifact(
     throw new TypeError('Applied setup does not match the resolved run plan.');
   }
   const artifact = parseSetupArtifact({
-    schema_version: SETUP_ARTIFACT_SCHEMA_VERSION,
     steps: applied.steps.map((step) => ({
       index: step.index,
       uses: step.uses,
       ...(step.resolution === undefined ? {} : {resolution: step.resolution}),
     })),
-  });
+  }, {forgeVersion: FORGE_VERSION});
   if (
     Buffer.byteLength(serializeCanonicalJson(artifact), 'utf8') >
     MAX_SETUP_ARTIFACT_BYTES
@@ -1673,6 +1666,7 @@ async function buildSupplementalArtifacts(
 function buildResult(input: {
   input: ExecuteEvalInput;
   agent: AgentAdapter;
+  agentMetadata: AgentAdapterMetadata | undefined;
   runtime: SealedRuntime;
   interaction: ExecutedInteraction;
   completionCalls: readonly CompletionCallSummaryV1[];
@@ -1686,11 +1680,10 @@ function buildResult(input: {
   completedAt: Date;
 }): RunResultV1 {
   return {
-    schema_version: RUN_RESULT_SCHEMA_VERSION,
     run_id: input.input.runId,
     selection: input.input.plan.selection,
     forge: {
-      version: FORGE_VERSION,
+      ...FORGE_BUILD_IDENTITY,
       ...(input.input.plan.provenance.forge.action_bundles === undefined
         ? {}
         : {
@@ -1709,6 +1702,7 @@ function buildResult(input: {
     agent: {
       adapter: input.agent.id,
       adapter_version: input.agent.version,
+      ...(input.agentMetadata === undefined ? {} : {metadata: input.agentMetadata}),
       provider: input.input.plan.agent.provider,
       model: input.input.plan.agent.model,
       session_id: input.interaction.sessionId,
@@ -1723,7 +1717,6 @@ function buildResult(input: {
     evidence: {
       format: 'atif',
       schema_version: ATIF_SCHEMA_VERSION,
-      normalization_version: ATIF_NORMALIZATION_VERSION,
       provenance: resultEvidenceProvenance(input.evidence.provenance),
       completeness: input.evidence.completeness,
       warnings: input.evidence.warnings,

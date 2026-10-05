@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {FORGE_VERSION} from '../../version.js';
 import {createClaudeCodeAdapter, type ClaudeCodeLayout} from './index.js';
 
 const layout: ClaudeCodeLayout = {
@@ -15,7 +16,8 @@ describe('Claude runtime layout', () => {
     const adapter = createClaudeCodeAdapter({layout: {
       workspace: '/workspace', home: '/home/forge', configDirectory: '/home/forge/.claude',
     }});
-    assert.equal(adapter.version, '2');
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'default', layout_mode: 'default'});
     assert.equal(adapter.requirements(selection).environment.variables, undefined);
   });
 

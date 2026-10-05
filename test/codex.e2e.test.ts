@@ -9,6 +9,7 @@ import {
   createJudgeTranscriptProjection,
   credentialReference,
   executeEval,
+  FORGE_VERSION,
   parseInteractionArtifact,
   parseJudgeEvidence,
   preflightEval,
@@ -315,7 +316,7 @@ describe('Codex engine integration', () => {
     assert.equal(verified.result.agent.session_id, SESSION_ID);
     assert.equal(verified.result.evidence.completeness, 'complete');
     assert.deepEqual(verified.result.evidence.provenance, {
-      adapter: {id: 'codex', version: '1'},
+      adapter: {id: 'codex', version: FORGE_VERSION},
       source: {kind: 'native_log', format: 'codex-rollout-jsonl', session_id: SESSION_ID},
     });
     const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
@@ -382,9 +383,9 @@ describe('Codex engine integration', () => {
     assert.ok(commands.every(({argv}) => !argv.includes('--last')));
     assert.deepEqual(provider.calls.map(({request}) => request.purpose), ['role_player', 'role_player', 'role_player', 'judge']);
     assert.ok(provider.calls.every(({context}) => Object.keys(context.credentials).join() === 'token'));
-    const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'));
+    const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'), {forgeVersion: completed.result.forge.version});
     assert.deepEqual(interaction.turns.map(({user}) => user), test.turns.map(({prompt}) => prompt));
-    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
     assert.doesNotMatch(JSON.stringify(judge.transcript), new RegExp(SYSTEM_MARKER));
     await assertRestrictedNative(completed, test.native()!);
   });
@@ -431,9 +432,9 @@ describe('Codex engine integration', () => {
       assert.equal(verified.result.evidence.completeness, liveHasTools ? 'fallback' : 'complete');
       assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code),
         liveHasTools ? ['source_incomplete', 'fallback_used'] : []);
-      const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'));
+      const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'), {forgeVersion: completed.result.forge.version});
       const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
       assert.equal(interaction.turns[0]!.tool_calls.length, liveHasTools ? 1 : 0);
       assert.equal(judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []).length, liveHasTools ? 1 : 0);
       assert.ok(provider.calls[0]!.request.systemPrompt?.includes(createJudgeTranscriptProjection(trajectory).transcriptJson));
@@ -506,7 +507,7 @@ describe('Codex engine integration', () => {
       assert.ok(!JSON.stringify(request).includes(AGENT_SECRET));
       assert.ok(!JSON.stringify(request).includes(imageData));
       const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
       const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
       const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
       assert.deepEqual(calls.map(({tool_call_id, function_name}) => ({tool_call_id, function_name})), [
@@ -585,10 +586,10 @@ describe('Codex engine integration', () => {
     assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
     assert.equal(verified.result.evidence.completeness, 'fallback');
     assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
-    const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'));
+    const interaction = parseInteractionArtifact(await readArtifact(completed.location, 'interaction.json'), {forgeVersion: completed.result.forge.version});
     assert.deepEqual(interaction.turns[0]!.tool_calls, [{id: 'item_1', name: 'mcp__fixture__probe', input: {}}]);
     const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
     const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
     assert.deepEqual(calls, [{tool_call_id: 'item_1', function_name: 'mcp__fixture__probe', arguments: {}}]);
     for (const steps of [trajectory.steps, judge.transcript.steps]) {
@@ -624,7 +625,7 @@ describe('Codex engine integration', () => {
     assert.equal(verified.result.evidence.provenance.source.kind, 'driver_fallback');
     assert.equal(verified.result.evidence.completeness, 'fallback');
     assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
-    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
     const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
     const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
     assert.deepEqual(calls.map(({function_name}) => function_name), ['mcp__fixture__probe']);
@@ -659,7 +660,7 @@ describe('Codex engine integration', () => {
       assert.equal(provider.calls.length, 1);
 
       const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+      const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
       const nativeResults = trajectory.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
       const nativeResult = nativeResults.find(({source_call_id}) => source_call_id === 'call-1');
       assert.equal(nativeResult?.content, expectedOutput);
@@ -714,7 +715,7 @@ describe('Codex engine integration', () => {
     assert.equal(verified.result.evidence.completeness, 'fallback');
     assert.deepEqual(verified.result.evidence.warnings.map(({code}) => code), ['source_incomplete', 'fallback_used']);
     const trajectory = parseAtifTrajectory(await readArtifact(completed.location, 'trajectory.json'));
-    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'));
+    const judge = parseJudgeEvidence(await readArtifact(completed.location, 'judge-evidence.json'), {forgeVersion: completed.result.forge.version});
     const calls = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.tool_calls ?? [] : []);
     const observations = judge.transcript.steps.flatMap((step) => step.source === 'agent' ? step.observation?.results ?? [] : []);
     assert.deepEqual(calls.map(({function_name}) => function_name), ['mcp__fixture__probe']);

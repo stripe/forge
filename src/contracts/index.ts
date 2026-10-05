@@ -9,3 +9,4 @@ export * from './observability.js';
 export * from './plugin.js';
 export * from './pluginReceipt.js';
 export * from './runtime.js';
+export type {AgentAdapterMetadata, CompletionProviderMetadata} from './metadata.js';

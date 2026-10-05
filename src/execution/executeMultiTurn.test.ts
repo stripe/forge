@@ -8,7 +8,6 @@ import {
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
-  JUDGE_TRANSCRIPT_PROJECTION_VERSION,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_JUDGE_WORKSPACE_FILE_CHARACTERS,
@@ -229,7 +228,6 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.doesNotMatch(JSON.stringify(judgeEvidence), new RegExp(AGENT_SECRET));
     assert.doesNotMatch(JSON.stringify(judgeEvidence), new RegExp(SHORT_SECRET));
     const auditedWorkspace: JudgeWorkspaceEvidenceV1 = {
-      schema_version: 1,
       entries: judgeEvidence.workspace.entries.map((entry) => ({
         ...entry,
         size_bytes: 0,
@@ -602,11 +600,9 @@ describe('executeEval multi-turn and judging integration', () => {
     }
 
     const judgeEvidence = artifactJson(stored, 'judge-evidence.json') as {
-      schema_version: number;
       transcript: {
         source: string;
         projection_id: string;
-        projection_version: number;
         trajectory_scope: string;
         included_step_sources: string[];
         copied_context: string;
@@ -614,11 +610,10 @@ describe('executeEval multi-turn and judging integration', () => {
         steps: unknown[];
       };
     };
-    assert.equal(judgeEvidence.schema_version, 1);
+    assert.ok(!('schema_version' in judgeEvidence));
     assert.deepEqual(judgeEvidence.transcript, {
       source: JUDGE_TRANSCRIPT_SOURCE,
       projection_id: JUDGE_TRANSCRIPT_PROJECTION_ID,
-      projection_version: JUDGE_TRANSCRIPT_PROJECTION_VERSION,
       trajectory_scope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
       included_step_sources: [...JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES],
       copied_context: JUDGE_TRANSCRIPT_COPIED_CONTEXT,

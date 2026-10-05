@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
+import {FORGE_VERSION} from '../../version.js';
 import {createCodexAdapter, type CodexLayout} from './index.js';
 import {assertCodexRuntimeLayout, resolveCodexLayout, usesDefaultCodexLayout} from './layout.js';
 
@@ -18,7 +19,8 @@ describe('Codex runtime layout', () => {
     });
     assert.ok(usesDefaultCodexLayout(resolved));
     const adapter = createCodexAdapter({layout: {...resolved}});
-    assert.equal(adapter.version, '1');
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'default', layout_mode: 'default'});
     assert.deepEqual(adapter.requirements(selection).environment.variables, {CODEX_HOME: '/home/forge/.codex'});
   });
 
@@ -28,13 +30,14 @@ describe('Codex runtime layout', () => {
     source.workspace = '/changed/workspace';
     source.home = '/changed/home';
     source.configDirectory = '/changed/config';
-    assert.equal(adapter.version, '1+layout');
+    assert.equal(adapter.version, FORGE_VERSION);
+    assert.deepEqual(adapter.metadata, {endpoint_mode: 'default', layout_mode: 'custom'});
     assert.deepEqual(adapter.requirements(selection).environment.variables, {CODEX_HOME: layout.configDirectory});
     assert.deepEqual(adapter.requirements(selection).stateDirectories, [{
       id: 'codex-home', containerPath: layout.configDirectory,
     }]);
     assert.equal(createCodexAdapter({layout, baseUrl: 'https://gateway.example.test/v1'}).version,
-      '1+responses-compatible.layout');
+      FORGE_VERSION);
     assert.equal(usesDefaultCodexLayout(resolveCodexLayout(layout)), false);
   });
 
