@@ -572,7 +572,8 @@ describe('createNormalizedTrajectory', () => {
       ],
     });
 
-    assert.equal(normalized.schemaVersion, ATIF_SCHEMA_VERSION);
+    assert.equal(normalized.trajectory.schema_version, ATIF_SCHEMA_VERSION);
+    assert.equal(Object.hasOwn(normalized, 'schemaVersion'), false);
     assert.equal(Object.hasOwn(normalized, 'normalizationVersion'), false);
     assert.equal(normalized.format, 'atif');
     assert.equal(normalized.completeness, 'partial');
@@ -602,7 +603,7 @@ describe('createNormalizedTrajectory', () => {
       NormalizedTrajectoryValidationError,
     );
     for (const [field, value] of [
-      ['schemaVersion', 'ATIF-v1.7'],
+      ['schemaVersion', ATIF_SCHEMA_VERSION],
       ['normalizationVersion', 1],
       ['undeclared', true],
     ] as const) {
@@ -613,6 +614,13 @@ describe('createNormalizedTrajectory', () => {
     }
     assert.throws(
       () => parseNormalizedTrajectory({...normalized, trajectory: {}}),
+      AtifValidationError,
+    );
+    assert.throws(
+      () => parseNormalizedTrajectory({
+        ...normalized,
+        trajectory: {...normalized.trajectory, schema_version: 'ATIF-v1.7'},
+      }),
       AtifValidationError,
     );
   });
@@ -665,7 +673,7 @@ describe('createNormalizedTrajectory', () => {
       trajectory: minimalTrajectory(),
       provenance: {
         source: {kind: 'atif' as const, format: 'atif' as const,
-          schemaVersion: 'ATIF-v1.8', sessionId: 'source-session'},
+          schemaVersion: 'ATIF-v1.7', sessionId: 'source-session'},
         adapter: {id: 'test-agent', version: '1'},
       },
       completeness: 'partial' as const,

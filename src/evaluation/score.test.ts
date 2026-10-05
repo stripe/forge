@@ -10,6 +10,7 @@ describe('scoreEvaluation', () => {
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'passed');
+      assert.equal(Object.hasOwn(actual, 'schema_version'), false);
     }
   });
 

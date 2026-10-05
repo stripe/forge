@@ -592,7 +592,7 @@ different.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/evaluation/audit wire types and schema versions | Used by execution, evaluation, storage, and consumers |
+| [`types.ts`](https://github.com/stripe/forge/blob/main/src/results/types.ts) | Result/artifact/audit wire types and schema versions; embedded evaluation types | Used by execution, evaluation, storage, and consumers |
 | [`parse.ts`](https://github.com/stripe/forge/blob/main/src/results/parse.ts) | Strict Zod parsers for result and audit artifacts | Called before commit and during verification; imports judge projection constants to bind schema policy |
 | [`localStore.ts`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) | `createArtifactStore`, `verifyCompletedRun`, store errors | Implements two-phase local commit and independent cross-artifact verification |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/results/index.ts) | Public results barrel | Re-exported by package root |

@@ -353,7 +353,8 @@ extensions/<contributor-id>/...    # optional host-contributed artifacts
 
 The checked-in quickstart includes `workspace-evidence.json` because its case
 defines file checks. `result.json.evaluation` is the sole canonical evaluation
-record; Forge does not write a duplicate `evaluation.json`.
+record, governed by the enclosing result schema; Forge does not write a
+duplicate `evaluation.json`.
 
 `result.json` is the atomic commit marker and is not listed in its own artifact
 array. Its `artifacts` and `supplemental_artifacts` arrays claim the media type,
@@ -1390,6 +1391,7 @@ Forge persists the canonical agent trajectory as a standalone
 - The implementation is pinned to Harbor v0.23.0 commit
   `1e5c5c6db929a10a140d05e606882c671ae20729` and its ATIF RFC.
 - `schema_version` is required and Forge validates exactly one ATIF version.
+  The normalization envelope exposes it through `trajectory.schema_version`.
 - Explicit JSON `null` is accepted and preserved where the pinned ATIF contract
   treats null and omission equivalently. Conditional multimodal fields still
   obey the RFC's requirement to be omitted when inapplicable.

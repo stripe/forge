@@ -22,7 +22,6 @@ import type {
 } from '../model/types.js';
 
 export const RUN_RESULT_SCHEMA_VERSION = 1 as const;
-export const EVALUATION_SCHEMA_VERSION = 1 as const;
 export const WORKSPACE_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const INTERACTION_SCHEMA_VERSION = 1 as const;
 export const SETUP_ARTIFACT_SCHEMA_VERSION = 1 as const;
@@ -44,7 +43,6 @@ export interface GuidelineResultV1 {
 }
 
 export interface EvaluationResultV1 {
-  readonly schema_version: typeof EVALUATION_SCHEMA_VERSION;
   readonly score: number;
   readonly status: EvalStatus;
   readonly guidelines_passed: number;

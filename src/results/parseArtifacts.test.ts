@@ -45,7 +45,6 @@ describe('canonical interaction and judge evidence parsing', () => {
 
   it('parses evaluation snapshots and rejects contradictory guideline totals', () => {
     const evaluation = {
-      schema_version: 1,
       score: 0.5,
       status: 'partial',
       guidelines_passed: 1,
@@ -58,6 +57,7 @@ describe('canonical interaction and judge evidence parsing', () => {
     };
     const parsed = parseEvaluationResult(evaluation);
     assert.deepEqual(parsed, evaluation);
+    assert.throws(() => parseEvaluationResult({...evaluation, schema_version: 1}));
     evaluation.guidelines[0]!.explanation = 'changed after parsing';
     assert.equal(parsed.guidelines[0]?.explanation, 'Done.');
     assert.throws(() => parseEvaluationResult({...evaluation, guidelines_total: 1}), /Guideline totals do not match/);

@@ -20,7 +20,6 @@ import {
 } from '../model/paths.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
-  EVALUATION_SCHEMA_VERSION,
   INTERACTION_SCHEMA_VERSION,
   JUDGE_EVIDENCE_SCHEMA_VERSION,
   RUN_RESULT_SCHEMA_VERSION,
@@ -107,7 +106,6 @@ const guidelineResult = z.object({
 }).strict();
 
 export const evaluationResultSchema = z.object({
-  schema_version: z.literal(EVALUATION_SCHEMA_VERSION),
   score: z.number().finite().min(0).max(1),
   status: z.enum(['passed', 'partial', 'failed']),
   guidelines_passed: z.number().int().nonnegative(),

@@ -891,12 +891,12 @@ native/<adapter-id>/session.<ext>    # exact restricted root-session source
 extensions/<contributor-id>/...     # optional host contribution
 ```
 
-Core plans, results, setup receipts, interaction, evaluation, and evidence
-artifacts use schema version 1. The trajectory uses ATIF v1.8. Parsers accept
-only the current version of each format.
+Core plans, results, setup receipts, interaction, and evidence artifacts use
+schema version 1. The trajectory uses ATIF v1.8. Parsers accept only the current
+version of each format.
 
-`result.json.evaluation` is the sole canonical evaluation result. The other
-core files serve distinct audit roles:
+`result.json.evaluation` is the sole canonical evaluation result, governed by
+the enclosing result schema. The other core files serve distinct audit roles:
 
 - `plan.json`: exact canonical declared execution input;
 - `setup.json`: ordered action audit and bounded material setup resolutions;

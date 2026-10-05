@@ -14,7 +14,6 @@ import {createTestResolvedRunPlan} from '../testing/plans.js';
 import {createArtifactStore, RunIdConflictError, verifyCompletedRun} from './localStore.js';
 import {parseRunResult} from './parse.js';
 import {
-  EVALUATION_SCHEMA_VERSION,
   RUN_RESULT_SCHEMA_VERSION,
   type ArtifactDescriptorV1,
   type InteractionArtifactV1,
@@ -455,6 +454,14 @@ describe('local artifact store', () => {
 
   it('rejects unsupported result schema versions', () => {
     assert.throws(() => parseRunResult({...resultFor([]), schema_version: 2}));
+  });
+
+  it('uses the result schema for evaluation and rejects a nested version', () => {
+    const result = resultFor([]);
+    assert.deepEqual(parseRunResult(result).evaluation, result.evaluation);
+    assert.throws(() => parseRunResult({
+      ...result, evaluation: {...result.evaluation, schema_version: 1},
+    }));
   });
 
   it('strictly parses configuration metadata and rejects removed normalization counters', () => {
@@ -1563,7 +1570,6 @@ function resultFor(
       redaction_count: 0,
     },
     evaluation: {
-      schema_version: EVALUATION_SCHEMA_VERSION,
       score: 0,
       status: 'passed',
       guidelines_passed: 0,

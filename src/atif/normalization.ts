@@ -1,11 +1,7 @@
 import {z} from 'zod';
 
 import {parseAtifTrajectory} from './parser.js';
-import {
-  ATIF_SCHEMA_VERSION,
-  type AtifTrajectoryV1_8,
-} from './types.js';
-
+import type {AtifTrajectoryV1_8} from './types.js';
 
 const MAX_METADATA_TEXT_LENGTH = 4_096;
 const MAX_WARNING_MESSAGE_LENGTH = 64 * 1_024;
@@ -62,7 +58,6 @@ const NormalizationWarningSchema = z
 const NormalizedTrajectorySchema = z
   .object({
     format: z.literal('atif'),
-    schemaVersion: z.literal(ATIF_SCHEMA_VERSION),
     trajectory: z.unknown(),
     provenance: z
       .object({
@@ -185,7 +180,6 @@ export type AtifNormalizationCompleteness =
  */
 export interface NormalizedTrajectory {
   format: 'atif';
-  schemaVersion: typeof ATIF_SCHEMA_VERSION;
   trajectory: AtifTrajectoryV1_8;
   provenance: AtifNormalizationProvenance;
   completeness: AtifNormalizationCompleteness;
@@ -239,7 +233,6 @@ export function parseNormalizedTrajectory(input: unknown): NormalizedTrajectory 
 
   return {
     format: result.data.format,
-    schemaVersion: result.data.schemaVersion,
     trajectory: parseAtifTrajectory(result.data.trajectory),
     provenance: result.data.provenance as AtifNormalizationProvenance,
     completeness: result.data.completeness,
@@ -253,7 +246,6 @@ export function createNormalizedTrajectory(
 ): NormalizedTrajectory {
   return parseNormalizedTrajectory({
     format: 'atif',
-    schemaVersion: ATIF_SCHEMA_VERSION,
     trajectory: input.trajectory,
     provenance: input.provenance,
     completeness: input.completeness,

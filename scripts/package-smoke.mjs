@@ -92,6 +92,26 @@ try {
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
       assert.equal(atif.isAtifTimestamp('2024-02-29T00:00:00Z'), true);
       assert.equal(typeof atif.parseNormalizedTrajectory, 'function');
+      const normalized = atif.createNormalizedTrajectory({
+        trajectory: {
+          schema_version: 'ATIF-v1.8',
+          agent: {name: 'package-smoke', version: '1.0.0'},
+          steps: [{step_id: 1, source: 'user', message: 'hello'}],
+        },
+        provenance: {
+          source: {kind: 'atif', format: 'atif', schemaVersion: 'ATIF-v1.8'},
+          adapter: {id: 'package-smoke', version: forge.FORGE_VERSION},
+        },
+        completeness: 'complete',
+      });
+      assert.equal(Object.hasOwn(normalized, 'schemaVersion'), false);
+      assert.equal(normalized.trajectory.schema_version, 'ATIF-v1.8');
+      assert.equal(normalized.provenance.source.schemaVersion, 'ATIF-v1.8');
+      assert.deepEqual(atif.parseNormalizedTrajectory(normalized), normalized);
+      assert.throws(
+        () => atif.parseNormalizedTrajectory({...normalized, schemaVersion: atif.ATIF_SCHEMA_VERSION}),
+        atif.NormalizedTrajectoryValidationError,
+      );
       assert.equal(typeof cli.runCli, 'function');
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
       assert.equal(typeof campaign.runCampaign, 'function');
@@ -117,7 +137,7 @@ try {
       assert.deepEqual(codex.createCodexAdapter().metadata, {endpoint_mode: 'default', layout_mode: 'default'});
       assert.deepEqual(anthropic.createAnthropicCompletionProvider({baseUrl: 'https://gateway.example.com'}).metadata, {endpoint_mode: 'custom'});
       for (const [surface, names] of [
-        [forge, ['GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
+        [forge, ['EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
         [atif, ['ATIF_NORMALIZATION_VERSION']],
         [claude, ['CLAUDE_CODE_ADAPTER_VERSION', 'CLAUDE_CODE_GATEWAY_ADAPTER_VERSION']],
         [codex, ['CODEX_ADAPTER_VERSION', 'CODEX_RESPONSES_ADAPTER_VERSION']],

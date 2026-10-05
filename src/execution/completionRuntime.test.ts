@@ -15,6 +15,7 @@ import {
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
 } from '../testing/index.js';
+import {FORGE_VERSION} from '../version.js';
 import {
   completionBindingsForPlan,
   prepareCompletionRuntime,
@@ -184,7 +185,7 @@ describe('completion runtime', () => {
         sequence: 1,
         purpose: 'judge',
         provider: 'test-provider',
-        provider_version: '1',
+        provider_version: FORGE_VERSION,
         model: 'judge-model',
         status: 'failed',
         stop_reason: null,
@@ -315,7 +316,7 @@ describe('completion runtime', () => {
         sequence: 1,
         purpose: 'judge',
         provider: 'test-provider',
-        provider_version: '1',
+        provider_version: FORGE_VERSION,
         model: 'judge-model',
         status: 'failed',
         stop_reason: null,

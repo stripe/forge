@@ -57,7 +57,7 @@ describe('@stripe/forge package root', () => {
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {
-    for (const removed of ['GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']) {
+    for (const removed of ['EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']) {
       assert.equal(removed in rootExports, false);
     }
     assert.equal(typeof (FORGE_VERSION), 'string');
