@@ -1,11 +1,12 @@
 import path from 'node:path';
-import {parse, stringify} from 'smol-toml';
+import {parse, stringify} from '@iarna/toml';
 
 import type {MutableWorkspace} from '../../contracts/runtime.js';
 import {isSha256Digest} from '../../model/hashes.js';
 import {isSafeSimpleIdentifier} from '../../model/paths.js';
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
+const MAX_CONFIG_DEPTH = 64;
 const MAX_ENTRIES = 10_000;
 
 /** Preserve native plugin/hook state; never inherit provider or auth settings. */
@@ -15,8 +16,8 @@ export async function prepareCodexPluginConfiguration(home: MutableWorkspace): P
   if (inspected.kind !== 'file') throw new Error('Codex configuration must be a regular file.');
   let config: Record<string, unknown>;
   try {
-    config = parse(Buffer.from(await home.readFile('config.toml', {maxBytes: MAX_CONFIG_BYTES})).toString('utf8'),
-      {maxDepth: 64, unsafeKeyBehaviour: 'throw'});
+    config = parse(Buffer.from(await home.readFile('config.toml', {maxBytes: MAX_CONFIG_BYTES})).toString('utf8'));
+    assertSafeConfiguration(config);
   } catch {
     // Parser errors may quote credential-bearing source lines.
     throw new Error('Codex configuration is malformed or exceeds its byte limit.');
@@ -64,6 +65,20 @@ export async function prepareCodexPluginConfiguration(home: MutableWorkspace): P
     ...(Object.keys(projects).length ? {projects} : {}),
     ...(Object.keys(hookStates).length ? {hooks: {state: hookStates}} : {}),
   })), {mode: 0o600});
+}
+
+/** Check discarded settings too, before selecting or rewriting native state. */
+function assertSafeConfiguration(config: Record<string, unknown>): void {
+  const pending: {value: unknown; depth: number}[] = [{value: config, depth: 0}];
+  while (pending.length) {
+    const {value, depth} = pending.pop()!;
+    if (typeof value !== 'object' || value === null) continue;
+    if (depth > MAX_CONFIG_DEPTH) invalid();
+    for (const [key, child] of Object.entries(value)) {
+      if (key === '__proto__' || key === 'constructor') invalid();
+      pending.push({value: child, depth: depth + 1});
+    }
+  }
 }
 
 export function qualifiedPluginId(value: string): {name: string; marketplace: string} | undefined {

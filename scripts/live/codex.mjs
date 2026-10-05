@@ -80,7 +80,7 @@ export async function runCodexPluginIntegrationSuite({dockerExecutable, resultsR
         inputProvider: forge.createMemoryRunInputProvider(),
         artifactStore: forge.createArtifactStore({root: resultsRoot}),
       };
-      const plan = forge.createTestResolvedRunPlan({
+      const plan = forge.parseResolvedRunPlan({...forge.createTestResolvedRunPlan({
         caseId: `live/codex-${scenario.id}`, agent: {adapter: 'codex', provider: 'openai', model: 'gpt-5.4', hook_trust: scenario.trust},
         mode: scenario.multi ? 'multi_turn' : 'one_shot', prompt: 'Exercise the Codex plugin fixture.', maxTurns: 3,
         ...(scenario.multi ? {rolePlayer: {provider: 'scripted-role', model: 'fixture'}} : {}),
@@ -98,7 +98,7 @@ export async function runCodexPluginIntegrationSuite({dockerExecutable, resultsR
         ]},
         runtime: {adapter: 'docker', image: {kind: 'forge'}, platform,
           resources: {memory_bytes: 4 * 1024 ** 3, cpu_count: 2, process_count: 512}},
-      });
+      }), limits: {run_timeout_ms: 5 * 60_000}});
       try {
         const completed = await forge.executeEval({runId, plan, composition, signal});
         const verified = await forge.verifyCompletedRun(completed.location);

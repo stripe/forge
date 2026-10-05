@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
-import {parse} from 'smol-toml';
+import {parse} from '@iarna/toml';
 
 import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
 import {prepareCodexPluginConfiguration} from './pluginConfig.js';
@@ -88,5 +88,45 @@ enabled=true
       async readFile() { throw new Error('must not read'); },
       async writeFile() { throw new Error('must not write'); },
     }), /regular file/);
+  });
+
+  it('rejects unsafe keys even in settings that would be discarded', async () => {
+    for (const config of [
+      '__proto__ = "synthetic-secret"',
+      'constructor = "synthetic-secret"',
+      '[model_providers.forge]\nconstructor = "synthetic-secret"',
+      'discarded = { nested = { "__proto__" = "synthetic-secret" } }',
+      'discarded = [{ nested = { constructor = "synthetic-secret" } }]',
+    ]) {
+      const state = createMemoryWorkspace({'config.toml': config});
+      await assert.rejects(prepareCodexPluginConfiguration(state.mutable), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.doesNotMatch(error.message, /synthetic-secret/);
+        assert.equal(error.cause, undefined);
+        return true;
+      });
+      assert.equal(Buffer.from(state.snapshot().get('config.toml')!).toString(), config);
+    }
+  });
+
+  it('bounds nested arrays and tables without changing rejected configuration', async () => {
+    const atLimit = 'discarded = ' + '['.repeat(64) + '"synthetic-secret"' + ']'.repeat(64);
+    const valid = createMemoryWorkspace({'config.toml': atLimit});
+    await prepareCodexPluginConfiguration(valid.mutable);
+    assert.doesNotMatch(Buffer.from(valid.snapshot().get('config.toml')!).toString(), /synthetic-secret/);
+
+    for (const config of [
+      'discarded = ' + '['.repeat(65) + '"synthetic-secret"' + ']'.repeat(65),
+      '[' + Array.from({length: 65}, (_, index) => `level${index}`).join('.') + ']\nvalue = "synthetic-secret"',
+    ]) {
+      const state = createMemoryWorkspace({'config.toml': config});
+      await assert.rejects(prepareCodexPluginConfiguration(state.mutable), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.doesNotMatch(error.message, /synthetic-secret/);
+        assert.equal(error.cause, undefined);
+        return true;
+      });
+      assert.equal(Buffer.from(state.snapshot().get('config.toml')!).toString(), config);
+    }
   });
 });
