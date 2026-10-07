@@ -8,12 +8,12 @@ import {parseArgs} from 'node:util';
 import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
 import {createCodexAdapter} from './agents/codex/index.js';
 import {
-  CAMPAIGN_CLI_OPTIONS,
-  CampaignCommandError,
-  CampaignUsageError,
-  createCampaignCliOptions,
-  runCampaignCommand,
-} from './campaignCli.js';
+  EXPERIMENT_CLI_OPTIONS,
+  ExperimentCommandError,
+  ExperimentUsageError,
+  createExperimentCliOptions,
+  runExperimentCommand,
+} from './experimentCli.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import type {RuntimePlatform} from './contracts/runtime.js';
 import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
@@ -66,7 +66,7 @@ const HOST_CLI_OPTIONS = {
   help: {type: 'boolean', short: 'h'},
   version: {type: 'boolean'},
 } as const;
-const CLI_OPTIONS = createCampaignCliOptions(HOST_CLI_OPTIONS);
+const CLI_OPTIONS = createExperimentCliOptions(HOST_CLI_OPTIONS);
 
 type CliOptionName = keyof typeof CLI_OPTIONS;
 
@@ -96,9 +96,9 @@ Selection options:
   --repetition <index> Select a zero-based repetition
 
 Run options:
-  --output <directory> Write experiment executions below this directory (default: ./results)
+  --output <directory> Write experiment runs below this directory (default: ./results)
   --run-id <id>        Use an explicit eval ID when exactly one combination is selected
-  --resume <id>        Resume this experiment execution; an ID is required
+  --resume <id>        Resume this experiment run; an ID is required
   --jobs <count>       Maximum simultaneous evals (default: 1)
   --credential-env <reference>=<environment-name>
                         Bind an opaque credential reference for this run
@@ -233,12 +233,12 @@ export async function runCli(
       'experiment',
       ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
-        ? [...Object.keys(CAMPAIGN_CLI_OPTIONS) as (keyof typeof CAMPAIGN_CLI_OPTIONS)[], 'credential-env' as const]
+        ? [...Object.keys(EXPERIMENT_CLI_OPTIONS) as (keyof typeof EXPERIMENT_CLI_OPTIONS)[], 'credential-env' as const]
         : []),
     ];
     assertAllowedOptions(parsed.values, allowed);
     if (command === 'run') {
-      return await runPublicCampaign(argv, options, engine, stdout, stderr);
+      return await runPublicExperiment(argv, options, engine, stdout, stderr);
     }
 
     const cwd = path.resolve(options.cwd ?? process.cwd());
@@ -397,11 +397,11 @@ export async function runCli(
   }
 }
 
-async function runPublicCampaign(
+async function runPublicExperiment(
   argv: readonly string[], options: RunCliOptions, engine: ForgeEngine,
   stdout: (text: string) => void, stderr: (text: string) => void,
 ): Promise<number> {
-  const result = await runCampaignCommand(argv, {
+  const result = await runExperimentCommand(argv, {
     hostOptions: HOST_CLI_OPTIONS,
     selectorOptions: SELECTOR_OPTIONS,
     allowPositionals: true,
@@ -419,7 +419,7 @@ async function runPublicCampaign(
       parseRepetition(values.repetition);
       parseCredentialEnvironmentBindings(values['credential-env']);
     },
-    loadCampaign: async ({values, cwd, root, savedSelections, signal}) => {
+    loadExperiment: async ({values, cwd, root, savedSelections, signal}) => {
       const experiment = await engine.loadExperimentConfig(resolveRequiredPath(values.experiment, 'experiment', cwd));
       if (experiment.config.dataset.path === undefined) {
         throw new CliUsageError('The experiment must declare dataset.path, relative to the experiment file.');
@@ -592,10 +592,10 @@ class CliUsageError extends Error {
 }
 
 function isUsageError(error: unknown): boolean {
-  if (error instanceof CampaignCommandError) return isUsageError(error.cause);
+  if (error instanceof ExperimentCommandError) return isUsageError(error.cause);
   return (
     error instanceof CliUsageError ||
-    error instanceof CampaignUsageError ||
+    error instanceof ExperimentUsageError ||
     (typeof error === 'object' &&
       error !== null &&
       'code' in error &&

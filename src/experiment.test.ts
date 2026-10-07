@@ -4,19 +4,19 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
-import * as campaignExports from './campaign.js';
+import * as experimentRunExports from './experiment.js';
 import {
-  CampaignReportError,
-  inspectCampaign,
-  parseCampaignReport,
-  readCampaignSelections,
-  runCampaign,
-  type CampaignOptions,
-  type CampaignProgressEvent,
-  type CampaignSummary,
-  type CampaignReportV1,
-} from './campaign.js';
-import {parseCampaign} from './campaignModel.js';
+  ExperimentRunReportError,
+  inspectExperimentRun,
+  parseExperimentRunReport,
+  readExperimentRunSelections,
+  runExperiment,
+  type ExperimentRunOptions,
+  type ExperimentRunProgressEvent,
+  type ExperimentRunSummary,
+  type ExperimentRunReportV1,
+} from './experiment.js';
+import {parseExperimentRunCheckpoint} from './experimentModel.js';
 import {createForgeEngine, defaultForgeEngine} from './engine.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import {createArtifactStore} from './results/index.js';
@@ -35,18 +35,18 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})));
 });
 
-describe('public campaign API', () => {
+describe('public experiment run API', () => {
   it('exports orchestration through its subpath, separate from the root engine API', () => {
-    assert.equal(typeof runCampaign, 'function');
-    assert.equal(typeof readCampaignSelections, 'function');
-    assert.equal(typeof inspectCampaign, 'function');
-    assert.equal(typeof parseCampaignReport, 'function');
-    assert.equal(typeof CampaignReportError, 'function');
-    assert.equal('CAMPAIGN_REPORT_SCHEMA_VERSION' in campaignExports, false);
-    const optionsType = (_options: CampaignOptions): void => undefined;
-    const summaryType = (_summary: CampaignSummary): void => undefined;
-    const reportType = (_report: CampaignReportV1): void => undefined;
-    const eventType = (event: CampaignProgressEvent): string => {
+    assert.equal(typeof runExperiment, 'function');
+    assert.equal(typeof readExperimentRunSelections, 'function');
+    assert.equal(typeof inspectExperimentRun, 'function');
+    assert.equal(typeof parseExperimentRunReport, 'function');
+    assert.equal(typeof ExperimentRunReportError, 'function');
+    assert.equal('EXPERIMENT_RUN_REPORT_SCHEMA_VERSION' in experimentRunExports, false);
+    const optionsType = (_options: ExperimentRunOptions): void => undefined;
+    const summaryType = (_summary: ExperimentRunSummary): void => undefined;
+    const reportType = (_report: ExperimentRunReportV1): void => undefined;
+    const eventType = (event: ExperimentRunProgressEvent): string => {
       if ('location' in event) return event.location;
       if (event.state === 'errored') return event.error_code;
       return event.run_id;
@@ -54,7 +54,7 @@ describe('public campaign API', () => {
   });
 
   it('reads a pending-only checkpoint using its Forge identity without companion artifacts', async () => {
-    const root = await campaignRoot();
+    const root = await experimentRunRoot();
     const plan = createTestResolvedRunPlan();
     const checkpoint = {
       forge: FORGE_BUILD_IDENTITY,
@@ -62,14 +62,14 @@ describe('public campaign API', () => {
       entries: [{selection: plan.selection, plan_sha256: `sha256:${'a'.repeat(64)}`, attempts: []}],
     };
     await fs.mkdir(root);
-    const location = path.join(root, 'campaign.json');
+    const location = path.join(root, 'experiment.json');
     await fs.writeFile(location, JSON.stringify(checkpoint));
-    assert.deepEqual(await readCampaignSelections(root), [plan.selection]);
-    const inspected = await inspectCampaign({root, engine: defaultForgeEngine});
+    assert.deepEqual(await readExperimentRunSelections(root), [plan.selection]);
+    const inspected = await inspectExperimentRun({root, engine: defaultForgeEngine});
     assert.equal(inspected.outcomes[0]!.state, 'pending');
     assert.equal(inspected.outcomes[0]!.artifact, null);
-    assert.deepEqual(parseCampaign(checkpoint).forge, FORGE_BUILD_IDENTITY);
-    assert.equal(Object.hasOwn(parseCampaign(checkpoint), 'schema_version'), false);
+    assert.deepEqual(parseExperimentRunCheckpoint(checkpoint).forge, FORGE_BUILD_IDENTITY);
+    assert.equal(Object.hasOwn(parseExperimentRunCheckpoint(checkpoint), 'schema_version'), false);
 
     for (const invalid of [
       {...checkpoint, forge: undefined},
@@ -78,13 +78,13 @@ describe('public campaign API', () => {
       {...checkpoint, forge: {version: '9999.0.0'}},
     ]) {
       await fs.writeFile(location, JSON.stringify(invalid));
-      await assert.rejects(readCampaignSelections(root), /compatible Forge campaign/);
-      await assert.rejects(inspectCampaign({root, engine: defaultForgeEngine}), /compatible Forge campaign/);
+      await assert.rejects(readExperimentRunSelections(root), /compatible Forge experiment.json/);
+      await assert.rejects(inspectExperimentRun({root, engine: defaultForgeEngine}), /compatible Forge experiment.json/);
     }
   });
 
   it('checks a checkpoint release before interpreting its selections and treats diagnostics as provenance', () => {
-    assert.throws(() => parseCampaign({forge: {version: '9999.0.0'}, entries: 'invalid'}),
+    assert.throws(() => parseExperimentRunCheckpoint({forge: {version: '9999.0.0'}, entries: 'invalid'}),
       /incompatible with installed Forge/);
     const checkpoint = {
       forge: {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: true},
@@ -92,31 +92,31 @@ describe('public campaign API', () => {
       entries: [{selection: createTestResolvedRunPlan().selection,
         plan_sha256: `sha256:${'a'.repeat(64)}`, attempts: []}],
     };
-    assert.deepEqual(parseCampaign(checkpoint).forge, checkpoint.forge);
+    assert.deepEqual(parseExperimentRunCheckpoint(checkpoint).forge, checkpoint.forge);
   });
 
   it('stamps the current build when rewriting a resumed checkpoint without changing committed runs', async () => {
-    const root = await campaignRoot();
-    const options: CampaignOptions = {
+    const root = await experimentRunRoot();
+    const options: ExperimentRunOptions = {
       root, plans: [createTestResolvedRunPlan()], composition: makeComposition(root),
       engine: defaultForgeEngine, resume: false, signal: new AbortController().signal,
       runIdFactory: () => 'retained-run', progress: () => undefined,
       execute: (input) => defaultForgeEngine.executeEval({...input, composition: makeComposition(root)}),
     };
-    const first = await runCampaign(options);
-    const checkpoint = parseCampaign(JSON.parse(await fs.readFile(first.campaign, 'utf8')));
+    const first = await runExperiment(options);
+    const checkpoint = parseExperimentRunCheckpoint(JSON.parse(await fs.readFile(first.checkpoint, 'utf8')));
     const oldBuild = {version: FORGE_VERSION, commit_sha: 'a'.repeat(40), dirty: FORGE_BUILD_IDENTITY.dirty !== true};
     assert.notDeepEqual(oldBuild, FORGE_BUILD_IDENTITY);
-    await fs.writeFile(first.campaign, JSON.stringify({...checkpoint, forge: oldBuild}));
+    await fs.writeFile(first.checkpoint, JSON.stringify({...checkpoint, forge: oldBuild}));
     const runRoot = path.join(root, 'runs', 'retained-run');
     const savedPlan = await fs.readFile(path.join(runRoot, 'plan.json'));
     const savedResult = await fs.readFile(path.join(runRoot, 'result.json'));
 
-    const resumed = await runCampaign({...options, resume: true,
+    const resumed = await runExperiment({...options, resume: true,
       execute: async () => {throw new Error('must skip committed runs');}});
     assert.equal(resumed.executed, 0);
     assert.equal(resumed.skipped, 1);
-    const rewritten = parseCampaign(JSON.parse(await fs.readFile(first.campaign, 'utf8')));
+    const rewritten = parseExperimentRunCheckpoint(JSON.parse(await fs.readFile(first.checkpoint, 'utf8')));
     assert.deepEqual(rewritten.forge, FORGE_BUILD_IDENTITY);
     assert.deepEqual(rewritten.entries, checkpoint.entries);
     assert.deepEqual(await fs.readFile(path.join(runRoot, 'plan.json')), savedPlan);
@@ -124,11 +124,11 @@ describe('public campaign API', () => {
   });
 
   it('rejects invalid library concurrency before preflight or filesystem writes', async () => {
-    const root = await campaignRoot();
+    const root = await experimentRunRoot();
     const composition = makeComposition(root);
     let calls = 0;
     for (const jobs of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      await assert.rejects(runCampaign({
+      await assert.rejects(runExperiment({
         root, composition, jobs,
         plans: [createTestResolvedRunPlan()],
         engine: {...defaultForgeEngine, preflightEval() {calls += 1;}},
@@ -144,11 +144,11 @@ describe('public campaign API', () => {
   });
 
   it('preflights every plan before acquiring per-run host resources', async () => {
-    const root = await campaignRoot();
+    const root = await experimentRunRoot();
     const plans = ['first', 'last'].map((id) => createTestResolvedRunPlan({caseId: `testing/${id}`}));
     const preflighted: string[] = [];
     let calls = 0;
-    await assert.rejects(runCampaign({
+    await assert.rejects(runExperiment({
       root, plans, jobs: 2,
       composition: makeComposition(root),
       engine: {...defaultForgeEngine, preflightEval({plan}) {
@@ -167,7 +167,7 @@ describe('public campaign API', () => {
   });
 
   it('shares scheduling and resume with a custom engine and per-run host compositions', async () => {
-    const root = await campaignRoot();
+    const root = await experimentRunRoot();
     const manifest = {namespace: 'acme-evals', version: '1.0.0', sha256: `sha256:${'a'.repeat(64)}` as const};
     const bundle = defineSetupActionBundle({
       manifest,
@@ -200,12 +200,12 @@ describe('public campaign API', () => {
       return engine.parseResolvedRunPlan(plan);
     });
     const composition = makeComposition(root);
-    const events: CampaignProgressEvent[] = [];
+    const events: ExperimentRunProgressEvent[] = [];
     const opened: string[] = [];
     const closed: string[] = [];
     let nextId = 0;
     let fail = true;
-    const options: CampaignOptions = {
+    const options: ExperimentRunOptions = {
       root, plans, composition, engine, resume: false, jobs: 2,
       signal: new AbortController().signal,
       runIdFactory: () => `host-run-${++nextId}`,
@@ -223,21 +223,21 @@ describe('public campaign API', () => {
         }
       },
     };
-    assert.deepEqual(await runCampaign(options), {
-      campaign: path.join(root, 'campaign.json'), report: path.join(root, 'report.json'),
+    assert.deepEqual(await runExperiment(options), {
+      checkpoint: path.join(root, 'experiment.json'), report: path.join(root, 'report.json'),
       total: 2, executed: 2, skipped: 0, completed: 1, errored: 1,
     });
-    assert.deepEqual(await readCampaignSelections(root), plans.map((plan) => plan.selection));
-    assert.deepEqual(await readCampaignSelections(`${root}/.`), plans.map((plan) => plan.selection));
-    assert.deepEqual(await readCampaignSelections(path.relative(process.cwd(), root)), plans.map((plan) => plan.selection));
+    assert.deepEqual(await readExperimentRunSelections(root), plans.map((plan) => plan.selection));
+    assert.deepEqual(await readExperimentRunSelections(`${root}/.`), plans.map((plan) => plan.selection));
+    assert.deepEqual(await readExperimentRunSelections(path.relative(process.cwd(), root)), plans.map((plan) => plan.selection));
     fail = false;
-    const resumed = await runCampaign({...options, resume: true, jobs: 3});
+    const resumed = await runExperiment({...options, resume: true, jobs: 3});
     assert.equal(resumed.executed, 1);
     assert.equal(resumed.skipped, 1);
     assert.equal(resumed.completed, 2);
     assert.deepEqual(opened, ['host-run-1', 'host-run-2', 'host-run-3']);
     assert.deepEqual([...closed].sort(), opened);
-    const checkpoint = JSON.parse(await fs.readFile(path.join(root, 'campaign.json'), 'utf8'));
+    const checkpoint = JSON.parse(await fs.readFile(path.join(root, 'experiment.json'), 'utf8'));
     assert.deepEqual(checkpoint.entries.map((entry: {attempts: unknown[]}) => entry.attempts.length), [1, 2]);
     for (const runId of ['host-run-1', 'host-run-3']) {
       const completed = await engine.verifyCompletedRun(path.join(root, 'runs', runId));
@@ -250,7 +250,7 @@ describe('public campaign API', () => {
   });
 
   it('drains siblings under the lock when an outcome callback throws and resumes only unfinished work', async () => {
-    const root = await campaignRoot();
+    const root = await experimentRunRoot();
     const plans = ['first', 'second', 'third'].map((id) => createTestResolvedRunPlan({caseId: `testing/${id}`}));
     const started = createGate();
     const cancelled = createGate();
@@ -259,7 +259,7 @@ describe('public campaign API', () => {
     const sentinel = new Error('outcome callback failed');
     const calls: string[] = [];
     let nextId = 0;
-    const options: CampaignOptions = {
+    const options: ExperimentRunOptions = {
       root, plans, composition: makeComposition(root), engine: defaultForgeEngine,
       jobs: 2, resume: false, signal: controller.signal,
       runIdFactory: () => `callback-${++nextId}`, progress: () => undefined,
@@ -282,26 +282,26 @@ describe('public campaign API', () => {
       },
     };
     let settled = false;
-    const running = runCampaign(options).then(
+    const running = runExperiment(options).then(
       () => {settled = true; return null;},
       (error: unknown) => {settled = true; return error;},
     );
     try {
       await waitFor(cancelled.promise);
-      await fs.stat(path.join(root, '.campaign.lock'));
+      await fs.stat(path.join(root, '.experiment.lock'));
       assert.equal(settled, false, 'The callback failure must wait for sibling cleanup');
       assert.deepEqual(calls, ['testing/first', 'testing/second']);
       cleanup.resolve();
       assert.equal(await waitFor(running), sentinel);
-      await assert.rejects(fs.stat(path.join(root, '.campaign.lock')), {code: 'ENOENT'});
+      await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {code: 'ENOENT'});
       const retained = await fs.readFile(path.join(root, 'runs', 'callback-1', 'result.json'));
-      const resumed = await runCampaign({...options, resume: true, onOutcome: () => undefined,
+      const resumed = await runExperiment({...options, resume: true, onOutcome: () => undefined,
         execute: (input) => defaultForgeEngine.executeEval({...input, composition: makeComposition(root)})});
       assert.equal(resumed.skipped, 1);
       assert.equal(resumed.executed, 2);
       assert.deepEqual(await fs.readFile(path.join(root, 'runs', 'callback-1', 'result.json')), retained);
       let executions = 0;
-      await assert.rejects(runCampaign({...options, resume: true,
+      await assert.rejects(runExperiment({...options, resume: true,
         execute: async () => {executions += 1; throw new Error('must not execute');}}),
       (error) => error === sentinel);
       assert.equal(executions, 0, 'A failing skipped-outcome callback must stop no-op resume');
@@ -313,39 +313,39 @@ describe('public campaign API', () => {
   });
 
   it('uses the latest attempt after an older valid result is restored', async () => {
-    const root = await campaignRoot();
+    const root = await experimentRunRoot();
     const plans = [createTestResolvedRunPlan()];
     let nextId = 0;
-    const options: CampaignOptions = {
+    const options: ExperimentRunOptions = {
       root, plans, composition: makeComposition(root), engine: defaultForgeEngine,
       resume: false, signal: new AbortController().signal,
       runIdFactory: () => `history-${++nextId}`, progress: () => undefined,
       execute: (input) => defaultForgeEngine.executeEval({...input, composition: makeComposition(root)}),
     };
-    await runCampaign(options);
+    await runExperiment(options);
     const originalPath = path.join(root, 'runs', 'history-1', 'result.json');
     const original = await fs.readFile(originalPath);
     await fs.writeFile(originalPath, 'invalid result');
-    const failedRetry = await runCampaign({...options, resume: true,
+    const failedRetry = await runExperiment({...options, resume: true,
       execute: async () => {throw new Error('retry execution failed');}});
     assert.equal(failedRetry.errored, 1);
     await fs.writeFile(originalPath, original);
     await defaultForgeEngine.verifyCompletedRun(path.dirname(originalPath));
 
-    const inspection = await inspectCampaign({root, engine: defaultForgeEngine});
+    const inspection = await inspectExperimentRun({root, engine: defaultForgeEngine});
     assert.equal(inspection.outcomes[0]!.run_id, 'history-2');
     assert.equal(inspection.outcomes[0]!.state, 'errored');
     assert.equal(inspection.outcomes[0]!.artifact, null);
-    const report = parseCampaignReport(JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')));
+    const report = parseExperimentRunReport(JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')));
     assert.equal(report.summary.completed, 0);
     assert.equal(report.runs[0]!.run_id, 'history-2');
     assert.equal(report.runs[0]!.evaluation, null);
-    const resumed = await runCampaign({...options, resume: true});
+    const resumed = await runExperiment({...options, resume: true});
     assert.equal(resumed.executed, 1);
     assert.equal(resumed.skipped, 0);
     assert.equal(resumed.completed, 1);
     assert.deepEqual(await fs.readFile(originalPath), original);
-    const checkpoint = JSON.parse(await fs.readFile(path.join(root, 'campaign.json'), 'utf8'));
+    const checkpoint = JSON.parse(await fs.readFile(path.join(root, 'experiment.json'), 'utf8'));
     assert.deepEqual(checkpoint.entries[0].attempts.map((attempt: {run_id: string}) => attempt.run_id),
       ['history-1', 'history-2', 'history-3']);
   });
@@ -361,17 +361,17 @@ async function waitFor<T>(promise: Promise<T>): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
-      timeout = setTimeout(() => reject(new Error('Timed out waiting for campaign test readiness')), 5_000);
+      timeout = setTimeout(() => reject(new Error('Timed out waiting for experiment run test readiness')), 5_000);
     })]);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function campaignRoot() {
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-campaign-api-'));
+async function experimentRunRoot() {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-experiment-run-api-'));
   temporaryDirectories.push(temporary);
-  return path.join(temporary, 'host-campaign');
+  return path.join(temporary, 'host-experiment-run');
 }
 
 function makeComposition(root: string): ForgeComposition {

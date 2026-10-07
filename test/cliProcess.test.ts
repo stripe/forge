@@ -47,6 +47,15 @@ describe('CLI executable', () => {
     assert.equal(result.stderr, '');
   });
 
+  it('describes experiment run IDs in executable help', () => {
+    const result = invoke(cliFile, ['--help']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /--resume <experiment-run-id>/);
+    assert.match(result.stdout, /results\/experiments\/<experiment-run-id>/);
+    assert.doesNotMatch(result.stdout, /campaign/i);
+    assert.equal(result.stderr, '');
+  });
+
   it('returns a usage error through the process exit code', () => {
     const result = invoke(cliFile, ['run', '--resume']);
     assert.equal(result.status, 2, result.stderr);

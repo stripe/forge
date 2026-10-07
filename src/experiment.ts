@@ -4,18 +4,18 @@ import * as path from 'node:path';
 import {z} from 'zod';
 
 import {
-  campaignRunIdSchema as runIdSchema,
-  parseCampaign,
-  type Campaign,
-  type CampaignAttempt as Attempt,
-  type SettledCampaignAttempt as SettledAttempt,
-} from './campaignModel.js';
+  experimentRunIdSchema as runIdSchema,
+  parseExperimentRunCheckpoint,
+  type ExperimentRunCheckpoint,
+  type ExperimentRunAttempt as Attempt,
+  type SettledExperimentRunAttempt as SettledAttempt,
+} from './experimentModel.js';
 import {
-  buildCampaignReport,
-  serializeCampaignReport,
-  type CampaignReportEvaluationV1,
-  type CampaignReportRunV1,
-} from './campaignReport.js';
+  buildExperimentRunReport,
+  serializeExperimentRunReport,
+  type ExperimentRunReportEvaluationV1,
+  type ExperimentRunReportRunV1,
+} from './experimentReport.js';
 import type {ForgeComposition} from './contracts/composition.js';
 import type {ForgeEngine} from './engine.js';
 import {ForgeExecutionError} from './execution/errors.js';
@@ -27,51 +27,51 @@ import {serializeCanonicalJson} from './serialization.js';
 import {FORGE_BUILD_IDENTITY} from './version.js';
 
 export {
-  parseCampaignReport,
-  type CampaignReportCaseV1,
-  type CampaignReportEvaluationV1,
-  type CampaignReportRunV1,
-  type CampaignReportStatisticsV1,
-  type CampaignReportV1,
-} from './campaignReport.js';
+  parseExperimentRunReport,
+  type ExperimentRunReportCaseV1,
+  type ExperimentRunReportEvaluationV1,
+  type ExperimentRunReportRunV1,
+  type ExperimentRunReportStatisticsV1,
+  type ExperimentRunReportV1,
+} from './experimentReport.js';
 
-const MAX_CAMPAIGN_BYTES = 16 * 1024 * 1024;
+const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
 
 /** A report failure does not invalidate committed evaluations or their checkpoint. */
-export class CampaignReportError extends Error {
+export class ExperimentRunReportError extends Error {
   readonly report: string;
   constructor(report: string, cause: unknown) {
-    super(`Could not write campaign report at ${report}. Saved evaluations can be resumed without rerunning completed entries.`, {cause});
-    this.name = 'CampaignReportError';
+    super(`Could not write experiment run report at ${report}. Saved evaluations can be resumed without rerunning completed entries.`, {cause});
+    this.name = 'ExperimentRunReportError';
     this.report = report;
   }
 }
 
 /** Bounded metadata from a verified local commit, independent of publication. */
-export interface CampaignArtifact {
+export interface ExperimentRunArtifact {
   readonly location: string;
   readonly evaluation: {readonly status: EvalStatus; readonly score: number};
   readonly failure: 'role_player_error' | null;
 }
 
 /** The effective latest attempt for one selection, in saved selection order. */
-export interface CampaignOutcome {
+export interface ExperimentRunOutcome {
   readonly selection: RunSelection;
   readonly plan_sha256: string;
   readonly run_id: string | null;
   readonly state: 'pending' | 'completed' | 'errored';
   readonly error_code: Extract<Attempt, {state: 'errored'}>['error_code'] | null;
-  readonly artifact: CampaignArtifact | null;
+  readonly artifact: ExperimentRunArtifact | null;
 }
 
-export interface CampaignInspection {
+export interface ExperimentRunInspection {
   readonly experiment_run_id: string;
   readonly location: string;
-  readonly campaign: string;
-  readonly outcomes: readonly CampaignOutcome[];
+  readonly checkpoint: string;
+  readonly outcomes: readonly ExperimentRunOutcome[];
 }
 
-export type CampaignProgressEvent =
+export type ExperimentRunProgressEvent =
   | {readonly state: 'started' | 'resuming'; readonly location: string}
   | {
       readonly state: 'running' | 'completed' | 'skipped';
@@ -85,8 +85,8 @@ export type CampaignProgressEvent =
       readonly error_code: Extract<Attempt, {state: 'errored'}>['error_code'];
     };
 
-export interface CampaignSummary {
-  readonly campaign: string;
+export interface ExperimentRunSummary {
+  readonly checkpoint: string;
   readonly report: string;
   readonly total: number;
   readonly executed: number;
@@ -96,23 +96,23 @@ export interface CampaignSummary {
 }
 
 /** Resume the original selection even when the new invocation has no filters. */
-export async function readCampaignSelections(root: string): Promise<RunSelection[]> {
+export async function readExperimentRunSelections(root: string): Promise<RunSelection[]> {
   root = path.resolve(root);
-  const campaign = await requireCampaign(root);
-  return campaign.entries.map(({selection}) => selection);
+  const experimentRun = await requireExperimentRun(root);
+  return experimentRun.entries.map(({selection}) => selection);
 }
 
 /** Verify latest committed attempts without loading inputs or changing state. */
-export async function inspectCampaign(options: {
+export async function inspectExperimentRun(options: {
   readonly root: string;
   readonly engine: ForgeEngine;
   readonly signal?: AbortSignal;
-}): Promise<CampaignInspection> {
+}): Promise<ExperimentRunInspection> {
   const root = path.resolve(options.root);
   options.signal?.throwIfAborted();
-  const campaign = await requireCampaign(root);
-  const outcomes: CampaignOutcome[] = [];
-  for (const entry of campaign.entries) {
+  const experimentRun = await requireExperimentRun(root);
+  const outcomes: ExperimentRunOutcome[] = [];
+  for (const entry of experimentRun.entries) {
     options.signal?.throwIfAborted();
     const last = entry.attempts.at(-1);
     if (last === undefined) {
@@ -122,33 +122,33 @@ export async function inspectCampaign(options: {
     }
     const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
     const attempt = inspected.artifact === null && last.state === 'errored' ? last : inspected.attempt;
-    outcomes.push(campaignOutcome(entry, attempt, inspected.artifact));
+    outcomes.push(experimentRunOutcome(entry, attempt, inspected.artifact));
   }
   options.signal?.throwIfAborted();
-  return {experiment_run_id: campaign.experiment_run_id, location: root,
-    campaign: path.join(root, 'campaign.json'), outcomes};
+  return {experiment_run_id: experimentRun.experiment_run_id, location: root,
+    checkpoint: path.join(root, 'experiment.json'), outcomes};
 }
 
-async function requireCampaign(root: string): Promise<Campaign> {
-  const campaign = await readCampaign(path.join(root, 'campaign.json'));
-  if (campaign === undefined) {
-    throw new Error('No experiment execution with this ID exists in the output directory.');
+async function requireExperimentRun(root: string): Promise<ExperimentRunCheckpoint> {
+  const experimentRun = await readExperimentRunCheckpoint(path.join(root, 'experiment.json'));
+  if (experimentRun === undefined) {
+    throw new Error('No experiment run with this ID exists in the output directory.');
   }
-  if (campaign.experiment_run_id !== path.basename(root)) {
-    throw new Error('Experiment execution ID does not match its checkpoint.');
+  if (experimentRun.experiment_run_id !== path.basename(root)) {
+    throw new Error('Experiment run ID does not match its checkpoint.');
   }
-  return campaign;
+  return experimentRun;
 }
 
-/** Local campaign checkpoint and scheduling, separate from eval semantics. */
-export interface CampaignOptions {
+/** Local experiment run checkpoint and scheduling, separate from eval semantics. */
+export interface ExperimentRunOptions {
   readonly root: string;
   readonly plans: readonly ResolvedRunPlanV1[];
   /** Pure preflight composition; execute may supply per-run capabilities. */
   readonly composition: ForgeComposition;
   readonly engine: ForgeEngine;
   readonly resume: boolean;
-  /** Maximum simultaneous eval executions; defaults to one. Not plan semantics. */
+  /** Maximum simultaneous eval runs; defaults to one. Not plan semantics. */
   readonly jobs?: number;
   readonly signal: AbortSignal;
   /**
@@ -157,27 +157,27 @@ export interface CampaignOptions {
    */
   readonly execute: (input: ExecuteEvalInput) => Promise<CompletedRunV1>;
   readonly runIdFactory: () => string;
-  readonly progress: (event: CampaignProgressEvent) => void;
+  readonly progress: (event: ExperimentRunProgressEvent) => void;
   /** Synchronous result collection, including verified selections skipped on resume. */
-  readonly onOutcome?: (outcome: CampaignOutcome, selectionIndex: number) => void;
+  readonly onOutcome?: (outcome: ExperimentRunOutcome, selectionIndex: number) => void;
 }
 
 /** Execute each pending selection once, retaining all earlier attempt IDs. */
-export async function runCampaign(options: CampaignOptions): Promise<CampaignSummary> {
+export async function runExperiment(options: ExperimentRunOptions): Promise<ExperimentRunSummary> {
   const jobs = options.jobs ?? 1;
   if (!Number.isSafeInteger(jobs) || jobs < 1) {
-    throw new Error('Campaign jobs must be a positive safe integer.');
+    throw new Error('Experiment run jobs must be a positive safe integer.');
   }
   const root = path.resolve(options.root);
   if (root === path.parse(root).root) {
-    throw new Error('Campaign output must not be a filesystem root.');
+    throw new Error('Experiment run output must not be a filesystem root.');
   }
   const identities = options.plans.map((plan) => ({
     selection: plan.selection,
     plan_sha256: resolvedRunPlanSha256(plan),
   }));
-  // Validate the whole campaign before checkpoint writes or any execution.
-  parseCampaign({
+  // Validate the whole experiment run before checkpoint writes or any execution.
+  parseExperimentRunCheckpoint({
     forge: FORGE_BUILD_IDENTITY,
     experiment_run_id: path.basename(root),
     entries: identities.map((identity) => ({...identity, attempts: []})),
@@ -188,16 +188,16 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
   options.signal.throwIfAborted();
   if (options.resume) {
     const stat = await fs.lstat(root);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid experiment execution directory.');
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid experiment run directory.');
   } else {
     await fs.mkdir(path.dirname(root), {recursive: true});
     await fs.mkdir(root);
   }
-  const release = await acquireCampaignLock(root);
-  const checkpoint = path.join(root, 'campaign.json');
+  const release = await acquireExperimentRunLock(root);
+  const checkpoint = path.join(root, 'experiment.json');
   const reportPath = path.join(root, 'report.json');
   const inspections = new Map<string, CachedInspection>();
-  const inspect = async (entry: Campaign['entries'][number], runId: string): Promise<AttemptInspection> => {
+  const inspect = async (entry: ExperimentRunCheckpoint['entries'][number], runId: string): Promise<AttemptInspection> => {
     const identity = serializeCanonicalJson({selection: entry.selection, plan_sha256: entry.plan_sha256});
     const cached = inspections.get(runId);
     if (cached?.identity === identity) return cached.inspected;
@@ -208,32 +208,32 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
   let reportReady = false;
   let succeeded = false;
   try {
-    let campaign = await readCampaign(checkpoint);
-    if (campaign === undefined) {
-      if (options.resume) throw new Error('No campaign.json to resume in the output directory.');
-      campaign = parseCampaign({
+    let experimentRun = await readExperimentRunCheckpoint(checkpoint);
+    if (experimentRun === undefined) {
+      if (options.resume) throw new Error('No experiment.json to resume in the output directory.');
+      experimentRun = parseExperimentRunCheckpoint({
         forge: FORGE_BUILD_IDENTITY,
         experiment_run_id: path.basename(root),
         entries: identities.map((identity) => ({...identity, attempts: []})),
       });
     } else {
       if (!options.resume) {
-        throw new Error('This experiment execution already exists; resume it with its ID.');
+        throw new Error('This experiment run already exists; resume it with its ID.');
       }
-      if (campaign.experiment_run_id !== path.basename(root)) {
-        throw new Error('Experiment execution ID does not match its checkpoint.');
+      if (experimentRun.experiment_run_id !== path.basename(root)) {
+        throw new Error('Experiment run ID does not match its checkpoint.');
       }
-      const storedIdentities = campaign.entries.map(({selection, plan_sha256}) => ({
+      const storedIdentities = experimentRun.entries.map(({selection, plan_sha256}) => ({
         selection, plan_sha256,
       }));
       if (serializeCanonicalJson(storedIdentities) !== serializeCanonicalJson(identities)) {
-        throw new Error('Cannot resume: the selected resolved plans differ from the saved campaign.');
+        throw new Error('Cannot resume: the selected resolved plans differ from the saved experiment run.');
       }
     }
     const runIds = new Set<string>();
-    for (const entry of campaign.entries) {
+    for (const entry of experimentRun.entries) {
       for (const attempt of entry.attempts) {
-        if (runIds.has(attempt.run_id)) throw new Error('Campaign contains duplicate run IDs.');
+        if (runIds.has(attempt.run_id)) throw new Error('Experiment run contains duplicate run IDs.');
         runIds.add(attempt.run_id);
       }
     }
@@ -243,7 +243,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
     // run committed just before the process died while updating its checkpoint.
     const pending: number[] = [];
     let skipped = 0;
-    for (const [index, entry] of campaign.entries.entries()) {
+    for (const [index, entry] of experimentRun.entries.entries()) {
       options.signal.throwIfAborted();
       const last = entry.attempts.at(-1);
       if (last !== undefined) {
@@ -258,14 +258,14 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
         }
         if (recovered.state === 'completed') {
           skipped += 1;
-          options.onOutcome?.(campaignOutcome(entry, recovered, inspected.artifact), index);
+          options.onOutcome?.(experimentRunOutcome(entry, recovered, inspected.artifact), index);
           options.progress({selection: entry.selection, run_id: last.run_id, state: 'skipped'});
           continue;
         }
       }
       pending.push(index);
     }
-    await writeCampaign(checkpoint, campaign);
+    await writeExperimentRunCheckpoint(checkpoint, experimentRun);
     options.progress({state: options.resume ? 'resuming' : 'started', location: root});
     let completed = skipped;
     let errored = 0;
@@ -303,21 +303,21 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
             if (signal.aborted) return undefined;
             const index = pending[nextPending++];
             if (index === undefined) return undefined;
-            const entry = campaign!.entries[index]!;
+            const entry = experimentRun!.entries[index]!;
             const runId = runIdSchema.parse(options.runIdFactory());
             if (runIds.has(runId) || await exists(path.join(root, 'runs', runId))) {
-              throw new Error('Campaign run ID already exists.');
+              throw new Error('Eval run ID already exists.');
             }
             runIds.add(runId);
             entry.attempts.push({run_id: runId, state: 'running'});
-            await writeCampaign(checkpoint, campaign!);
+            await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
             options.progress({selection: entry.selection, run_id: runId, state: 'running'});
             return {index, runId, entry};
           });
           if (task === undefined) return;
           const {index, runId, entry} = task;
           let attempt: SettledAttempt;
-          let artifact: CampaignArtifact | null = null;
+          let artifact: ExperimentRunArtifact | null = null;
           try {
             signal.throwIfAborted();
             executed += 1;
@@ -332,7 +332,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
               fs.realpath(path.join(root, 'runs', runId)),
             ]);
             if (actualLocation !== expectedLocation) {
-              throw new Error('Campaigns require the local artifact store at the selected output directory.');
+              throw new Error('Experiment runs require the local artifact store at the selected output directory.');
             }
             const inspected = await inspect(entry, runId);
             attempt = inspected.attempt;
@@ -353,27 +353,27 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
           }
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
-            await writeCampaign(checkpoint, campaign!);
+            await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
             options.progress({selection: entry.selection, ...attempt});
             if (attempt.state === 'completed') completed += 1;
             else errored += 1;
-            options.onOutcome?.(campaignOutcome(entry, attempt, artifact), index);
+            options.onOutcome?.(experimentRunOutcome(entry, attempt, artifact), index);
           });
         }
       } catch (error) {
         fail(error);
       }
     }
-    // Retain the campaign lock until every active callback has cleaned up,
+    // Retain the experiment run lock until every active callback has cleaned up,
     // including when cancellation or a coordinator failure stops new work.
     await Promise.all(Array.from({length: Math.min(jobs, pending.length)}, () => worker()));
     if (failed) throw failure;
     options.signal.throwIfAborted();
     succeeded = true;
     return {
-      campaign: checkpoint,
+      checkpoint,
       report: reportPath,
-      total: campaign.entries.length,
+      total: experimentRun.entries.length,
       executed,
       skipped,
       completed,
@@ -385,13 +385,13 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
         try {
           // Read the last durable checkpoint, including after coordinator
           // failures. Workers have drained and this process still owns the lock.
-          const source = await readCampaignSource(checkpoint);
-          if (source === undefined) throw new Error('Campaign checkpoint is missing.');
-          if (source.campaign.experiment_run_id !== path.basename(root)) {
-            throw new Error('Campaign checkpoint identity does not match its directory.');
+          const source = await readExperimentRunSource(checkpoint);
+          if (source === undefined) throw new Error('Experiment run checkpoint is missing.');
+          if (source.experimentRun.experiment_run_id !== path.basename(root)) {
+            throw new Error('Experiment run checkpoint identity does not match its directory.');
           }
-          const runs: CampaignReportRunV1[] = [];
-          for (const [index, entry] of source.campaign.entries.entries()) {
+          const runs: ExperimentRunReportRunV1[] = [];
+          for (const [index, entry] of source.experimentRun.entries.entries()) {
             const last = entry.attempts.at(-1);
             if (last === undefined) {
               runs.push({selection_index: index, selection: entry.selection, run_id: null,
@@ -406,13 +406,13 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
               result_path: inspected.artifact === null ? null : `runs/${last.run_id}/result.json`,
               evaluation: effective.state === 'completed' ? inspected.evaluation : null});
           }
-          const report = buildCampaignReport({experimentRunId: source.campaign.experiment_run_id,
+          const report = buildExperimentRunReport({experimentRunId: source.experimentRun.experiment_run_id,
             generatedAt: new Date().toISOString(), checkpointBody: source.body, runs});
-          await writeAtomicDocument(reportPath, serializeCampaignReport(report));
+          await writeAtomicDocument(reportPath, serializeExperimentRunReport(report));
         } catch (error) {
           // Report generation is best effort after interruption. Preserve the
           // original failure, but surface reporting failure on normal completion.
-          if (succeeded && !options.signal.aborted) throw new CampaignReportError(reportPath, error);
+          if (succeeded && !options.signal.aborted) throw new ExperimentRunReportError(reportPath, error);
         }
       }
       if (succeeded) options.signal.throwIfAborted();
@@ -424,8 +424,8 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
 
 interface AttemptInspection {
   attempt: SettledAttempt;
-  artifact: CampaignArtifact | null;
-  evaluation: CampaignReportEvaluationV1 | null;
+  artifact: ExperimentRunArtifact | null;
+  evaluation: ExperimentRunReportEvaluationV1 | null;
 }
 interface CachedInspection {
   identity: string;
@@ -462,36 +462,36 @@ async function inspectAttempt(
   }
 }
 
-function campaignOutcome(
-  entry: Campaign['entries'][number],
+function experimentRunOutcome(
+  entry: ExperimentRunCheckpoint['entries'][number],
   attempt: SettledAttempt,
-  artifact: CampaignArtifact | null,
-): CampaignOutcome {
+  artifact: ExperimentRunArtifact | null,
+): ExperimentRunOutcome {
   return {selection: entry.selection, plan_sha256: entry.plan_sha256,
     run_id: attempt.run_id, state: attempt.state,
     error_code: attempt.state === 'errored' ? attempt.error_code : null, artifact};
 }
 
-async function readCampaign(checkpoint: string): Promise<Campaign | undefined> {
-  return (await readCampaignSource(checkpoint))?.campaign;
+async function readExperimentRunCheckpoint(checkpoint: string): Promise<ExperimentRunCheckpoint | undefined> {
+  return (await readExperimentRunSource(checkpoint))?.experimentRun;
 }
 
-async function readCampaignSource(checkpoint: string): Promise<{campaign: Campaign; body: string} | undefined> {
+async function readExperimentRunSource(checkpoint: string): Promise<{experimentRun: ExperimentRunCheckpoint; body: string} | undefined> {
   try {
     const stat = await fs.lstat(checkpoint);
-    if (!stat.isFile() || stat.size > MAX_CAMPAIGN_BYTES) throw new Error('Invalid campaign checkpoint.');
+    if (!stat.isFile() || stat.size > MAX_EXPERIMENT_RUN_BYTES) throw new Error('Invalid experiment run checkpoint.');
     const body = await fs.readFile(checkpoint, 'utf8');
-    if (Buffer.byteLength(body) > MAX_CAMPAIGN_BYTES) throw new Error('Invalid campaign checkpoint.');
-    return {campaign: parseCampaign(JSON.parse(body)), body};
+    if (Buffer.byteLength(body) > MAX_EXPERIMENT_RUN_BYTES) throw new Error('Invalid experiment run checkpoint.');
+    return {experimentRun: parseExperimentRunCheckpoint(JSON.parse(body)), body};
   } catch (error) {
     if (hasCode(error, 'ENOENT')) return undefined;
-    throw new Error('Cannot read a compatible Forge campaign.json.', {cause: error});
+    throw new Error('Cannot read a compatible Forge experiment.json.', {cause: error});
   }
 }
 
-async function writeCampaign(checkpoint: string, campaign: Campaign): Promise<void> {
-  const body = serializeCanonicalJson(parseCampaign({...campaign, forge: FORGE_BUILD_IDENTITY}));
-  if (Buffer.byteLength(body) > MAX_CAMPAIGN_BYTES) throw new Error('Campaign checkpoint exceeds its byte limit.');
+async function writeExperimentRunCheckpoint(checkpoint: string, experimentRun: ExperimentRunCheckpoint): Promise<void> {
+  const body = serializeCanonicalJson(parseExperimentRunCheckpoint({...experimentRun, forge: FORGE_BUILD_IDENTITY}));
+  if (Buffer.byteLength(body) > MAX_EXPERIMENT_RUN_BYTES) throw new Error('Experiment run checkpoint exceeds its byte limit.');
   await writeAtomicDocument(checkpoint, body);
 }
 
@@ -518,8 +518,8 @@ async function writeAtomicDocument(checkpoint: string, body: string): Promise<vo
 }
 
 /** One writer per local output directory, with recovery after process death. */
-async function acquireCampaignLock(root: string): Promise<() => Promise<void>> {
-  const lock = path.join(root, '.campaign.lock');
+async function acquireExperimentRunLock(root: string): Promise<() => Promise<void>> {
+  const lock = path.join(root, '.experiment.lock');
   const temporary = `${lock}.${randomUUID()}`;
   const ownerName = `owner-${randomUUID()}.json`;
   await fs.mkdir(temporary, {mode: 0o700});
@@ -543,7 +543,7 @@ async function acquireCampaignLock(root: string): Promise<() => Promise<void>> {
           throw error;
         }
         try {
-          await reclaimCampaignLock(lock);
+          await reclaimExperimentRunLock(lock);
         } catch (lockError) {
           if (hasCode(lockError, 'ENOENT')) continue;
           throw lockError;
@@ -559,9 +559,9 @@ async function acquireCampaignLock(root: string): Promise<() => Promise<void>> {
   }
 }
 
-async function reclaimCampaignLock(lock: string): Promise<void> {
+async function reclaimExperimentRunLock(lock: string): Promise<void> {
   const stat = await fs.lstat(lock);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid campaign lock.');
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid experiment run lock.');
   const entries = await fs.readdir(lock);
   if (entries.length === 0) {
     // Recovery or release may have removed the marker before a process exit.
@@ -570,12 +570,12 @@ async function reclaimCampaignLock(lock: string): Promise<void> {
   }
   const ownerName = entries[0]!;
   if (entries.length !== 1 || !/^owner-[0-9a-f-]{36}\.json$/.test(ownerName)) {
-    throw new Error('Invalid campaign lock owner.');
+    throw new Error('Invalid experiment run lock owner.');
   }
   const ownerFile = path.join(lock, ownerName);
   const ownerStat = await fs.lstat(ownerFile);
   if (!ownerStat.isFile() || ownerStat.isSymbolicLink() || ownerStat.size > 128) {
-    throw new Error('Invalid campaign lock owner.');
+    throw new Error('Invalid experiment run lock owner.');
   }
   const owner = z.object({pid: z.number().int().positive()}).strict()
     .parse(JSON.parse(await fs.readFile(ownerFile, 'utf8')));
@@ -589,7 +589,7 @@ async function reclaimCampaignLock(lock: string): Promise<void> {
     await removeEmptyLockDirectory(lock);
     return;
   }
-  throw new Error('Another campaign process is using this output directory.');
+  throw new Error('Another experiment run process is using this output directory.');
 }
 
 async function removeEmptyLockDirectory(lock: string): Promise<void> {

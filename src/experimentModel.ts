@@ -4,25 +4,25 @@ import {isSha256Digest} from './model/hashes.js';
 import {parseRunSelection} from './model/parse.js';
 import {assertCompatibleForgeVersion, parseForgeBuildIdentity} from './version.js';
 
-export const campaignRunIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
-export const campaignErrorCodeSchema = z.enum([
+export const experimentRunIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+export const experimentRunErrorCodeSchema = z.enum([
   'execution_error', 'invalid_artifacts', 'role_player_error',
   'aborted', 'agent_failed', 'artifact_failed', 'credential_failed',
   'evaluation_failed', 'evidence_failed', 'invalid_plan', 'runtime_failed',
   'setup_failed', 'unsupported_capability',
 ]);
 const attemptSchema = z.discriminatedUnion('state', [
-  z.object({run_id: campaignRunIdSchema, state: z.literal('running')}).strict(),
-  z.object({run_id: campaignRunIdSchema, state: z.literal('completed')}).strict(),
+  z.object({run_id: experimentRunIdSchema, state: z.literal('running')}).strict(),
+  z.object({run_id: experimentRunIdSchema, state: z.literal('completed')}).strict(),
   z.object({
-    run_id: campaignRunIdSchema,
+    run_id: experimentRunIdSchema,
     state: z.literal('errored'),
-    error_code: campaignErrorCodeSchema,
+    error_code: experimentRunErrorCodeSchema,
   }).strict(),
 ]);
-const campaignSchema = z.object({
+const experimentRunCheckpointSchema = z.object({
   forge: z.unknown().transform(parseForgeBuildIdentity),
-  experiment_run_id: campaignRunIdSchema,
+  experiment_run_id: experimentRunIdSchema,
   entries: z.array(z.object({
     selection: z.unknown().transform(parseRunSelection),
     plan_sha256: z.string().refine(isSha256Digest),
@@ -31,13 +31,13 @@ const campaignSchema = z.object({
 }).strict();
 
 /** Check the producing release before interpreting checkpoint contents. */
-export function parseCampaign(input: unknown): Campaign {
+export function parseExperimentRunCheckpoint(input: unknown): ExperimentRunCheckpoint {
   const header = z.object({forge: z.unknown()}).passthrough().parse(input);
   const forge = parseForgeBuildIdentity(header.forge);
   assertCompatibleForgeVersion(forge.version);
-  return campaignSchema.parse(input);
+  return experimentRunCheckpointSchema.parse(input);
 }
 
-export type Campaign = z.infer<typeof campaignSchema>;
-export type CampaignAttempt = z.infer<typeof attemptSchema>;
-export type SettledCampaignAttempt = Exclude<CampaignAttempt, {state: 'running'}>;
+export type ExperimentRunCheckpoint = z.infer<typeof experimentRunCheckpointSchema>;
+export type ExperimentRunAttempt = z.infer<typeof attemptSchema>;
+export type SettledExperimentRunAttempt = Exclude<ExperimentRunAttempt, {state: 'running'}>;

@@ -1,0 +1,118 @@
+import assert from 'node:assert/strict';
+import {describe, it} from 'node:test';
+
+import * as root from '../src/index.js';
+import * as experiment from '../src/experiment.js';
+import * as experimentCli from '../src/experimentCli.js';
+import type {
+  ExperimentRunArtifact,
+  ExperimentRunInspection,
+  ExperimentRunOptions,
+  ExperimentRunOutcome,
+  ExperimentRunProgressEvent,
+  ExperimentRunReportCaseV1,
+  ExperimentRunReportEvaluationV1,
+  ExperimentRunReportRunV1,
+  ExperimentRunReportStatisticsV1,
+  ExperimentRunReportV1,
+  ExperimentRunSummary,
+} from '../src/experiment.js';
+import type {
+  ExperimentArgumentOptions,
+  ExperimentArguments,
+  ExperimentCommandOptions,
+  ExperimentCommandReference,
+  ExperimentCommandResult,
+  ExperimentLoadContext,
+  ExperimentValues,
+  LoadedExperimentRun,
+} from '../src/experimentCli.js';
+
+describe('experiment public entry points', () => {
+  it('keeps experiment orchestration on its dedicated entry points', () => {
+    for (const name of [
+      'runExperiment', 'readExperimentRunSelections', 'inspectExperimentRun',
+      'parseExperimentRunReport', 'runExperimentCommand',
+    ]) {
+      assert.equal(name in root, false);
+    }
+    assert.equal(typeof experiment.runExperiment, 'function');
+    assert.equal(typeof experiment.inspectExperimentRun, 'function');
+    assert.equal(typeof experiment.parseExperimentRunReport, 'function');
+    assert.equal(typeof experimentCli.runExperimentCommand, 'function');
+  });
+
+  it('exports public result types and precise host argument types', () => {
+    const hostOptions = {
+      tag: {type: 'string'},
+      upload: {type: 'boolean'},
+      labels: {type: 'string', multiple: true},
+    } as const;
+    const options: ExperimentArgumentOptions<typeof hostOptions> = {hostOptions};
+    const parsed: ExperimentArguments<typeof hostOptions> = experimentCli.parseExperimentArgs(
+      ['--tag', 'smoke', '--upload', '--labels', 'first', '--labels', 'second', '-j2'], options,
+    );
+    const values: ExperimentValues<typeof hostOptions> = parsed.values;
+    const tag: string | undefined = values.tag;
+    const upload: boolean | undefined = values.upload;
+    const labels: readonly string[] | undefined = values.labels;
+    assert.equal(tag, 'smoke');
+    assert.equal(upload, true);
+    assert.deepEqual(labels, ['first', 'second']);
+    assert.equal(parsed.jobs, 2);
+    assert.equal(Object.isFrozen(experimentCli.EXPERIMENT_CLI_OPTIONS), true);
+
+    // These assignments exercise the public declarations as well as runtime parsing.
+    const acceptsCoreTypes = (
+      options: ExperimentRunOptions,
+      artifact: ExperimentRunArtifact,
+      outcome: ExperimentRunOutcome,
+      progress: ExperimentRunProgressEvent,
+    ): {
+      execute: ExperimentRunOptions['execute'];
+      artifact: ExperimentRunOutcome['artifact'];
+      selection: ExperimentRunOutcome['selection'];
+      progress: Parameters<ExperimentRunOptions['progress']>[0];
+    } => ({execute: options.execute, artifact, selection: outcome.selection, progress});
+    const acceptsReportTypes = (
+      report: ExperimentRunReportV1,
+    ): {
+      cases: readonly ExperimentRunReportCaseV1[];
+      runs: readonly ExperimentRunReportRunV1[];
+      summary: ExperimentRunReportStatisticsV1;
+      evaluation: ExperimentRunReportEvaluationV1 | null;
+    } => ({cases: report.cases, runs: report.runs, summary: report.summary,
+      evaluation: report.runs[0]?.evaluation ?? null});
+    const acceptsReferences = (
+      summary: ExperimentRunSummary,
+      inspection: ExperimentRunInspection,
+      reference: ExperimentCommandReference,
+      result: ExperimentCommandResult<typeof hostOptions>,
+    ): readonly string[] => [summary.checkpoint, inspection.checkpoint, reference.checkpoint, result.checkpoint];
+    const acceptsCommandLoader = (loadExperiment: (
+      context: ExperimentLoadContext<typeof hostOptions>,
+    ) => Promise<LoadedExperimentRun>, engine: ExperimentRunOptions['engine']): ExperimentCommandOptions<typeof hostOptions> =>
+      ({hostOptions, engine, loadExperiment});
+    assert.equal(typeof acceptsCoreTypes, 'function');
+    assert.equal(typeof acceptsReportTypes, 'function');
+    assert.equal(typeof acceptsReferences, 'function');
+    assert.equal(typeof acceptsCommandLoader, 'function');
+  });
+
+  it('exposes usage and execution errors with experiment run references', () => {
+    assert.throws(() => experimentCli.parseExperimentArgs(['--jobs', '0'], {hostOptions: {}}),
+      (error) => error instanceof experimentCli.ExperimentUsageError && error.name === 'ExperimentUsageError');
+    assert.throws(() => experimentCli.createExperimentCliOptions({output: {type: 'string'}}),
+      (error) => error instanceof experimentCli.ExperimentUsageError && error.name === 'ExperimentUsageError');
+    const report = new experiment.ExperimentRunReportError('report.json', new Error('report failure'));
+    assert.equal(report.name, 'ExperimentRunReportError');
+    assert.ok(report instanceof experiment.ExperimentRunReportError);
+    const reference: ExperimentCommandReference = {
+      experiment_run_id: 'example', location: '/results/example', checkpoint: '/results/example/experiment.json',
+    };
+    const command = new experimentCli.ExperimentCommandError(reference, new Error('command failure'));
+    assert.equal(command.name, 'ExperimentCommandError');
+    assert.equal(command.reference.checkpoint, reference.checkpoint);
+    assert.ok(command instanceof experimentCli.ExperimentCommandError);
+  });
+});

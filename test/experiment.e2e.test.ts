@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {runCli, type RunCliOptions} from '../src/cli.js';
-import {parseCampaignReport} from '../src/campaign.js';
+import {parseExperimentRunReport} from '../src/experiment.js';
 import {defaultForgeEngine} from '../src/engine.js';
 import {ForgeExecutionError} from '../src/execution/errors.js';
 import {executeEvalWithTestHooks} from '../src/execution/execute.js';
@@ -29,7 +29,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})));
 });
 
-describe('resumable CLI campaigns', () => {
+describe('resumable CLI experiment runs', () => {
   it('defaults to one active execution at a time', async () => {
     const fixture = await createFixture();
     const started = Array.from({length: 3}, createGate);
@@ -183,7 +183,7 @@ describe('resumable CLI campaigns', () => {
       await waitFor(Promise.all(aborted.map((gate) => gate.promise)));
       const contender = await fixture.run(['--resume', 'exp-1', '--jobs', '3']);
       assert.equal(contender.code, 1);
-      assert.match(contender.stderr, /Another campaign process/);
+      assert.match(contender.stderr, /Another experiment run process/);
       assert.equal(cleaned, 0);
       assert.deepEqual(calls, [0, 1]);
       cleanup.resolve();
@@ -236,12 +236,12 @@ describe('resumable CLI campaigns', () => {
       await waitFor(started.promise);
       await waitFor(aborted.promise);
       const contender = await fixture.run(['--resume', 'exp-1']);
-      assert.match(contender.stderr, /Another campaign process/);
+      assert.match(contender.stderr, /Another experiment run process/);
       assert.equal(cleaned, false);
       cleanup.resolve();
       const result = await waitFor(running);
       assert.equal(result.code, 1);
-      assert.match(result.stderr, /Campaign run ID already exists/);
+      assert.match(result.stderr, /Eval run ID already exists/);
       assert.equal(calls, 1);
       assert.equal(cleaned, true);
       assert.deepEqual((await fixture.readCheckpoint()).entries.map((entry) => entry.attempts.length), [1, 0, 0]);
@@ -291,7 +291,7 @@ describe('resumable CLI campaigns', () => {
       commit.resolve();
       await waitFor(aborted.promise);
       const contender = await fixture.run(['--resume', 'exp-1']);
-      assert.match(contender.stderr, /Another campaign process/);
+      assert.match(contender.stderr, /Another experiment run process/);
       cleanup.resolve();
       const failed = await waitFor(running);
       assert.equal(failed.code, 1);
@@ -328,7 +328,7 @@ describe('resumable CLI campaigns', () => {
     assert.deepEqual([first.summary.experiment_run_id, second.summary.experiment_run_id, third.summary.experiment_run_id],
       ['exp-1', 'exp-2', 'exp-3']);
     const laterCheckpoints = await Promise.all(['exp-2', 'exp-3'].map((id) =>
-      fs.readFile(path.join(fixture.output, 'experiments', id, 'campaign.json'), 'utf8')));
+      fs.readFile(path.join(fixture.output, 'experiments', id, 'experiment.json'), 'utf8')));
     const executed: number[] = [];
     const resumed = await fixture.run(['--resume', 'exp-1'], {execute: async (input) => {
       executed.push(input.plan.selection.repetition);
@@ -338,7 +338,7 @@ describe('resumable CLI campaigns', () => {
     assert.deepEqual(executed, [1]);
     assert.equal(resumed.summary.experiment_run_id, 'exp-1');
     assert.deepEqual(await Promise.all(['exp-2', 'exp-3'].map((id) =>
-      fs.readFile(path.join(fixture.output, 'experiments', id, 'campaign.json'), 'utf8'))), laterCheckpoints);
+      fs.readFile(path.join(fixture.output, 'experiments', id, 'experiment.json'), 'utf8'))), laterCheckpoints);
     assert.equal((await fixture.readCheckpoint()).entries[1]!.attempts.at(-1)!.run_id, 'attempt-10');
   });
 
@@ -380,7 +380,7 @@ describe('resumable CLI campaigns', () => {
     assert.deepEqual(executed, [0, 1, 2]);
     assert.deepEqual(first.summary, {
       experiment_run_id: 'exp-1', location: fixture.root,
-      campaign: fixture.checkpoint, report: path.join(fixture.root, 'report.json'),
+      checkpoint: fixture.checkpoint, report: path.join(fixture.root, 'report.json'),
       total: 3, executed: 3, skipped: 0, completed: 2, errored: 1,
     });
     const before = await fs.readFile(path.join(fixture.root, 'runs', 'attempt-1', 'result.json'));
@@ -531,7 +531,7 @@ describe('resumable CLI campaigns', () => {
     const fixture = await createFixture();
     const missing = await fixture.run(['--resume', 'missing-execution']);
     assert.equal(missing.code, 1);
-    assert.match(missing.stderr, /No experiment execution/);
+    assert.match(missing.stderr, /No experiment run/);
     await fixture.run();
     const nextExecution = await fixture.run();
     assert.equal(nextExecution.code, 0);
@@ -540,10 +540,10 @@ describe('resumable CLI campaigns', () => {
     await fs.writeFile(fixture.checkpoint, JSON.stringify({...journal, unknown: true}));
     const invalid = await fixture.run(['--resume', 'exp-1']);
     assert.equal(invalid.code, 1);
-    assert.match(invalid.stderr, /compatible Forge campaign/);
+    assert.match(invalid.stderr, /compatible Forge experiment.json/);
   });
 
-  it('rejects invalid flag combinations and filters the initial campaign', async () => {
+  it('rejects invalid flag combinations and filters the initial experiment run', async () => {
     const fixture = await createFixture();
     const single = await fixture.run(['--repetition', '1']);
     assert.equal(single.code, 0);
@@ -580,7 +580,7 @@ describe('resumable CLI campaigns', () => {
     await assert.rejects(fs.stat(fixture.checkpoint), {code: 'ENOENT'});
   });
 
-  it('prevents simultaneous writers to the same campaign', async () => {
+  it('prevents simultaneous writers to the same experiment run', async () => {
     const fixture = await createFixture();
     let started!: () => void;
     let finish!: () => void;
@@ -595,7 +595,7 @@ describe('resumable CLI campaigns', () => {
     try {
       const second = await fixture.run(['--resume', 'exp-1']);
       assert.equal(second.code, 1);
-      assert.match(second.stderr, /Another campaign process/);
+      assert.match(second.stderr, /Another experiment run process/);
     } finally {
       finish();
     }
@@ -652,7 +652,7 @@ describe('resumable CLI campaigns', () => {
       removals[1]!.resolve();
       const rejected = await waitFor(second);
       assert.equal(rejected.code, 1);
-      assert.match(rejected.stderr, /Another campaign process/);
+      assert.match(rejected.stderr, /Another experiment run process/);
       assert.equal(executions, 1);
       assert.equal((await fs.readdir(lock)).length, 1);
       const active = await fixture.readCheckpoint();
@@ -704,7 +704,7 @@ describe('resumable CLI campaigns', () => {
       remove.resolve();
       const rejected = await waitFor(first);
       assert.equal(rejected.code, 1);
-      assert.match(rejected.stderr, /Another campaign process/);
+      assert.match(rejected.stderr, /Another experiment run process/);
       assert.equal(executions, 1);
       assert.equal((await fs.readdir(lock)).length, 1);
       finish.resolve();
@@ -722,7 +722,7 @@ describe('resumable CLI campaigns', () => {
   it('recovers an empty lock directory left during interrupted cleanup', async () => {
     const fixture = await createFixture();
     await fixture.run();
-    const lock = path.join(fixture.root, '.campaign.lock');
+    const lock = path.join(fixture.root, '.experiment.lock');
     await fs.mkdir(lock);
     const resumed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(resumed.code, 0);
@@ -760,7 +760,7 @@ describe('resumable CLI campaigns', () => {
     const fixture = await createFixture();
     const originalRename = fsPromises.rename;
     context.mock.method(fsPromises, 'rename', async (...args: Parameters<typeof originalRename>) => {
-      if (path.basename(String(args[1])) === '.campaign.lock') {
+      if (path.basename(String(args[1])) === '.experiment.lock') {
         throw Object.assign(new Error('Publication permission denied'), {code: 'EPERM'});
       }
       return originalRename(...args);
@@ -844,7 +844,7 @@ function createGate() {
 }
 
 async function readReport(root: string) {
-  return parseCampaignReport(JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')));
+  return parseExperimentRunReport(JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')));
 }
 
 async function waitFor<T>(promise: Promise<T>): Promise<T> {
@@ -861,7 +861,7 @@ async function waitFor<T>(promise: Promise<T>): Promise<T> {
 async function createDeadOwnerLock(root: string) {
   const owner = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], {encoding: 'utf8'});
   assert.equal(owner.status, 0);
-  const lock = path.join(root, '.campaign.lock');
+  const lock = path.join(root, '.experiment.lock');
   const ownerFile = path.join(lock, `owner-${randomUUID()}.json`);
   await fs.mkdir(lock);
   await fs.writeFile(ownerFile, JSON.stringify({pid: Number(owner.stdout)}));
@@ -869,7 +869,7 @@ async function createDeadOwnerLock(root: string) {
 }
 
 async function createFixture(options: {anotherCase?: boolean; repetitions?: number} = {}) {
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-campaign-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-experiment-run-'));
   temporaryDirectories.push(temporary);
   const output = path.join(temporary, 'results');
   const root = path.join(output, 'experiments', 'exp-1');
@@ -894,7 +894,7 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
     config.matrix.cases.push('examples/other-file');
   }
   await fs.writeFile(experiment, JSON.stringify(config));
-  const checkpoint = path.join(root, 'campaign.json');
+  const checkpoint = path.join(root, 'experiment.json');
   let nextId = 0;
   let nextExecutionId = 0;
   return {
@@ -906,7 +906,7 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
       const runtime = createFakeRuntimeAdapter();
       const agent = createScriptedAgentAdapter({
         id: 'claude-code',
-        turns: Array.from({length: 6}, () => ({text: 'Done', sessionId: 'campaign-session', toolCalls: []})),
+        turns: Array.from({length: 6}, () => ({text: 'Done', sessionId: 'experiment-run-session', toolCalls: []})),
       });
       const code = await runCli([
         'run', '--experiment', experiment, '--output', output, ...extra,
