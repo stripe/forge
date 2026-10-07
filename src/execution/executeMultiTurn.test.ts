@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {describe, it} from 'node:test';
 
 import {parseAtifTrajectory} from '../atif/index.js';
@@ -17,6 +20,11 @@ import {
   type JudgeWorkspaceEvidenceV1,
   type JudgeWorkspaceWarningCode,
 } from '../evaluation/index.js';
+import {
+  createArtifactStore,
+  verifyCompletedRun,
+  type InteractionArtifactV1,
+} from '../results/index.js';
 import {serializeCanonicalJson} from '../serialization.js';
 import {
   createFakeRuntimeAdapter,
@@ -50,6 +58,86 @@ const ROLE_MODEL = {provider: 'test-provider', model: 'role-model'} as const;
 const JUDGE_MODEL = {provider: 'test-provider', model: 'judge-model'} as const;
 
 describe('executeEval multi-turn and judging integration', () => {
+  it('preserves a long configured opening through execution and completed-run verification', async (t) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-long-opening-'));
+    t.after(() => fs.rm(root, {recursive: true, force: true}));
+    const initialPrompt = [
+      'Create a complete answer file.',
+      '',
+      'Preserve  the exact task details and\n\tinternal whitespace.\n'.repeat(20),
+      'End of instructions.',
+    ].join('\n');
+    assert.ok(initialPrompt.length > 500);
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({
+      turns: [
+        {
+          text: 'Completed the requested answer.',
+          sessionId: 'long-opening-session',
+          toolCalls: [],
+        },
+      ],
+    });
+    const provider = createScriptedCompletionProvider({
+      id: 'test-provider',
+      responses: [
+        (request) => {
+          assert.deepEqual(agent.messages, [initialPrompt]);
+          assert.equal(request.messages[0]?.content, initialPrompt);
+          return JSON.stringify({
+            user_needs: [
+              {description: 'Create the answer file', status: 'satisfied'},
+            ],
+            message: '',
+          });
+        },
+      ],
+    });
+
+    const completed = await executeEval({
+      runId: 'long-configured-opening',
+      plan: createTestResolvedRunPlan({
+        mode: 'multi_turn',
+        prompt: 'Create an answer file.',
+        initialPrompt,
+        rolePlayer: ROLE_MODEL,
+      }),
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        credentialResolver: createStaticCredentialResolver(),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createArtifactStore({root}),
+      },
+      now: incrementingClock(),
+    });
+
+    assert.deepEqual(agent.messages, [initialPrompt]);
+    assert.equal(completed.result.stop_reason, 'task_complete');
+    assert.equal(completed.result.interaction.turn_count, 1);
+    const verified = await verifyCompletedRun(completed.location);
+    assert.deepEqual(verified.result, completed.result);
+    const interaction = JSON.parse(await fs.readFile(
+      path.join(completed.location, 'interaction.json'),
+      'utf8',
+    )) as InteractionArtifactV1;
+    assert.equal(interaction.turns[0]?.user, initialPrompt);
+    assert.equal(
+      interaction.role_player?.decisions[0]?.source,
+      'configured_initial_prompt',
+    );
+    assert.equal(interaction.role_player?.decisions[0]?.message, initialPrompt);
+    const trajectory = parseAtifTrajectory(JSON.parse(await fs.readFile(
+      path.join(completed.location, 'trajectory.json'),
+      'utf8',
+    )));
+    assert.equal(
+      trajectory.steps.find(({source}) => source === 'user')?.message,
+      initialPrompt,
+    );
+  });
+
   it('runs Ava and judging after quiescence and commits their canonical audit', async () => {
     const expandingFiles = Object.fromEntries(
       Array.from({length: 5}, (_, index) => [

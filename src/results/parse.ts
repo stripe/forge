@@ -153,17 +153,26 @@ const avaNeed = z.object({
   description: z.string().trim().min(1).max(240),
 }).strict();
 
-const avaDecision = z.object({
+const avaDecisionBase = z.object({
   sequence: z.number().int().positive(),
   after_agent_turn: z.number().int().positive().nullable(),
-  message: z.string().max(500),
   stop: z.boolean(),
   remaining_need_ids: z.array(safeText).max(6).nullable(),
   focus_need_id: safeText.nullable(),
   coding_agent_invoked: z.boolean(),
-  source: z.enum(['configured_initial_prompt', 'generated']),
   error: rolePlayerError.optional(),
 }).strict();
+
+const avaDecision = z.discriminatedUnion('source', [
+  avaDecisionBase.extend({
+    source: z.literal('configured_initial_prompt'),
+    message: boundedArtifactText,
+  }),
+  avaDecisionBase.extend({
+    source: z.literal('generated'),
+    message: z.string().max(500),
+  }),
+]);
 
 const interactionArtifactSchema = z.object({
   mode: z.enum(['multi_turn', 'one_shot']),

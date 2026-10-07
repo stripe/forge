@@ -212,6 +212,33 @@ describe('canonical interaction and judge evidence parsing', () => {
     }, CONTEXT), /Interaction failure must match its stop reason/);
   });
 
+  it('preserves configured opening prompts while retaining generated message bounds', () => {
+    const interaction = (message: string, source: string) => ({
+      mode: 'multi_turn',
+      stop_reason: 'task_complete',
+      turns: [{turn: 1, user: message, assistant: 'done', tool_calls: []}],
+      role_player: {
+        model: {provider: 'test-provider', model: 'role-model'},
+        needs: null,
+        decisions: [{
+          sequence: 1, after_agent_turn: null, message, stop: false,
+          remaining_need_ids: null, focus_need_id: null, coding_agent_invoked: true,
+          source,
+        }],
+      },
+      failure: null,
+    });
+    const openingPrompt = 'x'.repeat(747);
+    const configured = interaction(openingPrompt, 'configured_initial_prompt');
+    assert.deepEqual(parseInteractionArtifact(configured, CONTEXT), configured);
+    const generated = interaction('x'.repeat(500), 'generated');
+    assert.deepEqual(parseInteractionArtifact(generated, CONTEXT), generated);
+    assert.throws(() => parseInteractionArtifact(interaction('x'.repeat(501), 'generated'), CONTEXT));
+    const oversizedDecision = interaction('x'.repeat(16 * 1024 * 1024 + 1), 'configured_initial_prompt');
+    oversizedDecision.turns[0]!.user = 'short opening';
+    assert.throws(() => parseInteractionArtifact(oversizedDecision, CONTEXT));
+  });
+
   it('strictly parses judge evidence and its projection declaration', () => {
     const evidence = {
       transcript: {

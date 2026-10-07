@@ -34,10 +34,11 @@ export const GUIDELINE_JUDGMENT_RESPONSE_SCHEMA: StrictCompletionResponseSchema 
               index: {type: 'integer', const: 0},
               passed: {type: 'boolean'},
               explanation: {
+                // Validate non-whitespace locally in StructuredJudgeEntry. Native
+                // regex-constrained strings can contain invalid JSON escapes.
                 type: 'string',
                 minLength: 1,
                 maxLength: MAX_GUIDELINE_EXPLANATION_CHARACTERS,
-                pattern: '\\S',
               },
             },
             required: ['index', 'passed', 'explanation'],
