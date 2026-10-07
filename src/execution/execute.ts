@@ -48,9 +48,9 @@ import type {
 import {
   collectJudgeWorkspaceEvidence,
   evaluateRunEvidence,
-  judgeGuidelines,
+  judgeCriteria,
   renderJudgeWorkspaceEvidence,
-  type GuidelineCompletionRequest,
+  type CriterionCompletionRequest,
   type JudgeWorkspaceEvidenceV1,
 } from '../evaluation/index.js';
 import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
@@ -414,10 +414,10 @@ export async function executeEvalWithTestHooks(
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
       throwIfAborted(signal, phase);
-      const guidelines = input.plan.evaluation.success_guidelines;
-      let guidelineResults = undefined;
+      const criteria = input.plan.evaluation.judging_criteria;
+      let criterionResults = undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
-      if (guidelines.length > 0) {
+      if (criteria.length > 0) {
         const collected = await collectJudgeWorkspaceEvidence(
           sealed!.workspace,
           {signal},
@@ -430,10 +430,10 @@ export async function executeEvalWithTestHooks(
         const judgeTranscript = createJudgeTranscriptProjection(
           redacted.evidence.trajectory,
         );
-        guidelineResults = await judgeGuidelines(
+        criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
-            guidelines,
+            criteria,
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
               : {exampleAnswer: input.plan.evaluation.example_answer}),
@@ -488,7 +488,7 @@ export async function executeEvalWithTestHooks(
         plan: input.plan,
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
-        ...(guidelineResults === undefined ? {} : {guidelineResults}),
+        ...(criterionResults === undefined ? {} : {criterionResults}),
         signal,
       });
       return {...result, judgeEvidence};
@@ -1794,7 +1794,7 @@ function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
  * boundaries.
  */
 function assertJudgePromptWillRemainUnchanged(
-  request: Pick<GuidelineCompletionRequest, 'systemPrompt' | 'messages'>,
+  request: Pick<CriterionCompletionRequest, 'systemPrompt' | 'messages'>,
   secrets: readonly string[],
 ): void {
   const projected = redactSecrets(

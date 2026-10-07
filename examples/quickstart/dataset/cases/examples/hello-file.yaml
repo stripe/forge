@@ -3,7 +3,7 @@ display_name: Hello file
 initial_prompt: Create hello.txt containing exactly "hello, forge!" followed by a newline.
 execution_mode: one_shot
 setup: []
-success_guidelines: []
+judging_criteria: []
 checks:
   files_created:
     - hello.txt

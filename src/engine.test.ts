@@ -59,7 +59,7 @@ describe('ForgeEngine setup action bundles', () => {
     const engine = createForgeEngine({setupActionBundles: [testBundle()]});
     const caseValue = {
       id: 'testing/yaml-extension', initial_prompt: 'Complete the task.',
-      execution_mode: 'one_shot', success_guidelines: [],
+      execution_mode: 'one_shot', judging_criteria: [],
       setup: [{uses: 'acme-evals/skill', with: {name: ' case-skill '}}],
     };
     const experiment = experimentValue();
@@ -642,7 +642,7 @@ function planningInputs(
     initial_prompt: 'Complete the task.',
     execution_mode: 'one_shot',
     setup: [],
-    success_guidelines: [],
+    judging_criteria: [],
   });
   const config = engine.parseExperimentConfig(experiment);
   return {

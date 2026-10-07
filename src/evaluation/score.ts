@@ -1,25 +1,25 @@
 import type {
   CheckResultV1,
   EvaluationResultV1,
-  GuidelineResultV1,
+  CriterionResultV1,
 } from '../results/index.js';
 
-/** Use a guideline-ratio score and gate a clean pass on invariant checks. */
+/** Use a criterion-ratio score and gate a clean pass on invariant checks. */
 export function scoreEvaluation(
-  guidelines: readonly GuidelineResultV1[],
+  criteria: readonly CriterionResultV1[],
   checks: readonly CheckResultV1[],
 ): EvaluationResultV1 {
-  const guidelinesTotal = guidelines.length;
-  const guidelinesPassed = guidelines.filter((guideline) => guideline.passed).length;
-  const score = guidelinesTotal === 0 ? 0 : guidelinesPassed / guidelinesTotal;
+  const criteriaTotal = criteria.length;
+  const criteriaPassed = criteria.filter((criterion) => criterion.passed).length;
+  const score = criteriaTotal === 0 ? 0 : criteriaPassed / criteriaTotal;
   const allChecksPass = checks.length === 0 || checks.every((check) => check.passed);
 
   let status: EvaluationResultV1['status'];
-  if (guidelinesTotal === 0) {
+  if (criteriaTotal === 0) {
     status = allChecksPass ? 'passed' : 'failed';
   } else if (score === 1 && allChecksPass) {
     status = 'passed';
-  } else if (guidelinesPassed > 0 || (checks.length > 0 && allChecksPass)) {
+  } else if (criteriaPassed > 0 || (checks.length > 0 && allChecksPass)) {
     status = 'partial';
   } else {
     status = 'failed';
@@ -28,9 +28,9 @@ export function scoreEvaluation(
   return {
     score,
     status,
-    guidelines_passed: guidelinesPassed,
-    guidelines_total: guidelinesTotal,
-    guidelines: guidelines.map((guideline) => ({...guideline})),
+    judging_criteria_passed: criteriaPassed,
+    judging_criteria_total: criteriaTotal,
+    judging_criteria: criteria.map((criterion) => ({...criterion})),
     checks: checks.map((check) => ({...check})),
   };
 }

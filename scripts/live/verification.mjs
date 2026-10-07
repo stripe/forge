@@ -35,7 +35,7 @@ export function createRunVerifiers(forge) {
     requireCondition(
       result.evaluation.status === 'passed' &&
       result.evaluation.score === 0 &&
-      result.evaluation.guidelines_total === 0 &&
+      result.evaluation.judging_criteria_total === 0 &&
       result.evaluation.checks.length > 0 &&
       result.evaluation.checks.every(({passed}) => passed),
       'The live one-shot checks did not all pass.',
@@ -103,13 +103,13 @@ export function createRunVerifiers(forge) {
     requireCondition(
       result.evaluation.status === 'passed' &&
       result.evaluation.score === 1 &&
-      result.evaluation.guidelines_total >= 1 &&
-      result.evaluation.guidelines_passed ===
-      result.evaluation.guidelines_total &&
-      result.evaluation.guidelines.every(({passed}) => passed) &&
+      result.evaluation.judging_criteria_total >= 1 &&
+      result.evaluation.judging_criteria_passed ===
+      result.evaluation.judging_criteria_total &&
+      result.evaluation.judging_criteria.every(({passed}) => passed) &&
       result.evaluation.checks.length > 0 &&
       result.evaluation.checks.every(({passed}) => passed),
-      'The live multi-turn checks and guidelines did not all pass.',
+      'The live multi-turn checks and criteria did not all pass.',
       completed.location,
     );
     requireArtifactPaths(
@@ -206,7 +206,7 @@ export function createRunVerifiers(forge) {
       status: result.evaluation.status,
       score: result.evaluation.score,
       turns: result.interaction.turn_count,
-      guidelines_passed: result.evaluation.guidelines_passed,
+      judging_criteria_passed: result.evaluation.judging_criteria_passed,
       agent_cost_usd: result.agent.cost_usd,
       session_provenance_verified: true,
       evidence: evidenceSummary(result.evidence),

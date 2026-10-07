@@ -37,8 +37,8 @@ export interface CheckResultV1 {
   readonly detail?: string;
 }
 
-export interface GuidelineResultV1 {
-  readonly guideline: string;
+export interface CriterionResultV1 {
+  readonly criterion: string;
   readonly passed: boolean;
   readonly explanation: string;
 }
@@ -46,9 +46,9 @@ export interface GuidelineResultV1 {
 export interface EvaluationResultV1 {
   readonly score: number;
   readonly status: EvalStatus;
-  readonly guidelines_passed: number;
-  readonly guidelines_total: number;
-  readonly guidelines: readonly GuidelineResultV1[];
+  readonly judging_criteria_passed: number;
+  readonly judging_criteria_total: number;
+  readonly judging_criteria: readonly CriterionResultV1[];
   readonly checks: readonly CheckResultV1[];
 }
 
@@ -161,7 +161,7 @@ export interface JudgeWorkspaceEntryV1 {
   readonly truncated: boolean;
 }
 
-/** Judge audit with the exact reduced transcript supplied to every guideline. */
+/** Judge audit with the exact reduced transcript supplied to every criterion. */
 export interface JudgeEvidenceV1 {
   readonly transcript: {
     readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;

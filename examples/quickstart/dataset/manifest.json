@@ -12,8 +12,8 @@
   "files": [
     {
       "path": "cases/examples/hello-file.yaml",
-      "size": 332,
-      "sha256": "cb3529be16df91394a179a7111703e72e7bd2e0d315752f5b444497407bb8c16"
+      "size": 330,
+      "sha256": "de86e553802bdbaf1f98a7f075dabde85cb288ec0c76860574f23ab3dd52e341"
     }
   ]
 }

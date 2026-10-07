@@ -64,7 +64,7 @@ describe('checked-in multi-turn example', () => {
       plan.interaction.initial_prompt,
       'I need a release-summary.txt for this handoff. Before changing any files, ask me for the exact status sentence it should contain.',
     );
-    assert.equal(plan.evaluation.success_guidelines.length, 1);
+    assert.equal(plan.evaluation.judging_criteria.length, 1);
     assert.equal(plan.evaluation.checks?.file_checks?.length, 1);
 
     let stdout = '';

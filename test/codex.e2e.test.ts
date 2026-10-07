@@ -344,7 +344,7 @@ describe('Codex engine integration', () => {
   it('uses one exact Codex thread for two Ava turns and judges only the visible native projection after sealing', async () => {
     const plan = createTestResolvedRunPlan({
       agent: selection, mode: 'multi_turn', prompt: 'Complete both parts.', maxTurns: 3,
-      rolePlayer: ROLE_MODEL, judge: JUDGE_MODEL, successGuidelines: ['Both parts are complete.'],
+      rolePlayer: ROLE_MODEL, judge: JUDGE_MODEL, judgingCriteria: ['Both parts are complete.'],
     });
     const test = await fixture(plan, {responses: ['Part one complete.', 'Part two complete.']});
     const provider = createScriptedCompletionProvider({
@@ -419,7 +419,7 @@ describe('Codex engine integration', () => {
       ? 'falls back when the entire native tool pair is missing, retaining observed activity for the judge'
       : 'accepts a genuinely tool-free native turn without warnings', async () => {
       const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Complete the requested answer.',
-        judge: JUDGE_MODEL, successGuidelines: ['The answer is complete.']});
+        judge: JUDGE_MODEL, judgingCriteria: ['The answer is complete.']});
       const test = await fixture(plan, {native: withoutNativeTools,
         ...(liveHasTools ? {} : {stdout: withoutLiveTools})});
       const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
@@ -480,7 +480,7 @@ describe('Codex engine integration', () => {
         ...(image ? [{type: 'input_image', image_url: `data:image/png;base64,${imageData}`}] : [])]
         : `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(shape === 'structured-string' ? structuredContent : result.content)}`;
       const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
-      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the fixture.']});
+      judge: JUDGE_MODEL, judgingCriteria: ['The assistant inspects the fixture.']});
       const test = await fixture(plan, {native: (turns) => mcpRollout(turns, output, result),
       stdout: (response) => mcpStream(response, result)});
       let sealedAtJudgeDispatch = false;
@@ -548,7 +548,7 @@ describe('Codex engine integration', () => {
     const result = {content: [{type: 'text', text: `${marker}: ${AGENT_SECRET}`}], isError: true};
     const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
     const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
-      judge: JUDGE_MODEL, successGuidelines: ['The assistant reports the fixture failure.']});
+      judge: JUDGE_MODEL, judgingCriteria: ['The assistant reports the fixture failure.']});
     const test = await fixture(plan, {
       responses: ['The fixture tool reported a failure.'],
       native(turns) {
@@ -612,7 +612,7 @@ describe('Codex engine integration', () => {
     const result = {content: [{type: 'text', text: 'Malformed metadata fixture.', annotations: null}], isError: false};
     const output = `Wall time: 0.001 seconds\nOutput:\n${JSON.stringify(result.content)}`;
     const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the fixture.',
-      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the fixture.']});
+      judge: JUDGE_MODEL, judgingCriteria: ['The assistant inspects the fixture.']});
     const test = await fixture(plan, {native: (turns) => mcpRollout(turns, output, result),
       stdout: (response) => mcpStream(response, result)});
     const provider = createScriptedCompletionProvider({id: JUDGE_MODEL.provider, responses: [
@@ -639,7 +639,7 @@ describe('Codex engine integration', () => {
       const captured = truncatedMcpFixture(shape);
       const expectedOutput = captured.output.replaceAll(AGENT_SECRET, '[REDACTED]');
       const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the large fixture.',
-      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the large fixture.']});
+      judge: JUDGE_MODEL, judgingCriteria: ['The assistant inspects the large fixture.']});
       const test = await fixture(plan, {
         native: (turns) => mcpRollout(turns, captured.output, captured.result),
         stdout: (response) => mcpStream(response, captured.result),
@@ -699,7 +699,7 @@ describe('Codex engine integration', () => {
     const captured = truncatedMcpFixture('text');
     const output = captured.output.replace(captured.truncationMarker, '…1 tokens truncated…');
     const plan = createTestResolvedRunPlan({agent: selection, prompt: 'Look up the large fixture.',
-      judge: JUDGE_MODEL, successGuidelines: ['The assistant inspects the large fixture.']});
+      judge: JUDGE_MODEL, judgingCriteria: ['The assistant inspects the large fixture.']});
     const test = await fixture(plan, {
       native: (turns) => mcpRollout(turns, output, captured.result),
       stdout: (response) => mcpStream(response, captured.result),

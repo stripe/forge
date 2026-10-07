@@ -557,7 +557,7 @@ describe('resumable CLI experiment runs', () => {
     assert.equal(report.summary.failed, 3);
     assert.equal(report.summary.pass_rate, 0);
     assert.equal(report.summary.coverage, 1);
-    assert.equal(report.summary.guideline_score.mean, null);
+    assert.equal(report.summary.judging_score.mean, null);
     const journal = await fixture.readCheckpoint();
     journal.entries[0]!.attempts[0] = {run_id: 'attempt-1', state: 'running'};
     await fs.writeFile(fixture.checkpoint, JSON.stringify(journal));

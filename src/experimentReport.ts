@@ -14,11 +14,11 @@ const selectionSchema = z.unknown().transform(parseRunSelection);
 const evaluationSchema = z.object({
   status: z.enum(['passed', 'partial', 'failed']),
   score: ratio,
-  guidelines_passed: count,
-  guidelines_total: count,
+  judging_criteria_passed: count,
+  judging_criteria_total: count,
   checks_passed: count,
   checks_total: count,
-}).strict().refine((value) => value.guidelines_passed <= value.guidelines_total &&
+}).strict().refine((value) => value.judging_criteria_passed <= value.judging_criteria_total &&
   value.checks_passed <= value.checks_total, 'Passed counts exceed totals.');
 const runSchema = z.object({
   selection_index: count,
@@ -53,7 +53,7 @@ const statisticsSchema = z.object({
   retry_attempts: count,
   coverage: ratio.nullable(),
   pass_rate: ratio.nullable(),
-  guideline_score: z.object({mean: ratio.nullable(), evaluations: count}).strict(),
+  judging_score: z.object({mean: ratio.nullable(), evaluations: count}).strict(),
 }).strict();
 const coordinates = z.object({
   case_id: z.string().min(1).max(4096),
@@ -161,8 +161,8 @@ function statistics(runs: ExperimentRunReportRunV1[]): ExperimentRunReportStatis
   let failed = 0;
   let attempts = 0;
   let retries = 0;
-  let guidelineSum = 0;
-  let guidelineEvaluations = 0;
+  let criterionSum = 0;
+  let criterionEvaluations = 0;
   for (const run of runs) {
     attempts += run.attempt_count;
     retries += Math.max(0, run.attempt_count - 1);
@@ -174,9 +174,9 @@ function statistics(runs: ExperimentRunReportRunV1[]): ExperimentRunReportStatis
       if (evaluation.status === 'passed') passed += 1;
       else if (evaluation.status === 'partial') partial += 1;
       else failed += 1;
-      if (evaluation.guidelines_total > 0) {
-        guidelineSum += evaluation.score;
-        guidelineEvaluations += 1;
+      if (evaluation.judging_criteria_total > 0) {
+        criterionSum += evaluation.score;
+        criterionEvaluations += 1;
       }
     }
   }
@@ -185,7 +185,7 @@ function statistics(runs: ExperimentRunReportRunV1[]): ExperimentRunReportStatis
     attempts_total: attempts, retry_attempts: retries,
     coverage: runs.length === 0 ? null : completed / runs.length,
     pass_rate: completed === 0 ? null : passed / completed,
-    guideline_score: {mean: guidelineEvaluations === 0 ? null : guidelineSum / guidelineEvaluations,
-      evaluations: guidelineEvaluations},
+    judging_score: {mean: criterionEvaluations === 0 ? null : criterionSum / criterionEvaluations,
+      evaluations: criterionEvaluations},
   };
 }

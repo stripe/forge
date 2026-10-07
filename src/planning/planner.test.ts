@@ -304,7 +304,7 @@ describe('experiment expansion and run planning', () => {
 
     definition.setup[0]!.with.argv = ['changed-command'];
     definition.checks!.files_created!.push('changed.txt');
-    definition.success_guidelines.push('Changed guideline');
+    definition.judging_criteria.push('Changed criterion');
     config.treatments['with-seed']!.setup[0]!.with.target = 'changed-seed.txt';
     config.models.role_player!.model = 'changed-role-player';
     config.models.judge!.model = 'changed-judge';
@@ -340,7 +340,7 @@ describe('experiment expansion and run planning', () => {
         ...caseWithoutPromptFields,
         initial_prompt: 'Create greeting.txt',
         execution_mode: 'one_shot',
-        success_guidelines: [],
+        judging_criteria: [],
         checks: {files_created: ['greeting.txt']},
       },
       // Configured but unused harness models must not enter a one-shot,
@@ -608,7 +608,7 @@ function evalCase(): EvalCaseV1 {
     setup: [
       {uses: 'forge/command', with: {argv: ['git', 'init']}},
     ],
-    success_guidelines: ['The task is complete'],
+    judging_criteria: ['The task is complete'],
   };
 }
 

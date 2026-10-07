@@ -1175,7 +1175,7 @@ async function createBenchmarkFixture(
 task: Do the thing
 execution_mode: one_shot
 setup: []
-success_guidelines: []
+judging_criteria: []
 `;
   const casePath = 'cases/example.yaml';
   const caseFilePath = path.join(datasetRoot, casePath);
@@ -1186,7 +1186,7 @@ success_guidelines: []
 task: Do another thing
 execution_mode: one_shot
 setup: []
-success_guidelines: []
+judging_criteria: []
 `;
   if (options.includeUnselectedCase) {
     await fs.writeFile(unselectedCaseFilePath, unselectedCaseBody);

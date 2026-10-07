@@ -85,6 +85,20 @@ try {
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseJudgeEvidence, 'function');
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
+      assert.equal(typeof forge.judgeCriteria, 'function');
+      assert.equal(typeof forge.buildCriterionJudgePrompt, 'function');
+      assert.equal(typeof forge.parseCriterionJudgment, 'function');
+      for (const removed of ['judgeGuidelines', 'buildGuidelineJudgePrompt', 'parseGuidelineJudgment']) {
+        assert.equal(removed in forge, false);
+      }
+      const criterion = forge.parseCriterionJudgment(
+        JSON.stringify({results: [{index: 0, passed: true, explanation: 'Done.'}]}),
+        'The task is complete.',
+      );
+      const evaluation = forge.parseEvaluationResult(forge.scoreEvaluation([criterion], []));
+      assert.equal(evaluation.judging_criteria_passed, 1);
+      assert.equal(evaluation.judging_criteria_total, 1);
+      assert.deepEqual(evaluation.judging_criteria, [criterion]);
       assert.equal(typeof docker.detectDockerRuntimePlatform, 'function');
       assert.equal(typeof docker.validateDockerRuntimeHost, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
@@ -142,7 +156,7 @@ try {
       assert.deepEqual(codex.createCodexAdapter().metadata, {endpoint_mode: 'default', layout_mode: 'default'});
       assert.deepEqual(anthropic.createAnthropicCompletionProvider({baseUrl: 'https://gateway.example.com'}).metadata, {endpoint_mode: 'custom'});
       for (const [surface, names] of [
-        [forge, ['BENCHMARK_SCHEMA_VERSION', 'RESOLVED_RUN_PLAN_SCHEMA_VERSION', 'RUN_RESULT_SCHEMA_VERSION', 'SETUP_ARTIFACT_SCHEMA_VERSION', 'WORKSPACE_EVIDENCE_SCHEMA_VERSION', 'INTERACTION_SCHEMA_VERSION', 'JUDGE_EVIDENCE_SCHEMA_VERSION', 'EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
+        [forge, ['BENCHMARK_SCHEMA_VERSION', 'RESOLVED_RUN_PLAN_SCHEMA_VERSION', 'RUN_RESULT_SCHEMA_VERSION', 'SETUP_ARTIFACT_SCHEMA_VERSION', 'WORKSPACE_EVIDENCE_SCHEMA_VERSION', 'INTERACTION_SCHEMA_VERSION', 'JUDGE_EVIDENCE_SCHEMA_VERSION', 'EVALUATION_SCHEMA_VERSION', 'CRITERION_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
         [experiment, ['EXPERIMENT_RUN_REPORT_SCHEMA_VERSION']],
         [atif, ['ATIF_NORMALIZATION_VERSION']],
         [claude, ['CLAUDE_CODE_ADAPTER_VERSION', 'CLAUDE_CODE_GATEWAY_ADAPTER_VERSION']],

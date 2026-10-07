@@ -452,7 +452,7 @@ async function inspectAttempt(
       : {run_id: runId, state: 'errored', error_code: 'role_player_error'};
     const evaluation = completed.result.evaluation;
     return {attempt, evaluation: {status: evaluation.status, score: evaluation.score,
-      guidelines_passed: evaluation.guidelines_passed, guidelines_total: evaluation.guidelines_total,
+      judging_criteria_passed: evaluation.judging_criteria_passed, judging_criteria_total: evaluation.judging_criteria_total,
       checks_passed: evaluation.checks.filter((check) => check.passed).length, checks_total: evaluation.checks.length},
       artifact: {location,
       evaluation: {status: completed.result.evaluation.status, score: completed.result.evaluation.score},

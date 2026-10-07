@@ -283,7 +283,7 @@ async function createFixture(root, platform, specs, liveAgent) {
   for (const spec of specs) {
     files[`cases/setup/${spec.id}.yaml`] = stringify({
       id: `setup/${spec.id}`, initial_prompt: `Verify ${spec.id} setup.`,
-      execution_mode: 'one_shot', setup: spec.setup, success_guidelines: [],
+      execution_mode: 'one_shot', setup: spec.setup, judging_criteria: [],
       checks: {
         file_checks: Object.entries(spec.files ?? {}).map(([file, body]) => ({
           file, exists: true, contains: `^${body.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

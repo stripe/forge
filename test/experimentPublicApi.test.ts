@@ -29,6 +29,28 @@ import type {
 } from '../src/experimentCli.js';
 
 describe('experiment public entry points', () => {
+  it('exports criterion judging contracts without former aliases', () => {
+    for (const name of ['judgeGuidelines', 'buildGuidelineJudgePrompt', 'parseGuidelineJudgment']) {
+      assert.equal(name in root, false);
+    }
+    assert.equal(typeof root.judgeCriteria, 'function');
+    assert.equal(typeof root.buildCriterionJudgePrompt, 'function');
+    assert.equal(typeof root.parseCriterionJudgment, 'function');
+    const criterion: root.CriterionResultV1 = root.parseCriterionJudgment(
+      JSON.stringify({results: [{index: 0, passed: true, explanation: 'Done.'}]}),
+      'The task is complete.',
+    );
+    const evaluation: root.EvaluationResultV1 = root.scoreEvaluation([criterion], []);
+    assert.equal(evaluation.judging_criteria_passed, 1);
+    assert.equal(evaluation.judging_criteria_total, 1);
+    assert.deepEqual(evaluation.judging_criteria, [criterion]);
+    assert.equal(evaluation.score, 1);
+    const judge = (input: root.CriterionJudgeInput, invoke: root.CriterionCompletionInvoker,
+      options: root.CriterionJudgeExecutionOptions): Promise<root.CriterionResultV1[]> =>
+      root.judgeCriteria(input, invoke, options);
+    assert.equal(typeof judge, 'function');
+  });
+
   it('exports flat and grouped matrix types and their shared axes helper', () => {
     const group: root.ExperimentMatrixGroupV1 = {
       cases: ['examples/first'],

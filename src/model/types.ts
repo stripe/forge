@@ -124,7 +124,7 @@ export interface EvalCaseV1 {
   execution_mode: 'multi_turn' | 'one_shot';
   max_turns?: number;
   setup: SetupStepV1[];
-  success_guidelines: string[];
+  judging_criteria: string[];
   checks?: ChecksV1;
   example_answer?: string;
 }
@@ -294,7 +294,7 @@ export interface ResolvedRunPlanV1 {
     max_turns: number;
   };
   evaluation: {
-    success_guidelines: string[];
+    judging_criteria: string[];
     checks?: ChecksV1;
     example_answer?: string;
     judge?: ModelRefV1;

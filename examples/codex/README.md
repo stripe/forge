@@ -45,7 +45,7 @@ container; container loopback is not the host.
 
 This one-shot, checks-only case needs no Anthropic key. Multi-turn cases use
 the same Codex session through exact-ID resume, but require an explicit
-`models.role_player`; guidelines similarly require `models.judge`. The public
+`models.role_player`; judging criteria similarly require `models.judge`. The public
 CLI currently uses the Anthropic completion provider for those two roles,
 independently of the Codex agent and its key. Codex supports native
 [`forge/plugin` treatments](../../docs/plugin-action.md). Set `hook_trust` on

@@ -19,7 +19,7 @@ export interface TestResolvedRunPlanOptions {
   readonly context?: string;
   readonly initialPrompt?: string;
   readonly maxTurns?: number;
-  readonly successGuidelines?: readonly string[];
+  readonly judgingCriteria?: readonly string[];
   readonly rolePlayer?: ModelRefV1;
   readonly judge?: ModelRefV1;
   readonly agent?: AgentSelectionV1;
@@ -49,7 +49,7 @@ export function createTestResolvedRunPlan(
   const treatmentSetup = [...(options.treatmentSetup ?? [])];
   const setup = [...caseSetup, ...treatmentSetup];
   const checks = options.checks;
-  const successGuidelines = [...(options.successGuidelines ?? [])];
+  const judgingCriteria = [...(options.judgingCriteria ?? [])];
   const initialPrompt = options.initialPrompt ?? (mode === 'one_shot' ? prompt : undefined);
   const maxTurns = mode === 'one_shot' ? 1 : (options.maxTurns ?? 10);
 
@@ -86,7 +86,7 @@ export function createTestResolvedRunPlan(
       execution_mode: mode,
       ...(mode === 'multi_turn' ? {max_turns: maxTurns} : {}),
       setup: caseSetup,
-      success_guidelines: successGuidelines,
+      judging_criteria: judgingCriteria,
       ...(checks === undefined ? {} : {checks}),
     },
     treatment: {id: treatment, setup: treatmentSetup},
@@ -112,7 +112,7 @@ export function createTestResolvedRunPlan(
       max_turns: maxTurns,
     },
     evaluation: {
-      success_guidelines: successGuidelines,
+      judging_criteria: judgingCriteria,
       ...(checks === undefined ? {} : {checks}),
       ...(options.judge === undefined ? {} : {judge: {...options.judge}}),
     },

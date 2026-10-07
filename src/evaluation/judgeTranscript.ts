@@ -17,7 +17,7 @@ import {serializeCanonicalJson} from '../serialization.js';
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
-/** Portable upper bound before workspace, guideline, and prompt text are added. */
+/** Portable upper bound before workspace, criterion, and prompt text are added. */
 export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
 export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze(
@@ -38,7 +38,7 @@ export const JUDGE_TRANSCRIPT_INCLUDED_FIELDS = Object.freeze(
   ] as const,
 );
 
-/** Message or media-reference content visible to a guideline judge. */
+/** Message or media-reference content visible to a criterion judge. */
 export type JudgeVisibleContentV1 = AtifContent;
 
 /** Observable invocation details, excluding provider-specific metadata. */
@@ -79,7 +79,7 @@ export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
   | JudgeVisibleAgentStepV1;
 
-/** Exact transcript projection and declared policy supplied to a guideline judge. */
+/** Exact transcript projection and declared policy supplied to a criterion judge. */
 export interface JudgeTranscriptProjectionV1 {
   readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
   readonly projectionId: typeof JUDGE_TRANSCRIPT_PROJECTION_ID;
