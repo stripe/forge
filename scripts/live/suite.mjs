@@ -4,6 +4,7 @@ import {startLoopbackGatewayBridge, assertDockerCanReachBridge} from './gateway.
 import {createRunVerifiers} from './verification.mjs';
 import {assertRuntimeCleanup} from './cleanup.mjs';
 import {runCodexPluginIntegrationSuite} from './codex.mjs';
+import {runGuidelineJudgmentRegression} from './judgment.mjs';
 
 export function createFullSuite(forge, options, overrides = {}) {
   const {
@@ -31,7 +32,9 @@ export function createFullSuite(forge, options, overrides = {}) {
   let bridge;
   const checks = {
     assertRuntimeCleanup, startLoopbackGatewayBridge, assertDockerCanReachBridge, runDockerConformance,
-    runClaudePluginConformance, runCodexPluginIntegrationSuite, runSelection, ...createRunVerifiers(forge), ...overrides
+    runClaudePluginConformance, runCodexPluginIntegrationSuite, runSelection,
+    runGuidelineJudgmentRegression: (input) => runGuidelineJudgmentRegression(forge, input),
+    ...createRunVerifiers(forge), ...overrides
   };
   return {run: async () => {try {return await run();} finally {await bridge?.close();} }, runDockerConformance};
 
@@ -82,6 +85,16 @@ export function createFullSuite(forge, options, overrides = {}) {
       [agentCredentialReference, agentCredential],
       ...(codexSelected ? [] : [[completionCredentialReference, upstreamCredential]]),
     ]);
+    const credentialResolver = Object.freeze({
+      async resolve(reference, context) {
+        context.signal.throwIfAborted();
+        const value = credentialValues.get(reference);
+        if (value === undefined) {
+          throw new Error('The live suite received an unexpected credential reference.');
+        }
+        return value;
+      },
+    });
     const compositionFactory = async ({datasetRoot, resultsRoot: selectedRoot}) =>
       Object.freeze({
         runtime,
@@ -89,16 +102,7 @@ export function createFullSuite(forge, options, overrides = {}) {
         ...(completionProvider === undefined ? {} : {
           completionProviders: new Map([[completionProvider.id, completionProvider]]),
         }),
-        credentialResolver: Object.freeze({
-          async resolve(reference, context) {
-            context.signal.throwIfAborted();
-            const value = credentialValues.get(reference);
-            if (value === undefined) {
-              throw new Error('The live suite received an unexpected credential reference.');
-            }
-            return value;
-          },
-        }),
+        credentialResolver,
         inputProvider: await createDirectoryRunInputProvider(datasetRoot),
         artifactStore: createArtifactStore({root: selectedRoot}),
       });
@@ -145,6 +149,7 @@ export function createFullSuite(forge, options, overrides = {}) {
     } : undefined);
 
     let multiTurnReport;
+    let judgmentReport;
     if (!codexSelected) {
       progress('running the multi-turn Ava and guideline evaluation');
       const multiTurnCompleted = await checked(runIds.multiTurn, () => checks.runSelection({
@@ -156,6 +161,13 @@ export function createFullSuite(forge, options, overrides = {}) {
         signal,
       }));
       multiTurnReport = await checks.verifyMultiTurnRun(multiTurnCompleted);
+      progress('checking native structured judgment JSON escaping');
+      judgmentReport = await checks.runGuidelineJudgmentRegression({
+        provider: completionProvider,
+        credentialResolver,
+        runId: `${suiteId}-judge-escaping`,
+        signal,
+      });
     }
 
     return {
@@ -168,6 +180,7 @@ export function createFullSuite(forge, options, overrides = {}) {
         : 'loopback_gateway_bridge',
       docker: dockerReport,
       ...(pluginReport === undefined ? {} : {plugin: pluginReport}),
+      ...(judgmentReport === undefined ? {} : {judgment: judgmentReport}),
       runs: {
         one_shot: oneShotReport,
         ...(multiTurnReport === undefined ? {} : {multi_turn: multiTurnReport}),

@@ -462,6 +462,24 @@ describe('judgeGuidelines', () => {
 });
 
 describe('parseGuidelineJudgment', () => {
+  it('accepts JSON explanations containing Markdown backticks and escaped characters', () => {
+    const explanation = '  Missing `cancel_url`; expected "https://example.com/cancel".\nCheck C:\\checkout.  ';
+    assert.deepEqual(parseGuidelineJudgment(valid(false, explanation), 'guideline'), {
+      guideline: 'guideline',
+      passed: false,
+      explanation: explanation.trim(),
+    });
+  });
+
+  it('rejects illegal backslash-backtick escapes in an explanation', () => {
+    const raw = '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}';
+    assert.deepEqual(parseGuidelineJudgment(raw, 'guideline'), {
+      guideline: 'guideline',
+      passed: false,
+      explanation: 'Judge response was not valid JSON.',
+    });
+  });
+
   it('does not recover JSON from prose or code fences', () => {
     for (const raw of [
       'prose {"results":[{"index":0,"passed":true,"explanation":"ok"}]}',
@@ -480,7 +498,9 @@ describe('parseGuidelineJudgment', () => {
     for (const response of [
       {results: [{...entry, extra: true}]},
       {results: [{...entry, index: 1}]},
+      {results: [{...entry, explanation: ''}]},
       {results: [{...entry, explanation: '   '}]},
+      {results: [{...entry, explanation: '\t\r\n'}]},
       {results: [entry], extra: true},
       {results: []},
       {results: [entry, entry]},

@@ -2074,6 +2074,8 @@ One full-mode invocation builds once and runs the following checks in order:
 5. Full `verifyCompletedRun` integrity verification plus targeted checks of the
    interaction, trajectory, judge evidence, completion calls, and session
    provenance, including the exact restricted Claude source artifact.
+6. A synthetic guideline judgment that requests invalid JSON escapes, which
+   must return valid JSON accepted by Forge's judgment parser.
 
 To test only Codex, select its mode in the same live suite:
 

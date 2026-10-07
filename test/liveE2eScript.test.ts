@@ -13,6 +13,7 @@ import {FORGE_VERSION} from '../src/version.js';
 import {FORGE_CODEX_VERSION, FORGE_CLAUDE_CODE_VERSION} from '../src/runtime/docker/assets.js';
 import * as forge from '../src/index.js';
 import {parseAtifTrajectory} from '../src/atif/index.js';
+import {createAnthropicCompletionProvider} from '../src/providers/anthropic/index.js';
 
 const repositoryRoot = process.cwd();
 const liveScript = path.join(repositoryRoot, 'scripts', 'live-e2e.mjs');
@@ -22,6 +23,7 @@ const {createFullSuite} = await liveModule('suite');
 const {createRunVerifiers} = await liveModule('verification');
 const {assertRuntimeCleanup} = await liveModule('cleanup');
 const {startLoopbackGatewayBridge, assertDockerCanReachBridge} = await liveModule('gateway');
+const {runGuidelineJudgmentRegression} = await liveModule('judgment');
 const verifiers = createRunVerifiers({...forge, parseAtifTrajectory, FORGE_CLAUDE_CODE_VERSION});
 
 describe('unified live end-to-end suite', () => {
@@ -40,7 +42,8 @@ describe('unified live end-to-end suite', () => {
       'pnpm build && node scripts/live-e2e.mjs',
     );
 
-    for (const script of [liveScript, path.join(repositoryRoot, 'scripts', 'live', 'setup.mjs'),
+    for (const script of [liveScript, path.join(repositoryRoot, 'scripts', 'live', 'judgment.mjs'),
+      path.join(repositoryRoot, 'scripts', 'live', 'setup.mjs'),
       path.join(repositoryRoot, 'scripts', 'live', 'codex.mjs')]) {
       const syntax = spawnSync(process.execPath, ['--check', script], {
         cwd: repositoryRoot,
@@ -321,6 +324,18 @@ describe('unified live end-to-end suite', () => {
           return {verified: true};
         },
         verifyMultiTurnRun: async () => ({verified: true}),
+        async runGuidelineJudgmentRegression(input: {
+          provider: {id: string}; runId: string; signal: AbortSignal;
+          credentialResolver: {resolve(reference: string, context: {signal: AbortSignal}): Promise<string>};
+        }) {
+          order.push('judge-escaping');
+          assert.equal(codex, false, 'Codex must not invoke the host judge regression');
+          assert.equal(input.provider.id, 'anthropic');
+          assert.equal(input.runId, 'synthetic-suite-judge-escaping');
+          assert.equal(input.signal, signal);
+          assert.equal(await input.credentialResolver.resolve('live.completion-credential', {signal}), upstreamCredential);
+          return {verified: true};
+        },
       });
       function agent(id: string, options: Record<string, unknown>) {
         assert.equal(id, scenario.agent);
@@ -333,13 +348,62 @@ describe('unified live end-to-end suite', () => {
       output = JSON.stringify(report);
       assert.deepEqual(order, [
         ...(scenario.bridged ? ['bridge'] : []), 'docker', ...(codex ? ['codex-plugin'] : ['plugin']),
-        ...(scenario.bridged ? ['bridge-probe'] : []), 'one-shot', ...(codex ? [] : ['multi-turn']), ...(scenario.bridged ? ['bridge-close'] : []),
+        ...(scenario.bridged ? ['bridge-probe'] : []), 'one-shot',
+        ...(codex ? [] : ['multi-turn', 'judge-escaping']), ...(scenario.bridged ? ['bridge-close'] : []),
       ]);
 
       assert.equal(report.verified, true);
+      assert.equal(report.judgment?.verified, codex ? undefined : true);
       assert.equal(report.authentication_mode, scenario.bridged ? 'loopback_gateway_bridge'
         : scenario.endpoint ? 'messages_compatible_gateway' : 'direct_anthropic');
       assert.ok(!output.includes(upstreamCredential) && !output.includes(bridgeCredential));
+    });
+  }
+
+  for (const fixture of [
+    {name: 'valid backticks', content: '{"results":[{"index":0,"passed":true,"explanation":"Missing `cancel_url`."}]}', error: undefined},
+    {name: 'illegal backtick escapes', content: '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}', error: /invalid response/},
+    {name: 'whitespace explanation', content: '{"results":[{"index":0,"passed":true,"explanation":"   "}]}', error: /valid completed judgment/},
+  ]) {
+    it(`checks the native judge schema and local parser for ${fixture.name} without exposing the reply`, async () => {
+      const signal = new AbortController().signal;
+      const native = createAnthropicCompletionProvider({
+        credential: 'live.completion-credential',
+        async fetch(_input, init) {
+          const request = JSON.parse(String(init?.body));
+          assert.equal(request.output_config.format.type, 'json_schema');
+          assert.equal(request.output_config.format.schema.properties.results.items.properties.explanation.pattern, undefined);
+          assert.equal(request.messages[0].content.match(/\\`/g)?.length, 2);
+          return new Response(JSON.stringify({
+            type: 'message', role: 'assistant', stop_reason: 'end_turn',
+            content: [{type: 'text', text: fixture.content}],
+            usage: {input_tokens: 10, output_tokens: 10},
+          }), {status: 200});
+        },
+      });
+      const provider = {
+        ...native,
+        async complete(request: forge.CompletionRequest, context: forge.CompletionProviderCallContext) {
+          assert.equal(request.purpose, 'judge');
+          assert.equal(request.responseSchema, forge.GUIDELINE_JUDGMENT_RESPONSE_SCHEMA);
+          assert.equal(request.signal, signal);
+          return native.complete(request, context);
+        },
+      };
+      const pending = runGuidelineJudgmentRegression(forge, {
+        provider, runId: 'synthetic-judge', signal,
+        credentialResolver: {
+          async resolve(reference: string, context: {signal: AbortSignal}) {
+            assert.equal(reference, 'live.completion-credential');
+            assert.equal(context.signal, signal);
+            return 'synthetic-private-key';
+          },
+        },
+      });
+      if (fixture.error !== undefined) await assert.rejects(pending, fixture.error);
+      else assert.deepEqual(await pending, {
+        verified: true, valid_json: true, local_judgment_validation: true,
+      });
     });
   }
 
