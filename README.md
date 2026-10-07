@@ -4,7 +4,7 @@ Forge is a portable execution harness for reproducible coding-agent evaluations.
 It loads a versioned dataset and experiment config, resolves one selection into
 an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session
 through a runtime adapter, normalizes agent evidence to ATIF, evaluates checks and success
-guidelines, and atomically commits a neutral local result.
+criteria, and atomically commits a neutral local result.
 
 An experiment defines the cases, treatments, agents, and repetitions to evaluate.
 An experiment run is one resumable batch of selections from that experiment.
@@ -26,7 +26,7 @@ file-by-file map and concrete call paths, see the
 
 > **v0.1 status:** the implemented end-to-end paths are one-shot and engine-owned
 > Ava multi-turn Claude Code and Codex runs, with file checks, model-judged success
-> guidelines, latest-marketplace Claude Code and Codex plugin treatments, ATIF v1.8 evidence,
+> criteria, latest-marketplace Claude Code and Codex plugin treatments, ATIF v1.8 evidence,
 > and local results. The public CLI supports
 > direct Anthropic and OpenAI, or explicitly configured compatible endpoints.
 > Host-side Ava and judging currently use Anthropic, independently of the coding
@@ -56,7 +56,7 @@ can supply an external runtime with its own explicit execution requirements.
   Responses-compatible API root. A checks-only, one-shot Codex run needs no
   Anthropic credential; Codex runs using Ava or judging additionally need the
   independently configured host completion provider's credential.
-- Ava and guideline judging use strict structured outputs. The built-in
+- Ava and criterion judging use strict structured outputs. The built-in
   Anthropic completion provider accepts Claude 4.5 or newer model identifiers.
 - Enough Docker capacity for the experiment config's limits. Defaults are 4 GiB
   memory, 2 CPUs, and 512 processes.
@@ -105,7 +105,7 @@ display_name: Hello file
 initial_prompt: Create hello.txt containing exactly "hello, forge!" followed by a newline.
 execution_mode: one_shot
 setup: []
-success_guidelines: []
+judging_criteria: []
 checks:
   files_created:
     - hello.txt
@@ -119,8 +119,8 @@ checks:
 This minimal quickstart uses one-shot interaction and deterministic file checks,
 so it needs no harness completion models. A one-shot case supplies exactly one
 of `task` or `initial_prompt`; this example uses `initial_prompt`. Multi-turn
-cases and success guidelines are described in
-[Multi-turn Ava and guideline judging](#multi-turn-ava-and-guideline-judging).
+cases and success criteria are described in
+[Multi-turn Ava and criterion judging](#multi-turn-ava-and-criterion-judging).
 
 ### 2. Dataset manifest
 
@@ -142,8 +142,8 @@ Create `quickstart/dataset/manifest.json`:
   "files": [
     {
       "path": "cases/examples/hello-file.yaml",
-      "size": 332,
-      "sha256": "cb3529be16df91394a179a7111703e72e7bd2e0d315752f5b444497407bb8c16"
+      "size": 330,
+      "sha256": "de86e553802bdbaf1f98a7f075dabde85cb288ec0c76860574f23ab3dd52e341"
     }
   ]
 }
@@ -166,7 +166,7 @@ dataset:
   path: ./dataset
   id: forge-quickstart
   version: 0.1.0
-  manifest_sha256: sha256:2ce8cb5dbcbb01f4d3f626109608ae9e0a0c91381f2dbf857eb677654ea7a187
+  manifest_sha256: sha256:75c268301fe1f8a3dc06762b64df75d6b6c3d3bb5b2dd349ddd0c6b8044fa0b0
 runtime:
   adapter: docker
   image:
@@ -225,7 +225,7 @@ omit it and supply a loaded dataset directly.
 
 `models: {}` is intentional for this one-shot, checks-only case. An experiment
 config must set `models.role_player` for every selected `multi_turn` case and
-`models.judge` for every selected case with non-empty `success_guidelines`.
+`models.judge` for every selected case with non-empty `judging_criteria`.
 Those model coordinates select host-side completion providers; the agent model
 remains independently selected by the matrix's agent entries.
 
@@ -366,7 +366,7 @@ Additional artifacts are emitted only when their capability is used:
 
 ```text
 workspace-evidence.json            # one or more deterministic file checks
-judge-evidence.json                # one or more guidelines judged
+judge-evidence.json                # one or more criteria judged
 native/claude-code/session.jsonl   # exact selected Claude source session
 native/codex/session.jsonl         # exact selected Codex rollout, for Codex runs
 extensions/<contributor-id>/...    # optional host-contributed artifacts
@@ -396,7 +396,7 @@ fingerprint of the installed plugin tree. `trajectory.json` is the full
 selected, normalized, redacted ATIF audit trajectory. `interaction.json` is a
 post-run driver audit record, not an execution input: it contains the public
 agent turns, stop reason, and, for multi-turn runs, Ava's private need model and
-decision history. It is not supplied to the guideline judge.
+decision history. It is not supplied to the criterion judge.
 
 This plan/receipt split is deliberate. The plan captures declared semantics;
 the setup receipt captures material facts that become known only while setup is
@@ -475,7 +475,7 @@ npx --no-install forge run --experiment ./experiment.yaml --jobs 4
 Each eval run retains its own runtime, agent session, and artifacts. Size concurrency
 for the host's memory/CPU capacity and provider rate limits; `--jobs` limits
 eval runs, not individual provider requests. Each eval run may also judge up to four
-guidelines concurrently. Completion and progress records can arrive in any order.
+criteria concurrently. Completion and progress records can arrive in any order.
 
 Each experiment run has an independent checkpoint, scorecard, and eval run
 artifacts:
@@ -540,7 +540,7 @@ even when no eval has completed.
 To view scores by case and configuration:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, guideline_score}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, judging_score}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
@@ -560,26 +560,27 @@ and completed evaluation statuses (`passed`, `partial`, `failed`).
 first for each selection. Retries never add another selection or another score.
 `coverage` is completed selections divided by all selections. `pass_rate` is
 passed evaluations divided by completed evaluations, or `null` when none
-completed. `guideline_score` contains the mean score and number of completed
-evaluations with guidelines; its mean is `null` when that count is zero. Ratios
-and scores range from 0 to 1. A checks-only evaluation can pass with raw score
-0; it contributes to pass rate, but not the guideline mean.
+completed. `judging_score` contains the mean score and number of completed
+evaluations with judging criteria; its mean is `null` when that count is zero.
+Ratios and scores range from 0 to 1. A checks-only evaluation can pass with raw
+score 0; it contributes to pass rate, but not the judging mean.
 
 Coverage counts only saved selections from the authored matrix and any CLI
 filters. Combinations absent from a grouped matrix have no report row and do
-not count as pending. Each completed guideline evaluation has equal weight in
-the summary mean, so cases selected for more treatment/agent combinations can
-contribute more weight. Compare treatments using matched case IDs and identical
-complete agent selections; arms with different case or model coverage describe
+not count as pending. Each completed evaluation with judging criteria has equal
+weight in the summary mean, so cases selected for more treatment/agent
+combinations can contribute more weight. Compare treatments using matched case
+IDs and identical complete agent selections; arms with different case or model coverage describe
 different evaluation distributions.
 
 Only the latest verified effective outcome for each selection contributes to
 scores, using the same committed-result recovery as resume. Completed failed
 or partial evaluations keep their scores. Execution errors, including committed
 role-player failures, and pending entries have `evaluation: null`. Completed
-rows retain status, score, guideline passed/total counts, and check passed/total
-counts. `result_path` points to `runs/<eval-run-id>/result.json` relative to the
-experiment run directory when verified artifacts exist, including an errored
+rows retain status, score, `judging_criteria_passed`, `judging_criteria_total`,
+`checks_passed`, and `checks_total`. `result_path` points to
+`runs/<eval-run-id>/result.json` relative to the experiment run directory when
+verified artifacts exist, including an errored
 role-player result; otherwise it is `null`.
 
 Execution errors still produce a partial scorecard. Graceful cancellation or a
@@ -673,7 +674,7 @@ No Docker-specific mechanism is required by the agent contract.
 
 Codex is a coding-agent adapter, not a host completion provider. For a
 multi-turn Codex experiment, still declare `models.role_player`; for success
-guidelines, declare `models.judge`. The CLI currently supplies Anthropic for
+criteria, declare `models.judge`. The CLI currently supplies Anthropic for
 those roles, or embedding hosts can supply their own `CompletionProvider`.
 Codex implements `forge/plugin`; add a `codex` distribution branch to the
 treatment. See [Marketplace plugin treatments](docs/plugin-action.md) for
@@ -689,7 +690,7 @@ Forge deliberately separates what is evaluated from how it is run:
 
 - The dataset contains cases and fixture bytes. Stable case IDs are independent
   of the dataset's location on disk.
-- A case owns the prompt, invariant setup, checks, and success guidelines.
+- A case owns the prompt, invariant setup, checks, and success criteria.
 - An experiment config pins one dataset, locates it with `dataset.path` for CLI
   execution, and defines treatments, agents, models,
   resources, limits, repetitions, retries, and the experiment matrix.
@@ -760,7 +761,7 @@ The selected case, treatment, and complete agent entry must occur together in
 one group. Plans, checkpoints, and reports record those selections without a
 group identity.
 
-## Multi-turn Ava and guideline judging
+## Multi-turn Ava and criterion judging
 
 A multi-turn case describes the developer's goal and optional background while
 leaving the agent, role-player model, and judge model in the experiment config:
@@ -772,7 +773,7 @@ context: You are a developer maintaining this project.
 execution_mode: multi_turn
 max_turns: 6
 setup: []
-success_guidelines:
+judging_criteria:
   - The assistant implements the requested behavior and explains the tradeoff.
 checks: {}
 example_answer: A concise reference answer used only to calibrate the judge.
@@ -798,7 +799,7 @@ models:
 
 `models.role_player` is required exactly when a selected case is multi-turn.
 `models.judge` is required exactly when a selected case has one or more success
-guidelines. Unused model settings are not copied into checks-only, one-shot
+criteria. Unused model settings are not copied into checks-only, one-shot
 plans. The experiment config's model providers must match entries in the
 composition's `completionProviders`; the public CLI registers the built-in
 `anthropic` provider.
@@ -828,10 +829,10 @@ The result and `interaction.json` record bounded failure details, while
 `result.json` records safe per-call provider, model, usage, cost, stop, and error
 summaries without prompts, responses, endpoints, or credentials.
 
-### Guideline semantics
+### Criterion semantics
 
 After the runtime is quiesced and agent evidence is normalized and redacted,
-Forge judges every authored success guideline independently. It derives a
+Forge judges every authored success criterion independently. It derives a
 deterministic positive projection of current-run root ATIF behavior. The
 allowlist contains root user and agent step identity, source, and messages;
 tool-call IDs, names, and arguments; and tool-result content and
@@ -857,7 +858,7 @@ load or attach those referenced bytes as multimodal judge input.
 The judge sees this projection, optional `example_answer`, and relevant bounded
 text from the sealed workspace. It never sees `interaction.json`, Ava's private
 needs, or the excluded ATIF data, and the prompt tells it not to infer or reward
-private reasoning. Each authored guideline is capped at 65,536 characters,
+private reasoning. Each authored criterion is capped at 65,536 characters,
 matching the persisted evaluation-result bound. Projected transcript JSON is
 capped at 786,432 UTF-8 bytes and receives the same bounded-JSON graph preflight
 as ATIF before recursive validation. The complete rendered prompt is capped at
@@ -871,18 +872,18 @@ Programmatic consumers can reproduce the exact judge transcript bytes and
 policy with `createJudgeTranscriptProjection` from `@stripe/forge`. The exported
 projection ID, source, and positive included-field policy describe the
 policy recorded in `judge-evidence.json`. Its `transcript.steps` array is decoded
-directly from the same canonical transcript JSON passed to `judgeGuidelines`;
+directly from the same canonical transcript JSON passed to `judgeCriteria`;
 canonical serialization of that array reproduces the transcript bytes in every
-guideline request. The public `judgeGuidelines` helper
+criterion request. The public `judgeCriteria` helper
 accepts this validated projection object rather than an arbitrary transcript
 string, so callers cannot accidentally bypass the projection policy.
 
-At most four guidelines are judged concurrently, with temperature 0, a
-1,024-token response limit, and a strict one-guideline JSON schema.
+At most four criteria are judged concurrently, with temperature 0, a
+1,024-token response limit, and a strict one-criterion JSON schema.
 
-Each guideline gets up to three attempts with the same one-second and
+Each criterion gets up to three attempts with the same one-second and
 five-second retry waits. Repeated malformed structured output fails that
-guideline closed and records it as not passed. If the provider request itself
+criterion closed and records it as not passed. If the provider request itself
 still fails on the final attempt, execution aborts, runtime cleanup runs, and no
 completed result is committed.
 
@@ -901,14 +902,18 @@ producing Forge release defines the artifact contract and projection policy. For
 refuses to dispatch a judge request if its final defensive
 credential-redaction pass would rewrite the selected prompt evidence.
 
-For a guideline-judged run named `judged-001`, inspect the actual reduced
+For an eval run with judging criteria, replace `EXPERIMENT_RUN_ID` and
+`EVAL_RUN_ID` with the saved IDs and inspect the actual reduced
 transcript with:
 
 ```sh
-jq '.transcript.steps' results/experiments/EXPERIMENT_RUN_ID/runs/judged-001/judge-evidence.json
+jq '.transcript.steps' results/experiments/EXPERIMENT_RUN_ID/runs/EVAL_RUN_ID/judge-evidence.json
 ```
 
-The numeric score remains the fraction of success guidelines that passed.
+The numeric score remains the fraction of success criteria that passed.
+`result.json.evaluation.judging_criteria` records each outcome's `criterion`,
+`passed`, and `explanation`; `judging_criteria_passed` and
+`judging_criteria_total` count those outcomes.
 Deterministic checks are evaluated as additional pass/fail constraints. A
 checks-only passing run retains numeric score `0`.
 
@@ -1335,7 +1340,7 @@ An `AgentAdapter` and a `CompletionProvider` have intentionally different
 authority. The agent adapter drives the selected coding agent inside the
 runtime, maintains its session, and collects run-owned evidence. A completion
 provider makes host-side text/structured-output calls for Forge-owned
-score-affecting behavior: currently Ava (`role_player`) and success-guideline
+score-affecting behavior: currently Ava (`role_player`) and criterion
 judging (`judge`). It does not receive a workspace, run commands, own the Ava
 state machine, or replace the selected coding agent.
 
@@ -1373,7 +1378,7 @@ const completionProviders = new Map([
 Pass `completionProviders` and `credentialResolver` in `ForgeComposition`.
 The `provider` in `models.role_player` or `models.judge` must match the resolved
 provider's `id`. The field is optional only when the plan needs neither Ava nor
-guideline judging.
+criterion judging.
 
 Built-in implementations use `FORGE_VERSION` as their adapter/provider version.
 Independently released integrations supply their own `version`. Optional
@@ -1552,7 +1557,7 @@ Forge persists the canonical agent trajectory as a standalone
   in native order. The exact rendered text and timestamp are retained, while
   `extra` identifies the
   native record and attachment types. These system steps remain excluded from
-  guideline judging. A `hook_success` record is treated as bookkeeping only
+  criterion judging. A `hook_success` record is treated as bookkeeping only
   when its validated output contains a single nonempty `additionalContext` that
   is repeated in the immediately following, rendered `hook_additional_context`
   record. The latter supplies the ATIF system step; a missing or mismatched pair
@@ -1580,7 +1585,7 @@ Forge persists the canonical agent trajectory as a standalone
   marker for every completed invocation, but it may deterministically truncate
   assistant text, tool calls, or tool arguments to stay inside ATIF safety
   limits. Such loss adds a `value_omitted` warning. Evaluation consumes that
-  exact bounded trajectory, and guideline judging consumes it through the
+  exact bounded trajectory, and criterion judging consumes it through the
   declared positive root-behavior projection.
 - If Ava exhausts its retries before the first agent turn, Forge instead writes
   a system-only fallback trajectory with `role_player_error` provenance.
@@ -1601,7 +1606,7 @@ Forge persists the canonical agent trajectory as a standalone
   result artifacts are staged. The explicitly restricted native source artifact
   is an unredacted exception.
 - The full selected, redacted trajectory remains the canonical audit artifact.
-  Guideline judging uses a separately defined positive projection of
+  Criterion judging uses a separately defined positive projection of
   current-run root user/agent messages and tool behavior.
 
 For example, a Claude `environment` attachment whose rendered content is
@@ -1921,7 +1926,7 @@ identity or content digest.
   responses, ATIF, interaction audit, judge evidence, and result metadata. The
   exact selected native agent log is deliberately retained unredacted as a
   restricted local artifact and may contain values the agent recorded.
-- Workspace evidence is bounded and does not follow symlinks. Guideline judges
+- Workspace evidence is bounded and does not follow symlinks. Criterion judges
   receive only the separately bounded, redacted text subset and the
   visible transcript projection described above. Local artifacts are
   staged and claimed by digest before atomic commit.
@@ -1947,9 +1952,9 @@ proxy, or an offline execution mode.
   alternate role-player engine, interactive human controller, or public
   conversation-policy plugin. Programmatic hosts may supply completion
   providers, but they cannot replace Ava's lifecycle from the composition.
-- Success guidelines are model-judged pass/fail criteria. The deterministic
-  built-in evaluator remains limited to file creation, file existence, and
-  regular-expression content checks; there are no built-in test-command,
+- Judging criteria are evaluated by a model as pass/fail requirements. The
+  deterministic built-in evaluator remains limited to file creation, file
+  existence, and regular-expression content checks; there are no built-in test-command,
   static-analysis, or custom deterministic check plugins.
 - Claude Code and Codex are built-in agents. Cursor is not included. Codex
   supports non-interactive API-key execution; ChatGPT login is not included.
@@ -1965,7 +1970,7 @@ proxy, or an offline execution mode.
 - `run` supports bounded local concurrency through `--jobs` and explicit
   `--resume <experiment-run-id>`. There is no distributed scheduler or automatic
   run retry loop; experiment-level `retries` is not acted on by the CLI. Ava and
-  guideline completion attempts have their own fixed retry policy and do not implement
+  criterion completion attempts have their own fixed retry policy and do not implement
   the experiment config's retry field.
 - Built-in setup includes `forge/write`, `forge/command`, and agent-native
   `forge/plugin`. The plugin action installs the current entry from a public
@@ -2074,7 +2079,7 @@ One full-mode invocation builds once and runs the following checks in order:
 5. Full `verifyCompletedRun` integrity verification plus targeted checks of the
    interaction, trajectory, judge evidence, completion calls, and session
    provenance, including the exact restricted Claude source artifact.
-6. A synthetic guideline judgment that requests invalid JSON escapes, which
+6. A synthetic criterion judgment that requests invalid JSON escapes, which
    must return valid JSON accepted by Forge's judgment parser.
 
 To test only Codex, select its mode in the same live suite:

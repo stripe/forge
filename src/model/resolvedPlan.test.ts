@@ -49,7 +49,7 @@ function validPlan(): ResolvedRunPlanV1 {
       initial_prompt: 'Create the requested file.',
       execution_mode: 'one_shot',
       setup,
-      success_guidelines: [],
+      judging_criteria: [],
       checks,
     },
     treatment: {id: 'baseline', setup: []},
@@ -61,7 +61,7 @@ function validPlan(): ResolvedRunPlanV1 {
       effective_prompt: 'Create the requested file.',
       max_turns: 1,
     },
-    evaluation: {success_guidelines: [], checks},
+    evaluation: {judging_criteria: [], checks},
     agent,
     runtime: {
       adapter: 'docker',
@@ -178,6 +178,21 @@ describe('parseResolvedRunPlan', () => {
     const input = validPlan();
     input.evaluation.checks = {files_created: ['other.txt']};
     assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /evaluation checks must match/});
+  });
+
+  it('binds judging criteria to the selected case and rejects former plan fields', () => {
+    const input = validPlan();
+    input.case.judging_criteria = ['The task is complete.'];
+    input.evaluation.judging_criteria = [...input.case.judging_criteria];
+    input.evaluation.judge = {provider: 'anthropic', model: 'claude-judge'};
+    assert.deepEqual(parseResolvedRunPlan(input), input);
+    for (const section of ['case', 'evaluation'] as const) {
+      assert.throws(() => parseResolvedRunPlan({
+        ...input, [section]: {...input[section], success_guidelines: input[section].judging_criteria},
+      }), BenchmarkModelError);
+    }
+    input.evaluation.judging_criteria = ['A different requirement.'];
+    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /evaluation criteria must match/});
   });
 
   it('rejects inconsistent duplicated execution fields', () => {

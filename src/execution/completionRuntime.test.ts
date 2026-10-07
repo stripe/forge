@@ -29,7 +29,7 @@ describe('completion runtime', () => {
     const scripted = createScriptedCompletionProvider({id: MODEL.provider, version: '3.4.1', responses: [response(1)]});
     const provider = {...scripted.provider, metadata};
     const bindings = completionBindingsForPlan(
-      createTestResolvedRunPlan({successGuidelines: ['One guideline'], judge: MODEL}),
+      createTestResolvedRunPlan({judgingCriteria: ['One criterion'], judge: MODEL}),
       composition(provider),
     );
     metadata.endpoint_mode = 'default';
@@ -50,7 +50,7 @@ describe('completion runtime', () => {
     for (const metadata of [null, {endpoint_mode: 'unknown'}, {endpoint_mode: 'custom', endpoint: 'https://private.example.com'}]) {
       const provider = {...scripted.provider, metadata} as CompletionProvider;
       assert.throws(() => completionBindingsForPlan(
-        createTestResolvedRunPlan({successGuidelines: ['One guideline'], judge: MODEL}),
+        createTestResolvedRunPlan({judgingCriteria: ['One criterion'], judge: MODEL}),
         composition(provider),
       ));
       assert.deepEqual(scripted.calls, []);
@@ -95,7 +95,7 @@ describe('completion runtime', () => {
       createTestResolvedRunPlan({
         mode: 'multi_turn',
         rolePlayer: MODEL,
-        successGuidelines: ['One guideline'],
+        judgingCriteria: ['One criterion'],
         judge: MODEL,
       }),
       composition(provider),
@@ -164,7 +164,7 @@ describe('completion runtime', () => {
     const prepared = await prepareCompletionRuntime({
       runId: 'cancelled-completion-1',
       bindings: completionBindingsForPlan(
-        createTestResolvedRunPlan({successGuidelines: ['One guideline'], judge: MODEL}),
+        createTestResolvedRunPlan({judgingCriteria: ['One criterion'], judge: MODEL}),
         composition(provider),
       ),
       credentialResolver: createStaticCredentialResolver(),
@@ -212,7 +212,7 @@ describe('completion runtime', () => {
       runId: 'completion-order-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          successGuidelines: ['One guideline'],
+          judgingCriteria: ['One criterion'],
           judge: MODEL,
         }),
         composition(provider.provider),
@@ -251,7 +251,7 @@ describe('completion runtime', () => {
       runId: 'completion-validation-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          successGuidelines: ['One guideline'],
+          judgingCriteria: ['One criterion'],
           judge: MODEL,
         }),
         composition(provider.provider),
@@ -283,7 +283,7 @@ describe('completion runtime', () => {
       runId: 'completion-error-redaction-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          successGuidelines: ['One guideline'],
+          judgingCriteria: ['One criterion'],
           judge: MODEL,
         }),
         composition(provider.provider),

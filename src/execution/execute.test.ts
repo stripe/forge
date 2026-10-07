@@ -340,7 +340,7 @@ describe('executeEval', () => {
         ...fixture.plan,
         case: evalCase,
         evaluation: {
-          success_guidelines: [],
+          judging_criteria: [],
           ...(emptyChecks === undefined ? {} : {checks: emptyChecks}),
         },
       };
@@ -1174,7 +1174,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       initial_prompt: 'Create greeting.txt',
       execution_mode: 'one_shot',
       setup: [],
-      success_guidelines: [],
+      judging_criteria: [],
       checks,
     },
     treatment: {id: 'baseline', setup: []},
@@ -1186,7 +1186,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       effective_prompt: 'Create greeting.txt',
       max_turns: 1,
     },
-    evaluation: {success_guidelines: [], checks},
+    evaluation: {judging_criteria: [], checks},
     agent,
     runtime: {
       adapter: 'docker',

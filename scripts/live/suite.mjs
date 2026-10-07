@@ -4,7 +4,7 @@ import {startLoopbackGatewayBridge, assertDockerCanReachBridge} from './gateway.
 import {createRunVerifiers} from './verification.mjs';
 import {assertRuntimeCleanup} from './cleanup.mjs';
 import {runCodexPluginIntegrationSuite} from './codex.mjs';
-import {runGuidelineJudgmentRegression} from './judgment.mjs';
+import {runCriterionJudgmentRegression} from './judgment.mjs';
 
 export function createFullSuite(forge, options, overrides = {}) {
   const {
@@ -33,7 +33,7 @@ export function createFullSuite(forge, options, overrides = {}) {
   const checks = {
     assertRuntimeCleanup, startLoopbackGatewayBridge, assertDockerCanReachBridge, runDockerConformance,
     runClaudePluginConformance, runCodexPluginIntegrationSuite, runSelection,
-    runGuidelineJudgmentRegression: (input) => runGuidelineJudgmentRegression(forge, input),
+    runCriterionJudgmentRegression: (input) => runCriterionJudgmentRegression(forge, input),
     ...createRunVerifiers(forge), ...overrides
   };
   return {run: async () => {try {return await run();} finally {await bridge?.close();} }, runDockerConformance};
@@ -151,7 +151,7 @@ export function createFullSuite(forge, options, overrides = {}) {
     let multiTurnReport;
     let judgmentReport;
     if (!codexSelected) {
-      progress('running the multi-turn Ava and guideline evaluation');
+      progress('running the multi-turn Ava and criterion evaluation');
       const multiTurnCompleted = await checked(runIds.multiTurn, () => checks.runSelection({
         label: 'multi-turn',
         example: 'multi-turn',
@@ -162,7 +162,7 @@ export function createFullSuite(forge, options, overrides = {}) {
       }));
       multiTurnReport = await checks.verifyMultiTurnRun(multiTurnCompleted);
       progress('checking native structured judgment JSON escaping');
-      judgmentReport = await checks.runGuidelineJudgmentRegression({
+      judgmentReport = await checks.runCriterionJudgmentRegression({
         provider: completionProvider,
         credentialResolver,
         runId: `${suiteId}-judge-escaping`,

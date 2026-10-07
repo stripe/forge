@@ -65,25 +65,38 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(() => parseSetupArtifact({...artifact, schema_version: 1}, CONTEXT));
   });
 
-  it('parses evaluation snapshots and rejects contradictory guideline totals', () => {
+  it('parses evaluation snapshots and rejects contradictory criterion totals', () => {
     const evaluation = {
       score: 0.5,
       status: 'partial',
-      guidelines_passed: 1,
-      guidelines_total: 2,
-      guidelines: [
-        {guideline: 'Complete the task.', passed: true, explanation: 'Done.'},
-        {guideline: 'Explain the result.', passed: false, explanation: 'Missing.'},
+      judging_criteria_passed: 1,
+      judging_criteria_total: 2,
+      judging_criteria: [
+        {criterion: 'Complete the task.', passed: true, explanation: 'Done.'},
+        {criterion: 'Explain the result.', passed: false, explanation: 'Missing.'},
       ],
       checks: [{name: 'file_exists: answer.txt', passed: true}],
     };
     const parsed = parseEvaluationResult(evaluation);
     assert.deepEqual(parsed, evaluation);
+    for (const [former, current] of [
+      ['guidelines', 'judging_criteria'],
+      ['guidelines_passed', 'judging_criteria_passed'],
+      ['guidelines_total', 'judging_criteria_total'],
+    ] as const) {
+      assert.throws(() => parseEvaluationResult({...evaluation, [former]: evaluation[current]}));
+      const {[current]: removed, ...remaining} = evaluation;
+      assert.throws(() => parseEvaluationResult({...remaining, [former]: removed}));
+    }
+    assert.throws(() => parseEvaluationResult({...evaluation, judging_criteria: [
+      {guideline: 'Complete the task.', passed: true, explanation: 'Done.'},
+      evaluation.judging_criteria[1],
+    ]}));
     assert.throws(() => parseEvaluationResult({...evaluation, schema_version: 1}));
-    evaluation.guidelines[0]!.explanation = 'changed after parsing';
-    assert.equal(parsed.guidelines[0]?.explanation, 'Done.');
-    assert.throws(() => parseEvaluationResult({...evaluation, guidelines_total: 1}), /Guideline totals do not match/);
-    assert.throws(() => parseEvaluationResult({...evaluation, guidelines_passed: 2}), /Guideline totals do not match/);
+    evaluation.judging_criteria[0]!.explanation = 'changed after parsing';
+    assert.equal(parsed.judging_criteria[0]?.explanation, 'Done.');
+    assert.throws(() => parseEvaluationResult({...evaluation, judging_criteria_total: 1}), /Criterion totals do not match/);
+    assert.throws(() => parseEvaluationResult({...evaluation, judging_criteria_passed: 2}), /Criterion totals do not match/);
     assert.throws(() => parseEvaluationResult({...evaluation, score: Infinity}));
     assert.throws(() => parseEvaluationResult({...evaluation, unknown: true}));
   });

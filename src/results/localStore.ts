@@ -331,13 +331,13 @@ function verifyPlanArtifact(
   if (!runtimeMatches || result.runtime.platform !== plannedRuntime.platform) {
     throw new ArtifactStoreError('plan.json runtime does not match the completed result.');
   }
-  const plannedGuidelines = plan.evaluation.success_guidelines;
-  const recordedGuidelines = result.evaluation.guidelines.map(
-    ({guideline}) => guideline,
+  const plannedCriteria = plan.evaluation.judging_criteria;
+  const recordedCriteria = result.evaluation.judging_criteria.map(
+    ({criterion}) => criterion,
   );
   if (
-    serializeCanonicalJson(plannedGuidelines) !==
-      serializeCanonicalJson(recordedGuidelines) ||
+    serializeCanonicalJson(plannedCriteria) !==
+      serializeCanonicalJson(recordedCriteria) ||
     hasDeterministicWorkspaceChecks(plan.evaluation.checks) !==
       (result.evaluation.checks.length > 0)
   ) {
@@ -360,7 +360,7 @@ function verifyCanonicalArtifactInventory(
     ...(hasDeterministicWorkspaceChecks(plan.evaluation.checks)
       ? ['workspace-evidence.json']
       : []),
-    ...(plan.evaluation.success_guidelines.length > 0
+    ...(plan.evaluation.judging_criteria.length > 0
       ? ['judge-evidence.json']
       : []),
   ];
@@ -582,12 +582,12 @@ function verifyJudgeEvidence(
 ): void {
   const path = 'judge-evidence.json';
   const body = artifactBodies.get(path);
-  const judgingRan = plan.evaluation.success_guidelines.length > 0;
+  const judgingRan = plan.evaluation.judging_criteria.length > 0;
   if ((body !== undefined) !== judgingRan) {
     throw new ArtifactStoreError(
       judgingRan
-        ? 'Completed result with judged guidelines is missing judge-evidence.json.'
-        : 'Completed result without judged guidelines contains judge-evidence.json.',
+        ? 'Completed result with judged criteria is missing judge-evidence.json.'
+        : 'Completed result without judged criteria contains judge-evidence.json.',
     );
   }
   if (body === undefined) return;

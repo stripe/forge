@@ -219,7 +219,7 @@ executeEvalWithTestHooks
 ├── evaluation
 │   ├── collectJudgeWorkspaceEvidence
 │   ├── createJudgeTranscriptProjection
-│   ├── judgeGuidelines
+│   ├── judgeCriteria
 │   └── evaluateRunEvidence
 ├── buildCoreArtifacts / buildResult
 ├── contributors[].contribute
@@ -242,7 +242,7 @@ flowchart LR
     W[Sealed workspace]
     JP[Judge transcript projection]
     JW[Judge workspace evidence]
-    G[Guideline results]
+    G[Criterion results]
     C[Deterministic check results]
     SC[evaluation/score.ts]
     R[result.json evaluation]
@@ -401,7 +401,7 @@ the action up again at execution time.
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
 | [`execute.ts`](https://github.com/stripe/forge/blob/main/src/execution/execute.ts) | `preflightEval`, `executeEval`, lifecycle helpers | Owns the full lifecycle and imports every score-affecting subsystem. This is the main integration file. |
-| [`completionRuntime.ts`](https://github.com/stripe/forge/blob/main/src/execution/completionRuntime.ts) | `completionBindingsForPlan`, `prepareCompletionRuntime`, `PreparedCompletionRuntime` | Resolves purpose-specific providers and credentials, performs provider preflight, invokes/redacts/validates completions, and records safe call summaries. Used by Ava and guideline judging through `execute.ts`. |
+| [`completionRuntime.ts`](https://github.com/stripe/forge/blob/main/src/execution/completionRuntime.ts) | `completionBindingsForPlan`, `prepareCompletionRuntime`, `PreparedCompletionRuntime` | Resolves purpose-specific providers and credentials, performs provider preflight, invokes/redacts/validates completions, and records safe call summaries. Used by Ava and criterion judging through `execute.ts`. |
 | [`events.ts`](https://github.com/stripe/forge/blob/main/src/execution/events.ts) | `createRunEventEmitter` | Wraps lifecycle phases in start/completion events and uses `Promise.allSettled` so observers cannot control execution. |
 | [`errors.ts`](https://github.com/stripe/forge/blob/main/src/execution/errors.ts) | `ForgeExecutionError`, `executionError`, `throwIfAborted` | Stable secret-safe phase/error surface used by the controller. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/execution/index.ts) | Public execution barrel | Re-exports execution entry points and stable errors |
@@ -531,7 +531,7 @@ capability validation, request validation and schema projection, fetch,
 bounded-response reading, provider-response parsing, usage normalization, and
 safe error classes in one file.
 
-It is used only through `execution/completionRuntime.ts`. Ava and guideline
+It is used only through `execution/completionRuntime.ts`. Ava and criterion
 judging depend on the provider-neutral completion contract, not this provider.
 That distinction lets an embedding host register another provider without
 changing `interaction` or `evaluation`.
@@ -576,11 +576,11 @@ one originally selected.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates guideline-result alignment, then calls `scoreEvaluation`. |
+| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
 | [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
 | [`judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
-| [`guidelineJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/guidelineJudge.ts) | `judgeGuidelines`, prompt/response helpers | Renders one prompt per guideline, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
-| [`score.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/score.ts) | `scoreEvaluation` | Purely combines guideline and check results into score/status. |
+| [`criterionJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionJudge.ts) | `judgeCriteria`, prompt/response helpers | Renders one prompt per criterion, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
+| [`score.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/score.ts) | `scoreEvaluation` | Purely combines criterion and check results into score/status. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/index.ts) | Public evaluation barrel | Re-exported at package root |
 
 There are two workspace evidence paths with different purposes:
@@ -788,7 +788,7 @@ External runtime-specific configuration stays in the plan's public bounded
 Implement `contracts/completion.ts:CompletionProvider`. The provider should
 declare credential references in `requirements`, optionally validate resolved
 credentials in `preflight`, and implement a bounded `complete`. Register it in
-the host composition by `ModelRefV1.provider` ID. Do not modify Ava or guideline
+the host composition by `ModelRefV1.provider` ID. Do not modify Ava or criterion
 judging to add transport-specific behavior.
 
 ### Change evidence or judging
@@ -799,7 +799,7 @@ Treat these changes as cross-cutting and score-affecting. Review together:
 - `evidence/selection.ts` coverage/fallback;
 - `atif` schema and normalization behavior;
 - `evaluation/judgeTranscript.ts` projection policy;
-- `evaluation/guidelineJudge.ts` prompt behavior;
+- `evaluation/criterionJudge.ts` prompt behavior;
 - result wire schemas and conditional artifacts;
 - `results/localStore.ts` verification; and
 - README/architecture documentation and end-to-end tests.
@@ -827,7 +827,7 @@ README/architecture inventory. Keep host-owned files below
 | `interaction` | `execution/execute.ts:executeInteraction` | selected agent `index.ts`, stream parser, Ava/conversation, completion runtime |
 | `quiesce` | selected runtime `quiesce` | active command controller and sealed workspace/state |
 | `evidence` | adapter `collectEvidence`, then `evidence/selection.ts` | adapter evidence parser, ATIF parser/normalization |
-| `evaluation` | `evaluation/checks.ts` and `guidelineJudge.ts` | judge transcript/workspace projection, completion runtime |
+| `evaluation` | `evaluation/checks.ts` and `criterionJudge.ts` | judge transcript/workspace projection, completion runtime |
 | `artifact_stage` | artifact store transaction and `buildSupplementalArtifacts` | result descriptors, contributors, secret scans |
 | `runtime_dispose` | selected runtime `dispose` | container/process cleanup; late failures become warnings |
 | `result_commit` | `results/localStore.ts:commit` | result parser, descriptor equality, directory rename |

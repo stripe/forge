@@ -23,7 +23,7 @@ verified dataset, an experiment configuration, and one matrix selection, it:
 3. prepares an isolated runtime and applies ordered setup;
 4. drives a one-shot or Ava-mediated coding-agent session;
 5. stops mutation and selects exact run-owned evidence;
-6. evaluates deterministic checks and model-judged guidelines; and
+6. evaluates deterministic checks and model-judged criteria; and
 7. commits a self-describing local result through one atomic boundary.
 
 The central architectural rule is that Forge owns every score-affecting
@@ -125,7 +125,7 @@ Forge keeps authored definitions, resolved inputs, and execution identities dist
 | Object | Responsibility | Important contents |
 | --- | --- | --- |
 | Dataset | Versioned evaluation payload | Manifest, cases, fixture files, exact sizes and SHA-256 hashes |
-| Eval case | What is evaluated | Task or prompt, context, invariant setup, interaction mode, turn limit, checks, guidelines, example answer |
+| Eval case | What is evaluated | Task or prompt, context, invariant setup, interaction mode, turn limit, checks, judging criteria, example answer |
 | Experiment | How cases run, defined by an experiment config | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
 | Experiment run | One resumable batch from an experiment | Experiment run ID, selected plans, checkpoint, attempt history, and aggregate report |
 | Eval run | One execution attempt for a selected plan | Eval run ID, isolated lifecycle, committed artifacts, and evaluation outcome |
@@ -287,7 +287,7 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - checks dataset and experiment compatibility;
 - checks that the selection is present in the matrix;
 - requires `models.role_player` for a multi-turn case;
-- requires `models.judge` when success guidelines are non-empty;
+- requires `models.judge` when judging criteria are non-empty;
 - concatenates case and treatment setup;
 - validates referenced dataset inputs and action-bundle pins;
 - chooses the effective prompt and records its source;
@@ -371,7 +371,7 @@ sequenceDiagram
     Runtime-->>Forge: sealed read-only runtime
     Forge->>Agent: collect exact native evidence/session artifact
     Forge->>Forge: select, normalize, and redact ATIF
-    Forge->>Completion: independent guideline judgments, if configured
+    Forge->>Completion: independent criterion judgments, if configured
     Forge->>Forge: deterministic checks and score
     Forge->>Store: begin and stage companion artifacts
     Forge->>Runtime: dispose()
@@ -499,8 +499,8 @@ full process is detailed in [Evidence architecture](#evidence-architecture).
 
 ### 8. Evaluate
 
-Deterministic file checks read the sealed workspace. If guidelines exist, Forge
-builds a positive projection of the redacted ATIF trajectory with an explicit policy,
+Deterministic file checks read the sealed workspace. If judging criteria exist,
+Forge builds a positive projection of the redacted ATIF trajectory with an explicit policy,
 collects bounded workspace text, invokes the judge provider, and records the
 exact evidence made available to it.
 
@@ -712,8 +712,8 @@ resolved; results retain the snapshots rather than rereading mutable host object
 
 One-shot mode sends `plan.interaction.effective_prompt` exactly once to the
 persistent session. The single completed turn is recorded with stop reason
-`task_complete`. It needs no host completion provider unless guidelines later
-require a judge.
+`task_complete`. It needs no host completion provider unless judging criteria
+later require a judge.
 
 ### Ava multi-turn mode
 
@@ -742,7 +742,7 @@ fallback trajectory and records a null agent session identity.
 
 `interaction.json` is a post-run audit of public turns plus Ava's need and
 decision history. It is never an execution input and is never supplied to the
-guideline judge.
+criterion judge.
 
 ### Host-side completion providers
 
@@ -857,9 +857,9 @@ is missing. Failed reads retain any inspected file existence, with an issue;
 unavailable content cannot pass a content check. Cancellation propagates
 through evidence collection.
 
-### Guideline judging
+### Criterion judging
 
-Each success guideline is judged independently against:
+Each judging criterion is judged independently against:
 
 - the judge-visible transcript projection with its declared policy;
 - bounded, eligible text collected from the sealed workspace; and
@@ -870,25 +870,25 @@ lockfiles, and common binary formats, and applies entry, depth, time, byte,
 per-file, and total-character limits. Truncation and unavailable evidence are
 recorded explicitly.
 
-At most four guidelines run concurrently. Each gets three attempts with fixed
+At most four criteria run concurrently. Each gets three attempts with fixed
 one- and five-second retry waits and strict JSON output. Repeated malformed
-output fails only that guideline closed. A final provider transport failure is
+output fails only that criterion closed. A final provider transport failure is
 fatal: cleanup runs and no result is committed. Before dispatch, Forge verifies
 that its final defensive redaction pass would not change the already-audited
 judge evidence.
 
 ### Score and status
 
-The numeric score is the fraction of success guidelines that pass. File checks
+The numeric score is the fraction of judging criteria that pass. File checks
 are independent pass constraints and do not change that ratio.
 
 | Situation | Status | Score |
 | --- | --- | --- |
-| No guidelines; all checks pass | `passed` | `0` |
-| No guidelines; a check fails | `failed` | `0` |
-| All guidelines and checks pass | `passed` | `1` |
-| Some guideline passes, or checks pass while guidelines do not all pass | `partial` | Guideline pass ratio |
-| No guideline passes and checks do not establish partial success | `failed` | `0` |
+| No judging criteria; all checks pass | `passed` | `0` |
+| No judging criteria; a check fails | `failed` | `0` |
+| All criteria and checks pass | `passed` | `1` |
+| Some criteria pass, or checks pass while criteria do not all pass | `partial` | Criterion pass ratio |
+| No criterion passes and checks do not establish partial success | `failed` | `0` |
 
 Interaction stop reason and evaluation status are separate. For example, a
 `max_turns` run can still pass its evidence-based evaluation.
@@ -910,7 +910,7 @@ Conditional and supplemental files are:
 
 ```text
 workspace-evidence.json             # deterministic file checks exist
-judge-evidence.json                 # one or more guidelines were judged
+judge-evidence.json                 # one or more criteria were judged
 native/<adapter-id>/session.<ext>    # exact restricted root-session source
 extensions/<contributor-id>/...     # optional host contribution
 ```
@@ -939,7 +939,7 @@ the producing Forge release. The other core files serve distinct audit roles:
 - `workspace-evidence.json`: exact requested bytes used by deterministic
   checks; and
 - `judge-evidence.json`: exact reduced transcript and workspace evidence made
-  available to guideline judges.
+  available to criterion judges.
 
 `result.json` summarizes run identity, selection, Forge and bundle
 versions, runtime and agent provenance, completion calls, interaction, evidence,
@@ -1037,7 +1037,7 @@ Two retry systems are internal score semantics, separate from experiment run
 retries:
 
 - Ava exhaustion commits `role_player_error` as a completed run; and
-- malformed judge output fails a guideline closed, while exhausted judge
+- malformed judge output fails a criterion closed, while exhausted judge
   transport failure aborts the run with no commit.
 
 Observer failures never change execution. A runtime disposal failure after
@@ -1093,7 +1093,7 @@ external runtime without changing core lifecycle semantics.
 | [`src/runtime`](https://github.com/stripe/forge/tree/main/src/runtime) | Workspace/command mechanics and built-in Docker runtime |
 | [`src/evidence`](https://github.com/stripe/forge/tree/main/src/evidence) | Native evidence validation, coverage, and driver fallback |
 | [`src/atif`](https://github.com/stripe/forge/tree/main/src/atif) | Pinned ATIF v1.8 schema, parser, serializer, and normalization envelope |
-| [`src/evaluation`](https://github.com/stripe/forge/tree/main/src/evaluation) | Workspace checks, judge projection/evidence, guideline judging, and scoring |
+| [`src/evaluation`](https://github.com/stripe/forge/tree/main/src/evaluation) | Workspace checks, judge projection/evidence, criterion judging, and scoring |
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |

@@ -4,16 +4,16 @@ import {describe, it} from 'node:test';
 import {createJudgeTranscriptProjection} from './judgeTranscript.js';
 import {scoreEvaluation} from './score.js';
 import {
-  GUIDELINE_JUDGMENT_RESPONSE_SCHEMA,
-  MAX_GUIDELINE_EXPLANATION_CHARACTERS,
-  MAX_GUIDELINE_JUDGE_ATTEMPTS,
-  MAX_GUIDELINE_JUDGE_PROMPT_BYTES,
-  buildGuidelineJudgePrompt,
-  judgeGuidelines,
-  parseGuidelineJudgment,
-  type GuidelineCompletionRequest,
-  type GuidelineCompletionInvoker,
-} from './guidelineJudge.js';
+  CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+  MAX_CRITERION_EXPLANATION_CHARACTERS,
+  MAX_CRITERION_JUDGE_ATTEMPTS,
+  MAX_CRITERION_JUDGE_PROMPT_BYTES,
+  buildCriterionJudgePrompt,
+  judgeCriteria,
+  parseCriterionJudgment,
+  type CriterionCompletionRequest,
+  type CriterionCompletionInvoker,
+} from './criterionJudge.js';
 
 const noRetryWait = {
   waitBeforeRetry: async (): Promise<void> => undefined,
@@ -40,18 +40,18 @@ function valid(
   return JSON.stringify({results: [{index: 0, passed, explanation}]});
 }
 
-describe('judgeGuidelines', () => {
+describe('judgeCriteria', () => {
   it('invokes one strict structured completion with the complete evidence prompt', async () => {
-    const requests: GuidelineCompletionRequest[] = [];
-    const invoke: GuidelineCompletionInvoker = async (request) => {
+    const requests: CriterionCompletionRequest[] = [];
+    const invoke: CriterionCompletionInvoker = async (request) => {
       requests.push(request);
       return valid();
     };
 
-    const results = await judgeGuidelines(
+    const results = await judgeCriteria(
       {
         transcript: visibleTranscript('THE_TRANSCRIPT'),
-        guidelines: ['THE_GUIDELINE'],
+        criteria: ['THE_CRITERION'],
         exampleAnswer: 'THE_EXAMPLE',
         workspaceText: 'THE_WORKSPACE',
       },
@@ -59,19 +59,19 @@ describe('judgeGuidelines', () => {
     );
 
     assert.deepEqual(results, [
-      {guideline: 'THE_GUIDELINE', passed: true, explanation: 'yes'},
+      {criterion: 'THE_CRITERION', passed: true, explanation: 'yes'},
     ]);
     assert.equal(requests.length, 1);
     const request = requests[0]!;
     assert.equal(request.temperature, 0);
     assert.equal(request.maxTokens, 1024);
-    assert.equal(request.responseSchema, GUIDELINE_JUDGMENT_RESPONSE_SCHEMA);
+    assert.equal(request.responseSchema, CRITERION_JUDGMENT_RESPONSE_SCHEMA);
     assert.deepEqual(request.messages, [
       {role: 'user', content: 'Return the requested structured judgment.'},
     ]);
     assert.match(
       request.systemPrompt,
-      /THE_TRANSCRIPT[\s\S]*THE_WORKSPACE[\s\S]*THE_EXAMPLE[\s\S]*THE_GUIDELINE/,
+      /THE_TRANSCRIPT[\s\S]*THE_WORKSPACE[\s\S]*THE_EXAMPLE[\s\S]*THE_CRITERION/,
     );
     assert.match(request.systemPrompt, /private reasoning/);
     assert.match(request.systemPrompt, /copied context/);
@@ -91,27 +91,27 @@ describe('judgeGuidelines', () => {
   });
 
   it('omits the optional example and workspace sections', () => {
-    const prompt = buildGuidelineJudgePrompt(
+    const prompt = buildCriterionJudgePrompt(
       {transcript: visibleTranscript('TRANSCRIPT')},
-      'GUIDELINE',
+      'CRITERION',
     );
 
     assert.doesNotMatch(prompt, /Example correct answer/);
     assert.doesNotMatch(prompt, /## Workspace Files/);
     assert.match(
       prompt,
-      /Only mark the guideline as passed if the assistant explicitly addressed it/,
+      /Only mark the criterion as passed if the assistant explicitly addressed it/,
     );
-    assert.match(prompt, /TRANSCRIPT[\s\S]*GUIDELINE/);
+    assert.match(prompt, /TRANSCRIPT[\s\S]*CRITERION/);
   });
 
   it('rejects an arbitrary transcript string at the public judging boundary', async () => {
     let calls = 0;
     await assert.rejects(
-      judgeGuidelines(
+      judgeCriteria(
         {
           transcript: {transcriptJson: '[]\n'} as never,
-          guidelines: ['guideline'],
+          criteria: ['criterion'],
         },
         async () => {
           calls += 1;
@@ -125,11 +125,11 @@ describe('judgeGuidelines', () => {
   it('rejects an oversized final prompt before invoking or retrying a provider', async () => {
     let calls = 0;
     await assert.rejects(
-      judgeGuidelines(
+      judgeCriteria(
         {
           transcript: EMPTY_TRANSCRIPT,
-          guidelines: ['guideline'],
-          workspaceText: 'w'.repeat(MAX_GUIDELINE_JUDGE_PROMPT_BYTES),
+          criteria: ['criterion'],
+          workspaceText: 'w'.repeat(MAX_CRITERION_JUDGE_PROMPT_BYTES),
         },
         async () => {
           calls += 1;
@@ -137,61 +137,61 @@ describe('judgeGuidelines', () => {
         },
         noRetryWait,
       ),
-      new RegExp(`${MAX_GUIDELINE_JUDGE_PROMPT_BYTES}-byte limit`),
+      new RegExp(`${MAX_CRITERION_JUDGE_PROMPT_BYTES}-byte limit`),
     );
     assert.equal(calls, 0);
   });
 
   it('bounds concurrency at four while preserving authored result order', async () => {
-    const guidelines = Array.from({length: 10}, (_, index) => `GUIDELINE_${index}`);
+    const criteria = Array.from({length: 10}, (_, index) => `CRITERION_${index}`);
     let active = 0;
     let maximumActive = 0;
-    const invoke: GuidelineCompletionInvoker = async (request) => {
+    const invoke: CriterionCompletionInvoker = async (request) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
       await new Promise<void>((resolve) => setImmediate(resolve));
       active -= 1;
       const prompt = request.systemPrompt;
-      const index = guidelines.findIndex((guideline) =>
-        prompt.includes(`Success Guideline:\n${guideline}\n`),
+      const index = criteria.findIndex((criterion) =>
+        prompt.includes(`Success Criterion:\n${criterion}\n`),
       );
       return valid(index % 2 === 0, `result ${index}`);
     };
 
-    const results = await judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines},
+    const results = await judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria},
       invoke,
     );
 
     assert.equal(maximumActive, 4);
     assert.deepEqual(
       results,
-      guidelines.map((guideline, index) => ({
-        guideline,
+      criteria.map((criterion, index) => ({
+        criterion,
         passed: index % 2 === 0,
         explanation: `result ${index}`,
       })),
     );
   });
 
-  it('retries malformed output only for the affected guideline', async () => {
+  it('retries malformed output only for the affected criterion', async () => {
     const attempts = new Map<string, number>();
-    const invoke: GuidelineCompletionInvoker = async (request) => {
+    const invoke: CriterionCompletionInvoker = async (request) => {
       const prompt = request.systemPrompt;
-      const guideline = ['first', 'second', 'third'].find((candidate) =>
-        prompt.includes(`Success Guideline:\n${candidate}\n`),
+      const criterion = ['first', 'second', 'third'].find((candidate) =>
+        prompt.includes(`Success Criterion:\n${candidate}\n`),
       )!;
-      const attempt = (attempts.get(guideline) ?? 0) + 1;
-      attempts.set(guideline, attempt);
-      return guideline === 'second' && attempt === 1
+      const attempt = (attempts.get(criterion) ?? 0) + 1;
+      attempts.set(criterion, attempt);
+      return criterion === 'second' && attempt === 1
         ? '{}'
-        : valid(true, guideline);
+        : valid(true, criterion);
     };
 
-    const results = await judgeGuidelines(
+    const results = await judgeCriteria(
       {
         transcript: EMPTY_TRANSCRIPT,
-        guidelines: ['first', 'second', 'third'],
+        criteria: ['first', 'second', 'third'],
       },
       invoke,
       noRetryWait,
@@ -199,10 +199,10 @@ describe('judgeGuidelines', () => {
 
     assert.deepEqual(
       results,
-      ['first', 'second', 'third'].map((guideline) => ({
-        guideline,
+      ['first', 'second', 'third'].map((criterion) => ({
+        criterion,
         passed: true,
-        explanation: guideline,
+        explanation: criterion,
       })),
     );
     assert.deepEqual(
@@ -217,40 +217,40 @@ describe('judgeGuidelines', () => {
 
   it('retries transport errors and accepts a later valid response', async () => {
     let calls = 0;
-    const invoke: GuidelineCompletionInvoker = async () => {
+    const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
       if (calls === 1) throw new Error('transport failed');
       return valid(true, 'recovered');
     };
 
-    const results = await judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
+    const results = await judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion']},
       invoke,
       noRetryWait,
     );
 
     assert.equal(calls, 2);
     assert.deepEqual(results, [
-      {guideline: 'guideline', passed: true, explanation: 'recovered'},
+      {criterion: 'criterion', passed: true, explanation: 'recovered'},
     ]);
   });
 
   it('throws the final exhausted transport error', async () => {
     let calls = 0;
-    const invoke: GuidelineCompletionInvoker = async () => {
+    const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
       throw new Error('transport failed');
     };
 
     await assert.rejects(
-      judgeGuidelines(
-        {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
+      judgeCriteria(
+        {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion']},
         invoke,
         noRetryWait,
       ),
       /transport failed/,
     );
-    assert.equal(calls, MAX_GUIDELINE_JUDGE_ATTEMPTS);
+    assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
   });
 
   it('cancels peer judgments after one transport failure is exhausted', async () => {
@@ -260,10 +260,10 @@ describe('judgeGuidelines', () => {
     const transportFailure = new Error('transport failed');
 
     await assert.rejects(
-      judgeGuidelines(
-        {transcript: EMPTY_TRANSCRIPT, guidelines: ['failing', 'peer']},
+      judgeCriteria(
+        {transcript: EMPTY_TRANSCRIPT, criteria: ['failing', 'peer']},
         async (request) => {
-          if (request.systemPrompt.includes('Success Guideline:\nfailing\n')) {
+          if (request.systemPrompt.includes('Success Criterion:\nfailing\n')) {
             failingCalls += 1;
             throw transportFailure;
           }
@@ -282,28 +282,28 @@ describe('judgeGuidelines', () => {
       (error: unknown) => error === transportFailure,
     );
 
-    assert.equal(failingCalls, MAX_GUIDELINE_JUDGE_ATTEMPTS);
+    assert.equal(failingCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
     assert.equal(peerCalls, 1);
     assert.equal(peerAborted, true);
   });
 
   it('fails closed after three malformed responses without retaining raw output', async () => {
     let calls = 0;
-    const invoke: GuidelineCompletionInvoker = async () => {
+    const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
       return 'secret malformed output';
     };
 
-    const results = await judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
+    const results = await judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion']},
       invoke,
       noRetryWait,
     );
 
-    assert.equal(calls, MAX_GUIDELINE_JUDGE_ATTEMPTS);
+    assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
     assert.deepEqual(results, [
       {
-        guideline: 'guideline',
+        criterion: 'criterion',
         passed: false,
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
@@ -312,12 +312,12 @@ describe('judgeGuidelines', () => {
     assert.doesNotMatch(JSON.stringify(results), /secret malformed output/);
   });
 
-  it('retains an exhausted malformed guideline in the score denominator alongside a successful peer', async () => {
+  it('retains an exhausted malformed criterion in the score denominator alongside a successful peer', async () => {
     let failedCalls = 0;
-    const results = await judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['unavailable', 'successful']},
+    const results = await judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['unavailable', 'successful']},
       async (request) => {
-        if (request.systemPrompt.includes('Success Guideline:\nsuccessful\n')) {
+        if (request.systemPrompt.includes('Success Criterion:\nsuccessful\n')) {
           return valid(true, 'completed');
         }
         failedCalls += 1;
@@ -327,18 +327,18 @@ describe('judgeGuidelines', () => {
       noRetryWait,
     );
 
-    assert.equal(failedCalls, MAX_GUIDELINE_JUDGE_ATTEMPTS);
+    assert.equal(failedCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
     assert.deepEqual(results, [
       {
-        guideline: 'unavailable', passed: false,
+        criterion: 'unavailable', passed: false,
         explanation: 'Judge response was not valid JSON. (unavailable after 3 attempts)',
       },
-      {guideline: 'successful', passed: true, explanation: 'completed'},
+      {criterion: 'successful', passed: true, explanation: 'completed'},
     ]);
     const evaluation = scoreEvaluation(results, [{name: 'file', passed: true}]);
     assert.equal(evaluation.score, 0.5);
-    assert.equal(evaluation.guidelines_total, 2);
-    assert.equal(evaluation.guidelines_passed, 1);
+    assert.equal(evaluation.judging_criteria_total, 2);
+    assert.equal(evaluation.judging_criteria_passed, 1);
     assert.equal(evaluation.status, 'partial');
     assert.doesNotMatch(JSON.stringify(evaluation), /private/);
   });
@@ -346,23 +346,23 @@ describe('judgeGuidelines', () => {
   it('propagates a final transport failure even after earlier malformed responses', async () => {
     const failure = new Error('final transport failure');
     let calls = 0;
-    await assert.rejects(judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
+    await assert.rejects(judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion']},
       async () => {
         calls += 1;
-        if (calls === MAX_GUIDELINE_JUDGE_ATTEMPTS) throw failure;
+        if (calls === MAX_CRITERION_JUDGE_ATTEMPTS) throw failure;
         return '{}';
       },
       noRetryWait,
     ), (error: unknown) => error === failure);
-    assert.equal(calls, MAX_GUIDELINE_JUDGE_ATTEMPTS);
+    assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
   });
 
   it('treats an explanation too large for the result artifact as malformed', async () => {
     let calls = 0;
-    const oversized = 'x'.repeat(MAX_GUIDELINE_EXPLANATION_CHARACTERS + 1);
-    const results = await judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
+    const oversized = 'x'.repeat(MAX_CRITERION_EXPLANATION_CHARACTERS + 1);
+    const results = await judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion']},
       async () => {
         calls += 1;
         return valid(true, oversized);
@@ -370,10 +370,10 @@ describe('judgeGuidelines', () => {
       noRetryWait,
     );
 
-    assert.equal(calls, MAX_GUIDELINE_JUDGE_ATTEMPTS);
+    assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
     assert.deepEqual(results, [
       {
-        guideline: 'guideline',
+        criterion: 'criterion',
         passed: false,
         explanation:
           'Judge response did not match the required schema. (unavailable after 3 attempts)',
@@ -385,17 +385,17 @@ describe('judgeGuidelines', () => {
     const controller = new AbortController();
     const reason = new DOMException('cancelled', 'AbortError');
     let calls = 0;
-    const invoke: GuidelineCompletionInvoker = async () => {
+    const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
       controller.abort(reason);
       throw reason;
     };
 
     await assert.rejects(
-      judgeGuidelines(
+      judgeCriteria(
         {
           transcript: EMPTY_TRANSCRIPT,
-          guidelines: ['guideline'],
+          criteria: ['criterion'],
           signal: controller.signal,
         },
         invoke,
@@ -410,8 +410,8 @@ describe('judgeGuidelines', () => {
     const controller = new AbortController();
     const reason = new Error('cancelled during retry wait');
     let calls = 0;
-    await assert.rejects(judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline'], signal: controller.signal},
+    await assert.rejects(judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'], signal: controller.signal},
       async () => {
         calls += 1;
         setImmediate(() => controller.abort(reason));
@@ -421,10 +421,10 @@ describe('judgeGuidelines', () => {
     assert.equal(calls, 1);
   });
 
-  it('does not invoke a completion for an empty guideline list', async () => {
+  it('does not invoke a completion for an empty criterion list', async () => {
     let calls = 0;
-    const results = await judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: []},
+    const results = await judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: []},
       async () => {
         calls += 1;
         return valid();
@@ -438,8 +438,8 @@ describe('judgeGuidelines', () => {
   it('uses the default one-second and five-second retry waits', async (t) => {
     t.mock.timers.enable({apis: ['setTimeout']});
     let calls = 0;
-    const pending = judgeGuidelines(
-      {transcript: EMPTY_TRANSCRIPT, guidelines: ['guideline']},
+    const pending = judgeCriteria(
+      {transcript: EMPTY_TRANSCRIPT, criteria: ['criterion']},
       async () => {calls += 1; return '{}';},
     );
     const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -461,11 +461,11 @@ describe('judgeGuidelines', () => {
   });
 });
 
-describe('parseGuidelineJudgment', () => {
+describe('parseCriterionJudgment', () => {
   it('accepts JSON explanations containing Markdown backticks and escaped characters', () => {
     const explanation = '  Missing `cancel_url`; expected "https://example.com/cancel".\nCheck C:\\checkout.  ';
-    assert.deepEqual(parseGuidelineJudgment(valid(false, explanation), 'guideline'), {
-      guideline: 'guideline',
+    assert.deepEqual(parseCriterionJudgment(valid(false, explanation), 'criterion'), {
+      criterion: 'criterion',
       passed: false,
       explanation: explanation.trim(),
     });
@@ -473,8 +473,8 @@ describe('parseGuidelineJudgment', () => {
 
   it('rejects illegal backslash-backtick escapes in an explanation', () => {
     const raw = '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}';
-    assert.deepEqual(parseGuidelineJudgment(raw, 'guideline'), {
-      guideline: 'guideline',
+    assert.deepEqual(parseCriterionJudgment(raw, 'criterion'), {
+      criterion: 'criterion',
       passed: false,
       explanation: 'Judge response was not valid JSON.',
     });
@@ -485,8 +485,8 @@ describe('parseGuidelineJudgment', () => {
       'prose {"results":[{"index":0,"passed":true,"explanation":"ok"}]}',
       '```json\n{"results":[{"index":0,"passed":true,"explanation":"ok"}]}\n```',
     ]) {
-      assert.deepEqual(parseGuidelineJudgment(raw, 'guideline'), {
-        guideline: 'guideline',
+      assert.deepEqual(parseCriterionJudgment(raw, 'criterion'), {
+        criterion: 'criterion',
         passed: false,
         explanation: 'Judge response was not valid JSON.',
       });
@@ -505,8 +505,8 @@ describe('parseGuidelineJudgment', () => {
       {results: []},
       {results: [entry, entry]},
     ]) {
-      assert.deepEqual(parseGuidelineJudgment(JSON.stringify(response), 'g'), {
-        guideline: 'g',
+      assert.deepEqual(parseCriterionJudgment(JSON.stringify(response), 'g'), {
+        criterion: 'g',
         passed: false,
         explanation: 'Judge response did not match the required schema.',
       });

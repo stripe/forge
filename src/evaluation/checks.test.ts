@@ -3,7 +3,7 @@ import {describe, it} from 'node:test';
 
 import type {AtifTrajectoryV1_8} from '../atif/index.js';
 import type {ReadonlyWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
-import type {GuidelineResultV1} from '../results/types.js';
+import type {CriterionResultV1} from '../results/types.js';
 import {createTestResolvedRunPlan} from '../testing/plans.js';
 import {
   UnsupportedEvaluationCapabilityError,
@@ -221,20 +221,20 @@ describe('evaluateRunEvidence', () => {
     steps: [{step_id: 1, source: 'agent', message: 'Completed.'}],
   };
 
-  it('requires results for every exact authored guideline before reading workspace evidence', async () => {
+  it('requires results for every exact authored criterion before reading workspace evidence', async () => {
     const plan = createTestResolvedRunPlan({
-      successGuidelines: ['first', 'second'],
+      judgingCriteria: ['first', 'second'],
       judge: {provider: 'test-judge', model: 'test-model'},
       checks: {files_created: ['answer.txt']},
     });
-    const first = {guideline: 'first', passed: true, explanation: 'yes'};
-    const second = {guideline: 'second', passed: false, explanation: 'no'};
+    const first = {criterion: 'first', passed: true, explanation: 'yes'};
+    const second = {criterion: 'second', passed: false, explanation: 'no'};
     let inspections = 0;
     const sealedWorkspace = {
       ...workspace({'answer.txt': 'answer'}),
       async inspect(): Promise<WorkspaceEntry> {
         inspections += 1;
-        assert.fail('Invalid guideline alignment must fail before evidence reads.');
+        assert.fail('Invalid criterion alignment must fail before evidence reads.');
       },
     };
 
@@ -242,11 +242,11 @@ describe('evaluateRunEvidence', () => {
       evaluateRunEvidence({plan, trajectory, workspace: sealedWorkspace}),
       UnsupportedEvaluationCapabilityError,
     );
-    for (const guidelineResults of [
-      [], [first], [second, first], [first, {...second, guideline: 'altered'}], [first, second, first],
-    ] satisfies GuidelineResultV1[][]) {
+    for (const criterionResults of [
+      [], [first], [second, first], [first, {...second, criterion: 'altered'}], [first, second, first],
+    ] satisfies CriterionResultV1[][]) {
       await assert.rejects(
-        evaluateRunEvidence({plan, trajectory, workspace: sealedWorkspace, guidelineResults}),
+        evaluateRunEvidence({plan, trajectory, workspace: sealedWorkspace, criterionResults}),
         /must correspond exactly to the resolved plan/,
       );
     }

@@ -59,6 +59,22 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.cases.map(({agent}) => agent.hook_trust), ['native', 'automation']);
     assert.deepEqual(parseExperimentRunReport(report), report);
   });
+
+  it('rejects former judging counter and score aggregate fields', () => {
+    const report = build([row(0)]);
+    assert.throws(() => parseExperimentRunReport({...report,
+      summary: {...report.summary, guideline_score: report.summary.judging_score},
+    }));
+    const {judging_score, ...summary} = report.summary;
+    assert.throws(() => parseExperimentRunReport({...report,
+      summary: {...summary, guideline_score: judging_score},
+    }));
+    for (const former of ['guidelines_passed', 'guidelines_total']) {
+      assert.throws(() => parseExperimentRunReport({...report,
+        runs: [{...report.runs[0], evaluation: {...report.runs[0]!.evaluation, [former]: 0}}],
+      }));
+    }
+  });
   it('groups repetitions by exact case/treatment/agent coordinates and separates execution coverage from scores', () => {
     const runs = [row(0), row(1), row(2), row(3), row(4), row(5)];
     runs[0]!.evaluation = evaluation(2, 2, 'passed');
@@ -81,12 +97,12 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.summary, {
       selections: 6, completed: 4, errored: 1, pending: 1,
       passed: 2, partial: 1, failed: 1, attempts_total: 6, retry_attempts: 1,
-      coverage: 4 / 6, pass_rate: 0.5, guideline_score: {mean: 0.5, evaluations: 3},
+      coverage: 4 / 6, pass_rate: 0.5, judging_score: {mean: 0.5, evaluations: 3},
     });
     assert.equal(report.cases.length, 4);
     assert.equal(report.cases[0]!.selections, 3);
-    assert.equal(report.cases[0]!.guideline_score.mean, 0.5);
-    assert.equal(report.cases[1]!.guideline_score.mean, null);
+    assert.equal(report.cases[0]!.judging_score.mean, 0.5);
+    assert.equal(report.cases[1]!.judging_score.mean, null);
     assert.equal(report.cases[2]!.pass_rate, null);
     assert.equal(report.cases[3]!.coverage, 0);
     assert.equal(report.checkpoint_sha256, sha256Digest('{}\n'));
@@ -103,12 +119,12 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.cases.map((group) => group.agent), runs.map((run) => run.selection.agent));
   });
 
-  it('uses status for checks-only pass rates and leaves guideline means unavailable', () => {
+  it('uses status for checks-only pass rates and leaves criterion means unavailable', () => {
     const failed = row(1);
     failed.evaluation = {...evaluation(0, 0, 'failed'), checks_passed: 0};
     const report = build([row(0), failed]);
     assert.equal(report.summary.pass_rate, 0.5);
-    assert.deepEqual(report.summary.guideline_score, {mean: null, evaluations: 0});
+    assert.deepEqual(report.summary.judging_score, {mean: null, evaluations: 0});
     assert.equal(report.runs[0]!.evaluation!.score, 0);
     assert.equal(report.runs[0]!.evaluation!.checks_passed, 1);
   });
@@ -126,7 +142,7 @@ describe('experiment run scorecards', () => {
       (value: typeof report) => {value.runs[0]!.evaluation!.checks_passed = 2;},
       (value: typeof report) => {Object.assign(value.runs[0]!, {extra: true});},
       (value: typeof report) => {Object.assign(value.runs[0]!.evaluation!, {extra: true});},
-      (value: typeof report) => {value.runs[0]!.evaluation!.guidelines_passed = 1;},
+      (value: typeof report) => {value.runs[0]!.evaluation!.judging_criteria_passed = 1;},
       (value: typeof report) => {value.runs[0]!.error_code = 'execution_error';},
       (value: typeof report) => {value.runs[0]!.state = 'errored';},
       (value: typeof report) => {value.runs[0]!.state = 'pending'; value.runs[0]!.run_id = null;},
@@ -200,10 +216,10 @@ describe('experiment run scorecards', () => {
     }
   });
 
-  it('extracts guideline and check scores from real engine commits and averages repetitions', async () => {
+  it('extracts criterion and check scores from real engine commits and averages repetitions', async () => {
     const fixture = await experimentRunFixture();
-    const plan = createTestResolvedRunPlan({caseId: 'testing/guidelines',
-      successGuidelines: ['The answer is complete.'], judge: {provider: 'scripted', model: 'judge'},
+    const plan = createTestResolvedRunPlan({caseId: 'testing/criteria',
+      judgingCriteria: ['The answer is complete.'], judge: {provider: 'scripted', model: 'judge'},
       checks: {file_checks: [{file: 'missing.txt', exists: true}]}});
     const repeated = structuredClone(plan);
     repeated.selection.repetition = 1;
@@ -224,11 +240,11 @@ describe('experiment run scorecards', () => {
     assert.equal(report.summary.completed, 2);
     assert.equal(report.cases.length, 1);
     assert.equal(report.cases[0]!.selections, 2);
-    assert.deepEqual(report.summary.guideline_score, {mean: 0.5, evaluations: 2});
+    assert.deepEqual(report.summary.judging_score, {mean: 0.5, evaluations: 2});
     assert.equal(report.summary.pass_rate, 0);
     assert.deepEqual(report.runs.map((run) => run.evaluation), [
-      {status: 'partial', score: 1, guidelines_passed: 1, guidelines_total: 1, checks_passed: 0, checks_total: 1},
-      {status: 'failed', score: 0, guidelines_passed: 0, guidelines_total: 1, checks_passed: 0, checks_total: 1},
+      {status: 'partial', score: 1, judging_criteria_passed: 1, judging_criteria_total: 1, checks_passed: 0, checks_total: 1},
+      {status: 'failed', score: 0, judging_criteria_passed: 0, judging_criteria_total: 1, checks_passed: 0, checks_total: 1},
     ]);
   });
 
@@ -332,8 +348,8 @@ describe('experiment run scorecards', () => {
 });
 
 function evaluation(passed: number, total: number, status: 'passed' | 'partial' | 'failed') {
-  return {status, score: total === 0 ? 0 : passed / total, guidelines_passed: passed,
-    guidelines_total: total, checks_passed: 1, checks_total: 1};
+  return {status, score: total === 0 ? 0 : passed / total, judging_criteria_passed: passed,
+    judging_criteria_total: total, checks_passed: 1, checks_total: 1};
 }
 function row(index: number): ExperimentRunReportRunV1 {
   const selection = structuredClone(createTestResolvedRunPlan({caseId: 'testing/first'}).selection);

@@ -135,12 +135,12 @@ export function resolveRunPlanWithSetupActions(
     );
   }
   if (
-    definition.success_guidelines.length > 0 &&
+    definition.judging_criteria.length > 0 &&
     config.models.judge === undefined
   ) {
     throw new PlanningError(
       'missing_judge',
-      'A case with success guidelines requires models.judge in the experiment config.',
+      'A case with success criteria requires models.judge in the experiment config.',
     );
   }
 
@@ -214,14 +214,14 @@ export function resolveRunPlanWithSetupActions(
           : (definition.max_turns ?? DEFAULT_MAX_TURNS),
     },
     evaluation: {
-      success_guidelines: [...definition.success_guidelines],
+      judging_criteria: [...definition.judging_criteria],
       ...(definition.checks === undefined
         ? {}
         : {checks: cloneJson(definition.checks)}),
       ...(definition.example_answer === undefined
         ? {}
         : {example_answer: definition.example_answer}),
-      ...(definition.success_guidelines.length === 0 ||
+      ...(definition.judging_criteria.length === 0 ||
       config.models.judge === undefined
         ? {}
         : {judge: cloneJson(config.models.judge)}),

@@ -224,7 +224,7 @@ describe('executeEval multi-turn and judging integration', () => {
       prompt: 'Create a complete answer file.',
       context: 'A developer validating an implementation.',
       maxTurns: 3,
-      successGuidelines: ['The requested answer file is complete.'],
+      judgingCriteria: ['The requested answer file is complete.'],
       checks: {files_created: ['answer.txt']},
       rolePlayer: ROLE_MODEL,
       judge: JUDGE_MODEL,
@@ -423,7 +423,7 @@ describe('executeEval multi-turn and judging integration', () => {
         mode: 'multi_turn',
         prompt: 'Complete both parts.',
         maxTurns: 3,
-        successGuidelines: ['Both requested parts are complete.'],
+        judgingCriteria: ['Both requested parts are complete.'],
         rolePlayer: ROLE_MODEL,
         judge: JUDGE_MODEL,
       }),
@@ -640,7 +640,7 @@ describe('executeEval multi-turn and judging integration', () => {
     const artifacts = createMemoryArtifactStore();
     const plan = createTestResolvedRunPlan({
       prompt: 'Produce visible evidence.',
-      successGuidelines: [
+      judgingCriteria: [
         'The assistant produced a visible response.',
         'The assistant invoked the visible tool.',
       ],
@@ -770,7 +770,7 @@ describe('executeEval multi-turn and judging integration', () => {
           runId: 'redaction-boundary-1',
           plan: createTestResolvedRunPlan({
             prompt: 'Produce an answer.',
-            successGuidelines: ['The assistant produced an answer.'],
+            judgingCriteria: ['The assistant produced an answer.'],
             judge: JUDGE_MODEL,
           }),
           composition: {

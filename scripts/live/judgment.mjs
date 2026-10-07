@@ -2,7 +2,7 @@ import {MODEL} from './configuration.mjs';
 
 // Native structured output must produce valid JSON even when the prompt asks
 // for a backslash before a Markdown backtick, which is not a JSON escape.
-export async function runGuidelineJudgmentRegression(forge, {
+export async function runCriterionJudgmentRegression(forge, {
   provider, credentialResolver, runId, signal,
 }) {
   const model = {provider: provider.id, model: MODEL};
@@ -24,10 +24,10 @@ export async function runGuidelineJudgmentRegression(forge, {
     }],
     temperature: 0,
     maxTokens: 1024,
-    responseSchema: forge.GUIDELINE_JUDGMENT_RESPONSE_SCHEMA,
+    responseSchema: forge.CRITERION_JUDGMENT_RESPONSE_SCHEMA,
     signal,
   }, {credentials});
-  const judgment = forge.parseGuidelineJudgment(response.content, 'Synthetic JSON escape check.');
+  const judgment = forge.parseCriterionJudgment(response.content, 'Synthetic JSON escape check.');
   if (response.stopReason !== 'end_turn' || judgment.passed !== true) {
     throw new Error('The live JSON escape check did not return a valid completed judgment.');
   }

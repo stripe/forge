@@ -49,17 +49,17 @@ const MAX_SETUP_STEPS = 1_000;
 const MAX_RESOLVED_SETUP_STEPS = MAX_SETUP_STEPS * 2;
 const MAX_ACTION_BUNDLES = 100;
 const MAX_CHECK_REGEX_BYTES = 1_024;
-const MAX_SUCCESS_GUIDELINE_CHARACTERS = 64 * 1024;
+const MAX_SUCCESS_CRITERION_CHARACTERS = 64 * 1024;
 
 const FiniteNumberSchema = z.number().finite();
 const PositiveIntegerSchema = FiniteNumberSchema.int().safe().positive();
 const NonnegativeIntegerSchema = FiniteNumberSchema.int().safe().nonnegative();
 const TrimmedTextSchema = z.string().trim().min(1).refine(isBoundedText);
-const SuccessGuidelineSchema = z
+const JudgingCriterionSchema = z
   .string()
   .trim()
   .min(1)
-  .max(MAX_SUCCESS_GUIDELINE_CHARACTERS)
+  .max(MAX_SUCCESS_CRITERION_CHARACTERS)
   .refine(isBoundedText);
 const MetadataSchema = z.string().trim().min(1).refine(isSafeMetadata);
 const SimpleIdentifierSchema = z
@@ -196,8 +196,8 @@ const EvalCaseSchema = z
     execution_mode: z.enum(['multi_turn', 'one_shot']).default('multi_turn'),
     max_turns: PositiveIntegerSchema.max(100).optional(),
     setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS).default([]),
-    success_guidelines: z
-      .array(SuccessGuidelineSchema)
+    judging_criteria: z
+      .array(JudgingCriterionSchema)
       .max(1_000)
       .default([]),
     checks: ChecksSchema.optional(),
@@ -560,7 +560,7 @@ const MaterializedEvalCaseSchema = z.intersection(
       id: CaseIdSchema,
       execution_mode: z.enum(['multi_turn', 'one_shot']),
       setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
-      success_guidelines: z.array(SuccessGuidelineSchema).max(1_000),
+      judging_criteria: z.array(JudgingCriterionSchema).max(1_000),
     })
     .passthrough(),
   EvalCaseSchema,
@@ -634,7 +634,7 @@ const ResolvedRunPlanSchema = z
       .strict(),
     evaluation: z
       .object({
-        success_guidelines: z.array(SuccessGuidelineSchema).max(1_000),
+        judging_criteria: z.array(JudgingCriterionSchema).max(1_000),
         checks: ChecksSchema.optional(),
         example_answer: z.string().refine(isBoundedText).optional(),
         judge: ModelRefSchema.optional(),
@@ -734,14 +734,14 @@ const ResolvedRunPlanSchema = z
 
     if (
       !jsonValuesEqual(
-        plan.evaluation.success_guidelines,
-        plan.case.success_guidelines,
+        plan.evaluation.judging_criteria,
+        plan.case.judging_criteria,
       )
     ) {
       addPlanIssue(
         context,
-        ['evaluation', 'success_guidelines'],
-        'evaluation guidelines must match the selected case',
+        ['evaluation', 'judging_criteria'],
+        'evaluation criteria must match the selected case',
       );
     }
     if (!jsonValuesEqual(plan.evaluation.checks, plan.case.checks)) {
@@ -779,23 +779,23 @@ const ResolvedRunPlanSchema = z
       );
     }
     if (
-      plan.case.success_guidelines.length > 0 &&
+      plan.case.judging_criteria.length > 0 &&
       plan.evaluation.judge === undefined
     ) {
       addPlanIssue(
         context,
         ['evaluation', 'judge'],
-        'plans with success guidelines require a judge model',
+        'plans with success criteria require a judge model',
       );
     }
     if (
-      plan.case.success_guidelines.length === 0 &&
+      plan.case.judging_criteria.length === 0 &&
       plan.evaluation.judge !== undefined
     ) {
       addPlanIssue(
         context,
         ['evaluation', 'judge'],
-        'plans without success guidelines cannot include a judge model',
+        'plans without success criteria cannot include a judge model',
       );
     }
   });

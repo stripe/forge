@@ -6,7 +6,7 @@ import type {ChecksV1, ResolvedRunPlanV1} from '../model/types.js';
 import {
   type CheckResultV1,
   type EvaluationResultV1,
-  type GuidelineResultV1,
+  type CriterionResultV1,
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
@@ -20,8 +20,8 @@ export interface EvaluateRunEvidenceInput {
   readonly plan: ResolvedRunPlanV1;
   readonly trajectory: AtifTrajectoryV1_8;
   readonly workspace: ReadonlyWorkspace;
-  /** Results produced by the configured judge for the plan's exact guidelines. */
-  readonly guidelineResults?: readonly GuidelineResultV1[];
+  /** Results produced by the configured judge for the plan's exact criteria. */
+  readonly criterionResults?: readonly CriterionResultV1[];
   readonly signal?: AbortSignal;
 }
 
@@ -35,21 +35,21 @@ export async function evaluateRunEvidence(
   input: EvaluateRunEvidenceInput,
 ): Promise<EvaluatedRunEvidence> {
   input.signal?.throwIfAborted();
-  const expectedGuidelines = input.plan.evaluation.success_guidelines;
-  if (expectedGuidelines.length > 0 && input.guidelineResults === undefined) {
+  const expectedCriteria = input.plan.evaluation.judging_criteria;
+  if (expectedCriteria.length > 0 && input.criterionResults === undefined) {
     throw new UnsupportedEvaluationCapabilityError(
-      'Guideline results are required to evaluate this run.',
+      'Criterion results are required to evaluate this run.',
     );
   }
-  const guidelineResults = [...(input.guidelineResults ?? [])];
+  const criterionResults = [...(input.criterionResults ?? [])];
   if (
-    guidelineResults.length !== expectedGuidelines.length ||
-    guidelineResults.some(
-      (result, index) => result.guideline !== expectedGuidelines[index],
+    criterionResults.length !== expectedCriteria.length ||
+    criterionResults.some(
+      (result, index) => result.criterion !== expectedCriteria[index],
     )
   ) {
     throw new TypeError(
-      'Guideline results must correspond exactly to the resolved plan.',
+      'Criterion results must correspond exactly to the resolved plan.',
     );
   }
   // Touch the canonical discriminator so callers cannot accidentally supply a
@@ -68,7 +68,7 @@ export async function evaluateRunEvidence(
   );
   return {
     workspaceEvidence,
-    evaluation: scoreEvaluation(guidelineResults, checks),
+    evaluation: scoreEvaluation(criterionResults, checks),
   };
 }
 

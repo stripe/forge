@@ -152,7 +152,7 @@ describe('multi-turn CLI end to end', () => {
     const summary = await verifyCompletedRun(path.join(experimentRun.location, 'runs', 'cli-multi-1'));
     assert.equal(summary.result.evaluation.score, 1);
     assert.equal(summary.result.evaluation.status, 'passed');
-    assert.equal(summary.result.evaluation.guidelines_passed, 1);
+    assert.equal(summary.result.evaluation.judging_criteria_passed, 1);
     assert.equal(summary.result.evaluation.checks.length, 3);
     assert.ok(summary.result.evaluation.checks.every(({passed}) => passed));
     assert.equal(summary.result.stop_reason, 'task_complete');

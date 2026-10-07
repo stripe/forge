@@ -62,8 +62,22 @@ context: Existing integration
       assert.equal(actual.initial_prompt, 'I need help with Checkout.');
       assert.equal(actual.execution_mode, 'multi_turn');
       assert.deepEqual(actual.setup, []);
-      assert.deepEqual(actual.success_guidelines, []);
+      assert.deepEqual(actual.judging_criteria, []);
     }
+  });
+
+  it('accepts judging criteria and rejects the former case field', () => {
+    const definition = {
+      id: 'sample/criteria', task: 'Complete the task.',
+      judging_criteria: ['Handle invalid input gracefully.'],
+      checks: {files_created: ['answer.txt']},
+    };
+    const parsed = parseEvalCase(definition);
+    assert.deepEqual(parsed.judging_criteria, definition.judging_criteria);
+    assert.deepEqual(parsed.checks, definition.checks);
+    assert.throws(() => parseEvalCase({...definition, success_guidelines: []}), BenchmarkModelError);
+    const {judging_criteria, ...withoutCriteria} = definition;
+    assert.throws(() => parseEvalCase({...withoutCriteria, success_guidelines: judging_criteria}), BenchmarkModelError);
   });
 
   it('accepts exactly one effective prompt in one-shot mode', () => {
@@ -91,14 +105,14 @@ initial_prompt: Two
 `), BenchmarkModelError);
   });
 
-  it('bounds success guidelines to the persisted result contract', () => {
+  it('bounds success criteria to the persisted result contract', () => {
     assert.throws(() =>
       parseEvalCase({
-        id: 'safe/oversized-guideline',
-        task: 'Evaluate a bounded guideline.',
+        id: 'safe/oversized-criterion',
+        task: 'Evaluate a bounded criterion.',
         execution_mode: 'multi_turn',
         setup: [],
-        success_guidelines: ['x'.repeat(64 * 1024 + 1)],
+        judging_criteria: ['x'.repeat(64 * 1024 + 1)],
       }), BenchmarkModelError);
   });
 

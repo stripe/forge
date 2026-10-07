@@ -14,7 +14,7 @@ export {
   type EvaluationResultV1,
   type EvalStatus,
   type ForgeArtifactParseContext,
-  type GuidelineResultV1,
+  type CriterionResultV1,
   type InteractionArtifactV1,
   type InteractionToolCallV1,
   type InteractionTurnV1,

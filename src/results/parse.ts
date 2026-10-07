@@ -94,8 +94,8 @@ const checkResult = z.object({
   detail: z.string().max(64 * 1024).optional(),
 }).strict();
 
-const guidelineResult = z.object({
-  guideline: z.string().min(1).max(64 * 1024),
+const criterionResult = z.object({
+  criterion: z.string().min(1).max(64 * 1024),
   passed: z.boolean(),
   explanation: z.string().max(64 * 1024),
 }).strict();
@@ -103,19 +103,19 @@ const guidelineResult = z.object({
 export const evaluationResultSchema = z.object({
   score: z.number().finite().min(0).max(1),
   status: z.enum(['passed', 'partial', 'failed']),
-  guidelines_passed: z.number().int().nonnegative(),
-  guidelines_total: z.number().int().nonnegative(),
-  guidelines: z.array(guidelineResult),
+  judging_criteria_passed: z.number().int().nonnegative(),
+  judging_criteria_total: z.number().int().nonnegative(),
+  judging_criteria: z.array(criterionResult),
   checks: z.array(checkResult),
 }).strict().superRefine((value, context) => {
-  const passed = value.guidelines.filter((guideline) => guideline.passed).length;
+  const passed = value.judging_criteria.filter((criterion) => criterion.passed).length;
   if (
-    value.guidelines_total !== value.guidelines.length ||
-    value.guidelines_passed !== passed
+    value.judging_criteria_total !== value.judging_criteria.length ||
+    value.judging_criteria_passed !== passed
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Guideline totals do not match guideline results.',
+      message: 'Criterion totals do not match criterion results.',
     });
   }
 });

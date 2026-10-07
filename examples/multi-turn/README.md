@@ -5,18 +5,18 @@ case decoupled from experiment configuration:
 
 - `dataset/cases/examples/release-summary.yaml` defines a deliberate two-step
   handoff, its opening message and role-player context, a turn limit, one success
-  guideline, and deterministic filesystem checks. It contains no agent,
+  criterion, and deterministic filesystem checks. It contains no agent,
   provider, model, runtime, or repetition choice.
 - `experiment.yaml` selects Claude Code for the coding agent and independently
   selects `claude-sonnet-4-6` through the Anthropic provider for both Ava's
-  role-player decisions and guideline judging.
+  role-player decisions and criterion judging.
 
 During a run, the configured opening asks Claude Code to request a missing
 status sentence before changing files. Ava supplies that sentence on the next
 user turn, so a conforming run exercises at least two turns in one persistent
-Claude Code session. Forge then seals the workspace and judges the guideline
+Claude Code session. Forge then seals the workspace and judges the criterion
 against the resulting evidence. The exact file check remains deterministic even
-though the interaction and guideline assessment use model completions.
+though the interaction and criterion assessment use model completions.
 
 ## Integrity pins
 
@@ -25,10 +25,10 @@ this exact payload:
 
 | Path | Size | SHA-256 |
 | --- | ---: | --- |
-| `cases/examples/release-summary.yaml` | 1137 bytes | `fa82c800831105fe9521ed03847d381523d774c706288a53a8082e34241991f3` |
+| `cases/examples/release-summary.yaml` | 1117 bytes | `1c2df03e4cdef6cf03bb18a6eda6a6b5842c401b96d3dd9de5efbd43655859bf` |
 
 The raw `dataset/manifest.json` digest is
-`sha256:acd68e0d7c13dd6d3a46382e802ad2345d0f82de8813ecd239a84ed21d032447`.
+`sha256:70eef227c10b8f733e544d5f56e6418a475532225f237014240486df552bcf8b`.
 `experiment.yaml` pins that exact digest, so changing the case or manifest
 requires updating the size, payload SHA-256, and experiment config's manifest
 digest together.
@@ -57,7 +57,7 @@ unversioned ad hoc experiment.
 ## Run with Docker and Anthropic
 
 This command builds or reuses the Forge Docker image and makes billable model
-calls for the coding agent, Ava role player, and guideline judge:
+calls for the coding agent, Ava role player, and criterion judge:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
@@ -100,5 +100,5 @@ pnpm test:live
 
 The unified live suite also exercises Docker conformance and the one-shot
 quickstart. For this example it requires at least two agent turns, a passing
-guideline and file check, every canonical audit artifact, and native evidence
+criterion and file check, every canonical audit artifact, and native evidence
 bound to the one persistent Claude Code session.

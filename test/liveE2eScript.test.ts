@@ -23,7 +23,7 @@ const {createFullSuite} = await liveModule('suite');
 const {createRunVerifiers} = await liveModule('verification');
 const {assertRuntimeCleanup} = await liveModule('cleanup');
 const {startLoopbackGatewayBridge, assertDockerCanReachBridge} = await liveModule('gateway');
-const {runGuidelineJudgmentRegression} = await liveModule('judgment');
+const {runCriterionJudgmentRegression} = await liveModule('judgment');
 const verifiers = createRunVerifiers({...forge, parseAtifTrajectory, FORGE_CLAUDE_CODE_VERSION});
 
 describe('unified live end-to-end suite', () => {
@@ -324,7 +324,7 @@ describe('unified live end-to-end suite', () => {
           return {verified: true};
         },
         verifyMultiTurnRun: async () => ({verified: true}),
-        async runGuidelineJudgmentRegression(input: {
+        async runCriterionJudgmentRegression(input: {
           provider: {id: string}; runId: string; signal: AbortSignal;
           credentialResolver: {resolve(reference: string, context: {signal: AbortSignal}): Promise<string>};
         }) {
@@ -385,12 +385,12 @@ describe('unified live end-to-end suite', () => {
         ...native,
         async complete(request: forge.CompletionRequest, context: forge.CompletionProviderCallContext) {
           assert.equal(request.purpose, 'judge');
-          assert.equal(request.responseSchema, forge.GUIDELINE_JUDGMENT_RESPONSE_SCHEMA);
+          assert.equal(request.responseSchema, forge.CRITERION_JUDGMENT_RESPONSE_SCHEMA);
           assert.equal(request.signal, signal);
           return native.complete(request, context);
         },
       };
-      const pending = runGuidelineJudgmentRegression(forge, {
+      const pending = runCriterionJudgmentRegression(forge, {
         provider, runId: 'synthetic-judge', signal,
         credentialResolver: {
           async resolve(reference: string, context: {signal: AbortSignal}) {

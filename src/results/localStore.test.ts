@@ -1128,13 +1128,13 @@ describe('local artifact store', () => {
     await assert.rejects(verifyCompletedRun(invalidLocation), /Zero-turn interaction requires the system-only role-player-error trajectory\./);
   });
 
-  it('requires judge evidence exactly when guidelines were judged', async () => {
+  it('requires judge evidence exactly when criteria were judged', async () => {
     const missingLocation = await commitArtifacts(
       [
         {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
         {path: 'trajectory.json', body: oneShotTrajectory},
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     await assert.rejects(verifyCompletedRun(missingLocation), /missing judge-evidence\.json/);
 
@@ -1144,7 +1144,7 @@ describe('local artifact store', () => {
       {path: 'trajectory.json', body: trajectory},
       {path: 'judge-evidence.json', body: judgeEvidenceBody()},
     ]);
-    await assert.rejects(verifyCompletedRun(unexpectedLocation), /without judged guidelines contains judge-evidence\.json/);
+    await assert.rejects(verifyCompletedRun(unexpectedLocation), /without judged criteria contains judge-evidence\.json/);
   });
 
   it('verifies judge evidence and its projection declaration', async () => {
@@ -1165,7 +1165,7 @@ describe('local artifact store', () => {
         {path: 'trajectory.json', body: trajectory},
         {path: 'judge-evidence.json', body: jsonBody(validJudgeEvidence)},
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     {
       const actual = (await verifyCompletedRun(validLocation));
@@ -1182,7 +1182,7 @@ describe('local artifact store', () => {
           body: jsonBody({...validJudgeEvidence, prompt_version: 'unsupported'}),
         },
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     await assert.rejects(verifyCompletedRun(unexpectedPromptVersionLocation), /Completed judge-evidence\.json does not match its schema\./);
 
@@ -1201,7 +1201,7 @@ describe('local artifact store', () => {
           }),
         },
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     await assert.rejects(verifyCompletedRun(unsupportedProjectionLocation), /Completed judge-evidence\.json does not match its schema\./);
 
@@ -1217,7 +1217,7 @@ describe('local artifact store', () => {
           }),
         },
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     await assert.rejects(verifyCompletedRun(invalidLocation), /Completed judge-evidence\.json does not match its schema\./);
   });
@@ -1239,7 +1239,7 @@ describe('local artifact store', () => {
         {path: 'trajectory.json', body: trajectory},
         {path: 'judge-evidence.json', body: jsonBody(evidence)},
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     const validLocation = await commitEvidence(judgeEvidence);
     {
@@ -1258,7 +1258,7 @@ describe('local artifact store', () => {
           body: jsonBody({...judgeEvidence, transcript: policyOnly}),
         },
       ],
-      withPassingGuideline,
+      withPassingCriterion,
     );
     await assert.rejects(verifyCompletedRun(missingStepsLocation), /Completed judge-evidence\.json does not match its schema\./);
 
@@ -1359,14 +1359,14 @@ async function commitCodexEvidence(
     caseId: 'sample/case',
     prompt: 'do it',
     agent: {adapter: 'codex', provider: 'openai', model: 'test'},
-    successGuidelines: ['The task is complete.'],
+    judgingCriteria: ['The task is complete.'],
     judge: {provider: 'test-provider', model: 'judge-model'},
   });
   return commitArtifacts([
     {path: 'interaction.json', body: jsonBody(interaction)},
     ...codexEvidenceArtifacts(steps),
   ], (result) => transform({
-    ...withPassingGuideline(result),
+    ...withPassingCriterion(result),
     agent: {...result.agent, adapter: 'codex'},
     evidence: {
       ...result.evidence,
@@ -1439,7 +1439,7 @@ async function commitArtifacts(
 
 function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
   const multiTurn = result.interaction.mode === 'multi_turn';
-  const guidelines = result.evaluation.guidelines.map(({guideline}) => guideline);
+  const criteria = result.evaluation.judging_criteria.map(({criterion}) => criterion);
   const hasChecks = result.evaluation.checks.length > 0;
   return createTestResolvedRunPlan({
     caseId: 'sample/case',
@@ -1448,8 +1448,8 @@ function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
     ...(multiTurn
       ? {rolePlayer: {provider: 'test-provider', model: 'role-model'}}
       : {}),
-    successGuidelines: guidelines,
-    ...(guidelines.length === 0
+    judgingCriteria: criteria,
+    ...(criteria.length === 0
       ? {}
       : {judge: {provider: 'test-provider', model: 'judge-model'}}),
     ...(hasChecks ? {checks: {files_created: ['answer.txt']}} : {}),
@@ -1529,15 +1529,15 @@ function emptySetupBody(plan: ResolvedRunPlanV1): Buffer {
   });
 }
 
-function withPassingGuideline(result: RunResultV1): RunResultV1 {
+function withPassingCriterion(result: RunResultV1): RunResultV1 {
   return {
     ...result,
     evaluation: {
       ...result.evaluation,
       score: 1,
-      guidelines_passed: 1,
-      guidelines_total: 1,
-      guidelines: [{guideline: 'The task is complete.', passed: true, explanation: 'Met.'}],
+      judging_criteria_passed: 1,
+      judging_criteria_total: 1,
+      judging_criteria: [{criterion: 'The task is complete.', passed: true, explanation: 'Met.'}],
     },
   };
 }
@@ -1641,9 +1641,9 @@ function resultFor(
     evaluation: {
       score: 0,
       status: 'passed',
-      guidelines_passed: 0,
-      guidelines_total: 0,
-      guidelines: [],
+      judging_criteria_passed: 0,
+      judging_criteria_total: 0,
+      judging_criteria: [],
       checks: [],
     },
     started_at: '2026-09-15T00:00:00.000Z',

@@ -14,50 +14,50 @@ describe('scoreEvaluation', () => {
     }
   });
 
-  it('gates a clean pass on checks without reducing a full guideline score', () => {
+  it('gates a clean pass on checks without reducing a full criterion score', () => {
     {
       const actual = scoreEvaluation(
         [
-          {guideline: 'one', passed: true, explanation: 'yes'},
-          {guideline: 'two', passed: true, explanation: 'yes'},
+          {criterion: 'one', passed: true, explanation: 'yes'},
+          {criterion: 'two', passed: true, explanation: 'yes'},
         ],
         [{name: 'file', passed: false}],
       );
       assert.ok(actual);
       assert.equal(actual.score, 1);
       assert.equal(actual.status, 'partial');
-      assert.equal(actual.guidelines_passed, 2);
-      assert.equal(actual.guidelines_total, 2);
+      assert.equal(actual.judging_criteria_passed, 2);
+      assert.equal(actual.judging_criteria_total, 2);
     }
   });
 
-  it('does not include deterministic checks in the guideline denominator', () => {
-    const guidelines = [
-      {guideline: 'one', passed: true, explanation: 'yes'},
-      {guideline: 'two', passed: false, explanation: 'no'},
+  it('does not include deterministic checks in the criterion denominator', () => {
+    const criteria = [
+      {criterion: 'one', passed: true, explanation: 'yes'},
+      {criterion: 'two', passed: false, explanation: 'no'},
     ];
     for (const checks of [[], [{name: 'file', passed: true}], [{name: 'file', passed: false}]]) {
       {
-        const actual = scoreEvaluation(guidelines, checks);
+        const actual = scoreEvaluation(criteria, checks);
         assert.ok(actual);
         assert.equal(actual.score, 0.5);
         assert.equal(actual.status, 'partial');
-        assert.equal(actual.guidelines_passed, 1);
-        assert.equal(actual.guidelines_total, 2);
+        assert.equal(actual.judging_criteria_passed, 1);
+        assert.equal(actual.judging_criteria_total, 2);
       }
     }
   });
 
-  it('requires actual successful checks to establish partial success when no guideline passes', () => {
-    const guidelines = [{guideline: 'one', passed: false, explanation: 'no'}];
+  it('requires actual successful checks to establish partial success when no criterion passes', () => {
+    const criteria = [{criterion: 'one', passed: false, explanation: 'no'}];
     {
-      const actual = scoreEvaluation(guidelines, []);
+      const actual = scoreEvaluation(criteria, []);
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'failed');
     }
     {
-      const actual = scoreEvaluation(guidelines, [{name: 'file', passed: true}]);
+      const actual = scoreEvaluation(criteria, [{name: 'file', passed: true}]);
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'partial');
@@ -67,8 +67,8 @@ describe('scoreEvaluation', () => {
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'failed');
-      assert.equal(actual.guidelines_passed, 0);
-      assert.equal(actual.guidelines_total, 0);
+      assert.equal(actual.judging_criteria_passed, 0);
+      assert.equal(actual.judging_criteria_total, 0);
     }
   });
 });
