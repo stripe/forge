@@ -18,8 +18,8 @@ import type {
 } from '../contracts/agent.js';
 
 // Keep deterministic fallback comfortably below the stricter whole-ATIF graph
-// budgets. Authored one-shot prompts are independently capped at 1 MiB and Ava
-// prompts at 500 characters, so exact user messages always retain headroom.
+// budgets. Authored prompts are independently capped at 1 MiB and generated
+// Ava prompts at 500 characters, so exact user messages always retain headroom.
 const MAX_COMPLETED_TURNS = 100;
 const FALLBACK_ASSISTANT_CODE_UNIT_BUDGET = 8 * 1024 * 1024;
 const FALLBACK_TOOL_CALL_BUDGET = 256;
