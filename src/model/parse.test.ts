@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
 import {BenchmarkModelError} from './errors.js';
+import {getMatrixGroups} from './matrix.js';
 import {
+  parseExperimentConfig,
   parseExperimentConfigYaml,
   parseDatasetManifestJson,
   parseEvalCase,
@@ -33,13 +35,14 @@ describe('public benchmark parsing', () => {
     const codex = yaml.replace('adapter: claude-code', 'adapter: codex');
     for (const hook_trust of ['native', 'automation']) {
       const config = parseExperimentConfigYaml(codex.replace('adapter: codex', `adapter: codex\n      hook_trust: ${hook_trust}`));
-      assert.equal(config.matrix.agents[0]!.hook_trust, hook_trust);
+      assert.equal(getMatrixGroups(config.matrix)[0]!.agents[0]!.hook_trust, hook_trust);
     }
     assert.throws(() => parseExperimentConfigYaml(yaml.replace('adapter: claude-code', 'adapter: claude-code\n      hook_trust: native')), /hook_trust/);
     assert.throws(() => parseExperimentConfigYaml(codex.replace('adapter: codex', 'adapter: codex\n      hook_trust: unknown')), /Invalid enum/);
     const config = parseExperimentConfigYaml(codex);
-    const duplicate = {...config, matrix: {...config.matrix, agents: [config.matrix.agents[0]!,
-      {...config.matrix.agents[0]!, hook_trust: 'native'}]}};
+    const agents = getMatrixGroups(config.matrix)[0]!.agents;
+    const duplicate = {...config, matrix: {...config.matrix, agents: [agents[0]!,
+      {...agents[0]!, hook_trust: 'native'}]}};
     // Exercise the strict JSON boundary through YAML, retaining authored defaults.
     assert.throws(() => parseExperimentConfigYaml(JSON.stringify(duplicate)), /unique/);
   });
@@ -221,6 +224,7 @@ task: safe
       assert.ok(actual);
       assert.equal(actual.repetitions, 1);
       assert.equal(actual.retries, 0);
+      assert.equal(Object.hasOwn(actual, 'groups'), false);
     }
     {
       const actual = 'resources' in config.runtime && config.runtime.resources;
@@ -228,6 +232,137 @@ task: safe
       assert.deepEqual(actual.memory_bytes, 4 * 1024 * 1024 * 1024);
       assert.equal(actual.cpu_count, 2);
       assert.equal(actual.process_count, 512);
+    }
+  });
+
+  it('preserves grouped matrix axes and applies only global run policy defaults', () => {
+    const flat = parseExperimentConfigYaml(experimentConfigYaml());
+    const group = getMatrixGroups(flat.matrix)[0]!;
+    const authored = {
+      ...flat,
+      matrix: {
+        groups: [{cases: group.cases, treatments: group.treatments, agents: group.agents}],
+      },
+    };
+    const before = structuredClone(authored);
+    const parsed = parseExperimentConfig(authored);
+    assert.deepEqual(parsed.matrix, {
+      ...authored.matrix,
+      repetitions: 1,
+      retries: 0,
+    });
+    assert.equal(Object.hasOwn(parsed.matrix, 'cases'), false);
+    assert.equal(Object.hasOwn(parsed.matrix, 'treatments'), false);
+    assert.equal(Object.hasOwn(parsed.matrix, 'agents'), false);
+    assert.deepEqual(authored, before);
+    assert.notEqual(parsed.matrix.groups, authored.matrix.groups);
+    const explicit = parseExperimentConfig({...authored, matrix: {
+      ...authored.matrix, repetitions: 3, retries: 2,
+    }});
+    assert.equal(explicit.matrix.repetitions, 3);
+    assert.equal(explicit.matrix.retries, 2);
+  });
+
+  it('rejects missing, mixed, empty, inherited, and unknown matrix axes', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const {cases, treatments, agents} = getMatrixGroups(config.matrix)[0]!;
+    const group = {cases, treatments, agents};
+    const axes = {cases: group.cases, treatments: group.treatments, agents: group.agents};
+    const invalid: unknown[] = [
+      {},
+      {groups: []},
+      {groups: [axes], ...axes},
+      {groups: [axes], extra: true},
+      {groups: [{...axes, extra: true}]},
+      {groups: [{...axes, repetitions: 2}]},
+      {groups: [{...axes, retries: 1}]},
+    ];
+    for (const axis of ['cases', 'treatments', 'agents'] as const) {
+      const missing = {...axes};
+      delete (missing as Partial<typeof axes>)[axis];
+      invalid.push(
+        missing,
+        {...axes, [axis]: []},
+        {groups: [missing]},
+        {groups: [{...axes, [axis]: []}]},
+        {groups: [missing], [axis]: axes[axis]},
+      );
+    }
+    for (const matrix of invalid) {
+      assert.throws(() => parseExperimentConfig({...config, matrix}), BenchmarkModelError);
+    }
+  });
+
+  it('allows overlapping case IDs when treatments or resolved agents differ', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const {cases, treatments, agents} = getMatrixGroups(config.matrix)[0]!;
+    const group = {cases, treatments, agents};
+    const groups = [
+      group,
+      {...group, treatments: ['seeded']},
+      {...group, agents: [{...group.agents[0]!, model: 'other-model'}]},
+    ];
+    const parsed = parseExperimentConfig({
+      ...config,
+      treatments: {...config.treatments, seeded: {setup: []}},
+      matrix: {groups},
+    });
+    assert.equal(parsed.matrix.groups?.length, 3);
+  });
+
+  it('rejects overlapping resolved selections including the Codex native default', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const {cases, treatments, agents} = getMatrixGroups(config.matrix)[0]!;
+    const group = {cases, treatments, agents};
+    assert.throws(() => parseExperimentConfig({
+      ...config,
+      matrix: {groups: [group, {...group, cases: ['smoke/other', ...group.cases]}]},
+    }), /duplicate resolved selections/);
+    const codex = {...group, agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}]};
+    assert.throws(() => parseExperimentConfig({
+      ...config,
+      matrix: {groups: [codex, {...codex, agents: [{...codex.agents[0]!, hook_trust: 'native'}]}]},
+    }), /duplicate resolved selections/);
+    const distinctPolicy = parseExperimentConfig({
+      ...config,
+      matrix: {groups: [codex, {...codex, agents: [{...codex.agents[0]!, hook_trust: 'automation'}]}]},
+    });
+    assert.equal(distinctPolicy.matrix.groups?.length, 2);
+    for (const axis of ['cases', 'treatments', 'agents'] as const) {
+      assert.throws(() => parseExperimentConfig({
+        ...config, matrix: {groups: [{...group, [axis]: [...group[axis], ...group[axis]]}]},
+      }), /unique/);
+    }
+  });
+
+  it('keeps omitted and native hook policies distinct for custom adapters', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const group = getMatrixGroups(config.matrix)[0]!;
+    const implicit = {adapter: 'custom-agent', provider: 'custom-provider', model: 'model'};
+    const native = {...implicit, hook_trust: 'native' as const};
+    const flat = parseExperimentConfig({...config, matrix: {
+      ...group, agents: [implicit, native],
+    }});
+    assert.deepEqual(getMatrixGroups(flat.matrix)[0]!.agents, [implicit, native]);
+    const grouped = parseExperimentConfig({...config, matrix: {groups: [
+      {...group, agents: [implicit]},
+      {...group, agents: [native]},
+    ]}});
+    assert.deepEqual(getMatrixGroups(grouped.matrix).map(({agents}) => agents), [[implicit], [native]]);
+  });
+
+  it('validates treatment references and identifiers in every matrix group', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const {cases, treatments, agents} = getMatrixGroups(config.matrix)[0]!;
+    const group = {cases, treatments, agents};
+    for (const [treatment, message] of [
+      ['missing', /undefined treatment/],
+      ['unsafe/treatment', /safe identifiers/],
+    ] as const) {
+      assert.throws(() => parseExperimentConfig({
+        ...config,
+        matrix: {groups: [group, {...group, cases: ['smoke/other'], treatments: [treatment]}]},
+      }), message);
     }
   });
 

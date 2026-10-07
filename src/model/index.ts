@@ -7,6 +7,7 @@ export {
   sha256Hex,
 } from './hashes.js';
 export {loadDataset, loadExperimentConfig} from './loaders.js';
+export {getMatrixGroups} from './matrix.js';
 export {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,

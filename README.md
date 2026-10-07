@@ -227,7 +227,7 @@ omit it and supply a loaded dataset directly.
 config must set `models.role_player` for every selected `multi_turn` case and
 `models.judge` for every selected case with non-empty `success_guidelines`.
 Those model coordinates select host-side completion providers; the agent model
-remains independently selected in `matrix.agents`.
+remains independently selected by the matrix's agent entries.
 
 Use `platform: native` for portable local smoke tests. Forge asks the Docker
 server for its architecture before `plan` or `run` and records the resulting
@@ -335,9 +335,10 @@ manifest digest. `--case-file` maps an exact regular file within that configured
 dataset to its declared case ID; the case must be in the experiment matrix.
 `--case` and `--case-file` are mutually exclusive.
 
-`run` executes every matching matrix combination. Selection options restrict
-which cases, treatments, agents, and repetitions run. `plan` requires exactly
-one matching combination:
+`run` executes every matching matrix combination, including selections from
+all declared groups. Selection options filter those combinations by case,
+treatment, agent, and repetition; they never create combinations across groups.
+`plan` requires exactly one matching combination:
 
 ```text
 --case <case-id>
@@ -564,6 +565,14 @@ evaluations with guidelines; its mean is `null` when that count is zero. Ratios
 and scores range from 0 to 1. A checks-only evaluation can pass with raw score
 0; it contributes to pass rate, but not the guideline mean.
 
+Coverage counts only saved selections from the authored matrix and any CLI
+filters. Combinations absent from a grouped matrix have no report row and do
+not count as pending. Each completed guideline evaluation has equal weight in
+the summary mean, so cases selected for more treatment/agent combinations can
+contribute more weight. Compare treatments using matched case IDs and identical
+complete agent selections; arms with different case or model coverage describe
+different evaluation distributions.
+
 Only the latest verified effective outcome for each selection contributes to
 scores, using the same committed-result recovery as resume. Completed failed
 or partial evaluations keep their scores. Execution errors, including committed
@@ -642,7 +651,8 @@ The adapter version is the installed Forge package version.
 `result.json.agent.metadata.endpoint_mode` records `default` or `custom`;
 endpoint URLs and credentials are not added to results.
 
-`hook_trust` belongs on the Codex entry in `matrix.agents`. It defaults to
+`hook_trust` belongs on the Codex entry in `matrix.agents` or a group's `agents`
+list. It defaults to
 `native`, which lets Codex enforce its normal hook review requirements. Set
 `automation` when enabled hooks should run without review in the isolated
 runtime. Forge then passes `--dangerously-bypass-hook-trust` on every initial
@@ -692,6 +702,63 @@ YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
 non-canonical paths, unknown or version-suffixed setup actions, and oversized
 values are rejected. YAML parsing additionally rejects duplicate keys.
 Defaults are materialized in the resolved plan rather than inferred by the runtime.
+
+### Experiment matrices
+
+The flat matrix used in the quickstart evaluates every combination of its
+`cases`, `treatments`, and `agents`, repeated `repetitions` times. Use `groups`
+when different cases need different treatments or agent models in one
+experiment. Each group evaluates its own Cartesian product:
+
+<!-- grouped-matrix:start -->
+```yaml
+matrix:
+  repetitions: 2
+  retries: 0
+  groups:
+    - cases:
+        - examples/payment
+      treatments:
+        - baseline
+        - payment-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-sonnet-4-6
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+    - cases:
+        - examples/marketplace
+      treatments:
+        - baseline
+        - marketplace-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+```
+<!-- grouped-matrix:end -->
+
+This is the `matrix` portion of an experiment whose dataset contains both case
+IDs and whose top-level `treatments` defines all three treatments. It selects
+12 selections: 8 for payment and 4 for marketplace. Payment uses only
+`baseline` and `payment-plugin` with both models; marketplace uses only
+`baseline` and `marketplace-plugin` with Opus.
+
+Choose either flat axes or `groups`; mixing them is an error. Every group must
+explicitly provide nonempty `cases`, `treatments`, and `agents` lists.
+`repetitions` and `retries` belong at the matrix level and apply to every group.
+Groups expand in authored order, then case, treatment, agent, and zero-based
+repetition order. A case may appear in several groups for different treatment
+or agent combinations. Duplicate resolved selections across groups, including
+agent defaults such as Codex's `hook_trust: native`, are rejected.
+
+Groups are an authoring boundary: they flatten into ordinary case/treatment/
+agent/repetition selections for planning, execution, resume, and reporting.
+The selected case, treatment, and complete agent entry must occur together in
+one group. Plans, checkpoints, and reports record those selections without a
+group identity.
 
 ## Multi-turn Ava and guideline judging
 
@@ -1058,6 +1125,12 @@ const completed = await executeEval({
 
 console.log(completed.location);
 ```
+
+`ExperimentMatrixV1` is the union of `FlatExperimentMatrixV1` and
+`GroupedExperimentMatrixV1`. `getMatrixGroups(matrix)` exposes either form as
+a read-only list of `ExperimentMatrixGroupV1` axes, treating a flat matrix as
+one group. These types and the helper are exported from `@stripe/forge`;
+`expandExperiment` returns the same ordinary selections for both forms.
 
 `parseRunResult` checks the producer's Forge version before interpreting a
 stored result. Public companion parsers `parseSetupArtifact`,

@@ -179,6 +179,36 @@ export type ForgeRuntimeConfigV1 =
   | ForgeDockerRuntimeConfigV1
   | ForgeExternalRuntimeV1;
 
+/** One authored Cartesian product; selections never cross group boundaries. */
+export interface ExperimentMatrixGroupV1 {
+  cases: CaseId[];
+  treatments: TreatmentId[];
+  agents: AgentSelectionV1[];
+}
+
+export interface FlatExperimentMatrixV1 extends ExperimentMatrixGroupV1 {
+  groups?: never;
+  /** Number of independent samples; selections use a zero-based index. */
+  repetitions: number;
+  /** Experiment run retry policy; a retry does not change the run selection. */
+  retries: number;
+}
+
+export interface GroupedExperimentMatrixV1 {
+  groups: ExperimentMatrixGroupV1[];
+  cases?: never;
+  treatments?: never;
+  agents?: never;
+  /** Number of independent samples for every group. */
+  repetitions: number;
+  /** Experiment run retry policy; a retry does not change the run selection. */
+  retries: number;
+}
+
+export type ExperimentMatrixV1 =
+  | FlatExperimentMatrixV1
+  | GroupedExperimentMatrixV1;
+
 export interface ExperimentConfigV1 {
   id: string;
   version: string;
@@ -195,15 +225,7 @@ export interface ExperimentConfigV1 {
     judge?: ModelRefV1;
   };
   treatments: Record<TreatmentId, TreatmentV1>;
-  matrix: {
-    cases: CaseId[];
-    treatments: TreatmentId[];
-    agents: AgentSelectionV1[];
-    /** Number of independent samples; selections use a zero-based index. */
-    repetitions: number;
-    /** Experiment run retry policy; a retry does not change the run selection. */
-    retries: number;
-  };
+  matrix: ExperimentMatrixV1;
   limits: {
     run_timeout_ms: number;
   };

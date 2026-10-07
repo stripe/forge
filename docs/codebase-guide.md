@@ -271,6 +271,7 @@ is selected.
 | --- | --- | --- |
 | [`types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts) | TypeScript wire types for manifests, cases, experiments, selections, setup steps, runtimes, and resolved plans | Imported across nearly every directory; contains data only |
 | [`parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
+| [`matrix.ts`](https://github.com/stripe/forge/blob/main/src/model/matrix.ts) | `getMatrixGroups` and shared agent identity after defaults | Provides shared matrix views and agent identity for parsing and planning. |
 | [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
 | [`paths.ts`](https://github.com/stripe/forge/blob/main/src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
 | [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for dataset pins, bundle identity checks, plugin snapshot fingerprints, and artifact verification |
@@ -312,6 +313,10 @@ credentials, inspect the runtime, or select a composition adapter. Its setup
 registry dependency exists only to bind the plan to registered action
 implementations and their bundle identities. It stamps the resolved plan with
 the installed Forge build identity; experiments do not author that identity.
+`expandExperiment` walks matrix groups before their case/treatment/agent/
+repetition axes. Selection membership checks keep the complete tuple within
+one group; downstream execution and reporting consume ordinary selections.
+See the README's [matrix contract](../README.md#experiment-matrices).
 
 ## `src/contracts`: host capability boundaries
 
