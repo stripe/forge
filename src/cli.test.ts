@@ -58,6 +58,34 @@ describe('Forge CLI', () => {
     assert.equal(stdout, `${FORGE_VERSION}\n`);
   });
 
+  it('prints an experiment run summary and resumes its checkpoint', async () => {
+    const fixture = await createBenchmarkFixture();
+    const output = path.join(fixture.root, 'results');
+    let stdout = '';
+    let executed = 0;
+    const options: RunCliOptions = {
+      environment: {},
+      experimentRunIdFactory: () => 'public-experiment',
+      runIdFactory: () => 'public-eval',
+      stdout: (text) => {stdout += text;},
+      execute: async (input) => {executed += 1; return executeOffline(input);},
+    };
+    assert.equal(await runCli(['run', '--experiment', fixture.experimentPath, '--output', output], options), 0);
+    const summary = JSON.parse(stdout) as {experiment_run_id: string; location: string; checkpoint: string; report: string};
+    assert.equal(summary.experiment_run_id, 'public-experiment');
+    assert.equal(summary.checkpoint, path.join(summary.location, 'experiment.json'));
+    assert.equal(summary.report, path.join(summary.location, 'report.json'));
+    stdout = '';
+    assert.equal(await runCli(['run', '--experiment', fixture.experimentPath, '--output', output,
+      '--resume', summary.experiment_run_id], options), 0);
+    assert.equal(executed, 1);
+    const resumed = JSON.parse(stdout) as {checkpoint: string; skipped: number; executed: number};
+    assert.equal(resumed.checkpoint, summary.checkpoint);
+    assert.equal(resumed.skipped, 1);
+    assert.equal(resumed.executed, 0);
+    assert.ok((await fs.stat(summary.checkpoint)).isFile());
+  });
+
   it('checks default-composition input bytes against the manifest loaded for the run', async () => {
     const fixture = await createBenchmarkFixture();
     const exitCode = await runCli([
@@ -656,8 +684,8 @@ describe('Forge CLI', () => {
     assert.equal(await runCli(['plan', '--experiment', fixture.experimentPath, '--case', 'case/example'], {
       stdout: (text) => {expectedPlan += text;},
     }), 0);
-    const campaign = JSON.parse(stdout) as {location: string};
-    const storedPlan = await fs.readFile(path.join(campaign.location, 'runs', 'case-file-run', 'plan.json'), 'utf8');
+    const experimentRun = JSON.parse(stdout) as {location: string};
+    const storedPlan = await fs.readFile(path.join(experimentRun.location, 'runs', 'case-file-run', 'plan.json'), 'utf8');
     assert.equal(storedPlan, expectedPlan);
     assert.ok(!(storedPlan).includes(fixture.caseFilePath));
   });

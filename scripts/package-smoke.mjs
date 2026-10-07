@@ -66,8 +66,8 @@ try {
       import * as forge from '@stripe/forge';
       import * as atif from '@stripe/forge/atif/v1.8';
       import * as cli from '@stripe/forge/cli';
-      import * as campaign from '@stripe/forge/campaign';
-      import * as campaignCli from '@stripe/forge/campaign/cli';
+      import * as experiment from '@stripe/forge/experiment';
+      import * as experimentCli from '@stripe/forge/experiment/cli';
       import * as claude from '@stripe/forge/agents/claude-code';
       import * as codex from '@stripe/forge/agents/codex';
       import * as anthropic from '@stripe/forge/providers/anthropic';
@@ -114,16 +114,22 @@ try {
       );
       assert.equal(typeof cli.runCli, 'function');
       assert.equal(typeof cli.createDefaultCliComposition, 'function');
-      assert.equal(typeof campaign.runCampaign, 'function');
-      assert.equal(typeof campaign.readCampaignSelections, 'function');
-      assert.equal(typeof campaign.inspectCampaign, 'function');
-      assert.equal(typeof campaign.parseCampaignReport, 'function');
-      assert.equal(typeof campaign.CampaignReportError, 'function');
-      assert.equal(typeof campaignCli.runCampaignCommand, 'function');
-      assert.equal(typeof campaignCli.parseCampaignArgs, 'function');
-      assert.equal(typeof campaignCli.createCampaignCliOptions, 'function');
-      assert.equal('runCampaign' in forge, false);
-      assert.equal('parseCampaignReport' in forge, false);
+      assert.equal(typeof experiment.runExperiment, 'function');
+      assert.equal(typeof experiment.readExperimentRunSelections, 'function');
+      assert.equal(typeof experiment.inspectExperimentRun, 'function');
+      assert.equal(typeof experiment.parseExperimentRunReport, 'function');
+      assert.equal(typeof experiment.ExperimentRunReportError, 'function');
+      assert.equal(typeof experimentCli.runExperimentCommand, 'function');
+      assert.equal(typeof experimentCli.parseExperimentArgs, 'function');
+      assert.equal(typeof experimentCli.createExperimentCliOptions, 'function');
+      assert.equal(typeof experimentCli.ExperimentCommandError, 'function');
+      assert.equal(typeof experimentCli.ExperimentUsageError, 'function');
+      assert.equal(Object.isFrozen(experimentCli.EXPERIMENT_CLI_OPTIONS), true);
+      assert.equal('runExperiment' in forge, false);
+      assert.equal('parseExperimentRunReport' in forge, false);
+      for (const removed of ['@stripe/forge/campaign', '@stripe/forge/campaign/cli']) {
+        await assert.rejects(import(removed), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
+      }
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
       assert.equal(typeof codex.createCodexAdapter, 'function');
       assert.equal(typeof codex.parseCodexStream, 'function');
@@ -137,7 +143,7 @@ try {
       assert.deepEqual(anthropic.createAnthropicCompletionProvider({baseUrl: 'https://gateway.example.com'}).metadata, {endpoint_mode: 'custom'});
       for (const [surface, names] of [
         [forge, ['BENCHMARK_SCHEMA_VERSION', 'RESOLVED_RUN_PLAN_SCHEMA_VERSION', 'RUN_RESULT_SCHEMA_VERSION', 'SETUP_ARTIFACT_SCHEMA_VERSION', 'WORKSPACE_EVIDENCE_SCHEMA_VERSION', 'INTERACTION_SCHEMA_VERSION', 'JUDGE_EVIDENCE_SCHEMA_VERSION', 'EVALUATION_SCHEMA_VERSION', 'GUIDELINE_JUDGE_PROMPT_VERSION', 'JUDGE_TRANSCRIPT_PROJECTION_VERSION', 'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION']],
-        [campaign, ['CAMPAIGN_REPORT_SCHEMA_VERSION']],
+        [experiment, ['EXPERIMENT_RUN_REPORT_SCHEMA_VERSION']],
         [atif, ['ATIF_NORMALIZATION_VERSION']],
         [claude, ['CLAUDE_CODE_ADAPTER_VERSION', 'CLAUDE_CODE_GATEWAY_ADAPTER_VERSION']],
         [codex, ['CODEX_ADAPTER_VERSION', 'CODEX_RESPONSES_ADAPTER_VERSION']],
@@ -203,7 +209,7 @@ try {
         {uses: 'package-smoke/tool', with: {name: 'formatter'}},
       );
 
-      const campaignRoot = path.resolve('results', 'package-campaign');
+      const experimentRoot = path.resolve('results', 'package-experiment');
       const plans = ['first', 'second'].map((id) => {
         const plan = structuredClone(testing.createTestResolvedRunPlan({caseId: 'testing/' + id}));
         plan.provenance.forge.action_bundles = [bundle.manifest];
@@ -217,30 +223,35 @@ try {
         agents: new Map([[agent.id, agent]]),
         credentialResolver: testing.createStaticCredentialResolver(),
         inputProvider: testing.createMemoryRunInputProvider(),
-        artifactStore: forge.createArtifactStore({root: campaignRoot}),
+        artifactStore: forge.createArtifactStore({root: experimentRoot}),
       };
       let nextId = 0;
-      const campaignOptions = {
-        root: campaignRoot, plans: [plans[0]], engine, composition, jobs: 1, resume: false,
+      const experimentOptions = {
+        root: experimentRoot, plans: [plans[0]], engine, composition, jobs: 1, resume: false,
         signal: new AbortController().signal,
         runIdFactory: () => 'package-run-' + (++nextId),
         progress: () => {},
         execute: (input) => {
           const runAgent = testing.createScriptedAgentAdapter().adapter;
           return engine.executeEval({...input, composition: {
-            ...composition, agents: new Map([[runAgent.id, runAgent]]),
+            ...input.composition, agents: new Map([[runAgent.id, runAgent]]),
           }});
         },
       };
-      const summary = await campaign.runCampaign(campaignOptions);
+      const summary = await experiment.runExperiment(experimentOptions);
       assert.equal(summary.completed, 1);
-      assert.deepEqual(await campaign.readCampaignSelections(campaignRoot), [plans[0].selection]);
+      assert.equal(summary.checkpoint, path.join(experimentRoot, 'experiment.json'));
+      assert.deepEqual(await experiment.readExperimentRunSelections(experimentRoot), [plans[0].selection]);
+      const resumed = await experiment.runExperiment({...experimentOptions, resume: true});
+      assert.equal(resumed.executed, 0);
+      assert.equal(resumed.skipped, 1);
+      assert.equal(resumed.checkpoint, summary.checkpoint);
 
       const commandOptions = {
         hostOptions: {tag: {type: 'string'}, upload: {type: 'boolean'}},
         engine, experimentRunIdFactory: () => 'package-command',
         runIdFactory: () => 'command-run-' + (++nextId),
-        loadCampaign: async (context) => {
+        loadExperiment: async (context) => {
           assert.equal(context.engine, engine);
           assert.equal(context.values.tag, 'smoke');
           if (context.resume) assert.deepEqual(context.savedSelections, plans.map((plan) => plan.selection));
@@ -253,21 +264,51 @@ try {
             }};
         },
       };
-      const command = await campaignCli.runCampaignCommand(['--tag', 'smoke', '--upload', '-j2'], commandOptions);
+      const command = await experimentCli.runExperimentCommand(['--tag', 'smoke', '--upload', '-j2'], commandOptions);
       assert.equal(command.completed, 2);
+      assert.equal(command.checkpoint, path.join(command.location, 'experiment.json'));
       assert.equal(command.report, path.join(command.location, 'report.json'));
-      assert.equal(campaign.parseCampaignReport(JSON.parse(await fs.readFile(command.report, 'utf8'))).summary.passed, 2);
+      const report = JSON.parse(await fs.readFile(command.report, 'utf8'));
+      assert.equal(experiment.parseExperimentRunReport(report).summary.passed, 2);
       assert.equal(command.arguments.values.upload, true);
       assert.ok(command.outcomes.every((outcome) => outcome.artifact.evaluation.status === 'passed'));
-      const inspected = await campaign.inspectCampaign({root: command.location + '/.', engine});
+      const inspected = await experiment.inspectExperimentRun({root: command.location + '/.', engine});
       assert.deepEqual(inspected.outcomes, command.outcomes);
-      const commandResume = await campaignCli.runCampaignCommand(['--tag', 'smoke', '--resume', command.experiment_run_id], commandOptions);
+      assert.equal(inspected.checkpoint, command.checkpoint);
+      const commandResume = await experimentCli.runExperimentCommand(
+        ['--tag', 'smoke', '--resume', command.experiment_run_id], commandOptions);
       assert.equal(commandResume.executed, 0);
       assert.equal(commandResume.skipped, 2);
       assert.deepEqual(commandResume.outcomes, command.outcomes);
+      assert.equal(commandResume.checkpoint, command.checkpoint);
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);
+  // Compile the same public API contract through the packed package's declared
+  // exports, so source-only type imports cannot hide missing consumer types.
+  const publicApiTest = await fs.readFile(
+    path.join(projectRoot, 'test', 'experimentPublicApi.test.ts'), 'utf8',
+  );
+  const consumerImports = new Map([
+    ['index', '@stripe/forge'],
+    ['experiment', '@stripe/forge/experiment'],
+    ['experimentCli', '@stripe/forge/experiment/cli'],
+  ]);
+  await fs.writeFile(
+    path.join(consumerRoot, 'public-api-types.ts'),
+    publicApiTest.replace(/'\.\.\/src\/([A-Za-z]+)\.js'/g, (specifier, module) => {
+      const target = consumerImports.get(module);
+      if (target === undefined) throw new Error(`Unknown public API test import: ${specifier}`);
+      return `'${target}'`;
+    }),
+  );
+  run(process.execPath, [
+    path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+    '--noEmit', '--strict', '--exactOptionalPropertyTypes', '--noUncheckedIndexedAccess', '--verbatimModuleSyntax',
+    '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022', '--lib', 'ES2023',
+    '--types', 'node', '--typeRoots', path.join(projectRoot, 'node_modules', '@types'),
+    'public-api-types.ts',
+  ], consumerRoot);
   assert.equal(
     execFileSync(
       path.join(consumerRoot, 'node_modules', '.bin', 'forge'),
@@ -283,11 +324,13 @@ try {
     path.join(consumerRoot, 'commonjs.cjs'),
     `
       const assert = require('node:assert/strict');
-      void Promise.all([import('@stripe/forge'), import('@stripe/forge/campaign'), import('@stripe/forge/campaign/cli')]).then(([forge, campaign, campaignCli]) => {
+      void Promise.all([
+        import('@stripe/forge'), import('@stripe/forge/experiment'), import('@stripe/forge/experiment/cli'),
+      ]).then(([forge, experiment, experimentCli]) => {
         assert.equal(typeof forge.executeEval, 'function');
-        assert.equal(typeof campaign.runCampaign, 'function');
-        assert.equal(typeof campaign.parseCampaignReport, 'function');
-        assert.equal(typeof campaignCli.runCampaignCommand, 'function');
+        assert.equal(typeof experiment.runExperiment, 'function');
+        assert.equal(typeof experiment.parseExperimentRunReport, 'function');
+        assert.equal(typeof experimentCli.runExperimentCommand, 'function');
       }).catch((error) => {
         console.error(error);
         process.exitCode = 1;

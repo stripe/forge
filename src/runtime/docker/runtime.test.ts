@@ -233,7 +233,7 @@ describe('Forge Docker runtime', () => {
       await waitFor(buildStarted.promise);
       let drained = false;
       void cancellations.then(() => {drained = true;});
-      cancelled.abort(new Error('Campaign cancelled.'));
+      cancelled.abort(new Error('Experiment run cancelled.'));
       await waitFor(buildAborted.promise);
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(drained, false, 'the last waiter must await build cleanup');

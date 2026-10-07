@@ -1,6 +1,6 @@
 import {z} from 'zod';
 
-import {campaignErrorCodeSchema, campaignRunIdSchema} from './campaignModel.js';
+import {experimentRunErrorCodeSchema, experimentRunIdSchema} from './experimentModel.js';
 import {sha256Digest} from './model/hashes.js';
 import {parseRunSelection} from './model/parse.js';
 import {serializeCanonicalJson} from './serialization.js';
@@ -23,9 +23,9 @@ const evaluationSchema = z.object({
 const runSchema = z.object({
   selection_index: count,
   selection: selectionSchema,
-  run_id: campaignRunIdSchema.nullable(),
+  run_id: experimentRunIdSchema.nullable(),
   state: z.enum(['pending', 'completed', 'errored']),
-  error_code: campaignErrorCodeSchema.nullable(),
+  error_code: experimentRunErrorCodeSchema.nullable(),
   attempt_count: count.max(10_000),
   result_path: z.string().max(160).nullable(),
   evaluation: evaluationSchema.nullable(),
@@ -68,7 +68,7 @@ const coordinates = z.object({
 const caseSchema = coordinates.merge(statisticsSchema);
 const reportSchema = z.object({
   forge: z.unknown().transform(parseForgeBuildIdentity),
-  experiment_run_id: campaignRunIdSchema,
+  experiment_run_id: experimentRunIdSchema,
   generated_at: z.string().datetime(),
   checkpoint_sha256: digest,
   summary: statisticsSchema,
@@ -76,14 +76,14 @@ const reportSchema = z.object({
   runs: z.array(runSchema).min(1).max(100_000),
 }).strict();
 
-export type CampaignReportEvaluationV1 = z.infer<typeof evaluationSchema>;
-export type CampaignReportRunV1 = z.infer<typeof runSchema>;
-export type CampaignReportStatisticsV1 = z.infer<typeof statisticsSchema>;
-export type CampaignReportCaseV1 = z.infer<typeof caseSchema>;
-export type CampaignReportV1 = z.infer<typeof reportSchema>;
+export type ExperimentRunReportEvaluationV1 = z.infer<typeof evaluationSchema>;
+export type ExperimentRunReportRunV1 = z.infer<typeof runSchema>;
+export type ExperimentRunReportStatisticsV1 = z.infer<typeof statisticsSchema>;
+export type ExperimentRunReportCaseV1 = z.infer<typeof caseSchema>;
+export type ExperimentRunReportV1 = z.infer<typeof reportSchema>;
 
 /** Check the producing release, then verify every aggregate against its run rows. */
-export function parseCampaignReport(input: unknown): CampaignReportV1 {
+export function parseExperimentRunReport(input: unknown): ExperimentRunReportV1 {
   const header = z.object({forge: z.unknown()}).passthrough().parse(input);
   const forge = parseForgeBuildIdentity(header.forge);
   assertCompatibleForgeVersion(forge.version);
@@ -103,13 +103,13 @@ export function parseCampaignReport(input: unknown): CampaignReportV1 {
 }
 
 /** Internal construction from bounded, verified latest-selection metadata. */
-export function buildCampaignReport(input: {
+export function buildExperimentRunReport(input: {
   experimentRunId: string;
   generatedAt: string;
   checkpointBody: string;
-  runs: CampaignReportRunV1[];
-}): CampaignReportV1 {
-  return parseCampaignReport({
+  runs: ExperimentRunReportRunV1[];
+}): ExperimentRunReportV1 {
+  return parseExperimentRunReport({
     forge: FORGE_BUILD_IDENTITY,
     experiment_run_id: input.experimentRunId,
     generated_at: input.generatedAt,
@@ -120,21 +120,21 @@ export function buildCampaignReport(input: {
 }
 
 /** Human-readable JSON with deterministic key and selection order. */
-export function serializeCampaignReport(report: CampaignReportV1): string {
+export function serializeExperimentRunReport(report: ExperimentRunReportV1): string {
   const body = `${JSON.stringify(JSON.parse(serializeCanonicalJson(report)), null, 2)}\n`;
   assertReportBytes(body);
   return body;
 }
 
 function assertReportBytes(body: string): void {
-  if (Buffer.byteLength(body) > MAX_REPORT_BYTES) throw new Error('Campaign report exceeds its byte limit.');
+  if (Buffer.byteLength(body) > MAX_REPORT_BYTES) throw new Error('Experiment run report exceeds its byte limit.');
 }
 
-function aggregateRuns(runs: CampaignReportRunV1[]): {
-  summary: CampaignReportStatisticsV1;
-  cases: CampaignReportCaseV1[];
+function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
+  summary: ExperimentRunReportStatisticsV1;
+  cases: ExperimentRunReportCaseV1[];
 } {
-  const groups = new Map<string, {coordinates: z.infer<typeof coordinates>; runs: CampaignReportRunV1[]}>();
+  const groups = new Map<string, {coordinates: z.infer<typeof coordinates>; runs: ExperimentRunReportRunV1[]}>();
   for (const run of runs) {
     const {case_id, treatment, agent} = run.selection;
     const selected = {case_id, treatment, agent};
@@ -152,7 +152,7 @@ function aggregateRuns(runs: CampaignReportRunV1[]): {
   };
 }
 
-function statistics(runs: CampaignReportRunV1[]): CampaignReportStatisticsV1 {
+function statistics(runs: ExperimentRunReportRunV1[]): ExperimentRunReportStatisticsV1 {
   let completed = 0;
   let errored = 0;
   let pending = 0;

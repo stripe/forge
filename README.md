@@ -6,8 +6,13 @@ an ambient-free run plan, executes a one-shot or Ava-driven multi-turn session
 through a runtime adapter, normalizes agent evidence to ATIF, evaluates checks and success
 guidelines, and atomically commits a neutral local result.
 
-In Forge, reproducible means that a completed run provides an auditable account
-of its declared intent, material setup resolutions, selected interaction
+An experiment defines the cases, treatments, agents, and repetitions to evaluate.
+An experiment run is one resumable batch of selections from that experiment.
+An eval run is one execution attempt for an individual selection; retries get
+new eval run IDs within the same experiment run.
+
+In Forge, reproducible means that a completed eval run provides an auditable
+account of its declared intent, material setup resolutions, selected interaction
 evidence, and result. It does not mean that a networked, model-driven run can be
 replayed byte-for-byte: model responses, websites, documentation, registries,
 and other external systems may change independently. `plan.json` records what
@@ -201,8 +206,8 @@ compatibility. ATIF, coding
 agent CLIs, native plugins, action bundles, and independently released
 integrations retain their own version identities.
 
-Resolved plans, results, campaign checkpoints, and reports record their producing
-Forge version. Readers require an exact package-version match whenever either
+Resolved plans, results, experiment run checkpoints, and reports record their
+producing Forge version. Readers require an exact package-version match whenever either
 version is outside the `X.Y.Z-dev.*` development channel. Different development
 versions may be read with the current strict schemas on a best-effort basis,
 without a compatibility or reproducibility guarantee. Use the corresponding
@@ -343,9 +348,10 @@ one matching combination:
 --repetition <zero-based-index>
 ```
 
-`run` prints its experiment execution ID in progress records and a final JSON
-summary. The quickstart eval is stored at
-`results/experiments/<experiment-run-id>/runs/hello-001/`. Every completed eval contains:
+`run` prints its experiment run ID in progress records and a final JSON
+summary. The quickstart eval run is stored at
+`results/experiments/<experiment-run-id>/runs/hello-001/`. Every completed eval
+run contains:
 
 ```text
 result.json
@@ -452,12 +458,12 @@ Run the matrix declared by an experiment with:
 npx --no-install forge run --experiment ./experiment.yaml
 ```
 
-Every invocation without `--resume` starts a new experiment execution and
+Every invocation without `--resume` starts a new experiment run and
 prints a generated `experiment_run_id`. The dataset location comes from
 `dataset.path`; there is no `--dataset` or `--all` flag. Use `--case <case-id>` or
 the other selection options to run a subset of the matrix.
 
-`--jobs <count>` (or `-j <count>`) limits simultaneous evals; the default is 1.
+`--jobs <count>` (or `-j <count>`) limits simultaneous eval runs; the default is 1.
 For example, this executes up to four selections at a time and starts another
 as soon as a slot is free:
 
@@ -465,32 +471,33 @@ as soon as a slot is free:
 npx --no-install forge run --experiment ./experiment.yaml --jobs 4
 ```
 
-Each eval retains its own runtime, agent session, and artifacts. Size concurrency
+Each eval run retains its own runtime, agent session, and artifacts. Size concurrency
 for the host's memory/CPU capacity and provider rate limits; `--jobs` limits
-evals, not individual provider requests. Each eval may also judge up to four
+eval runs, not individual provider requests. Each eval run may also judge up to four
 guidelines concurrently. Completion and progress records can arrive in any order.
 
-Each execution has an independent checkpoint, scorecard, and eval artifacts:
+Each experiment run has an independent checkpoint, scorecard, and eval run
+artifacts:
 
 ```text
 results/experiments/<experiment-run-id>/
-├── campaign.json
+├── experiment.json
 ├── report.json
 └── runs/
     ├── <eval-run-id>/
     └── <another-eval-run-id>/
 ```
 
-If an execution errors, Forge records the attempt and continues with the other
-entries. To resume a specific execution, replace `EXPERIMENT_RUN_ID` below with
-its printed ID:
+If an eval run errors, Forge records the attempt and continues with the other
+entries. To resume a specific experiment run, replace `EXPERIMENT_RUN_ID` below
+with its printed ID:
 
 ```sh
 npx --no-install forge run --experiment ./experiment.yaml --resume EXPERIMENT_RUN_ID
 ```
 
 An ID is required: bare `--resume` is a usage error. If the same experiment was
-run three times, each execution has a different ID and any of them can be
+run three times, each experiment run has a different ID and any of them can be
 resumed independently. `--output <directory>` changes the base output directory;
 resume must use the same underlying base directory, which may be accessed
 through a symlink. Resume uses the saved selections,
@@ -502,31 +509,31 @@ use a different number of jobs:
 npx --no-install forge run --experiment ./experiment.yaml --resume EXPERIMENT_RUN_ID --jobs 2
 ```
 
-Resume verifies each completed run before skipping it and requires the same
+Resume verifies each completed eval run before skipping it and requires the same
 resolved plans, including dataset pins, setup, models, runtime, and Forge
 version. Missing or invalid artifacts are retried. Completed evaluations with
 failed or partial scores remain completed; execution errors, including committed
-`role_player_error` results, are retried. A run whose artifacts committed just
-before interruption is recovered without rerunning it. Retries get fresh eval
-IDs and preserve all earlier artifacts and attempt records.
+`role_player_error` results, are retried. An eval run whose artifacts committed
+just before interruption is recovered without rerunning it. Retries get fresh
+eval run IDs and preserve all earlier artifacts and attempt records.
 
 Progress records go to stderr. The final JSON summary on stdout contains the
-experiment execution ID, directory, checkpoint path, and total, executed,
+experiment run ID, directory, checkpoint path, and total, executed,
 skipped, completed, and errored counts, plus the `report` path. Exit code 1 means
 execution errors remain or report generation failed; code 0 means every entry
 completed and the report was saved, regardless of evaluation scores.
 Each invocation attempts pending entries once; `matrix.retries` does not add
-automatic attempts. Campaigns use the local artifact store and permit one
-active process per execution. Cancellation stops new work, signals active evals,
-and waits for their cleanup before releasing the checkpoint lock. A checkpoint
+automatic attempts. Experiment runs use the local artifact store and permit one
+active process per experiment run. Cancellation stops new work, signals active
+eval runs, and waits for their cleanup before releasing the checkpoint lock. A checkpoint
 failure also cancels and drains active work; resume verifies any results committed
-before interruption. `--run-id` can name an eval only when exactly one
+before interruption. `--run-id` can name an eval run only when exactly one
 combination is selected; it cannot be combined with resume.
 
-`report.json` is the experiment's scorecard, automatically refreshed after each
-run or resume invocation settles. `campaign.json` remains the execution
+`report.json` is the experiment run's scorecard, automatically refreshed after
+each run or resume invocation settles. `experiment.json` remains the
 checkpoint with plan identities and attempt history; reports are derived from
-verified eval artifacts and are never used to decide what to resume.
+verified eval run artifacts and are never used to decide what to resume.
 Both files carry a `forge` producer identity, so their release can be checked
 even when no eval has completed.
 To view scores by case and configuration:
@@ -541,7 +548,7 @@ The strict report contains:
 | Field | Meaning |
 | --- | --- |
 | `forge` | Producing Forge package version and optional build diagnostics. |
-| `experiment_run_id`, `generated_at`, `checkpoint_sha256` | Execution ID, UTC snapshot time, and SHA-256 of the exact checkpoint bytes used for this report. |
+| `experiment_run_id`, `generated_at`, `checkpoint_sha256` | Experiment run ID, UTC snapshot time, and SHA-256 of the exact checkpoint bytes used for this report. |
 | `summary` | Statistics across every saved selection. |
 | `cases` | Statistics grouped by case ID, treatment, and complete agent selection (including Codex hook trust), combining repetitions. Groups appear in first-selection order. |
 | `runs` | One row per saved selection in original order: zero-based `selection_index`, full `selection`, latest `run_id`, effective `state`, stable `error_code`, `attempt_count`, relative `result_path`, and `evaluation`. |
@@ -563,13 +570,13 @@ or partial evaluations keep their scores. Execution errors, including committed
 role-player failures, and pending entries have `evaluation: null`. Completed
 rows retain status, score, guideline passed/total counts, and check passed/total
 counts. `result_path` points to `runs/<eval-run-id>/result.json` relative to the
-experiment directory when verified artifacts exist, including an errored
+experiment run directory when verified artifacts exist, including an errored
 role-player result; otherwise it is `null`.
 
 Execution errors still produce a partial scorecard. Graceful cancellation or a
 coordinator failure attempts to save one after active evals drain. Reports are
-atomically replaced while the campaign lock is held. They are snapshots, so an
-active resume or a hard process kill can leave the previous report stale or
+atomically replaced while the experiment run lock is held. They are snapshots,
+so an active resume or a hard process kill can leave the previous report stale or
 missing. A report write failure preserves committed evals and is surfaced on
 normal completion; an existing execution or cancellation failure remains the
 primary error. Rerun with `--resume EXPERIMENT_RUN_ID` to refresh a missing or
@@ -678,7 +685,7 @@ Forge deliberately separates what is evaluated from how it is run:
   resources, limits, repetitions, retries, and the experiment matrix.
 - A run selection chooses one case, treatment, agent, and repetition.
 - `resolveRunPlan` applies defaults and emits the complete immutable input for
-  one execution. The plan records dataset, case, experiment, and Forge
+  one eval run. The plan records dataset, case, experiment, and Forge
   provenance.
 
 YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
@@ -1095,30 +1102,30 @@ const plan = resolveRunPlan({
 Hosts using a remote or wrapped Docker executable can pass the same executable
 or an explicit host command runner to `detectDockerRuntimePlatform`.
 
-### Experiment campaigns
+### Experiment runs
 
-Hosts can share the run loop through `@stripe/forge/campaign`. Reuse the loaded inputs and composition
-above, choose an execution ID, resolve every selected plan, and point the local
-artifact store at the campaign root:
+Hosts can share the run loop through `@stripe/forge/experiment`. Reuse the loaded
+inputs and composition above, choose an experiment run ID, resolve every selected
+plan, and point the local artifact store at the experiment run root:
 
 ```js
 import {randomUUID} from 'node:crypto';
 import * as path from 'node:path';
 import {defaultForgeEngine} from '@stripe/forge';
-import {readCampaignSelections, runCampaign} from '@stripe/forge/campaign';
+import {readExperimentRunSelections, runExperiment} from '@stripe/forge/experiment';
 
 const engine = defaultForgeEngine; // Or the host's immutable custom engine.
-const resumeId = undefined; // Set to an existing experiment execution ID to resume.
+const resumeId = undefined; // Set to an existing experiment run ID to resume.
 const experimentRunId = resumeId ?? randomUUID();
 const root = path.resolve('results', 'experiments', experimentRunId);
 const selected = resumeId === undefined
   ? expandExperiment(experiment)
-  : await readCampaignSelections(root);
+  : await readExperimentRunSelections(root);
 const plans = selected.map((selection) => engine.resolveRunPlan({
   dataset, experiment, selection,
   runtimePlatform: plan.runtime.platform,
 }));
-const summary = await runCampaign({
+const summary = await runExperiment({
   root,
   plans,
   engine,
@@ -1133,35 +1140,36 @@ const summary = await runCampaign({
 console.log(summary);
 ```
 
-`runCampaign` preflights every plan with the supplied `engine` and `composition`
+`runExperiment` preflights every plan with the supplied `engine` and `composition`
 before writing checkpoints or invoking `execute`. The callback may acquire
-per-run host resources and construct another composition before calling that
+host resources for each eval run and construct another composition before calling that
 same engine. It must honor the supplied signal and finish cleanup in `finally`
 before settling; its full lifetime occupies a job slot. The artifact store must
-commit at `<root>/runs/<run-id>` so the campaign can verify results. Progress
-callbacks are synchronous; throwing stops scheduling and cancels active work.
+commit at `<root>/runs/<eval-run-id>` so the controller can verify results.
+Progress callbacks are synchronous; throwing stops scheduling and cancels
+active work.
 An optional synchronous `onOutcome(outcome, selectionIndex)` callback collects
 bounded verified outcomes, including selections skipped on resume. Like progress,
-throwing from this callback stops scheduling. `CampaignOptions`,
-`CampaignProgressEvent`, `CampaignSummary`, and `CampaignOutcome` are exported
-types from the same subpath.
+throwing from this callback stops scheduling. `ExperimentRunOptions`,
+`ExperimentRunProgressEvent`, `ExperimentRunSummary`, and `ExperimentRunOutcome`
+are exported types from the same subpath.
 
-Both `runCampaign` and `runCampaignCommand` automatically write the
-[experiment scorecard](#running-and-resuming-an-experiment) under their selected
-root and return its path as `summary.report`. `parseCampaignReport` validates
+Both `runExperiment` and `runExperimentCommand` automatically write the
+[experiment run scorecard](#running-and-resuming-an-experiment) under their selected
+root and return its path as `summary.report`. `parseExperimentRunReport` validates
 loaded report JSON, including producer-release compatibility and agreement
-between run rows and aggregate statistics. `CampaignReportV1` and its
+between run rows and aggregate statistics. `ExperimentRunReportV1` and its
 evaluation, run, statistics, and case types are exported from
-`@stripe/forge/campaign`. A reporting failure after normal execution makes
-`runCampaign` reject with `CampaignReportError`, which carries the report path
-and original cause. `runCampaignCommand` wraps it in `CampaignCommandError` as
-its cause, retaining the experiment reference. Saved evaluations remain
-resumable.
+`@stripe/forge/experiment`. A reporting failure after normal execution makes
+`runExperiment` reject with `ExperimentRunReportError`, which carries the
+report path and original cause. `runExperimentCommand` wraps it in
+`ExperimentCommandError` as its cause, retaining the experiment run reference.
+Saved evaluations remain resumable.
 
-For command hosts, `@stripe/forge/campaign/cli` adds a shared run/resume stage.
-`runCampaignCommand` parses `--jobs`/`-j`, `--resume <id>`, `--output`/`-o`, and
-`--run-id`, selects the execution ID/root, restores saved selections before
-loading inputs, and delegates execution to `runCampaign`. Hosts supply their own
+For command hosts, `@stripe/forge/experiment/cli` adds a shared run/resume stage.
+`runExperimentCommand` parses `--jobs`/`-j`, `--resume <id>`, `--output`/`-o`, and
+`--run-id`, selects the experiment run ID/root, restores saved selections before
+loading inputs, and delegates execution to `runExperiment`. Hosts supply their own
 option definitions, validation, and loader; no experiment format or dataset
 argument is required by this wrapper. The public `forge run` uses the same stage.
 
@@ -1169,10 +1177,10 @@ This example is an embedding pattern; `prepareInputs` and `publish` are
 host-supplied functions:
 
 ```js
-import {runCampaignCommand} from '@stripe/forge/campaign/cli';
+import {runExperimentCommand} from '@stripe/forge/experiment/cli';
 
 async function runHostCommand(argv, {engine, prepareInputs, publish}) {
-  const result = await runCampaignCommand(argv, {
+  const result = await runExperimentCommand(argv, {
     engine,
     hostOptions: {
       experiment: {type: 'string', short: 'e'},
@@ -1183,7 +1191,7 @@ async function runHostCommand(argv, {engine, prepareInputs, publish}) {
     validateHostArgs({values}) {
       if (!values.experiment) throw new Error('--experiment is required');
     },
-    loadCampaign: async (context) => {
+    loadExperiment: async (context) => {
       // May read custom YAML and generate a deterministic input inventory.
       // On resume, reproduce context.savedSelections in their original order.
       const inputs = await prepareInputs(context);
@@ -1201,7 +1209,7 @@ async function runHostCommand(argv, {engine, prepareInputs, publish}) {
 ```
 
 The outer router owns commands, help, and version handling. It can compose its
-parser with `createCampaignCliOptions(hostOptions)` or use `parseCampaignArgs`;
+parser with `createExperimentCliOptions(hostOptions)` or use `parseExperimentArgs`;
 forward shared run flags rather than rejecting them in a separate hardcoded
 list. Long-name and short-alias collisions are rejected. `allowPositionals: true`
 lets `validateHostArgs` enforce host-specific positional grammar, including
@@ -1223,17 +1231,17 @@ after cleanup finishes. Prepared-input disposal and per-run cleanup must operate
 independently of an aborted signal. Host capabilities must support the selected
 concurrency; sharing checkpoints does not make host global resources safe.
 
-The result contains the execution reference, counts, parsed arguments, and one
-outcome per selection in original order. An outcome has its plan digest, latest
-run ID, execution state/error code, and, when verified, a local artifact reference
+The result contains the experiment run reference, counts, parsed arguments,
+and one outcome per selection in original order. An outcome has its plan digest,
+latest eval run ID, execution state/error code, and, when verified, a local artifact reference
 with evaluation status/score and a bounded failure code. Valid failed or partial
 scores remain completed. Publication and final exit policy are host-owned.
-Keep upload state outside `campaign.json`, keyed by immutable run/artifact
+Keep upload state outside `experiment.json`, keyed by immutable run/artifact
 identity and destination, and use idempotent publication or a publication lock.
-Publish verified skipped outcomes too; an upload error must not cause an eval to
-rerun. Do not perform uploads inside the execution or outcome callbacks.
+Publish verified skipped outcomes too; an upload error must not cause an eval
+run to rerun. Do not perform uploads inside the execution or outcome callbacks.
 
-`inspectCampaign({root, engine, signal?})` from `@stripe/forge/campaign` verifies
+`inspectExperimentRun({root, engine, signal?})` from `@stripe/forge/experiment` verifies
 the latest attempt for every saved selection without loading inputs, acquiring
 execution credentials, or changing the checkpoint. It supports publication-only
 retries even when the original sources have changed. Both the saved selection
@@ -1244,7 +1252,7 @@ It returns no historical
 attempts; an unstarted selection has a pending outcome with no artifact.
 Invalid or missing artifacts have no publishable reference. Inspection is a
 snapshot and does not wait for active execution. After a failed stage has drained
-and disposed inputs, `CampaignCommandError.reference` identifies the execution
+and disposed inputs, `ExperimentCommandError.reference` identifies the experiment run
 for inspection; its `cause` is caller-owned and must not be persisted wholesale.
 The wrapper performs no publication after cancellation or any other failure.
 
@@ -1404,8 +1412,8 @@ async function loadForge() {
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
-| `@stripe/forge/campaign` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
-| `@stripe/forge/campaign/cli` | Extensible shared run/resume command stage and operational option definitions |
+| `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
+| `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
@@ -1789,7 +1797,7 @@ and composition without overriding the shared lifecycle. Command-line wrappers
 can import `runCli` from `@stripe/forge/cli` and provide both that engine and a
 `compositionFactory`, preserving the public command grammar while selecting
 host-owned semantics and capabilities. Wrappers with their own grammar or
-generated inputs can instead use the shared [campaign API](#experiment-campaigns).
+generated inputs can instead use the shared [experiment run API](#experiment-runs).
 
 ## Security and reproducibility
 
@@ -1885,7 +1893,7 @@ proxy, or an offline execution mode.
   `--resume <experiment-run-id>`. There is no distributed scheduler or automatic
   run retry loop; experiment-level `retries` is not acted on by the CLI. Ava and
   guideline completion attempts have their own fixed retry policy and do not implement
-  the experiment config's campaign retry field.
+  the experiment config's retry field.
 - Built-in setup includes `forge/write`, `forge/command`, and agent-native
   `forge/plugin`. The plugin action installs the current entry from a public
   GitHub marketplace named as `owner/repository`. Exact plugin-version pins,

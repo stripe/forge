@@ -120,14 +120,16 @@ host capabilities from leaking into the benchmark document.
 
 ## The benchmark data model
 
-Forge keeps four related objects distinct.
+Forge keeps authored definitions, resolved inputs, and execution identities distinct.
 
 | Object | Responsibility | Important contents |
 | --- | --- | --- |
 | Dataset | Versioned evaluation payload | Manifest, cases, fixture files, exact sizes and SHA-256 hashes |
 | Eval case | What is evaluated | Task or prompt, context, invariant setup, interaction mode, turn limit, checks, guidelines, example answer |
-| Experiment config | How cases run | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
-| Resolved run plan | Complete input to one run | One case/treatment/agent/repetition, merged setup, materialized defaults, runtime and model selections, provenance |
+| Experiment | How cases run, defined by an experiment config | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
+| Experiment run | One resumable batch from an experiment | Experiment run ID, selected plans, checkpoint, attempt history, and aggregate report |
+| Eval run | One execution attempt for a selected plan | Eval run ID, isolated lifecycle, committed artifacts, and evaluation outcome |
+| Resolved run plan | Complete input to one eval run | One case/treatment/agent/repetition, merged setup, materialized defaults, runtime and model selections, provenance |
 
 The wire types live in [`src/model/types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts); strict
 parsing lives in [`src/model/parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts).
@@ -181,9 +183,9 @@ order:
 case → treatment → agent → repetition
 ```
 
-The experiment-level `retries` value is campaign policy and does not create a
-new semantic selection. `executeEval` executes one resolved plan once; a
-campaign runner is responsible for retrying that selection.
+The experiment-level `retries` value is experiment run policy and does not
+create a new semantic selection. `executeEval` executes one resolved plan once;
+an experiment run controller is responsible for retrying that selection.
 
 A `RunSelection` chooses exactly one case, treatment, complete agent selection,
 and zero-based repetition. Codex selections include `hook_trust`; new plans
@@ -192,15 +194,15 @@ filters to resolve to one entry for `plan`. `run` resolves and purely preflights
 every matching plan before executing them with bounded concurrency. The CLI loads the dataset from
 the experiment config and permits selectors such as `--case` to restrict execution.
 
-The shared controller exposed through `@stripe/forge/campaign` checkpoints
-attempts in a strict `campaign.json` under
+The shared controller exposed through `@stripe/forge/experiment` checkpoints
+attempts in a strict `experiment.json` under
 `results/experiments/<experiment-run-id>/`, outside the immutable eval run
-directories. Every new invocation receives a distinct experiment execution ID.
+directories. Every new invocation receives a distinct experiment run ID.
 The checkpoint records its producing `forge` build identity and binds that ID
-to its directory. Each entry records its selection,
-canonical plan SHA-256, and ordered attempts with
-a unique run ID and `running`, `completed`, or `errored` state. Errored attempts
-retain only a stable error code. A bounded worker pool executes pending plans;
+to its directory. Each entry records its selection, canonical plan SHA-256,
+and ordered attempts with a unique eval run ID and `running`, `completed`, or
+`errored` state. Errored attempts retain only a stable error code. A bounded
+worker pool executes pending plans;
 one coordinator serializes reservations, checkpoint mutations, and writes so
 out-of-order completions cannot overwrite one another. `jobs` defaults to one
 and is scheduling policy, excluded from plan identities. Checkpoint updates use
@@ -211,8 +213,8 @@ a replacement owner's lock. Committed artifact locations are compared after
 resolving filesystem aliases, including symlinked output directories.
 
 `--resume <experiment-run-id>` requires an explicit ID and loads that
-execution's saved selections. Bare `--resume` is rejected. The resolved plans
-must retain their original checksums. Resume independently verifies prior run
+experiment run's saved selections. Bare `--resume` is rejected. The resolved
+plans must retain their original checksums. Resume independently verifies prior eval run
 artifacts and their plan checksum before
 skipping an entry, including recovery after a commit/checkpoint interruption.
 Execution errors, committed role-player failures, missing results, and invalid
@@ -223,7 +225,7 @@ for every callback to finish cleanup before releasing its lock.
 
 The controller also writes a derived `report.json` with its producing `forge`
 build identity after workers
-drain, while still holding the campaign lock. It reads the last durable
+drain, while still holding the experiment run lock. It reads the last durable
 checkpoint and uses the same verified latest-attempt recovery as resume,
 reusing bounded inspection metadata from the invocation. The scorecard groups
 repetitions by case/treatment/agent and separates execution coverage from
@@ -234,7 +236,7 @@ coordinator failure, reporting is best effort and preserves the primary error.
 Resume does not read the report, so it can regenerate a missing or corrupt
 scorecard without rerunning valid completed evaluations. Report fields and
 denominators are documented in the README's
-[campaign workflow](../README.md#running-and-resuming-an-experiment).
+[experiment run workflow](../README.md#running-and-resuming-an-experiment).
 
 Embedding hosts supply resolved plans, an engine, a pure preflight composition,
 and an execution callback. The callback may construct per-run host resources
@@ -243,11 +245,11 @@ finishing cleanup before settling. The host retains input loading, command
 grammar, publication, and evaluation exit policy. The shared
 controller requires verified local artifacts below its selected root; it is
 not a remote worker protocol. It does not alter `executeEval` or its scoring
-semantics. See the README's [campaign workflow](../README.md#running-and-resuming-an-experiment).
+semantics. See the README's [experiment run workflow](../README.md#running-and-resuming-an-experiment).
 
-The command stage exposed through `@stripe/forge/campaign/cli` composes shared
+The command stage exposed through `@stripe/forge/experiment/cli` composes shared
 operational options with host-defined arguments, validates invocation rules,
-selects execution IDs/roots, and restores saved selections before invoking the
+selects experiment run IDs/roots, and restores saved selections before invoking the
 host loader. The loader supplies resolved plans, pure capability descriptors,
 and an execution closure. Generated inputs remain alive until workers drain;
 the command stage then awaits prepared-input disposal. The loader owns partial
@@ -256,12 +258,12 @@ cleanup on rejection, and workers own scoped runtime/resource cleanup.
 Bounded verified outcomes include skipped selections and separate evaluation
 status from execution completion. Remote publication follows the shared stage,
 with destination-specific retry state outside the execution checkpoint. A
-read-only campaign inspection API verifies latest immutable commits against
+read-only experiment run inspection API verifies latest immutable commits against
 saved plan digests without regenerating inputs or altering execution state,
 supporting independent publication retries. The public CLI uses this same
 command stage while retaining its own grammar, input loader, rendering, and
 exit policy. Exact embedding contracts are documented in the README's
-[programmatic campaign API](../README.md#experiment-campaigns).
+[programmatic experiment run API](../README.md#experiment-runs).
 
 ### Plan resolution
 
@@ -901,7 +903,7 @@ extensions/<contributor-id>/...     # optional host contribution
 
 The Forge package version defines core plans, results, setup receipts,
 interaction, and evidence formats. Plans record their producer under
-`provenance.forge`; results use `forge`. Standalone campaign checkpoints and
+`provenance.forge`; results use `forge`. Standalone experiment run checkpoints and
 reports also carry `forge`, while companion files inherit their release from
 the result. Readers check release compatibility before interpreting generated
 contents. ATIF trajectories retain their upstream `ATIF-v1.8` discriminator.
@@ -1017,8 +1019,8 @@ Cleanup does not rely on an already-aborted execution signal. Runtime disposal
 is idempotent, and the Docker implementation waits for an in-progress quiesce
 barrier before removing resources.
 
-Two retry systems are internal score semantics, separate from experiment
-campaign retries:
+Two retry systems are internal score semantics, separate from experiment run
+retries:
 
 - Ava exhaustion commits `role_player_error` as a completed run; and
 - malformed judge output fails a guideline closed, while exhausted judge
@@ -1042,8 +1044,8 @@ Specialized subpaths expose:
 - `@stripe/forge/atif` and `@stripe/forge/atif/v1.8`;
 - `@stripe/forge/setup`;
 - `@stripe/forge/testing`;
-- `@stripe/forge/campaign`;
-- `@stripe/forge/campaign/cli`;
+- `@stripe/forge/experiment`;
+- `@stripe/forge/experiment/cli`;
 - `@stripe/forge/cli`; and
 - `@stripe/forge/package.json`.
 
@@ -1053,8 +1055,8 @@ engine APIs:
 - `validate` loads inputs, expands every selection, resolves plans, constructs
   the default composition, and runs pure preflight;
 - `plan` selects one entry and prints canonical plan JSON; and
-- `run` supplies its argument validation and input loader to the shared campaign
-  command stage for bounded execution and explicit resume.
+- `run` supplies its argument validation and input loader to the shared
+  experiment run command stage for bounded execution and explicit resume.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
 Codex agent adapters, the Anthropic host completion provider, an explicit
@@ -1089,7 +1091,7 @@ external runtime without changing core lifecycle semantics.
 The current architecture leaves several responsibilities outside the public
 engine:
 
-- distributed campaign scheduling and automatic experiment-level retries;
+- distributed experiment run scheduling and automatic experiment-level retries;
 - remote result publication and access control;
 - interactive or human-driven execution;
 - dynamic setup plugin discovery or imports named by YAML;

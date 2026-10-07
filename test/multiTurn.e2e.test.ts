@@ -147,9 +147,9 @@ describe('multi-turn CLI end to end', () => {
 
     assert.equal(exitCode, 0, stderr);
     assert.equal(stderr.includes('forge:'), false);
-    const campaign = JSON.parse(stdout) as {location: string; completed: number};
-    assert.equal(campaign.completed, 1);
-    const summary = await verifyCompletedRun(path.join(campaign.location, 'runs', 'cli-multi-1'));
+    const experimentRun = JSON.parse(stdout) as {location: string; completed: number};
+    assert.equal(experimentRun.completed, 1);
+    const summary = await verifyCompletedRun(path.join(experimentRun.location, 'runs', 'cli-multi-1'));
     assert.equal(summary.result.evaluation.score, 1);
     assert.equal(summary.result.evaluation.status, 'passed');
     assert.equal(summary.result.evaluation.guidelines_passed, 1);

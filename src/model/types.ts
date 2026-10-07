@@ -201,7 +201,7 @@ export interface ExperimentConfigV1 {
     agents: AgentSelectionV1[];
     /** Number of independent samples; selections use a zero-based index. */
     repetitions: number;
-    /** Campaign retry policy; a retry does not change the run selection. */
+    /** Experiment run retry policy; a retry does not change the run selection. */
     retries: number;
   };
   limits: {

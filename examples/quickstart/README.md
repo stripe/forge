@@ -55,11 +55,11 @@ loopback does not refer to a gateway process on the host.
 
 The experiment's `dataset.path` locates the pinned dataset relative to the
 experiment file. `--case-file` selects a manifest-listed case within that
-dataset. Each invocation creates a new experiment execution; eval artifacts are
+dataset. Each invocation creates a new experiment run; eval run artifacts are
 under `results/experiments/<experiment-run-id>/runs/quickstart-001/`.
 Use `--resume <experiment-run-id>` to retry execution errors or unfinished
 entries while preserving completed scores. See the root README's
-[campaign workflow](../../README.md#running-and-resuming-an-experiment).
+[experiment run workflow](../../README.md#running-and-resuming-an-experiment).
 
 ## Opt-in live checks
 

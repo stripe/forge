@@ -1,4 +1,4 @@
-import {runCampaign} from '../../src/campaign.js';
+import {runExperiment} from '../../src/experiment.js';
 import {defaultForgeEngine} from '../../src/engine.js';
 import {createArtifactStore} from '../../src/results/index.js';
 import {
@@ -22,7 +22,7 @@ function composition() {
 }
 
 let nextId = 0;
-const summary = await runCampaign({
+const summary = await runExperiment({
   root, plans, resume, jobs: 1, composition: composition(), engine: defaultForgeEngine,
   signal: new AbortController().signal, progress: () => undefined,
   runIdFactory: () => `${resume ? 'resumed' : 'crashed'}-${++nextId}`,

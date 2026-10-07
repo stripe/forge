@@ -42,14 +42,14 @@ import {
 } from './index.js';
 
 describe('@stripe/forge package root', () => {
-  it('keeps campaign orchestration on its documented subpath', () => {
-    assert.equal('runCampaign' in rootExports, false);
-    assert.equal('readCampaignSelections' in rootExports, false);
-    assert.equal('inspectCampaign' in rootExports, false);
-    assert.equal('runCampaignCommand' in rootExports, false);
-    assert.equal('parseCampaignReport' in rootExports, false);
-    assert.equal('CAMPAIGN_REPORT_SCHEMA_VERSION' in rootExports, false);
-    assert.equal('CampaignReportError' in rootExports, false);
+  it('keeps experiment run orchestration on its documented subpath', () => {
+    assert.equal('runExperiment' in rootExports, false);
+    assert.equal('readExperimentRunSelections' in rootExports, false);
+    assert.equal('inspectExperimentRun' in rootExports, false);
+    assert.equal('runExperimentCommand' in rootExports, false);
+    assert.equal('parseExperimentRunReport' in rootExports, false);
+    assert.equal('EXPERIMENT_RUN_REPORT_SCHEMA_VERSION' in rootExports, false);
+    assert.equal('ExperimentRunReportError' in rootExports, false);
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {

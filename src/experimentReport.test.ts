@@ -6,8 +6,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
-import {CampaignReportError, parseCampaignReport, runCampaign, type CampaignOptions} from './campaign.js';
-import {buildCampaignReport, type CampaignReportRunV1} from './campaignReport.js';
+import {ExperimentRunReportError, parseExperimentRunReport, runExperiment, type ExperimentRunOptions} from './experiment.js';
+import {buildExperimentRunReport, type ExperimentRunReportRunV1} from './experimentReport.js';
 import {defaultForgeEngine} from './engine.js';
 import {sha256Digest} from './model/hashes.js';
 import {FORGE_BUILD_IDENTITY, FORGE_VERSION} from './version.js';
@@ -16,12 +16,12 @@ import {createFakeRuntimeAdapter, createMemoryRunInputProvider, createScriptedAg
   createScriptedCompletionProvider, createStaticCredentialResolver, createTestResolvedRunPlan} from './testing/index.js';
 
 const temporaryDirectories: string[] = [];
-type MutableCampaignOptions = {-readonly [K in keyof CampaignOptions]: CampaignOptions[K]};
+type MutableExperimentRunOptions = {-readonly [K in keyof ExperimentRunOptions]: ExperimentRunOptions[K]};
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})));
 });
 
-describe('campaign scorecards', () => {
+describe('experiment run scorecards', () => {
   it('records the producing Forge build and reads standalone pending scorecards', () => {
     const pending = row(0);
     Object.assign(pending, {state: 'pending', run_id: null, result_path: null,
@@ -29,14 +29,14 @@ describe('campaign scorecards', () => {
     const report = build([pending]);
     assert.deepEqual(report.forge, FORGE_BUILD_IDENTITY);
     assert.equal(Object.hasOwn(report, 'schema_version'), false);
-    assert.equal(parseCampaignReport(report).summary.pending, 1);
-    assert.throws(() => parseCampaignReport({...report, forge: undefined}));
-    assert.throws(() => parseCampaignReport({...report, forge: {...report.forge, unknown: true}}));
-    assert.throws(() => parseCampaignReport({...report, schema_version: 1}));
-    assert.throws(() => parseCampaignReport({forge: {version: '9999.0.0'}, runs: 'invalid'}),
+    assert.equal(parseExperimentRunReport(report).summary.pending, 1);
+    assert.throws(() => parseExperimentRunReport({...report, forge: undefined}));
+    assert.throws(() => parseExperimentRunReport({...report, forge: {...report.forge, unknown: true}}));
+    assert.throws(() => parseExperimentRunReport({...report, schema_version: 1}));
+    assert.throws(() => parseExperimentRunReport({forge: {version: '9999.0.0'}, runs: 'invalid'}),
       /incompatible with installed Forge/);
     const diagnosticIdentity = {version: FORGE_VERSION, commit_sha: 'b'.repeat(40), dirty: true};
-    assert.deepEqual(parseCampaignReport({...report, forge: diagnosticIdentity}).forge, diagnosticIdentity);
+    assert.deepEqual(parseExperimentRunReport({...report, forge: diagnosticIdentity}).forge, diagnosticIdentity);
   });
 
   it('permits different development releases only when the reader is also a development build', () => {
@@ -44,9 +44,9 @@ describe('campaign scorecards', () => {
       version: '9999.0.0-dev.123', commit_sha: 'c'.repeat(40), dirty: false,
     }};
     if (/^\d+\.\d+\.\d+-dev(?:\.|$)/.test(FORGE_VERSION)) {
-      assert.deepEqual(parseCampaignReport(report).forge, report.forge);
+      assert.deepEqual(parseExperimentRunReport(report).forge, report.forge);
     } else {
-      assert.throws(() => parseCampaignReport(report), /incompatible with installed Forge/);
+      assert.throws(() => parseExperimentRunReport(report), /incompatible with installed Forge/);
     }
   });
 
@@ -57,7 +57,7 @@ describe('campaign scorecards', () => {
     const report = build(runs);
     assert.equal(report.cases.length, 2);
     assert.deepEqual(report.cases.map(({agent}) => agent.hook_trust), ['native', 'automation']);
-    assert.deepEqual(parseCampaignReport(report), report);
+    assert.deepEqual(parseExperimentRunReport(report), report);
   });
   it('groups repetitions by exact case/treatment/agent coordinates and separates execution coverage from scores', () => {
     const runs = [row(0), row(1), row(2), row(3), row(4), row(5)];
@@ -134,17 +134,17 @@ describe('campaign scorecards', () => {
     ]) {
       const changed = structuredClone(report);
       mutate(changed);
-      assert.throws(() => parseCampaignReport(changed));
+      assert.throws(() => parseExperimentRunReport(changed));
     }
-    assert.deepEqual(parseCampaignReport(report), report);
+    assert.deepEqual(parseExperimentRunReport(report), report);
     const duplicate = build([row(0), row(1)]);
     duplicate.runs[1]!.run_id = duplicate.runs[0]!.run_id;
     duplicate.runs[1]!.result_path = duplicate.runs[0]!.result_path;
-    assert.throws(() => parseCampaignReport(duplicate), /duplicate run IDs/);
+    assert.throws(() => parseExperimentRunReport(duplicate), /duplicate run IDs/);
   });
 
   it('writes partial results after execution errors and refreshes only latest attempts on resume', async () => {
-    const fixture = await campaignFixture();
+    const fixture = await experimentRunFixture();
     let fail = true;
     let verified = 0;
     fixture.options.engine = {...defaultForgeEngine, async verifyCompletedRun(location) {
@@ -155,7 +155,7 @@ describe('campaign scorecards', () => {
       if (fail && input.plan.selection.case_id === 'testing/second') throw new Error('private execution failure');
       return defaultForgeEngine.executeEval({...input, composition: composition(fixture.root)});
     };
-    const first = await runCampaign(fixture.options);
+    const first = await runExperiment(fixture.options);
     const report = await readReport(first.report);
     assert.equal(report.summary.completed, 1);
     assert.equal(report.summary.errored, 1);
@@ -164,11 +164,11 @@ describe('campaign scorecards', () => {
     assert.equal(report.runs[1]!.error_code, 'execution_error');
     assert.equal(report.runs[1]!.evaluation, null);
     assert.equal(JSON.stringify(report).includes('private execution failure'), false);
-    assert.equal(report.checkpoint_sha256, sha256Digest(await fs.readFile(first.campaign)));
+    assert.equal(report.checkpoint_sha256, sha256Digest(await fs.readFile(first.checkpoint)));
     assert.equal(verified, 2, 'report reuses each latest attempt verification');
     const previousResult = await fs.readFile(path.join(fixture.root, report.runs[0]!.result_path!));
     fail = false;
-    const resumed = await runCampaign({...fixture.options, resume: true});
+    const resumed = await runExperiment({...fixture.options, resume: true});
     const refreshed = await readReport(resumed.report);
     assert.equal(resumed.executed, 1);
     assert.equal(refreshed.summary.completed, 2);
@@ -179,29 +179,29 @@ describe('campaign scorecards', () => {
     assert.equal(refreshed.runs[0]!.run_id, report.runs[0]!.run_id);
     assert.notEqual(refreshed.runs[1]!.run_id, report.runs[1]!.run_id);
     assert.deepEqual(await fs.readFile(path.join(fixture.root, refreshed.runs[0]!.result_path!)), previousResult);
-    assert.equal(refreshed.checkpoint_sha256, sha256Digest(await fs.readFile(resumed.campaign)));
+    assert.equal(refreshed.checkpoint_sha256, sha256Digest(await fs.readFile(resumed.checkpoint)));
   });
 
   it('regenerates missing or corrupt reports on a no-op resume without changing eval artifacts', async () => {
-    const fixture = await campaignFixture();
-    const first = await runCampaign(fixture.options);
+    const fixture = await experimentRunFixture();
+    const first = await runExperiment(fixture.options);
     const report = await readReport(first.report);
-    const checkpoint = await fs.readFile(first.campaign);
+    const checkpoint = await fs.readFile(first.checkpoint);
     for (const corrupt of [false, true]) {
       if (corrupt) await fs.writeFile(first.report, '{invalid report');
       else await fs.rm(first.report);
-      const resumed = await runCampaign({...fixture.options, resume: true,
+      const resumed = await runExperiment({...fixture.options, resume: true,
         execute: async () => {throw new Error('must skip completed evals');}});
       assert.equal(resumed.executed, 0);
       const restored = await readReport(resumed.report);
       assert.deepEqual(restored.runs, report.runs);
       assert.deepEqual(restored.summary, report.summary);
-      assert.deepEqual(await fs.readFile(first.campaign), checkpoint);
+      assert.deepEqual(await fs.readFile(first.checkpoint), checkpoint);
     }
   });
 
   it('extracts guideline and check scores from real engine commits and averages repetitions', async () => {
-    const fixture = await campaignFixture();
+    const fixture = await experimentRunFixture();
     const plan = createTestResolvedRunPlan({caseId: 'testing/guidelines',
       successGuidelines: ['The answer is complete.'], judge: {provider: 'scripted', model: 'judge'},
       checks: {file_checks: [{file: 'missing.txt', exists: true}]}});
@@ -219,7 +219,7 @@ describe('campaign scorecards', () => {
     const provider = createScriptedCompletionProvider({id: 'scripted'}).provider;
     fixture.options.composition = {...composition(fixture.root),
       completionProviders: new Map([[provider.id, provider]])};
-    const summary = await runCampaign(fixture.options);
+    const summary = await runExperiment(fixture.options);
     const report = await readReport(summary.report);
     assert.equal(report.summary.completed, 2);
     assert.equal(report.cases.length, 1);
@@ -233,7 +233,7 @@ describe('campaign scorecards', () => {
   });
 
   it('writes a cancellation report after cleanup, including cases that never started', async () => {
-    const fixture = await campaignFixture();
+    const fixture = await experimentRunFixture();
     fixture.options.plans = [...fixture.options.plans, createTestResolvedRunPlan({caseId: 'testing/third'})];
     const controller = new AbortController();
     fixture.options.signal = controller.signal;
@@ -246,7 +246,7 @@ describe('campaign scorecards', () => {
       try {input.signal!.throwIfAborted(); throw new Error('unreachable');}
       finally {cleaned = true;}
     };
-    await assert.rejects(runCampaign(fixture.options), /cancelled by test/);
+    await assert.rejects(runExperiment(fixture.options), /cancelled by test/);
     assert.equal(cleaned, true);
     const report = await readReport(path.join(fixture.root, 'report.json'));
     assert.equal(report.summary.completed, 1);
@@ -254,12 +254,12 @@ describe('campaign scorecards', () => {
     assert.equal(report.summary.pending, 1);
     assert.equal(report.runs[1]!.error_code, 'aborted');
     assert.equal(report.runs[2]!.run_id, null);
-    await assert.rejects(fs.stat(path.join(fixture.root, '.campaign.lock')), {code: 'ENOENT'});
+    await assert.rejects(fs.stat(path.join(fixture.root, '.experiment.lock')), {code: 'ENOENT'});
   });
 
   it('atomically preserves the previous report on write failure and retains completed evals', async (context) => {
-    const fixture = await campaignFixture();
-    const first = await runCampaign(fixture.options);
+    const fixture = await experimentRunFixture();
+    const first = await runExperiment(fixture.options);
     const previous = await fs.readFile(first.report);
     const rename = fsPromises.rename;
     context.mock.method(fsPromises, 'rename', async (...args: Parameters<typeof rename>) => {
@@ -268,8 +268,8 @@ describe('campaign scorecards', () => {
     });
     syncBuiltinESMExports();
     try {
-      await assert.rejects(runCampaign({...fixture.options, resume: true}), (error) => {
-        assert.ok(error instanceof CampaignReportError);
+      await assert.rejects(runExperiment({...fixture.options, resume: true}), (error) => {
+        assert.ok(error instanceof ExperimentRunReportError);
         assert.equal(error.report, first.report);
         assert.equal(error.message.includes('private filesystem detail'), false);
         return true;
@@ -280,12 +280,12 @@ describe('campaign scorecards', () => {
       context.mock.restoreAll();
       syncBuiltinESMExports();
     }
-    const resumed = await runCampaign({...fixture.options, resume: true});
+    const resumed = await runExperiment({...fixture.options, resume: true});
     assert.equal(resumed.executed, 0);
   });
 
-  it('holds the campaign lock through report persistence and rejects late cancellation', async (context) => {
-    const fixture = await campaignFixture();
+  it('holds the experiment run lock through report persistence and rejects late cancellation', async (context) => {
+    const fixture = await experimentRunFixture();
     const controller = new AbortController();
     fixture.options.signal = controller.signal;
     const rename = fsPromises.rename;
@@ -293,8 +293,8 @@ describe('campaign scorecards', () => {
     let blocked = false;
     context.mock.method(fsPromises, 'rename', async (...args: Parameters<typeof rename>) => {
       if (args[1] === reportPath) {
-        await assert.rejects(runCampaign({...fixture.options, resume: true,
-          signal: new AbortController().signal}), /Another campaign process/);
+        await assert.rejects(runExperiment({...fixture.options, resume: true,
+          signal: new AbortController().signal}), /Another experiment run process/);
         blocked = true;
         controller.abort(new Error('cancelled while writing report'));
       }
@@ -302,7 +302,7 @@ describe('campaign scorecards', () => {
     });
     syncBuiltinESMExports();
     try {
-      await assert.rejects(runCampaign(fixture.options), /cancelled while writing report/);
+      await assert.rejects(runExperiment(fixture.options), /cancelled while writing report/);
       assert.equal(blocked, true);
       assert.equal((await readReport(reportPath)).summary.completed, 2);
     } finally {
@@ -312,7 +312,7 @@ describe('campaign scorecards', () => {
   });
 
   it('preserves a coordinator failure even when writing its partial report also fails', async (context) => {
-    const fixture = await campaignFixture();
+    const fixture = await experimentRunFixture();
     const original = new Error('primary callback failure');
     fixture.options.progress = (event) => {if (event.state === 'started') throw original;};
     const rename = fsPromises.rename;
@@ -322,8 +322,8 @@ describe('campaign scorecards', () => {
     });
     syncBuiltinESMExports();
     try {
-      await assert.rejects(runCampaign(fixture.options), (error) => error === original);
-      await assert.rejects(fs.stat(path.join(fixture.root, '.campaign.lock')), {code: 'ENOENT'});
+      await assert.rejects(runExperiment(fixture.options), (error) => error === original);
+      await assert.rejects(fs.stat(path.join(fixture.root, '.experiment.lock')), {code: 'ENOENT'});
     } finally {
       context.mock.restoreAll();
       syncBuiltinESMExports();
@@ -335,19 +335,19 @@ function evaluation(passed: number, total: number, status: 'passed' | 'partial' 
   return {status, score: total === 0 ? 0 : passed / total, guidelines_passed: passed,
     guidelines_total: total, checks_passed: 1, checks_total: 1};
 }
-function row(index: number): CampaignReportRunV1 {
+function row(index: number): ExperimentRunReportRunV1 {
   const selection = structuredClone(createTestResolvedRunPlan({caseId: 'testing/first'}).selection);
   selection.repetition = index;
   return {selection_index: index, selection, run_id: `run-${index}`, state: 'completed',
     error_code: null, attempt_count: 1, result_path: `runs/run-${index}/result.json`,
     evaluation: evaluation(0, 0, 'passed')};
 }
-function build(runs: CampaignReportRunV1[]) {
-  return buildCampaignReport({experimentRunId: 'test-report', generatedAt: '2026-10-02T00:00:00.000Z',
+function build(runs: ExperimentRunReportRunV1[]) {
+  return buildExperimentRunReport({experimentRunId: 'test-report', generatedAt: '2026-10-02T00:00:00.000Z',
     checkpointBody: '{}\n', runs});
 }
 async function readReport(location: string) {
-  return parseCampaignReport(JSON.parse(await fs.readFile(location, 'utf8')));
+  return parseExperimentRunReport(JSON.parse(await fs.readFile(location, 'utf8')));
 }
 function composition(root: string) {
   const agent = createScriptedAgentAdapter().adapter;
@@ -355,12 +355,12 @@ function composition(root: string) {
     credentialResolver: createStaticCredentialResolver(), inputProvider: createMemoryRunInputProvider(),
     artifactStore: createArtifactStore({root})};
 }
-async function campaignFixture() {
+async function experimentRunFixture() {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-scorecards-'));
   temporaryDirectories.push(temporary);
   const root = path.join(temporary, 'experiment');
   let nextId = 0;
-  const options: MutableCampaignOptions = {
+  const options: MutableExperimentRunOptions = {
     root, plans: ['first', 'second'].map((id) => createTestResolvedRunPlan({caseId: `testing/${id}`})),
     composition: composition(root), engine: defaultForgeEngine, resume: false,
     signal: new AbortController().signal, progress: () => undefined,

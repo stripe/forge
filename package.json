@@ -46,13 +46,13 @@
       "types": "./dist/cli.d.ts",
       "import": "./dist/cli.js"
     },
-    "./campaign": {
-      "types": "./dist/campaign.d.ts",
-      "import": "./dist/campaign.js"
+    "./experiment": {
+      "types": "./dist/experiment.d.ts",
+      "import": "./dist/experiment.js"
     },
-    "./campaign/cli": {
-      "types": "./dist/campaignCli.d.ts",
-      "import": "./dist/campaignCli.js"
+    "./experiment/cli": {
+      "types": "./dist/experimentCli.d.ts",
+      "import": "./dist/experimentCli.js"
     },
     "./agents/claude-code": {
       "types": "./dist/agents/claude-code/index.d.ts",
