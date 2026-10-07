@@ -14,7 +14,7 @@ import {ForgeExecutionError} from '../src/execution/errors.js';
 import {executeEvalWithTestHooks} from '../src/execution/execute.js';
 import {parseExperimentConfigYaml} from '../src/model/parse.js';
 import {sha256Digest, sha256Hex} from '../src/model/hashes.js';
-import type {DatasetManifestV1} from '../src/model/types.js';
+import type {DatasetManifestV1, RunSelection} from '../src/model/types.js';
 import {createArtifactStore, verifyCompletedRun} from '../src/results/index.js';
 import {
   createFakeRuntimeAdapter,
@@ -345,6 +345,7 @@ describe('resumable CLI experiment runs', () => {
   it('runs multiple cases and treatments by default and resumes a saved case filter', async () => {
     const fixture = await createFixture({anotherCase: true});
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experiment, 'utf8'));
+    assert.ok(config.matrix.groups === undefined);
     config.treatments.seeded = {setup: [{uses: 'forge/write', with: {target: 'seed.txt', source: {content: 'seed'}}}]};
     config.matrix.treatments.push('seeded');
     config.matrix.repetitions = 1;
@@ -360,6 +361,131 @@ describe('resumable CLI experiment runs', () => {
     assert.equal(resumed.summary.total, 2);
     assert.equal(resumed.summary.skipped, 2);
     assert.equal(resumed.summary.executed, 0);
+  });
+
+  it('runs and reports only the three authored grouped combinations and skips them on resume', async () => {
+    const fixture = await createGroupedFixture();
+    const expected: RunSelection[] = [
+      {case_id: 'examples/hello-file', treatment: 'baseline',
+        agent: {adapter: 'claude-code', provider: 'anthropic', model: 'group-a-model'}, repetition: 0},
+      {case_id: 'examples/other-file', treatment: 'baseline',
+        agent: {adapter: 'claude-code', provider: 'anthropic', model: 'group-b-model'}, repetition: 0},
+      {case_id: 'examples/other-file', treatment: 'seeded',
+        agent: {adapter: 'claude-code', provider: 'anthropic', model: 'group-b-model'}, repetition: 0},
+    ];
+    const first = await fixture.run();
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(first.summary.total, 3);
+    assert.equal(first.summary.executed, 3);
+    assert.equal(first.summary.completed, 3);
+    assert.equal(first.summary.errored, 0);
+    const checkpoint = await fs.readFile(fixture.checkpoint);
+    const entries = (await fixture.readCheckpoint()).entries;
+    assert.deepEqual(entries.map(({selection}) => selection), expected);
+    assert.deepEqual(entries.map(({attempts}) => attempts.length), [1, 1, 1]);
+    const report = await readReport(fixture.root);
+    assert.deepEqual(report.runs.map(({selection}) => selection), expected);
+    assert.deepEqual(report.runs.map(({selection_index}) => selection_index), [0, 1, 2]);
+    assert.deepEqual(report.runs.map(({state}) => state), ['completed', 'completed', 'completed']);
+    assert.equal(report.summary.selections, 3);
+    assert.equal(report.summary.completed, 3);
+    assert.equal(report.summary.pending, 0);
+    assert.equal(report.summary.coverage, 1);
+    assert.equal(report.summary.passed, 3);
+    assert.equal(report.summary.attempts_total, 3);
+    assert.equal(report.summary.retry_attempts, 0);
+    assert.equal(report.checkpoint_sha256, sha256Digest(checkpoint));
+    assert.deepEqual(report.cases.map(({case_id, treatment, agent}) => ({case_id, treatment, agent})),
+      expected.map(({case_id, treatment, agent}) => ({case_id, treatment, agent})));
+    for (const row of report.cases) {
+      assert.equal(row.selections, 1);
+      assert.equal(row.completed, 1);
+      assert.equal(row.pending, 0);
+      assert.equal(row.coverage, 1);
+    }
+    const results = await Promise.all(entries.map(async (entry) => {
+      const run = await verifyCompletedRun(path.join(fixture.root, 'runs', entry.attempts[0]!.run_id));
+      assert.deepEqual(run.result.selection, entry.selection);
+      return fs.readFile(path.join(run.location, 'result.json'));
+    }));
+
+    const resumed = await fixture.run(['--resume', 'exp-1'], {
+      execute: async () => {throw new Error('completed grouped selections must be skipped');},
+    });
+    assert.equal(resumed.code, 0, resumed.stderr);
+    assert.equal(resumed.summary.total, 3);
+    assert.equal(resumed.summary.executed, 0);
+    assert.equal(resumed.summary.skipped, 3);
+    assert.deepEqual(await fs.readFile(fixture.checkpoint), checkpoint);
+    const refreshed = await readReport(fixture.root);
+    assert.deepEqual(refreshed.runs, report.runs);
+    assert.deepEqual(refreshed.cases, report.cases);
+    assert.deepEqual(refreshed.summary, report.summary);
+    assert.deepEqual(await Promise.all(entries.map((entry) =>
+      fs.readFile(path.join(fixture.root, 'runs', entry.attempts[0]!.run_id, 'result.json')))), results);
+  });
+
+  it('filters grouped selections and resumes the original group subset', async () => {
+    const fixture = await createGroupedFixture();
+    const filtered = await fixture.run(['--case', 'examples/other-file']);
+    assert.equal(filtered.code, 0, filtered.stderr);
+    assert.equal(filtered.summary.total, 2);
+    const report = await readReport(fixture.root);
+    assert.deepEqual(report.runs.map(({selection}) =>
+      [selection.case_id, selection.treatment, selection.agent.model]), [
+      ['examples/other-file', 'baseline', 'group-b-model'],
+      ['examples/other-file', 'seeded', 'group-b-model'],
+    ]);
+    const resumed = await fixture.run(['--resume', 'exp-1'], {
+      execute: async () => {throw new Error('the filtered selections must be skipped');},
+    });
+    assert.equal(resumed.code, 0, resumed.stderr);
+    assert.equal(resumed.summary.total, 2);
+    assert.equal(resumed.summary.executed, 0);
+    assert.equal(resumed.summary.skipped, 2);
+    assert.deepEqual((await readReport(fixture.root)).runs, report.runs);
+
+    const baseline = await fixture.run(['--treatment', 'baseline']);
+    assert.equal(baseline.code, 0, baseline.stderr);
+    assert.equal(baseline.summary.total, 2);
+    const baselineReport = await readReport(path.join(fixture.output, 'experiments', 'exp-2'));
+    assert.deepEqual(baselineReport.runs.map(({selection}) =>
+      [selection.case_id, selection.treatment, selection.agent.model]), [
+      ['examples/hello-file', 'baseline', 'group-a-model'],
+      ['examples/other-file', 'baseline', 'group-b-model'],
+    ]);
+  });
+
+  it('rejects saved selections removed from a group before creating execution capabilities', async () => {
+    const fixture = await createGroupedFixture();
+    assert.equal((await fixture.run()).code, 0);
+    const checkpoint = await fs.readFile(fixture.checkpoint);
+    const report = await fs.readFile(path.join(fixture.root, 'report.json'));
+    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experiment, 'utf8'));
+    assert.ok(config.matrix.groups !== undefined);
+    config.matrix.groups[0]!.agents[0]!.model = 'group-b-model';
+    config.matrix.groups[1]!.agents[0]!.model = 'group-a-model';
+    await fs.writeFile(fixture.experiment, JSON.stringify(config));
+    let compositions = 0;
+    let executions = 0;
+    const rejected = await fixture.run(['--resume', 'exp-1'], {
+      compositionFactory: async () => {
+        compositions += 1;
+        throw new Error('invalid grouped selections must fail before composition');
+      },
+      execute: async () => {
+        executions += 1;
+        throw new Error('invalid grouped selections must not execute');
+      },
+    });
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.stderr, /selection.*matrix/i);
+    assert.equal(compositions, 0);
+    assert.equal(executions, 0);
+    assert.deepEqual(await fs.readFile(fixture.checkpoint), checkpoint);
+    assert.deepEqual(await fs.readFile(path.join(fixture.root, 'report.json')), report);
+    assert.deepEqual((await fs.readdir(path.join(fixture.root, 'runs'))).sort(),
+      ['attempt-1', 'attempt-2', 'attempt-3']);
   });
 
   it('continues after execution errors and resumes only errored entries with new run IDs', async () => {
@@ -831,7 +957,7 @@ describe('resumable CLI experiment runs', () => {
 
 interface Checkpoint {
   entries: Array<{
-    selection: {repetition: number};
+    selection: RunSelection;
     plan_sha256: string;
     attempts: Array<{run_id: string; state: string; error_code?: string}>;
   }>;
@@ -868,7 +994,27 @@ async function createDeadOwnerLock(root: string) {
   return {lock, ownerFile};
 }
 
-async function createFixture(options: {anotherCase?: boolean; repetitions?: number} = {}) {
+async function createGroupedFixture() {
+  const fixture = await createFixture({anotherCase: true, repetitions: 1,
+    initialFiles: {'hello.txt': 'hello, forge!\n'}});
+  const config = parseExperimentConfigYaml(await fs.readFile(fixture.experiment, 'utf8'));
+  config.treatments.seeded = {setup: [{uses: 'forge/write', with: {target: 'seed.txt', source: {content: 'seed'}}}]};
+  config.matrix = {
+    groups: [
+      {cases: ['examples/hello-file'], treatments: ['baseline'],
+        agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'group-a-model'}]},
+      {cases: ['examples/other-file'], treatments: ['baseline', 'seeded'],
+        agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'group-b-model'}]},
+    ],
+    repetitions: 1,
+    retries: 0,
+  };
+  await fs.writeFile(fixture.experiment, JSON.stringify(config));
+  return fixture;
+}
+
+async function createFixture(options: {anotherCase?: boolean; repetitions?: number;
+  initialFiles?: Readonly<Record<string, string>>} = {}) {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-experiment-run-'));
   temporaryDirectories.push(temporary);
   const output = path.join(temporary, 'results');
@@ -876,7 +1022,9 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
   const example = path.resolve('examples/quickstart');
   const experiment = path.join(temporary, 'experiment.yaml');
   const config = parseExperimentConfigYaml(await fs.readFile(path.join(example, 'experiment.yaml'), 'utf8'));
+  assert.ok(config.matrix.groups === undefined);
   config.matrix.repetitions = options.repetitions ?? 3;
+  const initialFiles = options.initialFiles;
   const dataset = path.join(temporary, 'dataset');
   await fs.cp(path.join(example, 'dataset'), dataset, {recursive: true});
   config.dataset.path = './dataset';
@@ -903,7 +1051,7 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
     async run(extra: string[] = [], options: RunCliOptions = {}) {
       let stdout = '';
       let stderr = '';
-      const runtime = createFakeRuntimeAdapter();
+      const runtime = createFakeRuntimeAdapter(initialFiles === undefined ? {} : {initialFiles});
       const agent = createScriptedAgentAdapter({
         id: 'claude-code',
         turns: Array.from({length: 6}, () => ({text: 'Done', sessionId: 'experiment-run-session', toolCalls: []})),

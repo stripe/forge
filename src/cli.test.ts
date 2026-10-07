@@ -184,6 +184,92 @@ describe('Forge CLI', () => {
     }
   });
 
+  it('validates grouped selections without combining coordinates across groups', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    const selections: Array<readonly string[]> = [];
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await runCli(['validate', '--experiment', fixture.experimentPath], {
+      environment: {},
+      stdout: (text) => {stdout += text;},
+      stderr: (text) => {stderr += text;},
+      engine: {
+        ...defaultForgeEngine,
+        preflightEval: (input) => {
+          const {case_id, treatment, agent} = input.plan.selection;
+          selections.push([case_id, treatment, agent.model]);
+          return defaultForgeEngine.preflightEval(input);
+        },
+      },
+    });
+    assert.equal(exitCode, 0, stderr);
+    assert.equal(JSON.parse(stdout).run_count, 3);
+    assert.deepEqual(selections, [
+      ['case/example', 'baseline', 'claude-sonnet'],
+      ['case/unselected', 'baseline', 'claude-opus-4-6'],
+      ['case/unselected', 'enhanced', 'claude-opus-4-6'],
+    ]);
+  });
+
+  it('filters grouped plans by case file, treatment, and model without inventing combinations', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    for (const [caseFile, treatment, model, expectedCode] of [
+      [fixture.caseFilePath, 'baseline', 'claude-sonnet', 0],
+      [fixture.unselectedCaseFilePath!, 'enhanced', 'claude-opus-4-6', 0],
+      [fixture.caseFilePath, 'enhanced', 'claude-opus-4-6', 2],
+      [fixture.caseFilePath, 'baseline', 'claude-opus-4-6', 2],
+      [fixture.unselectedCaseFilePath!, 'enhanced', 'claude-sonnet', 2],
+    ] as const) {
+      let stdout = '';
+      let stderr = '';
+      const exitCode = await runCli([
+        'plan', '--experiment', fixture.experimentPath, '--case-file', caseFile,
+        '--treatment', treatment, '--model', model,
+      ], {
+        stdout: (text) => {stdout += text;},
+        stderr: (text) => {stderr += text;},
+      });
+      assert.equal(exitCode, expectedCode, stderr);
+      if (expectedCode === 0) {
+        const plan = defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout));
+        assert.equal(plan.selection.treatment, treatment);
+        assert.equal(plan.selection.agent.model, model);
+        assert.equal(plan.selection.case_id,
+          caseFile === fixture.caseFilePath ? 'case/example' : 'case/unselected');
+      } else {
+        assert.equal(stdout, '');
+        assert.ok(stderr.includes('Selection does not match the benchmark matrix'));
+      }
+    }
+  });
+
+  it('checks references in all matrix groups before allocating a filtered run', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    assert.ok(config.matrix.groups !== undefined);
+    config.matrix.groups[1]!.cases = ['case/not-in-dataset'];
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    let preparations = 0;
+    let executions = 0;
+    let stderr = '';
+    const exitCode = await runCli([
+      'run', '--experiment', fixture.experimentPath, '--case', 'case/example',
+    ], {
+      environment: {},
+      stdout: () => undefined,
+      stderr: (text) => {stderr += text;},
+      compositionFactory: async (options) => {
+        preparations += 1;
+        return createDefaultCliComposition(options);
+      },
+      execute: async (input) => {executions += 1; return executeOffline(input);},
+    });
+    assert.equal(exitCode, 1);
+    assert.ok(stderr.includes('references a case absent from the loaded dataset'));
+    assert.equal(preparations, 0);
+    assert.equal(executions, 0);
+  });
+
   it('validates both native platforms without contacting Docker', async () => {
     const fixture = await createBenchmarkFixture();
     const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
@@ -1039,6 +1125,32 @@ describe('Forge CLI', () => {
     assert.ok((stderr).includes('Selection matches 2 matrix entries'));
   });
 });
+
+async function createGroupedBenchmarkFixture() {
+  const fixture = await createBenchmarkFixture({includeUnselectedCase: true});
+  const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+  await fs.writeFile(fixture.experimentPath, JSON.stringify({
+    ...config,
+    treatments: {...config.treatments, enhanced: {setup: []}},
+    matrix: {
+      groups: [
+        {
+          cases: ['case/example'],
+          treatments: ['baseline'],
+          agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet'}],
+        },
+        {
+          cases: ['case/unselected'],
+          treatments: ['baseline', 'enhanced'],
+          agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-opus-4-6'}],
+        },
+      ],
+      repetitions: 1,
+      retries: 0,
+    },
+  }));
+  return fixture;
+}
 
 async function createBenchmarkFixture(
   options: {repetitions?: number; includeUnselectedCase?: boolean} = {},

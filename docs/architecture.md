@@ -176,12 +176,23 @@ treatment may have an empty setup list; it is still an explicit matrix choice.
 
 ### Matrix expansion and selection
 
-[`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands in stable authored
-order:
+An experiment matrix declares either one flat Cartesian product or an ordered
+list of groups, each with explicit case, treatment, and agent axes. Repetitions
+and retry policy belong to the whole matrix. Strict parsing rejects mixed
+forms, missing group axes, and duplicate selections after agent defaults.
+
+[`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands each product in stable
+authored order:
 
 ```text
-case → treatment → agent → repetition
+group → case → treatment → agent → repetition
 ```
+
+The flat form behaves as one group. Groups flatten into ordinary selections;
+group identity does not enter plans, checkpoints, or reports. Membership checks
+require the complete case/treatment/agent tuple to coexist in one group, which
+prevents combinations from crossing group boundaries. The authoring contract
+and example are in the README's [experiment matrices](../README.md#experiment-matrices).
 
 The experiment-level `retries` value is experiment run policy and does not
 create a new semantic selection. `executeEval` executes one resolved plan once;
@@ -229,7 +240,10 @@ drain, while still holding the experiment run lock. It reads the last durable
 checkpoint and uses the same verified latest-attempt recovery as resume,
 reusing bounded inspection metadata from the invocation. The scorecard groups
 repetitions by case/treatment/agent and separates execution coverage from
-completed evaluation scores. Its checkpoint digest and generation time bind it
+completed evaluation scores. Coverage uses only saved selections; combinations
+absent from the matrix are outside its denominator. Aggregate scores follow the
+selected distribution, and treatment comparisons require matched case and
+complete agent coverage. Its checkpoint digest and generation time bind it
 to that snapshot. Atomic replacement preserves the previous report if writing
 fails. Reporting errors surface on normal completion; after cancellation or
 coordinator failure, reporting is best effort and preserves the primary error.

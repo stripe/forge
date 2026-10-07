@@ -1,4 +1,5 @@
 import {sha256Digest} from '../model/hashes.js';
+import {agentSelectionKey, getMatrixGroups} from '../model/matrix.js';
 import {
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
@@ -22,6 +23,7 @@ export type PlanningErrorCode =
   | 'unknown_case'
   | 'unknown_treatment'
   | 'unknown_agent'
+  | 'invalid_selection'
   | 'invalid_repetition'
   | 'missing_role_player'
   | 'missing_judge'
@@ -40,7 +42,7 @@ export class PlanningError extends Error {
 }
 
 /**
- * Expand in stable authored order: case, treatment, agent, then repetition.
+ * Expand in stable authored order: group, case, treatment, agent, repetition.
  * Retries deliberately do not create new semantic selections.
  */
 export function expandExperiment(
@@ -48,20 +50,22 @@ export function expandExperiment(
 ): RunSelection[] {
   const config = 'config' in input ? input.config : input;
   const selections: RunSelection[] = [];
-  for (const caseId of config.matrix.cases) {
-    for (const treatment of config.matrix.treatments) {
-      for (const agent of config.matrix.agents) {
-        for (
-          let repetition = 0;
-          repetition < config.matrix.repetitions;
-          repetition += 1
-        ) {
-          selections.push({
-            case_id: caseId,
-            treatment,
-            agent: resolveAgentSelection(agent),
-            repetition,
-          });
+  for (const group of getMatrixGroups(config.matrix)) {
+    for (const caseId of group.cases) {
+      for (const treatment of group.treatments) {
+        for (const agent of group.agents) {
+          for (
+            let repetition = 0;
+            repetition < config.matrix.repetitions;
+            repetition += 1
+          ) {
+            selections.push({
+              case_id: caseId,
+              treatment,
+              agent: resolveAgentSelection(agent),
+              repetition,
+            });
+          }
         }
       }
     }
@@ -281,12 +285,14 @@ function assertDatasetCompatibility(
       'Loaded dataset does not match the experiment config pin.',
     );
   }
-  for (const caseId of config.matrix.cases) {
-    if (!dataset.cases.has(caseId)) {
-      throw new PlanningError(
-        'unknown_case',
-        'Experiment config references a case absent from the loaded dataset.',
-      );
+  for (const group of getMatrixGroups(config.matrix)) {
+    for (const caseId of group.cases) {
+      if (!dataset.cases.has(caseId)) {
+        throw new PlanningError(
+          'unknown_case',
+          'Experiment config references a case absent from the loaded dataset.',
+        );
+      }
     }
   }
 }
@@ -295,22 +301,23 @@ function assertSelection(
   config: ExperimentConfigV1,
   selection: RunSelection,
 ): void {
-  if (!config.matrix.cases.includes(selection.case_id)) {
+  const groups = getMatrixGroups(config.matrix);
+  if (!groups.some((group) => group.cases.includes(selection.case_id))) {
     throw new PlanningError(
       'unknown_case',
       'Run selection case is not in the benchmark matrix.',
     );
   }
-  if (!config.matrix.treatments.includes(selection.treatment)) {
+  if (!groups.some((group) => group.treatments.includes(selection.treatment))) {
     throw new PlanningError(
       'unknown_treatment',
       'Run selection treatment is not in the benchmark matrix.',
     );
   }
   if (
-    !config.matrix.agents.some((agent) =>
+    !groups.some((group) => group.agents.some((agent) =>
       agentsEqual(agent, selection.agent),
-    )
+    ))
   ) {
     throw new PlanningError(
       'unknown_agent',
@@ -325,6 +332,16 @@ function assertSelection(
     throw new PlanningError(
       'invalid_repetition',
       'Run selection repetition is outside the benchmark matrix.',
+    );
+  }
+  if (!groups.some((group) =>
+    group.cases.includes(selection.case_id) &&
+    group.treatments.includes(selection.treatment) &&
+    group.agents.some((agent) => agentsEqual(agent, selection.agent))
+  )) {
+    throw new PlanningError(
+      'invalid_selection',
+      'Run selection does not belong to a single benchmark matrix group.',
     );
   }
 }
@@ -352,12 +369,7 @@ function isWriteSetupStep(step: SetupStepV1): step is WriteSetupStepV1 {
 }
 
 function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {
-  return (
-    left.adapter === right.adapter &&
-    left.provider === right.provider &&
-    left.model === right.model &&
-    (left.hook_trust ?? 'native') === (right.hook_trust ?? 'native')
-  );
+  return agentSelectionKey(left) === agentSelectionKey(right);
 }
 
 function resolveAgentSelection(agent: AgentSelectionV1): AgentSelectionV1 {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {describe, it} from 'node:test';
 
 import {sha256Digest} from '../model/hashes.js';
+import {getMatrixGroups} from '../model/matrix.js';
 import type {
   EvalCaseV1,
   ExperimentConfigV1,
@@ -77,7 +78,157 @@ describe('experiment expansion and run planning', () => {
     assert.deepEqual(expandExperiment(loaded.experiment), selections);
     selections[0]!.agent.model = 'changed-model';
     assert.equal(selections[1]!.agent.model, 'gpt');
-    assert.equal(experiment.matrix.agents[0]!.model, 'gpt');
+    assert.equal(getMatrixGroups(experiment.matrix)[0]!.agents[0]!.model, 'gpt');
+  });
+
+  it('expands sparse groups in group/case/treatment/agent/repetition order', () => {
+    const experiment = experimentConfig({
+      matrix: {
+        groups: [
+          {
+            cases: ['case/b', 'case/a'],
+            treatments: ['with-seed', 'baseline'],
+            agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}],
+          },
+          {
+            cases: ['case/a'],
+            treatments: ['baseline'],
+            agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'}],
+          },
+        ],
+        repetitions: 2,
+        retries: 3,
+      },
+    });
+    const before = structuredClone(experiment);
+    const selections = expandExperiment(experiment);
+    assert.deepEqual(selections, [
+      selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 0),
+      selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 1),
+      selection('case/b', 'baseline', 'codex', 'openai', 'gpt', 0),
+      selection('case/b', 'baseline', 'codex', 'openai', 'gpt', 1),
+      selection('case/a', 'with-seed', 'codex', 'openai', 'gpt', 0),
+      selection('case/a', 'with-seed', 'codex', 'openai', 'gpt', 1),
+      selection('case/a', 'baseline', 'codex', 'openai', 'gpt', 0),
+      selection('case/a', 'baseline', 'codex', 'openai', 'gpt', 1),
+      selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
+      selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 1),
+    ]);
+    assert.deepEqual(expandExperiment(inputs({experiment}).experiment), selections);
+    assert.deepEqual(experiment, before);
+    selections[0]!.agent.model = 'changed-model';
+    assert.equal(selections[1]!.agent.model, 'gpt');
+    assert.deepEqual(experiment, before);
+  });
+
+  it('requires all selection coordinates to belong to the same group', () => {
+    const loaded = inputs({experiment: experimentConfig({
+      matrix: {
+        groups: [
+          {
+            cases: ['case/a'],
+            treatments: ['baseline'],
+            agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}],
+          },
+          {
+            cases: ['case/a'],
+            treatments: ['with-seed'],
+            agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'}],
+          },
+        ],
+        repetitions: 1,
+        retries: 0,
+      },
+    })});
+    const selections = expandExperiment(loaded.experiment);
+    for (const selected of selections) {
+      assert.equal(resolveRunPlan({...loaded, selection: selected}).selection.case_id, 'case/a');
+    }
+    // An omitted Codex hook policy matches its materialized native selection.
+    const codex = {...selections[0]!, agent: {adapter: 'codex', provider: 'openai', model: 'gpt'}};
+    assert.deepEqual(resolveRunPlan({...loaded, selection: codex}),
+      resolveRunPlan({...loaded, selection: selections[0]!}));
+    for (const selected of selections) {
+      const treatment = selected.treatment === 'baseline' ? 'with-seed' : 'baseline';
+      assert.throws(() => resolveRunPlan({...loaded, selection: {...selected, treatment}}),
+        {code: 'invalid_selection'});
+    }
+    for (const [changed, code] of [
+      [{case_id: 'case/other'}, 'unknown_case'],
+      [{treatment: 'other'}, 'unknown_treatment'],
+      [{agent: {...selections[0]!.agent, model: 'other-model'}}, 'unknown_agent'],
+      [{repetition: 1}, 'invalid_repetition'],
+    ] as const) {
+      assert.throws(() => resolveRunPlan({...loaded, selection: {...selections[0]!, ...changed}}), {code});
+    }
+  });
+
+  it('preserves custom hook policies and uses them for plan identity and group membership', () => {
+    const implicit = {adapter: 'custom-agent', provider: 'custom-provider', model: 'model'};
+    const native = {...implicit, hook_trust: 'native' as const};
+    const flat = experimentConfig({matrix: {
+      cases: ['case/a'],
+      treatments: ['baseline'],
+      agents: [implicit, native],
+      repetitions: 1,
+      retries: 0,
+    }});
+    const flatSelections = expandExperiment(flat);
+    assert.deepEqual(flatSelections.map(({agent}) => agent), [implicit, native]);
+    assert.equal(Object.hasOwn(flatSelections[0]!.agent, 'hook_trust'), false);
+    const flatPlans = flatSelections.map((selected) =>
+      resolveRunPlan({...inputs({experiment: flat}), selection: selected}));
+    assert.deepEqual(flatPlans.map(({agent}) => agent), [implicit, native]);
+    assert.notEqual(resolvedRunPlanSha256(flatPlans[0]!), resolvedRunPlanSha256(flatPlans[1]!));
+
+    const grouped = experimentConfig({matrix: {
+      groups: [
+        {cases: ['case/a'], treatments: ['baseline'], agents: [implicit]},
+        {cases: ['case/a'], treatments: ['with-seed'], agents: [native]},
+      ],
+      repetitions: 1,
+      retries: 0,
+    }});
+    const selections = expandExperiment(grouped);
+    assert.deepEqual(selections.map(({agent}) => agent), [implicit, native]);
+    const loaded = inputs({experiment: grouped});
+    for (const [index, selected] of selections.entries()) {
+      assert.deepEqual(resolveRunPlan({...loaded, selection: selected}).agent, selected.agent);
+      const otherAgent = selections[1 - index]!.agent;
+      assert.throws(() => resolveRunPlan({...loaded, selection: {...selected, agent: otherAgent}}),
+        {code: 'invalid_selection'});
+    }
+  });
+
+  it('validates cases in every group before resolving a selected plan', () => {
+    const experiment = experimentConfig();
+    const {cases, treatments, agents} = getMatrixGroups(experiment.matrix)[0]!;
+    const axes = {cases, treatments, agents};
+    experiment.matrix = {
+      groups: [axes, {...axes, cases: ['case/missing']}],
+      repetitions: 1,
+      retries: 0,
+    };
+    const loaded = inputs({experiment});
+    const selected = expandExperiment(experiment)[0]!;
+    assert.throws(() => resolveRunPlan({...loaded, selection: selected}), {code: 'unknown_case'});
+  });
+
+  it('keeps resolved plan identities equal for equivalent flat and grouped selections', () => {
+    const flat = experimentConfig();
+    const {cases, treatments, agents} = getMatrixGroups(flat.matrix)[0]!;
+    const axes = {cases, treatments, agents};
+    const grouped = experimentConfig({matrix: {
+      groups: [axes],
+      repetitions: flat.matrix.repetitions,
+      retries: flat.matrix.retries,
+    }});
+    const selected = expandExperiment(flat)[1]!;
+    const flatPlan = resolveRunPlan({...inputs({experiment: flat}), selection: selected});
+    const groupedPlan = resolveRunPlan({...inputs({experiment: grouped}), selection: selected});
+    assert.deepEqual(groupedPlan, flatPlan);
+    assert.equal(resolvedRunPlanSha256(groupedPlan), resolvedRunPlanSha256(flatPlan));
+    assert.equal(Object.hasOwn(groupedPlan, 'groups'), false);
   });
 
   it('materializes current multi-turn prompt semantics and ordered setup', () => {
@@ -369,8 +520,10 @@ describe('experiment expansion and run planning', () => {
           },
         },
         matrix: {
-          ...experimentConfig().matrix,
+          ...getMatrixGroups(experimentConfig().matrix)[0]!,
           treatments: ['directory'],
+          repetitions: 1,
+          retries: 0,
         },
       }),
     });

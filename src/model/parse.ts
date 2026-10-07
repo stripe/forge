@@ -7,6 +7,7 @@ import {
   type BenchmarkModelErrorCode,
 } from './errors.js';
 import {isSha256Digest, isSha256Hex} from './hashes.js';
+import {agentSelectionKey} from './matrix.js';
 import {
   isSafeActionIdentifier,
   isSafeCaseId,
@@ -414,6 +415,36 @@ function assertRuntimeConfigBytes(value: unknown): void {
   }
 }
 
+const ExperimentMatrixGroupSchema = z
+  .object({
+    cases: z.array(CaseIdSchema).min(1).max(10_000),
+    treatments: z.array(z.string()).min(1).max(1_000),
+    agents: z.array(AgentSelectionSchema).min(1).max(1_000),
+  })
+  .strict();
+
+const MatrixRunPolicySchema = {
+  repetitions: PositiveIntegerSchema.max(10_000).default(1),
+  retries: NonnegativeIntegerSchema.max(100).default(0),
+};
+
+const FlatExperimentMatrixSchema = ExperimentMatrixGroupSchema
+  .extend(MatrixRunPolicySchema).strict();
+const GroupedExperimentMatrixSchema = z.object({
+  groups: z.array(ExperimentMatrixGroupSchema).min(1).max(1_000),
+  ...MatrixRunPolicySchema,
+}).strict();
+const ExperimentMatrixSchema = z.unknown().transform((matrix, context) => {
+  const grouped = matrix !== null && typeof matrix === 'object' && Object.hasOwn(matrix, 'groups');
+  const parsed = (grouped ? GroupedExperimentMatrixSchema : FlatExperimentMatrixSchema).safeParse(matrix);
+  if (!parsed.success) {
+    // Keep diagnostics specific to the authored form, including existing flat axes.
+    for (const issue of parsed.error.issues) context.addIssue({...issue, fatal: true});
+    return z.NEVER;
+  }
+  return parsed.data;
+});
+
 const ExperimentConfigSchema = z
   .object({
     id: CaseIdSchema,
@@ -437,15 +468,7 @@ const ExperimentConfigSchema = z
       .strict()
       .default({}),
     treatments: z.record(z.string(), TreatmentSchema).default({}),
-    matrix: z
-      .object({
-        cases: z.array(CaseIdSchema).min(1).max(10_000),
-        treatments: z.array(z.string()).min(1).max(1_000),
-        agents: z.array(AgentSelectionSchema).min(1).max(1_000),
-        repetitions: PositiveIntegerSchema.max(10_000).default(1),
-        retries: NonnegativeIntegerSchema.max(100).default(0),
-      })
-      .strict(),
+    matrix: ExperimentMatrixSchema,
     limits: z
       .object({
         run_timeout_ms: PositiveIntegerSchema.max(24 * 60 * 60 * 1000).default(
@@ -475,35 +498,58 @@ const ExperimentConfigSchema = z
           'baseline setup must be empty; invariant setup belongs to the case',
       });
     }
-    addDuplicateIssues(config.matrix.cases, context, ['matrix', 'cases']);
-    addDuplicateIssues(
-      config.matrix.treatments,
-      context,
-      ['matrix', 'treatments'],
-    );
-    addDuplicateIssues(
-      config.matrix.agents.map(agentKey),
-      context,
-      ['matrix', 'agents'],
-    );
+    const matrix = config.matrix;
+    const grouped = 'groups' in matrix;
+    const groups = 'groups' in matrix ? matrix.groups : [matrix];
     const treatmentNames = new Set([
       'baseline',
       ...Object.keys(config.treatments),
     ]);
-    for (const [index, treatment] of config.matrix.treatments.entries()) {
-      if (!isSafeSimpleIdentifier(treatment)) {
+    const previousGroups: {
+      cases: Set<string>;
+      treatments: Set<string>;
+      agents: Set<string>;
+    }[] = [];
+    for (const [groupIndex, group] of groups.entries()) {
+      const parent = grouped ? ['matrix', 'groups', groupIndex] : ['matrix'];
+      const agentKeys = group.agents.map(agentSelectionKey);
+      addDuplicateIssues(group.cases, context, [...parent, 'cases']);
+      addDuplicateIssues(group.treatments, context, [...parent, 'treatments']);
+      addDuplicateIssues(agentKeys, context, [...parent, 'agents']);
+      for (const [index, treatment] of group.treatments.entries()) {
+        if (!isSafeSimpleIdentifier(treatment)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [...parent, 'treatments', index],
+            message: 'treatment names must be safe identifiers',
+          });
+        } else if (!treatmentNames.has(treatment)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [...parent, 'treatments', index],
+            message: 'matrix references an undefined treatment',
+          });
+        }
+      }
+      const currentGroup = {
+        cases: new Set(group.cases),
+        treatments: new Set(group.treatments),
+        agents: new Set(agentKeys),
+      };
+      // Cartesian products overlap exactly when all three axes intersect.
+      // Check their sets without materializing a potentially huge product.
+      if (previousGroups.some((previous) =>
+        setsIntersect(currentGroup.cases, previous.cases) &&
+        setsIntersect(currentGroup.treatments, previous.treatments) &&
+        setsIntersect(currentGroup.agents, previous.agents)
+      )) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['matrix', 'treatments', index],
-          message: 'treatment names must be safe identifiers',
-        });
-      } else if (!treatmentNames.has(treatment)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['matrix', 'treatments', index],
-          message: 'matrix references an undefined treatment',
+          path: parent,
+          message: 'matrix groups must not contain duplicate resolved selections',
         });
       }
+      previousGroups.push(currentGroup);
     }
   });
 
@@ -1171,14 +1217,12 @@ function rejectUnsafeObjectKeys(
   }
 }
 
-function agentKey(agent: {
-  adapter: string;
-  provider: string;
-  model: string;
-  hook_trust?: 'native' | 'automation' | undefined;
-}): string {
-  return JSON.stringify([agent.adapter, agent.provider, agent.model,
-    agent.hook_trust ?? (agent.adapter === 'codex' ? 'native' : null)]);
+function setsIntersect(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  const [smaller, larger] = left.size <= right.size ? [left, right] : [right, left];
+  for (const value of smaller) {
+    if (larger.has(value)) return true;
+  }
+  return false;
 }
 
 function deepFreeze<T>(value: T): T {

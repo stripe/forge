@@ -29,6 +29,23 @@ import type {
 } from '../src/experimentCli.js';
 
 describe('experiment public entry points', () => {
+  it('exports flat and grouped matrix types and their shared axes helper', () => {
+    const group: root.ExperimentMatrixGroupV1 = {
+      cases: ['examples/first'],
+      treatments: ['baseline'],
+      agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet-4-6'}],
+    };
+    const flat: root.FlatExperimentMatrixV1 = {...group, repetitions: 1, retries: 0};
+    const grouped: root.GroupedExperimentMatrixV1 = {groups: [group], repetitions: 1, retries: 0};
+    const matrices: root.ExperimentMatrixV1[] = [flat, grouped];
+    assert.equal(typeof root.getMatrixGroups, 'function');
+    for (const matrix of matrices) {
+      const groups: readonly root.ExperimentMatrixGroupV1[] = root.getMatrixGroups(matrix);
+      assert.equal(groups.length, 1);
+      assert.deepEqual(groups[0]!.cases, ['examples/first']);
+    }
+  });
+
   it('keeps experiment orchestration on its dedicated entry points', () => {
     for (const name of [
       'runExperiment', 'readExperimentRunSelections', 'inspectExperimentRun',
