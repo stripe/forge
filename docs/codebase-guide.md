@@ -653,10 +653,10 @@ that classification.
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/testing/index.ts) | Public testing subpath | Exposes supported fixtures to adapter authors |
 
 Production unit tests sit beside their source as `*.test.ts`. Cross-module,
-CLI, package, and runnable-example tests live under [`test`](https://github.com/stripe/forge/tree/main/test):
+CLI, package, and embedding tests live under [`test`](https://github.com/stripe/forge/tree/main/test):
 
-- `quickstart.e2e.test.ts`: checked-in one-shot example;
-- `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava and example flow;
+- `quickstart.e2e.test.ts`: one-shot CLI execution;
+- `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava execution and multi-turn planning;
 - `externalRuntime.e2e.test.ts`: external runtime composition;
 - `claudeCode.e2e.test.ts` and `codex.e2e.test.ts`: actual adapter integration
   through a fake command transport and verified local artifacts;
@@ -667,7 +667,10 @@ CLI, package, and runnable-example tests live under [`test`](https://github.com/
 
 Tests use `node:assert/strict` with explicit field assertions for partial objects.
 Keep native parser inputs and expected canonical bytes independent of the
-implementation being tested.
+implementation being tested. Checked-in eval inputs under
+[`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures) serve
+deterministic tests and the opt-in live suite; their manifest sizes and hashes
+are verified by `pnpm check:cases` and loader tests.
 
 The normal suite combines focused unit tests, deterministic integration tests,
 real local subprocesses, and loopback HTTP transport tests. It requires no
@@ -681,7 +684,7 @@ evals with cleanup warnings fail live verification.
 
 | Path | Role |
 | --- | --- |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Checked-in quickstart, multi-turn, Codex, and external-runtime examples. Their manifest sizes/hashes are part of the tests. |
+| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
 | [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
@@ -731,7 +734,7 @@ Usually touch:
 4. `execution` or the relevant subsystem that consumes it;
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
-7. adjacent tests, examples, manifest sizes/hashes, and README docs.
+7. adjacent tests, eval fixtures, manifest sizes/hashes, and README docs.
 
 Do not let runtime code infer a new default. Materialize it during parsing or
 planning.

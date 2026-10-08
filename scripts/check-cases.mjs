@@ -5,16 +5,16 @@ import {fileURLToPath} from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-// These checked-in examples are the repository's authored dataset roots.
-export const EXAMPLE_DATASET_ROOTS = Object.freeze([
-  'examples/quickstart/dataset',
-  'examples/multi-turn/dataset',
+// Validate the authored datasets used by the harness tests.
+export const FIXTURE_DATASET_ROOTS = Object.freeze([
+  'test/fixtures/one-shot/dataset',
+  'test/fixtures/multi-turn/dataset',
 ]);
 
 export async function checkRepositoryCases({root, loadDataset}) {
   const errors = [];
   let cases = 0;
-  for (const relativeRoot of EXAMPLE_DATASET_ROOTS) {
+  for (const relativeRoot of FIXTURE_DATASET_ROOTS) {
     try {
       const dataset = await loadDataset(path.join(root, relativeRoot));
       cases += dataset.cases.size;
@@ -23,7 +23,7 @@ export async function checkRepositoryCases({root, loadDataset}) {
       errors.push(`${relativeRoot}: ${message}`);
     }
   }
-  return {datasets: EXAMPLE_DATASET_ROOTS.length, cases, errors};
+  return {datasets: FIXTURE_DATASET_ROOTS.length, cases, errors};
 }
 
 if (process.argv[1] !== undefined &&

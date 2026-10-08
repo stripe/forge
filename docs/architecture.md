@@ -134,9 +134,8 @@ Forge keeps authored definitions, resolved inputs, and execution identities dist
 The wire types live in [`src/model/types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts); strict
 parsing lives in [`src/model/parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts).
 The installed Forge release defines their schemas; authored inputs have no
-separate `schema_version` field. Official releases freeze Forge code and
-Forge-owned datasets together, while independently owned dataset and experiment
-versions continue identifying those inputs.
+separate `schema_version` field. Dataset and experiment versions identify those
+inputs independently of Forge format compatibility.
 
 ### Dataset loading and integrity
 
@@ -1102,8 +1101,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Runnable datasets and experiments |
+| [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
+| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 
 ## What Forge intentionally does not own
 

@@ -15,7 +15,7 @@ import {
 } from '../src/testing/index.js';
 
 const repositoryRoot = process.cwd();
-const exampleRoot = path.join(repositoryRoot, 'examples', 'quickstart');
+const fixtureRoot = path.join(repositoryRoot, 'test', 'fixtures', 'one-shot');
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -26,7 +26,7 @@ afterEach(async () => {
   );
 });
 
-describe('checked-in quickstart', () => {
+describe('one-shot CLI fixture', () => {
   it('runs through the public CLI and commits verifiable artifacts without Docker', async () => {
     const temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-quickstart-e2e-'),
@@ -61,10 +61,10 @@ describe('checked-in quickstart', () => {
       [
         'run',
         '--experiment',
-        path.join(exampleRoot, 'experiment.yaml'),
+        path.join(fixtureRoot, 'experiment.yaml'),
         '--case-file',
         path.join(
-          exampleRoot,
+          fixtureRoot,
           'dataset',
           'cases',
           'examples',

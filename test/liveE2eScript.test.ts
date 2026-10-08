@@ -292,16 +292,16 @@ describe('unified live end-to-end suite', () => {
           order.push('bridge-probe'); assert.equal(input.imageId, 'immutable-image');
         },
         async runSelection(input: {
-          label: string; example: string; datasetExample?: string; agent?: string; model?: string;
+          label: string; fixture: string; datasetFixture?: string; agent?: string; model?: string;
           compositionFactory(input: {datasetRoot: string; resultsRoot: string}): Promise<{
             agents: Map<string, unknown>; completionProviders?: Map<string, unknown>;
             credentialResolver: {resolve(reference: string, context: {signal: AbortSignal}): Promise<string>};
           }>
         }) {
           order.push(input.label);
-          assert.equal(input.example, input.label === 'multi-turn' ? 'multi-turn' : codex ? 'codex' : 'quickstart');
+          assert.equal(input.fixture, input.label === 'multi-turn' ? 'multi-turn' : codex ? 'codex' : 'one-shot');
           if (input.label === 'one-shot') {
-            assert.equal(input.datasetExample, 'quickstart');
+            assert.equal(input.datasetFixture, 'one-shot');
             assert.equal(input.agent, scenario.agent);
             assert.equal(input.model, codex ? 'gpt-5.4' : 'claude-sonnet-4-6');
           }

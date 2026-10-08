@@ -79,7 +79,7 @@ pnpm build
 
 ## Quick start
 
-Create this layout:
+Create a minimal dataset and experiment in your own project with this layout:
 
 ```text
 quickstart/
@@ -201,11 +201,9 @@ The experiment config independently pins the dataset identity and SHA-256 digest
 of the raw `manifest.json` bytes. The installed Forge package version is not an
 authored experiment field. It defines Forge's input schemas, execution behavior,
 and generated formats; authored inputs do not carry a `schema_version` field.
-Official releases freeze Forge code and Forge-owned datasets together. Dataset
-and experiment versions identify input definitions, rather than Forge format
-compatibility. ATIF, coding
-agent CLIs, native plugins, action bundles, and independently released
-integrations retain their own version identities.
+Dataset and experiment versions identify input definitions, rather than Forge
+format compatibility. ATIF, coding agent CLIs, native plugins, action bundles,
+and independently released integrations retain their own version identities.
 
 Resolved plans, results, experiment run checkpoints, and reports record their
 producing Forge version. Readers require an exact package-version match whenever either
@@ -373,7 +371,7 @@ native/codex/session.jsonl         # exact selected Codex rollout, for Codex run
 extensions/<contributor-id>/...    # optional host-contributed artifacts
 ```
 
-The checked-in quickstart includes `workspace-evidence.json` because its case
+The quickstart run includes `workspace-evidence.json` because its case
 defines file checks. `result.json.evaluation` is the sole canonical evaluation
 record, governed by the producing Forge release; Forge does not write a
 duplicate `evaluation.json`.
@@ -608,18 +606,18 @@ matrix:
       hook_trust: native
 ```
 
-The [checked-in Codex example](https://github.com/stripe/forge/blob/main/examples/codex/README.md) is a complete runnable
-experiment using the quickstart dataset. From a source checkout:
+To run the quickstart with Codex, replace the `matrix.agents` list in your
+`quickstart/experiment.yaml` with the entry above. Keep its dataset pin, cases,
+treatments, and other experiment settings. From `quickstart/`:
 
 ```sh
-pnpm build
-node dist/cli.js validate \
-  --experiment examples/codex/experiment.yaml
+npx --no-install forge validate \
+  --experiment ./experiment.yaml
 
 CODEX_API_KEY=your-restricted-key \
-node dist/cli.js run \
-  --experiment examples/codex/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml \
+npx --no-install forge run \
+  --experiment ./experiment.yaml \
+  --case-file ./dataset/cases/examples/hello-file.case.yaml \
   --agent codex --model gpt-5.4 \
   --output ./results --run-id codex-001
 ```
@@ -2008,7 +2006,9 @@ proxy, or an offline execution mode.
 
 The library and test suite compile with `tsc`; the repository does not require
 a bundler or an `esbuild` install/build exception. Tests run on Node's built-in
-test runner.
+test runner. Eval inputs used to verify the harness live under
+[`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+`pnpm check:cases` verifies their dataset inventories and case IDs.
 
 ```sh
 pnpm typecheck
@@ -2024,9 +2024,10 @@ Pull requests targeting `main`, including drafts, automatically run the same
 validation as `pnpm check` on Node.js 22 through the
 [PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
 The single `Forge checks` job has named steps for type checking, automated tests,
-build, dataset case validation, documentation validation, and package checks, using the same package
-scripts as the local command without Docker or model credentials. It runs when
-a PR opens, receives new commits, or reopens, and cancels obsolete runs when a
+build, validation of fixture datasets, documentation validation, and package
+checks, using the same package scripts as the local command without Docker or
+model credentials. It runs when a PR opens, receives new commits, or reopens,
+and cancels obsolete runs when a
 newer commit arrives. The development-publishing workflow assigns its snapshot
 version before checking and publishing the package after pushes to `main`.
 Stable release commits are skipped by that workflow.
@@ -2087,9 +2088,9 @@ One full-mode invocation builds once and runs the following checks in order:
 2. A credential-free install of the latest Stripe Claude plugin through the
    current marketplace, followed by verification of writable plugin files,
    native settings, and hook data, with the same container retained after setup.
-3. The checked-in one-shot quickstart, which must pass its deterministic checks
+3. The one-shot test fixture, which must pass its deterministic checks
    without calling a host completion provider.
-4. The checked-in multi-turn example, which must exercise at least two turns in
+4. The multi-turn test fixture, which must exercise at least two turns in
    one persistent Claude session and pass both deterministic checks and model
    judging.
 5. Full `verifyCompletedRun` integrity verification plus targeted checks of the
@@ -2109,11 +2110,11 @@ pnpm test:live
 ```
 
 Omit `OPENAI_BASE_URL` for direct OpenAI. Codex mode runs Docker conformance,
-the plugin fixture suite described above, the checked-in Codex one-shot
-experiment, and full artifact verification, including native rollout evidence.
+the plugin fixture suite described above, the Codex one-shot test fixture, and
+full artifact verification, including native rollout evidence.
 It needs no Anthropic credential; its multi-turn fixture uses a scripted
 host completion provider. The selected model for upstream inference is
-`gpt-5.4`, as pinned by the example experiment.
+`gpt-5.4`, as pinned by the fixture experiment.
 
 For this live-suite mode, a temporary authenticated host bridge forwards only
 Responses API requests to the configured endpoint. The real upstream key stays

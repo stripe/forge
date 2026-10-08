@@ -1019,14 +1019,14 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
   temporaryDirectories.push(temporary);
   const output = path.join(temporary, 'results');
   const root = path.join(output, 'experiments', 'exp-1');
-  const example = path.resolve('examples/quickstart');
+  const fixtureRoot = path.resolve('test/fixtures/one-shot');
   const experiment = path.join(temporary, 'experiment.yaml');
-  const config = parseExperimentConfigYaml(await fs.readFile(path.join(example, 'experiment.yaml'), 'utf8'));
+  const config = parseExperimentConfigYaml(await fs.readFile(path.join(fixtureRoot, 'experiment.yaml'), 'utf8'));
   assert.ok(config.matrix.groups === undefined);
   config.matrix.repetitions = options.repetitions ?? 3;
   const initialFiles = options.initialFiles;
   const dataset = path.join(temporary, 'dataset');
-  await fs.cp(path.join(example, 'dataset'), dataset, {recursive: true});
+  await fs.cp(path.join(fixtureRoot, 'dataset'), dataset, {recursive: true});
   config.dataset.path = './dataset';
   if (options.anotherCase) {
     const body = (await fs.readFile(path.join(dataset, 'cases/examples/hello-file.case.yaml'), 'utf8'))

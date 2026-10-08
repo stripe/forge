@@ -25,7 +25,7 @@ import {
   createStaticCredentialResolver,
 } from '../src/testing/index.js';
 
-const exampleRoot = path.join(process.cwd(), 'examples', 'quickstart');
+const fixtureRoot = path.join(process.cwd(), 'test', 'fixtures', 'one-shot');
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -38,9 +38,9 @@ describe('external runtime composition', () => {
   it('plans, runs, and verifies external runtime artifacts without an adapter parser', async () => {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-external-e2e-'));
     temporaryDirectories.push(temporaryRoot);
-    const [dataset, example] = await Promise.all([
-      loadDataset(path.join(exampleRoot, 'dataset')),
-      loadExperimentConfig(path.join(exampleRoot, 'experiment.yaml')),
+    const [dataset, fixtureExperiment] = await Promise.all([
+      loadDataset(path.join(fixtureRoot, 'dataset')),
+      loadExperimentConfig(path.join(fixtureRoot, 'experiment.yaml')),
     ]);
     const descriptor = {
       adapter: 'acme/process',
@@ -49,9 +49,9 @@ describe('external runtime composition', () => {
     };
     const experimentPath = path.join(temporaryRoot, 'experiment.json');
     await fs.writeFile(experimentPath, JSON.stringify({
-      ...example.config,
+      ...fixtureExperiment.config,
       runtime: descriptor,
-      matrix: {...example.config.matrix, treatments: ['seeded']},
+      matrix: {...fixtureExperiment.config.matrix, treatments: ['seeded']},
       treatments: {
         seeded: {
           setup: [{

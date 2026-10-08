@@ -6,9 +6,9 @@ import {runCli} from '../src/cli.js';
 import {loadExperimentConfig, loadDataset} from '../src/model/index.js';
 import {expandExperiment, resolveRunPlan} from '../src/planning/index.js';
 
-const exampleRoot = path.join(process.cwd(), 'examples', 'multi-turn');
-const datasetRoot = path.join(exampleRoot, 'dataset');
-const experimentPath = path.join(exampleRoot, 'experiment.yaml');
+const fixtureRoot = path.join(process.cwd(), 'test', 'fixtures', 'multi-turn');
+const datasetRoot = path.join(fixtureRoot, 'dataset');
+const experimentPath = path.join(fixtureRoot, 'experiment.yaml');
 const casePath = path.join(
   datasetRoot,
   'cases',
@@ -16,7 +16,7 @@ const casePath = path.join(
   'release-summary.case.yaml',
 );
 
-describe('checked-in multi-turn example', () => {
+describe('multi-turn fixture', () => {
   it('loads its pinned dataset and resolves the same plan through the CLI', async () => {
     const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),

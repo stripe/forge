@@ -26,13 +26,13 @@ afterEach(async () => {
 });
 
 describe('multi-turn CLI end to end', () => {
-  it('validates and executes the shipped two-turn handoff with agent-produced work', async () => {
+  it('validates and executes the two-turn fixture with agent-produced work', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-multi-e2e-'));
     temporaryDirectories.push(root);
-    const example = path.join(process.cwd(), 'examples', 'multi-turn');
+    const fixtureRoot = path.join(process.cwd(), 'test', 'fixtures', 'multi-turn');
     const fixture = {
-      experimentPath: path.join(example, 'experiment.yaml'),
-      casePath: path.join(example, 'dataset', 'cases', 'examples', 'release-summary.case.yaml'),
+      experimentPath: path.join(fixtureRoot, 'experiment.yaml'),
+      casePath: path.join(fixtureRoot, 'dataset', 'cases', 'examples', 'release-summary.case.yaml'),
       resultsRoot: path.join(root, 'results'),
     };
     const deliverable = 'Forge is ready for multi-turn evaluation.\n';
