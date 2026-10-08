@@ -68,7 +68,7 @@ describe('checked-in quickstart', () => {
           'dataset',
           'cases',
           'examples',
-          'hello-file.yaml',
+          'hello-file.case.yaml',
         ),
         '--agent',
         'claude-code',

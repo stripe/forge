@@ -653,15 +653,10 @@ function planningInputs(
       manifestSha256: DIGEST,
       manifest: {
         dataset: {id: 'testing', version: '1.0.0'},
-        cases: [
-          {
-            id: definition.id,
-            path: 'cases/testing/action-bundle.yaml',
-          },
-        ],
+        cases: ['cases/testing/action-bundle.case.yaml'],
         files: [
           {
-            path: 'cases/testing/action-bundle.yaml',
+            path: 'cases/testing/action-bundle.case.yaml',
             size: 1,
             sha256: CASE_DIGEST.slice('sha256:'.length),
           },
@@ -672,7 +667,7 @@ function planningInputs(
           definition.id,
           {
             definition,
-            path: '/dataset/cases/testing/action-bundle.yaml',
+            path: '/dataset/cases/testing/action-bundle.case.yaml',
           },
         ],
       ]),
@@ -720,7 +715,7 @@ function experimentValue() {
       },
     },
     matrix: {
-      cases: ['testing/action-bundle'],
+      cases: ['cases/testing/action-bundle.case.yaml'],
       treatments: ['baseline', 'with-skill'],
       agents: [
         {

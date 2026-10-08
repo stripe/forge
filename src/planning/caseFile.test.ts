@@ -57,6 +57,14 @@ describe('resolveManifestCaseIdFromFile', () => {
     );
   });
 
+  it('rejects a lexical path through a symlinked parent inside the dataset', async () => {
+    const {dataset, caseFile} = await createDataset();
+    const alias = path.join(dataset.root, 'inside-alias');
+    await fs.symlink(path.dirname(caseFile), alias, 'dir');
+    await expectCode(resolveManifestCaseIdFromFile(dataset,
+      path.join(alias, path.basename(caseFile))), 'invalid_loaded_dataset');
+  });
+
   it('rejects ambiguous or inconsistent loaded-dataset indexes', async () => {
     const {dataset, caseFile, fixtureFile} = await createDataset();
     const duplicate: LoadedDatasetV1 = {
@@ -65,7 +73,7 @@ describe('resolveManifestCaseIdFromFile', () => {
         ...dataset.manifest,
         cases: [
           ...dataset.manifest.cases,
-          {id: 'sample/duplicate', path: dataset.manifest.cases[0]!.path},
+          dataset.manifest.cases[0]!,
         ],
       },
     };
@@ -106,6 +114,28 @@ describe('resolveManifestCaseIdFromFile', () => {
     );
   });
 
+  it('rejects forged unselected cases and replaced unselected manifest targets', async () => {
+    const {dataset, caseFile, otherCaseFile} = await createDataset();
+    const selectedCase = dataset.cases.get('sample/write')!;
+    const otherCase = dataset.cases.get('unselected')!;
+    for (const changed of [
+      {...otherCase, definition: {...otherCase.definition, id: 'sample/write'}},
+      {...otherCase, path: caseFile},
+      {...otherCase, path: '/outside/other.case.yaml'},
+    ]) {
+      await expectCode(resolveManifestCaseIdFromFile({...dataset,
+        cases: new Map([['sample/write', selectedCase], ['unselected', changed]]),
+      }, caseFile), 'invalid_loaded_dataset');
+    }
+    const extra = {...otherCase, definition: {...otherCase.definition, id: 'extra'}};
+    await expectCode(resolveManifestCaseIdFromFile({...dataset,
+      cases: new Map([...dataset.cases, ['extra', extra]]),
+    }, caseFile), 'invalid_loaded_dataset');
+    await fs.rm(otherCaseFile);
+    await fs.symlink(caseFile, otherCaseFile);
+    await expectCode(resolveManifestCaseIdFromFile(dataset, caseFile), 'invalid_loaded_dataset');
+  });
+
   it('fails closed if a verified manifest path is replaced by a symlink', async () => {
     const {dataset, caseFile} = await createDataset();
     const outsideRoot = await fs.mkdtemp(
@@ -128,13 +158,16 @@ async function createDataset(): Promise<{
   dataset: LoadedDatasetV1;
   caseFile: string;
   fixtureFile: string;
+  otherCaseFile: string;
 }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-case-file-'));
   cleanupPaths.push(root);
-  const casePath = 'cases/sample/write/eval.yaml';
+  const casePath = 'cases/sample/write/case.yaml';
   const fixturePath = 'cases/sample/write/fixtures/input.txt';
+  const otherCasePath = 'cases/unselected/other.case.yaml';
   const caseFile = path.join(root, ...casePath.split('/'));
   const fixtureFile = path.join(root, ...fixturePath.split('/'));
+  const otherCaseFile = path.join(root, ...otherCasePath.split('/'));
   const caseBody = Buffer.from(
     [
       'id: sample/write',
@@ -144,14 +177,17 @@ async function createDataset(): Promise<{
     ].join('\n'),
   );
   const fixtureBody = Buffer.from('fixture');
+  const otherCaseBody = Buffer.from('id: unselected\nexecution_mode: one_shot\ninitial_prompt: Another task.\n');
   await fs.mkdir(path.dirname(fixtureFile), {recursive: true});
   await fs.writeFile(caseFile, caseBody);
   await fs.writeFile(fixtureFile, fixtureBody);
+  await fs.mkdir(path.dirname(otherCaseFile), {recursive: true});
+  await fs.writeFile(otherCaseFile, otherCaseBody);
   await fs.writeFile(
     path.join(root, 'manifest.json'),
     JSON.stringify({
       dataset: {id: 'case-file-test', version: '1.0.0'},
-      cases: [{id: 'sample/write', path: casePath}],
+      cases: [casePath, otherCasePath],
       files: [
         {
           path: casePath,
@@ -163,10 +199,11 @@ async function createDataset(): Promise<{
           size: fixtureBody.byteLength,
           sha256: sha256Hex(fixtureBody),
         },
+        {path: otherCasePath, size: otherCaseBody.byteLength, sha256: sha256Hex(otherCaseBody)},
       ],
     }),
   );
-  return {dataset: await loadDataset(root), caseFile, fixtureFile};
+  return {dataset: await loadDataset(root), caseFile, fixtureFile, otherCaseFile};
 }
 
 async function expectCode(

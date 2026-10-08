@@ -166,7 +166,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
       artifactStore: createArtifactStore({root: resultsRoot}),
       credentialResolver: {async resolve() {throw new Error('Setup integration must never resolve credentials');} },
     };
-    const plans = expandExperiment(experiment).map((selection) =>
+    const plans = expandExperiment(experiment, dataset).map((selection) =>
       engine.resolveRunPlan({dataset, experiment, selection}));
     for (const plan of plans) engine.preflightEval({plan, composition});
 
@@ -281,7 +281,7 @@ async function createFixture(root, platform, specs, liveAgent) {
     'fixtures/seed.txt': 'dataset seed\n',
   };
   for (const spec of specs) {
-    files[`cases/setup/${spec.id}.yaml`] = stringify({
+    files[`cases/setup/${spec.id}.case.yaml`] = stringify({
       id: `setup/${spec.id}`, initial_prompt: `Verify ${spec.id} setup.`,
       execution_mode: 'one_shot', setup: spec.setup, judging_criteria: [],
       checks: {
@@ -294,7 +294,7 @@ async function createFixture(root, platform, specs, liveAgent) {
   }
   const manifest = {
     dataset: {id: 'forge-live-setup', version: '1.0.0'},
-    cases: specs.map(({id}) => ({id: `setup/${id}`, path: `cases/setup/${id}.yaml`})),
+    cases: specs.map(({id}) => `cases/setup/${id}.case.yaml`),
     files: Object.entries(files).map(([file, body]) => ({
       path: file, size: Buffer.byteLength(body), sha256: sha256(body),
     })),
@@ -316,7 +316,7 @@ async function createFixture(root, platform, specs, liveAgent) {
     },
     models: {}, treatments: {baseline: {setup: []}},
     matrix: {
-      cases: specs.map(({id}) => `setup/${id}`), treatments: ['baseline'],
+      cases: specs.map(({id}) => `cases/setup/${id}.case.yaml`), treatments: ['baseline'],
       agents: [{adapter: liveAgent, provider: liveAgent === 'codex' ? 'openai' : 'anthropic', model: 'setup-probe'}],
       repetitions: 1, retries: 0
     },

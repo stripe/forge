@@ -19,9 +19,59 @@ import {
 } from './planner.js';
 import {FORGE_BUILD_IDENTITY} from '../version.js';
 
+const CASE_A_PATH = 'cases/case/a/case.yaml';
+const CASE_B_PATH = 'cases/case-b.case.yaml';
+
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
 describe('experiment expansion and run planning', () => {
+  it('resolves authored file paths to stable case IDs while preserving manifest paths in plans', () => {
+    const experiment = experimentConfig({matrix: {
+      ...getMatrixGroups(experimentConfig().matrix)[0]!,
+      cases: [CASE_B_PATH, CASE_A_PATH],
+      repetitions: 1,
+      retries: 0,
+    }});
+    const loaded = inputs({experiment});
+    const selections = expandExperiment(experiment, loaded.dataset);
+    assert.deepEqual(selections.map(({case_id}) => case_id), [
+      'case/b', 'case/b', 'case/a', 'case/a',
+    ]);
+    const plans = selections.map((selection) => resolveRunPlan({...loaded, selection}));
+    assert.deepEqual(plans.map(({provenance}) => provenance.case.path), [
+      CASE_B_PATH, CASE_B_PATH, CASE_A_PATH, CASE_A_PATH,
+    ]);
+    assert.deepEqual(plans.map(({case: definition}) => definition.id), [
+      'case/b', 'case/b', 'case/a', 'case/a',
+    ]);
+    assert.throws(() => resolveRunPlan({...loaded,
+      selection: {...selections[0]!, case_id: CASE_B_PATH},
+    }), {code: 'unknown_case'});
+  });
+
+  it('requires matrix case references to identify loaded manifest cases without ID aliases', () => {
+    for (const casePath of [
+      'case/a',
+      'fixtures/seed.txt',
+      'cases/unlisted.case.yaml',
+    ]) {
+      const experiment = experimentConfig({matrix: {
+        ...getMatrixGroups(experimentConfig().matrix)[0]!,
+        cases: [casePath],
+        repetitions: 1,
+        retries: 0,
+      }});
+      const loaded = inputs({experiment});
+      assert.throws(() => expandExperiment(experiment, loaded.dataset), {code: 'unknown_case'});
+      assert.throws(() => resolveRunPlan({...loaded,
+        selection: selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
+      }), {code: 'unknown_case'});
+    }
+    const loaded = inputs();
+    loaded.dataset.cases = new Map();
+    assert.throws(() => expandExperiment(loaded.experiment, loaded.dataset), {code: 'invalid_loaded_dataset'});
+  });
+
   it('records Codex hook trust explicitly and separates policies in selection and plan identity', () => {
     const experiment = experimentConfig();
     experiment.matrix.agents = [
@@ -29,7 +79,7 @@ describe('experiment expansion and run planning', () => {
       {adapter: 'codex', provider: 'openai', model: 'gpt', hook_trust: 'automation'},
     ];
     const loaded = inputs({experiment});
-    const selections = expandExperiment(experiment);
+    const selections = expandExperiment(experiment, loaded.dataset);
     const plans = selections.map((selected) => resolveRunPlan({...loaded, selection: selected}));
     assert.equal(plans[0]!.agent.hook_trust, 'native');
     assert.equal(plans[1]!.agent.hook_trust, 'automation');
@@ -41,10 +91,77 @@ describe('experiment expansion and run planning', () => {
     experiment.matrix.agents.pop();
     assert.throws(() => resolveRunPlan({...loaded, selection: selections[1]!}), /not in the benchmark matrix/);
   });
+
+  it('rejects tampered dataset indexes even when the affected case is unselected', () => {
+    const original = inputs();
+    const selected = selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0);
+    const other = original.dataset.cases.get('case/b')!;
+    const variants: LoadedDatasetV1[] = [
+      {...original.dataset, cases: new Map([['case/a', original.dataset.cases.get('case/a')!]])},
+      {...original.dataset, cases: new Map([...original.dataset.cases,
+        ['extra', {...other, definition: {...other.definition, id: 'extra'}}]])},
+      {...original.dataset, manifest: {...original.dataset.manifest,
+        cases: [CASE_A_PATH, CASE_A_PATH]}},
+      {...original.dataset, manifest: {...original.dataset.manifest,
+        cases: [CASE_A_PATH, 'cases/ordinary.yaml']}},
+    ];
+    for (const changed of [
+      {...other, definition: {...other.definition, id: 'case/a'}},
+      {...other, path: original.dataset.cases.get('case/a')!.path},
+      {...other, path: '/outside/other.case.yaml'},
+      {...other, path: `./${CASE_B_PATH}`},
+    ]) {
+      variants.push({...original.dataset, cases: new Map([
+        ['case/a', original.dataset.cases.get('case/a')!], ['case/b', changed],
+      ])});
+    }
+    for (const dataset of variants) {
+      assert.throws(() => expandExperiment(original.experiment, dataset), {code: 'invalid_loaded_dataset'});
+      assert.throws(() => resolveRunPlan({dataset, experiment: original.experiment, selection: selected}),
+        {code: 'invalid_loaded_dataset'});
+    }
+  });
+
+  it('accepts complete ReadonlyMap implementations and rejects inconsistent bounded iteration', () => {
+    const loaded = inputs();
+    const source = loaded.dataset.cases;
+    const cases: LoadedDatasetV1['cases'] = {
+      size: source.size,
+      get: source.get.bind(source),
+      has: source.has.bind(source),
+      keys: source.keys.bind(source),
+      values: source.values.bind(source),
+      entries: source.entries.bind(source),
+      forEach: source.forEach.bind(source),
+      [Symbol.iterator]: source[Symbol.iterator].bind(source),
+    };
+    const selections = expandExperiment(loaded.experiment, loaded.dataset);
+    const dataset = {...loaded.dataset, cases};
+    assert.deepEqual(expandExperiment(loaded.experiment, dataset), selections);
+    assert.deepEqual(resolveRunPlan({...loaded, dataset, selection: selections[0]!}),
+      resolveRunPlan({...loaded, selection: selections[0]!}));
+    const entries = [...source];
+    let yielded = 0;
+    const invalid = [
+      {...cases, size: 1},
+      {...cases, get: () => undefined},
+      {...cases, [Symbol.iterator]: function* () {
+        while (true) {
+          yielded += 1;
+          yield entries[0]!;
+        }
+      }},
+    ];
+    for (const cases of invalid) {
+      assert.throws(() => expandExperiment(loaded.experiment, {...dataset, cases}),
+        {code: 'invalid_loaded_dataset'});
+    }
+    assert.ok(yielded <= source.size + 1);
+  });
   it('expands deterministically in case/treatment/agent/repetition order', () => {
     const experiment = experimentConfig({
       matrix: {
-        cases: ['case/b', 'case/a'],
+        cases: [CASE_B_PATH, CASE_A_PATH],
         treatments: ['with-seed', 'baseline'],
         agents: [
           {adapter: 'codex', provider: 'openai', model: 'gpt'},
@@ -55,7 +172,8 @@ describe('experiment expansion and run planning', () => {
       },
     });
 
-    const selections = expandExperiment(experiment);
+    const loaded = inputs({experiment});
+    const selections = expandExperiment(experiment, loaded.dataset);
     assert.deepEqual(selections, [
       selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 0),
       selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 1),
@@ -74,8 +192,7 @@ describe('experiment expansion and run planning', () => {
       selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
       selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 1),
     ]);
-    const loaded = inputs({experiment});
-    assert.deepEqual(expandExperiment(loaded.experiment), selections);
+    assert.deepEqual(expandExperiment(loaded.experiment, loaded.dataset), selections);
     selections[0]!.agent.model = 'changed-model';
     assert.equal(selections[1]!.agent.model, 'gpt');
     assert.equal(getMatrixGroups(experiment.matrix)[0]!.agents[0]!.model, 'gpt');
@@ -86,12 +203,12 @@ describe('experiment expansion and run planning', () => {
       matrix: {
         groups: [
           {
-            cases: ['case/b', 'case/a'],
+            cases: [CASE_B_PATH, CASE_A_PATH],
             treatments: ['with-seed', 'baseline'],
             agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}],
           },
           {
-            cases: ['case/a'],
+            cases: [CASE_A_PATH],
             treatments: ['baseline'],
             agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'}],
           },
@@ -101,7 +218,8 @@ describe('experiment expansion and run planning', () => {
       },
     });
     const before = structuredClone(experiment);
-    const selections = expandExperiment(experiment);
+    const loaded = inputs({experiment});
+    const selections = expandExperiment(experiment, loaded.dataset);
     assert.deepEqual(selections, [
       selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 0),
       selection('case/b', 'with-seed', 'codex', 'openai', 'gpt', 1),
@@ -114,7 +232,7 @@ describe('experiment expansion and run planning', () => {
       selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0),
       selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 1),
     ]);
-    assert.deepEqual(expandExperiment(inputs({experiment}).experiment), selections);
+    assert.deepEqual(expandExperiment(loaded.experiment, loaded.dataset), selections);
     assert.deepEqual(experiment, before);
     selections[0]!.agent.model = 'changed-model';
     assert.equal(selections[1]!.agent.model, 'gpt');
@@ -126,12 +244,12 @@ describe('experiment expansion and run planning', () => {
       matrix: {
         groups: [
           {
-            cases: ['case/a'],
+            cases: [CASE_A_PATH],
             treatments: ['baseline'],
             agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}],
           },
           {
-            cases: ['case/a'],
+            cases: [CASE_A_PATH],
             treatments: ['with-seed'],
             agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'}],
           },
@@ -140,7 +258,7 @@ describe('experiment expansion and run planning', () => {
         retries: 0,
       },
     })});
-    const selections = expandExperiment(loaded.experiment);
+    const selections = expandExperiment(loaded.experiment, loaded.dataset);
     for (const selected of selections) {
       assert.equal(resolveRunPlan({...loaded, selection: selected}).selection.case_id, 'case/a');
     }
@@ -167,31 +285,32 @@ describe('experiment expansion and run planning', () => {
     const implicit = {adapter: 'custom-agent', provider: 'custom-provider', model: 'model'};
     const native = {...implicit, hook_trust: 'native' as const};
     const flat = experimentConfig({matrix: {
-      cases: ['case/a'],
+      cases: [CASE_A_PATH],
       treatments: ['baseline'],
       agents: [implicit, native],
       repetitions: 1,
       retries: 0,
     }});
-    const flatSelections = expandExperiment(flat);
+    const flatLoaded = inputs({experiment: flat});
+    const flatSelections = expandExperiment(flat, flatLoaded.dataset);
     assert.deepEqual(flatSelections.map(({agent}) => agent), [implicit, native]);
     assert.equal(Object.hasOwn(flatSelections[0]!.agent, 'hook_trust'), false);
     const flatPlans = flatSelections.map((selected) =>
-      resolveRunPlan({...inputs({experiment: flat}), selection: selected}));
+      resolveRunPlan({...flatLoaded, selection: selected}));
     assert.deepEqual(flatPlans.map(({agent}) => agent), [implicit, native]);
     assert.notEqual(resolvedRunPlanSha256(flatPlans[0]!), resolvedRunPlanSha256(flatPlans[1]!));
 
     const grouped = experimentConfig({matrix: {
       groups: [
-        {cases: ['case/a'], treatments: ['baseline'], agents: [implicit]},
-        {cases: ['case/a'], treatments: ['with-seed'], agents: [native]},
+        {cases: [CASE_A_PATH], treatments: ['baseline'], agents: [implicit]},
+        {cases: [CASE_A_PATH], treatments: ['with-seed'], agents: [native]},
       ],
       repetitions: 1,
       retries: 0,
     }});
-    const selections = expandExperiment(grouped);
-    assert.deepEqual(selections.map(({agent}) => agent), [implicit, native]);
     const loaded = inputs({experiment: grouped});
+    const selections = expandExperiment(grouped, loaded.dataset);
+    assert.deepEqual(selections.map(({agent}) => agent), [implicit, native]);
     for (const [index, selected] of selections.entries()) {
       assert.deepEqual(resolveRunPlan({...loaded, selection: selected}).agent, selected.agent);
       const otherAgent = selections[1 - index]!.agent;
@@ -205,12 +324,13 @@ describe('experiment expansion and run planning', () => {
     const {cases, treatments, agents} = getMatrixGroups(experiment.matrix)[0]!;
     const axes = {cases, treatments, agents};
     experiment.matrix = {
-      groups: [axes, {...axes, cases: ['case/missing']}],
+      groups: [axes, {...axes, cases: ['cases/case/missing.case.yaml']}],
       repetitions: 1,
       retries: 0,
     };
     const loaded = inputs({experiment});
-    const selected = expandExperiment(experiment)[0]!;
+    const selected = selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0);
+    assert.throws(() => expandExperiment(experiment, loaded.dataset), {code: 'unknown_case'});
     assert.throws(() => resolveRunPlan({...loaded, selection: selected}), {code: 'unknown_case'});
   });
 
@@ -223,7 +343,7 @@ describe('experiment expansion and run planning', () => {
       repetitions: flat.matrix.repetitions,
       retries: flat.matrix.retries,
     }});
-    const selected = expandExperiment(flat)[1]!;
+    const selected = expandExperiment(flat, inputs({experiment: flat}).dataset)[1]!;
     const flatPlan = resolveRunPlan({...inputs({experiment: flat}), selection: selected});
     const groupedPlan = resolveRunPlan({...inputs({experiment: grouped}), selection: selected});
     assert.deepEqual(groupedPlan, flatPlan);
@@ -270,7 +390,7 @@ describe('experiment expansion and run planning', () => {
       assert.equal(actual.experiment.id, 'experiment/default');
       assert.equal(actual.experiment.version, '2026.09.0');
       assert.equal(actual.case.id, 'case/a');
-      assert.equal(actual.case.path, 'cases/case/a/eval.yaml');
+      assert.equal(actual.case.path, CASE_A_PATH);
       assert.deepEqual(actual.forge, FORGE_BUILD_IDENTITY);
     }
   });
@@ -283,7 +403,7 @@ describe('experiment expansion and run planning', () => {
         example_answer: 'A complete answer',
       },
     });
-    const selected = expandExperiment(loaded.experiment)[1]!;
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[1]!;
     const plan = resolveRunPlan({...loaded, selection: selected});
     const serialized = serializeResolvedRunPlan(plan);
     const definition = loaded.dataset.cases.get('case/a')!.definition;
@@ -320,7 +440,7 @@ describe('experiment expansion and run planning', () => {
 
   it('keeps dataset locations out of resolved plans and their checksums', () => {
     const loaded = inputs();
-    const selected = expandExperiment(loaded.experiment)[0]!;
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
     const before = resolveRunPlan({...loaded, selection: selected});
     loaded.experiment.config.dataset.path = '../relocated-dataset';
     const after = resolveRunPlan({...loaded, selection: selected});
@@ -441,7 +561,7 @@ describe('experiment expansion and run planning', () => {
 
   it('requires every component of a programmatic selection to match the matrix', () => {
     const loaded = inputs();
-    const selected = expandExperiment(loaded.experiment)[0]!;
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
     const invalid: [string, Partial<RunSelection>, PlanningError['code']][] = [
       ['case', {case_id: 'case/other'}, 'unknown_case'],
       ['treatment', {treatment: 'other'}, 'unknown_treatment'],
@@ -476,6 +596,10 @@ describe('experiment expansion and run planning', () => {
       {version: 'other-version'},
       {manifest_sha256: `sha256:${'0'.repeat(64)}` as const},
     ]) {
+      assert.throws(() => expandExperiment({
+        ...loaded.experiment.config,
+        dataset: {...loaded.experiment.config.dataset, ...changed},
+      }, loaded.dataset), {code: 'dataset_experiment_mismatch'});
       assert.throws(() =>
         resolveRunPlan({
           ...loaded,
@@ -652,7 +776,7 @@ function experimentConfig(
       },
     },
     matrix: {
-      cases: ['case/a'],
+      cases: [CASE_A_PATH],
       treatments: ['baseline', 'with-seed'],
       agents: [
         {adapter: 'claude-code', provider: 'anthropic', model: 'sonnet'},
@@ -675,7 +799,8 @@ function inputs(
   const definition = options.caseDefinition ?? evalCase();
   const config = options.experiment ?? experimentConfig();
   const manifestFiles = options.manifestFiles ?? [
-    {path: 'cases/case/a/eval.yaml', size: 100, sha256: 'b'.repeat(64)},
+    {path: CASE_A_PATH, size: 100, sha256: 'b'.repeat(64)},
+    {path: CASE_B_PATH, size: 100, sha256: 'c'.repeat(64)},
     {path: 'fixtures/seed.txt', size: 4, sha256: 'd'.repeat(64)},
   ];
   return {
@@ -686,13 +811,17 @@ function inputs(
       manifestSha256: MANIFEST_DIGEST,
       manifest: {
         dataset: {id: 'dataset', version: '2026.09.0'},
-        cases: [{id: 'case/a', path: 'cases/case/a/eval.yaml'}],
+        cases: [CASE_A_PATH, CASE_B_PATH],
         files: manifestFiles,
       },
       cases: new Map([
         [
           'case/a',
-          {definition, path: '/dataset/cases/case/a/eval.yaml'},
+          {definition, path: `/dataset/${CASE_A_PATH}`},
+        ],
+        [
+          'case/b',
+          {definition: {...definition, id: 'case/b'}, path: `/dataset/${CASE_B_PATH}`},
         ],
       ]),
     },

@@ -1,8 +1,11 @@
 import {sha256Digest} from '../model/hashes.js';
+import {indexLoadedDatasetCases} from '../model/loaders.js';
 import {agentSelectionKey, getMatrixGroups} from '../model/matrix.js';
 import {
   DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
+  type CaseId,
+  type DatasetRelativePath,
   type ExperimentConfigV1,
   type ForgeDockerRuntimeV1,
   type LoadedExperimentConfigV1,
@@ -28,6 +31,7 @@ export type PlanningErrorCode =
   | 'missing_role_player'
   | 'missing_judge'
   | 'missing_dataset_input'
+  | 'invalid_loaded_dataset'
   | 'action_bundle_mismatch'
   | 'missing_runtime_platform';
 
@@ -41,17 +45,29 @@ export class PlanningError extends Error {
   }
 }
 
+/** @internal Validate the complete authored inventory without expanding selections. */
+export function validateExperimentDataset(
+  input: ExperimentConfigV1 | LoadedExperimentConfigV1,
+  dataset: LoadedDatasetV1,
+): void {
+  assertDatasetCompatibility(dataset, 'config' in input ? input.config : input);
+}
+
 /**
  * Expand in stable authored order: group, case, treatment, agent, repetition.
+ * Manifest-listed case paths resolve to their stable case IDs in selections.
  * Retries deliberately do not create new semantic selections.
  */
 export function expandExperiment(
   input: ExperimentConfigV1 | LoadedExperimentConfigV1,
+  dataset: LoadedDatasetV1,
 ): RunSelection[] {
   const config = 'config' in input ? input.config : input;
+  const caseIdsByPath = assertDatasetCompatibility(dataset, config);
   const selections: RunSelection[] = [];
   for (const group of getMatrixGroups(config.matrix)) {
-    for (const caseId of group.cases) {
+    for (const casePath of group.cases) {
+      const caseId = caseIdsByPath.get(casePath)!;
       for (const treatment of group.treatments) {
         for (const agent of group.agents) {
           for (
@@ -95,8 +111,11 @@ export function resolveRunPlanWithSetupActions(
 ): ResolvedRunPlanV1 {
   const {dataset, selection} = input;
   const config = input.experiment.config;
-  assertDatasetCompatibility(dataset, config);
-  assertSelection(config, selection);
+  const caseIdsByPath = assertDatasetCompatibility(dataset, config);
+  const casePath = [...caseIdsByPath].find(
+    ([, id]) => id === selection.case_id,
+  )?.[0];
+  assertSelection(config, selection, casePath);
 
   const loadedCase = dataset.cases.get(selection.case_id);
   if (!loadedCase) {
@@ -105,10 +124,7 @@ export function resolveRunPlanWithSetupActions(
       'Run selection references a case absent from the loaded dataset.',
     );
   }
-  const manifestCase = dataset.manifest.cases.find(
-    ({id}) => id === selection.case_id,
-  );
-  if (!manifestCase) {
+  if (casePath === undefined) {
     throw new PlanningError(
       'unknown_case',
       'Run selection references a case absent from the dataset manifest.',
@@ -184,7 +200,7 @@ export function resolveRunPlanWithSetupActions(
       },
       case: {
         id: definition.id,
-        path: manifestCase.path,
+        path: casePath,
       },
       forge: {
         ...FORGE_BUILD_IDENTITY,
@@ -274,7 +290,17 @@ export function resolvedRunPlanSha256(plan: ResolvedRunPlanV1): `sha256:${string
 function assertDatasetCompatibility(
   dataset: LoadedDatasetV1,
   config: ExperimentConfigV1,
-): void {
+): ReadonlyMap<DatasetRelativePath, CaseId> {
+  let caseIdsByPath: ReadonlyMap<DatasetRelativePath, CaseId>;
+  try {
+    caseIdsByPath = new Map([...indexLoadedDatasetCases(dataset)].map(
+      ([casePath, loadedCase]) => [casePath, loadedCase.definition.id],
+    ));
+  } catch (error) {
+    throw new PlanningError('invalid_loaded_dataset',
+      'The loaded dataset case index does not match its authored definitions and manifest.',
+      {cause: error});
+  }
   if (
     dataset.manifest.dataset.id !== config.dataset.id ||
     dataset.manifest.dataset.version !== config.dataset.version ||
@@ -286,23 +312,26 @@ function assertDatasetCompatibility(
     );
   }
   for (const group of getMatrixGroups(config.matrix)) {
-    for (const caseId of group.cases) {
-      if (!dataset.cases.has(caseId)) {
+    for (const casePath of group.cases) {
+      const caseId = caseIdsByPath.get(casePath);
+      if (caseId === undefined) {
         throw new PlanningError(
           'unknown_case',
-          'Experiment config references a case absent from the loaded dataset.',
+          'Experiment config references a case file absent from the loaded dataset manifest.',
         );
       }
     }
   }
+  return caseIdsByPath;
 }
 
 function assertSelection(
   config: ExperimentConfigV1,
   selection: RunSelection,
+  casePath: DatasetRelativePath | undefined,
 ): void {
   const groups = getMatrixGroups(config.matrix);
-  if (!groups.some((group) => group.cases.includes(selection.case_id))) {
+  if (casePath === undefined || !groups.some((group) => group.cases.includes(casePath))) {
     throw new PlanningError(
       'unknown_case',
       'Run selection case is not in the benchmark matrix.',
@@ -335,7 +364,7 @@ function assertSelection(
     );
   }
   if (!groups.some((group) =>
-    group.cases.includes(selection.case_id) &&
+    group.cases.includes(casePath) &&
     group.treatments.includes(selection.treatment) &&
     group.agents.some((agent) => agentsEqual(agent, selection.agent))
   )) {

@@ -65,7 +65,7 @@ describe('external runtime composition', () => {
     const plan = resolveRunPlan({
       dataset,
       experiment,
-      selection: expandExperiment(experiment)[0]!,
+      selection: expandExperiment(experiment, dataset)[0]!,
     });
     assert.deepEqual(plan.runtime, descriptor);
 

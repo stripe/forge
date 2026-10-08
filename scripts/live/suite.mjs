@@ -139,7 +139,7 @@ export function createFullSuite(forge, options, overrides = {}) {
       datasetExample: 'quickstart',
       agent: liveAgent,
       model: codexSelected ? CODEX_MODEL : MODEL,
-      casePath: ['cases', 'examples', 'hello-file.yaml'],
+      casePath: ['cases', 'examples', 'hello-file.case.yaml'],
       runId: runIds.oneShot,
       compositionFactory,
       signal,
@@ -155,7 +155,7 @@ export function createFullSuite(forge, options, overrides = {}) {
       const multiTurnCompleted = await checked(runIds.multiTurn, () => checks.runSelection({
         label: 'multi-turn',
         example: 'multi-turn',
-        casePath: ['cases', 'examples', 'release-summary.yaml'],
+        casePath: ['cases', 'examples', 'release-summary.case.yaml'],
         runId: runIds.multiTurn,
         compositionFactory,
         signal,
@@ -200,7 +200,7 @@ export function createFullSuite(forge, options, overrides = {}) {
         path.join(repositoryRoot, 'examples', 'quickstart', 'experiment.yaml'),
       ),
     ]);
-    const selection = expandExperiment(experiment)[0];
+    const selection = expandExperiment(experiment, dataset)[0];
     if (selection === undefined) {
       throw new Error('The quickstart experiment config contains no run selection.');
     }
@@ -403,7 +403,7 @@ export function createFullSuite(forge, options, overrides = {}) {
           path.join(repositoryRoot, 'examples', 'quickstart', 'experiment.yaml'),
         ),
       ]);
-      const selection = expandExperiment(experiment)[0];
+      const selection = expandExperiment(experiment, dataset)[0];
       if (selection === undefined) {
         throw new Error('The quickstart experiment config contains no run selection.');
       }

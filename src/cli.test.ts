@@ -86,6 +86,61 @@ describe('Forge CLI', () => {
     assert.ok((await fs.stat(summary.checkpoint)).isFile());
   });
 
+  it('resumes a saved selection without expanding unrelated matrix entries', async () => {
+    const fixture = await createBenchmarkFixture();
+    const output = path.join(fixture.root, 'results');
+    let stdout = '';
+    let executed = 0;
+    const options: RunCliOptions = {
+      environment: {},
+      experimentRunIdFactory: () => 'saved-subset',
+      runIdFactory: () => 'saved-eval',
+      stdout: (text) => {stdout += text;},
+      execute: async (input) => {executed += 1; return executeOffline(input);},
+    };
+    assert.equal(await runCli([
+      'run', '--experiment', fixture.experimentPath, '--output', output,
+    ], options), 0);
+    const summary = JSON.parse(stdout) as {experiment_run_id: string};
+
+    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    assert.ok(config.matrix.groups === undefined);
+    const selectedAgent = config.matrix.agents[0]!;
+    config.matrix.agents = [selectedAgent, ...Array.from({length: 999}, (_, index) => ({
+      ...selectedAgent, model: `unselected-${index}`,
+    }))];
+    config.matrix.repetitions = 10_000;
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+
+    let agentEnumerations = 0;
+    const engine = {
+      ...defaultForgeEngine,
+      loadExperimentConfig: async (experimentPath: string) => {
+        const experiment = await defaultForgeEngine.loadExperimentConfig(experimentPath);
+        assert.ok(experiment.config.matrix.groups === undefined);
+        // Stop an accidental ten-million-selection expansion immediately. Matrix
+        // membership checks use array.some and do not enumerate Cartesian axes.
+        Object.defineProperty(experiment.config.matrix.agents, Symbol.iterator, {value: () => {
+          agentEnumerations += 1;
+          throw new Error('Resume must not expand unsaved matrix combinations.');
+        }});
+        return experiment;
+      },
+    };
+    stdout = '';
+    let stderr = '';
+    assert.equal(await runCli([
+      'run', '--experiment', fixture.experimentPath, '--output', output,
+      '--resume', summary.experiment_run_id,
+    ], {...options, engine, stderr: (text) => {stderr += text;}}), 0, stderr);
+    const resumed = JSON.parse(stdout) as {total: number; skipped: number; executed: number};
+    assert.equal(resumed.total, 1);
+    assert.equal(resumed.skipped, 1);
+    assert.equal(resumed.executed, 0);
+    assert.equal(executed, 1);
+    assert.equal(agentEnumerations, 0);
+  });
+
   it('checks default-composition input bytes against the manifest loaded for the run', async () => {
     const fixture = await createBenchmarkFixture();
     const exitCode = await runCli([
@@ -97,7 +152,7 @@ describe('Forge CLI', () => {
         const {composition} = input;
         const original = await fs.readFile(fixture.caseFilePath, 'utf8');
         await fs.writeFile(fixture.caseFilePath, original.replace('Do the thing', 'Do bad thing'));
-        await assert.rejects(composition.inputProvider.read('cases/example.yaml'), /SHA-256/);
+        await assert.rejects(composition.inputProvider.read('cases/example.case.yaml'), /SHA-256/);
         await fs.writeFile(path.join(fixture.datasetRoot, 'cases/extra.yaml'), 'extra');
         await assert.rejects(composition.inputProvider.listFiles('cases'), /manifest inventory/);
         await fs.writeFile(fixture.caseFilePath, original);
@@ -247,10 +302,13 @@ describe('Forge CLI', () => {
     const fixture = await createGroupedBenchmarkFixture();
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
     assert.ok(config.matrix.groups !== undefined);
-    config.matrix.groups[1]!.cases = ['case/not-in-dataset'];
+    config.matrix.groups[1]!.cases = ['cases/not-in-dataset.case.yaml'];
+    assert.equal(config.runtime.adapter, 'docker');
+    config.runtime.platform = 'native';
     await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
     let preparations = 0;
     let executions = 0;
+    let detections = 0;
     let stderr = '';
     const exitCode = await runCli([
       'run', '--experiment', fixture.experimentPath, '--case', 'case/example',
@@ -258,6 +316,7 @@ describe('Forge CLI', () => {
       environment: {},
       stdout: () => undefined,
       stderr: (text) => {stderr += text;},
+      detectDockerPlatform: async () => {detections += 1; return 'linux/amd64';},
       compositionFactory: async (options) => {
         preparations += 1;
         return createDefaultCliComposition(options);
@@ -265,7 +324,8 @@ describe('Forge CLI', () => {
       execute: async (input) => {executions += 1; return executeOffline(input);},
     });
     assert.equal(exitCode, 1);
-    assert.ok(stderr.includes('references a case absent from the loaded dataset'));
+    assert.ok(stderr.includes('references a case file absent from the loaded dataset manifest'));
+    assert.equal(detections, 0);
     assert.equal(preparations, 0);
     assert.equal(executions, 0);
   });
@@ -721,7 +781,7 @@ describe('Forge CLI', () => {
         '--experiment',
         'experiments/default.yaml',
         '--case-file',
-        'dataset/cases/example.yaml',
+        'dataset/cases/example.case.yaml',
       ],
       {
         cwd: fixture.root,
@@ -1135,12 +1195,12 @@ async function createGroupedBenchmarkFixture() {
     matrix: {
       groups: [
         {
-          cases: ['case/example'],
+          cases: ['cases/example.case.yaml'],
           treatments: ['baseline'],
           agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet'}],
         },
         {
-          cases: ['case/unselected'],
+          cases: ['cases/unselected.case.yaml'],
           treatments: ['baseline', 'enhanced'],
           agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-opus-4-6'}],
         },
@@ -1177,10 +1237,10 @@ execution_mode: one_shot
 setup: []
 judging_criteria: []
 `;
-  const casePath = 'cases/example.yaml';
+  const casePath = 'cases/example.case.yaml';
   const caseFilePath = path.join(datasetRoot, casePath);
   await fs.writeFile(caseFilePath, caseBody);
-  const unselectedCasePath = 'cases/unselected.yaml';
+  const unselectedCasePath = 'cases/unselected.case.yaml';
   const unselectedCaseFilePath = path.join(datasetRoot, unselectedCasePath);
   const unselectedCaseBody = `id: case/unselected
 task: Do another thing
@@ -1192,9 +1252,9 @@ judging_criteria: []
     await fs.writeFile(unselectedCaseFilePath, unselectedCaseBody);
   }
   const cases = [
-    {id: 'case/example', path: casePath},
+    casePath,
     ...(options.includeUnselectedCase
-      ? [{id: 'case/unselected', path: unselectedCasePath}]
+      ? [unselectedCasePath]
       : []),
   ];
   const files = [
@@ -1243,7 +1303,7 @@ treatments:
   baseline:
     setup: []
 matrix:
-  cases: [case/example]
+  cases: [cases/example.case.yaml]
   treatments: [baseline]
   agents:
     - adapter: claude-code

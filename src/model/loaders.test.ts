@@ -53,11 +53,31 @@ describe('benchmark filesystem loaders', () => {
     await assert.rejects(loadDataset(inputFixture.root), {code: 'dataset_integrity_mismatch', message: /declared size or hash/});
   });
 
-  it('rejects a correctly hashed case with a different manifest ID', async () => {
+  it('derives case identity from the definition independently of its filename', async () => {
     const fixture = await createDataset();
     const changedCase = fixture.caseYaml.replace('id: smoke/write', 'id: smoke/other');
     await replaceCasePayload(fixture, Buffer.from(changedCase));
-    await assert.rejects(loadDataset(fixture.root), {code: 'dataset_integrity_mismatch', message: /ID does not match/});
+    const loaded = await loadDataset(fixture.root);
+    assert.equal(loaded.cases.has('smoke/write'), false);
+    assert.equal(loaded.cases.get('smoke/other')?.path, fixture.casePath);
+  });
+
+  it('rejects duplicate authored IDs across every case before overwriting the index', async () => {
+    const fixture = await createDataset();
+    await appendCase(fixture.root, 'other/case', 'cases/unselected/first.case.yaml');
+    await appendCase(fixture.root, 'other/case', 'cases/unselected/second/case.yaml');
+    await assert.rejects(loadDataset(fixture.root), {
+      code: 'dataset_integrity_mismatch',
+      message: /Duplicate case ID "other\/case".*"cases\/unselected\/first.case.yaml".*"cases\/unselected\/second\/case.yaml"/,
+    });
+  });
+
+  it('parses unselected definitions and rejects missing or invalid authored IDs', async () => {
+    for (const id of ['invalid_case', '']) {
+      const fixture = await createDataset();
+      await appendCase(fixture.root, id, 'cases/unselected.case.yaml');
+      await assert.rejects(loadDataset(fixture.root), {code: 'invalid_case'});
+    }
   });
 
   it('rejects oversized documents before parsing their bytes', async () => {
@@ -101,7 +121,7 @@ describe('benchmark filesystem loaders', () => {
     const original = await loadExperimentConfig(experimentPath);
     await fs.appendFile(experimentPath, '\n# Clarify the experiment without changing it.\n');
     const edited = await loadExperimentConfig(experimentPath);
-    const selection = expandExperiment(original)[0]!;
+    const selection = expandExperiment(original, dataset)[0]!;
     assert.equal(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: edited, selection})), serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: original, selection})));
   });
 
@@ -127,6 +147,21 @@ describe('benchmark filesystem loaders', () => {
   });
 });
 
+async function appendCase(root: string, id: string, casePath: string): Promise<void> {
+  const manifestPath = path.join(root, 'manifest.json');
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as {
+    cases: string[];
+    files: {path: string; size: number; sha256: string}[];
+  };
+  const body = `${id === '' ? '' : `id: ${id}\n`}execution_mode: one_shot\ninitial_prompt: Complete the task.\n`;
+  const absolutePath = path.join(root, ...casePath.split('/'));
+  await fs.mkdir(path.dirname(absolutePath), {recursive: true});
+  await fs.writeFile(absolutePath, body);
+  manifest.cases.push(casePath);
+  manifest.files.push({path: casePath, size: Buffer.byteLength(body), sha256: sha256Hex(body)});
+  await fs.writeFile(manifestPath, JSON.stringify(manifest));
+}
+
 async function replaceCasePayload(
   fixture: {root: string; casePath: string; manifestRaw: string},
   body: Buffer,
@@ -134,7 +169,7 @@ async function replaceCasePayload(
   const manifest = JSON.parse(fixture.manifestRaw) as {
     files: {path: string; size: number; sha256: string}[];
   };
-  const entry = manifest.files.find(({path: relative}) => relative === 'cases/smoke/write/eval.yaml')!;
+  const entry = manifest.files.find(({path: relative}) => relative === 'cases/smoke/write/case.yaml')!;
   entry.size = body.byteLength;
   entry.sha256 = sha256Hex(body);
   await fs.writeFile(fixture.casePath, body);
@@ -148,7 +183,7 @@ async function createDataset(): Promise<{
   manifestRaw: string;
 }> {
   const root = await temporaryDirectory();
-  const casePath = path.join(root, 'cases', 'smoke', 'write', 'eval.yaml');
+  const casePath = path.join(root, 'cases', 'smoke', 'write', 'case.yaml');
   const inputPath = path.join(root, 'fixtures', 'seed.txt');
   const caseYaml = `
 id: smoke/write
@@ -167,10 +202,10 @@ setup:
   await fs.writeFile(inputPath, input);
   const manifestRaw = `${JSON.stringify({
     dataset: {id: 'forge-smoke', version: '2026.09.0'},
-    cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
+    cases: ['cases/smoke/write/case.yaml'],
     files: [
       {
-        path: 'cases/smoke/write/eval.yaml',
+        path: 'cases/smoke/write/case.yaml',
         size: Buffer.byteLength(caseYaml),
         sha256: sha256Hex(caseYaml),
       },
@@ -204,7 +239,7 @@ runtime:
   image: {kind: forge}
   platform: linux/amd64
 matrix:
-  cases: [smoke/write]
+  cases: [cases/smoke/write/case.yaml]
   treatments: [baseline]
   agents:
     - {adapter: claude-code, provider: anthropic, model: claude-sonnet-4-6}

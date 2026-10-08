@@ -4,7 +4,7 @@ dataset:
   path: ./dataset
   id: forge-multi-turn
   version: 0.1.0
-  manifest_sha256: sha256:70eef227c10b8f733e544d5f56e6418a475532225f237014240486df552bcf8b
+  manifest_sha256: sha256:8d78623d9f5328fa68c2cb2475a02af71896abef9f59a0ba4f5db46937581218
 runtime:
   adapter: docker
   image:
@@ -26,7 +26,7 @@ treatments:
     setup: []
 matrix:
   cases:
-    - examples/release-summary
+    - cases/examples/release-summary.case.yaml
   treatments:
     - baseline
   agents:

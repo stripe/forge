@@ -9,6 +9,8 @@ import {
 import {isSha256Digest, isSha256Hex} from './hashes.js';
 import {agentSelectionKey} from './matrix.js';
 import {
+  isAuthoredCaseId,
+  isCaseDefinitionPath,
   isSafeActionIdentifier,
   isSafeCaseId,
   isSafeDatasetRelativePath,
@@ -71,12 +73,20 @@ const VersionSchema = z
 const CaseIdSchema = z
   .string()
   .refine(isSafeCaseId, 'must be a canonical dataset-relative case ID');
+const AuthoredCaseIdSchema = z.string().refine(
+  isAuthoredCaseId,
+  'case ID must use lowercase slash-separated kebab-case segments',
+);
 const DatasetPathSchema = z
   .string()
   .refine(
     isSafeDatasetRelativePath,
     'must be a canonical dataset-relative POSIX path',
   );
+const CasePathSchema = DatasetPathSchema.refine(
+  isCaseDefinitionPath,
+  'case definitions must be case.yaml or <name>.case.yaml files below cases/',
+);
 const WorkspacePathSchema = z
   .string()
   .refine(
@@ -186,7 +196,7 @@ const ChecksSchema = z
   })
   .strict();
 
-const EvalCaseSchema = z
+const CompatibleEvalCaseSchema = z
   .object({
     id: CaseIdSchema,
     display_name: TrimmedTextSchema.optional(),
@@ -239,20 +249,15 @@ const EvalCaseSchema = z
     }
   });
 
+const EvalCaseSchema = z.intersection(
+  CompatibleEvalCaseSchema,
+  z.object({id: AuthoredCaseIdSchema}),
+);
+
 const DatasetIdentitySchema = z
   .object({
     id: SimpleIdentifierSchema,
     version: VersionSchema,
-  })
-  .strict();
-
-const ManifestCaseSchema = z
-  .object({
-    id: CaseIdSchema,
-    path: DatasetPathSchema.refine(
-      (value) => value.startsWith('cases/') && value.endsWith('.yaml'),
-      'case definitions must be YAML files below cases/',
-    ),
   })
   .strict();
 
@@ -267,19 +272,13 @@ const ManifestFileSchema = z
 const DatasetManifestSchema = z
   .object({
     dataset: DatasetIdentitySchema,
-    cases: z.array(ManifestCaseSchema).min(1).max(10_000),
+    cases: z.array(CasePathSchema).min(1).max(10_000),
     files: z.array(ManifestFileSchema).min(1).max(50_000),
   })
   .strict()
   .superRefine((manifest, context) => {
     addDuplicateIssues(
-      manifest.cases.map(({id}) => id),
-      context,
-      ['cases'],
-      'id',
-    );
-    addDuplicateIssues(
-      manifest.cases.map(({path}) => path),
+      manifest.cases,
       context,
       ['cases'],
       'path',
@@ -291,11 +290,11 @@ const DatasetManifestSchema = z
       'path',
     );
     const files = new Set(manifest.files.map(({path}) => path));
-    for (const [index, entry] of manifest.cases.entries()) {
-      if (!files.has(entry.path)) {
+    for (const [index, casePath] of manifest.cases.entries()) {
+      if (!files.has(casePath)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['cases', index, 'path'],
+          path: ['cases', index],
           message: 'case path must be present in the file manifest',
         });
       }
@@ -417,7 +416,7 @@ function assertRuntimeConfigBytes(value: unknown): void {
 
 const ExperimentMatrixGroupSchema = z
   .object({
-    cases: z.array(CaseIdSchema).min(1).max(10_000),
+    cases: z.array(CasePathSchema).min(1).max(10_000),
     treatments: z.array(z.string()).min(1).max(1_000),
     agents: z.array(AgentSelectionSchema).min(1).max(1_000),
   })
@@ -563,7 +562,7 @@ const MaterializedEvalCaseSchema = z.intersection(
       judging_criteria: z.array(JudgingCriterionSchema).max(1_000),
     })
     .passthrough(),
-  EvalCaseSchema,
+  CompatibleEvalCaseSchema,
 );
 
 const ResolvedDockerRuntimeSchema = z

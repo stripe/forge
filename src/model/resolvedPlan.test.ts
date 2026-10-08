@@ -78,6 +78,15 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('retains historical case identities and filenames in saved artifacts', () => {
+    const plan = validPlan();
+    const id = 'Legacy_Suite/Case.1';
+    plan.selection.case_id = id;
+    plan.provenance.case.id = id;
+    plan.case.id = id;
+    plan.provenance.case.path = 'cases/Legacy_Suite/ordinary.yaml';
+    assert.deepEqual(parseResolvedRunPlan(plan), plan);
+  });
   it('preserves saved Codex plans without a hook policy and rejects policy drift', () => {
     const input = validPlan();
     input.agent = {adapter: 'codex', provider: 'openai', model: 'gpt-test'};

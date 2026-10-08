@@ -25,6 +25,7 @@ import {
   type DatasetManifestV1,
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
+  type LoadedDatasetV1,
   type RunSelection,
 } from './model/index.js';
 import {
@@ -33,6 +34,7 @@ import {
   resolveManifestCaseIdFromFile,
   serializeResolvedRunPlan,
 } from './planning/index.js';
+import {validateExperimentDataset} from './planning/planner.js';
 import {createArtifactStore} from './results/index.js';
 import {
   createDockerRuntimeAdapter,
@@ -265,7 +267,7 @@ export async function runCli(
       experiment.config.runtime.platform === 'native';
 
     if (command === 'validate') {
-      const selections = expandExperiment(experiment);
+      const selections = expandExperiment(experiment, dataset);
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
       let hostSelection:
@@ -354,15 +356,6 @@ export async function runCli(
       return 0;
     }
 
-    const runtimePlatform = nativeDocker
-      ? (options.runtimePlatform ??
-        (await (
-          options.detectDockerPlatform ?? detectDockerRuntimePlatform
-        )(
-          options.signal === undefined ? {} : {signal: options.signal},
-        )))
-      : undefined;
-
     let caseId = parsed.values.case;
     if (caseFilePath !== undefined) {
       try {
@@ -382,10 +375,19 @@ export async function runCli(
       model: parsed.values.model,
       repetition: parseRepetition(parsed.values.repetition),
     };
+    const selection = selectOne(experiment.config, dataset, filters);
+    const runtimePlatform = nativeDocker
+      ? (options.runtimePlatform ??
+        (await (
+          options.detectDockerPlatform ?? detectDockerRuntimePlatform
+        )(
+          options.signal === undefined ? {} : {signal: options.signal},
+        )))
+      : undefined;
     const plan = engine.resolveRunPlan({
       dataset,
       experiment,
-      selection: selectOne(experiment.config, filters),
+      selection,
       ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
     });
     stdout(serializeResolvedRunPlan(plan));
@@ -425,9 +427,6 @@ async function runPublicExperiment(
         throw new CliUsageError('The experiment must declare dataset.path, relative to the experiment file.');
       }
       const dataset = await engine.loadDataset(path.resolve(experiment.root, experiment.config.dataset.path));
-      const runtimePlatform = experiment.config.runtime.adapter === 'docker' && experiment.config.runtime.platform === 'native'
-        ? options.runtimePlatform ?? await (options.detectDockerPlatform ?? detectDockerRuntimePlatform)({signal})
-        : undefined;
       let caseId = values.case;
       const caseFilePath = resolveOptionalPath(values['case-file'], 'case-file', cwd);
       if (caseFilePath !== undefined) {
@@ -438,10 +437,14 @@ async function runPublicExperiment(
           throw error;
         }
       }
-      const selections = savedSelections ?? selectMatching(experiment.config, {
+      if (savedSelections !== undefined) validateExperimentDataset(experiment, dataset);
+      const selections = savedSelections ?? selectMatching(experiment.config, dataset, {
         caseId, treatment: values.treatment, adapter: values.agent,
         provider: values.provider, model: values.model, repetition: parseRepetition(values.repetition),
       });
+      const runtimePlatform = experiment.config.runtime.adapter === 'docker' && experiment.config.runtime.platform === 'native'
+        ? options.runtimePlatform ?? await (options.detectDockerPlatform ?? detectDockerRuntimePlatform)({signal})
+        : undefined;
       const plans = selections.map((selection) => engine.resolveRunPlan({dataset, experiment, selection,
         ...(runtimePlatform === undefined ? {} : {runtimePlatform})}));
       const credentialBindings = parseCredentialEnvironmentBindings(values['credential-env']);
@@ -469,9 +472,10 @@ interface SelectionFilters {
 
 function selectOne(
   experiment: ExperimentConfigV1,
+  dataset: LoadedDatasetV1,
   filters: SelectionFilters,
 ): RunSelection {
-  const matches = selectMatching(experiment, filters);
+  const matches = selectMatching(experiment, dataset, filters);
   if (matches.length > 1) {
     throw new CliUsageError(
       `Selection matches ${matches.length} matrix entries; add selection options.`,
@@ -482,9 +486,10 @@ function selectOne(
 
 function selectMatching(
   experiment: ExperimentConfigV1,
+  dataset: LoadedDatasetV1,
   filters: SelectionFilters,
 ): RunSelection[] {
-  const matches = expandExperiment(experiment).filter((selection) =>
+  const matches = expandExperiment(experiment, dataset).filter((selection) =>
     (filters.caseId === undefined || selection.case_id === filters.caseId) &&
     (filters.treatment === undefined || selection.treatment === filters.treatment) &&
     (filters.adapter === undefined || selection.agent.adapter === filters.adapter) &&

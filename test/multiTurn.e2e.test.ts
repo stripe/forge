@@ -32,7 +32,7 @@ describe('multi-turn CLI end to end', () => {
     const example = path.join(process.cwd(), 'examples', 'multi-turn');
     const fixture = {
       experimentPath: path.join(example, 'experiment.yaml'),
-      casePath: path.join(example, 'dataset', 'cases', 'examples', 'release-summary.yaml'),
+      casePath: path.join(example, 'dataset', 'cases', 'examples', 'release-summary.case.yaml'),
       resultsRoot: path.join(root, 'results'),
     };
     const deliverable = 'Forge is ready for multi-turn evaluation.\n';
