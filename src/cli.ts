@@ -34,6 +34,7 @@ import {
   resolveManifestCaseIdFromFile,
   serializeResolvedRunPlan,
 } from './planning/index.js';
+import {validateExperimentDataset} from './planning/planner.js';
 import {createArtifactStore} from './results/index.js';
 import {
   createDockerRuntimeAdapter,
@@ -436,7 +437,7 @@ async function runPublicExperiment(
           throw error;
         }
       }
-      if (savedSelections !== undefined) expandExperiment(experiment, dataset);
+      if (savedSelections !== undefined) validateExperimentDataset(experiment, dataset);
       const selections = savedSelections ?? selectMatching(experiment.config, dataset, {
         caseId, treatment: values.treatment, adapter: values.agent,
         provider: values.provider, model: values.model, repetition: parseRepetition(values.repetition),

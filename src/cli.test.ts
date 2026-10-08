@@ -86,6 +86,61 @@ describe('Forge CLI', () => {
     assert.ok((await fs.stat(summary.checkpoint)).isFile());
   });
 
+  it('resumes a saved selection without expanding unrelated matrix entries', async () => {
+    const fixture = await createBenchmarkFixture();
+    const output = path.join(fixture.root, 'results');
+    let stdout = '';
+    let executed = 0;
+    const options: RunCliOptions = {
+      environment: {},
+      experimentRunIdFactory: () => 'saved-subset',
+      runIdFactory: () => 'saved-eval',
+      stdout: (text) => {stdout += text;},
+      execute: async (input) => {executed += 1; return executeOffline(input);},
+    };
+    assert.equal(await runCli([
+      'run', '--experiment', fixture.experimentPath, '--output', output,
+    ], options), 0);
+    const summary = JSON.parse(stdout) as {experiment_run_id: string};
+
+    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    assert.ok(config.matrix.groups === undefined);
+    const selectedAgent = config.matrix.agents[0]!;
+    config.matrix.agents = [selectedAgent, ...Array.from({length: 999}, (_, index) => ({
+      ...selectedAgent, model: `unselected-${index}`,
+    }))];
+    config.matrix.repetitions = 10_000;
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+
+    let agentEnumerations = 0;
+    const engine = {
+      ...defaultForgeEngine,
+      loadExperimentConfig: async (experimentPath: string) => {
+        const experiment = await defaultForgeEngine.loadExperimentConfig(experimentPath);
+        assert.ok(experiment.config.matrix.groups === undefined);
+        // Stop an accidental ten-million-selection expansion immediately. Matrix
+        // membership checks use array.some and do not enumerate Cartesian axes.
+        Object.defineProperty(experiment.config.matrix.agents, Symbol.iterator, {value: () => {
+          agentEnumerations += 1;
+          throw new Error('Resume must not expand unsaved matrix combinations.');
+        }});
+        return experiment;
+      },
+    };
+    stdout = '';
+    let stderr = '';
+    assert.equal(await runCli([
+      'run', '--experiment', fixture.experimentPath, '--output', output,
+      '--resume', summary.experiment_run_id,
+    ], {...options, engine, stderr: (text) => {stderr += text;}}), 0, stderr);
+    const resumed = JSON.parse(stdout) as {total: number; skipped: number; executed: number};
+    assert.equal(resumed.total, 1);
+    assert.equal(resumed.skipped, 1);
+    assert.equal(resumed.executed, 0);
+    assert.equal(executed, 1);
+    assert.equal(agentEnumerations, 0);
+  });
+
   it('checks default-composition input bytes against the manifest loaded for the run', async () => {
     const fixture = await createBenchmarkFixture();
     const exitCode = await runCli([

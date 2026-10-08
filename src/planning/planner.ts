@@ -45,6 +45,14 @@ export class PlanningError extends Error {
   }
 }
 
+/** @internal Validate the complete authored inventory without expanding selections. */
+export function validateExperimentDataset(
+  input: ExperimentConfigV1 | LoadedExperimentConfigV1,
+  dataset: LoadedDatasetV1,
+): void {
+  assertDatasetCompatibility(dataset, 'config' in input ? input.config : input);
+}
+
 /**
  * Expand in stable authored order: group, case, treatment, agent, repetition.
  * Manifest-listed case paths resolve to their stable case IDs in selections.
