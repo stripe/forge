@@ -13,7 +13,7 @@ node dist/cli.js validate \
 
 node dist/cli.js plan \
   --experiment examples/quickstart/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml \
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6
 ```
@@ -24,7 +24,7 @@ Run it with a dedicated Anthropic key:
 ANTHROPIC_API_KEY=your-restricted-key \
 node dist/cli.js run \
   --experiment examples/quickstart/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml \
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
   --output ./results \
@@ -39,7 +39,7 @@ ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
 node dist/cli.js run \
   --experiment examples/quickstart/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml \
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
   --output ./results \

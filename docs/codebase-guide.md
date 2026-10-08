@@ -313,7 +313,8 @@ credentials, inspect the runtime, or select a composition adapter. Its setup
 registry dependency exists only to bind the plan to registered action
 implementations and their bundle identities. It stamps the resolved plan with
 the installed Forge build identity; experiments do not author that identity.
-`expandExperiment` walks matrix groups before their case/treatment/agent/
+`expandExperiment(experiment, dataset)` maps the matrix's manifest-listed case
+paths to declared IDs and walks groups before their case/treatment/agent/
 repetition axes. Selection membership checks keep the complete tuple within
 one group; downstream execution and reporting consume ordinary selections.
 See the README's [matrix contract](../README.md#experiment-matrices).

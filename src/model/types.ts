@@ -181,7 +181,8 @@ export type ForgeRuntimeConfigV1 =
 
 /** One authored Cartesian product; selections never cross group boundaries. */
 export interface ExperimentMatrixGroupV1 {
-  cases: CaseId[];
+  /** Manifest-listed case YAML paths, relative to the dataset root. */
+  cases: DatasetRelativePath[];
   treatments: TreatmentId[];
   agents: AgentSelectionV1[];
 }

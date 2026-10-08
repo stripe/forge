@@ -53,7 +53,7 @@ describe('experiment public entry points', () => {
 
   it('exports flat and grouped matrix types and their shared axes helper', () => {
     const group: root.ExperimentMatrixGroupV1 = {
-      cases: ['examples/first'],
+      cases: ['cases/examples/first.case.yaml'],
       treatments: ['baseline'],
       agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet-4-6'}],
     };
@@ -64,7 +64,7 @@ describe('experiment public entry points', () => {
     for (const matrix of matrices) {
       const groups: readonly root.ExperimentMatrixGroupV1[] = root.getMatrixGroups(matrix);
       assert.equal(groups.length, 1);
-      assert.deepEqual(groups[0]!.cases, ['examples/first']);
+      assert.deepEqual(groups[0]!.cases, ['cases/examples/first.case.yaml']);
     }
   });
 

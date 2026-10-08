@@ -6,12 +6,12 @@
   "cases": [
     {
       "id": "examples/hello-file",
-      "path": "cases/examples/hello-file.yaml"
+      "path": "cases/examples/hello-file.case.yaml"
     }
   ],
   "files": [
     {
-      "path": "cases/examples/hello-file.yaml",
+      "path": "cases/examples/hello-file.case.yaml",
       "size": 330,
       "sha256": "de86e553802bdbaf1f98a7f075dabde85cb288ec0c76860574f23ab3dd52e341"
     }

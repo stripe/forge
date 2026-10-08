@@ -87,7 +87,7 @@ quickstart/
 │   ├── manifest.json
 │   └── cases/
 │       └── examples/
-│           └── hello-file.yaml
+│           └── hello-file.case.yaml
 └── experiment.yaml
 ```
 
@@ -96,7 +96,7 @@ final newline. Dataset payload bytes must exactly match their manifest entries.
 
 ### 1. Eval case
 
-Create `quickstart/dataset/cases/examples/hello-file.yaml`:
+Create `quickstart/dataset/cases/examples/hello-file.case.yaml`:
 
 <!-- quickstart-case:start -->
 ```yaml
@@ -136,12 +136,12 @@ Create `quickstart/dataset/manifest.json`:
   "cases": [
     {
       "id": "examples/hello-file",
-      "path": "cases/examples/hello-file.yaml"
+      "path": "cases/examples/hello-file.case.yaml"
     }
   ],
   "files": [
     {
-      "path": "cases/examples/hello-file.yaml",
+      "path": "cases/examples/hello-file.case.yaml",
       "size": 330,
       "sha256": "de86e553802bdbaf1f98a7f075dabde85cb288ec0c76860574f23ab3dd52e341"
     }
@@ -166,7 +166,7 @@ dataset:
   path: ./dataset
   id: forge-quickstart
   version: 0.1.0
-  manifest_sha256: sha256:75c268301fe1f8a3dc06762b64df75d6b6c3d3bb5b2dd349ddd0c6b8044fa0b0
+  manifest_sha256: sha256:158c4c18bd0a914efc0f4a79d44e71bd156cf8b72c6ea9d3be03f1fffdf4130e
 runtime:
   adapter: docker
   image:
@@ -182,7 +182,7 @@ treatments:
     setup: []
 matrix:
   cases:
-    - examples/hello-file
+    - cases/examples/hello-file.case.yaml
   treatments:
     - baseline
   agents:
@@ -274,7 +274,7 @@ Inspect the canonical resolved plan:
 ```sh
 npx --no-install forge plan \
   --experiment ./experiment.yaml \
-  --case-file ./dataset/cases/examples/hello-file.yaml \
+  --case-file ./dataset/cases/examples/hello-file.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6
 ```
@@ -285,7 +285,7 @@ Run the single selection:
 ANTHROPIC_API_KEY=your-restricted-key \
 npx --no-install forge run \
   --experiment ./experiment.yaml \
-  --case-file ./dataset/cases/examples/hello-file.yaml \
+  --case-file ./dataset/cases/examples/hello-file.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
   --output ./results \
@@ -301,7 +301,7 @@ ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
 npx --no-install forge run \
   --experiment ./experiment.yaml \
-  --case-file ./dataset/cases/examples/hello-file.yaml \
+  --case-file ./dataset/cases/examples/hello-file.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
   --output ./results \
@@ -618,7 +618,7 @@ node dist/cli.js validate \
 CODEX_API_KEY=your-restricted-key \
 node dist/cli.js run \
   --experiment examples/codex/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml \
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml \
   --agent codex --model gpt-5.4 \
   --output ./results --run-id codex-001
 ```
@@ -706,6 +706,19 @@ Defaults are materialized in the resolved plan rather than inferred by the runti
 
 ### Experiment matrices
 
+The `cases` axis contains complete dataset-relative file paths, including the
+`cases/` prefix and `.yaml` extension. Each path must match a case entry in the
+selected dataset's manifest. For the quickstart, `dataset.path: ./dataset`
+locates the dataset relative to `experiment.yaml`, and
+`cases/examples/hello-file.case.yaml` locates the case within that dataset.
+The case's declared `id` remains its identity in CLI filters, run selections,
+checkpoints, and reports; it can differ from the file path.
+
+Use `<name>.case.yaml` for flat cases or `<name>/case.yaml` when a case has
+supporting files. These are naming conventions; other manifest-listed `.yaml`
+filenames are supported. Experiment filenames are also flexible; use
+`experiment.yaml` when an experiment has its own directory.
+
 The flat matrix used in the quickstart evaluates every combination of its
 `cases`, `treatments`, and `agents`, repeated `repetitions` times. Use `groups`
 when different cases need different treatments or agent models in one
@@ -718,7 +731,7 @@ matrix:
   retries: 0
   groups:
     - cases:
-        - examples/payment
+        - cases/examples/payment.case.yaml
       treatments:
         - baseline
         - payment-plugin
@@ -730,7 +743,7 @@ matrix:
           provider: anthropic
           model: claude-opus-4-6
     - cases:
-        - examples/marketplace
+        - cases/examples/marketplace/case.yaml
       treatments:
         - baseline
         - marketplace-plugin
@@ -741,8 +754,8 @@ matrix:
 ```
 <!-- grouped-matrix:end -->
 
-This is the `matrix` portion of an experiment whose dataset contains both case
-IDs and whose top-level `treatments` defines all three treatments. It selects
+This is the `matrix` portion of an experiment whose dataset manifest lists both
+case paths and whose top-level `treatments` defines all three treatments. It selects
 12 selections: 8 for payment and 4 for marketplace. Payment uses only
 `baseline` and `payment-plugin` with both models; marketplace uses only
 `baseline` and `marketplace-plugin` with Opus.
@@ -1106,7 +1119,7 @@ const [dataset, experiment] = await Promise.all([
   loadDataset('./dataset'),
   loadExperimentConfig('./experiment.yaml'),
 ]);
-const selections = expandExperiment(experiment);
+const selections = expandExperiment(experiment, dataset);
 if (selections.length !== 1) throw new Error('Choose exactly one selection');
 
 const plan = resolveRunPlan({dataset, experiment, selection: selections[0]});
@@ -1135,7 +1148,8 @@ console.log(completed.location);
 `GroupedExperimentMatrixV1`. `getMatrixGroups(matrix)` exposes either form as
 a read-only list of `ExperimentMatrixGroupV1` axes, treating a flat matrix as
 one group. These types and the helper are exported from `@stripe/forge`;
-`expandExperiment` returns the same ordinary selections for both forms.
+`expandExperiment(experiment, dataset)` resolves authored case paths through the
+verified dataset manifest and returns the same ordinary selections for both forms.
 
 `parseRunResult` checks the producer's Forge version before interpreting a
 stored result. Public companion parsers `parseSetupArtifact`,
@@ -1197,7 +1211,7 @@ const resumeId = undefined; // Set to an existing experiment run ID to resume.
 const experimentRunId = resumeId ?? randomUUID();
 const root = path.resolve('results', 'experiments', experimentRunId);
 const selected = resumeId === undefined
-  ? expandExperiment(experiment)
+  ? expandExperiment(experiment, dataset)
   : await readExperimentRunSelections(root);
 const plans = selected.map((selection) => engine.resolveRunPlan({
   dataset, experiment, selection,

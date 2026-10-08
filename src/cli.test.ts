@@ -247,10 +247,13 @@ describe('Forge CLI', () => {
     const fixture = await createGroupedBenchmarkFixture();
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
     assert.ok(config.matrix.groups !== undefined);
-    config.matrix.groups[1]!.cases = ['case/not-in-dataset'];
+    config.matrix.groups[1]!.cases = ['cases/not-in-dataset.yaml'];
+    assert.equal(config.runtime.adapter, 'docker');
+    config.runtime.platform = 'native';
     await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
     let preparations = 0;
     let executions = 0;
+    let detections = 0;
     let stderr = '';
     const exitCode = await runCli([
       'run', '--experiment', fixture.experimentPath, '--case', 'case/example',
@@ -258,6 +261,7 @@ describe('Forge CLI', () => {
       environment: {},
       stdout: () => undefined,
       stderr: (text) => {stderr += text;},
+      detectDockerPlatform: async () => {detections += 1; return 'linux/amd64';},
       compositionFactory: async (options) => {
         preparations += 1;
         return createDefaultCliComposition(options);
@@ -265,7 +269,8 @@ describe('Forge CLI', () => {
       execute: async (input) => {executions += 1; return executeOffline(input);},
     });
     assert.equal(exitCode, 1);
-    assert.ok(stderr.includes('references a case absent from the loaded dataset'));
+    assert.ok(stderr.includes('references a case file absent from the loaded dataset manifest'));
+    assert.equal(detections, 0);
     assert.equal(preparations, 0);
     assert.equal(executions, 0);
   });
@@ -1135,12 +1140,12 @@ async function createGroupedBenchmarkFixture() {
     matrix: {
       groups: [
         {
-          cases: ['case/example'],
+          cases: ['cases/example.yaml'],
           treatments: ['baseline'],
           agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet'}],
         },
         {
-          cases: ['case/unselected'],
+          cases: ['cases/unselected.yaml'],
           treatments: ['baseline', 'enhanced'],
           agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-opus-4-6'}],
         },
@@ -1243,7 +1248,7 @@ treatments:
   baseline:
     setup: []
 matrix:
-  cases: [case/example]
+  cases: [cases/example.yaml]
   treatments: [baseline]
   agents:
     - adapter: claude-code

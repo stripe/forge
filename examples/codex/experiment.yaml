@@ -4,7 +4,7 @@ dataset:
   path: ../quickstart/dataset
   id: forge-quickstart
   version: 0.1.0
-  manifest_sha256: sha256:75c268301fe1f8a3dc06762b64df75d6b6c3d3bb5b2dd349ddd0c6b8044fa0b0
+  manifest_sha256: sha256:158c4c18bd0a914efc0f4a79d44e71bd156cf8b72c6ea9d3be03f1fffdf4130e
 runtime:
   adapter: docker
   image:
@@ -20,7 +20,7 @@ treatments:
     setup: []
 matrix:
   cases:
-    - examples/hello-file
+    - cases/examples/hello-file.case.yaml
   treatments:
     - baseline
   agents:

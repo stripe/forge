@@ -13,7 +13,7 @@ const casePath = path.join(
   datasetRoot,
   'cases',
   'examples',
-  'release-summary.yaml',
+  'release-summary.case.yaml',
 );
 
 describe('checked-in multi-turn example', () => {
@@ -25,9 +25,9 @@ describe('checked-in multi-turn example', () => {
 
     assert.equal(dataset.manifestSha256, experiment.config.dataset.manifest_sha256);
     assert.deepEqual(dataset.manifest.files.map(({path}) => path),
-      ['cases/examples/release-summary.yaml']);
+      ['cases/examples/release-summary.case.yaml']);
 
-    const selections = expandExperiment(experiment);
+    const selections = expandExperiment(experiment, dataset);
     assert.deepEqual(selections, [
       {
         case_id: 'examples/release-summary',
@@ -48,7 +48,7 @@ describe('checked-in multi-turn example', () => {
     });
     assert.deepEqual(plan.provenance.case, {
       id: 'examples/release-summary',
-      path: 'cases/examples/release-summary.yaml',
+      path: 'cases/examples/release-summary.case.yaml',
     });
     assert.deepEqual(plan.role_player, {
       provider: 'anthropic',

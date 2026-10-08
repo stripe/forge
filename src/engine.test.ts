@@ -720,7 +720,7 @@ function experimentValue() {
       },
     },
     matrix: {
-      cases: ['testing/action-bundle'],
+      cases: ['cases/testing/action-bundle.yaml'],
       treatments: ['baseline', 'with-skill'],
       agents: [
         {

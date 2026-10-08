@@ -249,6 +249,44 @@ task: safe
     }
   });
 
+  it('accepts explicit case YAML paths in flat and grouped matrices without requiring a naming suffix', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const group = getMatrixGroups(config.matrix)[0]!;
+    const cases = [
+      'cases/suite/payments-onetime.case.yaml',
+      'cases/suite/connect-creator-fans/case.yaml',
+      'cases/suite/ordinary.yaml',
+    ];
+    const flat = parseExperimentConfig({...config, matrix: {...group, cases}});
+    const grouped = parseExperimentConfig({...config, matrix: {groups: [{...group, cases}]}});
+    assert.deepEqual(getMatrixGroups(flat.matrix)[0]!.cases, cases);
+    assert.deepEqual(getMatrixGroups(grouped.matrix)[0]!.cases, cases);
+  });
+
+  it('rejects case IDs, non-case files and noncanonical paths as matrix case references', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const group = getMatrixGroups(config.matrix)[0]!;
+    for (const casePath of [
+      'smoke/write',
+      'cases/suite/case',
+      'cases/suite/case.yml',
+      'fixtures/suite/case.yaml',
+      '/cases/suite/case.yaml',
+      '../cases/suite/case.yaml',
+      './cases/suite/case.yaml',
+      'cases/../suite/case.yaml',
+      'cases//suite/case.yaml',
+      'cases\\suite\\case.yaml',
+    ]) {
+      for (const matrix of [
+        {...group, cases: [casePath]},
+        {groups: [{...group, cases: [casePath]}]},
+      ]) {
+        assert.throws(() => parseExperimentConfig({...config, matrix}), BenchmarkModelError);
+      }
+    }
+  });
+
   it('preserves grouped matrix axes and applies only global run policy defaults', () => {
     const flat = parseExperimentConfigYaml(experimentConfigYaml());
     const group = getMatrixGroups(flat.matrix)[0]!;
@@ -307,7 +345,7 @@ task: safe
     }
   });
 
-  it('allows overlapping case IDs when treatments or resolved agents differ', () => {
+  it('allows overlapping case paths when treatments or resolved agents differ', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     const {cases, treatments, agents} = getMatrixGroups(config.matrix)[0]!;
     const group = {cases, treatments, agents};
@@ -330,7 +368,7 @@ task: safe
     const group = {cases, treatments, agents};
     assert.throws(() => parseExperimentConfig({
       ...config,
-      matrix: {groups: [group, {...group, cases: ['smoke/other', ...group.cases]}]},
+      matrix: {groups: [group, {...group, cases: ['cases/smoke/other.case.yaml', ...group.cases]}]},
     }), /duplicate resolved selections/);
     const codex = {...group, agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}]};
     assert.throws(() => parseExperimentConfig({
@@ -375,7 +413,7 @@ task: safe
     ] as const) {
       assert.throws(() => parseExperimentConfig({
         ...config,
-        matrix: {groups: [group, {...group, cases: ['smoke/other'], treatments: [treatment]}]},
+        matrix: {groups: [group, {...group, cases: ['cases/smoke/other.case.yaml'], treatments: [treatment]}]},
       }), message);
     }
   });
@@ -491,7 +529,7 @@ runtime:
   image: {kind: forge}
   platform: linux/amd64
 matrix:
-  cases: [smoke/write]
+  cases: [cases/smoke/write/eval.yaml]
   treatments: [baseline]
   agents:
     - adapter: claude-code

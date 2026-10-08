@@ -14,7 +14,7 @@ node dist/cli.js validate \
 
 node dist/cli.js plan \
   --experiment examples/codex/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml
 ```
 
 To run, start Docker and supply a restricted API key. This command makes
@@ -24,7 +24,7 @@ potentially billable model calls:
 CODEX_API_KEY=your-restricted-key \
 node dist/cli.js run \
   --experiment examples/codex/experiment.yaml \
-  --case-file examples/quickstart/dataset/cases/examples/hello-file.yaml \
+  --case-file examples/quickstart/dataset/cases/examples/hello-file.case.yaml \
   --agent codex \
   --model gpt-5.4 \
   --output ./results \

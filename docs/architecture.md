@@ -180,6 +180,10 @@ An experiment matrix declares either one flat Cartesian product or an ordered
 list of groups, each with explicit case, treatment, and agent axes. Repetitions
 and retry policy belong to the whole matrix. Strict parsing rejects mixed
 forms, missing group axes, and duplicate selections after agent defaults.
+The case axis contains canonical dataset-relative YAML file paths. Expansion
+checks the loaded dataset pin and resolves each path through its manifest to
+the case's declared ID. IDs remain the selection and report identity; resolved
+plan provenance records both the ID and manifest path.
 
 [`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands each product in stable
 authored order:

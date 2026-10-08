@@ -906,7 +906,7 @@ describe('resumable CLI experiment runs', () => {
   it('retries committed role-player errors while retaining their valid artifacts', async () => {
     const fixture = await createFixture();
     const dataset = path.join(path.dirname(fixture.experiment), 'dataset');
-    const relative = 'cases/examples/hello-file.yaml';
+    const relative = 'cases/examples/hello-file.case.yaml';
     const body = (await fs.readFile(path.join(dataset, relative), 'utf8'))
       .replace('execution_mode: one_shot', 'execution_mode: multi_turn\ntask: Complete the task');
     await fs.writeFile(path.join(dataset, relative), body);
@@ -1001,9 +1001,9 @@ async function createGroupedFixture() {
   config.treatments.seeded = {setup: [{uses: 'forge/write', with: {target: 'seed.txt', source: {content: 'seed'}}}]};
   config.matrix = {
     groups: [
-      {cases: ['examples/hello-file'], treatments: ['baseline'],
+      {cases: ['cases/examples/hello-file.case.yaml'], treatments: ['baseline'],
         agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'group-a-model'}]},
-      {cases: ['examples/other-file'], treatments: ['baseline', 'seeded'],
+      {cases: ['cases/examples/other-file.yaml'], treatments: ['baseline', 'seeded'],
         agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'group-b-model'}]},
     ],
     repetitions: 1,
@@ -1029,7 +1029,7 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
   await fs.cp(path.join(example, 'dataset'), dataset, {recursive: true});
   config.dataset.path = './dataset';
   if (options.anotherCase) {
-    const body = (await fs.readFile(path.join(dataset, 'cases/examples/hello-file.yaml'), 'utf8'))
+    const body = (await fs.readFile(path.join(dataset, 'cases/examples/hello-file.case.yaml'), 'utf8'))
       .replace('id: examples/hello-file', 'id: examples/other-file');
     const relative = 'cases/examples/other-file.yaml';
     await fs.writeFile(path.join(dataset, relative), body);
@@ -1039,7 +1039,7 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
     const raw = `${JSON.stringify(manifest)}\n`;
     await fs.writeFile(path.join(dataset, 'manifest.json'), raw);
     config.dataset.manifest_sha256 = sha256Digest(raw);
-    config.matrix.cases.push('examples/other-file');
+    config.matrix.cases.push(relative);
   }
   await fs.writeFile(experiment, JSON.stringify(config));
   const checkpoint = path.join(root, 'experiment.json');

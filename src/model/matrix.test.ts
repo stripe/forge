@@ -6,7 +6,7 @@ import type {ExperimentMatrixGroupV1, ExperimentMatrixV1} from './types.js';
 
 describe('matrix group views', () => {
   const group: ExperimentMatrixGroupV1 = {
-    cases: ['case/a'],
+    cases: ['cases/case/a/case.yaml'],
     treatments: ['baseline'],
     agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}],
   };
@@ -27,13 +27,13 @@ describe('matrix group views', () => {
 
   it('retains grouped order and boundaries without changing authored shape', () => {
     const matrix: ExperimentMatrixV1 = {
-      groups: [structuredClone(group), {...structuredClone(group), cases: ['case/b']}],
+      groups: [structuredClone(group), {...structuredClone(group), cases: ['cases/case-b.case.yaml']}],
       repetitions: 2,
       retries: 1,
     };
     const before = structuredClone(matrix);
     assert.equal(getMatrixGroups(matrix), matrix.groups);
-    assert.deepEqual(getMatrixGroups(matrix).map(({cases}) => cases), [['case/a'], ['case/b']]);
+    assert.deepEqual(getMatrixGroups(matrix).map(({cases}) => cases), [['cases/case/a/case.yaml'], ['cases/case-b.case.yaml']]);
     assert.deepEqual(matrix, before);
     assert.equal(Object.hasOwn(matrix, 'cases'), false);
   });

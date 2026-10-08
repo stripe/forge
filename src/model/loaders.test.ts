@@ -101,7 +101,7 @@ describe('benchmark filesystem loaders', () => {
     const original = await loadExperimentConfig(experimentPath);
     await fs.appendFile(experimentPath, '\n# Clarify the experiment without changing it.\n');
     const edited = await loadExperimentConfig(experimentPath);
-    const selection = expandExperiment(original)[0]!;
+    const selection = expandExperiment(original, dataset)[0]!;
     assert.equal(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: edited, selection})), serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: original, selection})));
   });
 
@@ -204,7 +204,7 @@ runtime:
   image: {kind: forge}
   platform: linux/amd64
 matrix:
-  cases: [smoke/write]
+  cases: [cases/smoke/write/eval.yaml]
   treatments: [baseline]
   agents:
     - {adapter: claude-code, provider: anthropic, model: claude-sonnet-4-6}

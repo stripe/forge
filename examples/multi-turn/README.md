@@ -3,7 +3,7 @@
 This is a complete, manifest-pinned multi-turn benchmark. It keeps the eval
 case decoupled from experiment configuration:
 
-- `dataset/cases/examples/release-summary.yaml` defines a deliberate two-step
+- `dataset/cases/examples/release-summary.case.yaml` defines a deliberate two-step
   handoff, its opening message and role-player context, a turn limit, one success
   criterion, and deterministic filesystem checks. It contains no agent,
   provider, model, runtime, or repetition choice.
@@ -25,10 +25,10 @@ this exact payload:
 
 | Path | Size | SHA-256 |
 | --- | ---: | --- |
-| `cases/examples/release-summary.yaml` | 1117 bytes | `1c2df03e4cdef6cf03bb18a6eda6a6b5842c401b96d3dd9de5efbd43655859bf` |
+| `cases/examples/release-summary.case.yaml` | 1117 bytes | `1c2df03e4cdef6cf03bb18a6eda6a6b5842c401b96d3dd9de5efbd43655859bf` |
 
 The raw `dataset/manifest.json` digest is
-`sha256:70eef227c10b8f733e544d5f56e6418a475532225f237014240486df552bcf8b`.
+`sha256:09ea7013effb28ebcf3186c0d79b6bc8083c7382760134b066141a3b60b1770d`.
 `experiment.yaml` pins that exact digest, so changing the case or manifest
 requires updating the size, payload SHA-256, and experiment config's manifest
 digest together.
@@ -44,7 +44,7 @@ node dist/cli.js validate \
 
 node dist/cli.js plan \
   --experiment examples/multi-turn/experiment.yaml \
-  --case-file examples/multi-turn/dataset/cases/examples/release-summary.yaml \
+  --case-file examples/multi-turn/dataset/cases/examples/release-summary.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6
 ```
@@ -63,7 +63,7 @@ calls for the coding agent, Ava role player, and criterion judge:
 ANTHROPIC_API_KEY=your-restricted-key \
 node dist/cli.js run \
   --experiment examples/multi-turn/experiment.yaml \
-  --case-file examples/multi-turn/dataset/cases/examples/release-summary.yaml \
+  --case-file examples/multi-turn/dataset/cases/examples/release-summary.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
   --output ./results \
@@ -78,7 +78,7 @@ ANTHROPIC_BASE_URL=https://gateway.example.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-restricted-token \
 node dist/cli.js run \
   --experiment examples/multi-turn/experiment.yaml \
-  --case-file examples/multi-turn/dataset/cases/examples/release-summary.yaml \
+  --case-file examples/multi-turn/dataset/cases/examples/release-summary.case.yaml \
   --agent claude-code \
   --model claude-sonnet-4-6 \
   --output ./results \

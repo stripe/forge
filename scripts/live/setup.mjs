@@ -166,7 +166,7 @@ export async function runSetupIntegrationSuite({dockerExecutable, resultsRoot, s
       artifactStore: createArtifactStore({root: resultsRoot}),
       credentialResolver: {async resolve() {throw new Error('Setup integration must never resolve credentials');} },
     };
-    const plans = expandExperiment(experiment).map((selection) =>
+    const plans = expandExperiment(experiment, dataset).map((selection) =>
       engine.resolveRunPlan({dataset, experiment, selection}));
     for (const plan of plans) engine.preflightEval({plan, composition});
 
@@ -316,7 +316,7 @@ async function createFixture(root, platform, specs, liveAgent) {
     },
     models: {}, treatments: {baseline: {setup: []}},
     matrix: {
-      cases: specs.map(({id}) => `setup/${id}`), treatments: ['baseline'],
+      cases: specs.map(({id}) => `cases/setup/${id}.yaml`), treatments: ['baseline'],
       agents: [{adapter: liveAgent, provider: liveAgent === 'codex' ? 'openai' : 'anthropic', model: 'setup-probe'}],
       repetitions: 1, retries: 0
     },

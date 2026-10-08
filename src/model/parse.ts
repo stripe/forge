@@ -77,6 +77,10 @@ const DatasetPathSchema = z
     isSafeDatasetRelativePath,
     'must be a canonical dataset-relative POSIX path',
   );
+const CasePathSchema = DatasetPathSchema.refine(
+  (value) => value.startsWith('cases/') && value.endsWith('.yaml'),
+  'case definitions must be YAML files below cases/',
+);
 const WorkspacePathSchema = z
   .string()
   .refine(
@@ -249,10 +253,7 @@ const DatasetIdentitySchema = z
 const ManifestCaseSchema = z
   .object({
     id: CaseIdSchema,
-    path: DatasetPathSchema.refine(
-      (value) => value.startsWith('cases/') && value.endsWith('.yaml'),
-      'case definitions must be YAML files below cases/',
-    ),
+    path: CasePathSchema,
   })
   .strict();
 
@@ -417,7 +418,7 @@ function assertRuntimeConfigBytes(value: unknown): void {
 
 const ExperimentMatrixGroupSchema = z
   .object({
-    cases: z.array(CaseIdSchema).min(1).max(10_000),
+    cases: z.array(CasePathSchema).min(1).max(10_000),
     treatments: z.array(z.string()).min(1).max(1_000),
     agents: z.array(AgentSelectionSchema).min(1).max(1_000),
   })

@@ -19,7 +19,7 @@ function experiment(selectedRuntime: unknown): unknown {
     dataset: {id: 'test', version: '1', manifest_sha256: `sha256:${'a'.repeat(64)}`},
     runtime: selectedRuntime,
     matrix: {
-      cases: ['testing/example'],
+      cases: ['cases/testing/example.case.yaml'],
       treatments: ['baseline'],
       agents: [{adapter: 'test-agent', provider: 'test-provider', model: 'test'}],
     },
