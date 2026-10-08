@@ -134,10 +134,7 @@ Create `quickstart/dataset/manifest.json`:
     "version": "0.1.0"
   },
   "cases": [
-    {
-      "id": "examples/hello-file",
-      "path": "cases/examples/hello-file.case.yaml"
-    }
+    "cases/examples/hello-file.case.yaml"
   ],
   "files": [
     {
@@ -149,6 +146,10 @@ Create `quickstart/dataset/manifest.json`:
 }
 ```
 <!-- quickstart-manifest:end -->
+
+`cases` lists case file paths; each file declares its own `id`. IDs must be
+unique within this dataset release and use lowercase kebab-case segments
+separated by `/`, for example `hello-file` or `examples/hello-file`.
 
 `files` is an exact inventory of every regular payload file below `dataset/`;
 do not include `manifest.json` itself. Extra, missing, modified, symbolic-link,
@@ -166,7 +167,7 @@ dataset:
   path: ./dataset
   id: forge-quickstart
   version: 0.1.0
-  manifest_sha256: sha256:158c4c18bd0a914efc0f4a79d44e71bd156cf8b72c6ea9d3be03f1fffdf4130e
+  manifest_sha256: sha256:0705866807c02da99567f075787f5177c969e5616cf5fa1b1918d6794a41475f
 runtime:
   adapter: docker
   image:
@@ -707,16 +708,16 @@ Defaults are materialized in the resolved plan rather than inferred by the runti
 ### Experiment matrices
 
 The `cases` axis contains complete dataset-relative file paths, including the
-`cases/` prefix and `.yaml` extension. Each path must match a case entry in the
+`cases/` prefix and the accepted case filename. Each path must match a case entry in the
 selected dataset's manifest. For the quickstart, `dataset.path: ./dataset`
 locates the dataset relative to `experiment.yaml`, and
 `cases/examples/hello-file.case.yaml` locates the case within that dataset.
 The case's declared `id` remains its identity in CLI filters, run selections,
 checkpoints, and reports; it can differ from the file path.
 
-Use `<name>.case.yaml` for flat cases or `<name>/case.yaml` when a case has
-supporting files. These are naming conventions; other manifest-listed `.yaml`
-filenames are supported. Experiment filenames are also flexible; use
+Case filenames must be `case.yaml` or `<name>.case.yaml` with a nonempty name.
+Use named files for flat cases or `<name>/case.yaml` for directory cases.
+The filename and directory do not determine the declared case ID. Experiment filenames are also flexible; use
 `experiment.yaml` when an experiment has its own directory.
 
 The flat matrix used in the quickstart evaluates every combination of its
@@ -2014,6 +2015,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm check:docs
+pnpm check:cases
 pnpm test:package
 pnpm check
 ```
@@ -2022,7 +2024,7 @@ Pull requests targeting `main`, including drafts, automatically run the same
 validation as `pnpm check` on Node.js 22 through the
 [PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
 The single `Forge checks` job has named steps for type checking, automated tests,
-build, documentation validation, and package checks, using the same package
+build, dataset case validation, documentation validation, and package checks, using the same package
 scripts as the local command without Docker or model credentials. It runs when
 a PR opens, receives new commits, or reopens, and cancels obsolete runs when a
 newer commit arrives. The development-publishing workflow assigns its snapshot

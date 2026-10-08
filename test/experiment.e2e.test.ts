@@ -1003,7 +1003,7 @@ async function createGroupedFixture() {
     groups: [
       {cases: ['cases/examples/hello-file.case.yaml'], treatments: ['baseline'],
         agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'group-a-model'}]},
-      {cases: ['cases/examples/other-file.yaml'], treatments: ['baseline', 'seeded'],
+      {cases: ['cases/examples/other-file.case.yaml'], treatments: ['baseline', 'seeded'],
         agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'group-b-model'}]},
     ],
     repetitions: 1,
@@ -1031,10 +1031,10 @@ async function createFixture(options: {anotherCase?: boolean; repetitions?: numb
   if (options.anotherCase) {
     const body = (await fs.readFile(path.join(dataset, 'cases/examples/hello-file.case.yaml'), 'utf8'))
       .replace('id: examples/hello-file', 'id: examples/other-file');
-    const relative = 'cases/examples/other-file.yaml';
+    const relative = 'cases/examples/other-file.case.yaml';
     await fs.writeFile(path.join(dataset, relative), body);
     const manifest = JSON.parse(await fs.readFile(path.join(dataset, 'manifest.json'), 'utf8')) as DatasetManifestV1;
-    manifest.cases.push({id: 'examples/other-file', path: relative});
+    manifest.cases.push(relative);
     manifest.files.push({path: relative, size: Buffer.byteLength(body), sha256: sha256Hex(body)});
     const raw = `${JSON.stringify(manifest)}\n`;
     await fs.writeFile(path.join(dataset, 'manifest.json'), raw);

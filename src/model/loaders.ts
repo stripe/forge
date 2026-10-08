@@ -12,7 +12,13 @@ import {
   parseDatasetManifestJson,
   parseEvalCaseYamlWithSetupActions,
 } from './parse.js';
-import {isSafeDatasetRelativePath} from './paths.js';
+import {
+  isAuthoredCaseId,
+  isCaseDefinitionPath,
+  isSafeDatasetRelativePath,
+  isSafeSimpleIdentifier,
+  isSafeVersion,
+} from './paths.js';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
@@ -21,6 +27,7 @@ import type {
   LoadedExperimentConfigV1,
   LoadedDatasetV1,
   LoadedEvalCaseV1,
+  DatasetRelativePath,
   Sha256Hex,
 } from './types.js';
 
@@ -70,7 +77,7 @@ export async function loadDatasetWithSetupActions(
 
   let totalBytes = 0;
   const absoluteFiles = new Map<string, string>();
-  const casePaths = new Set(manifest.cases.map(({path: casePath}) => casePath));
+  const casePaths = new Set(manifest.cases);
   for (const file of manifest.files) {
     totalBytes += file.size;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_DATASET_TOTAL_BYTES) {
@@ -92,12 +99,12 @@ export async function loadDatasetWithSetupActions(
 
   const cases = new Map<string, LoadedEvalCaseV1>();
   const manifestFiles = new Map(manifest.files.map((file) => [file.path, file]));
-  for (const entry of manifest.cases) {
-    const file = manifestFiles.get(entry.path)!;
+  for (const casePath of manifest.cases) {
+    const file = manifestFiles.get(casePath)!;
     if (file.size > MAX_BENCHMARK_YAML_BYTES) {
       throw integrityError('An eval case exceeds the benchmark YAML size limit.');
     }
-    const absolutePath = absoluteFiles.get(entry.path)!;
+    const absolutePath = absoluteFiles.get(casePath)!;
     const bytes = await readBoundedRegularFile(
       absolutePath,
       MAX_BENCHMARK_YAML_BYTES,
@@ -108,10 +115,15 @@ export async function loadDatasetWithSetupActions(
     }
     const raw = decodeDocument(bytes, 'Eval case');
     const definition = parseEvalCaseYamlWithSetupActions(raw, setupActions);
-    if (definition.id !== entry.id) {
-      throw integrityError('An eval case ID does not match its manifest entry.');
+    const previous = cases.get(definition.id);
+    if (previous !== undefined) {
+      throw integrityError(
+        `Duplicate case ID ${JSON.stringify(definition.id)} in ` +
+        `${JSON.stringify(path.relative(root, previous.path).split(path.sep).join('/'))} and ` +
+        `${JSON.stringify(casePath)}.`,
+      );
     }
-    cases.set(entry.id, {
+    cases.set(definition.id, {
       definition,
       path: absolutePath,
     });
@@ -125,6 +137,82 @@ export async function loadDatasetWithSetupActions(
     manifest,
     cases,
   };
+}
+
+/** @internal Derive an index while rejecting inconsistent host-supplied datasets. */
+export function indexLoadedDatasetCases(
+  dataset: LoadedDatasetV1,
+): ReadonlyMap<DatasetRelativePath, LoadedEvalCaseV1> {
+  try {
+    if (
+      dataset === null || typeof dataset !== 'object' ||
+      typeof dataset.root !== 'string' || dataset.root.length === 0 ||
+      dataset.root.includes('\0') || !path.isAbsolute(dataset.root) ||
+      path.resolve(dataset.root) !== dataset.root ||
+      dataset.root === path.parse(dataset.root).root ||
+      dataset.manifest === null || typeof dataset.manifest !== 'object' ||
+      dataset.manifest.dataset === null || typeof dataset.manifest.dataset !== 'object' ||
+      typeof dataset.manifest.dataset.id !== 'string' ||
+      !isSafeSimpleIdentifier(dataset.manifest.dataset.id) ||
+      typeof dataset.manifest.dataset.version !== 'string' ||
+      !isSafeVersion(dataset.manifest.dataset.version) ||
+      !Array.isArray(dataset.manifest.cases) || dataset.manifest.cases.length === 0 ||
+      dataset.manifest.cases.length > 10_000 ||
+      dataset.cases === null || typeof dataset.cases !== 'object' ||
+      typeof dataset.cases.get !== 'function' ||
+      typeof dataset.cases[Symbol.iterator] !== 'function' ||
+      !Number.isSafeInteger(dataset.cases.size) || dataset.cases.size < 0 ||
+      dataset.cases.size > 10_000
+    ) {
+      throw integrityError('The loaded dataset has an invalid case index.');
+    }
+    const manifestPaths = new Set<string>();
+    for (const casePath of dataset.manifest.cases) {
+      if (typeof casePath !== 'string' || !isCaseDefinitionPath(casePath) ||
+        manifestPaths.has(casePath)) {
+        throw integrityError('The loaded dataset manifest has an invalid or duplicate case path.');
+      }
+      manifestPaths.add(casePath);
+    }
+    const byPath = new Map<DatasetRelativePath, LoadedEvalCaseV1>();
+    const ids = new Set<string>();
+    let visited = 0;
+    for (const entry of dataset.cases) {
+      visited += 1;
+      if (visited > manifestPaths.size || !Array.isArray(entry) || entry.length !== 2) {
+        throw integrityError('The loaded case index exceeds or does not match the manifest case inventory.');
+      }
+      const [id, loadedCase] = entry;
+      if (
+        typeof id !== 'string' || !isAuthoredCaseId(id) ||
+        ids.has(id) ||
+        loadedCase === null || typeof loadedCase !== 'object' ||
+        loadedCase.definition === null || typeof loadedCase.definition !== 'object' ||
+        loadedCase.definition.id !== id || typeof loadedCase.path !== 'string' ||
+        loadedCase.path.includes('\0') || !path.isAbsolute(loadedCase.path) ||
+        path.resolve(loadedCase.path) !== loadedCase.path ||
+        dataset.cases.get(id) !== loadedCase
+      ) {
+        throw integrityError('The loaded case index contains an invalid definition or path.');
+      }
+      ids.add(id);
+      const casePath = path.relative(dataset.root, loadedCase.path).split(path.sep).join('/');
+      if (!manifestPaths.has(casePath) ||
+        loadedCase.path !== path.join(dataset.root, ...casePath.split('/')) ||
+        byPath.has(casePath)) {
+        throw integrityError('The loaded case index does not match the dataset manifest.');
+      }
+      byPath.set(casePath, loadedCase);
+    }
+    if (byPath.size !== manifestPaths.size || dataset.cases.size !== byPath.size) {
+      throw integrityError('The loaded case index does not match the dataset manifest.');
+    }
+    return byPath;
+  } catch (error) {
+    if (error instanceof BenchmarkModelError) throw error;
+    throw new BenchmarkModelError('dataset_integrity_mismatch',
+      'The loaded dataset case index is unavailable.', {cause: error});
+  }
 }
 
 /** Load a strict experiment config. */

@@ -43,6 +43,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Check example cases
+        run: pnpm check:cases:built
+
       - name: Check documentation
         run: pnpm check:docs:built
 

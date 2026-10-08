@@ -15,14 +15,23 @@ import {
 const HASH = 'a'.repeat(64);
 
 describe('public benchmark parsing', () => {
+  it('requires an explicit lowercase kebab-case authored identity', () => {
+    for (const id of ['task', 'suite/task', 'team-name/task-2']) {
+      assert.equal(parseEvalCase({id, task: 'Complete the task.'}).id, id);
+    }
+    assert.throws(() => parseEvalCase({task: 'Complete the task.'}), BenchmarkModelError);
+    for (const id of ['Suite/task', 'suite_name/task', 'suite/task.v2', 'suite/task--2']) {
+      assert.throws(() => parseEvalCase({id, task: 'Complete the task.'}), /case ID/);
+    }
+  });
   it('uses the installed grammar and rejects removed authored schema fields', () => {
     const definition = {id: 'sample/task', task: 'Complete the task.'};
     assert.equal(Object.hasOwn(parseEvalCase(definition), 'schema_version'), false);
     assert.throws(() => parseEvalCase({...definition, schema_version: 1}), BenchmarkModelError);
     const manifest = {
       dataset: {id: 'sample', version: '1'},
-      cases: [{id: 'sample/task', path: 'cases/sample/task.yaml'}],
-      files: [{path: 'cases/sample/task.yaml', size: 10, sha256: HASH}],
+      cases: ['cases/sample/task.case.yaml'],
+      files: [{path: 'cases/sample/task.case.yaml', size: 10, sha256: HASH}],
     };
     assert.equal(Object.hasOwn(parseDatasetManifestJson(JSON.stringify(manifest)), 'schema_version'), false);
     assert.throws(() => parseDatasetManifestJson(JSON.stringify({...manifest, schema_version: 1})), BenchmarkModelError);
@@ -249,13 +258,13 @@ task: safe
     }
   });
 
-  it('accepts explicit case YAML paths in flat and grouped matrices without requiring a naming suffix', () => {
+  it('accepts named case files and nested case.yaml in flat and grouped matrices', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     const group = getMatrixGroups(config.matrix)[0]!;
     const cases = [
       'cases/suite/payments-onetime.case.yaml',
       'cases/suite/connect-creator-fans/case.yaml',
-      'cases/suite/ordinary.yaml',
+      'cases/case.yaml',
     ];
     const flat = parseExperimentConfig({...config, matrix: {...group, cases}});
     const grouped = parseExperimentConfig({...config, matrix: {groups: [{...group, cases}]}});
@@ -270,6 +279,8 @@ task: safe
       'smoke/write',
       'cases/suite/case',
       'cases/suite/case.yml',
+      'cases/suite/ordinary.yaml',
+      'cases/suite/.case.yaml',
       'fixtures/suite/case.yaml',
       '/cases/suite/case.yaml',
       '../cases/suite/case.yaml',
@@ -466,8 +477,8 @@ treatments:
   it('validates manifest hashes, path inventory, and uniqueness', () => {
     const manifest = {
       dataset: {id: 'forge-smoke', version: '2026.09.0'},
-      cases: [{id: 'smoke/write', path: 'cases/smoke/write/eval.yaml'}],
-      files: [{path: 'cases/smoke/write/eval.yaml', size: 100, sha256: HASH}],
+      cases: ['cases/smoke/write/case.yaml'],
+      files: [{path: 'cases/smoke/write/case.yaml', size: 100, sha256: HASH}],
     };
     {
       const actual = parseDatasetManifestJson(JSON.stringify(manifest));
@@ -492,24 +503,32 @@ treatments:
       {
         value: {
           ...manifest,
-          cases: [...manifest.cases, {id: 'smoke/write', path: 'cases/other.yaml'}],
-          files: [...manifest.files, {path: 'cases/other.yaml', size: 100, sha256: HASH}],
+          cases: [...manifest.cases, {id: 'smoke/write', path: 'cases/other.case.yaml'}],
+          files: [...manifest.files, {path: 'cases/other.case.yaml', size: 100, sha256: HASH}],
         },
-        reason: 'id values must be unique',
+        reason: 'Expected string',
       },
       {
         value: {
           ...manifest,
-          cases: [...manifest.cases, {id: 'smoke/other', path: manifest.cases[0]!.path}],
+          cases: [...manifest.cases, manifest.cases[0]!],
         },
         reason: 'path values must be unique',
       },
     ];
+    for (const casePath of ['cases/plain.yaml', 'cases/.case.yaml', 'cases/case.yml',
+      'fixtures/case.yaml', './cases/case.yaml']) {
+      invalidManifests.push({
+        value: {...manifest, cases: [casePath],
+          files: [{path: casePath, size: 100, sha256: HASH}]},
+        reason: casePath.startsWith('./') ? 'canonical dataset-relative POSIX path' : 'case definitions must be',
+      });
+    }
     for (const {value, reason} of invalidManifests) {
       assert.throws(() => parseDatasetManifestJson(JSON.stringify(value)), (error: unknown) => {
         assert.ok(error instanceof Error && 'code' in error);
         assert.equal(error.code, 'invalid_manifest');
-        assert.ok(error.message.includes(reason));
+        assert.ok(error.message.includes(reason), `Expected ${reason}: ${error.message}`);
         return true;
       });
     }
@@ -529,7 +548,7 @@ runtime:
   image: {kind: forge}
   platform: linux/amd64
 matrix:
-  cases: [cases/smoke/write/eval.yaml]
+  cases: [cases/smoke/write/case.yaml]
   treatments: [baseline]
   agents:
     - adapter: claude-code

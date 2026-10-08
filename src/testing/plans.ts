@@ -72,7 +72,7 @@ export function createTestResolvedRunPlan(
       },
       case: {
         id: caseId,
-        path: `cases/${caseId}/eval.yaml`,
+        path: `cases/${caseId}/case.yaml`,
       },
       forge: {...FORGE_BUILD_IDENTITY, ...(options.forgeVersion === undefined ? {} : {version: options.forgeVersion})},
     },

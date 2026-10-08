@@ -2,12 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import {
-  isSafeCaseId,
+  isCaseDefinitionPath,
   isSafeDatasetRelativePath,
 } from '../model/paths.js';
+import {indexLoadedDatasetCases} from '../model/loaders.js';
 import type {
   CaseId,
-  DatasetManifestCaseV1,
+  DatasetRelativePath,
   LoadedDatasetV1,
   LoadedEvalCaseV1,
 } from '../model/types.js';
@@ -61,7 +62,7 @@ export async function resolveManifestCaseIdFromFile(
     );
   }
   const matches = manifestCases.filter(
-    (entry) => entry.path === datasetPath,
+    (casePath) => casePath === datasetPath,
   );
   if (matches.length === 0) {
     throw new ManifestCaseFileError(
@@ -77,7 +78,7 @@ export async function resolveManifestCaseIdFromFile(
   }
 
   const match = matches[0]!;
-  const manifestTarget = await canonicalManifestTarget(root, match.path);
+  const manifestTarget = await canonicalManifestTarget(root, match);
   if (manifestTarget !== candidate) {
     throw invalidLoadedDataset(
       'The selected manifest case no longer resolves to its verified file.',
@@ -85,7 +86,7 @@ export async function resolveManifestCaseIdFromFile(
   }
   let loadedCase: LoadedEvalCaseV1 | undefined;
   try {
-    loadedCase = dataset.cases.get(match.id);
+    loadedCase = indexLoadedDatasetCases(dataset).get(match);
   } catch (error) {
     throw invalidLoadedDataset(
       'The loaded case index is unavailable.',
@@ -94,8 +95,7 @@ export async function resolveManifestCaseIdFromFile(
   }
   if (
     loadedCase === undefined ||
-    loadedCase.definition.id !== match.id ||
-    path.resolve(loadedCase.path) !== path.resolve(root, ...match.path.split('/'))
+    path.resolve(loadedCase.path) !== path.resolve(root, ...match.split('/'))
   ) {
     throw invalidLoadedDataset(
       'The loaded case index does not match the dataset manifest.',
@@ -106,12 +106,15 @@ export async function resolveManifestCaseIdFromFile(
     'The loaded case index references an unavailable file.',
     'invalid_loaded_dataset',
   );
+  for (const casePath of manifestCases) {
+    if (casePath !== match) await canonicalManifestTarget(root, casePath);
+  }
   if (loadedTarget !== manifestTarget) {
     throw invalidLoadedDataset(
       'The loaded case index does not match the verified manifest file.',
     );
   }
-  return match.id;
+  return loadedCase.definition.id;
 }
 
 async function canonicalDatasetRoot(dataset: LoadedDatasetV1): Promise<string> {
@@ -150,7 +153,7 @@ async function canonicalDatasetRoot(dataset: LoadedDatasetV1): Promise<string> {
 
 function validatedManifestCases(
   dataset: LoadedDatasetV1,
-): readonly DatasetManifestCaseV1[] {
+): readonly DatasetRelativePath[] {
   if (
     dataset.manifest === null ||
     typeof dataset.manifest !== 'object' ||
@@ -165,10 +168,8 @@ function validatedManifestCases(
   }
   for (const entry of dataset.manifest.cases) {
     if (
-      entry === null ||
-      typeof entry !== 'object' ||
-      !isSafeCaseId(entry.id) ||
-      !isSafeDatasetRelativePath(entry.path)
+      typeof entry !== 'string' ||
+      !isCaseDefinitionPath(entry)
     ) {
       throw invalidLoadedDataset(
         'The loaded dataset manifest contains an invalid case entry.',
@@ -194,6 +195,9 @@ async function canonicalCaseFile(
   }
   const requested = path.resolve(caseFile);
   try {
+    if (isWithin(root, requested)) {
+      await assertDatasetPathHasNoSymlinks(root, requested);
+    }
     const canonicalParent = await fs.realpath(path.dirname(requested));
     const canonicalRequested = path.join(
       canonicalParent,

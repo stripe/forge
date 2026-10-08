@@ -13,6 +13,20 @@ export function isSafeCaseId(value: string): boolean {
   return isCanonicalRelativePosixPath(value, false);
 }
 
+/** Authored identities use lowercase, slash-separated kebab-case segments. */
+export function isAuthoredCaseId(value: string): boolean {
+  return isSafeCaseId(value) &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(value);
+}
+
+/** Dataset case definitions have a recognizable name below cases/. */
+export function isCaseDefinitionPath(value: string): boolean {
+  if (!isSafeDatasetRelativePath(value) || !value.startsWith('cases/')) return false;
+  const filename = path.posix.basename(value);
+  return filename === 'case.yaml' ||
+    (filename.endsWith('.case.yaml') && filename.length > '.case.yaml'.length);
+}
+
 export function isSafeWorkspaceRelativePath(
   value: string,
   options: {allowRoot?: boolean} = {},

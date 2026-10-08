@@ -148,7 +148,8 @@ inventory, not a best-effort index:
 - missing, extra, modified, symbolic-link, or special-file entries fail;
 - paths must be canonical, dataset-relative POSIX paths;
 - entry count, depth, individual document size, and total bytes are bounded;
-- each case ID must agree with its manifest entry.
+- the manifest lists case paths; IDs come from case definitions and must be
+  unique within the loaded dataset release.
 
 The experiment pins the dataset ID, version, and digest of the raw manifest
 bytes. Its optional `dataset.path` locates those bytes for the CLI, relative to
@@ -181,8 +182,8 @@ list of groups, each with explicit case, treatment, and agent axes. Repetitions
 and retry policy belong to the whole matrix. Strict parsing rejects mixed
 forms, missing group axes, and duplicate selections after agent defaults.
 The case axis contains canonical dataset-relative YAML file paths. Expansion
-checks the loaded dataset pin and resolves each path through its manifest to
-the case's declared ID. IDs remain the selection and report identity; resolved
+checks the loaded dataset pin and resolves manifest-listed paths to the IDs
+read from their case definitions. IDs remain the selection and report identity; resolved
 plan provenance records both the ID and manifest path.
 
 [`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands each product in stable

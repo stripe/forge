@@ -1,4 +1,5 @@
 import {sha256Digest} from '../model/hashes.js';
+import {indexLoadedDatasetCases} from '../model/loaders.js';
 import {agentSelectionKey, getMatrixGroups} from '../model/matrix.js';
 import {
   DEFAULT_MAX_TURNS,
@@ -30,6 +31,7 @@ export type PlanningErrorCode =
   | 'missing_role_player'
   | 'missing_judge'
   | 'missing_dataset_input'
+  | 'invalid_loaded_dataset'
   | 'action_bundle_mismatch'
   | 'missing_runtime_platform';
 
@@ -101,12 +103,11 @@ export function resolveRunPlanWithSetupActions(
 ): ResolvedRunPlanV1 {
   const {dataset, selection} = input;
   const config = input.experiment.config;
-  assertDatasetCompatibility(dataset, config);
-
-  const manifestCase = dataset.manifest.cases.find(
-    ({id}) => id === selection.case_id,
-  );
-  assertSelection(config, selection, manifestCase?.path);
+  const caseIdsByPath = assertDatasetCompatibility(dataset, config);
+  const casePath = [...caseIdsByPath].find(
+    ([, id]) => id === selection.case_id,
+  )?.[0];
+  assertSelection(config, selection, casePath);
 
   const loadedCase = dataset.cases.get(selection.case_id);
   if (!loadedCase) {
@@ -115,7 +116,7 @@ export function resolveRunPlanWithSetupActions(
       'Run selection references a case absent from the loaded dataset.',
     );
   }
-  if (!manifestCase) {
+  if (casePath === undefined) {
     throw new PlanningError(
       'unknown_case',
       'Run selection references a case absent from the dataset manifest.',
@@ -191,7 +192,7 @@ export function resolveRunPlanWithSetupActions(
       },
       case: {
         id: definition.id,
-        path: manifestCase.path,
+        path: casePath,
       },
       forge: {
         ...FORGE_BUILD_IDENTITY,
@@ -282,6 +283,16 @@ function assertDatasetCompatibility(
   dataset: LoadedDatasetV1,
   config: ExperimentConfigV1,
 ): ReadonlyMap<DatasetRelativePath, CaseId> {
+  let caseIdsByPath: ReadonlyMap<DatasetRelativePath, CaseId>;
+  try {
+    caseIdsByPath = new Map([...indexLoadedDatasetCases(dataset)].map(
+      ([casePath, loadedCase]) => [casePath, loadedCase.definition.id],
+    ));
+  } catch (error) {
+    throw new PlanningError('invalid_loaded_dataset',
+      'The loaded dataset case index does not match its authored definitions and manifest.',
+      {cause: error});
+  }
   if (
     dataset.manifest.dataset.id !== config.dataset.id ||
     dataset.manifest.dataset.version !== config.dataset.version ||
@@ -292,13 +303,10 @@ function assertDatasetCompatibility(
       'Loaded dataset does not match the experiment config pin.',
     );
   }
-  const caseIdsByPath = new Map(
-    dataset.manifest.cases.map(({path, id}) => [path, id]),
-  );
   for (const group of getMatrixGroups(config.matrix)) {
     for (const casePath of group.cases) {
       const caseId = caseIdsByPath.get(casePath);
-      if (caseId === undefined || !dataset.cases.has(caseId)) {
+      if (caseId === undefined) {
         throw new PlanningError(
           'unknown_case',
           'Experiment config references a case file absent from the loaded dataset manifest.',

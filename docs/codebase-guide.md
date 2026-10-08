@@ -173,8 +173,8 @@ flowchart TD
 ```
 
 For `--case-file`, `runCli` additionally calls
-`planning/caseFile.ts:resolveManifestCaseIdFromFile`, which maps the exact file within the configured dataset back to a manifest
-case ID. `run` executes all matching selections through `experiment.ts`; `plan`
+`planning/caseFile.ts:resolveManifestCaseIdFromFile`, which maps the exact file within the configured dataset back to the case ID
+read from its manifest-listed definition. `run` executes all matching selections through `experiment.ts`; `plan`
 requires one. The experiment's `dataset.path` is resolved relative to its file.
 Experiment run resume selects a saved experiment run by its explicit ID.
 `--jobs` controls the experiment run worker count without changing resolved plans.
@@ -305,7 +305,7 @@ composition.
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
 | [`planner.ts`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) | `expandExperiment`, `resolveRunPlan`, `serializeResolvedRunPlan`, `resolvedRunPlanSha256`, `PlanningError` | Combines loaded model objects and one selection. Uses the action registry to validate bundle pins and returns a deeply frozen plan. |
-| [`caseFile.ts`](https://github.com/stripe/forge/blob/main/src/planning/caseFile.ts) | `resolveManifestCaseIdFromFile`, `ManifestCaseFileError` | Maps a user-selected case file to an exact manifest entry while defending against symlink, identity, and containment mistakes. Called only by the CLI/file-selection path. |
+| [`caseFile.ts`](https://github.com/stripe/forge/blob/main/src/planning/caseFile.ts) | `resolveManifestCaseIdFromFile`, `ManifestCaseFileError` | Maps a user-selected manifest-listed file to its loaded case ID while defending against symlink, identity, and containment mistakes. Called only by the CLI/file-selection path. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/planning/index.ts) | Public planning barrel | Re-exported by the package root |
 
 `planner.ts` is intentionally pure after loading. It does not resolve

@@ -4,7 +4,7 @@ dataset:
   path: ./dataset
   id: forge-quickstart
   version: 0.1.0
-  manifest_sha256: sha256:158c4c18bd0a914efc0f4a79d44e71bd156cf8b72c6ea9d3be03f1fffdf4130e
+  manifest_sha256: sha256:0705866807c02da99567f075787f5177c969e5616cf5fa1b1918d6794a41475f
 runtime:
   adapter: docker
   image:

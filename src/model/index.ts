@@ -22,6 +22,8 @@ export {
   parseSetupStep,
 } from './parse.js';
 export {
+  isAuthoredCaseId,
+  isCaseDefinitionPath,
   isSafeActionIdentifier,
   isSafeCaseId,
   isSafeDatasetRelativePath,

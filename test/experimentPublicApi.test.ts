@@ -29,6 +29,17 @@ import type {
 } from '../src/experimentCli.js';
 
 describe('experiment public entry points', () => {
+  it('exports dataset case entries as file paths', () => {
+    const manifest: root.DatasetManifestV1 = {
+      dataset: {id: 'public-api', version: '1.0.0'},
+      cases: ['cases/first.case.yaml'],
+      files: [{path: 'cases/first.case.yaml', size: 1, sha256: 'a'.repeat(64)}],
+    };
+    const casePaths: root.DatasetRelativePath[] = manifest.cases;
+    assert.deepEqual(casePaths, ['cases/first.case.yaml']);
+    assert.deepEqual(root.parseDatasetManifest(manifest), manifest);
+  });
+
   it('exports criterion judging contracts without former aliases', () => {
     for (const name of ['judgeGuidelines', 'buildGuidelineJudgePrompt', 'parseGuidelineJudgment']) {
       assert.equal(name in root, false);

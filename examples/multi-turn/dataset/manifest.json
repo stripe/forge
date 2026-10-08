@@ -4,10 +4,7 @@
     "version": "0.1.0"
   },
   "cases": [
-    {
-      "id": "examples/release-summary",
-      "path": "cases/examples/release-summary.case.yaml"
-    }
+    "cases/examples/release-summary.case.yaml"
   ],
   "files": [
     {

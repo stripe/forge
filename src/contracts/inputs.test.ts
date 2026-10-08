@@ -231,7 +231,7 @@ async function verifiedDatasetInputs() {
   temporaryRoots.push(root);
   const caseBody = 'id: test/example\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
   const payloads = [
-    {path: 'cases/example.yaml', body: caseBody},
+    {path: 'cases/example.case.yaml', body: caseBody},
     {path: 'fixtures/hello.txt', body: 'hello'},
   ];
   for (const file of payloads) {
@@ -241,7 +241,7 @@ async function verifiedDatasetInputs() {
   }
   await fs.writeFile(path.join(root, 'manifest.json'), JSON.stringify({
     dataset: {id: 'test', version: '1'},
-    cases: [{id: 'test/example', path: 'cases/example.yaml'}],
+    cases: ['cases/example.case.yaml'],
     files: payloads.map(({path: filePath, body}) => ({
       path: filePath, size: Buffer.byteLength(body), sha256: sha256Hex(body),
     })),

@@ -28,7 +28,8 @@ it('expands the README grouped matrix into its documented selections', async (co
       sha256: createHash('sha256').update(body).digest('hex')});
   }
   await writeFile(path.join(root, 'manifest.json'), JSON.stringify({
-    dataset: {id: 'grouped-matrix-docs', version: '0.1.0'}, cases, files,
+    dataset: {id: 'grouped-matrix-docs', version: '0.1.0'},
+    cases: cases.map(({path}) => path), files,
   }));
   const dataset = await loadDataset(root);
 

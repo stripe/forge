@@ -28,7 +28,7 @@ this exact payload:
 | `cases/examples/release-summary.case.yaml` | 1117 bytes | `1c2df03e4cdef6cf03bb18a6eda6a6b5842c401b96d3dd9de5efbd43655859bf` |
 
 The raw `dataset/manifest.json` digest is
-`sha256:09ea7013effb28ebcf3186c0d79b6bc8083c7382760134b066141a3b60b1770d`.
+`sha256:8d78623d9f5328fa68c2cb2475a02af71896abef9f59a0ba4f5db46937581218`.
 `experiment.yaml` pins that exact digest, so changing the case or manifest
 requires updating the size, payload SHA-256, and experiment config's manifest
 digest together.

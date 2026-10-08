@@ -24,11 +24,6 @@ export interface DatasetIdentityV1 {
   version: string;
 }
 
-export interface DatasetManifestCaseV1 {
-  id: CaseId;
-  path: DatasetRelativePath;
-}
-
 export interface DatasetManifestFileV1 {
   path: DatasetRelativePath;
   size: number;
@@ -37,7 +32,8 @@ export interface DatasetManifestFileV1 {
 
 export interface DatasetManifestV1 {
   dataset: DatasetIdentityV1;
-  cases: DatasetManifestCaseV1[];
+  /** Case definition paths; each definition declares its own stable ID. */
+  cases: DatasetRelativePath[];
   files: DatasetManifestFileV1[];
 }
 

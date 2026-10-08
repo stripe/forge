@@ -97,7 +97,7 @@ describe('Forge CLI', () => {
         const {composition} = input;
         const original = await fs.readFile(fixture.caseFilePath, 'utf8');
         await fs.writeFile(fixture.caseFilePath, original.replace('Do the thing', 'Do bad thing'));
-        await assert.rejects(composition.inputProvider.read('cases/example.yaml'), /SHA-256/);
+        await assert.rejects(composition.inputProvider.read('cases/example.case.yaml'), /SHA-256/);
         await fs.writeFile(path.join(fixture.datasetRoot, 'cases/extra.yaml'), 'extra');
         await assert.rejects(composition.inputProvider.listFiles('cases'), /manifest inventory/);
         await fs.writeFile(fixture.caseFilePath, original);
@@ -247,7 +247,7 @@ describe('Forge CLI', () => {
     const fixture = await createGroupedBenchmarkFixture();
     const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
     assert.ok(config.matrix.groups !== undefined);
-    config.matrix.groups[1]!.cases = ['cases/not-in-dataset.yaml'];
+    config.matrix.groups[1]!.cases = ['cases/not-in-dataset.case.yaml'];
     assert.equal(config.runtime.adapter, 'docker');
     config.runtime.platform = 'native';
     await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
@@ -726,7 +726,7 @@ describe('Forge CLI', () => {
         '--experiment',
         'experiments/default.yaml',
         '--case-file',
-        'dataset/cases/example.yaml',
+        'dataset/cases/example.case.yaml',
       ],
       {
         cwd: fixture.root,
@@ -1140,12 +1140,12 @@ async function createGroupedBenchmarkFixture() {
     matrix: {
       groups: [
         {
-          cases: ['cases/example.yaml'],
+          cases: ['cases/example.case.yaml'],
           treatments: ['baseline'],
           agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet'}],
         },
         {
-          cases: ['cases/unselected.yaml'],
+          cases: ['cases/unselected.case.yaml'],
           treatments: ['baseline', 'enhanced'],
           agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-opus-4-6'}],
         },
@@ -1182,10 +1182,10 @@ execution_mode: one_shot
 setup: []
 judging_criteria: []
 `;
-  const casePath = 'cases/example.yaml';
+  const casePath = 'cases/example.case.yaml';
   const caseFilePath = path.join(datasetRoot, casePath);
   await fs.writeFile(caseFilePath, caseBody);
-  const unselectedCasePath = 'cases/unselected.yaml';
+  const unselectedCasePath = 'cases/unselected.case.yaml';
   const unselectedCaseFilePath = path.join(datasetRoot, unselectedCasePath);
   const unselectedCaseBody = `id: case/unselected
 task: Do another thing
@@ -1197,9 +1197,9 @@ judging_criteria: []
     await fs.writeFile(unselectedCaseFilePath, unselectedCaseBody);
   }
   const cases = [
-    {id: 'case/example', path: casePath},
+    casePath,
     ...(options.includeUnselectedCase
-      ? [{id: 'case/unselected', path: unselectedCasePath}]
+      ? [unselectedCasePath]
       : []),
   ];
   const files = [
@@ -1248,7 +1248,7 @@ treatments:
   baseline:
     setup: []
 matrix:
-  cases: [cases/example.yaml]
+  cases: [cases/example.case.yaml]
   treatments: [baseline]
   agents:
     - adapter: claude-code

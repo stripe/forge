@@ -69,7 +69,7 @@ describe('experiment expansion and run planning', () => {
     }
     const loaded = inputs();
     loaded.dataset.cases = new Map();
-    assert.throws(() => expandExperiment(loaded.experiment, loaded.dataset), {code: 'unknown_case'});
+    assert.throws(() => expandExperiment(loaded.experiment, loaded.dataset), {code: 'invalid_loaded_dataset'});
   });
 
   it('records Codex hook trust explicitly and separates policies in selection and plan identity', () => {
@@ -90,6 +90,73 @@ describe('experiment expansion and run planning', () => {
     assert.deepEqual(resolveRunPlan({...loaded, selection: implicit}), plans[0]);
     experiment.matrix.agents.pop();
     assert.throws(() => resolveRunPlan({...loaded, selection: selections[1]!}), /not in the benchmark matrix/);
+  });
+
+  it('rejects tampered dataset indexes even when the affected case is unselected', () => {
+    const original = inputs();
+    const selected = selection('case/a', 'baseline', 'claude-code', 'anthropic', 'sonnet', 0);
+    const other = original.dataset.cases.get('case/b')!;
+    const variants: LoadedDatasetV1[] = [
+      {...original.dataset, cases: new Map([['case/a', original.dataset.cases.get('case/a')!]])},
+      {...original.dataset, cases: new Map([...original.dataset.cases,
+        ['extra', {...other, definition: {...other.definition, id: 'extra'}}]])},
+      {...original.dataset, manifest: {...original.dataset.manifest,
+        cases: [CASE_A_PATH, CASE_A_PATH]}},
+      {...original.dataset, manifest: {...original.dataset.manifest,
+        cases: [CASE_A_PATH, 'cases/ordinary.yaml']}},
+    ];
+    for (const changed of [
+      {...other, definition: {...other.definition, id: 'case/a'}},
+      {...other, path: original.dataset.cases.get('case/a')!.path},
+      {...other, path: '/outside/other.case.yaml'},
+      {...other, path: `./${CASE_B_PATH}`},
+    ]) {
+      variants.push({...original.dataset, cases: new Map([
+        ['case/a', original.dataset.cases.get('case/a')!], ['case/b', changed],
+      ])});
+    }
+    for (const dataset of variants) {
+      assert.throws(() => expandExperiment(original.experiment, dataset), {code: 'invalid_loaded_dataset'});
+      assert.throws(() => resolveRunPlan({dataset, experiment: original.experiment, selection: selected}),
+        {code: 'invalid_loaded_dataset'});
+    }
+  });
+
+  it('accepts complete ReadonlyMap implementations and rejects inconsistent bounded iteration', () => {
+    const loaded = inputs();
+    const source = loaded.dataset.cases;
+    const cases: LoadedDatasetV1['cases'] = {
+      size: source.size,
+      get: source.get.bind(source),
+      has: source.has.bind(source),
+      keys: source.keys.bind(source),
+      values: source.values.bind(source),
+      entries: source.entries.bind(source),
+      forEach: source.forEach.bind(source),
+      [Symbol.iterator]: source[Symbol.iterator].bind(source),
+    };
+    const selections = expandExperiment(loaded.experiment, loaded.dataset);
+    const dataset = {...loaded.dataset, cases};
+    assert.deepEqual(expandExperiment(loaded.experiment, dataset), selections);
+    assert.deepEqual(resolveRunPlan({...loaded, dataset, selection: selections[0]!}),
+      resolveRunPlan({...loaded, selection: selections[0]!}));
+    const entries = [...source];
+    let yielded = 0;
+    const invalid = [
+      {...cases, size: 1},
+      {...cases, get: () => undefined},
+      {...cases, [Symbol.iterator]: function* () {
+        while (true) {
+          yielded += 1;
+          yield entries[0]!;
+        }
+      }},
+    ];
+    for (const cases of invalid) {
+      assert.throws(() => expandExperiment(loaded.experiment, {...dataset, cases}),
+        {code: 'invalid_loaded_dataset'});
+    }
+    assert.ok(yielded <= source.size + 1);
   });
   it('expands deterministically in case/treatment/agent/repetition order', () => {
     const experiment = experimentConfig({
@@ -744,10 +811,7 @@ function inputs(
       manifestSha256: MANIFEST_DIGEST,
       manifest: {
         dataset: {id: 'dataset', version: '2026.09.0'},
-        cases: [
-          {id: 'case/a', path: CASE_A_PATH},
-          {id: 'case/b', path: CASE_B_PATH},
-        ],
+        cases: [CASE_A_PATH, CASE_B_PATH],
         files: manifestFiles,
       },
       cases: new Map([
