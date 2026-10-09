@@ -93,7 +93,7 @@
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:cases:built && pnpm check:docs:built && pnpm check:package",
     "test:package": "node scripts/package-smoke.mjs",
     "test:types": "attw --pack . --profile esm-only",
-    "prepack": "pnpm build"
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
