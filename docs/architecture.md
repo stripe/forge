@@ -2,15 +2,15 @@
 
 This document describes the implemented architecture of Forge. It is a
 conceptual companion to the user-facing [README](../README.md): the README
-explains how to author and run an evaluation, while this document explains the
-boundaries, control flow, trust model, and extension points that make a run
-reproducible.
+explains installation, consuming published dataset releases, execution, and
+results. This document explains the data model, boundaries, control flow, trust
+model, and extension points behind Forge's audit records.
 
-Reproducible here means auditable semantics and provenance, not guaranteed
-byte-for-byte replay. Forge records declared intent, material setup-time
-resolutions, selected evidence, and the resulting evaluation. Models, network
-resources, registries, and other external systems can still change between
-runs.
+Forge records declared intent in `plan.json`, bounded non-sensitive setup
+resolutions in `setup.json`, selected evidence, and the resulting evaluation.
+Those records support audit and comparison; they do not guarantee identical
+reruns or complete capture of external state. Models, network resources,
+registries, and other external systems can change independently.
 
 For a file-by-file tour and concrete call graphs, see the
 [Forge codebase guide](codebase-guide.md).
@@ -26,9 +26,10 @@ verified dataset, an experiment configuration, and one matrix selection, it:
 6. evaluates deterministic checks and model-judged criteria; and
 7. commits a self-describing local result through one atomic boundary.
 
-The central architectural rule is that Forge owns every score-affecting
-decision and its ordering. Host integrations provide mechanisms through narrow
-contracts, but they do not own benchmark semantics or lifecycle control.
+The central architectural rule is that Forge owns core interaction, evidence
+selection, and scoring order. Host integrations provide mechanisms through
+narrow contracts, while the engine preserves the shared lifecycle and scoring
+semantics.
 
 ## Architectural goals
 
@@ -192,6 +193,42 @@ checks the loaded dataset pin and resolves manifest-listed paths to the IDs
 read from their case definitions. IDs remain the selection and report identity; resolved
 plan provenance records both the ID and manifest path.
 
+A grouped matrix keeps case-specific treatment and model combinations separate:
+
+<!-- grouped-matrix:start -->
+```yaml
+matrix:
+  repetitions: 2
+  retries: 0
+  groups:
+    - cases:
+        - cases/examples/payment.case.yaml
+      treatments:
+        - baseline
+        - payment-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-sonnet-4-6
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+    - cases:
+        - cases/examples/marketplace/case.yaml
+      treatments:
+        - baseline
+        - marketplace-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+```
+<!-- grouped-matrix:end -->
+
+This fragment assumes both case paths are in the manifest and all three
+treatments are defined. It produces **12 selections**: eight for payment and
+four for marketplace.
+
 [`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands each product in stable
 authored order:
 
@@ -202,8 +239,7 @@ group → case → treatment → agent → repetition
 The flat form behaves as one group. Groups flatten into ordinary selections;
 group identity does not enter plans, checkpoints, or reports. Membership checks
 require the complete case/treatment/agent tuple to coexist in one group, which
-prevents combinations from crossing group boundaries. The authoring contract
-and example are in the README's [experiment matrices](../README.md#experiment-matrices).
+prevents combinations from crossing group boundaries.
 
 The experiment-level `retries` value is experiment run policy and does not
 create a new semantic selection. `executeEval` executes one resolved plan once;
@@ -261,7 +297,7 @@ coordinator failure, reporting is best effort and preserves the primary error.
 Resume does not read the report, so it can regenerate a missing or corrupt
 scorecard without rerunning valid completed evaluations. Report fields and
 denominators are documented in the README's
-[experiment run workflow](../README.md#running-and-resuming-an-experiment).
+[results and scores](../README.md#results-and-scores).
 
 Embedding hosts supply resolved plans, an engine, a pure preflight composition,
 and an execution callback. The callback may construct per-run host resources
@@ -270,7 +306,8 @@ finishing cleanup before settling. The host retains input loading, command
 grammar, publication, and evaluation exit policy. The shared
 controller requires verified local artifacts below its selected root; it is
 not a remote worker protocol. It does not alter `executeEval` or its scoring
-semantics. See the README's [experiment run workflow](../README.md#running-and-resuming-an-experiment).
+semantics. See the README's
+[experiment run workflow](../README.md#running-experiments).
 
 The command stage exposed through `@stripe/forge/experiment/cli` composes shared
 operational options with host-defined arguments, validates invocation rules,
@@ -287,8 +324,7 @@ read-only experiment run inspection API verifies latest immutable commits agains
 saved plan digests without regenerating inputs or altering execution state,
 supporting independent publication retries. The public CLI uses this same
 command stage while retaining its own grammar, input loader, rendering, and
-exit policy. Exact embedding contracts are documented in the README's
-[programmatic experiment run API](../README.md#experiment-runs).
+exit policy.
 
 ### Plan resolution
 
@@ -475,7 +511,7 @@ fields serve an expected-content check, artifact verification, or a documented
 content-identity workflow such as comparing installed plugin snapshots.
 Resolutions do not include credentials or private host paths. Static built-ins
 return no dynamic resolution.
-After every action succeeds, Forge calls `finalizeSetup()`. This closes setup
+Once all actions succeed, Forge calls `finalizeSetup()` once. This closes setup
 command authority and asks the runtime to seal any state directory declared
 immutable for interaction.
 
@@ -559,7 +595,10 @@ or inferred host settings do not belong in runtime config.
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
 with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
 builds an image with pinned Claude Code and Codex versions, and records the
-built image ID. Docker can reuse the image across runs.
+built image ID. Image builds begin during runtime preparation or explicit
+`validate --host`; ordinary validation, planning, and a resume that skips every
+selection do not build an image. A runtime adapter shares its build per platform,
+and Docker's content cache can reuse layers across invocations.
 
 Each run uses a non-root container with a read-only image filesystem. On hosts
 which expose a non-root Unix UID, Forge builds the image's named `forge` user
@@ -581,7 +620,7 @@ directory.
 
 | Source | Container target | Purpose | Examples | Host access |
 | --- | --- | --- | --- | --- |
-| `R/workspace` | `/workspace` | The case working directory: setup populates it, the agent edits it, and checks evaluate it. | The quickstart's `hello.txt`; source files copied by `forge/write`; files created or changed by the agent. | `PreparedRuntime.workspace` is mutable until quiescence; `SealedRuntime.workspace` is read-only afterward. |
+| `R/workspace` | `/workspace` | The case working directory: setup populates it, the agent edits it, and checks evaluate it. | A file the case asks the agent to create; source files copied by `forge/write`; files changed by the agent. | `PreparedRuntime.workspace` is mutable until quiescence; `SealedRuntime.workspace` is read-only afterward. |
 | `R/home` | `/home/forge` | An isolated writable `HOME` for the non-root agent process, without mounting the host user's real home. | Tool-owned settings and caches such as `.config/...` or `.cache/...`, except paths replaced by more-specific state mounts. | No general home filesystem capability is exposed by the runtime contract. The Docker adapter retains the backing path only to mount and clean it up. |
 | `R/state/{id}` | The requirement's `containerPath` | Named state explicitly requested by an agent or setup action; each ID gets its own mount and lifecycle. | Claude `<session-id>.jsonl`; Codex `sessions/.../rollout-...jsonl`; `installed_plugins.json` and plugin caches; a host-imported tool under a sealed `/opt/...` target. | Available by ID through `PreparedRuntime.stateDirectories`; mutable until quiescence, or until setup finalization when sealed, then read-only through `SealedRuntime.stateDirectories`. Trusted host imports also target a declared state ID. |
 | Memory-backed tmpfs | `/tmp` | Bounded ephemeral scratch space on an otherwise read-only container root filesystem. | Temporary files created by CLIs and subprocesses. | None. It has no path below `R` and disappears with the container. |
@@ -634,8 +673,7 @@ settings writes or host cleanup.
 
 Trusted host code can use `PreparedRuntime.importHostFile` during setup to copy
 a SHA-256-verified file into declared state. Setup actions and agents cannot
-call it. See [Runtime layouts and conformance](../README.md#runtime-layouts-and-conformance)
-for its exact contract. This low-level capability currently verifies the copy
+call it. This low-level capability currently verifies the copy
 but does not add an import receipt to `setup.json`; that is a provenance gap for
 integrations where the imported contents can affect evaluation behavior.
 
@@ -732,9 +770,10 @@ later require a judge.
 not an adapter or completion-provider feature. The provider supplies only
 structured completions.
 
-Ava privately derives up to six high-level needs from the case task and
-context, focuses on one remaining need at a time, and emits short natural user
-messages. Its private need model is never sent to the coding agent. A configured
+Ava privately derives up to six high-level needs, each at most 240 characters,
+from the case task and context. It focuses on one remaining need at a time and
+emits user messages of at most 500 characters. Its private need model is never
+sent to the coding agent. A configured
 initial prompt is sent verbatim before Ava initializes; otherwise Ava generates
 the opening turn.
 
@@ -795,10 +834,16 @@ match the selected session and, when normalized native evidence is available,
 its source format.
 
 [`selectAgentEvidence`](https://github.com/stripe/forge/blob/main/src/evidence/selection.ts) parses the adapter's ATIF
-candidate and proves that it covers every completed driver turn. Coverage
-requires ordered user messages and an agent step with visible response
-evidence. Codex receives additional reconciliation between live tool categories
-and native rollout activity.
+candidate and checks that it covers every completed driver turn: the same
+logical turn count, the same ordered user prompts, and visible response or tool
+activity for every completed invocation. Native text and tool payloads need not
+be byte-identical to live output because the two protocols are lossy
+projections. Codex additionally requires assistant text when the live response
+had text, and at least the observed count of every comparable tool kind,
+including each named MCP tool. Native-only tool discovery cannot compensate for
+a missing executed tool. These are lower-bound coverage checks, not exact
+one-to-one matching; they apply by native source format, including for custom
+Codex adapter IDs.
 
 If the adapter reports that native evidence is unavailable, invalid, or
 incomplete, or if a structurally valid candidate fails completed-turn coverage,
@@ -808,14 +853,83 @@ malformed candidate labeled `available` is an adapter contract violation and
 aborts the evidence phase. Optional native detail loss may instead produce
 `partial` evidence with warnings.
 
+Driver fallback preserves every ordered user prompt and a visible response
+marker for every completed invocation. Assistant text, tool calls, or tool
+arguments may be deterministically truncated to stay within ATIF safety bounds;
+such loss adds a `value_omitted` warning. Scoring consumes this exact bounded
+trajectory, and judging receives its declared root-behavior projection. If Ava
+fails before any agent turn, the system-only fallback instead identifies
+`role_player_error` and has no agent session ID.
+
+When an adapter captured the exact root-session JSONL, those bytes remain a
+restricted supplemental artifact even if normalization falls back. The built-in
+adapters do not filter, redact, normalize, or reserialize that copy, and do not
+crawl sibling sessions or subagent traces. It can contain prompts, credentials,
+private reasoning, tool payloads, and file contents; it is excluded from judging
+and scoring. Local storage writes it mode `0600`, and its descriptor carries
+`sensitivity: restricted` for custom stores and publishers to respect.
+
 ### ATIF normalization
 
-Forge pins ATIF v1.8; its package release identifies normalization behavior. The ATIF parser
-rejects cyclic, exotic, sparse, non-finite, overly deep, or oversized JSON
-graphs before recursive schema validation. The canonical trajectory may retain
-agent messages, reasoning, tool calls/results, metrics, copied context, system
-context, media references, and embedded subagent data when supplied by the
-adapter and permitted by ATIF.
+Forge pins `ATIF-v1.8` to Harbor v0.23.0 commit
+`1e5c5c6db929a10a140d05e606882c671ae20729` and its RFC. Its package release
+identifies normalization behavior. `schema_version` is required; explicit JSON
+`null` is preserved where the pinned contract treats null and omission
+equivalently, while conditional multimodal fields must be omitted when
+inapplicable. The parser rejects cyclic, exotic, sparse, non-finite, overly deep,
+or oversized JSON graphs before recursive schema validation. The canonical
+trajectory may retain agent messages, reasoning, tool calls/results, metrics,
+copied context, system context, media references, and embedded subagent data
+when supplied by the adapter and permitted by ATIF.
+
+Known non-conversation metadata is ignored explicitly. Unknown conversational
+records, attachments without renderable or explicitly classified content,
+unsupported content blocks, sidechains, and compaction make native evidence
+incomplete and trigger whole-trajectory fallback. Loss of optional detail such
+as an invalid timestamp instead adds a partial-evidence warning. Unsupported
+record diagnostics identify a safe category and line number, never payload
+values.
+
+Claude attachment records with string-valued `rendered[].content` become ATIF
+system steps in native order, retaining rendered text and valid timestamps;
+`extra` identifies the native record and attachment types. They stay excluded
+from criterion judging. A `hook_success` record is bookkeeping only when its
+validated output has a single nonempty `additionalContext` repeated in the
+immediately following rendered `hook_additional_context` record. That following
+record supplies the system step; missing or mismatched pairs trigger fallback.
+Empty session-context bookkeeping is ignored. Prompt snapshots stay in the
+restricted native source and add a partial-detail warning until their per-call
+semantics can be normalized faithfully.
+
+Codex selects a single matching root UUID rollout under its isolated
+`CODEX_HOME/sessions`, validates session metadata, and records source format
+`codex-rollout-jsonl`. Actual user turns are distinguished from injected
+AGENTS.md and environment context, which become system steps. Function and
+custom-tool calls retain native call IDs, arguments, and correlated outputs;
+tool-search calls and returned tool definitions remain correlated tool behavior.
+Every MCP call requires a matching `McpToolCall` completion snapshot verified
+against its call and result. A missing snapshot triggers fallback even if an
+output includes `is_error`; another completion type cannot substitute. A
+completed invocation does not override an MCP `isError` result.
+
+Supported Codex MCP text and image blocks may carry opaque `annotations` and
+`_meta` objects under the existing JSON graph bounds. Metadata in recorded
+rendered output is preserved after credential redaction; snapshot-only metadata
+is not added to judge evidence. Metadata alone does not reduce completeness.
+Recognized MCP truncation retains exactly the shortened text, truncation, and
+omitted-item markers recorded in native output. Forge verifies the retained
+text and omission counts against the full snapshot without restoring hidden
+text. A `value_omitted` warning marks that trajectory `partial`. Unknown or
+mismatched truncation, including a clipped timing header that cannot be
+reconstructed from the snapshot, triggers fallback.
+
+Codex tool results may be strings or supported content-block arrays. Text stays
+judge-visible. Native image bytes and URL references stay only in the restricted
+source; normalized results contain an explicit omission marker and
+`value_omitted` warning, retaining the text as `partial` evidence. Forge does not
+fabricate image-file references, fetch image URLs, or attach those native bytes
+to a text-only judge. Incomplete, compacted, ambiguous, or unsupported
+conversation records still trigger whole-trajectory fallback.
 
 Before persistence or scoring, Forge redacts every resolved run and completion
 secret from the normalized trajectory. Provenance in `result.json` records:
@@ -842,17 +956,35 @@ positive allowlist from the redacted root trajectory:
 Opaque tool arguments and results remain because they are observable behavior,
 even when a nested key is named `reasoning_content`. Image and audio references
 remain, but their bytes are not loaded into the text-only judge request.
+Tool results without a source-call ID remain visible, with correlation retained
+when supplied. An exact boolean `observation.results[].extra.is_error` is
+promoted to judge-visible `is_error`; other result extras are excluded. Subagent
+work is visible only through root messages/tool results or separately selected
+workspace text. The judge prompt instructs it not to infer or reward private
+reasoning.
 
 The projection policy is declared in
 [`src/evaluation/judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts).
 `judge-evidence.json` stores both that policy and the exact projected steps; its
 producing Forge release governs their interpretation and verification. The
 verifier recreates the projection from `trajectory.json` and requires bytewise
-canonical equivalence.
+canonical equivalence. Embedded steps are required; a policy-only artifact is
+invalid. Consumers can reproduce these exact bytes with
+`createJudgeTranscriptProjection` from `@stripe/forge`: canonical serialization
+of `transcript.steps` reproduces the transcript JSON supplied to each request.
+`judgeCriteria` accepts a validated projection rather than an arbitrary
+transcript string.
+
+Projected transcript JSON is capped at 786,432 UTF-8 bytes, with bounded-JSON
+graph preflight before recursive validation. The complete rendered criterion
+prompt is capped at 1,048,576 UTF-8 bytes before a provider is invoked. Each
+authored criterion is limited to 65,536 characters, matching the persisted
+evaluation bound.
 
 ## Evaluation and scoring
 
-Evaluation consumes only sealed, redacted evidence.
+Evaluation consumes sealed workspace evidence and the selected redacted
+trajectory. Criterion judges receive a separately redacted workspace subset.
 
 ### Deterministic checks
 
@@ -877,12 +1009,15 @@ Each judging criterion is judged independently against:
 - the optional authored example answer.
 
 Workspace collection skips symlinks, agent state, dependencies, build output,
-lockfiles, and common binary formats, and applies entry, depth, time, byte,
-per-file, and total-character limits. Truncation and unavailable evidence are
-recorded explicitly.
+lockfiles, and common binary formats. Its hard bounds are 10,000 listed entries,
+depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
+rendered characters total. Truncation and unavailable evidence are recorded
+explicitly. `judge-evidence.json` records the redacted workspace subset and
+exact projected transcript for audit; it is not an input to a later judge call.
 
-At most four criteria run concurrently. Each gets three attempts with fixed
-one- and five-second retry waits and strict JSON output. Repeated malformed
+At most four criteria run concurrently, with temperature 0, a 1,024-token
+response limit, and a strict one-criterion JSON schema. Each gets up to three
+attempts with fixed one- and five-second retry waits. Repeated malformed
 output fails only that criterion closed. A final provider transport failure is
 fatal: cleanup runs and no result is committed. Before dispatch, Forge verifies
 that its final defensive redaction pass would not change the already-audited
@@ -1004,7 +1139,8 @@ file; stored-run verification supplies it automatically.
 ## Security and trust boundaries
 
 Forge does not claim that every extension is untrusted. Instead, it makes trust
-and authority explicit.
+and authority explicit. The installed Forge code and host Docker daemon remain
+trusted.
 
 | Boundary | What is trusted | What Forge still enforces |
 | --- | --- | --- |
@@ -1029,6 +1165,14 @@ Other important safeguards include:
   scoring, and selected by exact session identity rather than “newest session”;
   and
 - serializers reject non-JSON values instead of silently projecting them.
+
+Redaction matches exact resolved secret values; it does not detect transformed
+or partially leaked values. The evaluated agent receives its selected provider
+credential and outbound network access, so it can intentionally disclose that
+credential. Use restricted, short-lived keys with appropriate account limits.
+The built-in runtime provides no domain allowlisting or offline execution mode;
+custom network policy requires an explicit runtime implementation. Ava and judge
+providers receive benchmark prompts and the evidence needed for their roles.
 
 ## Failure, cancellation, and cleanup semantics
 
@@ -1055,24 +1199,31 @@ Observer failures never change execution. A runtime disposal failure after
 artifact staging becomes a result warning so the completed evidence can still
 be committed; failures before that point remain fatal.
 
-## Public entry points and default CLI composition
+## Public entry points
+
+| Entry point | Purpose |
+| --- | --- |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
+| `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
+| `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
+| `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
+| `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
+| `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
+| `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
+| `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
+| `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
+| `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
+| `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
+| `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
+| `@stripe/forge/package.json` | Package metadata |
+
+## Default CLI composition
 
 The `@stripe/forge` ESM package root exports the engine, contracts, model,
 planning, execution, evaluation, setup, and result APIs through
 [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts).
-Specialized subpaths expose:
-
-- `@stripe/forge/agents/claude-code`;
-- `@stripe/forge/agents/codex`;
-- `@stripe/forge/providers/anthropic`;
-- `@stripe/forge/runtime/docker`;
-- `@stripe/forge/atif` and `@stripe/forge/atif/v1.8`;
-- `@stripe/forge/setup`;
-- `@stripe/forge/testing`;
-- `@stripe/forge/experiment`;
-- `@stripe/forge/experiment/cli`;
-- `@stripe/forge/cli`; and
-- `@stripe/forge/package.json`.
+See [public entry points](#public-entry-points) for the complete
+export inventory and specialized implementations.
 
 The public CLI in [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) is a thin host around the same
 engine APIs:
@@ -1112,24 +1263,38 @@ external runtime without changing core lifecycle semantics.
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 
-## What Forge intentionally does not own
+## Current limitations
 
-The current architecture leaves several responsibilities outside the public
-engine:
+The public CLI and built-in composition currently have these limits:
 
-- distributed experiment run scheduling and automatic experiment-level retries;
-- remote result publication and access control;
-- interactive or human-driven execution;
-- dynamic setup plugin discovery or imports named by YAML;
-- private infrastructure, service discovery, or implicit credential lookup;
-- automatic pinning of rolling marketplace plugins or remote MCP services; and
-- scoring of subagent traces that were not surfaced into root trajectory or
-  selected workspace evidence.
+- Claude Code and Codex are the built-in agents. Cursor and interactive human
+  controllers are not included. Codex uses API-key execution, without ChatGPT
+  login.
+- Multi-turn automation uses fixed Ava semantics. Anthropic is the only
+  built-in host completion provider; other providers require an explicit
+  [completion-provider implementation](#host-side-completion-providers) and
+  cannot replace Ava's lifecycle.
+- Deterministic evaluation supports file creation, existence, and regex content
+  checks. Post-agent test commands and static-analysis checks are not built in.
+- The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
+  network policies need a host-supplied [runtime adapter](#runtime-architecture).
+- Execution is local, with bounded concurrency and explicit resume. There is no
+  distributed scheduler, automatic experiment retry loop, remote publisher, or
+  hosted execution service. `matrix.retries` does not schedule automatic attempts.
+- Marketplace plugins follow the current public catalog entry. Exact authored
+  pins, private repository authentication, transitive dependencies, and
+  user-defined plugin options are unsupported; see the authoritative
+  [plugin limitations](plugin-action.md#credentials-and-limitations).
+- Host-file imports verify transferred bytes without emitting a core setup
+  receipt; this leaves a provenance gap when imported contents affect evaluation.
+- Subagent traces affect scoring only through visible root-session behavior or
+  selected workspace evidence. The [judge projection](#judge-visible-projection)
+  defines the exact boundary.
 
-These exclusions keep a single run's semantics portable and auditable. A host
-may build orchestration around Forge, but it should treat the resolved plan,
-engine-owned lifecycle, sealed evidence boundary, and committed result format
-as the stable core.
+A host may build orchestration around Forge, but should preserve the resolved
+plan, engine-owned lifecycle, sealed evidence boundary, and committed result
+format as the stable core. Docker build timing and cold-build network
+requirements are described under [the built-in runtime](#built-in-docker-runtime).
 
 ## Invariants to preserve when changing Forge
 
