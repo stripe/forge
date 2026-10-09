@@ -29,18 +29,21 @@ truth for feature details; do not duplicate their full specifications here.
 
 ## Invariants to preserve
 
-- Cases define what is evaluated; experiments define how cases run. Keep
-  environment configuration out of case definitions.
-- A resolved run plan completely captures declared semantics, is canonical and
-  immutable, and is free of ambient inference.
-- Record every material, non-sensitive setup-time resolution not fixed by the
-  plan in `setup.json`. Changing external state may prevent exact replay, but it
-  must not silently change the realized setup.
-- Wire formats are strict and governed by the Forge package release; unknown
-  authored fields remain errors.
-  Do not mutate parsed inputs, and keep resolved plans cloned and deeply frozen.
+- Cases define the task, invariant setup, and evaluation; experiments define
+  treatments and execution choices. Keep runtime, model, and host configuration
+  out of case definitions.
+- Do not mutate parsed inputs. Resolve declared inputs, defaults, and explicit
+  host choices into canonical, cloned, deeply frozen plans. Do not infer omitted
+  semantic settings during execution.
+- Record bounded, non-sensitive receipts in `setup.json` for setup choices Forge
+  explicitly resolves. Keep provenance claims within the recorded facts and
+  document material gaps.
+- Keep core wire formats strict and governed by the Forge package release.
+  Reject unknown authored fields in their owning schemas.
+- Preserve dataset integrity checks: verify the exact manifest inventory,
+  declared file sizes and hashes, and experiment dataset pins.
 - Complete parsing and pure capability preflight before resolving credentials,
-  allocating resources, invoking providers, or mutating a workspace.
+  allocating resources, making provider requests, or mutating a workspace.
 - `executeEval` owns score-affecting lifecycle ordering. Adapters provide
   mechanisms and must not redefine benchmark semantics.
 - Apply case setup before treatment setup. Stop mutation before selecting or
@@ -48,14 +51,15 @@ truth for feature details; do not duplicate their full specifications here.
 - Select evidence for the exact run and session. If native evidence is
   unavailable or incomplete, make fallback and fidelity loss explicit.
 - Treat credentials as scoped capabilities. Keep secret values out of authored
-  inputs, plans, events, errors, transcripts, and ordinary artifacts; never
-  copy the ambient host environment wholesale into a runtime.
+  inputs, plans, events, errors, normalized transcripts, and ordinary artifacts.
+  Keep unredacted native logs explicitly restricted, and never copy the ambient
+  host environment wholesale into a runtime.
 - Calculate a content digest for an expected-content comparison, artifact
   verification, or a documented identity workflow such as comparing installed
   plugin snapshots. Avoid redundant digests and fingerprints without a defined use.
-- Keep result serialization deterministic, bounded, verifiable, and atomically
-  committed. Cleanup, observation, and publication must not alter scoring
-  semantics.
+- Keep core serialization canonical and bounded, describe and verify companion
+  bytes, and commit completed runs atomically. Cleanup, observation, and
+  publication must not alter scoring semantics.
 - Add host-specific capabilities through narrow public interfaces or explicit,
   immutable action bundles. Do not add global discovery, YAML-driven imports,
   or hidden process-environment fallbacks.
