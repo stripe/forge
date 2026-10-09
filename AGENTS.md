@@ -69,8 +69,11 @@ policy, artifact format, and scoring semantics.
 Every code change must have relevant automated test coverage. Place focused
 unit tests beside source files as `*.test.ts`; put cross-module, CLI, package,
 and embedding tests under `test/`. Keep harness test inputs under `test/fixtures/`.
-Versioned public dataset snapshots belong under `datasets/<name>/<version>/`,
-with consumer experiments under `experiments/`.
+Versioned public release bundles belong under `datasets/<name>/<version>/`,
+with a runnable `experiment.yaml` beside the exact-manifest `dataset/` tree.
+Use `dataset.path: ./dataset` so the complete bundle can be moved or archived
+without rewriting its experiment. Keep release documentation outside the
+exact-manifest dataset tree.
 Prefer deterministic fakes for the normal test suite.
 
 Use the narrowest relevant test while iterating:

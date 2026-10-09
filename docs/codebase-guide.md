@@ -684,8 +684,7 @@ evals with cleanup warnings fail live verification.
 
 | Path | Role |
 | --- | --- |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample dataset snapshots with exact payload manifests. |
-| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Consumer experiments which pin dataset snapshots and select treatments and models. |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
 | [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |

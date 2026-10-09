@@ -161,6 +161,13 @@ requires directory listings to match the pinned inventory. The public CLI
 supplies that manifest automatically. This closes the gap between initial
 verification and later setup reads.
 
+A release bundle can contain `experiment.yaml` beside its exact-manifest
+`dataset/` tree. The experiment uses `dataset.path: ./dataset`, keeping runtime
+choices outside the dataset inventory while allowing the complete bundle to be
+archived and extracted without path changes. See the
+[sample bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+for the layout and commands.
+
 ### Cases, treatments, and setup ordering
 
 A case owns invariant setup because it is part of the task definition. A
@@ -1101,8 +1108,7 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample dataset snapshots |
-| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Consumer experiments which pin dataset snapshots |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles with runnable experiments and exact-manifest dataset trees |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 

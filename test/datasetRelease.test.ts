@@ -12,11 +12,12 @@ import {
 } from '../src/index.js';
 import {runCli} from '../src/cli.js';
 
-const datasetRoot = path.resolve('datasets/stripe-integration-public-evals/0.1.0');
-const experimentPath = path.resolve('experiments/stripe-integration-public-evals/experiment.yaml');
+const releaseRoot = path.resolve('datasets/stripe-integration-public-evals/0.1.0');
+const datasetRoot = path.join(releaseRoot, 'dataset');
+const experimentPath = path.join(releaseRoot, 'experiment.yaml');
 
 describe('sample dataset release', () => {
-  it('validates the pinned snapshot and plans its public baseline without credentials', async () => {
+  it('validates the bundled dataset and plans its pinned public baseline without credentials', async () => {
     const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),
       loadExperimentConfig(experimentPath),
@@ -64,7 +65,7 @@ describe('sample dataset release', () => {
     }
   });
 
-  it('consumes a relocated snapshot with the same release identity and resolved plan', async (context) => {
+  it('relocates the complete release without rewriting the experiment or changing its plan', async (context) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-dataset-release-'));
     context.after(() => fs.rm(root, {recursive: true, force: true}));
     const [dataset, experiment] = await Promise.all([
@@ -75,20 +76,30 @@ describe('sample dataset release', () => {
       dataset, experiment, selection: expandExperiment(experiment, dataset)[0]!,
     });
 
-    await fs.cp(datasetRoot, path.join(root, 'dataset'), {recursive: true});
-    await fs.writeFile(path.join(root, 'experiment.yaml'), JSON.stringify({
-      ...experiment.config,
-      dataset: {...experiment.config.dataset, path: './dataset'},
-    }));
+    const relocatedRoot = path.join(root, 'release');
+    await fs.cp(releaseRoot, relocatedRoot, {recursive: true});
+    const relocatedExperimentPath = path.join(relocatedRoot, 'experiment.yaml');
     const [relocated, consumer] = await Promise.all([
-      loadDataset(path.join(root, 'dataset')),
-      loadExperimentConfig(path.join(root, 'experiment.yaml')),
+      loadDataset(path.join(relocatedRoot, 'dataset')),
+      loadExperimentConfig(relocatedExperimentPath),
     ]);
     assert.equal(relocated.manifestRaw, dataset.manifestRaw);
+    assert.equal(consumer.raw, experiment.raw);
     assert.deepEqual(resolveRunPlan({
       dataset: relocated,
       experiment: consumer,
       selection: expandExperiment(consumer, relocated)[0]!,
     }), originalPlan);
+
+    let stdout = '';
+    let stderr = '';
+    const code = await runCli(['plan', '--experiment', relocatedExperimentPath], {
+      environment: {},
+      stdout: (text) => {stdout += text;},
+      stderr: (text) => {stderr += text;},
+    });
+    assert.equal(code, 0, stderr);
+    assert.equal(stderr, '');
+    assert.deepEqual(JSON.parse(stdout), originalPlan);
   });
 });

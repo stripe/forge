@@ -699,10 +699,12 @@ Forge deliberately separates what is evaluated from how it is run:
   provenance.
 
 The repository includes a
-[Stripe integration sample snapshot](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
-containing one payments case. Its separate
-[consumer experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/experiment.yaml)
-pins that snapshot. Use a source checkout for these input files.
+[Stripe integration sample release bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+containing one payments case and a
+[baseline experiment](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/0.1.0/experiment.yaml).
+The experiment pins the nested `dataset/` tree and uses `dataset.path: ./dataset`,
+so the versioned bundle can be archived and extracted without rewriting paths.
+Use a source checkout for these input files.
 
 YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
 non-canonical paths, unknown or version-suffixed setup actions, and oversized
@@ -2012,9 +2014,9 @@ proxy, or an offline execution mode.
 
 The library and test suite compile with `tsc`; the repository does not require
 a bundler or an `esbuild` install/build exception. Tests run on Node's built-in
-test runner. Versioned sample snapshots live under
-[`datasets`](https://github.com/stripe/forge/tree/main/datasets), with consumer
-experiments under [`experiments`](https://github.com/stripe/forge/tree/main/experiments).
+test runner. Versioned sample release bundles live under
+[`datasets`](https://github.com/stripe/forge/tree/main/datasets), each with a
+runnable `experiment.yaml` and an exact-manifest `dataset/` tree.
 Eval inputs used to verify the harness live under
 [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
 `pnpm check:cases` verifies the snapshots and fixtures through the public dataset

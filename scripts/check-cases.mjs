@@ -9,7 +9,7 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 export const REPOSITORY_DATASET_ROOTS = Object.freeze([
   'test/fixtures/one-shot/dataset',
   'test/fixtures/multi-turn/dataset',
-  'datasets/stripe-integration-public-evals/0.1.0',
+  'datasets/stripe-integration-public-evals/0.1.0/dataset',
 ]);
 
 export async function checkRepositoryCases({root, loadDataset}) {
