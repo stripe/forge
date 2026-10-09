@@ -19,8 +19,9 @@ Stripe-owned names or integrations are acceptable only when they are portable,
 documented, and usable outside Stripe. Keep runtime dependencies small,
 portable, and suitable for an Apache-2.0 public package; record required
 attribution and provenance. Environment-specific behavior must enter through
-documented public contracts; do not import or discover private host
-implementations from the core.
+documented public contracts or explicit, immutable action bundles. Do not add
+global implementation discovery, YAML-driven imports, or hidden
+process-environment fallbacks; keep private host implementations out of the core.
 
 Before changing behavior or public exports, read `README.md`, `package.json`,
 and `docs/architecture.md`. Use `docs/codebase-guide.md` for detailed code
@@ -29,40 +30,28 @@ truth for feature details; do not duplicate their full specifications here.
 
 ## Invariants to preserve
 
-- Cases define the task, invariant setup, and evaluation; experiments define
-  treatments and execution choices. Keep runtime, model, and host configuration
-  out of case definitions.
-- Do not mutate parsed inputs. Resolve declared inputs, defaults, and explicit
-  host choices into canonical, cloned, deeply frozen plans. Do not infer omitted
-  semantic settings during execution.
-- Record bounded, non-sensitive receipts in `setup.json` for setup choices Forge
-  explicitly resolves. Keep provenance claims within the recorded facts and
-  document material gaps.
-- Keep core wire formats strict and governed by the Forge package release.
-  Reject unknown authored fields in their owning schemas.
-- Preserve dataset integrity checks: verify the exact manifest inventory,
-  declared file sizes and hashes, and experiment dataset pins.
-- Complete parsing and pure capability preflight before resolving credentials,
-  allocating resources, making provider requests, or mutating a workspace.
-- `executeEval` owns score-affecting lifecycle ordering. Adapters provide
-  mechanisms and must not redefine benchmark semantics.
-- Apply case setup before treatment setup. Stop mutation before selecting or
-  evaluating evidence.
-- Select evidence for the exact run and session. If native evidence is
-  unavailable or incomplete, make fallback and fidelity loss explicit.
-- Treat credentials as scoped capabilities. Keep secret values out of authored
-  inputs, plans, events, errors, normalized transcripts, and ordinary artifacts.
-  Keep unredacted native logs explicitly restricted, and never copy the ambient
-  host environment wholesale into a runtime.
-- Calculate a content digest for an expected-content comparison, artifact
-  verification, or a documented identity workflow such as comparing installed
-  plugin snapshots. Avoid redundant digests and fingerprints without a defined use.
-- Keep core serialization canonical and bounded, describe and verify companion
-  bytes, and commit completed runs atomically. Cleanup, observation, and
-  publication must not alter scoring semantics.
-- Add host-specific capabilities through narrow public interfaces or explicit,
-  immutable action bundles. Do not add global discovery, YAML-driven imports,
-  or hidden process-environment fallbacks.
+- Cases own tasks, criteria, and invariant setup; experiments own treatments,
+  models, and runtime choices.
+- Keep core schemas strict under the Forge release and reject unknown fields in
+  their owning schemas. Resolve explicit inputs and defaults into canonical,
+  cloned, deeply frozen plans without mutating inputs or introducing hidden
+  execution defaults.
+- Verify exact dataset inventories, sizes, hashes, and experiment pins. Add
+  other digests only for a defined integrity or identity purpose.
+- Finish parsing and pure capability preflight before credential lookup,
+  provider requests, allocation, or workspace mutation.
+- `executeEval` owns lifecycle and scoring order. Apply case setup before
+  treatment setup, and stop mutation before evidence selection or evaluation.
+- Record bounded, non-sensitive setup receipts for choices Forge explicitly
+  resolves; document provenance gaps.
+- Select evidence for the exact run and session. Make native-evidence fallback
+  and fidelity loss explicit.
+- Keep credentials scoped and avoid copying the host environment wholesale.
+  Exclude secrets from authored inputs, plans, normalized transcripts, and
+  ordinary outputs; keep unredacted native logs restricted.
+- Keep core serialization canonical and bounded, verify companion artifacts,
+  and commit completed runs atomically. Cleanup, observation, and publication
+  must not alter scoring semantics.
 
 See `docs/architecture.md` for the complete lifecycle, trust model, evidence
 policy, artifact format, and scoring semantics.
