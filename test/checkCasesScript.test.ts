@@ -12,10 +12,10 @@ import type {DatasetManifestV1} from '../src/index.js';
 
 const repositoryRoot = process.cwd();
 const scriptPath = path.join(repositoryRoot, 'scripts', 'check-cases.mjs');
-const {checkRepositoryCases, EXAMPLE_DATASET_ROOTS} = await import(
+const {checkRepositoryCases, REPOSITORY_DATASET_ROOTS} = await import(
   pathToFileURL(scriptPath).href
 ) as {
-  EXAMPLE_DATASET_ROOTS: readonly string[];
+  REPOSITORY_DATASET_ROOTS: readonly string[];
   checkRepositoryCases(options: {root: string; loadDataset: typeof loadDataset}): Promise<{
     datasets: number;
     cases: number;
@@ -24,28 +24,28 @@ const {checkRepositoryCases, EXAMPLE_DATASET_ROOTS} = await import(
 };
 
 describe('repository case check', () => {
-  it('validates the explicit checked-in example datasets through the public loader', async () => {
+  it('validates the explicit checked-in snapshots and fixture datasets through the public loader', async () => {
     assert.deepEqual(await checkRepositoryCases({root: repositoryRoot, loadDataset}), {
-      datasets: 2, cases: 2, errors: [],
+      datasets: 3, cases: 3, errors: [],
     });
   });
 
   it('ignores datasets outside the explicit repository roots', async (context) => {
     const root = await fixture();
     context.after(() => fs.rm(root, {recursive: true, force: true}));
-    const unrelated = path.join(root, 'examples', 'unlisted', 'dataset');
+    const unrelated = path.join(root, 'test', 'fixtures', 'unlisted', 'dataset');
     await fs.mkdir(unrelated, {recursive: true});
     await fs.writeFile(path.join(unrelated, 'manifest.json'), 'invalid manifest');
 
     assert.deepEqual(await checkRepositoryCases({root, loadDataset}), {
-      datasets: 2, cases: 2, errors: [],
+      datasets: 3, cases: 3, errors: [],
     });
   });
 
   it('reports a malformed authored case and still validates the next dataset', async (context) => {
     const root = await fixture();
     context.after(() => fs.rm(root, {recursive: true, force: true}));
-    const datasetRoot = path.join(root, EXAMPLE_DATASET_ROOTS[0]!);
+    const datasetRoot = path.join(root, REPOSITORY_DATASET_ROOTS[0]!);
     const manifestPath = path.join(datasetRoot, 'manifest.json');
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as DatasetManifestV1;
     const relativePath = manifest.cases[0]!;
@@ -59,10 +59,10 @@ describe('repository case check', () => {
     await fs.writeFile(manifestPath, JSON.stringify(manifest));
 
     const result = await checkRepositoryCases({root, loadDataset});
-    assert.equal(result.datasets, 2);
-    assert.equal(result.cases, 1);
+    assert.equal(result.datasets, 3);
+    assert.equal(result.cases, 2);
     assert.equal(result.errors.length, 1);
-    assert.match(result.errors[0]!, /^examples\/quickstart\/dataset:/);
+    assert.match(result.errors[0]!, /^test\/fixtures\/one-shot\/dataset:/);
     assert.match(result.errors[0]!, /id|identifier/i);
   });
 
@@ -70,9 +70,9 @@ describe('repository case check', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-case-check-'));
     context.after(() => fs.rm(root, {recursive: true, force: true}));
     const result = await checkRepositoryCases({root, loadDataset});
-    assert.equal(result.datasets, 2);
+    assert.equal(result.datasets, 3);
     assert.equal(result.cases, 0);
-    assert.deepEqual(result.errors.map((error) => error.split(':')[0]), EXAMPLE_DATASET_ROOTS);
+    assert.deepEqual(result.errors.map((error) => error.split(':')[0]), REPOSITORY_DATASET_ROOTS);
   });
 
   it('uses the compiled public loader and exits unsuccessfully for invalid repository cases', async (context) => {
@@ -93,20 +93,20 @@ describe('repository case check', () => {
     });
     const valid = invoke();
     assert.equal(valid.status, 0, valid.stderr);
-    assert.equal(valid.stdout, 'cases: checked 2 datasets and 2 cases\n');
+    assert.equal(valid.stdout, 'cases: checked 3 datasets and 3 cases\n');
     assert.equal(valid.stderr, '');
 
-    await fs.writeFile(path.join(root, EXAMPLE_DATASET_ROOTS[0]!, 'manifest.json'), '{}');
+    await fs.writeFile(path.join(root, REPOSITORY_DATASET_ROOTS[0]!, 'manifest.json'), '{}');
     const invalid = invoke();
     assert.equal(invalid.status, 1, invalid.stderr);
     assert.equal(invalid.stdout, '');
-    assert.match(invalid.stderr, /^cases: examples\/quickstart\/dataset:/);
+    assert.match(invalid.stderr, /^cases: test\/fixtures\/one-shot\/dataset:/);
   });
 });
 
 async function fixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-case-check-'));
-  for (const relativeRoot of EXAMPLE_DATASET_ROOTS) {
+  for (const relativeRoot of REPOSITORY_DATASET_ROOTS) {
     await fs.cp(path.join(repositoryRoot, relativeRoot), path.join(root, relativeRoot), {
       recursive: true,
     });

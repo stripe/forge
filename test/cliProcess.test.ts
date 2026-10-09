@@ -63,7 +63,7 @@ describe('CLI executable', () => {
   });
 
   it('validates an experiment through the real process without runtime allocation', () => {
-    const result = invoke(cliFile, ['validate', '--experiment', 'examples/quickstart/experiment.yaml']);
+    const result = invoke(cliFile, ['validate', '--experiment', 'test/fixtures/one-shot/experiment.yaml']);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /valid/i);
     assert.equal(result.stderr, '');

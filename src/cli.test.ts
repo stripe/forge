@@ -942,12 +942,12 @@ describe('Forge CLI', () => {
     )), 'test-api-key');
   });
 
-  it('validates and plans the checked-in Codex example without credentials or Docker', async () => {
+  it('validates and plans the Codex fixture without credentials or Docker', async () => {
     for (const command of ['validate', 'plan']) {
       let stdout = '';
       let stderr = '';
       const code = await runCli([
-        command, '--experiment', 'examples/codex/experiment.yaml',
+        command, '--experiment', 'test/fixtures/codex/experiment.yaml',
       ], {
         environment: {},
         stdout: (value) => {stdout += value;},

@@ -1,0 +1,39 @@
+id: stripe-integration-public-evals/baseline
+version: 0.1.0
+dataset:
+  path: ./dataset
+  id: stripe-integration-public-evals
+  version: 0.1.0
+  manifest_sha256: sha256:6b52bcfd75334b251060c996a6803a62b75b9425c26c2b6bf46c9240e2e81a19
+runtime:
+  adapter: docker
+  image:
+    kind: forge
+  platform: linux/amd64
+  resources:
+    memory_bytes: 4294967296
+    cpu_count: 2
+    process_count: 512
+models:
+  role_player:
+    provider: anthropic
+    model: claude-sonnet-4-6
+  judge:
+    provider: anthropic
+    model: claude-sonnet-4-6
+treatments:
+  baseline:
+    setup: []
+matrix:
+  cases:
+    - cases/payments-onetime.case.yaml
+  treatments:
+    - baseline
+  agents:
+    - adapter: claude-code
+      provider: anthropic
+      model: claude-sonnet-4-6
+  repetitions: 1
+  retries: 0
+limits:
+  run_timeout_ms: 900000

@@ -135,8 +135,8 @@ export function createFullSuite(forge, options, overrides = {}) {
     progress(`running the one-shot ${codexSelected ? 'Codex' : 'Claude Code'} evaluation`);
     const oneShotCompleted = await checked(runIds.oneShot, () => checks.runSelection({
       label: 'one-shot',
-      example: codexSelected ? 'codex' : 'quickstart',
-      datasetExample: 'quickstart',
+      fixture: codexSelected ? 'codex' : 'one-shot',
+      datasetFixture: 'one-shot',
       agent: liveAgent,
       model: codexSelected ? CODEX_MODEL : MODEL,
       casePath: ['cases', 'examples', 'hello-file.case.yaml'],
@@ -154,7 +154,7 @@ export function createFullSuite(forge, options, overrides = {}) {
       progress('running the multi-turn Ava and criterion evaluation');
       const multiTurnCompleted = await checked(runIds.multiTurn, () => checks.runSelection({
         label: 'multi-turn',
-        example: 'multi-turn',
+        fixture: 'multi-turn',
         casePath: ['cases', 'examples', 'release-summary.case.yaml'],
         runId: runIds.multiTurn,
         compositionFactory,
@@ -195,14 +195,14 @@ export function createFullSuite(forge, options, overrides = {}) {
     signal: executionSignal,
   }) {
     const [dataset, experiment] = await Promise.all([
-      loadDataset(path.join(repositoryRoot, 'examples', 'quickstart', 'dataset')),
+      loadDataset(path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'dataset')),
       loadExperimentConfig(
-        path.join(repositoryRoot, 'examples', 'quickstart', 'experiment.yaml'),
+        path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'experiment.yaml'),
       ),
     ]);
     const selection = expandExperiment(experiment, dataset)[0];
     if (selection === undefined) {
-      throw new Error('The quickstart experiment config contains no run selection.');
+      throw new Error('The one-shot fixture experiment config contains no run selection.');
     }
     const plan = resolveRunPlan({dataset, experiment, selection});
     const installer = agent.pluginInstaller;
@@ -398,14 +398,14 @@ export function createFullSuite(forge, options, overrides = {}) {
   async function runDockerConformance(runtime, runId, executionSignal) {
     return checked(runId, async () => {
       const [dataset, experiment] = await Promise.all([
-        loadDataset(path.join(repositoryRoot, 'examples', 'quickstart', 'dataset')),
+        loadDataset(path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'dataset')),
         loadExperimentConfig(
-          path.join(repositoryRoot, 'examples', 'quickstart', 'experiment.yaml'),
+          path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'experiment.yaml'),
         ),
       ]);
       const selection = expandExperiment(experiment, dataset)[0];
       if (selection === undefined) {
-        throw new Error('The quickstart experiment config contains no run selection.');
+        throw new Error('The one-shot fixture experiment config contains no run selection.');
       }
       const plan = resolveRunPlan({dataset, experiment, selection});
       let imageId;
@@ -464,8 +464,8 @@ export function createFullSuite(forge, options, overrides = {}) {
 
   async function runSelection({
     label,
-    example,
-    datasetExample = example,
+    fixture,
+    datasetFixture = fixture,
     agent = 'claude-code',
     model = MODEL,
     casePath,
@@ -479,12 +479,13 @@ export function createFullSuite(forge, options, overrides = {}) {
       [
         'run',
         '--experiment',
-        path.join(repositoryRoot, 'examples', example, 'experiment.yaml'),
+        path.join(repositoryRoot, 'test', 'fixtures', fixture, 'experiment.yaml'),
         '--case-file',
         path.join(
           repositoryRoot,
-          'examples',
-          datasetExample,
+          'test',
+          'fixtures',
+          datasetFixture,
           'dataset',
           ...casePath,
         ),
