@@ -68,7 +68,9 @@ policy, artifact format, and scoring semantics.
 
 Every code change must have relevant automated test coverage. Place focused
 unit tests beside source files as `*.test.ts`; put cross-module, CLI, package,
-and embedding tests under `test/`. Keep eval inputs under `test/fixtures/`.
+and embedding tests under `test/`. Keep harness test inputs under `test/fixtures/`.
+Versioned public dataset snapshots belong under `datasets/<name>/<version>/`,
+with consumer experiments under `experiments/`.
 Prefer deterministic fakes for the normal test suite.
 
 Use the narrowest relevant test while iterating:
@@ -138,8 +140,9 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   serialization, tests, and public documentation together.
 - When adding or changing an entry point, update `package.json`, root and
   subpath export tests, the package smoke test, and the README.
-- When changing checked-in eval fixtures, update dependent sizes and SHA-256
-  digests in dataset manifests and experiment configs, plus mirrored README snippets.
+- When changing checked-in dataset snapshots or eval fixtures, update dependent
+  sizes and SHA-256 digests in dataset manifests and experiment configs, plus
+  mirrored README snippets.
 - When changing packaged Docker assets or tool pins, update their recorded
   digests, runtime metadata, and tests.
 - Keep ATIF changes tied to a specific upstream version and update provenance,

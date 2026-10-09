@@ -1,0 +1,37 @@
+id: stripe-integration-public-evals/payments-onetime
+task: |-
+  I'm building an e-commerce site that sells a single product: a printed photography book for $50. When a customer clicks "Buy Now" on my product page, they should be taken through a payment flow and land on a confirmation page when done.
+
+  Build the Stripe integration for this. Use Node.js/TypeScript on the backend. I want the simplest hosted checkout approach — no need to build a custom payment form.
+
+  Requirements:
+  - A backend endpoint that creates a checkout order and returns a URL to redirect the customer to
+  - A success page the customer lands on after payment
+  - A webhook endpoint that listens for payment completion and logs the order (stub the database write)
+
+  Assume a basic Express app already exists. Just build out the Stripe pieces.
+initial_prompt: |-
+  I'm building an e-commerce site that sells a single product: a printed photography book for $50. When a customer clicks "Buy Now" on my product page, they should be taken through a payment flow and land on a confirmation page when done.
+
+  Build the Stripe integration for this. Use Node.js/TypeScript on the backend. I want the simplest hosted checkout approach — no need to build a custom payment form.
+
+  Requirements:
+  - A backend endpoint that creates a checkout order and returns a URL to redirect the customer to
+  - A success page the customer lands on after payment
+  - A webhook endpoint that listens for payment completion and logs the order (stub the database write)
+
+  Assume a basic Express app already exists. Just build out the Stripe pieces.
+context: You run a small e-commerce site selling a single product — a printed photography book — and you're not a payments expert. You'd rather not design, build, or maintain your own payment form, so you want to hand off as much of the checkout experience to Stripe as possible.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - Uses checkout.sessions.create with mode 'payment' for the one-time charge — the prompt asks for the simplest hosted approach
+  - Does NOT use paymentIntents.create directly (Checkout Sessions is the recommended approach for hosted checkout)
+  - Has success_url configured for the post-payment redirect
+  - Has cancel_url configured
+  - Has a webhook handler that verifies the payment (constructEvent or similar)
+  - Does NOT pass payment_method_types to any Stripe API call — dynamic payment methods should remain enabled since the prompt does not request specific payment methods. If the code does not include payment_method_types at all, this expectation PASSES regardless of which Stripe API is used.
+  - Does not explicitly hardcode an API version older than '2026-04-22.dahlia'. This expectation PASSES if apiVersion is omitted or set to '2026-04-22.dahlia' or any newer version. This expectation only FAILS if an apiVersion older than '2026-04-22.dahlia' is explicitly hardcoded.
+  - Includes the parameter integration_identifier in the checkout.sessions.create call
+checks: {}

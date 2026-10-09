@@ -684,6 +684,8 @@ evals with cleanup warnings fail live verification.
 
 | Path | Role |
 | --- | --- |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample dataset snapshots with exact payload manifests. |
+| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Consumer experiments which pin dataset snapshots and select treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
 | [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
@@ -734,7 +736,8 @@ Usually touch:
 4. `execution` or the relevant subsystem that consumes it;
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
-7. adjacent tests, eval fixtures, manifest sizes/hashes, and README docs.
+7. adjacent tests, affected dataset snapshots and eval fixtures, manifest sizes/hashes,
+   and README docs.
 
 Do not let runtime code infer a new default. Materialize it during parsing or
 planning.

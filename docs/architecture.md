@@ -1101,6 +1101,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample dataset snapshots |
+| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Consumer experiments which pin dataset snapshots |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 

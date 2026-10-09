@@ -698,6 +698,12 @@ Forge deliberately separates what is evaluated from how it is run:
   one eval run. The plan records dataset, case, experiment, and Forge
   provenance.
 
+The repository includes a
+[Stripe integration sample snapshot](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+containing one payments case. Its separate
+[consumer experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/experiment.yaml)
+pins that snapshot. Use a source checkout for these input files.
+
 YAML and JSON inputs use strict schemas: unknown fields, unsafe names,
 non-canonical paths, unknown or version-suffixed setup actions, and oversized
 values are rejected. YAML parsing additionally rejects duplicate keys.
@@ -2006,9 +2012,13 @@ proxy, or an offline execution mode.
 
 The library and test suite compile with `tsc`; the repository does not require
 a bundler or an `esbuild` install/build exception. Tests run on Node's built-in
-test runner. Eval inputs used to verify the harness live under
+test runner. Versioned sample snapshots live under
+[`datasets`](https://github.com/stripe/forge/tree/main/datasets), with consumer
+experiments under [`experiments`](https://github.com/stripe/forge/tree/main/experiments).
+Eval inputs used to verify the harness live under
 [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
-`pnpm check:cases` verifies their dataset inventories and case IDs.
+`pnpm check:cases` verifies the snapshots and fixtures through the public dataset
+loader, checking their inventories and case IDs without model calls.
 
 ```sh
 pnpm typecheck
@@ -2024,7 +2034,7 @@ Pull requests targeting `main`, including drafts, automatically run the same
 validation as `pnpm check` on Node.js 22 through the
 [PR checks workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
 The single `Forge checks` job has named steps for type checking, automated tests,
-build, validation of fixture datasets, documentation validation, and package
+build, dataset case validation, documentation validation, and package
 checks, using the same package scripts as the local command without Docker or
 model credentials. It runs when a PR opens, receives new commits, or reopens,
 and cancels obsolete runs when a

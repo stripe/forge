@@ -43,7 +43,7 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Check fixture cases
+      - name: Check dataset cases
         run: pnpm check:cases:built
 
       - name: Check documentation

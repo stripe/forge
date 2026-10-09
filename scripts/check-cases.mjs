@@ -5,16 +5,17 @@ import {fileURLToPath} from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-// Validate the authored datasets used by the harness tests.
-export const FIXTURE_DATASET_ROOTS = Object.freeze([
+// Validate checked-in dataset snapshots and harness test inputs.
+export const REPOSITORY_DATASET_ROOTS = Object.freeze([
   'test/fixtures/one-shot/dataset',
   'test/fixtures/multi-turn/dataset',
+  'datasets/stripe-integration-public-evals/0.1.0',
 ]);
 
 export async function checkRepositoryCases({root, loadDataset}) {
   const errors = [];
   let cases = 0;
-  for (const relativeRoot of FIXTURE_DATASET_ROOTS) {
+  for (const relativeRoot of REPOSITORY_DATASET_ROOTS) {
     try {
       const dataset = await loadDataset(path.join(root, relativeRoot));
       cases += dataset.cases.size;
@@ -23,7 +24,7 @@ export async function checkRepositoryCases({root, loadDataset}) {
       errors.push(`${relativeRoot}: ${message}`);
     }
   }
-  return {datasets: FIXTURE_DATASET_ROOTS.length, cases, errors};
+  return {datasets: REPOSITORY_DATASET_ROOTS.length, cases, errors};
 }
 
 if (process.argv[1] !== undefined &&
