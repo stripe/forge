@@ -182,7 +182,7 @@ After workers drain, the controller atomically saves `report.json` from verified
 latest outcomes before releasing the lock; a resume refreshes the scorecard.
 Hosts with their own input formats can use `@stripe/forge/experiment/cli` with their
 own argument definitions and loader, or call `@stripe/forge/experiment` directly.
-See the README's [embedding contracts](../README.md#experiment-runs).
+See the [embedding guide](embedding.md#run-and-resume-batches) for those contracts.
 
 ### Resolved plan to committed run
 
@@ -686,7 +686,7 @@ evals with cleanup warnings fail live verification.
 | --- | --- |
 | [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
-| [`docs`](.) | Architecture and feature-contract documents. `plugin-action.md` and `setup-action-bundles.md` describe semantics that cross several source directories. |
+| [`docs`](.) | Architecture, [authoring](authoring.md), and [embedding](embedding.md) guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts; `create-quickstart.mjs` creates portable, hash-verified example inputs and ships in the npm package. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
 | [`scripts/build-info.mjs`](https://github.com/stripe/forge/blob/main/scripts/build-info.mjs) | Captures source commit and dirty state into packaged build metadata when Git is available. |
