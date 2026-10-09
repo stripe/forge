@@ -7,12 +7,11 @@ coding-agent evaluations. The internal Forge implementation builds on this
 package, so changes to its contracts, schemas, lifecycle, exports, or observable
 behavior can affect downstream internal consumers.
 
-Here, reproducible means that declared semantics and material execution-time
-resolutions are explicit and auditable. It does not promise byte-for-byte replay
-when models, network resources, registries, or other external systems can
-change. Preserve that distinction: `plan.json` records declared intent,
-`setup.json` records bounded non-sensitive setup resolutions, and the result
-binds those records to the selected evidence and outcome.
+Forge aims to make evaluation runs auditable. `plan.json` records declared
+inputs and Forge producer identity; `setup.json` records bounded, non-sensitive
+setup provenance; results bind those records to selected evidence and outcomes.
+These records do not guarantee identical reruns or complete capture of external
+state.
 
 Keep the public package free of dependencies on Stripe-internal infrastructure,
 services, credentials, paths, packages, and unpublished behavior. Public
@@ -20,8 +19,9 @@ Stripe-owned names or integrations are acceptable only when they are portable,
 documented, and usable outside Stripe. Keep runtime dependencies small,
 portable, and suitable for an Apache-2.0 public package; record required
 attribution and provenance. Environment-specific behavior must enter through
-documented public contracts; do not import or discover private host
-implementations from the core.
+documented public contracts or explicit, immutable action bundles. Do not add
+global implementation discovery, YAML-driven imports, or hidden
+process-environment fallbacks; keep private host implementations out of the core.
 
 Before changing behavior or public exports, read `README.md`, `package.json`,
 and `docs/architecture.md`. Use `docs/codebase-guide.md` for detailed code
@@ -30,69 +30,61 @@ truth for feature details; do not duplicate their full specifications here.
 
 ## Invariants to preserve
 
-- Cases define what is evaluated; experiments define how cases run. Keep
-  environment configuration out of case definitions.
-- A resolved run plan completely captures declared semantics, is canonical and
-  immutable, and is free of ambient inference.
-- Record every material, non-sensitive setup-time resolution not fixed by the
-  plan in `setup.json`. Changing external state may prevent exact replay, but it
-  must not silently change the realized setup.
-- Wire formats are strict and governed by the Forge package release; unknown
-  authored fields remain errors.
-  Do not mutate parsed inputs, and keep resolved plans cloned and deeply frozen.
-- Complete parsing and pure capability preflight before resolving credentials,
-  allocating resources, invoking providers, or mutating a workspace.
-- `executeEval` owns score-affecting lifecycle ordering. Adapters provide
-  mechanisms and must not redefine benchmark semantics.
-- Apply case setup before treatment setup. Stop mutation before selecting or
-  evaluating evidence.
-- Select evidence for the exact run and session. If native evidence is
-  unavailable or incomplete, make fallback and fidelity loss explicit.
-- Treat credentials as scoped capabilities. Keep secret values out of authored
-  inputs, plans, events, errors, transcripts, and ordinary artifacts; never
-  copy the ambient host environment wholesale into a runtime.
-- Calculate a content digest for an expected-content comparison, artifact
-  verification, or a documented identity workflow such as comparing installed
-  plugin snapshots. Avoid redundant digests and fingerprints without a defined use.
-- Keep result serialization deterministic, bounded, verifiable, and atomically
-  committed. Cleanup, observation, and publication must not alter scoring
-  semantics.
-- Add host-specific capabilities through narrow public interfaces or explicit,
-  immutable action bundles. Do not add global discovery, YAML-driven imports,
-  or hidden process-environment fallbacks.
+- Cases own tasks, criteria, and invariant setup; experiments own treatments,
+  models, and runtime choices.
+- Keep core schemas strict under the Forge release and reject unknown fields in
+  their owning schemas. Resolve explicit inputs and defaults into canonical,
+  cloned, deeply frozen plans without mutating inputs or introducing hidden
+  execution defaults.
+- Verify exact dataset inventories, sizes, hashes, and experiment pins. Add
+  other digests only for a defined integrity or identity purpose.
+- Finish parsing and pure capability preflight before credential lookup,
+  provider requests, allocation, or workspace mutation.
+- `executeEval` owns lifecycle and scoring order. Apply case setup before
+  treatment setup, and stop mutation before evidence selection or evaluation.
+- Record bounded, non-sensitive setup receipts for choices Forge explicitly
+  resolves; document provenance gaps.
+- Select evidence for the exact run and session. Make native-evidence fallback
+  and fidelity loss explicit.
+- Keep credentials scoped and avoid copying the host environment wholesale.
+  Exclude secrets from authored inputs, plans, normalized transcripts, and
+  ordinary outputs; keep unredacted native logs restricted.
+- Keep core serialization canonical and bounded, verify companion artifacts,
+  and commit completed runs atomically. Cleanup, observation, and publication
+  must not alter scoring semantics.
 
 See `docs/architecture.md` for the complete lifecycle, trust model, evidence
 policy, artifact format, and scoring semantics.
 
 ## Testing and verification
 
-Every code change must have relevant automated test coverage. Place focused
-unit tests beside source files as `*.test.ts`; put cross-module, CLI, package,
-and embedding tests under `test/`. Keep harness test inputs under `test/fixtures/`.
+Validate changes at the affected boundary. Add or update automated tests when
+needed to establish observable behavior or prevent a meaningful regression;
+existing coverage can suffice. Avoid tests that merely restate the
+implementation. Prose and formatting-only changes do not need new tests.
+
+Place focused unit tests beside source files as `*.test.ts`; put cross-module,
+CLI, package, and embedding tests under `test/`. Keep harness test inputs under
+`test/fixtures/`. Prefer deterministic fakes for the normal test suite.
 Versioned public release bundles belong under `datasets/<name>/<version>/`,
 with a runnable `experiment.yaml` beside the exact-manifest `dataset/` tree.
 Use `dataset.path: ./dataset` so the complete bundle can be moved or archived
 without rewriting its experiment. Keep release documentation outside the
 exact-manifest dataset tree.
-Prefer deterministic fakes for the normal test suite.
 
-Use the narrowest relevant test while iterating:
+While iterating, run the narrowest relevant tests, plus applicable type, build,
+or package checks from `package.json`:
 
 ```sh
 pnpm test -- path/to/file.test.ts
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm test:types
-pnpm test:package
-pnpm check:docs
-pnpm check
 ```
 
 Run `pnpm check` before handing off changes that affect code, public types,
 exports, execution, packaging, or release artifacts. For a documentation-only
-change, run `pnpm check:docs`.
-Always report which checks were run and any checks that could not be run.
+change, run `pnpm check:docs` and review the affected content. Broaden or repeat
+successful checks only when new changes, failures, or unresolved concerns
+justify it. Report checks run and their outcomes, relevant checks skipped and
+why, and any validation still needed.
 
 Use the opt-in live suite when the changed behavior cannot be established by
 fakes and affects the real Docker runtime or assets, Claude Code or Codex
@@ -101,16 +93,36 @@ installation, or native evidence collection. Keep live coverage in the single
 repository live-suite path.
 
 ```sh
-FORGE_LIVE=1 ANTHROPIC_API_KEY=... pnpm test:live
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
 ```
 
-The live suite requires Docker and network access. Its default full mode also
-requires provider credentials and makes potentially billable model calls; run
-that mode only when appropriate to the changed surface and the task permits
-credentialed, billable execution. `FORGE_LIVE_MODE=setup` exercises built-in
-setup actions without model credentials or model calls. If relevant live
-coverage cannot be run, say so explicitly in the handoff. See the README for
-setup, gateway, and Codex variants.
+Both live modes require Docker and network access. Setup mode exercises built-in
+setup actions without model credentials or model calls. Full mode is the default,
+requires provider credentials, and makes potentially billable model calls; run
+it only when the task authorizes credentialed, billable execution. If relevant
+live coverage cannot be run, report that validation gap. See the README for
+mode details, gateway configuration, and agent variants.
+
+## Pull requests and review
+
+Every PR must receive an independent review from a separate subagent with a
+fresh context before handoff. Give the reviewer the task requirements,
+repository instructions, and final PR diff, with access to relevant code,
+documentation, and tests. Do not inherit the implementation conversation.
+Keep the reviewer read-only, address actionable findings, and obtain another
+review when fixes materially change the reviewed diff.
+
+Every PR description must include these sections:
+
+- **Context:** Explain the problem, its consequences, and intended behavior for
+  a reader unfamiliar with the task.
+- **Changes:** Describe the final changes and consequential decisions. Use
+  tables or diagrams when they make the change easier to understand, and
+  include before/after comparisons when applicable.
+
+When useful, include a **Validation** section describing checks that add signal
+beyond routine CI and any remaining validation gaps. Keep the description
+proportional to the change and focused on the final implementation.
 
 ## Documentation maintenance
 
