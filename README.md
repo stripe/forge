@@ -46,6 +46,8 @@ promise identical reruns or complete capture of external state.
 For the built-in CLI, you need:
 
 - Node.js 22 or newer, npm, and Git for installation from source. Forge is ESM-only.
+- Git access to this repository. If access is restricted, authenticate Git
+  with your GitHub account before installation.
 - A running Linux Docker server and Docker CLI supporting `linux/amd64` or
   `linux/arm64`. `platform: native` selects the server's architecture.
 - Network access to GitHub and npm for installation, and Docker Hub and npm
