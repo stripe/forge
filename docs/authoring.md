@@ -1,7 +1,7 @@
 # Authoring cases and experiments
 
 Use this guide to create or update evaluation inputs. The
-[quickstart](../README.md#quick-start) generates a working bundle without
+[quickstart](../README.md#run-your-first-experiment) generates a working bundle without
 hand-maintained hashes; [running experiments](../README.md#running-experiments)
 explains validation, selection, and resume. The
 [architecture guide](architecture.md#the-benchmark-data-model) describes how
@@ -145,14 +145,6 @@ execution. For a benchmark where architecture is part of the definition, pin
 4 GiB memory, 2 CPUs, and 512 processes; the run timeout defaults to 1,800,000 ms.
 Authored defaults become explicit in the resolved plan.
 
-The matrix selects case paths, treatment IDs, and full agent entries, repeated
-`repetitions` times. Use either flat axes or `groups`, never both. Groups
-evaluate their own Cartesian products and cannot create combinations across
-groups. Duplicate resolved selections are rejected. See the
-[matrix example](../README.md#authoring-cases-and-experiments). Repetitions and
-`retries` belong at matrix level. The current run controller attempts pending
-entries once per invocation; `retries` does not trigger automatic attempts.
-
 A checks-only, one-shot experiment uses `models: {}`. Add `models.role_player`
 for selected multi-turn cases and `models.judge` for selected cases with
 nonempty `judging_criteria`:
@@ -172,6 +164,90 @@ These coordinates select host completion providers, independently of
 plan. The public CLI supplies the Anthropic completion provider, which requires
 Claude 4.5-or-newer model identifiers for structured output. Codex can be the
 coding agent while Ava and judging still use Anthropic.
+
+### Experiment matrices
+
+A flat matrix evaluates every combination of its `cases`, `treatments`, and
+`agents`, repeated `repetitions` times. Cases are complete dataset-relative
+paths, including `cases/`; each must occur in the manifest.
+
+Use groups when different cases need different treatments or models in the
+same experiment. Each group evaluates its own Cartesian product:
+
+<!-- grouped-matrix:start -->
+```yaml
+matrix:
+  repetitions: 2
+  retries: 0
+  groups:
+    - cases:
+        - cases/examples/payment.case.yaml
+      treatments:
+        - baseline
+        - payment-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-sonnet-4-6
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+    - cases:
+        - cases/examples/marketplace/case.yaml
+      treatments:
+        - baseline
+        - marketplace-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+```
+<!-- grouped-matrix:end -->
+
+This fragment assumes both case paths are in the manifest and all three
+treatments are defined. It produces **12 selections**: eight for payment and
+four for marketplace. It never creates combinations across groups.
+
+Choose flat axes or `groups`; mixing them is an error. Every group provides
+nonempty `cases`, `treatments`, and `agents`. `repetitions` and `retries` belong
+at matrix level. A case may appear in several groups, but duplicate resolved
+selections, including materialized agent defaults, are rejected.
+
+Groups flatten into ordinary selections without a group identity in plans,
+checkpoints, or reports. Ordering is group, case, treatment, agent, then
+zero-based repetition. The current run controller attempts pending entries
+once per invocation; `retries` does not trigger automatic attempts.
+
+### Select Codex
+
+To run the [quickstart](../README.md#run-your-first-experiment) with Codex,
+replace its `matrix.agents` with the following entries, keeping the other
+matrix fields and dataset pin:
+
+```yaml
+matrix:
+  agents:
+    - adapter: codex
+      provider: openai
+      model: gpt-5.4
+      hook_trust: native
+```
+
+The model is an explicit experiment choice, subject to provider availability.
+Validate the changed experiment, configure the Codex key, and run:
+
+```sh
+npx --no-install forge validate --experiment ./quickstart/experiment.yaml
+export CODEX_API_KEY=your-restricted-key
+npx --no-install forge run \
+  --experiment ./quickstart/experiment.yaml \
+  --output ./results --run-id codex-001
+```
+
+This checks-only run needs no Anthropic credential. `hook_trust: native` lets
+Codex enforce its normal hook review requirements. `automation` permits all
+enabled hooks, including workspace hooks, to run without review in the isolated
+runtime. See [plugin hook policy](plugin-action.md#hook-policy-and-writable-state).
 
 ## Setup and treatments
 
@@ -212,7 +288,9 @@ Request shell behavior explicitly, such as
 `argv: [sh, -lc, "printf ready > status.txt"]`. Setup failures stop the run.
 This action declares no credentials; its command receives the uncredentialed
 environment. A credentialed operation needs a typed setup action supplied by
-a trusted embedding host.
+a trusted embedding host. Setup commands run before the agent: running
+`npm test` in setup does not evaluate code the agent later writes. Built-in
+deterministic evaluation supports file checks, without post-agent commands.
 
 Use `forge/plugin` for native marketplace plugin treatments; its current
 marketplace entry is intentionally resolved during execution. See

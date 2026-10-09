@@ -7,10 +7,10 @@ import {it} from 'node:test';
 
 import {expandExperiment, loadDataset, parseExperimentConfigYaml} from '../src/index.js';
 
-it('expands the README grouped matrix into its documented selections', async (context) => {
-  const readme = await readFile('README.md', 'utf8');
-  const match = /<!-- grouped-matrix:start -->\n```yaml\n([\s\S]*?)```\n<!-- grouped-matrix:end -->/.exec(readme);
-  assert.ok(match?.[1], 'README grouped matrix example is present');
+it('expands the authoring guide grouped matrix into its documented selections', async (context) => {
+  const authoringGuide = await readFile('docs/authoring.md', 'utf8');
+  const match = /<!-- grouped-matrix:start -->\n```yaml\n([\s\S]*?)```\n<!-- grouped-matrix:end -->/.exec(authoringGuide);
+  assert.ok(match?.[1], 'authoring guide grouped matrix example is present');
 
   const root = await mkdtemp(path.join(tmpdir(), 'forge-grouped-matrix-docs-'));
   context.after(() => rm(root, {recursive: true, force: true}));

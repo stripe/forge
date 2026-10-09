@@ -10,11 +10,31 @@ for those boundaries.
 
 Depend on an exact `@stripe/forge` version and use its documented ESM exports.
 The README covers [installation](../README.md#installation),
-[authoring inputs](../README.md#authoring-cases-and-experiments),
 [running experiments](../README.md#running-experiments), and
-[results and scores](../README.md#results-and-scores).
+[results and scores](../README.md#results-and-scores); the
+[authoring guide](authoring.md) defines cases, datasets, and experiments.
 Do not import `dist/` files or undeclared internal paths. CommonJS applications
 can load the package with `await import('@stripe/forge')`.
+
+## Public entry points
+
+Only the following documented package exports are public:
+
+| Entry point | Purpose |
+| --- | --- |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
+| `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
+| `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
+| `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
+| `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
+| `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
+| `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
+| `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
+| `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
+| `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
+| `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
+| `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
+| `@stripe/forge/package.json` | Package metadata |
 
 ## Execute one selection
 
@@ -276,7 +296,7 @@ The wrapper performs no publication after cancellation or other failure.
 Publishers must enforce access controls for descriptors marked
 `sensitivity: restricted`. Exact native session logs are deliberately retained
 unredacted and may contain sensitive data. See
-[security and auditability](../README.md#security-and-auditability).
+[security and trust boundaries](architecture.md#security-and-trust-boundaries).
 
 ## Completion providers
 

@@ -2,8 +2,8 @@
 
 This guide explains how the Forge source tree fits together at the file and
 symbol level. Read [Forge architecture](architecture.md) first for the design
-and lifecycle invariants; use this document when you are navigating code,
-tracing a request, or deciding where a change belongs.
+and lifecycle invariants; use this document when you are developing a change,
+navigating code, tracing a request, or deciding where a change belongs.
 
 Forge is mostly organized by responsibility rather than by feature. An eval run moves
 through several directories:
@@ -18,6 +18,84 @@ The arrows are a useful reading order, not a strict acyclic layering rule.
 `execution` coordinates almost every subsystem, and `results` imports selected
 evidence and evaluation policies so it can independently verify a committed
 run.
+
+## Development and verification
+
+From a source checkout, use Node.js 22 or newer and the pinned package manager:
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+Use `node dist/cli.js` to run the built CLI, and
+`node docs/create-quickstart.mjs ./quickstart` to generate the
+[first experiment](../README.md#run-your-first-experiment). Run the narrowest
+relevant tests while iterating:
+
+```sh
+pnpm test -- path/to/file.test.ts
+```
+
+`pnpm check` runs type checking, tests, build, dataset validation, documentation
+validation, and package checks. PRs targeting `main`, including drafts, run the
+same checks through the [PR workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
+The publishing workflow checks and publishes versioned development snapshots
+after pushes to `main`; stable release commits are skipped.
+
+`pnpm check:docs` checks documentation links, the public export inventory, and
+structured snippets. `pnpm check:cases` validates checked-in release datasets
+and harness fixtures through the public loader without model calls. Sample
+release bundles live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets);
+harness inputs live under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+
+### Opt-in live tests
+
+The single live suite under
+[`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
+is separate from `pnpm test` and `pnpm check`. Both modes require Docker and
+network access. Setup mode exercises real setup actions and plugin installation
+without model credentials or upstream model calls:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
+```
+
+Full mode is the default and makes potentially billable calls. Run it only when
+credentialed, billable execution is authorized, using the provider credentials
+appropriate to the selected agent:
+
+```sh
+FORGE_LIVE=1 ANTHROPIC_API_KEY=your-restricted-key pnpm test:live
+```
+
+For an Anthropic-compatible endpoint, use `ANTHROPIC_BASE_URL` and
+`ANTHROPIC_AUTH_TOKEN` instead. To exercise Codex:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_AGENT=codex CODEX_API_KEY=your-restricted-key pnpm test:live
+```
+
+Optional `OPENAI_BASE_URL` selects a Responses-compatible endpoint. Codex full
+mode uses scripted host completions for multi-turn coverage, so it needs no
+Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
+setup without upstream calls.
+
+The live suite can create temporary authenticated host bridges for Codex
+Responses requests and loopback Claude endpoints. These require
+`host.docker.internal` support, such as Docker Desktop. The real upstream key
+stays host-side; the container receives a per-run bridge credential. This is
+test-suite behavior: the public CLI creates no bridge and requires endpoints
+reachable from the container.
+
+Results default to `results/live`. `FORGE_LIVE_RUN_ID` sets the suite/run ID
+prefix; `FORGE_LIVE_RESULTS_ROOT` changes the root; `FORGE_LIVE_TIMEOUT_MS` sets
+the positive overall timeout (30 minutes by default); and
+`FORGE_DOCKER_EXECUTABLE` selects another Docker CLI. Both modes verify removal
+of containers and host runtime files; completed evals with cleanup warnings fail
+live verification. The helpers under `scripts/live/` are safe to import; Docker
+or model calls begin only when the entry point runs a selected mode.
 
 ## Directory interaction map
 
@@ -317,7 +395,7 @@ the installed Forge build identity; experiments do not author that identity.
 paths to declared IDs and walks groups before their case/treatment/agent/
 repetition axes. Selection membership checks keep the complete tuple within
 one group; downstream execution and reporting consume ordinary selections.
-See the README's [matrix contract](../README.md#experiment-matrices).
+See the authoring guide's [matrix contract](authoring.md#experiment-matrices).
 
 ## `src/contracts`: host capability boundaries
 
@@ -674,11 +752,9 @@ are verified by `pnpm check:cases` and loader tests.
 
 The normal suite combines focused unit tests, deterministic integration tests,
 real local subprocesses, and loopback HTTP transport tests. It requires no
-Docker, provider credentials, or external network access. The live script under [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
-is explicitly opt-in. Its helpers under `scripts/live/` are safe to import;
-Docker or model calls begin only when the entry point runs a selected mode.
-Both modes verify that containers and host runtime files are removed; completed
-evals with cleanup warnings fail live verification.
+Docker, provider credentials, or external network access. See
+[opt-in live tests](#opt-in-live-tests) for real-runtime commands, credentials,
+gateway behavior, and suite configuration.
 
 ## Other top-level directories and files
 
@@ -701,27 +777,12 @@ evals with cleanup warnings fail live verification.
 
 Inside the package, source files often import a concrete sibling file to avoid
 barrel cycles. External consumers must use only exports declared in
-[`package.json`](../package.json):
-
-```text
-@stripe/forge
-@stripe/forge/atif
-@stripe/forge/atif/v1.8
-@stripe/forge/cli
-@stripe/forge/experiment
-@stripe/forge/experiment/cli
-@stripe/forge/agents/claude-code
-@stripe/forge/agents/codex
-@stripe/forge/providers/anthropic
-@stripe/forge/runtime/docker
-@stripe/forge/setup
-@stripe/forge/testing
-@stripe/forge/package.json
-```
+[`package.json`](../package.json), documented in the embedding guide's
+[public entry points](embedding.md#public-entry-points).
 
 Do not make consumers import `dist/...` or an internal source path. Adding a
 public file is not sufficient: update `package.json` exports, barrel/export
-tests, package smoke tests, and README documentation together.
+tests, package smoke tests, and the embedding export inventory together.
 
 ## Where a change should go
 
@@ -736,7 +797,7 @@ Usually touch:
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
 7. adjacent tests, affected dataset snapshots and eval fixtures, manifest sizes/hashes,
-   and README docs.
+   and authoring documentation.
 
 Do not let runtime code infer a new default. Materialize it during parsing or
 planning.

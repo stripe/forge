@@ -2,9 +2,10 @@
 
 This document describes the implemented architecture of Forge. It is a
 conceptual companion to the user-facing [README](../README.md): the README
-explains how to author and run an evaluation, while this document explains the
-boundaries, control flow, trust model, and extension points behind its audit
-records.
+explains installation, execution, and results, while the
+[authoring guide](authoring.md) defines evaluation inputs. This document explains
+the boundaries, control flow, trust model, and extension points behind Forge's
+audit records.
 
 Forge records declared intent in `plan.json`, bounded non-sensitive setup
 resolutions in `setup.json`, selected evidence, and the resulting evaluation.
@@ -204,8 +205,8 @@ The flat form behaves as one group. Groups flatten into ordinary selections;
 group identity does not enter plans, checkpoints, or reports. Membership checks
 require the complete case/treatment/agent tuple to coexist in one group, which
 prevents combinations from crossing group boundaries. The authoring contract
-and example are in the README's
-[authoring workflow](../README.md#authoring-cases-and-experiments).
+and example are in the
+[authoring guide](authoring.md#experiment-matrices).
 
 The experiment-level `retries` value is experiment run policy and does not
 create a new semantic selection. `executeEval` executes one resolved plan once;
@@ -1107,7 +1108,8 @@ file; stored-run verification supplies it automatically.
 ## Security and trust boundaries
 
 Forge does not claim that every extension is untrusted. Instead, it makes trust
-and authority explicit.
+and authority explicit. The installed Forge code and host Docker daemon remain
+trusted.
 
 | Boundary | What is trusted | What Forge still enforces |
 | --- | --- | --- |
@@ -1132,6 +1134,14 @@ Other important safeguards include:
   scoring, and selected by exact session identity rather than “newest session”;
   and
 - serializers reject non-JSON values instead of silently projecting them.
+
+Redaction matches exact resolved secret values; it does not detect transformed
+or partially leaked values. The evaluated agent receives its selected provider
+credential and outbound network access, so it can intentionally disclose that
+credential. Use restricted, short-lived keys with appropriate account limits.
+The built-in runtime provides no domain allowlisting or offline execution mode;
+custom network policy requires an explicit runtime implementation. Ava and judge
+providers receive benchmark prompts and the evidence needed for their roles.
 
 ## Failure, cancellation, and cleanup semantics
 
@@ -1158,24 +1168,13 @@ Observer failures never change execution. A runtime disposal failure after
 artifact staging becomes a result warning so the completed evidence can still
 be committed; failures before that point remain fatal.
 
-## Public entry points and default CLI composition
+## Default CLI composition
 
 The `@stripe/forge` ESM package root exports the engine, contracts, model,
 planning, execution, evaluation, setup, and result APIs through
 [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts).
-Specialized subpaths expose:
-
-- `@stripe/forge/agents/claude-code`;
-- `@stripe/forge/agents/codex`;
-- `@stripe/forge/providers/anthropic`;
-- `@stripe/forge/runtime/docker`;
-- `@stripe/forge/atif` and `@stripe/forge/atif/v1.8`;
-- `@stripe/forge/setup`;
-- `@stripe/forge/testing`;
-- `@stripe/forge/experiment`;
-- `@stripe/forge/experiment/cli`;
-- `@stripe/forge/cli`; and
-- `@stripe/forge/package.json`.
+See [public entry points](embedding.md#public-entry-points) for the complete
+export inventory and specialized implementations.
 
 The public CLI in [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) is a thin host around the same
 engine APIs:
@@ -1215,24 +1214,39 @@ external runtime without changing core lifecycle semantics.
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 
-## What Forge intentionally does not own
+## Current limitations
 
-The current architecture leaves several responsibilities outside the public
-engine:
+The public CLI and built-in composition currently have these limits:
 
-- distributed experiment run scheduling and automatic experiment-level retries;
-- remote result publication and access control;
-- interactive or human-driven execution;
-- dynamic setup plugin discovery or imports named by YAML;
-- private infrastructure, service discovery, or implicit credential lookup;
-- automatic pinning of rolling marketplace plugins or remote MCP services; and
-- scoring of subagent traces that were not surfaced into root trajectory or
-  selected workspace evidence.
+- Claude Code and Codex are the built-in agents. Cursor and interactive human
+  controllers are not included. Codex uses API-key execution, without ChatGPT
+  login.
+- Multi-turn automation uses fixed Ava semantics. Anthropic is the only
+  built-in host completion provider; other providers require an
+  [embedding implementation](embedding.md#completion-providers), which cannot
+  replace Ava's lifecycle.
+- Deterministic evaluation supports file creation, existence, and regex content
+  checks. Post-agent test commands and static-analysis checks are not built in.
+- The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
+  network policies need an [external runtime](embedding.md#external-runtimes).
+- Execution is local, with bounded concurrency and explicit resume. There is no
+  distributed scheduler, automatic experiment retry loop, remote publisher, or
+  hosted execution service. `matrix.retries` does not schedule automatic attempts.
+- Marketplace plugins follow the current public catalog entry. Exact authored
+  pins, private repository authentication, transitive dependencies, and
+  user-defined plugin options are unsupported; see the authoritative
+  [plugin limitations](plugin-action.md#credentials-and-limitations).
+- Host-file imports verify transferred bytes without emitting a core setup
+  receipt; the [import contract](embedding.md#state-host-imports-and-conformance)
+  explains the resulting provenance gap.
+- Subagent traces affect scoring only through visible root-session behavior or
+  selected workspace evidence. The [judge projection](#judge-visible-projection)
+  defines the exact boundary.
 
-These exclusions keep a single run's semantics portable and auditable. A host
-may build orchestration around Forge, but it should treat the resolved plan,
-engine-owned lifecycle, sealed evidence boundary, and committed result format
-as the stable core.
+A host may build orchestration around Forge, but should preserve the resolved
+plan, engine-owned lifecycle, sealed evidence boundary, and committed result
+format as the stable core. Docker build timing and cold-build network
+requirements are described under [the built-in runtime](#built-in-docker-runtime).
 
 ## Invariants to preserve when changing Forge
 

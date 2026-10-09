@@ -43,18 +43,8 @@ const packageExports = new Set(
   ),
 );
 validateDocumentedExports(
-  'README.md',
+  'docs/embedding.md',
   'Public entry points',
-  packageExports,
-);
-validateDocumentedExports(
-  'docs/architecture.md',
-  'Public entry points and default CLI composition',
-  packageExports,
-);
-validateDocumentedExports(
-  'docs/codebase-guide.md',
-  'Public versus internal imports',
   packageExports,
 );
 
@@ -300,7 +290,7 @@ function githubAnchor(text) {
     .replace(/[`*_~]/g, '')
     .replace(/[^\p{L}\p{N}\- _]/gu, '')
     .trim()
-    .replace(/\s+/g, '-');
+    .replace(/\s/g, '-');
 }
 
 function setsEqual(left, right) {

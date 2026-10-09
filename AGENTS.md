@@ -100,8 +100,9 @@ Both live modes require Docker and network access. Setup mode exercises built-in
 setup actions without model credentials or model calls. Full mode is the default,
 requires provider credentials, and makes potentially billable model calls; run
 it only when the task authorizes credentialed, billable execution. If relevant
-live coverage cannot be run, report that validation gap. See the README for
-mode details, gateway configuration, and agent variants.
+live coverage cannot be run, report that validation gap. See
+`docs/codebase-guide.md` for mode details, gateway configuration, and agent
+variants.
 
 ## Pull requests and review
 
@@ -136,10 +137,11 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   `AGENTS.md`, and `docs/` for overlapping coverage.
 - Update or replace existing material instead of appending by default. Remove
   stale or redundant text in the same change.
-- Keep one source of truth: `README.md` owns user workflows and current
-  limitations; `docs/architecture.md` owns stable boundaries and lifecycle;
-  `docs/codebase-guide.md` owns contributor navigation; feature documents own
-  their exact current contracts; `AGENTS.md` owns repository instructions.
+- Keep one source of truth: `README.md` owns user workflows;
+  `docs/architecture.md` owns stable boundaries, lifecycle, and current
+  limitations; `docs/codebase-guide.md` owns contributor workflows and navigation;
+  feature documents own their exact current contracts; `AGENTS.md` owns
+  repository instructions.
 - Link to authoritative material instead of copying schemas, inventories,
   constants, or implementation details between documents.
 - Add a document or major section only for a distinct audience that cannot be
@@ -154,7 +156,7 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
 - When changing a wire format, update its TypeScript model, parser,
   serialization, tests, and public documentation together.
 - When adding or changing an entry point, update `package.json`, root and
-  subpath export tests, the package smoke test, and the README.
+  subpath export tests, the package smoke test, and `docs/embedding.md`.
 - When changing checked-in dataset snapshots or eval fixtures, update dependent
   sizes and SHA-256 digests in dataset manifests and experiment configs, plus
   mirrored README snippets.
@@ -162,7 +164,7 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   digests, runtime metadata, and tests.
 - Keep ATIF changes tied to a specific upstream version and update provenance,
   conformance tests, and notices together.
-- Update the README for changes to CLI syntax, schemas, public entry points,
-  security properties, requirements, or current limitations. Keep public
-  documentation free of private infrastructure details and migration-only
-  formats.
+- Update the README for changes to CLI syntax, requirements, or user workflows;
+  update the authoritative guides for schemas, public entry points, security
+  properties, or current limitations. Keep public documentation free of private
+  infrastructure details and migration-only formats.
