@@ -69,33 +69,33 @@ policy, artifact format, and scoring semantics.
 
 ## Testing and verification
 
-Every code change must have relevant automated test coverage. Place focused
-unit tests beside source files as `*.test.ts`; put cross-module, CLI, package,
-and embedding tests under `test/`. Keep harness test inputs under `test/fixtures/`.
+Validate changes at the affected boundary. Add or update automated tests when
+needed to establish observable behavior or prevent a meaningful regression;
+existing coverage can suffice. Avoid tests that merely restate the
+implementation. Prose and formatting-only changes do not need new tests.
+
+Place focused unit tests beside source files as `*.test.ts`; put cross-module,
+CLI, package, and embedding tests under `test/`. Keep harness test inputs under
+`test/fixtures/`. Prefer deterministic fakes for the normal test suite.
 Versioned public release bundles belong under `datasets/<name>/<version>/`,
 with a runnable `experiment.yaml` beside the exact-manifest `dataset/` tree.
 Use `dataset.path: ./dataset` so the complete bundle can be moved or archived
 without rewriting its experiment. Keep release documentation outside the
 exact-manifest dataset tree.
-Prefer deterministic fakes for the normal test suite.
 
-Use the narrowest relevant test while iterating:
+While iterating, run the narrowest relevant tests, plus applicable type, build,
+or package checks from `package.json`:
 
 ```sh
 pnpm test -- path/to/file.test.ts
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm test:types
-pnpm test:package
-pnpm check:docs
-pnpm check
 ```
 
 Run `pnpm check` before handing off changes that affect code, public types,
 exports, execution, packaging, or release artifacts. For a documentation-only
-change, run `pnpm check:docs`.
-Always report which checks were run and any checks that could not be run.
+change, run `pnpm check:docs` and review the affected content. Broaden or repeat
+successful checks only when new changes, failures, or unresolved concerns
+justify it. Report checks run and their outcomes, relevant checks skipped and
+why, and any validation still needed.
 
 Use the opt-in live suite when the changed behavior cannot be established by
 fakes and affects the real Docker runtime or assets, Claude Code or Codex
@@ -104,16 +104,36 @@ installation, or native evidence collection. Keep live coverage in the single
 repository live-suite path.
 
 ```sh
-FORGE_LIVE=1 ANTHROPIC_API_KEY=... pnpm test:live
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
 ```
 
-The live suite requires Docker and network access. Its default full mode also
-requires provider credentials and makes potentially billable model calls; run
-that mode only when appropriate to the changed surface and the task permits
-credentialed, billable execution. `FORGE_LIVE_MODE=setup` exercises built-in
-setup actions without model credentials or model calls. If relevant live
-coverage cannot be run, say so explicitly in the handoff. See the README for
-setup, gateway, and Codex variants.
+Both live modes require Docker and network access. Setup mode exercises built-in
+setup actions without model credentials or model calls. Full mode is the default,
+requires provider credentials, and makes potentially billable model calls; run
+it only when the task authorizes credentialed, billable execution. If relevant
+live coverage cannot be run, report that validation gap. See the README for
+mode details, gateway configuration, and agent variants.
+
+## Pull requests and review
+
+Every PR must receive an independent review from a separate subagent with a
+fresh context before handoff. Give the reviewer the task requirements,
+repository instructions, and final PR diff, with access to relevant code,
+documentation, and tests. Do not inherit the implementation conversation.
+Keep the reviewer read-only, address actionable findings, and obtain another
+review when fixes materially change the reviewed diff.
+
+Every PR description must include these sections:
+
+- **Context:** Explain the problem, its consequences, and intended behavior for
+  a reader unfamiliar with the task.
+- **Changes:** Describe the final changes and consequential decisions. Use
+  tables or diagrams when they make the change easier to understand, and
+  include before/after comparisons when applicable.
+
+When useful, include a **Validation** section describing checks that add signal
+beyond routine CI and any remaining validation gaps. Keep the description
+proportional to the change and focused on the final implementation.
 
 ## Documentation maintenance
 
