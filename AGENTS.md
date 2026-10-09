@@ -7,12 +7,11 @@ coding-agent evaluations. The internal Forge implementation builds on this
 package, so changes to its contracts, schemas, lifecycle, exports, or observable
 behavior can affect downstream internal consumers.
 
-Here, reproducible means that declared semantics and material execution-time
-resolutions are explicit and auditable. It does not promise byte-for-byte replay
-when models, network resources, registries, or other external systems can
-change. Preserve that distinction: `plan.json` records declared intent,
-`setup.json` records bounded non-sensitive setup resolutions, and the result
-binds those records to the selected evidence and outcome.
+Forge aims to make evaluation runs auditable. `plan.json` records declared
+inputs and Forge producer identity; `setup.json` records bounded, non-sensitive
+setup provenance; results bind those records to selected evidence and outcomes.
+These records do not guarantee identical reruns or complete capture of external
+state.
 
 Keep the public package free of dependencies on Stripe-internal infrastructure,
 services, credentials, paths, packages, and unpublished behavior. Public
