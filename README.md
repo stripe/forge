@@ -3,8 +3,7 @@
 Forge runs and compares coding agents, models, and plugins on versioned tasks.
 Each evaluation runs in an isolated environment, checks the agent's output,
 and saves results and transcripts for inspection. Claude Code and Codex are
-built in; applications can supply other agents, runtimes, and completion
-providers through the [public APIs](docs/embedding.md).
+built in.
 
 Forge is in early development. See the
 [architecture and current limitations](docs/architecture.md#current-limitations)
@@ -87,9 +86,8 @@ must use HTTPS and be reachable from the container; host-side completions
 must also reach their endpoint. A host loopback address points at the
 container when used by the agent.
 
-The runtime installs pinned Claude Code and Codex CLI releases from npm,
-subject to their providers' terms. See [embedding and credentials](docs/embedding.md)
-for custom providers, explicit bindings, and runtime requirements.
+The runtime installs pinned Claude Code and Codex CLI releases from npm.
+Their use remains subject to their providers' terms.
 
 ## Installation
 

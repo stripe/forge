@@ -156,7 +156,7 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
 - When changing a wire format, update its TypeScript model, parser,
   serialization, tests, and public documentation together.
 - When adding or changing an entry point, update `package.json`, root and
-  subpath export tests, the package smoke test, and `docs/embedding.md`.
+  subpath export tests, the package smoke test, and `docs/architecture.md`.
 - When changing checked-in dataset snapshots or eval fixtures, update dependent
   sizes and SHA-256 digests in dataset manifests and experiment configs, plus
   mirrored README snippets.

@@ -43,7 +43,7 @@ const packageExports = new Set(
   ),
 );
 validateDocumentedExports(
-  'docs/embedding.md',
+  'docs/architecture.md',
   'Public entry points',
   packageExports,
 );

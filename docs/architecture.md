@@ -324,8 +324,7 @@ read-only experiment run inspection API verifies latest immutable commits agains
 saved plan digests without regenerating inputs or altering execution state,
 supporting independent publication retries. The public CLI uses this same
 command stage while retaining its own grammar, input loader, rendering, and
-exit policy. Exact embedding contracts are documented in
-[run and resume batches](embedding.md#run-and-resume-batches).
+exit policy.
 
 ### Plan resolution
 
@@ -674,8 +673,7 @@ settings writes or host cleanup.
 
 Trusted host code can use `PreparedRuntime.importHostFile` during setup to copy
 a SHA-256-verified file into declared state. Setup actions and agents cannot
-call it. See [State, host imports, and conformance](embedding.md#state-host-imports-and-conformance)
-for its exact contract. This low-level capability currently verifies the copy
+call it. This low-level capability currently verifies the copy
 but does not add an import receipt to `setup.json`; that is a provenance gap for
 integrations where the imported contents can affect evaluation behavior.
 
@@ -1201,12 +1199,30 @@ Observer failures never change execution. A runtime disposal failure after
 artifact staging becomes a result warning so the completed evidence can still
 be committed; failures before that point remain fatal.
 
+## Public entry points
+
+| Entry point | Purpose |
+| --- | --- |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
+| `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
+| `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
+| `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
+| `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
+| `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
+| `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
+| `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
+| `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
+| `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
+| `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
+| `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
+| `@stripe/forge/package.json` | Package metadata |
+
 ## Default CLI composition
 
 The `@stripe/forge` ESM package root exports the engine, contracts, model,
 planning, execution, evaluation, setup, and result APIs through
 [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts).
-See [public entry points](embedding.md#public-entry-points) for the complete
+See [public entry points](#public-entry-points) for the complete
 export inventory and specialized implementations.
 
 The public CLI in [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) is a thin host around the same
@@ -1255,13 +1271,13 @@ The public CLI and built-in composition currently have these limits:
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
 - Multi-turn automation uses fixed Ava semantics. Anthropic is the only
-  built-in host completion provider; other providers require an
-  [embedding implementation](embedding.md#completion-providers), which cannot
-  replace Ava's lifecycle.
+  built-in host completion provider; other providers require an explicit
+  [completion-provider implementation](#host-side-completion-providers) and
+  cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content
   checks. Post-agent test commands and static-analysis checks are not built in.
 - The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
-  network policies need an [external runtime](embedding.md#external-runtimes).
+  network policies need a host-supplied [runtime adapter](#runtime-architecture).
 - Execution is local, with bounded concurrency and explicit resume. There is no
   distributed scheduler, automatic experiment retry loop, remote publisher, or
   hosted execution service. `matrix.retries` does not schedule automatic attempts.
@@ -1270,8 +1286,7 @@ The public CLI and built-in composition currently have these limits:
   user-defined plugin options are unsupported; see the authoritative
   [plugin limitations](plugin-action.md#credentials-and-limitations).
 - Host-file imports verify transferred bytes without emitting a core setup
-  receipt; the [import contract](embedding.md#state-host-imports-and-conformance)
-  explains the resulting provenance gap.
+  receipt; this leaves a provenance gap when imported contents affect evaluation.
 - Subagent traces affect scoring only through visible root-session behavior or
   selected workspace evidence. The [judge projection](#judge-visible-projection)
   defines the exact boundary.

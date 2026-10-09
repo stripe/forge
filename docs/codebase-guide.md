@@ -259,7 +259,8 @@ After workers drain, the controller atomically saves `report.json` from verified
 latest outcomes before releasing the lock; a resume refreshes the scorecard.
 Hosts with their own input formats can use `@stripe/forge/experiment/cli` with their
 own argument definitions and loader, or call `@stripe/forge/experiment` directly.
-See the [embedding guide](embedding.md#run-and-resume-batches) for those contracts.
+The command-host contracts are defined in
+[`src/experimentCli.ts`](https://github.com/stripe/forge/blob/main/src/experimentCli.ts).
 
 ### Resolved plan to committed run
 
@@ -762,7 +763,7 @@ gateway behavior, and suite configuration.
 | --- | --- |
 | [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
-| [`docs`](.) | [Architecture](architecture.md) and [embedding](embedding.md) guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
+| [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
 | [`scripts/build-info.mjs`](https://github.com/stripe/forge/blob/main/scripts/build-info.mjs) | Captures source commit and dirty state into packaged build metadata when Git is available. |
@@ -777,12 +778,12 @@ gateway behavior, and suite configuration.
 
 Inside the package, source files often import a concrete sibling file to avoid
 barrel cycles. External consumers must use only exports declared in
-[`package.json`](../package.json), documented in the embedding guide's
-[public entry points](embedding.md#public-entry-points).
+[`package.json`](../package.json), documented in the architecture guide's
+[public entry points](architecture.md#public-entry-points).
 
 Do not make consumers import `dist/...` or an internal source path. Adding a
 public file is not sufficient: update `package.json` exports, barrel/export
-tests, package smoke tests, and the embedding export inventory together.
+tests, package smoke tests, and the architecture export inventory together.
 
 ## Where a change should go
 
