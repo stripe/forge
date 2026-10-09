@@ -2,10 +2,9 @@
 
 This document describes the implemented architecture of Forge. It is a
 conceptual companion to the user-facing [README](../README.md): the README
-explains installation, execution, and results, while the
-[authoring guide](authoring.md) defines evaluation inputs. This document explains
-the boundaries, control flow, trust model, and extension points behind Forge's
-audit records.
+explains installation, consuming published dataset releases, execution, and
+results. This document explains the data model, boundaries, control flow, trust
+model, and extension points behind Forge's audit records.
 
 Forge records declared intent in `plan.json`, bounded non-sensitive setup
 resolutions in `setup.json`, selected evidence, and the resulting evaluation.
@@ -194,6 +193,42 @@ checks the loaded dataset pin and resolves manifest-listed paths to the IDs
 read from their case definitions. IDs remain the selection and report identity; resolved
 plan provenance records both the ID and manifest path.
 
+A grouped matrix keeps case-specific treatment and model combinations separate:
+
+<!-- grouped-matrix:start -->
+```yaml
+matrix:
+  repetitions: 2
+  retries: 0
+  groups:
+    - cases:
+        - cases/examples/payment.case.yaml
+      treatments:
+        - baseline
+        - payment-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-sonnet-4-6
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+    - cases:
+        - cases/examples/marketplace/case.yaml
+      treatments:
+        - baseline
+        - marketplace-plugin
+      agents:
+        - adapter: claude-code
+          provider: anthropic
+          model: claude-opus-4-6
+```
+<!-- grouped-matrix:end -->
+
+This fragment assumes both case paths are in the manifest and all three
+treatments are defined. It produces **12 selections**: eight for payment and
+four for marketplace.
+
 [`expandExperiment`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) expands each product in stable
 authored order:
 
@@ -204,9 +239,7 @@ group → case → treatment → agent → repetition
 The flat form behaves as one group. Groups flatten into ordinary selections;
 group identity does not enter plans, checkpoints, or reports. Membership checks
 require the complete case/treatment/agent tuple to coexist in one group, which
-prevents combinations from crossing group boundaries. The authoring contract
-and example are in the
-[authoring guide](authoring.md#experiment-matrices).
+prevents combinations from crossing group boundaries.
 
 The experiment-level `retries` value is experiment run policy and does not
 create a new semantic selection. `executeEval` executes one resolved plan once;
@@ -588,7 +621,7 @@ directory.
 
 | Source | Container target | Purpose | Examples | Host access |
 | --- | --- | --- | --- | --- |
-| `R/workspace` | `/workspace` | The case working directory: setup populates it, the agent edits it, and checks evaluate it. | The quickstart's `hello.txt`; source files copied by `forge/write`; files created or changed by the agent. | `PreparedRuntime.workspace` is mutable until quiescence; `SealedRuntime.workspace` is read-only afterward. |
+| `R/workspace` | `/workspace` | The case working directory: setup populates it, the agent edits it, and checks evaluate it. | A file the case asks the agent to create; source files copied by `forge/write`; files changed by the agent. | `PreparedRuntime.workspace` is mutable until quiescence; `SealedRuntime.workspace` is read-only afterward. |
 | `R/home` | `/home/forge` | An isolated writable `HOME` for the non-root agent process, without mounting the host user's real home. | Tool-owned settings and caches such as `.config/...` or `.cache/...`, except paths replaced by more-specific state mounts. | No general home filesystem capability is exposed by the runtime contract. The Docker adapter retains the backing path only to mount and clean it up. |
 | `R/state/{id}` | The requirement's `containerPath` | Named state explicitly requested by an agent or setup action; each ID gets its own mount and lifecycle. | Claude `<session-id>.jsonl`; Codex `sessions/.../rollout-...jsonl`; `installed_plugins.json` and plugin caches; a host-imported tool under a sealed `/opt/...` target. | Available by ID through `PreparedRuntime.stateDirectories`; mutable until quiescence, or until setup finalization when sealed, then read-only through `SealedRuntime.stateDirectories`. Trusted host imports also target a declared state ID. |
 | Memory-backed tmpfs | `/tmp` | Bounded ephemeral scratch space on an otherwise read-only container root filesystem. | Temporary files created by CLIs and subprocesses. | None. It has no path below `R` and disappears with the container. |

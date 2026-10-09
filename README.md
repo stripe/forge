@@ -69,7 +69,7 @@ For the built-in CLI, you need:
 Export the required variables in your shell or credential manager before
 running or resuming pending work. Use restricted, short-lived keys with
 appropriate account limits: the evaluated agent receives its credential and
-outbound network access. Keep secrets outside authored cases and experiments.
+outbound network access. Keep secrets outside dataset and experiment files.
 
 The built-in Ava/judge provider is Anthropic and requires Claude 4.5-or-newer
 model identifiers with strict structured-output support. Selecting Codex as
@@ -115,37 +115,34 @@ For work on Forge itself, see
 
 ### Run your first experiment
 
-From the project where you installed Forge, generate a small one-shot case,
-dataset manifest, and baseline experiment:
-
-```sh
-node node_modules/@stripe/forge/docs/create-quickstart.mjs ./quickstart
-```
-
-The helper calculates sizes and hashes from the bytes it writes and refuses
-to overwrite an existing destination. It creates:
+Dataset releases include an experiment and its dataset bundle. Run the
+supplied experiment with the released inputs. For a working example, copy
+`experiment.yaml` and the complete `dataset/` directory from the
+[Stripe integration sample release](https://github.com/stripe/forge/tree/main/datasets/stripe-integration-public-evals/0.1.0)
+into `my-eval/` in the project where you installed Forge:
 
 ```text
-quickstart/
+my-eval/
 ├── experiment.yaml
 └── dataset/
     ├── manifest.json
-    └── cases/examples/hello-file.case.yaml
+    └── cases/payments-onetime.case.yaml
 ```
 
-The task is to create `hello.txt` containing exactly `hello, forge!` followed
-by one newline. File checks evaluate the result, so it needs no Ava or judge
-model. The experiment uses Claude Code and `platform: native`.
+The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
+and a criterion judge. All three use the configured Anthropic credential.
+The bundle is separate from the installed Forge package; preserve its dataset
+bytes and keep `experiment.yaml` beside `dataset/`.
 
 Validate without Docker allocation or model credentials, then run with your
 Anthropic key configured:
 
 ```sh
-npx --no-install forge validate --experiment ./quickstart/experiment.yaml
+npx --no-install forge validate --experiment ./my-eval/experiment.yaml
 export ANTHROPIC_API_KEY=your-restricted-key
 npx --no-install forge run \
-  --experiment ./quickstart/experiment.yaml \
-  --output ./results --run-id hello-001 > run-summary.json
+  --experiment ./my-eval/experiment.yaml \
+  --output ./results --run-id payments-001 > run-summary.json
 ```
 
 Execution uses Docker and makes model calls. Progress goes to stderr;
@@ -156,25 +153,18 @@ experiment run. See [Results and Scores](#results-and-scores) to inspect it.
 To inspect the resolved plan before execution:
 
 ```sh
-npx --no-install forge plan --experiment ./quickstart/experiment.yaml
+npx --no-install forge plan --experiment ./my-eval/experiment.yaml
 ```
 
 Planning with `platform: native` queries the Docker server's architecture
 without building or allocating a runtime. `validate --host` additionally
 builds the runtime image and probes the host without making model calls.
 
-### Use your own experiment
+### Select from an experiment
 
-Start from the generated files and follow the [authoring guide](docs/authoring.md)
-for cases, manifests, treatments, grouped matrices, and Codex configuration.
-Experiment matrix cases are dataset-relative file paths; CLI case filters
-use the IDs declared inside those files. `dataset.path` resolves relative to
-the experiment file.
-
-The [Stripe integration sample bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
-provides a larger example with a runnable experiment beside its `dataset/`
-tree. Those input files are available in the repository separately from the
-installed package.
+The bundled experiment defines the available cases, treatments, and agents.
+CLI case filters use the IDs declared inside the released case files.
+`dataset.path` resolves relative to the experiment file.
 
 `run` executes every matching matrix selection. These optional filters
 select existing combinations; `plan` requires exactly one match:
@@ -190,8 +180,8 @@ select existing combinations; `plan` requires exactly one match:
 
 ```sh
 npx --no-install forge run \
-  --experiment ./quickstart/experiment.yaml \
-  --case examples/hello-file --treatment baseline --agent claude-code
+  --experiment ./my-eval/experiment.yaml \
+  --case stripe-integration-public-evals/payments-onetime --treatment baseline --agent claude-code
 ```
 
 `--run-id` names an **eval run** and requires one matching selection. Omit it
@@ -202,7 +192,7 @@ for an automatically generated ID. Experiment runs receive their own IDs.
 Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
 
 ```sh
-npx --no-install forge run --experiment ./quickstart/experiment.yaml --jobs 4
+npx --no-install forge run --experiment ./my-eval/experiment.yaml --jobs 4
 ```
 
 Each run owns its runtime and artifacts. Size concurrency for host resources
@@ -215,7 +205,7 @@ credentials configured again if work remains:
 
 ```sh
 npx --no-install forge run \
-  --experiment ./quickstart/experiment.yaml \
+  --experiment ./my-eval/experiment.yaml \
   --output ./results --resume EXPERIMENT_RUN_ID --jobs 2
 ```
 
@@ -268,7 +258,7 @@ import {readFile} from 'node:fs/promises';
 import * as path from 'node:path';
 const summary = JSON.parse(await readFile('run-summary.json', 'utf8'));
 const result = JSON.parse(await readFile(
-  path.join(summary.location, 'runs', 'hello-001', 'result.json'), 'utf8',
+  path.join(summary.location, 'runs', 'payments-001', 'result.json'), 'utf8',
 ));
 console.log(result.evaluation);
 JS
@@ -286,9 +276,9 @@ are additional pass/fail constraints and do not change that fraction.
 | `failed` | The completed evaluation did not establish a pass or partial success. |
 | Execution error | The selection did not complete successfully and can be retried. |
 
-The greeting example should have `status: 'passed'`, all checks passed, and
-`score: 0` because it has no judging criteria. Interaction stop reasons are
-separate from evaluation status: reaching `max_turns` can still produce a pass.
+For example, passing six of eight criteria gives a score of `0.75`.
+Interaction stop reasons are separate from evaluation status: reaching
+`max_turns` can still produce a pass.
 
 `report.json` contains an overall `summary`, per-case/configuration `cases`,
 and one `runs` row per saved selection. With optional `jq`:

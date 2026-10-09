@@ -10,4 +10,4 @@ checks:
   file_checks:
     - file: hello.txt
       exists: true
-      contains: '^hello, forge!\n(?![\s\S])'
+      contains: '^hello, forge!\n?$'

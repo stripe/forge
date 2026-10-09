@@ -11,8 +11,8 @@ for those boundaries.
 Depend on an exact `@stripe/forge` version and use its documented ESM exports.
 The README covers [installation](../README.md#installation),
 [running experiments](../README.md#running-experiments), and
-[results and scores](../README.md#results-and-scores); the
-[authoring guide](authoring.md) defines cases, datasets, and experiments.
+[results and scores](../README.md#results-and-scores); the architecture guide
+defines the [benchmark data model](architecture.md#the-benchmark-data-model).
 Do not import `dist/` files or undeclared internal paths. CommonJS applications
 can load the package with `await import('@stripe/forge')`.
 
@@ -38,17 +38,19 @@ Only the following documented package exports are public:
 
 ## Execute one selection
 
-This example uses the checks-only, one-shot quickstart inputs. Save it as
-`run.mjs` in the directory containing `dataset/` and `experiment.yaml`, then run
-it with `ANTHROPIC_API_KEY` configured. It makes potentially billable agent
-calls and requires Docker. For cases that use Ava or criterion judging, also
-register [completion providers](#completion-providers).
+This example executes the single selection in the README's
+[sample release bundle](../README.md#run-your-first-experiment). Save it as
+`run.mjs` in the bundle directory containing `dataset/` and
+`experiment.yaml`, then run it with `ANTHROPIC_API_KEY` configured. It requires
+Docker and makes potentially billable agent, Ava, and judge calls. The
+[completion provider](#completion-providers) supplies the sample's harness models.
 
 ```js
 import {
   createArtifactStore,
   createDirectoryRunInputProvider,
   createEnvironmentCredentialResolver,
+  credentialReference,
   executeEval,
   expandExperiment,
   loadDataset,
@@ -57,6 +59,7 @@ import {
   verifyCompletedRun,
 } from '@stripe/forge';
 import {createClaudeCodeAdapter} from '@stripe/forge/agents/claude-code';
+import {createAnthropicCompletionProvider} from '@stripe/forge/providers/anthropic';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
@@ -78,9 +81,13 @@ const plan = resolveRunPlan({
   ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
 });
 const claude = createClaudeCodeAdapter();
+const anthropicCompletions = createAnthropicCompletionProvider({
+  credential: credentialReference('anthropic.api-key'),
+});
 const composition = {
   runtime: createDockerRuntimeAdapter(),
   agents: new Map([[claude.id, claude]]),
+  completionProviders: new Map([[anthropicCompletions.id, anthropicCompletions]]),
   credentialResolver: createEnvironmentCredentialResolver({
     bindings: {'anthropic.api-key': 'ANTHROPIC_API_KEY'},
   }),
@@ -89,7 +96,7 @@ const composition = {
   }),
   artifactStore: createArtifactStore({root: './results'}),
 };
-const completed = await executeEval({runId: 'hello-001', plan, composition});
+const completed = await executeEval({runId: 'eval-001', plan, composition});
 await verifyCompletedRun(completed.location);
 console.log(completed.location);
 ```

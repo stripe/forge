@@ -29,9 +29,8 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-Use `node dist/cli.js` to run the built CLI, and
-`node docs/create-quickstart.mjs ./quickstart` to generate the
-[first experiment](../README.md#run-your-first-experiment). Run the narrowest
+Use `node dist/cli.js` to run the built CLI with the README's
+[sample walkthrough](../README.md#run-your-first-experiment). Run the narrowest
 relevant tests while iterating:
 
 ```sh
@@ -395,7 +394,8 @@ the installed Forge build identity; experiments do not author that identity.
 paths to declared IDs and walks groups before their case/treatment/agent/
 repetition axes. Selection membership checks keep the complete tuple within
 one group; downstream execution and reporting consume ordinary selections.
-See the authoring guide's [matrix contract](authoring.md#experiment-matrices).
+See the architecture guide's
+[matrix contract](architecture.md#matrix-expansion-and-selection).
 
 ## `src/contracts`: host capability boundaries
 
@@ -762,7 +762,7 @@ gateway behavior, and suite configuration.
 | --- | --- |
 | [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
-| [`docs`](.) | Architecture, [authoring](authoring.md), and [embedding](embedding.md) guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts; `create-quickstart.mjs` creates portable, hash-verified example inputs and ships in the npm package. |
+| [`docs`](.) | [Architecture](architecture.md) and [embedding](embedding.md) guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
 | [`scripts/build-info.mjs`](https://github.com/stripe/forge/blob/main/scripts/build-info.mjs) | Captures source commit and dirty state into packaged build metadata when Git is available. |
@@ -797,7 +797,7 @@ Usually touch:
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
 7. adjacent tests, affected dataset snapshots and eval fixtures, manifest sizes/hashes,
-   and authoring documentation.
+   and the architecture guide's [data model](architecture.md#the-benchmark-data-model).
 
 Do not let runtime code infer a new default. Materialize it during parsing or
 planning.
