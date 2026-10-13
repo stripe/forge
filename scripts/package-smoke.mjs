@@ -100,6 +100,11 @@ try {
       assert.equal(evaluation.judging_criteria_passed, 1);
       assert.equal(evaluation.judging_criteria_total, 1);
       assert.deepEqual(evaluation.judging_criteria, [criterion]);
+      const judgeError = forge.parseCriterionJudgment('{}', 'Unavailable criterion.');
+      const incomplete = forge.parseEvaluationResult(forge.scoreEvaluation([judgeError], []));
+      assert.equal(incomplete.status, 'judge_error');
+      assert.equal(incomplete.score, null);
+      assert.equal(incomplete.judging_criteria_errored, 1);
       assert.equal(typeof docker.detectDockerRuntimePlatform, 'function');
       assert.equal(typeof docker.validateDockerRuntimeHost, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');

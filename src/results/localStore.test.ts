@@ -2172,6 +2172,7 @@ function withPassingCriterion(result: RunResultV1): RunResultV1 {
       score: 1,
       judging_criteria_passed: 1,
       judging_criteria_total: 1,
+      judging_criteria_errored: 0,
       judging_criteria: [
         {
           requirement_level: 'SHOULD' as const,
@@ -2285,6 +2286,7 @@ function resultFor(
       status: 'passed',
       judging_criteria_passed: 0,
       judging_criteria_total: 0,
+      judging_criteria_errored: 0,
       judging_criteria: [],
       checks: [],
     },

@@ -268,7 +268,8 @@ JS
 
 ### Understand scores
 
-Numeric `score` is the fraction of scored judging criteria that passed.
+Numeric `score` is the fraction of valid MUST and SHOULD judgments that passed.
+Judge errors are excluded; the score is `null` if every scored criterion errored.
 `requirement_level` classifies each criterion as `MUST` (required),
 `SHOULD` (recommended), or `OPTIONAL` (non-scoring telemetry). Omitted values
 default to `SHOULD`. Both MUST and SHOULD contribute equally to the score;
@@ -285,9 +286,12 @@ This writing guardrail does not infer or change the requirement level. See
 | `passed` | All checks and scored criteria passed. A checks-only pass has score `0`. |
 | `partial` | Some scored criteria passed, or checks passed while scored criteria did not all pass. |
 | `failed` | The completed evaluation did not establish a pass or partial success. |
+| `judge_error` | At least one included criterion could not be judged; valid judgments and checks remain recorded. |
 | Execution error | The selection did not complete successfully and can be retried. |
 
-For example, passing six of eight criteria gives a score of `0.75`.
+For example, six included passes, two failures, and one judge error give a score of
+`0.75` and status `judge_error`. Each errored criterion records `passed: null`,
+an error type and attempt count; `judging_criteria_errored` counts included errors.
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
@@ -295,17 +299,21 @@ Interaction stop reasons are separate from evaluation status: reaching
 and one `runs` row per saved selection. With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, judging_score, criteria_by_requirement}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criteria_by_requirement}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
 `coverage` is completed selections divided by all saved selections.
-`pass_rate` is passed evaluations divided by completed evaluations, or `null`
-when none completed. `judging_score.mean` includes only completed evaluations
-with judging criteria; checks-only runs contribute to pass rate. Ratios range
-from 0 to 1. Only the latest verified effective outcome contributes for each
-selection, so retries do not add scores. Compare treatments on matched cases
-and agent configurations. See [scoring semantics](docs/architecture.md#evaluation-and-scoring).
+`pass_rate` is passed evaluations divided by completed evaluations without
+judge errors, or `null` when none qualify. `judging_score.mean` includes
+completed evaluations with at least one valid criterion judgment; checks-only
+runs contribute to pass rate. `judge_errors` separately counts affected
+evaluations and errored criteria in the summary and each case/configuration.
+These errors remain committed outcomes on resume; they do not rerun the coding
+agent. Ratios range from 0 to 1. Only the latest verified effective outcome
+contributes for each selection, so retries do not add scores. Compare treatments
+on matched cases and agent configurations. See
+[scoring semantics](docs/architecture.md#evaluation-and-scoring).
 
 `criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
 case groups, and run rows. Each aggregate includes passed/total criterion counts

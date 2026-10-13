@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
 import { defaultForgeEngine } from './engine.ts';
 import { scoreEvaluation } from './evaluation/score.ts';
+import { executeEvalWithTestHooks } from './execution/execute.ts';
 import {
   type ExperimentRunOptions,
   ExperimentRunReportError,
@@ -187,6 +188,7 @@ describe('experiment run scorecards', () => {
       failed: 1,
       attempts_total: 6,
       retry_attempts: 1,
+      judge_errors: { evaluations: 0, criteria: 0 },
       coverage: 4 / 6,
       pass_rate: 0.5,
       judging_score: { mean: 0.5, evaluations: 3 },
@@ -368,6 +370,46 @@ describe('experiment run scorecards', () => {
     });
     assert.equal(report.runs[0]!.evaluation!.score, 0);
     assert.equal(report.runs[0]!.evaluation!.checks_passed, 1);
+  });
+
+  it('reports all-error judgments separately with unavailable score and pass rate', () => {
+    const run = row(0);
+    run.evaluation = {
+      ...evaluation(0, 1, 'failed'),
+      status: 'judge_error',
+      score: null,
+      judging_criteria_errored: 1,
+    };
+    const report = build([run]);
+    assert.deepEqual(report.summary.judge_errors, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.equal(report.summary.failed, 0);
+    assert.equal(report.summary.errored, 0);
+    assert.equal(report.summary.pass_rate, null);
+    assert.deepEqual(report.summary.judging_score, {
+      mean: null,
+      evaluations: 0,
+    });
+    for (const evaluation of [
+      { ...run.evaluation, score: 0 },
+      { ...run.evaluation, status: 'failed' as const },
+      { ...run.evaluation, judging_criteria_errored: 2 },
+      { ...run.evaluation, judging_criteria_passed: 1 },
+    ])
+      assert.throws(() => build([{ ...run, evaluation }]));
+    assert.throws(
+      () =>
+        parseExperimentRunReport({
+          ...report,
+          summary: {
+            ...report.summary,
+            judge_errors: { evaluations: 0, criteria: 0 },
+          },
+        }),
+      /statistics/,
+    );
   });
 
   it('rejects unknown fields, false aggregates and invalid run references', () => {
@@ -601,6 +643,7 @@ describe('experiment run scorecards', () => {
             SHOULD: { passed: 0, total: 0 },
             OPTIONAL: { passed: 0, total: 1 },
           },
+          judging_criteria_errored: 0,
           checks_passed: 0,
           checks_total: 1,
         },
@@ -614,11 +657,125 @@ describe('experiment run scorecards', () => {
             SHOULD: { passed: 0, total: 0 },
             OPTIONAL: { passed: 1, total: 1 },
           },
+          judging_criteria_errored: 0,
           checks_passed: 0,
           checks_total: 1,
         },
       ],
     );
+  });
+
+  it('commits mixed judge outcomes, reports errors separately, and preserves them on resume', async () => {
+    const fixture = await experimentRunFixture();
+    const plan = createTestResolvedRunPlan({
+      caseId: 'testing/judge-errors',
+      checks: {},
+      judgingCriteria: ['Available criterion.', 'Unavailable criterion.'],
+      judge: { provider: 'scripted', model: 'judge' },
+    });
+    fixture.options.plans = Array.from({ length: 4 }, (_, repetition) => {
+      const repeated = structuredClone(plan);
+      repeated.selection.repetition = repetition;
+      return defaultForgeEngine.parseResolvedRunPlan(repeated);
+    });
+    const preflight = createScriptedCompletionProvider({
+      id: 'scripted',
+    }).provider;
+    fixture.options.composition = {
+      ...composition(fixture.root),
+      completionProviders: new Map([[preflight.id, preflight]]),
+    };
+    fixture.options.execute = (input) => {
+      const repetition = input.plan.selection.repetition;
+      const provider = createScriptedCompletionProvider({
+        id: 'scripted',
+        responses: Array.from({ length: 6 }, () => (request) => {
+          if (repetition === 2) throw new Error('private provider failure');
+          if (
+            repetition === 1 &&
+            request.systemPrompt!.includes(
+              'Success Criterion:\nUnavailable criterion.\n',
+            )
+          )
+            return '{}';
+          return JSON.stringify({
+            results: [
+              {
+                index: 0,
+                passed: repetition !== 3,
+                explanation: 'Valid judgment.',
+              },
+            ],
+          });
+        }),
+      }).provider;
+      return executeEvalWithTestHooks(
+        {
+          ...input,
+          composition: {
+            ...composition(fixture.root),
+            completionProviders: new Map([[provider.id, provider]]),
+          },
+        },
+        { waitBeforeCompletionRetry: async () => undefined },
+      );
+    };
+    const first = await runExperiment(fixture.options);
+    const report = await readReport(first.report);
+    assert.equal(report.summary.completed, 4);
+    assert.equal(report.summary.errored, 0);
+    assert.equal(report.summary.passed, 1);
+    assert.equal(report.summary.failed, 1);
+    assert.equal(report.summary.partial, 0);
+    assert.equal(report.summary.coverage, 1);
+    assert.equal(report.summary.pass_rate, 0.5);
+    assert.deepEqual(report.summary.judge_errors, {
+      evaluations: 2,
+      criteria: 3,
+    });
+    assert.deepEqual(
+      report.cases[0]!.judge_errors,
+      report.summary.judge_errors,
+    );
+    assert.deepEqual(report.summary.judging_score, {
+      mean: 2 / 3,
+      evaluations: 3,
+    });
+    assert.deepEqual(
+      report.runs.map((run) => run.evaluation!.judging_criteria_errored),
+      [0, 1, 2, 0],
+    );
+    assert.deepEqual(
+      report.runs.map((run) => run.evaluation!.score),
+      [1, 1, null, 0],
+    );
+    const stored = await defaultForgeEngine.verifyCompletedRun(
+      path.join(fixture.root, 'runs', report.runs[2]!.run_id!),
+    );
+    assert.equal(stored.result.evaluation.status, 'judge_error');
+    assert.deepEqual(stored.result.evaluation.judging_criteria[0]!.error, {
+      type: 'request_error',
+      attempts: 3,
+    });
+    assert.equal(stored.result.completion_calls.length, 6);
+    assert.ok(
+      stored.result.completion_calls.every((call) => call.status === 'failed'),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(stored.result),
+      /private provider failure/,
+    );
+    const resumed = await runExperiment({
+      ...fixture.options,
+      resume: true,
+      execute: async () => {
+        throw new Error(
+          'Committed judge errors must not rerun the coding agent.',
+        );
+      },
+    });
+    assert.equal(resumed.executed, 0);
+    assert.deepEqual((await readReport(resumed.report)).runs, report.runs);
   });
 
   it('writes a cancellation report after cleanup, including cases that never started', async () => {
@@ -781,7 +938,9 @@ function evaluation(
       SHOULD: { passed, total },
       OPTIONAL: { passed: 0, total: 0 },
     },
-    checks_passed: 1,
+
+    judging_criteria_errored: 0,
+    checks_passed: status === 'failed' ? 0 : 1,
     checks_total: 1,
   };
 }

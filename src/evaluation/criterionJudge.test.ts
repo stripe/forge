@@ -385,65 +385,59 @@ describe('judgeCriteria', () => {
     ]);
   });
 
-  it('throws the final exhausted transport error', async () => {
+  it('records an exhausted transport error without retaining provider details', async () => {
     let calls = 0;
     const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
       throw new Error('transport failed');
     };
 
-    await assert.rejects(
-      judgeCriteria(
-        {
-          transcript: EMPTY_TRANSCRIPT,
-          criteria: ['criterion'],
-        },
-        invoke,
-        noRetryWait,
-      ),
-      /transport failed/,
+    const results = await judgeCriteria(
+      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      invoke,
+      noRetryWait,
     );
+    assert.deepEqual(results, [
+      {
+        criterion: 'criterion',
+        passed: null,
+        error: { type: 'request_error', attempts: 3 },
+        explanation: 'Judge request failed after 3 attempts.',
+      },
+    ]);
     assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
   });
 
-  it('cancels peer judgments after one transport failure is exhausted', async () => {
+  it('preserves peer judgments after one transport failure is exhausted', async () => {
     let failingCalls = 0;
     let peerCalls = 0;
-    let peerAborted = false;
     const transportFailure = new Error('transport failed');
 
-    await assert.rejects(
-      judgeCriteria(
-        {
-          transcript: EMPTY_TRANSCRIPT,
-          criteria: ['failing', 'peer'],
-        },
-        async (request) => {
-          if (request.systemPrompt.includes('Success Criterion:\nfailing\n')) {
-            failingCalls += 1;
-            throw transportFailure;
-          }
-          peerCalls += 1;
-          return new Promise<string>((_resolve, reject) => {
-            const onAbort = (): void => {
-              peerAborted = true;
-              reject(request.signal.reason);
-            };
-            request.signal.addEventListener('abort', onAbort, { once: true });
-            if (request.signal.aborted) onAbort();
-          });
-        },
-        noRetryWait,
-      ),
-      (error: unknown) => error === transportFailure,
+    const results = await judgeCriteria(
+      { transcript: EMPTY_TRANSCRIPT, criteria: ['failing', 'peer'] },
+      async (request) => {
+        if (request.systemPrompt.includes('Success Criterion:\nfailing\n')) {
+          failingCalls += 1;
+          throw transportFailure;
+        }
+        peerCalls += 1;
+        assert.equal(request.signal.aborted, false);
+        return valid(true, 'Peer passed.');
+      },
+      noRetryWait,
     );
 
     assert.equal(failingCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
     assert.equal(peerCalls, 1);
-    assert.equal(peerAborted, true);
+    assert.equal(results[0]!.passed, null);
+    assert.deepEqual(results[1], {
+      criterion: 'peer',
+      passed: true,
+      explanation: 'Peer passed.',
+    });
   });
 
-  it('fails closed after three malformed responses without retaining raw output', async () => {
+  it('records a parse error after three malformed responses without retaining raw output', async () => {
     let calls = 0;
     const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
@@ -464,7 +458,8 @@ describe('judgeCriteria', () => {
       {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
-        passed: false,
+        passed: null,
+        error: { type: 'parse_error', attempts: 3 },
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
       },
@@ -472,7 +467,7 @@ describe('judgeCriteria', () => {
     assert.doesNotMatch(JSON.stringify(results), /secret malformed output/);
   });
 
-  it('retains an exhausted malformed criterion in the score denominator alongside a successful peer', async () => {
+  it('excludes an exhausted malformed criterion from the score denominator alongside a successful peer', async () => {
     let failedCalls = 0;
     const results = await judgeCriteria(
       {
@@ -495,7 +490,8 @@ describe('judgeCriteria', () => {
       {
         criterion: 'unavailable',
         requirement_level: 'SHOULD' as const,
-        passed: false,
+        passed: null,
+        error: { type: 'parse_error', attempts: 3 },
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
       },
@@ -509,31 +505,27 @@ describe('judgeCriteria', () => {
     const evaluation = scoreEvaluation(results, [
       { name: 'file', passed: true },
     ]);
-    assert.equal(evaluation.score, 0.5);
+    assert.equal(evaluation.score, 1);
     assert.equal(evaluation.judging_criteria_total, 2);
     assert.equal(evaluation.judging_criteria_passed, 1);
-    assert.equal(evaluation.status, 'partial');
+    assert.equal(evaluation.judging_criteria_errored, 1);
+    assert.equal(evaluation.status, 'judge_error');
     assert.doesNotMatch(JSON.stringify(evaluation), /private/);
   });
 
-  it('propagates a final transport failure even after earlier malformed responses', async () => {
+  it('classifies a final request failure after earlier malformed responses', async () => {
     const failure = new Error('final transport failure');
     let calls = 0;
-    await assert.rejects(
-      judgeCriteria(
-        {
-          transcript: EMPTY_TRANSCRIPT,
-          criteria: ['criterion'],
-        },
-        async () => {
-          calls += 1;
-          if (calls === MAX_CRITERION_JUDGE_ATTEMPTS) throw failure;
-          return '{}';
-        },
-        noRetryWait,
-      ),
-      (error: unknown) => error === failure,
+    const results = await judgeCriteria(
+      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      async () => {
+        calls += 1;
+        if (calls === MAX_CRITERION_JUDGE_ATTEMPTS) throw failure;
+        return '{}';
+      },
+      noRetryWait,
     );
+    assert.deepEqual(results[0]!.error, { type: 'request_error', attempts: 3 });
     assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
   });
 
@@ -557,11 +549,65 @@ describe('judgeCriteria', () => {
       {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
-        passed: false,
+        passed: null,
+        error: { type: 'parse_error', attempts: 3 },
         explanation:
           'Judge response did not match the required schema. (unavailable after 3 attempts)',
       },
     ]);
+  });
+
+  it('aborts peer judgments without retrying a dispatch invariant failure', async () => {
+    const invariant = new Error('Unsafe dispatch.');
+    let invocations = 0;
+    let retries = 0;
+    await assert.rejects(
+      judgeCriteria(
+        { transcript: EMPTY_TRANSCRIPT, criteria: ['peer', 'unsafe'] },
+        (request) => {
+          invocations += 1;
+          return new Promise<string>((_resolve, reject) => {
+            request.signal.addEventListener(
+              'abort',
+              () => reject(request.signal.reason),
+              { once: true },
+            );
+          });
+        },
+        {
+          validateRequest(request) {
+            if (request.systemPrompt.includes('Success Criterion:\nunsafe\n'))
+              throw invariant;
+          },
+          waitBeforeRetry: async () => {
+            retries += 1;
+          },
+        },
+      ),
+      (error: unknown) => error === invariant,
+    );
+    assert.equal(invocations, 1);
+    assert.equal(retries, 0);
+  });
+
+  it('propagates cancellation even if the invocation returns a valid judgment', async () => {
+    const controller = new AbortController();
+    const reason = new Error('cancelled');
+    await assert.rejects(
+      judgeCriteria(
+        {
+          transcript: EMPTY_TRANSCRIPT,
+          criteria: ['criterion'],
+          signal: controller.signal,
+        },
+        async () => {
+          controller.abort(reason);
+          return valid();
+        },
+        noRetryWait,
+      ),
+      (error: unknown) => error === reason,
+    );
   });
 
   it('does not retry an aborted completion', async () => {
@@ -657,7 +703,7 @@ describe('judgeCriteria', () => {
     vi.advanceTimersByTime(1);
     const results = await pending;
     assert.equal(calls, 3);
-    assert.equal(results[0]?.passed, false);
+    assert.equal(results[0]?.passed, null);
   });
 });
 
@@ -697,7 +743,8 @@ describe('parseCriterionJudgment', () => {
     assert.deepEqual(parseCriterionJudgment(raw, 'criterion'), {
       criterion: 'criterion',
       requirement_level: 'SHOULD' as const,
-      passed: false,
+      passed: null,
+      error: { type: 'parse_error', attempts: 1 },
       explanation: 'Judge response was not valid JSON.',
     });
   });
@@ -710,13 +757,14 @@ describe('parseCriterionJudgment', () => {
       assert.deepEqual(parseCriterionJudgment(raw, 'criterion'), {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
-        passed: false,
+        passed: null,
+        error: { type: 'parse_error', attempts: 1 },
         explanation: 'Judge response was not valid JSON.',
       });
     }
   });
 
-  it('fails closed for extra fields, the wrong index, blank explanations, and wrong result counts', () => {
+  it('reports parse errors for extra fields, the wrong index, blank explanations, and wrong result counts', () => {
     const entry = { index: 0, passed: true, explanation: 'ok' };
     for (const response of [
       { results: [{ ...entry, extra: true }] },
@@ -731,7 +779,8 @@ describe('parseCriterionJudgment', () => {
       assert.deepEqual(parseCriterionJudgment(JSON.stringify(response), 'g'), {
         criterion: 'g',
         requirement_level: 'SHOULD' as const,
-        passed: false,
+        passed: null,
+        error: { type: 'parse_error', attempts: 1 },
         explanation: 'Judge response did not match the required schema.',
       });
     }

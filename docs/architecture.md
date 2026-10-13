@@ -1058,37 +1058,61 @@ exact projected transcript for audit; it is not an input to a later judge call.
 
 At most four criteria run concurrently, with temperature 0, a 1,024-token
 response limit, and a strict one-criterion JSON schema. Each gets up to three
-attempts with fixed one- and five-second retry waits. Repeated malformed
-output fails only that criterion closed. A final provider transport failure is
-fatal: cleanup runs and no result is committed. Before dispatch, Forge verifies
-that its final defensive redaction pass would not change the already-audited
-judge evidence.
+attempts with fixed one- and five-second retry waits. Exhaustion records that
+criterion with `passed: null`, a bounded explanation, and an `error` containing
+`type` (`parse_error` or `request_error`) and `attempts`. The final unsuccessful
+attempt determines the error type. Other criteria continue, and the run commits
+its evidence, valid judgments, checks, and safe completion-call summaries.
+Raw provider errors and malformed responses are not retained as judgment
+details. `parseCriterionJudgment` reports malformed input as a one-attempt
+parse error.
+
+Cancellation, oversized prompts, and dispatch invariant failures remain fatal.
+The execution controller supplies `validateRequest` to the judge's execution
+options to ensure final defensive redaction cannot change the already-audited
+evidence. This validation runs outside the retryable provider call; failure
+cancels peer judgments and prevents commit.
 
 ### Score and status
 
-The numeric score is the fraction of MUST and SHOULD judging criteria that pass,
-with equal weight per criterion. `judging_criteria_passed` and
-`judging_criteria_total` count those two groups. OPTIONAL criteria affect neither
-score nor status. File checks are independent pass constraints and do not change
-that ratio. Only `requirement_level` determines scoring inclusion.
+The numeric score is passes divided by valid MUST and SHOULD judgments, with
+equal weight per criterion. `judging_criteria_passed`, `judging_criteria_total`,
+and `judging_criteria_errored` count those two groups; the denominator is total
+minus errored. OPTIONAL criteria affect neither score nor status. File checks
+are independent pass constraints and do not change that ratio. Any scored
+judge error takes precedence over normal evaluation statuses, without discarding
+valid judgments or check outcomes. Only `requirement_level` determines scoring
+inclusion.
 
-Reports preserve per-run passed/total counts for all three classifications and
-verify that MUST plus SHOULD match the scored counts and ratio. Overall and
-per-case/configuration aggregates separate required failures from recommended
-failures and OPTIONAL telemetry. Group strict and average pass rates use only
-completed evaluations containing that classification, independently of checks;
-the README defines their [denominators](../README.md#understand-scores).
+Reports preserve per-run counts for all three classifications and verify that
+MUST plus SHOULD match the scored counts and ratio. Overall and per-case
+aggregates separate required failures from recommended failures and OPTIONAL
+telemetry. The README defines group [denominators](../README.md#understand-scores).
 
 | Situation | Status | Score |
 | --- | --- | --- |
 | No judging criteria; all checks pass | `passed` | `0` |
 | No judging criteria; a check fails | `failed` | `0` |
+| Some scored criteria errored; at least one received a valid judgment | `judge_error` | Passes / valid scored judgments |
+| Every scored criterion errored | `judge_error` | `null` |
 | All scored criteria and checks pass | `passed` | `1` |
 | Some scored criteria pass, or checks pass while scored criteria do not all pass | `partial` | Criterion pass ratio |
 | No scored criterion passes and checks do not establish partial success | `failed` | `0` |
 
 Interaction stop reason and evaluation status are separate. For example, a
 `max_turns` run can still pass its evidence-based evaluation.
+
+Experiment reports keep execution `errored` counts separate from
+`judge_errors: {evaluations, criteria}` in the overall and case/configuration
+statistics. Rows retain `judging_criteria_errored`; per-criterion error details
+remain in the referenced result. `completed` and execution coverage include
+committed judge-error evaluations. Pass rate excludes those evaluations from
+its denominator. The judging mean averages per-evaluation scores with at least
+one valid judgment, including incomplete evaluations; all-error and checks-only
+scores are excluded. Ratios are `null` when their denominator is zero.
+Resume retains committed judge-error evaluations, preserving the coding-agent
+execution and evidence. A CLI run can exit successfully with judge errors;
+consumers must inspect the report to establish grading completeness.
 
 ## Result and artifact architecture
 
@@ -1249,8 +1273,8 @@ Two retry systems are internal score semantics, separate from experiment run
 retries:
 
 - Ava exhaustion commits `role_player_error` as a completed run; and
-- malformed judge output fails a criterion closed, while exhausted judge
-  transport failure aborts the run with no commit.
+- judge exhaustion commits a distinct per-criterion error, preserving other
+  judgments and excluding errors from scores.
 
 Observer failures never change execution. A runtime disposal failure after
 artifact staging becomes a result warning so the completed evidence can still

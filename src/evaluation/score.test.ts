@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { REQUIREMENT_LEVELS } from '../model/types.ts';
-
+import type { CriterionResultV1 } from '../results/types.ts';
 import { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
 
 describe('scoreEvaluation', () => {
@@ -96,6 +96,62 @@ describe('scoreEvaluation', () => {
         assert.equal(result.judging_criteria_passed, passed ? 1 : 0);
         assert.deepEqual(result.judging_criteria, criteria);
       }
+    }
+  });
+
+  it('excludes judge errors while retaining valid agent failures and error details', () => {
+    const error: CriterionResultV1 = {
+      requirement_level: 'SHOULD' as const,
+      criterion: 'unavailable',
+      passed: null,
+      error: { type: 'request_error', attempts: 3 },
+      explanation: 'Request failed.',
+    };
+    const scored = scoreEvaluation(
+      [
+        {
+          requirement_level: 'SHOULD' as const,
+          criterion: 'one',
+          passed: true,
+          explanation: 'yes',
+        },
+        {
+          requirement_level: 'SHOULD' as const,
+          criterion: 'two',
+          passed: false,
+          explanation: 'no',
+        },
+        error,
+      ],
+      [{ name: 'file', passed: true }],
+    );
+    assert.equal(scored.score, 0.5);
+    assert.equal(scored.status, 'judge_error');
+    assert.equal(scored.judging_criteria_total, 3);
+    assert.equal(scored.judging_criteria_passed, 1);
+    assert.equal(scored.judging_criteria_errored, 1);
+    assert.deepEqual(scored.judging_criteria[2], error);
+    assert.notEqual(scored.judging_criteria[2]!.error, error.error);
+  });
+
+  it('does not fabricate a score or an agent pass/fail when all judgments error', () => {
+    const error: CriterionResultV1 = {
+      requirement_level: 'SHOULD' as const,
+      criterion: 'unavailable',
+      passed: null,
+      error: { type: 'parse_error', attempts: 3 },
+      explanation: 'Malformed response.',
+    };
+    for (const checks of [
+      [],
+      [{ name: 'file', passed: true }],
+      [{ name: 'file', passed: false }],
+    ]) {
+      const scored = scoreEvaluation([error], checks);
+      assert.equal(scored.score, null);
+      assert.equal(scored.status, 'judge_error');
+      assert.equal(scored.judging_criteria_errored, 1);
+      assert.deepEqual(scored.checks, checks);
     }
   });
 

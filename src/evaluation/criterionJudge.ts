@@ -80,6 +80,8 @@ export interface CriterionJudgeInput {
 }
 
 export interface CriterionJudgeExecutionOptions {
+  /** Validate dispatch invariants outside the retryable provider invocation. */
+  readonly validateRequest?: (request: CriterionCompletionRequest) => void;
   /** Test seam for the fixed one-second and five-second retry waits. */
   readonly waitBeforeRetry?: (
     failedAttempt: number,
@@ -162,7 +164,11 @@ export function parseCriterionJudgment(
   const outcome = parseJudgeResponse(raw, parsedCriterion);
   return outcome.valid
     ? outcome.result
-    : criterionResult(parsedCriterion, false, outcome.explanation);
+    : {
+        ...criterionResult(parsedCriterion, false, outcome.explanation),
+        passed: null,
+        error: { type: 'parse_error', attempts: 1 },
+      };
 }
 
 /** Grade each criterion independently with stable output order. */
@@ -209,7 +215,7 @@ export async function judgeCriteria(
         if (!failed) {
           failed = true;
           firstError = error ?? new Error('Criterion judging failed.');
-          // A fatal transport/cancellation result makes the run uncommittable.
+          // A dispatch invariant or cancellation makes the run uncommittable.
           // Stop already-running peers so they do not continue model calls and
           // retries while the workers converge on the same failure.
           peerCancellation.abort(firstError);
@@ -239,26 +245,37 @@ async function judgeOneCriterion(
 
   for (let attempt = 1; attempt <= MAX_CRITERION_JUDGE_ATTEMPTS; attempt += 1) {
     input.signal?.throwIfAborted();
+    const request: CriterionCompletionRequest = {
+      systemPrompt,
+      messages: [
+        { role: 'user', content: 'Return the requested structured judgment.' },
+      ],
+      temperature: 0,
+      maxTokens: 1024,
+      responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+      signal: input.signal ?? new AbortController().signal,
+    };
+    options.validateRequest?.(request);
     try {
-      const raw = await invoke({
-        systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: 'Return the requested structured judgment.',
-          },
-        ],
-        temperature: 0,
-        maxTokens: 1024,
-        responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
-        signal: input.signal ?? new AbortController().signal,
-      });
+      const raw = await invoke(request);
+      input.signal?.throwIfAborted();
       const outcome = parseJudgeResponse(raw, criterion);
       if (outcome.valid) return outcome.result;
       finalParseExplanation = outcome.explanation;
     } catch (error) {
       if (isAbort(error, input.signal)) throw error;
-      if (attempt === MAX_CRITERION_JUDGE_ATTEMPTS) throw error;
+      if (attempt === MAX_CRITERION_JUDGE_ATTEMPTS) {
+        return {
+          ...criterionResult(
+            criterion,
+            false,
+            `Judge request failed after ${attempt} attempts.`,
+          ),
+          passed: null,
+          error: { type: 'request_error', attempts: attempt },
+          explanation: `Judge request failed after ${attempt} attempts.`,
+        };
+      }
     }
 
     if (attempt < MAX_CRITERION_JUDGE_ATTEMPTS) {
@@ -266,11 +283,15 @@ async function judgeOneCriterion(
     }
   }
 
-  return criterionResult(
-    criterion,
-    false,
-    `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
-  );
+  return {
+    ...criterionResult(
+      criterion,
+      false,
+      `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
+    ),
+    passed: null,
+    error: { type: 'parse_error', attempts: MAX_CRITERION_JUDGE_ATTEMPTS },
+  };
 }
 
 function parseJudgeResponse(
