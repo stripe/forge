@@ -401,6 +401,7 @@ describe('experiment expansion and run planning', () => {
         ...evalCase(),
         checks: {files_created: ['answer.txt']},
         example_answer: 'A complete answer',
+        judging_criteria: [{value: 'Correct answer', label: 'correctness'}],
       },
     });
     const selected = expandExperiment(loaded.experiment, loaded.dataset)[1]!;
@@ -424,6 +425,13 @@ describe('experiment expansion and run planning', () => {
 
     definition.setup[0]!.with.argv = ['changed-command'];
     definition.checks!.files_created!.push('changed.txt');
+    const criterion = definition.judging_criteria[0]!;
+    assert.equal(typeof criterion, 'object');
+    if (typeof criterion !== 'string') {
+      assert.equal(Object.isFrozen(criterion), false);
+      criterion.value = 'Changed criterion';
+      criterion.include_in_score = false;
+    }
     definition.judging_criteria.push('Changed criterion');
     config.treatments['with-seed']!.setup[0]!.with.target = 'changed-seed.txt';
     config.models.role_player!.model = 'changed-role-player';

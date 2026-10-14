@@ -1,4 +1,4 @@
-export {scoreEvaluation} from './score.js';
+export {scoreEvaluation, criterionResultMatchesDefinition} from './score.js';
 export {
   collectWorkspaceEvidence,
   evaluateRunEvidence,

@@ -86,6 +86,7 @@ try {
       assert.equal(typeof forge.parseJudgeEvidence, 'function');
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
       assert.equal(typeof forge.judgeCriteria, 'function');
+      assert.equal(typeof forge.criterionResultMatchesDefinition, 'function');
       assert.equal(typeof forge.buildCriterionJudgePrompt, 'function');
       assert.equal(typeof forge.parseCriterionJudgment, 'function');
       for (const removed of ['judgeGuidelines', 'buildGuidelineJudgePrompt', 'parseGuidelineJudgment']) {

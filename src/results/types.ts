@@ -38,6 +38,9 @@ export interface CheckResultV1 {
 }
 
 export interface CriterionResultV1 {
+  readonly label?: string;
+  /** Omitted on historical results means true. */
+  readonly include_in_score?: boolean;
   readonly criterion: string;
   readonly passed: boolean;
   readonly explanation: string;

@@ -1,5 +1,7 @@
 import {z} from 'zod';
 
+import type {JudgingCriterionV1} from '../model/types.js';
+
 import type {
   CompletionMessage,
   StrictCompletionResponseSchema,
@@ -68,7 +70,7 @@ export type CriterionCompletionInvoker = (
 export interface CriterionJudgeInput {
   /** Validated current-run evidence emitted by createJudgeTranscriptProjection(). */
   readonly transcript: JudgeTranscriptProjectionV1;
-  readonly criteria: readonly string[];
+  readonly criteria: readonly JudgingCriterionV1[];
   readonly exampleAnswer?: string;
   /** Exact rendered text returned by collectJudgeWorkspaceEvidence(). */
   readonly workspaceText?: string;
@@ -176,7 +178,8 @@ export async function judgeCriteria(
   };
   if (input.criteria.length === 0) return [];
 
-  const criteria = [...validatedInput.criteria];
+  const criteria = validatedInput.criteria.map((criterion) =>
+    typeof criterion === 'string' ? criterion : {...criterion});
   const results = new Array<CriterionResultV1>(criteria.length);
   const peerCancellation = new AbortController();
   const signal = validatedInput.signal === undefined
@@ -194,12 +197,18 @@ export async function judgeCriteria(
       nextCriterionIndex += 1;
 
       try {
-        results[criterionIndex] = await judgeOneCriterion(
+        const criterion = criteria[criterionIndex]!;
+        const result = await judgeOneCriterion(
           workerInput,
-          criteria[criterionIndex]!,
+          typeof criterion === 'string' ? criterion : criterion.value,
           invoke,
           options,
         );
+        results[criterionIndex] = typeof criterion === 'string' ? result : {
+          ...result,
+          ...(criterion.label === undefined ? {} : {label: criterion.label}),
+          include_in_score: criterion.include_in_score !== false,
+        };
       } catch (error) {
         if (!failed) {
           failed = true;

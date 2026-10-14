@@ -264,13 +264,17 @@ JS
 
 ### Understand scores
 
-Numeric `score` is the fraction of judging criteria that passed. File checks
-are additional pass/fail constraints and do not change that fraction.
+Numeric `score` is the fraction of included judging criteria that passed.
+Every criterion is judged and retained in results; criteria with
+`include_in_score: false` affect neither this fraction nor evaluation status.
+File checks are additional pass/fail constraints and do not change the fraction.
+See [criterion authoring](docs/architecture.md#criterion-judging) for labels and
+scoring inclusion.
 
 | Outcome | Meaning |
 | --- | --- |
-| `passed` | All required checks and criteria passed. A checks-only pass has score `0`. |
-| `partial` | Some criteria passed, or checks passed while criteria did not all pass. |
+| `passed` | All required checks and included criteria passed. A checks-only pass has score `0`. |
+| `partial` | Some included criteria passed, or checks passed while included criteria did not all pass. |
 | `failed` | The completed evaluation did not establish a pass or partial success. |
 | Execution error | The selection did not complete successfully and can be retried. |
 

@@ -253,6 +253,22 @@ describe('evaluateRunEvidence', () => {
     assert.equal(inspections, 0);
   });
 
+  it('rejects altered criterion labels or scoring inclusion before grading', async () => {
+    const plan = createTestResolvedRunPlan({judgingCriteria: [
+      {value: 'Correct answer', label: 'correctness'},
+      {value: 'Read docs', label: 'source', include_in_score: false},
+    ], judge: {provider: 'test-judge', model: 'test-model'}});
+    const rows = [
+      {criterion: 'Correct answer', label: 'correctness', include_in_score: true, passed: true, explanation: ''},
+      {criterion: 'Read docs', label: 'source', include_in_score: false, passed: false, explanation: ''},
+    ];
+    const actual = await evaluateRunEvidence({plan, trajectory, workspace: workspace({}), criterionResults: rows});
+    assert.equal(actual.evaluation.score, 1);
+    for (const changed of [{...rows[1]!, label: 'correctness'}, {...rows[1]!, include_in_score: true}]) {
+      await assert.rejects(evaluateRunEvidence({plan, trajectory, workspace: workspace({}), criterionResults: [rows[0]!, changed]}), /must correspond exactly/);
+    }
+  });
+
   it('rejects unsupported trajectories before reading grading evidence', async () => {
     await assert.rejects(evaluateRunEvidence({
       plan: createTestResolvedRunPlan({checks: {files_created: ['answer.txt']}}),
