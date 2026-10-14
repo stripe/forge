@@ -1002,6 +1002,27 @@ through evidence collection.
 
 ### Criterion judging
 
+`judging_criteria` accepts nonblank strings or strict objects with `value`,
+optional `label`, and optional `include_in_score`. Labels are repeatable
+categories matching `[a-z][a-z0-9_]*`; they are not individual identities.
+`include_in_score` defaults to true. A case with criteria must keep at least
+one included criterion. Existing string criteria are unlabeled and included.
+
+```yaml
+judging_criteria:
+  - label: correctness
+    value: The answer correctly explains cancellation.
+  - label: source
+    include_in_score: false
+    value: The agent consulted the cancellation documentation.
+```
+
+Every criterion is judged, including excluded criteria. Only its text is sent
+to the judge; authored metadata is attached to the ordered result afterward.
+`result.json.evaluation.judging_criteria` retains every text, outcome,
+explanation, optional label, and scoring inclusion. Source-consultation criteria
+are model judgments about the available evidence, not verified network telemetry.
+
 Each judging criterion is judged independently against:
 
 - the judge-visible transcript projection with its declared policy;
@@ -1025,16 +1046,19 @@ judge evidence.
 
 ### Score and status
 
-The numeric score is the fraction of judging criteria that pass. File checks
-are independent pass constraints and do not change that ratio.
+The numeric score is the fraction of included judging criteria that pass.
+`judging_criteria_passed` and `judging_criteria_total` count only results whose
+`include_in_score` is not false. Excluded criteria affect neither score nor
+status. File checks are independent pass constraints and do not change that
+ratio. Labels do not determine inclusion; authors select it explicitly.
 
 | Situation | Status | Score |
 | --- | --- | --- |
 | No judging criteria; all checks pass | `passed` | `0` |
 | No judging criteria; a check fails | `failed` | `0` |
-| All criteria and checks pass | `passed` | `1` |
-| Some criteria pass, or checks pass while criteria do not all pass | `partial` | Criterion pass ratio |
-| No criterion passes and checks do not establish partial success | `failed` | `0` |
+| All included criteria and checks pass | `passed` | `1` |
+| Some included criteria pass, or checks pass while included criteria do not all pass | `partial` | Criterion pass ratio |
+| No included criterion passes and checks do not establish partial success | `failed` | `0` |
 
 Interaction stop reason and evaluation status are separate. For example, a
 `max_turns` run can still pass its evidence-based evaluation.
@@ -1120,6 +1144,7 @@ hashes. It also requires:
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
 - canonical plan bytes to match their artifact descriptor and result summary;
+- recorded criterion text, labels, and effective inclusion to match the plan;
 - workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
@@ -1128,6 +1153,11 @@ hashes. It also requires:
 - zero-turn role-player failures to use the system-only fallback shape;
 - conditional canonical artifacts to exist exactly when required; and
 - judge evidence to match the projection of the stored trajectory.
+
+`criterionResultMatchesDefinition` from `@stripe/forge` compares a recorded
+judgment's text, label, and effective scoring inclusion with its authored
+criterion. Embedding hosts with their own result envelopes use the same check.
+Omitted inclusion on historical result rows means true.
 
 Publication is deliberately outside `executeEval`. A caller should verify the
 committed local run before passing it to a host-owned publisher.

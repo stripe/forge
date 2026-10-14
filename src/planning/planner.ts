@@ -230,7 +230,7 @@ export function resolveRunPlanWithSetupActions(
           : (definition.max_turns ?? DEFAULT_MAX_TURNS),
     },
     evaluation: {
-      judging_criteria: [...definition.judging_criteria],
+      judging_criteria: cloneJson(definition.judging_criteria),
       ...(definition.checks === undefined
         ? {}
         : {checks: cloneJson(definition.checks)}),

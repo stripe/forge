@@ -95,6 +95,8 @@ const checkResult = z.object({
 }).strict();
 
 const criterionResult = z.object({
+  label: z.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
+  include_in_score: z.boolean().optional(),
   criterion: z.string().min(1).max(64 * 1024),
   passed: z.boolean(),
   explanation: z.string().max(64 * 1024),
@@ -108,9 +110,10 @@ export const evaluationResultSchema = z.object({
   judging_criteria: z.array(criterionResult),
   checks: z.array(checkResult),
 }).strict().superRefine((value, context) => {
-  const passed = value.judging_criteria.filter((criterion) => criterion.passed).length;
+  const included = value.judging_criteria.filter((criterion) => criterion.include_in_score !== false);
+  const passed = included.filter((criterion) => criterion.passed).length;
   if (
-    value.judging_criteria_total !== value.judging_criteria.length ||
+    value.judging_criteria_total !== included.length ||
     value.judging_criteria_passed !== passed
   ) {
     context.addIssue({

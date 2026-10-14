@@ -1,6 +1,7 @@
 import {parseResolvedRunPlan} from '../model/parse.js';
 import {FORGE_BUILD_IDENTITY} from '../version.js';
 import type {
+  JudgingCriterionV1,
   AgentSelectionV1,
   ChecksV1,
   ForgeRuntimeV1,
@@ -19,7 +20,7 @@ export interface TestResolvedRunPlanOptions {
   readonly context?: string;
   readonly initialPrompt?: string;
   readonly maxTurns?: number;
-  readonly judgingCriteria?: readonly string[];
+  readonly judgingCriteria?: readonly JudgingCriterionV1[];
   readonly rolePlayer?: ModelRefV1;
   readonly judge?: ModelRefV1;
   readonly agent?: AgentSelectionV1;

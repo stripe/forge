@@ -101,6 +101,21 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(() => parseEvaluationResult({...evaluation, unknown: true}));
   });
 
+  it('validates scoring totals against included criteria and retains labels', () => {
+    const evaluation = {
+      score: 1, status: 'passed', judging_criteria_passed: 1, judging_criteria_total: 1,
+      judging_criteria: [
+        {criterion: 'Correct answer', label: 'correctness', passed: true, explanation: '', include_in_score: true},
+        {criterion: 'Read docs', label: 'source', passed: false, explanation: '', include_in_score: false},
+      ], checks: [],
+    };
+    assert.deepEqual(parseEvaluationResult(evaluation), evaluation);
+    assert.throws(() => parseEvaluationResult({...evaluation, judging_criteria_total: 2}), /Criterion totals/);
+    for (const changed of [{label: 'bad-label'}, {include_in_score: 'false'}]) {
+      assert.throws(() => parseEvaluationResult({...evaluation, judging_criteria: [evaluation.judging_criteria[0], {...evaluation.judging_criteria[1], ...changed}]}));
+    }
+  });
+
   it('strictly parses one-shot and multi-turn interaction audits', () => {
     assert.deepEqual(
       parseInteractionArtifact({

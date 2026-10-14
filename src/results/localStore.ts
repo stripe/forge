@@ -11,6 +11,7 @@ import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js
 import {parseAtifTrajectory, type AtifTrajectoryV1_8} from '../atif/index.js';
 import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
+import {criterionResultMatchesDefinition} from '../evaluation/score.js';
 import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
 import {sha256Digest} from '../model/hashes.js';
 import {
@@ -332,12 +333,11 @@ function verifyPlanArtifact(
     throw new ArtifactStoreError('plan.json runtime does not match the completed result.');
   }
   const plannedCriteria = plan.evaluation.judging_criteria;
-  const recordedCriteria = result.evaluation.judging_criteria.map(
-    ({criterion}) => criterion,
-  );
+  const recordedCriteria = result.evaluation.judging_criteria;
   if (
-    serializeCanonicalJson(plannedCriteria) !==
-      serializeCanonicalJson(recordedCriteria) ||
+    plannedCriteria.length !== recordedCriteria.length ||
+    recordedCriteria.some((entry, index) =>
+      !criterionResultMatchesDefinition(entry, plannedCriteria[index]!)) ||
     hasDeterministicWorkspaceChecks(plan.evaluation.checks) !==
       (result.evaluation.checks.length > 0)
   ) {

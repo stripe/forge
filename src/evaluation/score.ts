@@ -1,3 +1,5 @@
+import type {JudgingCriterionV1} from '../model/types.js';
+
 import type {
   CheckResultV1,
   EvaluationResultV1,
@@ -9,8 +11,9 @@ export function scoreEvaluation(
   criteria: readonly CriterionResultV1[],
   checks: readonly CheckResultV1[],
 ): EvaluationResultV1 {
-  const criteriaTotal = criteria.length;
-  const criteriaPassed = criteria.filter((criterion) => criterion.passed).length;
+  const included = criteria.filter((criterion) => criterion.include_in_score !== false);
+  const criteriaTotal = included.length;
+  const criteriaPassed = included.filter((criterion) => criterion.passed).length;
   const score = criteriaTotal === 0 ? 0 : criteriaPassed / criteriaTotal;
   const allChecksPass = checks.length === 0 || checks.every((check) => check.passed);
 
@@ -33,4 +36,16 @@ export function scoreEvaluation(
     judging_criteria: criteria.map((criterion) => ({...criterion})),
     checks: checks.map((check) => ({...check})),
   };
+}
+
+/** Bind recorded text and effective scoring metadata to an authored criterion. */
+export function criterionResultMatchesDefinition(
+  result: CriterionResultV1,
+  definition: JudgingCriterionV1,
+): boolean {
+  const text = typeof definition === 'string' ? definition : definition.value;
+  const label = typeof definition === 'string' ? undefined : definition.label;
+  const included = typeof definition === 'string' || definition.include_in_score !== false;
+  return result.criterion === text && result.label === label &&
+    (result.include_in_score !== false) === included;
 }

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 
 import {parseAtifTrajectory, type AtifStep} from '../atif/index.js';
+import {scoreEvaluation} from '../evaluation/score.js';
 import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
 import {sha256Digest} from '../model/hashes.js';
 import type {ResolvedRunPlanV1} from '../model/types.js';
@@ -381,6 +382,33 @@ describe('local artifact store', () => {
       },
     }), {plan});
     await assert.rejects(verifyCompletedRun(mismatched), /plan\.json does not match the completed result summary/);
+  });
+
+  it('binds recorded labels and score inclusion to the plan even when altered totals are consistent', async () => {
+    const criteria = [
+      {value: 'The task is complete.', label: 'correctness'},
+      {value: 'Read docs', label: 'source', include_in_score: false},
+    ];
+    const basePlan = testPlanForResult(withPassingCriterion(resultFor([])));
+    const plan = {...basePlan, case: {...basePlan.case, judging_criteria: criteria},
+      evaluation: {...basePlan.evaluation, judging_criteria: criteria}};
+    const location = await commitArtifacts([
+      {path: 'interaction.json', body: jsonBody(oneShotInteraction)},
+      {path: 'trajectory.json', body: oneShotTrajectory},
+      {path: 'judge-evidence.json', body: judgeEvidenceBody()},
+    ], (result) => ({...result, evaluation: scoreEvaluation([
+      {criterion: 'The task is complete.', label: 'correctness', passed: true, explanation: '', include_in_score: true},
+      {criterion: 'Read docs', label: 'source', passed: false, explanation: '', include_in_score: false},
+    ], [])}), {plan});
+    const verified = await verifyCompletedRun(location);
+    assert.equal(verified.result.evaluation.score, 1);
+    for (const change of [{label: 'correctness'}, {include_in_score: true}]) {
+      const result = structuredClone(verified.result);
+      const changed = {...result, evaluation: scoreEvaluation(result.evaluation.judging_criteria.map((entry, index) =>
+        index === 1 ? {...entry, ...change} : entry), [])};
+      await fs.writeFile(path.join(location, 'result.json'), jsonBody(changed));
+      await assert.rejects(verifyCompletedRun(location), /evaluation configuration does not match/);
+    }
   });
 
   it('rejects unclaimed files and symlinks even when the claimed artifact bytes match', async () => {

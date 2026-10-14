@@ -21,6 +21,7 @@ import {
   defineSetupActionBundle,
   credentialReference,
   evaluateRunEvidence,
+  criterionResultMatchesDefinition,
   executeEval,
   firstPartySetupHandlers,
   normalizeEnvironmentSpecification,
@@ -59,6 +60,7 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof (FORGE_VERSION), 'string');
     assert.equal(FORGE_BUILD_IDENTITY.version, FORGE_VERSION);
     assert.equal(Object.isFrozen(FORGE_BUILD_IDENTITY), true);
+    assert.equal(typeof criterionResultMatchesDefinition, 'function');
     assert.equal(typeof (executeEval), 'function');
     assert.equal(typeof (preflightEval), 'function');
     assert.equal(typeof (parseInteractionArtifact), 'function');

@@ -90,6 +90,28 @@ describe('judgeCriteria', () => {
     assert.ok(request.signal instanceof AbortSignal);
   });
 
+  it('judges text only and preserves ordered labels and scoring inclusion for every criterion', async () => {
+    const requests: CriterionCompletionRequest[] = [];
+    const results = await judgeCriteria({transcript: EMPTY_TRANSCRIPT, criteria: [
+      {label: 'correctness', value: 'Correct answer'},
+      {label: 'source', value: 'Read page A', include_in_score: false},
+      {label: 'source', value: 'Read page B', include_in_score: false},
+      'Legacy criterion',
+    ]}, async (request) => {
+      requests.push(request);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      return valid(!request.systemPrompt.includes('Read page A'));
+    });
+    assert.equal(requests.length, 4);
+    for (const request of requests) assert.doesNotMatch(request.systemPrompt, /correctness|include_in_score|\[object Object\]/);
+    assert.deepEqual(results, [
+      {criterion: 'Correct answer', label: 'correctness', include_in_score: true, passed: true, explanation: 'yes'},
+      {criterion: 'Read page A', label: 'source', include_in_score: false, passed: false, explanation: 'yes'},
+      {criterion: 'Read page B', label: 'source', include_in_score: false, passed: true, explanation: 'yes'},
+      {criterion: 'Legacy criterion', passed: true, explanation: 'yes'},
+    ]);
+  });
+
   it('omits the optional example and workspace sections', () => {
     const prompt = buildCriterionJudgePrompt(
       {transcript: visibleTranscript('TRANSCRIPT')},

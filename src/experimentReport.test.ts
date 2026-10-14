@@ -219,7 +219,7 @@ describe('experiment run scorecards', () => {
   it('extracts criterion and check scores from real engine commits and averages repetitions', async () => {
     const fixture = await experimentRunFixture();
     const plan = createTestResolvedRunPlan({caseId: 'testing/criteria',
-      judgingCriteria: ['The answer is complete.'], judge: {provider: 'scripted', model: 'judge'},
+      judgingCriteria: [{value: 'The answer is complete.', label: 'correctness'}, {value: 'Read docs', label: 'source', include_in_score: false}], judge: {provider: 'scripted', model: 'judge'},
       checks: {file_checks: [{file: 'missing.txt', exists: true}]}});
     const repeated = structuredClone(plan);
     repeated.selection.repetition = 1;
@@ -228,6 +228,7 @@ describe('experiment run scorecards', () => {
       const passed = input.plan.selection.repetition === 0;
       const provider = createScriptedCompletionProvider({id: 'scripted', responses: [
         JSON.stringify({results: [{index: 0, passed, explanation: 'Scripted judgment.'}]}),
+        JSON.stringify({results: [{index: 0, passed: !passed, explanation: 'Source observation.'}]}),
       ]}).provider;
       return defaultForgeEngine.executeEval({...input, composition: {...composition(fixture.root),
         completionProviders: new Map([[provider.id, provider]])}});

@@ -114,6 +114,28 @@ initial_prompt: Two
 `), BenchmarkModelError);
   });
 
+  it('accepts mixed criteria and repeatable labels while rejecting invalid scoring definitions', () => {
+    const criteria = [
+      'Legacy criterion',
+      {value: 'Correct answer', label: 'correctness'},
+      {value: 'Read page A', label: 'source', include_in_score: false},
+      {value: 'Read page B', label: 'source', include_in_score: false},
+      {value: 'Unlabeled criterion'},
+    ];
+    assert.deepEqual(parseEvalCase({id: 'sample/task', task: 'Answer', judging_criteria: criteria}).judging_criteria, criteria);
+    for (const invalid of [
+      {value: ''}, {value: '   '}, {value: 'x'.repeat(64 * 1024 + 1)},
+      {value: 'a', label: ''}, {value: 'a', label: 'Uppercase'},
+      {value: 'a', label: 'two-words'}, {value: 'a', label: '1'},
+      {value: 'a', include_in_score: 'false'}, {value: 'a', id: 'correctness'},
+    ]) {
+      assert.throws(() => parseEvalCase({id: 'sample/task', task: 'Answer', judging_criteria: [invalid]}), BenchmarkModelError);
+    }
+    assert.throws(() => parseEvalCase({id: 'sample/task', task: 'Answer', judging_criteria: [
+      {value: 'Read docs', include_in_score: false},
+    ]}), /at least one judging criterion must be included in scoring/);
+  });
+
   it('bounds success criteria to the persisted result contract', () => {
     assert.throws(() =>
       parseEvalCase({

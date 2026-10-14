@@ -10,7 +10,7 @@ import {
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
-import {scoreEvaluation} from './score.js';
+import {scoreEvaluation, criterionResultMatchesDefinition} from './score.js';
 
 const MAX_CHECK_FILE_BYTES = 256_000;
 const MAX_REGEX_BYTES = 1_024;
@@ -45,7 +45,7 @@ export async function evaluateRunEvidence(
   if (
     criterionResults.length !== expectedCriteria.length ||
     criterionResults.some(
-      (result, index) => result.criterion !== expectedCriteria[index],
+      (result, index) => !criterionResultMatchesDefinition(result, expectedCriteria[index]!),
     )
   ) {
     throw new TypeError(

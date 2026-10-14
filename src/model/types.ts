@@ -107,6 +107,13 @@ export interface ChecksV1 {
   file_checks?: FilesystemCheckV1[];
 }
 
+/** A repeatable category and scoring policy for one model-judged criterion. */
+export type JudgingCriterionV1 = string | {
+  value: string;
+  label?: string;
+  include_in_score?: boolean;
+};
+
 /**
  * The benchmark case defines what is evaluated, never which agent runs it.
  * Prompt fields intentionally preserve the imported case semantics.
@@ -120,7 +127,7 @@ export interface EvalCaseV1 {
   execution_mode: 'multi_turn' | 'one_shot';
   max_turns?: number;
   setup: SetupStepV1[];
-  judging_criteria: string[];
+  judging_criteria: JudgingCriterionV1[];
   checks?: ChecksV1;
   example_answer?: string;
 }
@@ -291,7 +298,7 @@ export interface ResolvedRunPlanV1 {
     max_turns: number;
   };
   evaluation: {
-    judging_criteria: string[];
+    judging_criteria: JudgingCriterionV1[];
     checks?: ChecksV1;
     example_answer?: string;
     judge?: ModelRefV1;

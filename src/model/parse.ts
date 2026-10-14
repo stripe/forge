@@ -57,12 +57,28 @@ const FiniteNumberSchema = z.number().finite();
 const PositiveIntegerSchema = FiniteNumberSchema.int().safe().positive();
 const NonnegativeIntegerSchema = FiniteNumberSchema.int().safe().nonnegative();
 const TrimmedTextSchema = z.string().trim().min(1).refine(isBoundedText);
-const JudgingCriterionSchema = z
+const JudgingCriterionTextSchema = z
   .string()
   .trim()
   .min(1)
   .max(MAX_SUCCESS_CRITERION_CHARACTERS)
   .refine(isBoundedText);
+const JudgingCriterionSchema = z.union([
+  JudgingCriterionTextSchema,
+  z.object({
+    value: JudgingCriterionTextSchema,
+    label: z.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
+    include_in_score: z.boolean().optional(),
+  }).strict(),
+]);
+const JudgingCriteriaSchema = z.array(JudgingCriterionSchema).max(1_000)
+  .superRefine((criteria, context) => {
+    if (criteria.length > 0 && criteria.every((criterion) =>
+      typeof criterion !== 'string' && criterion.include_in_score === false)) {
+      context.addIssue({code: z.ZodIssueCode.custom,
+        message: 'at least one judging criterion must be included in scoring'});
+    }
+  });
 const MetadataSchema = z.string().trim().min(1).refine(isSafeMetadata);
 const SimpleIdentifierSchema = z
   .string()
@@ -206,10 +222,7 @@ const CompatibleEvalCaseSchema = z
     execution_mode: z.enum(['multi_turn', 'one_shot']).default('multi_turn'),
     max_turns: PositiveIntegerSchema.max(100).optional(),
     setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS).default([]),
-    judging_criteria: z
-      .array(JudgingCriterionSchema)
-      .max(1_000)
-      .default([]),
+    judging_criteria: JudgingCriteriaSchema.default([]),
     checks: ChecksSchema.optional(),
     example_answer: z.string().refine(isBoundedText).optional(),
   })
@@ -559,7 +572,7 @@ const MaterializedEvalCaseSchema = z.intersection(
       id: CaseIdSchema,
       execution_mode: z.enum(['multi_turn', 'one_shot']),
       setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
-      judging_criteria: z.array(JudgingCriterionSchema).max(1_000),
+      judging_criteria: JudgingCriteriaSchema,
     })
     .passthrough(),
   CompatibleEvalCaseSchema,
@@ -633,7 +646,7 @@ const ResolvedRunPlanSchema = z
       .strict(),
     evaluation: z
       .object({
-        judging_criteria: z.array(JudgingCriterionSchema).max(1_000),
+        judging_criteria: JudgingCriteriaSchema,
         checks: ChecksSchema.optional(),
         example_answer: z.string().refine(isBoundedText).optional(),
         judge: ModelRefSchema.optional(),
