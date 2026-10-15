@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, describe, it} from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
-import {runCli} from '../src/cli.js';
-import type {AgentAdapter} from '../src/contracts/agent.js';
-import {createDirectoryRunInputProvider} from '../src/contracts/inputs.js';
-import {createArtifactStore, verifyCompletedRun} from '../src/results/index.js';
+import { runCli } from '../src/cli.js';
+import type { AgentAdapter } from '../src/contracts/agent.js';
+import { createDirectoryRunInputProvider } from '../src/contracts/inputs.js';
+import {
+  createArtifactStore,
+  verifyCompletedRun,
+} from '../src/results/index.js';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
@@ -22,7 +25,7 @@ afterEach(async () => {
   await Promise.all(
     temporaryDirectories
       .splice(0)
-      .map((directory) => fs.rm(directory, {recursive: true, force: true})),
+      .map((directory) => fs.rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -35,7 +38,7 @@ describe('one-shot CLI fixture', () => {
     const resultsRoot = path.join(temporaryRoot, 'results');
     const runtime = createFakeRuntimeAdapter({
       id: 'forge/docker',
-      metadata: {platform: 'linux/amd64', mode: 'test-double'},
+      metadata: { platform: 'linux/amd64', mode: 'test-double' },
     });
     const scripted = createScriptedAgentAdapter({
       id: 'claude-code',
@@ -47,7 +50,7 @@ describe('one-shot CLI fixture', () => {
             {
               id: 'write-1',
               name: 'Write',
-              input: {path: 'hello.txt'},
+              input: { path: 'hello.txt' },
             },
           ],
         },
@@ -86,21 +89,29 @@ describe('one-shot CLI fixture', () => {
         stderr: (text) => {
           stderr += text;
         },
-        compositionFactory: async ({datasetRoot, resultsRoot: outputRoot}) => ({
+        compositionFactory: async ({
+          datasetRoot,
+          resultsRoot: outputRoot,
+        }) => ({
           runtime: runtime.adapter,
           agents: new Map([[agent.id, agent]]),
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: await createDirectoryRunInputProvider(datasetRoot),
-          artifactStore: createArtifactStore({root: outputRoot}),
+          artifactStore: createArtifactStore({ root: outputRoot }),
         }),
       },
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
-    const summary = JSON.parse(stdout) as {location: string; completed: number};
+    assert.ok(!stderr.includes('forge:'));
+    const summary = JSON.parse(stdout) as {
+      location: string;
+      completed: number;
+    };
     assert.equal(summary.completed, 1);
-    const completed = await verifyCompletedRun(path.join(summary.location, 'runs', 'quickstart-e2e'));
+    const completed = await verifyCompletedRun(
+      path.join(summary.location, 'runs', 'quickstart-e2e'),
+    );
     assert.equal(completed.runId, 'quickstart-e2e');
     {
       const actual = completed.result.evaluation;
@@ -110,7 +121,10 @@ describe('one-shot CLI fixture', () => {
     }
 
     assert.equal(completed.result.runtime.adapter, 'forge/docker');
-    assert.equal(Object.hasOwn(completed.result.runtime, 'adapter_version'), false);
+    assert.equal(
+      Object.hasOwn(completed.result.runtime, 'adapter_version'),
+      false,
+    );
     {
       const actual = completed.result.selection;
       assert.ok(actual);
@@ -120,24 +134,30 @@ describe('one-shot CLI fixture', () => {
       assert.equal(actual.agent.provider, 'anthropic');
       assert.equal(actual.agent.model, 'claude-sonnet-4-6');
     }
-    assert.deepEqual(completed.result.artifacts.map(({path: artifactPath}) => artifactPath), [
-      'plan.json',
-      'setup.json',
-      'trajectory.json',
-      'interaction.json',
-      'workspace-evidence.json',
-    ]);
+    assert.deepEqual(
+      completed.result.artifacts.map(({ path: artifactPath }) => artifactPath),
+      [
+        'plan.json',
+        'setup.json',
+        'trajectory.json',
+        'interaction.json',
+        'workspace-evidence.json',
+      ],
+    );
 
     const workspaceEvidence = JSON.parse(
       await fs.readFile(
         path.join(completed.location, 'workspace-evidence.json'),
         'utf8',
       ),
-    ) as {entries: Array<{path: string; content_base64?: string}>};
-    const hello = workspaceEvidence.entries.find(({path: filePath}) =>
-      filePath === 'hello.txt',
+    ) as { entries: Array<{ path: string; content_base64?: string }> };
+    const hello = workspaceEvidence.entries.find(
+      ({ path: filePath }) => filePath === 'hello.txt',
     );
-    assert.equal(Buffer.from(hello?.content_base64 ?? '', 'base64').toString('utf8'), 'hello, forge!\n');
+    assert.equal(
+      Buffer.from(hello?.content_base64 ?? '', 'base64').toString('utf8'),
+      'hello, forge!\n',
+    );
     assert.deepEqual(runtime.runs[0]?.events, [
       'prepare',
       'finalizeSetup',
@@ -154,7 +174,7 @@ function agentWhichCreatesHelloFile(delegate: AgentAdapter): AgentAdapter {
       const session = await delegate.openSession(context);
       return {
         sessionId: () => session.sessionId(),
-        async send(message: string, options: {signal: AbortSignal}) {
+        async send(message: string, options: { signal: AbortSignal }) {
           await context.runtime.workspace.writeFile(
             'hello.txt',
             Buffer.from('hello, forge!\n', 'utf8'),

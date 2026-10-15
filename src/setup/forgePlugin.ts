@@ -1,9 +1,6 @@
-import type {
-  PluginSetupStepV1,
-  SetupStepV1,
-} from '../model/types.js';
-import type {PreparedAgentPluginInstallation} from '../contracts/plugin.js';
-import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
+import type { PreparedAgentPluginInstallation } from '../contracts/plugin.js';
+import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.js';
+import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.js';
 import type {
   PreparedSetupStep,
   SetupExecutionContext,
@@ -13,7 +10,10 @@ import type {
 
 export const pluginSetupHandler: SetupStepHandler = Object.freeze({
   uses: 'forge/plugin',
-  preflight(step: SetupStepV1, context: SetupPreflightContext): PreparedSetupStep {
+  preflight(
+    step: SetupStepV1,
+    context: SetupPreflightContext,
+  ): PreparedSetupStep {
     if (step.uses !== 'forge/plugin') {
       throw new TypeError(
         `forge/plugin cannot handle ${JSON.stringify(step.uses)}.`,
@@ -73,6 +73,8 @@ function assertPreparedInstallation(
     !Array.isArray(value.requirements.executables) ||
     !Array.isArray(value.requirements.stateDirectories)
   ) {
-    throw new TypeError('Agent plugin installer returned an invalid prepared operation.');
+    throw new TypeError(
+      'Agent plugin installer returned an invalid prepared operation.',
+    );
   }
 }

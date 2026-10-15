@@ -14,6 +14,7 @@ when designing a benchmark.
 - [Installation](#installation)
 - [Running Experiments](#running-experiments)
 - [Results and Scores](#results-and-scores)
+- [Development](#development)
 
 ## Concept
 
@@ -106,8 +107,7 @@ The examples below use the locally installed `npx --no-install forge` command.
 We plan to publish Forge to npm so it can be installed by package name;
 the supported installation path here is GitHub source.
 
-For work on Forge itself, see
-[development and verification](docs/codebase-guide.md#development-and-verification).
+For work on Forge itself, see [Development](#development).
 
 ## Running Experiments
 
@@ -315,3 +315,15 @@ snapshots and can be stale after interruption.
 
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
+
+## Development
+
+From a source checkout with dependencies installed, type-check and run Biome:
+
+```sh
+pnpm run typecheck
+pnpm biome check .
+```
+
+See [development and verification](docs/codebase-guide.md#development-and-verification)
+for setup, tests, automatic fixes, and the full check suite.

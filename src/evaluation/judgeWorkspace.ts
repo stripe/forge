@@ -147,7 +147,7 @@ export async function collectJudgeWorkspaceEvidence(
 
   const stop = (reason: CollectionStop): void => {
     truncated = true;
-    warnings.push({code: reason.code, message: reason.message});
+    warnings.push({ code: reason.code, message: reason.message });
   };
 
   if (limits.maxDurationMs === 0) {
@@ -178,7 +178,7 @@ export async function collectJudgeWorkspaceEvidence(
       workspace.listFiles({
         under: '.',
         maxEntries: limits.maxEntries,
-        ...(options.signal === undefined ? {} : {signal: options.signal}),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
       }),
       deadline,
       limits.maxDurationMs,
@@ -219,8 +219,8 @@ export async function collectJudgeWorkspaceEvidence(
     );
   }
   const symlinkRoots = ordered
-    .filter(({kind}) => kind === 'symlink')
-    .map(({path}) => path);
+    .filter(({ kind }) => kind === 'symlink')
+    .map(({ path }) => path);
 
   for (const entry of ordered) {
     options.signal?.throwIfAborted();
@@ -237,15 +237,17 @@ export async function collectJudgeWorkspaceEvidence(
       }
 
       const remainingReadBytes = limits.maxReadBytes - bytesRead;
-      if (remainingReadBytes <= 0 ||
-          (entry.size !== undefined && entry.size > remainingReadBytes)) {
+      if (
+        remainingReadBytes <= 0 ||
+        (entry.size !== undefined && entry.size > remainingReadBytes)
+      ) {
         throw readLimit(limits.maxReadBytes);
       }
 
       let body: Uint8Array;
       try {
         body = await withinDeadline(
-          workspace.readFile(entry.path, {maxBytes: remainingReadBytes}),
+          workspace.readFile(entry.path, { maxBytes: remainingReadBytes }),
           deadline,
           limits.maxDurationMs,
           options.signal,
@@ -388,10 +390,7 @@ export function boundJudgeWorkspaceEvidence(
       );
     }
   }
-  const normalizedWarnings = [
-    ...evidence.warnings,
-    ...normalizationWarnings,
-  ];
+  const normalizedWarnings = [...evidence.warnings, ...normalizationWarnings];
   const normalized = freezeEvidence({
     ...evidence,
     entries: normalizedEntries,
@@ -449,7 +448,8 @@ export function boundJudgeWorkspaceEvidence(
 export function renderJudgeWorkspaceEvidence(
   evidence: JudgeWorkspaceEvidenceV1,
 ): string {
-  if (evidence.entries.length === 0 && evidence.warnings.length === 0) return '';
+  if (evidence.entries.length === 0 && evidence.warnings.length === 0)
+    return '';
   return `${WORKSPACE_SECTION_PREFIX}${[
     ...evidence.entries.map(renderEntry),
     ...evidence.warnings.map(renderWarning),
@@ -526,7 +526,9 @@ function extension(relativePath: string): string {
   return index < 0 ? '' : name.slice(index).toLowerCase();
 }
 
-function resolveLimits(options: JudgeWorkspaceCollectionOptions): ResolvedLimits {
+function resolveLimits(
+  options: JudgeWorkspaceCollectionOptions,
+): ResolvedLimits {
   return {
     maxEntries: tightened(options.maxEntries, MAX_JUDGE_WORKSPACE_ENTRIES),
     maxDepth: tightened(options.maxDepth, MAX_JUDGE_WORKSPACE_DEPTH),
@@ -577,9 +579,8 @@ function withinDeadline<T>(
       () => finish(() => reject(timeLimit(durationMs))),
       remaining,
     );
-    const onAbort = (): void =>
-      finish(() => reject(abortReason(signal)));
-    signal?.addEventListener('abort', onAbort, {once: true});
+    const onAbort = (): void => finish(() => reject(abortReason(signal)));
+    signal?.addEventListener('abort', onAbort, { once: true });
     operation.then(
       (value) => finish(() => resolve(value)),
       (error: unknown) => finish(() => reject(error)),
@@ -622,7 +623,10 @@ function isCallerAbort(signal: AbortSignal | undefined): boolean {
 }
 
 function abortReason(signal: AbortSignal | undefined): unknown {
-  return signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+  return (
+    signal?.reason ??
+    new DOMException('The operation was aborted.', 'AbortError')
+  );
 }
 
 function compareCodeUnits(left: string, right: string): number {

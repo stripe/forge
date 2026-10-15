@@ -1,10 +1,10 @@
-import {isSha256Digest} from '../model/hashes.js';
+import { isSha256Digest } from '../model/hashes.js';
 import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.js';
-import type {AgentPluginInstallationReceipt} from './plugin.js';
+import type { AgentPluginInstallationReceipt } from './plugin.js';
 
 /** Validate and snapshot an adapter-produced plugin receipt at a trust boundary. */
 export function parseAgentPluginInstallationReceipt(
@@ -63,15 +63,17 @@ function parsePluginSourceReceipt(
     throw new TypeError('Agent plugin source receipt is invalid.');
   }
   if (hasExactKeys(input, ['kind'])) {
-    return Object.freeze({kind: input.kind});
+    return Object.freeze({ kind: input.kind });
   }
   if (
-    (input.kind === 'github' || input.kind === 'url' || input.kind === 'git-subdir') &&
+    (input.kind === 'github' ||
+      input.kind === 'url' ||
+      input.kind === 'git-subdir') &&
     hasExactKeys(input, ['kind', 'commit']) &&
     typeof input.commit === 'string' &&
     isFullGitCommit(input.commit)
   ) {
-    return Object.freeze({kind: input.kind, commit: input.commit});
+    return Object.freeze({ kind: input.kind, commit: input.commit });
   }
   throw new TypeError('Agent plugin source receipt is invalid.');
 }
@@ -91,7 +93,13 @@ function parseInstalledPluginTree(
 ): AgentPluginInstallationReceipt['installed_tree'] {
   if (
     !isPlainRecord(input) ||
-    !hasExactKeys(input, ['format', 'sha256', 'entry_count', 'file_count', 'size_bytes']) ||
+    !hasExactKeys(input, [
+      'format',
+      'sha256',
+      'entry_count',
+      'file_count',
+      'size_bytes',
+    ]) ||
     input.format !== 'forge-plugin-tree-v1' ||
     typeof input.sha256 !== 'string' ||
     !isSha256Digest(input.sha256) ||

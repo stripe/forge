@@ -1,11 +1,11 @@
 import {
   ATIF_SCHEMA_VERSION,
-  createNormalizedTrajectory,
   type AtifAgentStep,
   type AtifNormalizationSource,
   type AtifNormalizationWarning,
-  type AtifTrajectoryV1_8,
   type AtifToolCall,
+  type AtifTrajectoryV1_8,
+  createNormalizedTrajectory,
   type JsonObject,
   type JsonValue,
   type NormalizedTrajectory,
@@ -56,9 +56,11 @@ export function parseAgentEvidenceIdentity(
     !isSafeMetadataText(input.name) ||
     !isSafeMetadataText(input.version)
   ) {
-    throw new TypeError('Agent evidence identity requires a safe name and version.');
+    throw new TypeError(
+      'Agent evidence identity requires a safe name and version.',
+    );
   }
-  return Object.freeze({name: input.name, version: input.version});
+  return Object.freeze({ name: input.name, version: input.version });
 }
 
 /**
@@ -81,7 +83,10 @@ export function selectAgentEvidence(
     throw new TypeError('Agent returned an invalid native evidence result.');
   }
   if (input.collected.kind === 'unavailable') {
-    return driverFallback(input, parseUnavailableReason(input.collected.reason));
+    return driverFallback(
+      input,
+      parseUnavailableReason(input.collected.reason),
+    );
   }
   if (input.collected.kind !== 'available') {
     throw new TypeError('Agent returned an invalid native evidence result.');
@@ -91,31 +96,43 @@ export function selectAgentEvidence(
     trajectory: input.collected.trajectory,
     provenance: {
       source: input.collected.source,
-      adapter: {id: input.agent.id, version: input.agent.version},
+      adapter: { id: input.agent.id, version: input.agent.version },
     },
-    completeness: input.collected.warnings.length === 0 ? 'complete' : 'partial',
+    completeness:
+      input.collected.warnings.length === 0 ? 'complete' : 'partial',
     warnings: input.collected.warnings,
   });
   const source = candidate.provenance.source;
   if (source.kind !== 'native_log' && source.kind !== 'atif') {
-    throw new TypeError('Agent evidence candidates must identify a native source.');
+    throw new TypeError(
+      'Agent evidence candidates must identify a native source.',
+    );
   }
   if (
     source.sessionId !== input.sessionId ||
     candidate.trajectory.session_id !== input.sessionId
   ) {
-    throw new TypeError('Native evidence did not identify the selected agent session.');
+    throw new TypeError(
+      'Native evidence did not identify the selected agent session.',
+    );
   }
   if (
     candidate.warnings.some(
-      ({code}) => code !== 'unsupported_native_event' && code !== 'value_omitted',
+      ({ code }) =>
+        code !== 'unsupported_native_event' && code !== 'value_omitted',
     )
   ) {
     throw new TypeError(
       'Available native evidence contained a source-state or fallback warning.',
     );
   }
-  if (!trajectoryCoversCompletedTurns(candidate.trajectory, input.completedTurns, source)) {
+  if (
+    !trajectoryCoversCompletedTurns(
+      candidate.trajectory,
+      input.completedTurns,
+      source,
+    )
+  ) {
     return driverFallback(input, {
       code: 'source_incomplete',
       message: 'Native evidence did not cover every completed agent turn.',
@@ -142,7 +159,8 @@ export function trajectoryCoversCompletedTurns(
   completedTurns: readonly CompletedEvidenceTurn[],
   source: Pick<AtifNormalizationSource, 'kind' | 'format'>,
 ): boolean {
-  const reconcileCodex = source.kind === 'native_log' && source.format === 'codex-rollout-jsonl';
+  const reconcileCodex =
+    source.kind === 'native_log' && source.format === 'codex-rollout-jsonl';
   const nativeTurns: NativeTurnCoverage[] = [];
   let current: NativeTurnCoverage | undefined;
 
@@ -167,7 +185,8 @@ export function trajectoryCoversCompletedTurns(
     if (reconcileCodex) {
       for (const call of step.tool_calls ?? []) {
         const category = codexToolCategory(call.function_name, 'native');
-        if (category !== undefined) incrementCount(current.toolCounts, category);
+        if (category !== undefined)
+          incrementCount(current.toolCounts, category);
       }
     }
   }
@@ -178,7 +197,8 @@ export function trajectoryCoversCompletedTurns(
     if (native === undefined || native.user !== completed.user) return false;
     if (!native.hasAgentStep) return false;
     if (reconcileCodex) {
-      if (completed.assistant.length > 0 && !native.hasAssistantText) return false;
+      if (completed.assistant.length > 0 && !native.hasAssistantText)
+        return false;
       const driverToolCounts = new Map<string, number>();
       for (const call of completed.toolCalls) {
         const category = codexToolCategory(call.name, 'live');
@@ -215,7 +235,10 @@ function incrementCount(counts: Map<string, number>, category: string): void {
  * missing execution/MCP call. Preserve tool-name case and only strip the
  * built-in functions namespace, not arbitrary user-defined namespaces.
  */
-function codexToolCategory(name: string, protocol: 'live' | 'native'): string | undefined {
+function codexToolCategory(
+  name: string,
+  protocol: 'live' | 'native',
+): string | undefined {
   if (protocol === 'native' && name.startsWith('functions.')) {
     name = name.slice('functions.'.length);
   }
@@ -229,11 +252,19 @@ function codexToolCategory(name: string, protocol: 'live' | 'native'): string | 
       }
     }
     const separator = name.indexOf('__', 'mcp__'.length);
-    return separator > 'mcp__'.length && separator + 2 < name.length ? name : undefined;
+    return separator > 'mcp__'.length && separator + 2 < name.length
+      ? name
+      : undefined;
   }
   if (protocol === 'live') {
-    return ['command_execution', 'file_change', 'todo_list', 'web_search'].includes(name)
-      ? name : undefined;
+    return [
+      'command_execution',
+      'file_change',
+      'todo_list',
+      'web_search',
+    ].includes(name)
+      ? name
+      : undefined;
   }
   switch (name) {
     case 'exec_command':
@@ -267,7 +298,7 @@ function driverFallback(
 ): NormalizedTrajectory {
   const steps: AtifTrajectoryV1_8['steps'] = [];
   const nonemptyAssistantTurns = input.completedTurns.filter(
-    ({assistant}) => assistant.length > 0,
+    ({ assistant }) => assistant.length > 0,
   ).length;
   const assistantLimit =
     nonemptyAssistantTurns === 0
@@ -311,7 +342,7 @@ function driverFallback(
       message: assistant,
       ...(projectedTools.calls.length === 0
         ? {}
-        : {tool_calls: projectedTools.calls}),
+        : { tool_calls: projectedTools.calls }),
     });
   }
 
@@ -332,7 +363,7 @@ function driverFallback(
         format: 'forge-driver-turns',
         sessionId: input.sessionId,
       },
-      adapter: {id: input.agent.id, version: input.agent.version},
+      adapter: { id: input.agent.id, version: input.agent.version },
     },
     completeness: 'fallback',
     warnings: [
@@ -357,7 +388,7 @@ function driverFallback(
 function fallbackToolCalls(
   calls: readonly AgentToolCall[],
   stepId: number,
-): {calls: AtifToolCall[]; detailOmitted: boolean} {
+): { calls: AtifToolCall[]; detailOmitted: boolean } {
   const usedIds = new Set<string>();
   let detailOmitted = false;
   const projected = calls.map((call, index) => {
@@ -377,11 +408,13 @@ function fallbackToolCalls(
       arguments: toolArguments.arguments,
     };
   });
-  return {calls: projected, detailOmitted};
+  return { calls: projected, detailOmitted };
 }
 
-function boundedToolCallCounts(turns: readonly CompletedEvidenceTurn[]): number[] {
-  const counts: number[] = turns.map(({toolCalls}) =>
+function boundedToolCallCounts(
+  turns: readonly CompletedEvidenceTurn[],
+): number[] {
+  const counts: number[] = turns.map(({ toolCalls }) =>
     toolCalls.length > 0 ? 1 : 0,
   );
   let remaining =
@@ -401,7 +434,7 @@ function fallbackToolArguments(value: unknown): {
   arguments: JsonObject;
   detailOmitted: boolean;
 } {
-  if (value === undefined) return {arguments: {}, detailOmitted: false};
+  if (value === undefined) return { arguments: {}, detailOmitted: false };
   let lossy = false;
   let encoded: string | undefined;
   try {
@@ -434,23 +467,23 @@ function fallbackToolArguments(value: unknown): {
       return nested;
     });
   } catch {
-    return {arguments: {}, detailOmitted: true};
+    return { arguments: {}, detailOmitted: true };
   }
   if (encoded === undefined || lossy) {
-    return {arguments: {}, detailOmitted: true};
+    return { arguments: {}, detailOmitted: true };
   }
   const json = JSON.parse(encoded) as JsonValue;
   const candidate =
     json !== null && typeof json === 'object' && !Array.isArray(json)
       ? json
-      : {value: json};
+      : { value: json };
   if (
     JSON.stringify(candidate).length > FALLBACK_TOOL_ARGUMENT_CODE_UNITS ||
     jsonDepth(candidate) > FALLBACK_TOOL_ARGUMENT_DEPTH
   ) {
-    return {arguments: {}, detailOmitted: true};
+    return { arguments: {}, detailOmitted: true };
   }
-  return {arguments: candidate, detailOmitted: false};
+  return { arguments: candidate, detailOmitted: false };
 }
 
 function jsonDepth(value: JsonValue, depth = 0): number {
@@ -472,12 +505,16 @@ function parseUnavailableReason(input: unknown): AtifNormalizationWarning {
     input.code !== 'source_invalid' &&
     input.code !== 'source_incomplete'
   ) {
-    throw new TypeError('Unavailable native evidence has an invalid reason code.');
+    throw new TypeError(
+      'Unavailable native evidence has an invalid reason code.',
+    );
   }
   if (!isSafeWarningMessage(input.message)) {
-    throw new TypeError('Unavailable native evidence has an invalid reason message.');
+    throw new TypeError(
+      'Unavailable native evidence has an invalid reason message.',
+    );
   }
-  return {code: input.code, message: input.message};
+  return { code: input.code, message: input.message };
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -498,5 +535,7 @@ function isSafeMetadataText(value: unknown): value is string {
 }
 
 function isSafeWarningMessage(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 64 * 1_024;
+  return (
+    typeof value === 'string' && value.length > 0 && value.length <= 64 * 1_024
+  );
 }

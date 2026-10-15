@@ -1,15 +1,14 @@
-import {z} from 'zod';
-
+import { z } from 'zod';
+import type { StrictCompletionResponseSchema } from '../contracts/completion.js';
 import type {
   InteractionCompletionInvoker,
   InteractionHistoryMessage,
 } from './completion.js';
-import type {StrictCompletionResponseSchema} from '../contracts/completion.js';
 import {
   AVA_STOP_SENTINEL,
+  type AvaPromptInputs,
   buildAvaContinuationPrompt,
   buildAvaInitializationPrompt,
-  type AvaPromptInputs,
 } from './prompt.js';
 
 export const MAX_AVA_ATTEMPTS = 3;
@@ -105,7 +104,7 @@ const INITIAL_AVA_RESPONSE_SCHEMA: StrictCompletionResponseSchema = {
           additionalProperties: false,
         },
       },
-      message: {type: 'string', maxLength: MAX_AVA_MESSAGE_CHARACTERS},
+      message: { type: 'string', maxLength: MAX_AVA_MESSAGE_CHARACTERS },
     },
     required: ['user_needs', 'message'],
     additionalProperties: false,
@@ -131,9 +130,9 @@ function continuationResponseFormat(
         remaining_need_ids: {
           type: 'array',
           uniqueItems: true,
-          items: {type: 'string', enum: [...remainingNeedIds]},
+          items: { type: 'string', enum: [...remainingNeedIds] },
         },
-        message: {type: 'string', maxLength: MAX_AVA_MESSAGE_CHARACTERS},
+        message: { type: 'string', maxLength: MAX_AVA_MESSAGE_CHARACTERS },
       },
       required: ['remaining_need_ids', 'message'],
       additionalProperties: false,
@@ -161,7 +160,7 @@ function parseContinuationResponse(
     throw new Error('Ava returned invalid remaining need IDs.');
   }
   if (returned.size === 0) {
-    return {remainingNeedIds: [], focusNeedId: null, message: ''};
+    return { remainingNeedIds: [], focusNeedId: null, message: '' };
   }
   return {
     remainingNeedIds: parsed.remaining_need_ids,
@@ -173,7 +172,7 @@ function parseContinuationResponse(
 function assertUniqueNeedDescriptions(
   needs: readonly z.infer<typeof InitialNeedResponse>[],
 ): void {
-  const normalized = needs.map(({description}) => description.toLowerCase());
+  const normalized = needs.map(({ description }) => description.toLowerCase());
   if (new Set(normalized).size !== normalized.length) {
     throw new Error('Ava returned duplicate private user needs.');
   }
@@ -242,7 +241,7 @@ export class AvaRolePlayer {
     this.#initialPrompt = options.initialPrompt;
     this.#promptInputs = {
       task: options.task,
-      ...(options.context === undefined ? {} : {context: options.context}),
+      ...(options.context === undefined ? {} : { context: options.context }),
     };
     this.#signal = options.signal ?? NEVER_ABORTED_SIGNAL;
   }
@@ -258,7 +257,7 @@ export class AvaRolePlayer {
         .split(AVA_STOP_SENTINEL)
         .join('')
         .trim();
-      this.#history.push({role: 'assistant', content: message});
+      this.#history.push({ role: 'assistant', content: message });
       return {
         message,
         stop,
@@ -329,7 +328,7 @@ export class AvaRolePlayer {
             ? this.#initializeFromResponse(raw, lastAgentResponse === undefined)
             : this.#continueFromResponse(raw);
           if (turn.message) {
-            this.#history.push({role: 'assistant', content: turn.message});
+            this.#history.push({ role: 'assistant', content: turn.message });
           }
           return turn;
         } catch (error) {
@@ -349,16 +348,14 @@ export class AvaRolePlayer {
   #initializeFromResponse(raw: string, opening: boolean): AvaTurn {
     const parsed = InitialAvaResponse.parse(JSON.parse(raw));
     assertUniqueNeedDescriptions(parsed.user_needs);
-    const needs = parsed.user_needs.map(({description}, index) => ({
+    const needs = parsed.user_needs.map(({ description }, index) => ({
       id: `need_${index + 1}`,
       description,
     }));
-    const remainingIndexes = parsed.user_needs.flatMap(({status}, index) =>
+    const remainingIndexes = parsed.user_needs.flatMap(({ status }, index) =>
       opening || status === 'remaining' ? [index] : [],
     );
-    const remainingNeedIds = remainingIndexes.map(
-      (index) => needs[index]!.id,
-    );
+    const remainingNeedIds = remainingIndexes.map((index) => needs[index]!.id);
     if (remainingNeedIds.length === 0) {
       this.#needs = needs;
       this.#remainingNeedIds = remainingNeedIds;
@@ -366,11 +363,7 @@ export class AvaRolePlayer {
     }
     const focusNeedId = needs[remainingIndexes[0]!]!.id;
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(
-        parsed.message,
-        focusNeedId,
-        needs,
-      ),
+      message: assertSafeGeneratedMessage(parsed.message, focusNeedId, needs),
       stop: false,
       remainingNeeds: remainingNeedIds.map(
         (id) => needs.find((need) => need.id === id)!,
@@ -494,7 +487,7 @@ function waitBeforeAvaRetry(
       signal.removeEventListener('abort', onAbort);
       resolve();
     }, delayMs);
-    signal.addEventListener('abort', onAbort, {once: true});
+    signal.addEventListener('abort', onAbort, { once: true });
     if (signal.aborted) onAbort();
   });
 }

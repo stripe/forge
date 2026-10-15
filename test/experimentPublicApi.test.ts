@@ -1,9 +1,5 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
-
-import * as root from '../src/index.js';
-import * as experiment from '../src/experiment.js';
-import * as experimentCli from '../src/experimentCli.js';
+import { describe, it } from 'node:test';
 import type {
   ExperimentRunArtifact,
   ExperimentRunInspection,
@@ -17,6 +13,7 @@ import type {
   ExperimentRunReportV1,
   ExperimentRunSummary,
 } from '../src/experiment.js';
+import * as experiment from '../src/experiment.js';
 import type {
   ExperimentArgumentOptions,
   ExperimentArguments,
@@ -27,13 +24,17 @@ import type {
   ExperimentValues,
   LoadedExperimentRun,
 } from '../src/experimentCli.js';
+import * as experimentCli from '../src/experimentCli.js';
+import * as root from '../src/index.js';
 
 describe('experiment public entry points', () => {
   it('exports dataset case entries as file paths', () => {
     const manifest: root.DatasetManifestV1 = {
-      dataset: {id: 'public-api', version: '1.0.0'},
+      dataset: { id: 'public-api', version: '1.0.0' },
       cases: ['cases/first.case.yaml'],
-      files: [{path: 'cases/first.case.yaml', size: 1, sha256: 'a'.repeat(64)}],
+      files: [
+        { path: 'cases/first.case.yaml', size: 1, sha256: 'a'.repeat(64) },
+      ],
     };
     const casePaths: root.DatasetRelativePath[] = manifest.cases;
     assert.deepEqual(casePaths, ['cases/first.case.yaml']);
@@ -41,23 +42,35 @@ describe('experiment public entry points', () => {
   });
 
   it('exports criterion judging contracts without former aliases', () => {
-    for (const name of ['judgeGuidelines', 'buildGuidelineJudgePrompt', 'parseGuidelineJudgment']) {
+    for (const name of [
+      'judgeGuidelines',
+      'buildGuidelineJudgePrompt',
+      'parseGuidelineJudgment',
+    ]) {
       assert.equal(name in root, false);
     }
     assert.equal(typeof root.judgeCriteria, 'function');
     assert.equal(typeof root.buildCriterionJudgePrompt, 'function');
     assert.equal(typeof root.parseCriterionJudgment, 'function');
     const criterion: root.CriterionResultV1 = root.parseCriterionJudgment(
-      JSON.stringify({results: [{index: 0, passed: true, explanation: 'Done.'}]}),
+      JSON.stringify({
+        results: [{ index: 0, passed: true, explanation: 'Done.' }],
+      }),
       'The task is complete.',
     );
-    const evaluation: root.EvaluationResultV1 = root.scoreEvaluation([criterion], []);
+    const evaluation: root.EvaluationResultV1 = root.scoreEvaluation(
+      [criterion],
+      [],
+    );
     assert.equal(evaluation.judging_criteria_passed, 1);
     assert.equal(evaluation.judging_criteria_total, 1);
     assert.deepEqual(evaluation.judging_criteria, [criterion]);
     assert.equal(evaluation.score, 1);
-    const judge = (input: root.CriterionJudgeInput, invoke: root.CriterionCompletionInvoker,
-      options: root.CriterionJudgeExecutionOptions): Promise<root.CriterionResultV1[]> =>
+    const judge = (
+      input: root.CriterionJudgeInput,
+      invoke: root.CriterionCompletionInvoker,
+      options: root.CriterionJudgeExecutionOptions,
+    ): Promise<root.CriterionResultV1[]> =>
       root.judgeCriteria(input, invoke, options);
     assert.equal(typeof judge, 'function');
   });
@@ -66,14 +79,29 @@ describe('experiment public entry points', () => {
     const group: root.ExperimentMatrixGroupV1 = {
       cases: ['cases/examples/first.case.yaml'],
       treatments: ['baseline'],
-      agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet-4-6'}],
+      agents: [
+        {
+          adapter: 'claude-code',
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-6',
+        },
+      ],
     };
-    const flat: root.FlatExperimentMatrixV1 = {...group, repetitions: 1, retries: 0};
-    const grouped: root.GroupedExperimentMatrixV1 = {groups: [group], repetitions: 1, retries: 0};
+    const flat: root.FlatExperimentMatrixV1 = {
+      ...group,
+      repetitions: 1,
+      retries: 0,
+    };
+    const grouped: root.GroupedExperimentMatrixV1 = {
+      groups: [group],
+      repetitions: 1,
+      retries: 0,
+    };
     const matrices: root.ExperimentMatrixV1[] = [flat, grouped];
     assert.equal(typeof root.getMatrixGroups, 'function');
     for (const matrix of matrices) {
-      const groups: readonly root.ExperimentMatrixGroupV1[] = root.getMatrixGroups(matrix);
+      const groups: readonly root.ExperimentMatrixGroupV1[] =
+        root.getMatrixGroups(matrix);
       assert.equal(groups.length, 1);
       assert.deepEqual(groups[0]!.cases, ['cases/examples/first.case.yaml']);
     }
@@ -81,8 +109,11 @@ describe('experiment public entry points', () => {
 
   it('keeps experiment orchestration on its dedicated entry points', () => {
     for (const name of [
-      'runExperiment', 'readExperimentRunSelections', 'inspectExperimentRun',
-      'parseExperimentRunReport', 'runExperimentCommand',
+      'runExperiment',
+      'readExperimentRunSelections',
+      'inspectExperimentRun',
+      'parseExperimentRunReport',
+      'runExperimentCommand',
     ]) {
       assert.equal(name in root, false);
     }
@@ -94,14 +125,27 @@ describe('experiment public entry points', () => {
 
   it('exports public result types and precise host argument types', () => {
     const hostOptions = {
-      tag: {type: 'string'},
-      upload: {type: 'boolean'},
-      labels: {type: 'string', multiple: true},
+      tag: { type: 'string' },
+      upload: { type: 'boolean' },
+      labels: { type: 'string', multiple: true },
     } as const;
-    const options: ExperimentArgumentOptions<typeof hostOptions> = {hostOptions};
-    const parsed: ExperimentArguments<typeof hostOptions> = experimentCli.parseExperimentArgs(
-      ['--tag', 'smoke', '--upload', '--labels', 'first', '--labels', 'second', '-j2'], options,
-    );
+    const options: ExperimentArgumentOptions<typeof hostOptions> = {
+      hostOptions,
+    };
+    const parsed: ExperimentArguments<typeof hostOptions> =
+      experimentCli.parseExperimentArgs(
+        [
+          '--tag',
+          'smoke',
+          '--upload',
+          '--labels',
+          'first',
+          '--labels',
+          'second',
+          '-j2',
+        ],
+        options,
+      );
     const values: ExperimentValues<typeof hostOptions> = parsed.values;
     const tag: string | undefined = values.tag;
     const upload: boolean | undefined = values.upload;
@@ -123,7 +167,12 @@ describe('experiment public entry points', () => {
       artifact: ExperimentRunOutcome['artifact'];
       selection: ExperimentRunOutcome['selection'];
       progress: Parameters<ExperimentRunOptions['progress']>[0];
-    } => ({execute: options.execute, artifact, selection: outcome.selection, progress});
+    } => ({
+      execute: options.execute,
+      artifact,
+      selection: outcome.selection,
+      progress,
+    });
     const acceptsReportTypes = (
       report: ExperimentRunReportV1,
     ): {
@@ -131,18 +180,33 @@ describe('experiment public entry points', () => {
       runs: readonly ExperimentRunReportRunV1[];
       summary: ExperimentRunReportStatisticsV1;
       evaluation: ExperimentRunReportEvaluationV1 | null;
-    } => ({cases: report.cases, runs: report.runs, summary: report.summary,
-      evaluation: report.runs[0]?.evaluation ?? null});
+    } => ({
+      cases: report.cases,
+      runs: report.runs,
+      summary: report.summary,
+      evaluation: report.runs[0]?.evaluation ?? null,
+    });
     const acceptsReferences = (
       summary: ExperimentRunSummary,
       inspection: ExperimentRunInspection,
       reference: ExperimentCommandReference,
       result: ExperimentCommandResult<typeof hostOptions>,
-    ): readonly string[] => [summary.checkpoint, inspection.checkpoint, reference.checkpoint, result.checkpoint];
-    const acceptsCommandLoader = (loadExperiment: (
-      context: ExperimentLoadContext<typeof hostOptions>,
-    ) => Promise<LoadedExperimentRun>, engine: ExperimentRunOptions['engine']): ExperimentCommandOptions<typeof hostOptions> =>
-      ({hostOptions, engine, loadExperiment});
+    ): readonly string[] => [
+      summary.checkpoint,
+      inspection.checkpoint,
+      reference.checkpoint,
+      result.checkpoint,
+    ];
+    const acceptsCommandLoader = (
+      loadExperiment: (
+        context: ExperimentLoadContext<typeof hostOptions>,
+      ) => Promise<LoadedExperimentRun>,
+      engine: ExperimentRunOptions['engine'],
+    ): ExperimentCommandOptions<typeof hostOptions> => ({
+      hostOptions,
+      engine,
+      loadExperiment,
+    });
     assert.equal(typeof acceptsCoreTypes, 'function');
     assert.equal(typeof acceptsReportTypes, 'function');
     assert.equal(typeof acceptsReferences, 'function');
@@ -150,17 +214,37 @@ describe('experiment public entry points', () => {
   });
 
   it('exposes usage and execution errors with experiment run references', () => {
-    assert.throws(() => experimentCli.parseExperimentArgs(['--jobs', '0'], {hostOptions: {}}),
-      (error) => error instanceof experimentCli.ExperimentUsageError && error.name === 'ExperimentUsageError');
-    assert.throws(() => experimentCli.createExperimentCliOptions({output: {type: 'string'}}),
-      (error) => error instanceof experimentCli.ExperimentUsageError && error.name === 'ExperimentUsageError');
-    const report = new experiment.ExperimentRunReportError('report.json', new Error('report failure'));
+    assert.throws(
+      () =>
+        experimentCli.parseExperimentArgs(['--jobs', '0'], { hostOptions: {} }),
+      (error) =>
+        error instanceof experimentCli.ExperimentUsageError &&
+        error.name === 'ExperimentUsageError',
+    );
+    assert.throws(
+      () =>
+        experimentCli.createExperimentCliOptions({
+          output: { type: 'string' },
+        }),
+      (error) =>
+        error instanceof experimentCli.ExperimentUsageError &&
+        error.name === 'ExperimentUsageError',
+    );
+    const report = new experiment.ExperimentRunReportError(
+      'report.json',
+      new Error('report failure'),
+    );
     assert.equal(report.name, 'ExperimentRunReportError');
     assert.ok(report instanceof experiment.ExperimentRunReportError);
     const reference: ExperimentCommandReference = {
-      experiment_run_id: 'example', location: '/results/example', checkpoint: '/results/example/experiment.json',
+      experiment_run_id: 'example',
+      location: '/results/example',
+      checkpoint: '/results/example/experiment.json',
     };
-    const command = new experimentCli.ExperimentCommandError(reference, new Error('command failure'));
+    const command = new experimentCli.ExperimentCommandError(
+      reference,
+      new Error('command failure'),
+    );
     assert.equal(command.name, 'ExperimentCommandError');
     assert.equal(command.reference.checkpoint, reference.checkpoint);
     assert.ok(command instanceof experimentCli.ExperimentCommandError);

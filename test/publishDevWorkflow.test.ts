@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, it} from 'node:test';
-import {parse} from 'yaml';
+import { describe, it } from 'node:test';
+import { parse } from 'yaml';
 
 interface WorkflowStep {
   name: string;
@@ -12,9 +12,12 @@ interface WorkflowStep {
   if?: string;
   run?: string;
 }
-const workflow = parse(await fs.readFile(
-  path.join(process.cwd(), '.github', 'workflows', 'publish-dev.yml'), 'utf8',
-)) as {jobs: {publish: {steps: WorkflowStep[]}}};
+const workflow = parse(
+  await fs.readFile(
+    path.join(process.cwd(), '.github', 'workflows', 'publish-dev.yml'),
+    'utf8',
+  ),
+) as { jobs: { publish: { steps: WorkflowStep[] } } };
 const steps = workflow.jobs.publish.steps;
 const snapshot = steps.find((step) => step.name === 'Set snapshot version')!;
 
@@ -44,7 +47,10 @@ describe('development snapshot publishing', () => {
     for (const version of ['0.2.0-rc.1', '0.2.0-dev.7']) {
       const rejected = await runSnapshot(version);
       assert.equal(rejected.status, 1);
-      assert.match(rejected.stderr, /Expected package version to end in -dev.0/);
+      assert.match(
+        rejected.stderr,
+        /Expected package version to end in -dev.0/,
+      );
       assert.equal(rejected.version, version);
       assert.equal(rejected.output, '');
     }
@@ -54,19 +60,37 @@ describe('development snapshot publishing', () => {
 async function runSnapshot(version: string) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-publish-dev-'));
   try {
-    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({name: 'snapshot-test', version}));
+    await fs.writeFile(
+      path.join(root, 'package.json'),
+      JSON.stringify({ name: 'snapshot-test', version }),
+    );
     const output = path.join(root, 'github-output');
     await fs.writeFile(output, '');
-    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', snapshot.run!], {
-      cwd: root, encoding: 'utf8', timeout: 10_000,
-      env: {...process.env, GITHUB_RUN_NUMBER: '123', GITHUB_OUTPUT: output},
-    });
+    const result = spawnSync(
+      'bash',
+      ['-e', '-o', 'pipefail', '-c', snapshot.run!],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 10_000,
+        env: {
+          ...process.env,
+          GITHUB_RUN_NUMBER: '123',
+          GITHUB_OUTPUT: output,
+        },
+      },
+    );
     return {
-      status: result.status, stderr: result.stderr,
-      version: (JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')) as {version: string}).version,
+      status: result.status,
+      stderr: result.stderr,
+      version: (
+        JSON.parse(
+          await fs.readFile(path.join(root, 'package.json'), 'utf8'),
+        ) as { version: string }
+      ).version,
       output: await fs.readFile(output, 'utf8'),
     };
   } finally {
-    await fs.rm(root, {recursive: true, force: true});
+    await fs.rm(root, { recursive: true, force: true });
   }
 }

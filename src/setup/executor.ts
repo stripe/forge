@@ -2,36 +2,36 @@ import * as path from 'node:path';
 
 import {
   assertEnvironmentName,
-  credentialReference,
   type CredentialRequirement,
+  credentialReference,
 } from '../contracts/credentials.js';
-import {isSafeActionIdentifier} from '../model/paths.js';
+import type { AgentPluginInstaller } from '../contracts/plugin.js';
+import type {
+  MutableWorkspace,
+  RuntimeStateDirectoryRequirement,
+} from '../contracts/runtime.js';
+import { isSafeActionIdentifier } from '../model/paths.js';
 import type {
   AgentSelectionV1,
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
-import type {AgentPluginInstaller} from '../contracts/plugin.js';
-import type {
-  MutableWorkspace,
-  RuntimeStateDirectoryRequirement,
-} from '../contracts/runtime.js';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from './registry.js';
-import {normalizeSetupStepResolution} from './resolution.js';
+import { normalizeSetupStepResolution } from './resolution.js';
 import {
-  SetupActionError,
-  UnsupportedSetupActionError,
   type AppliedSetupStep,
   type PreparedSetup,
   type PreparedSetupStep,
+  SetupActionError,
   type SetupApplyContext,
   type SetupCredentialRequirements,
+  type SetupExecutor,
   type SetupStepHandler,
   type SetupStepRequirements,
-  type SetupExecutor,
+  UnsupportedSetupActionError,
 } from './types.js';
 
 /** Actions implemented and shipped by the exact installed Forge version. */
@@ -92,7 +92,7 @@ export function createSetupExecutorWithHandlers(
             runtime,
             ...(context.pluginInstaller === undefined
               ? {}
-              : {pluginInstaller: context.pluginInstaller}),
+              : { pluginInstaller: context.pluginInstaller }),
           }),
           step.uses,
         );
@@ -103,7 +103,7 @@ export function createSetupExecutorWithHandlers(
           ),
         );
         const stateDirectoryIds = Object.freeze(
-          (prepared.requirements.stateDirectories ?? []).map(({id}) => id),
+          (prepared.requirements.stateDirectories ?? []).map(({ id }) => id),
         );
         preparedSteps.push(
           Object.freeze({
@@ -152,16 +152,19 @@ export function createSetupExecutorWithHandlers(
                 Object.freeze({
                   index: step.index,
                   uses: step.uses,
-                  ...(resolution === undefined ? {} : {resolution}),
+                  ...(resolution === undefined ? {} : { resolution }),
                 }),
               );
             } catch (error) {
-              if (applyContext.signal.aborted) applyContext.signal.throwIfAborted();
+              if (applyContext.signal.aborted)
+                applyContext.signal.throwIfAborted();
               if (error instanceof SetupActionError) throw error;
-              throw new SetupActionError(step.uses, step.index, {cause: error});
+              throw new SetupActionError(step.uses, step.index, {
+                cause: error,
+              });
             }
           }
-          return Object.freeze({steps: Object.freeze(appliedSteps)});
+          return Object.freeze({ steps: Object.freeze(appliedSteps) });
         },
       };
       return Object.freeze(preparedSetup);
@@ -179,10 +182,12 @@ function normalizePreparedStep(
     !hasExactKeys(input, ['requirements', 'apply']) ||
     typeof input.apply !== 'function'
   ) {
-    throw new TypeError(`Setup handler ${uses} returned an invalid prepared step.`);
+    throw new TypeError(
+      `Setup handler ${uses} returned an invalid prepared step.`,
+    );
   }
   const requirements = normalizeStepRequirements(input.requirements, uses);
-  return Object.freeze({requirements, apply: input.apply});
+  return Object.freeze({ requirements, apply: input.apply });
 }
 
 function normalizeStepRequirements(
@@ -240,11 +245,11 @@ function normalizeStepRequirements(
   const unknownCredentialKeys = ownStringKeys(
     credentialsInput,
     `Setup handler ${uses} credentials`,
-  ).filter(
-    (key) => key !== 'setup' && key !== 'agent',
-  );
+  ).filter((key) => key !== 'setup' && key !== 'agent');
   if (unknownCredentialKeys.length > 0) {
-    throw new TypeError(`Setup handler ${uses} assigned an invalid credential scope.`);
+    throw new TypeError(
+      `Setup handler ${uses} assigned an invalid credential scope.`,
+    );
   }
   const setup = normalizeCredentialRequirements(
     Object.hasOwn(credentialsInput, 'setup') ? credentialsInput.setup : {},
@@ -255,7 +260,13 @@ function normalizeStepRequirements(
     uses,
   );
 
-  return freezeRequirements({executables, stateDirectories, variables, setup, agent});
+  return freezeRequirements({
+    executables,
+    stateDirectories,
+    variables,
+    setup,
+    agent,
+  });
 }
 
 function normalizeExecutableRequirements(
@@ -274,7 +285,9 @@ function normalizeExecutableRequirements(
       executable.includes('\0') ||
       seen.has(executable)
     ) {
-      throw new TypeError(`Setup handler ${uses} returned invalid executables.`);
+      throw new TypeError(
+        `Setup handler ${uses} returned invalid executables.`,
+      );
     }
     seen.add(executable);
     return executable;
@@ -287,13 +300,17 @@ function normalizeStateDirectoryRequirements(
   uses: string,
 ): readonly RuntimeStateDirectoryRequirement[] {
   if (!Array.isArray(input)) {
-    throw new TypeError(`Setup handler ${uses} returned invalid state directories.`);
+    throw new TypeError(
+      `Setup handler ${uses} returned invalid state directories.`,
+    );
   }
   const ids = new Set<string>();
   const paths: string[] = [];
   const output = input.map((requirement) => {
     if (!isPlainRecord(requirement)) {
-      throw new TypeError(`Setup handler ${uses} returned an invalid state directory.`);
+      throw new TypeError(
+        `Setup handler ${uses} returned an invalid state directory.`,
+      );
     }
     const keys = ownStringKeys(requirement, 'Setup state directory');
     if (
@@ -310,13 +327,16 @@ function normalizeStateDirectoryRequirements(
       typeof requirement.containerPath !== 'string' ||
       !requirement.containerPath.startsWith('/') ||
       requirement.containerPath.includes('\0') ||
-      path.posix.normalize(requirement.containerPath) !== requirement.containerPath ||
+      path.posix.normalize(requirement.containerPath) !==
+        requirement.containerPath ||
       ids.has(requirement.id) ||
       paths.some((existing) =>
         pathsOverlap(existing, requirement.containerPath as string),
       )
     ) {
-      throw new TypeError(`Setup handler ${uses} returned an invalid state directory.`);
+      throw new TypeError(
+        `Setup handler ${uses} returned an invalid state directory.`,
+      );
     }
     const id = requirement.id as string;
     const containerPath = requirement.containerPath as string;
@@ -326,12 +346,12 @@ function normalizeStateDirectoryRequirements(
     return Object.freeze({
       id,
       containerPath,
-      ...(sealAfterSetup === undefined
-        ? {}
-        : {sealAfterSetup}),
+      ...(sealAfterSetup === undefined ? {} : { sealAfterSetup }),
     });
   });
-  return Object.freeze(output.sort((left, right) => compareCodeUnits(left.id, right.id)));
+  return Object.freeze(
+    output.sort((left, right) => compareCodeUnits(left.id, right.id)),
+  );
 }
 
 function normalizeCredentialRequirements(
@@ -359,7 +379,7 @@ function normalizeCredentialRequirements(
     defineRecordValue(
       output,
       name,
-      Object.freeze({reference: credentialReference(binding.reference)}),
+      Object.freeze({ reference: credentialReference(binding.reference) }),
     );
   }
   return Object.freeze(output);
@@ -389,14 +409,16 @@ function createRequirementAccumulator(): Readonly<{
       }
       const previous = credentials.get(name);
       if (previous !== undefined && previous !== binding.reference) {
-        throw new TypeError(`Credential binding ${name} has conflicting references.`);
+        throw new TypeError(
+          `Credential binding ${name} has conflicting references.`,
+        );
       }
       credentials.set(name, binding.reference);
       if (!Object.hasOwn(output, name)) {
         defineRecordValue(
           output,
           name,
-          Object.freeze({reference: binding.reference}),
+          Object.freeze({ reference: binding.reference }),
         );
       }
     }
@@ -404,7 +426,8 @@ function createRequirementAccumulator(): Readonly<{
 
   return Object.freeze({
     add(input) {
-      for (const executable of input.executables ?? []) executables.add(executable);
+      for (const executable of input.executables ?? [])
+        executables.add(executable);
       for (const requirement of input.stateDirectories ?? []) {
         const existing = stateDirectories.get(requirement.id);
         if (
@@ -439,7 +462,9 @@ function createRequirementAccumulator(): Readonly<{
           );
         }
         if (Object.hasOwn(variables, name) && variables[name] !== value) {
-          throw new TypeError(`Environment variable ${name} has conflicting values.`);
+          throw new TypeError(
+            `Environment variable ${name} has conflicting values.`,
+          );
         }
         defineRecordValue(variables, name, value);
       }
@@ -473,15 +498,15 @@ function freezeRequirements(input: {
   const setup = Object.freeze(input.setup);
   const agent = Object.freeze(input.agent);
   return Object.freeze({
-    ...(executables.length === 0 ? {} : {executables}),
-    ...(stateDirectories.length === 0 ? {} : {stateDirectories}),
-    ...(Object.keys(variables).length === 0 ? {} : {variables}),
+    ...(executables.length === 0 ? {} : { executables }),
+    ...(stateDirectories.length === 0 ? {} : { stateDirectories }),
+    ...(Object.keys(variables).length === 0 ? {} : { variables }),
     ...(Object.keys(setup).length === 0 && Object.keys(agent).length === 0
       ? {}
       : {
           credentials: Object.freeze({
-            ...(Object.keys(setup).length === 0 ? {} : {setup}),
-            ...(Object.keys(agent).length === 0 ? {} : {agent}),
+            ...(Object.keys(setup).length === 0 ? {} : { setup }),
+            ...(Object.keys(agent).length === 0 ? {} : { agent }),
           }),
         }),
   });
@@ -495,7 +520,9 @@ function selectStateDirectories(
   for (const id of selectedIds) {
     const workspace = available.get(id);
     if (!workspace) {
-      throw new TypeError(`Prepared runtime omitted setup state directory ${id}.`);
+      throw new TypeError(
+        `Prepared runtime omitted setup state directory ${id}.`,
+      );
     }
     selected.set(id, workspace);
   }
@@ -518,7 +545,8 @@ class ReadonlyMapView<Key, Value> implements ReadonlyMap<Key, Value> {
     callbackfn: (value: Value, key: Key, map: ReadonlyMap<Key, Value>) => void,
     thisArg?: unknown,
   ): void {
-    for (const [key, value] of this.source) callbackfn.call(thisArg, value, key, this);
+    for (const [key, value] of this.source)
+      callbackfn.call(thisArg, value, key, this);
   }
 
   get(key: Key): Value | undefined {
@@ -548,7 +576,9 @@ class ReadonlyMapView<Key, Value> implements ReadonlyMap<Key, Value> {
 
 function pathsOverlap(left: string, right: string): boolean {
   return (
-    left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+    left === right ||
+    left.startsWith(`${right}/`) ||
+    right.startsWith(`${left}/`)
   );
 }
 
@@ -618,10 +648,11 @@ function handlersForRegistry(
   return new Map(
     registry.actionIds.map((uses) => {
       const action = registry.action(uses);
-      if (!action) throw new TypeError(`Missing registered setup action: ${uses}.`);
+      if (!action)
+        throw new TypeError(`Missing registered setup action: ${uses}.`);
       return [
         uses,
-        Object.freeze({uses, preflight: action.preflight}),
+        Object.freeze({ uses, preflight: action.preflight }),
       ] as const;
     }),
   );

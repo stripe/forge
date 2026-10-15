@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
 import type {
   CompletionProvider,
   CompletionResponse,
 } from '../contracts/completion.js';
-import {credentialReference} from '../contracts/credentials.js';
+import { credentialReference } from '../contracts/credentials.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
@@ -15,44 +15,64 @@ import {
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
 } from '../testing/index.js';
-import {FORGE_VERSION} from '../version.js';
+import { FORGE_VERSION } from '../version.js';
 import {
   completionBindingsForPlan,
   prepareCompletionRuntime,
 } from './completionRuntime.js';
 
-const MODEL = {provider: 'test-provider', model: 'judge-model'} as const;
+const MODEL = { provider: 'test-provider', model: 'judge-model' } as const;
 
 describe('completion runtime', () => {
   it('snapshots independently versioned provider identity and configuration during preflight', async () => {
-    const metadata = {endpoint_mode: 'custom' as 'default' | 'custom'};
-    const scripted = createScriptedCompletionProvider({id: MODEL.provider, version: '3.4.1', responses: [response(1)]});
-    const provider = {...scripted.provider, metadata};
+    const metadata = { endpoint_mode: 'custom' as 'default' | 'custom' };
+    const scripted = createScriptedCompletionProvider({
+      id: MODEL.provider,
+      version: '3.4.1',
+      responses: [response(1)],
+    });
+    const provider = { ...scripted.provider, metadata };
     const bindings = completionBindingsForPlan(
-      createTestResolvedRunPlan({judgingCriteria: ['One criterion'], judge: MODEL}),
+      createTestResolvedRunPlan({
+        judgingCriteria: ['One criterion'],
+        judge: MODEL,
+      }),
       composition(provider),
     );
     metadata.endpoint_mode = 'default';
     provider.version = '3.4.2';
     const signal = new AbortController().signal;
     const prepared = await prepareCompletionRuntime({
-      runId: 'provider-metadata-snapshot', bindings,
-      credentialResolver: createStaticCredentialResolver(), signal,
+      runId: 'provider-metadata-snapshot',
+      bindings,
+      credentialResolver: createStaticCredentialResolver(),
+      signal,
     });
     await prepared.invoke('judge', prompt('judge it'), signal);
     assert.equal(prepared.calls[0]!.provider_version, '3.4.1');
-    assert.deepEqual(prepared.calls[0]!.provider_metadata, {endpoint_mode: 'custom'});
+    assert.deepEqual(prepared.calls[0]!.provider_metadata, {
+      endpoint_mode: 'custom',
+    });
     assert.equal(Object.isFrozen(prepared.calls[0]!.provider_metadata), true);
   });
 
   it('rejects malformed provider metadata before resolving credentials', () => {
-    const scripted = createScriptedCompletionProvider({id: MODEL.provider});
-    for (const metadata of [null, {endpoint_mode: 'unknown'}, {endpoint_mode: 'custom', endpoint: 'https://private.example.com'}]) {
-      const provider = {...scripted.provider, metadata} as CompletionProvider;
-      assert.throws(() => completionBindingsForPlan(
-        createTestResolvedRunPlan({judgingCriteria: ['One criterion'], judge: MODEL}),
-        composition(provider),
-      ));
+    const scripted = createScriptedCompletionProvider({ id: MODEL.provider });
+    for (const metadata of [
+      null,
+      { endpoint_mode: 'unknown' },
+      { endpoint_mode: 'custom', endpoint: 'https://private.example.com' },
+    ]) {
+      const provider = { ...scripted.provider, metadata } as CompletionProvider;
+      assert.throws(() =>
+        completionBindingsForPlan(
+          createTestResolvedRunPlan({
+            judgingCriteria: ['One criterion'],
+            judge: MODEL,
+          }),
+          composition(provider),
+        ),
+      );
       assert.deepEqual(scripted.calls, []);
     }
   });
@@ -71,24 +91,30 @@ describe('completion runtime', () => {
     const provider: CompletionProvider = {
       id: 'test-provider',
       version: '1',
-      requirements({purpose}) {
+      requirements({ purpose }) {
         requirements.push(purpose);
-        return {credentials: {token: {reference: credentialReference('shared.token')}}};
+        return {
+          credentials: {
+            token: { reference: credentialReference('shared.token') },
+          },
+        };
       },
-      async preflight({purpose, credentials}) {
+      async preflight({ purpose, credentials }) {
         assert.ok(Object.isFrozen(credentials));
-        assert.deepEqual(credentials, {token: secretsByPurpose[purpose]});
+        assert.deepEqual(credentials, { token: secretsByPurpose[purpose] });
         preflights.push(purpose);
       },
-      async complete(request, {credentials}) {
+      async complete(request, { credentials }) {
         assert.ok(Object.isFrozen(credentials));
-        assert.deepEqual(credentials, {token: secretsByPurpose[request.purpose]});
+        assert.deepEqual(credentials, {
+          token: secretsByPurpose[request.purpose],
+        });
         assert.equal(request.systemPrompt, '[REDACTED] [REDACTED] [REDACTED]');
         assert.deepEqual(request.messages, [
-          {role: 'user', content: '[REDACTED] [REDACTED] [REDACTED]'},
+          { role: 'user', content: '[REDACTED] [REDACTED] [REDACTED]' },
         ]);
         dispatched.push(request.purpose);
-        return {...response(1), content: secretText};
+        return { ...response(1), content: secretText };
       },
     };
     const bindings = completionBindingsForPlan(
@@ -108,7 +134,7 @@ describe('completion runtime', () => {
       runId: 'purpose-credentials-1',
       bindings,
       credentialResolver: {
-        async resolve(reference, {runId, purpose}) {
+        async resolve(reference, { runId, purpose }) {
           assert.equal(reference, 'shared.token');
           assert.equal(runId, 'purpose-credentials-1');
           resolutions.push(purpose);
@@ -125,9 +151,13 @@ describe('completion runtime', () => {
       'forge-eval:completion:judge:token',
     ]);
     assert.deepEqual(preflights, ['role_player', 'judge']);
-    assert.deepEqual(prepared.secrets, [agentSecret, secretsByPurpose.role_player, secretsByPurpose.judge]);
+    assert.deepEqual(prepared.secrets, [
+      agentSecret,
+      secretsByPurpose.role_player,
+      secretsByPurpose.judge,
+    ]);
 
-    const originalPrompt = {systemPrompt: secretText, ...prompt(secretText)};
+    const originalPrompt = { systemPrompt: secretText, ...prompt(secretText) };
     for (const purpose of ['role_player', 'judge'] as const) {
       assert.equal(prepared.has(purpose), true);
       assert.equal(prepared.provider(purpose), provider);
@@ -138,10 +168,13 @@ describe('completion runtime', () => {
     assert.deepEqual(dispatched, ['role_player', 'judge']);
     assert.equal(originalPrompt.systemPrompt, secretText);
     assert.equal(originalPrompt.messages[0]?.content, secretText);
-    assert.deepEqual(prepared.calls.map(({purpose, status}) => ({purpose, status})), [
-      {purpose: 'role_player', status: 'succeeded'},
-      {purpose: 'judge', status: 'succeeded'},
-    ]);
+    assert.deepEqual(
+      prepared.calls.map(({ purpose, status }) => ({ purpose, status })),
+      [
+        { purpose: 'role_player', status: 'succeeded' },
+        { purpose: 'judge', status: 'succeeded' },
+      ],
+    );
     for (const secret of prepared.secrets) {
       assert.equal(JSON.stringify(prepared.calls).includes(secret), false);
     }
@@ -152,26 +185,35 @@ describe('completion runtime', () => {
     const reason = new Error('caller cancelled the completion');
     let deliverResponse!: (response: CompletionResponse) => void;
     let invocations = 0;
-    const scripted = createScriptedCompletionProvider({id: 'test-provider'});
+    const scripted = createScriptedCompletionProvider({ id: 'test-provider' });
     const provider: CompletionProvider = {
       ...scripted.provider,
       // The engine must enforce cancellation even when a provider does not.
       async complete() {
         invocations += 1;
-        return new Promise((resolve) => {deliverResponse = resolve;});
+        return new Promise((resolve) => {
+          deliverResponse = resolve;
+        });
       },
     };
     const prepared = await prepareCompletionRuntime({
       runId: 'cancelled-completion-1',
       bindings: completionBindingsForPlan(
-        createTestResolvedRunPlan({judgingCriteria: ['One criterion'], judge: MODEL}),
+        createTestResolvedRunPlan({
+          judgingCriteria: ['One criterion'],
+          judge: MODEL,
+        }),
         composition(provider),
       ),
       credentialResolver: createStaticCredentialResolver(),
       signal: controller.signal,
     });
 
-    const pending = prepared.invoke('judge', prompt('pending'), controller.signal);
+    const pending = prepared.invoke(
+      'judge',
+      prompt('pending'),
+      controller.signal,
+    );
     controller.abort(reason);
     deliverResponse(response(1));
     await assert.rejects(pending, (error: unknown) => error === reason);
@@ -204,8 +246,14 @@ describe('completion runtime', () => {
     const provider = createScriptedCompletionProvider({
       id: 'test-provider',
       responses: [
-        () => new Promise((resolve) => { resolveFirst = resolve; }),
-        () => new Promise((resolve) => { resolveSecond = resolve; }),
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
       ],
     });
     const prepared = await prepareCompletionRuntime({
@@ -221,18 +269,26 @@ describe('completion runtime', () => {
       signal: new AbortController().signal,
     });
 
-    const first = prepared.invoke('judge', prompt('first'), new AbortController().signal);
-    const second = prepared.invoke('judge', prompt('second'), new AbortController().signal);
+    const first = prepared.invoke(
+      'judge',
+      prompt('first'),
+      new AbortController().signal,
+    );
+    const second = prepared.invoke(
+      'judge',
+      prompt('second'),
+      new AbortController().signal,
+    );
     resolveSecond(response(2));
     await second;
     resolveFirst(response(1));
     await first;
 
     assert.deepEqual(
-      prepared.calls.map(({sequence, cost_usd}) => ({sequence, cost_usd})),
+      prepared.calls.map(({ sequence, cost_usd }) => ({ sequence, cost_usd })),
       [
-        {sequence: 1, cost_usd: 1},
-        {sequence: 2, cost_usd: 2},
+        { sequence: 1, cost_usd: 1 },
+        { sequence: 2, cost_usd: 2 },
       ],
     );
   });
@@ -264,16 +320,17 @@ describe('completion runtime', () => {
       prepared.invoke('judge', prompt('invalid'), new AbortController().signal),
       /Completion provider call failed/,
     );
-    assert.deepEqual(prepared.calls.map(({status, error_code}) => ({status, error_code})), [
-      {status: 'failed', error_code: 'completion_failed'},
-    ]);
+    assert.deepEqual(
+      prepared.calls.map(({ status, error_code }) => ({ status, error_code })),
+      [{ status: 'failed', error_code: 'completion_failed' }],
+    );
   });
 
   it('does not expose provider error details outside the completion boundary', async () => {
     const secret = 'provider-error-secret';
     const providerError = Object.assign(
       new Error(`upstream response contained ${secret}`),
-      {code: secret},
+      { code: secret },
     );
     const provider = createScriptedCompletionProvider({
       id: 'test-provider',
@@ -307,7 +364,7 @@ describe('completion runtime', () => {
     assert.ok(captured instanceof Error);
     assert.doesNotMatch(captured.message, new RegExp(secret));
     assert.equal(
-      (captured as Error & {code?: string}).code,
+      (captured as Error & { code?: string }).code,
       'completion_failed',
     );
     assert.equal('cause' in captured, false);
@@ -345,7 +402,7 @@ function composition(provider: CompletionProvider) {
 
 function prompt(content: string) {
   return {
-    messages: [{role: 'user' as const, content}],
+    messages: [{ role: 'user' as const, content }],
   };
 }
 
@@ -353,7 +410,7 @@ function response(costUsd: number): CompletionResponse {
   return {
     content: '{}',
     stopReason: 'end_turn',
-    usage: {inputTokens: 1, outputTokens: 1, cachedInputTokens: 0},
+    usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
     costUsd,
   };
 }

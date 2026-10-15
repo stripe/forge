@@ -1,9 +1,11 @@
-import type {AgentAdapterMetadata, CompletionProviderMetadata} from '../contracts/metadata.js';
-import type {ForgeBuildIdentity} from '../version.js';
 import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.js';
+import type {
+  AgentAdapterMetadata,
+  CompletionProviderMetadata,
+} from '../contracts/metadata.js';
 import type {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -14,13 +16,14 @@ import type {
   JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.js';
 import type {
-  ModelRefV1,
   JsonObject,
   JsonValue,
+  ModelRefV1,
   RunSelection,
   SetupActionBundleReferenceV1,
   Sha256Digest,
 } from '../model/types.js';
+import type { ForgeBuildIdentity } from '../version.js';
 
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
 
@@ -68,7 +71,11 @@ export interface WorkspaceEvidenceEntryV1 {
 export interface WorkspaceEvidenceV1 {
   readonly entries: readonly WorkspaceEvidenceEntryV1[];
   readonly complete: boolean;
-  readonly warnings: readonly {code: string; message: string; path?: string}[];
+  readonly warnings: readonly {
+    code: string;
+    message: string;
+    path?: string;
+  }[];
 }
 
 export type CompletionPurposeV1 = 'role_player' | 'judge';

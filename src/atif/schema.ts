@@ -1,11 +1,10 @@
-import {z} from 'zod';
-
+import { z } from 'zod';
+import { isAtifTimestamp } from './timestamp.js';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifTrajectoryV1_8,
   type JsonValue,
 } from './types.js';
-import {isAtifTimestamp} from './timestamp.js';
 
 const IMAGE_MEDIA_TYPES = [
   'image/jpeg',
@@ -152,10 +151,7 @@ const SubagentTrajectoryRefSchema = z
   })
   .strict()
   .superRefine((reference, context) => {
-    if (
-      reference.trajectory_id == null &&
-      reference.trajectory_path == null
-    ) {
+    if (reference.trajectory_id == null && reference.trajectory_path == null) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['trajectory_id'],
@@ -254,9 +250,7 @@ const StepSchema = z
       toolCallIds.add(toolCall.tool_call_id);
     }
 
-    for (const [index, result] of (
-      step.observation?.results ?? []
-    ).entries()) {
+    for (const [index, result] of (step.observation?.results ?? []).entries()) {
       if (
         result.source_call_id != null &&
         !toolCallIds.has(result.source_call_id)

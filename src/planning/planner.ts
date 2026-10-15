@@ -1,15 +1,15 @@
-import {sha256Digest} from '../model/hashes.js';
-import {indexLoadedDatasetCases} from '../model/loaders.js';
-import {agentSelectionKey, getMatrixGroups} from '../model/matrix.js';
+import { sha256Digest } from '../model/hashes.js';
+import { indexLoadedDatasetCases } from '../model/loaders.js';
+import { agentSelectionKey, getMatrixGroups } from '../model/matrix.js';
 import {
-  DEFAULT_MAX_TURNS,
   type AgentSelectionV1,
   type CaseId,
   type DatasetRelativePath,
+  DEFAULT_MAX_TURNS,
   type ExperimentConfigV1,
   type ForgeDockerRuntimeV1,
-  type LoadedExperimentConfigV1,
   type LoadedDatasetV1,
+  type LoadedExperimentConfigV1,
   type ResolvedRunPlanV1,
   type RunSelection,
   type SetupStepV1,
@@ -19,7 +19,7 @@ import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from '../setup/registry.js';
-import {FORGE_BUILD_IDENTITY} from '../version.js';
+import { FORGE_BUILD_IDENTITY } from '../version.js';
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'
@@ -38,7 +38,11 @@ export type PlanningErrorCode =
 export class PlanningError extends Error {
   readonly code: PlanningErrorCode;
 
-  constructor(code: PlanningErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    code: PlanningErrorCode,
+    message: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = 'PlanningError';
     this.code = code;
@@ -109,7 +113,7 @@ export function resolveRunPlanWithSetupActions(
   },
   setupActions: SetupActionRegistry,
 ): ResolvedRunPlanV1 {
-  const {dataset, selection} = input;
+  const { dataset, selection } = input;
   const config = input.experiment.config;
   const caseIdsByPath = assertDatasetCompatibility(dataset, config);
   const casePath = [...caseIdsByPath].find(
@@ -133,7 +137,7 @@ export function resolveRunPlanWithSetupActions(
 
   const treatment =
     config.treatments[selection.treatment] ??
-    (selection.treatment === 'baseline' ? {setup: []} : undefined);
+    (selection.treatment === 'baseline' ? { setup: [] } : undefined);
   if (!treatment) {
     throw new PlanningError(
       'unknown_treatment',
@@ -160,10 +164,7 @@ export function resolveRunPlanWithSetupActions(
     );
   }
 
-  const setup = [
-    ...cloneJson(definition.setup),
-    ...cloneJson(treatment.setup),
-  ];
+  const setup = [...cloneJson(definition.setup), ...cloneJson(treatment.setup)];
   const configuredActionBundles = config.forge?.action_bundles ?? [];
   try {
     setupActions.assertStepsDeclared(setup, configuredActionBundles);
@@ -171,7 +172,7 @@ export function resolveRunPlanWithSetupActions(
     throw new PlanningError(
       'action_bundle_mismatch',
       'Selected setup actions do not match the experiment action bundle pins.',
-      {cause: error},
+      { cause: error },
     );
   }
   const requiredActionBundles = setupActions.requiredActionBundles(setup);
@@ -184,11 +185,17 @@ export function resolveRunPlanWithSetupActions(
   const effectivePrompt = definition.initial_prompt ?? definition.task;
   if (effectivePrompt === undefined) {
     // Public parsers prevent this; retain a defensive execution boundary.
-    throw new PlanningError('unknown_case', 'Selected case has no effective prompt.');
+    throw new PlanningError(
+      'unknown_case',
+      'Selected case has no effective prompt.',
+    );
   }
 
   const plan: ResolvedRunPlanV1 = {
-    selection: {...cloneJson(selection), agent: resolveAgentSelection(selection.agent)},
+    selection: {
+      ...cloneJson(selection),
+      agent: resolveAgentSelection(selection.agent),
+    },
     provenance: {
       dataset: {
         ...cloneJson(dataset.manifest.dataset),
@@ -206,7 +213,7 @@ export function resolveRunPlanWithSetupActions(
         ...FORGE_BUILD_IDENTITY,
         ...(requiredActionBundles.length === 0
           ? {}
-          : {action_bundles: cloneJson([...requiredActionBundles])}),
+          : { action_bundles: cloneJson([...requiredActionBundles]) }),
       },
     },
     case: cloneJson(definition),
@@ -217,11 +224,13 @@ export function resolveRunPlanWithSetupActions(
     setup,
     interaction: {
       mode: definition.execution_mode,
-      ...(definition.task === undefined ? {} : {task: definition.task}),
-      ...(definition.context === undefined ? {} : {context: definition.context}),
+      ...(definition.task === undefined ? {} : { task: definition.task }),
+      ...(definition.context === undefined
+        ? {}
+        : { context: definition.context }),
       ...(definition.initial_prompt === undefined
         ? {}
-        : {initial_prompt: definition.initial_prompt}),
+        : { initial_prompt: definition.initial_prompt }),
       initial_prompt_source: initialPromptSource,
       effective_prompt: effectivePrompt,
       max_turns:
@@ -233,19 +242,19 @@ export function resolveRunPlanWithSetupActions(
       judging_criteria: cloneJson(definition.judging_criteria),
       ...(definition.checks === undefined
         ? {}
-        : {checks: cloneJson(definition.checks)}),
+        : { checks: cloneJson(definition.checks) }),
       ...(definition.example_answer === undefined
         ? {}
-        : {example_answer: definition.example_answer}),
+        : { example_answer: definition.example_answer }),
       ...(definition.judging_criteria.length === 0 ||
       config.models.judge === undefined
         ? {}
-        : {judge: cloneJson(config.models.judge)}),
+        : { judge: cloneJson(config.models.judge) }),
     },
     ...(definition.execution_mode !== 'multi_turn' ||
     config.models.role_player === undefined
       ? {}
-      : {role_player: cloneJson(config.models.role_player)}),
+      : { role_player: cloneJson(config.models.role_player) }),
     agent: resolveAgentSelection(selection.agent),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),
@@ -266,16 +275,13 @@ function resolveRuntime(
       'A native Docker experiment requires a concrete runtimePlatform during plan resolution.',
     );
   }
-  if (
-    runtimePlatform !== 'linux/amd64' &&
-    runtimePlatform !== 'linux/arm64'
-  ) {
+  if (runtimePlatform !== 'linux/amd64' && runtimePlatform !== 'linux/arm64') {
     throw new PlanningError(
       'missing_runtime_platform',
       'runtimePlatform must be linux/amd64 or linux/arm64.',
     );
   }
-  return cloneJson({...runtime, platform: runtimePlatform});
+  return cloneJson({ ...runtime, platform: runtimePlatform });
 }
 
 /** Canonical JSON used when a caller needs a stable resolved-plan digest. */
@@ -283,7 +289,9 @@ export function serializeResolvedRunPlan(plan: ResolvedRunPlanV1): string {
   return `${JSON.stringify(sortJson(plan))}\n`;
 }
 
-export function resolvedRunPlanSha256(plan: ResolvedRunPlanV1): `sha256:${string}` {
+export function resolvedRunPlanSha256(
+  plan: ResolvedRunPlanV1,
+): `sha256:${string}` {
   return sha256Digest(serializeResolvedRunPlan(plan));
 }
 
@@ -293,13 +301,18 @@ function assertDatasetCompatibility(
 ): ReadonlyMap<DatasetRelativePath, CaseId> {
   let caseIdsByPath: ReadonlyMap<DatasetRelativePath, CaseId>;
   try {
-    caseIdsByPath = new Map([...indexLoadedDatasetCases(dataset)].map(
-      ([casePath, loadedCase]) => [casePath, loadedCase.definition.id],
-    ));
+    caseIdsByPath = new Map(
+      [...indexLoadedDatasetCases(dataset)].map(([casePath, loadedCase]) => [
+        casePath,
+        loadedCase.definition.id,
+      ]),
+    );
   } catch (error) {
-    throw new PlanningError('invalid_loaded_dataset',
+    throw new PlanningError(
+      'invalid_loaded_dataset',
       'The loaded dataset case index does not match its authored definitions and manifest.',
-      {cause: error});
+      { cause: error },
+    );
   }
   if (
     dataset.manifest.dataset.id !== config.dataset.id ||
@@ -331,7 +344,10 @@ function assertSelection(
   casePath: DatasetRelativePath | undefined,
 ): void {
   const groups = getMatrixGroups(config.matrix);
-  if (casePath === undefined || !groups.some((group) => group.cases.includes(casePath))) {
+  if (
+    casePath === undefined ||
+    !groups.some((group) => group.cases.includes(casePath))
+  ) {
     throw new PlanningError(
       'unknown_case',
       'Run selection case is not in the benchmark matrix.',
@@ -344,9 +360,9 @@ function assertSelection(
     );
   }
   if (
-    !groups.some((group) => group.agents.some((agent) =>
-      agentsEqual(agent, selection.agent),
-    ))
+    !groups.some((group) =>
+      group.agents.some((agent) => agentsEqual(agent, selection.agent)),
+    )
   ) {
     throw new PlanningError(
       'unknown_agent',
@@ -363,11 +379,14 @@ function assertSelection(
       'Run selection repetition is outside the benchmark matrix.',
     );
   }
-  if (!groups.some((group) =>
-    group.cases.includes(casePath) &&
-    group.treatments.includes(selection.treatment) &&
-    group.agents.some((agent) => agentsEqual(agent, selection.agent))
-  )) {
+  if (
+    !groups.some(
+      (group) =>
+        group.cases.includes(casePath) &&
+        group.treatments.includes(selection.treatment) &&
+        group.agents.some((agent) => agentsEqual(agent, selection.agent)),
+    )
+  ) {
     throw new PlanningError(
       'invalid_selection',
       'Run selection does not belong to a single benchmark matrix group.',
@@ -379,7 +398,7 @@ function assertDatasetInputsExist(
   steps: readonly SetupStepV1[],
   dataset: LoadedDatasetV1,
 ): void {
-  const files = dataset.manifest.files.map(({path}) => path);
+  const files = dataset.manifest.files.map(({ path }) => path);
   for (const step of steps) {
     if (!isWriteSetupStep(step)) continue;
     const source = step.with.source;
@@ -402,8 +421,12 @@ function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {
 }
 
 function resolveAgentSelection(agent: AgentSelectionV1): AgentSelectionV1 {
-  return {...cloneJson(agent), ...(agent.adapter === 'codex'
-    ? {hook_trust: agent.hook_trust ?? 'native'} : {})};
+  return {
+    ...cloneJson(agent),
+    ...(agent.adapter === 'codex'
+      ? { hook_trust: agent.hook_trust ?? 'native' }
+      : {}),
+  };
 }
 
 function cloneJson<T>(value: T): T {

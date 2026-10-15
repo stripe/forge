@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
-import type {CommandResult, CommandRunner} from '../../contracts/command.js';
-import type {PluginSelectionV1} from '../../model/types.js';
-import type {ClaudeCodeLayout} from './layout.js';
+import type { CommandResult, CommandRunner } from '../../contracts/command.js';
+import type { PluginSelectionV1 } from '../../model/types.js';
 import {
   createMemoryWorkspace,
   type MemoryWorkspaceFixture,
 } from '../../testing/memoryWorkspace.js';
+import type { ClaudeCodeLayout } from './layout.js';
 import {
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
@@ -42,43 +42,64 @@ describe('Claude plugin installer', () => {
     };
     const pluginStatePath = `${layout.configDirectory}/plugins`;
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {pluginStatePath});
+    const harness = nativeCommandHarness(state, { pluginStatePath });
     const prepared = createClaudePluginInstaller({
-      adapterId: 'claude-code', executable: 'claude', layout,
+      adapterId: 'claude-code',
+      executable: 'claude',
+      layout,
     }).preflight(distribution, {
-      selection: {adapter: 'claude-code', provider: 'anthropic', model: 'claude-test'},
+      selection: {
+        adapter: 'claude-code',
+        provider: 'anthropic',
+        model: 'claude-test',
+      },
       runtime: runtimeSelection(),
     });
-    assert.equal(prepared.requirements.stateDirectories[0]?.containerPath, pluginStatePath);
-    const receipt = await prepared.install({...installContext(state, harness.commands), paths: layout});
+    assert.equal(
+      prepared.requirements.stateDirectories[0]?.containerPath,
+      pluginStatePath,
+    );
+    const receipt = await prepared.install({
+      ...installContext(state, harness.commands),
+      paths: layout,
+    });
     assert.equal(receipt.native_plugin_id, distribution.plugin);
-    assert.equal(readInstalledState(state)[distribution.plugin]?.[0]?.installPath,
-      `${pluginStatePath}/cache/claude-plugins-official/stripe/${LATEST_VERSION}`);
+    assert.equal(
+      readInstalledState(state)[distribution.plugin]?.[0]?.installPath,
+      `${pluginStatePath}/cache/claude-plugins-official/stripe/${LATEST_VERSION}`,
+    );
 
     const otherState = createMemoryWorkspace();
     const otherHarness = nativeCommandHarness(otherState, {
       pluginStatePath,
       listedInstallPath: `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${LATEST_VERSION}`,
     });
-    await assert.rejects(prepared.install({
-      ...installContext(otherState, otherHarness.commands), paths: layout,
-    }), /invalid installed plugin/);
+    await assert.rejects(
+      prepared.install({
+        ...installContext(otherState, otherHarness.commands),
+        paths: layout,
+      }),
+      /invalid installed plugin/,
+    );
   });
 
   it('rejects a mismatched runtime layout before reading or installing plugin state', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state);
-    await assert.rejects(installerPreflight().install({
-      ...installContext(state, harness.commands),
-      paths: {workspace: '/another/workspace', home: '/home/forge'},
-    }), /do not match the declared layout/);
+    await assert.rejects(
+      installerPreflight().install({
+        ...installContext(state, harness.commands),
+        paths: { workspace: '/another/workspace', home: '/home/forge' },
+      }),
+      /do not match the declared layout/,
+    );
     assert.equal(harness.calls.length, 0);
     assert.equal(state.snapshot().size, 0);
   });
 
   it('records the observed source identities and initial installed content snapshot', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {requireSafeDirectory: true});
+    const harness = nativeCommandHarness(state, { requireSafeDirectory: true });
     const prepared = createClaudePluginInstaller({
       adapterId: 'claude-code',
       executable: 'claude',
@@ -101,24 +122,37 @@ describe('Claude plugin installer', () => {
         },
       ],
     });
-    const receipt = await prepared.install(installContext(state, harness.commands));
+    const receipt = await prepared.install(
+      installContext(state, harness.commands),
+    );
 
-    assert.equal(harness.calls.some((argv) => argv.includes('update')), false);
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('update')),
+      false,
+    );
     const add = harness.calls.find(
       (argv) => argv.includes('marketplace') && argv.includes('add'),
     )!;
     assert.equal(add[add.indexOf('add') + 1], distribution.marketplace);
     const marketplacePath = `${CLAUDE_PLUGIN_STATE_PATH}/marketplaces/claude-plugins-official`;
-    for (const argv of harness.calls.filter((command) => command.includes('git'))) {
+    for (const argv of harness.calls.filter((command) =>
+      command.includes('git'),
+    )) {
       assert.deepEqual(
         argv.filter((argument) => argument.startsWith('safe.directory=')),
         [`safe.directory=${marketplacePath}`],
       );
     }
-    assert.equal(harness.calls.some((argv) => argv.includes('ln')), false);
     assert.equal(
-      harness.calls.some((argv) => argv.some((arg) =>
-        /^(HOME|CLAUDE_CODE_PLUGIN_(SEED|CACHE)_DIR)=/.test(arg))),
+      harness.calls.some((argv) => argv.includes('ln')),
+      false,
+    );
+    assert.equal(
+      harness.calls.some((argv) =>
+        argv.some((arg) =>
+          /^(HOME|CLAUDE_CODE_PLUGIN_(SEED|CACHE)_DIR)=/.test(arg),
+        ),
+      ),
       false,
     );
 
@@ -130,12 +164,19 @@ describe('Claude plugin installer', () => {
     assert.equal(state.snapshot().has('session-settings.json'), false);
 
     const catalog = JSON.parse(
-      Buffer.from(state.snapshot().get(
-        'marketplaces/claude-plugins-official/.claude-plugin/marketplace.json',
-      )!).toString('utf8'),
-    ) as {name: string; plugins: Array<{name: string}>};
+      Buffer.from(
+        state
+          .snapshot()
+          .get(
+            'marketplaces/claude-plugins-official/.claude-plugin/marketplace.json',
+          )!,
+      ).toString('utf8'),
+    ) as { name: string; plugins: Array<{ name: string }> };
     assert.equal(catalog.name, 'claude-plugins-official');
-    assert.deepEqual(catalog.plugins.map(({name}) => name), ['stripe', 'formatter']);
+    assert.deepEqual(
+      catalog.plugins.map(({ name }) => name),
+      ['stripe', 'formatter'],
+    );
     assert.deepEqual(receipt, {
       adapter: 'claude-code',
       plugin: distribution.plugin,
@@ -143,13 +184,15 @@ describe('Claude plugin installer', () => {
       marketplace_commit: CATALOG_COMMIT,
       native_plugin_id: nativeId,
       version: LATEST_VERSION,
-      source: {kind: 'git-subdir', commit: PLUGIN_COMMIT},
+      source: { kind: 'git-subdir', commit: PLUGIN_COMMIT },
       installed_tree: {
         format: 'forge-plugin-tree-v1',
         sha256: receipt.installed_tree.sha256,
         entry_count: 2,
         file_count: 1,
-        size_bytes: Buffer.byteLength(JSON.stringify({name: 'stripe', version: LATEST_VERSION})),
+        size_bytes: Buffer.byteLength(
+          JSON.stringify({ name: 'stripe', version: LATEST_VERSION }),
+        ),
       },
     });
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
@@ -161,8 +204,14 @@ describe('Claude plugin installer', () => {
     const context = installContext(state, harness.commands);
     await installerPreflight().install(context);
     await installerPreflight().install(context);
-    assert.equal(harness.calls.filter((argv) => argv.includes('add')).length, 1);
-    assert.equal(harness.calls.some((argv) => argv.includes('update')), false);
+    assert.equal(
+      harness.calls.filter((argv) => argv.includes('add')).length,
+      1,
+    );
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('update')),
+      false,
+    );
   });
 
   it('preserves earlier plugins when installing another entry from the same marketplace', async () => {
@@ -174,7 +223,10 @@ describe('Claude plugin installer', () => {
       ...distribution,
       plugin: 'formatter@claude-plugins-official',
     }).install(context);
-    assert.equal(harness.calls.filter((argv) => argv.includes('add')).length, 1);
+    assert.equal(
+      harness.calls.filter((argv) => argv.includes('add')).length,
+      1,
+    );
     assert.equal(receipt.native_plugin_id, 'formatter@claude-plugins-official');
     assert.deepEqual(Object.keys(readInstalledState(state)).sort(), [
       'formatter@claude-plugins-official',
@@ -184,13 +236,13 @@ describe('Claude plugin installer', () => {
 
   it('rejects a registered marketplace pointing at another repository or path', async () => {
     for (const override of [
-      {source: {source: 'github', repo: 'other/marketplace'}},
-      {installLocation: '/workspace/marketplace'},
+      { source: { source: 'github', repo: 'other/marketplace' } },
+      { installLocation: '/workspace/marketplace' },
     ]) {
       const state = createMemoryWorkspace({
         'known_marketplaces.json': JSON.stringify({
           'claude-plugins-official': {
-            source: {source: 'github', repo: distribution.marketplace},
+            source: { source: 'github', repo: distribution.marketplace },
             installLocation: `${CLAUDE_PLUGIN_STATE_PATH}/marketplaces/claude-plugins-official`,
             ...override,
           },
@@ -207,12 +259,17 @@ describe('Claude plugin installer', () => {
 
   it('rejects a fetched checkout whose origin differs from the selected repository', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {origin: 'https://github.com/other/repo.git'});
+    const harness = nativeCommandHarness(state, {
+      origin: 'https://github.com/other/repo.git',
+    });
     await assert.rejects(
       installerPreflight().install(installContext(state, harness.commands)),
       /checkout does not match its repository/,
     );
-    assert.equal(harness.calls.some((argv) => argv.includes('install')), false);
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('install')),
+      false,
+    );
   });
 
   it('accepts a native checkout origin without the optional .git suffix', async () => {
@@ -226,20 +283,30 @@ describe('Claude plugin installer', () => {
   it('reads and records the captured marketplace snapshot', async () => {
     const state = createMemoryWorkspace();
     const commit = 'd'.repeat(40);
-    const harness = nativeCommandHarness(state, {marketplaceCommit: commit});
-    const receipt = await installerPreflight().install(installContext(state, harness.commands));
+    const harness = nativeCommandHarness(state, { marketplaceCommit: commit });
+    const receipt = await installerPreflight().install(
+      installContext(state, harness.commands),
+    );
     assert.equal(receipt.marketplace_commit, commit);
     const readCatalog = harness.calls.find((argv) => argv.includes('show'))!;
-    assert.equal(readCatalog.at(-1), `${commit}:.claude-plugin/marketplace.json`);
+    assert.equal(
+      readCatalog.at(-1),
+      `${commit}:.claude-plugin/marketplace.json`,
+    );
   });
 
   it('rejects a marketplace checkout without a full lowercase Git commit', async () => {
     for (const marketplaceCommit of ['not-a-commit', 'A'.repeat(40)]) {
       const state = createMemoryWorkspace();
-      const harness = nativeCommandHarness(state, {marketplaceCommit});
-      await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
-        /did not resolve to a Git commit/);
-      assert.equal(harness.calls.some((argv) => argv.includes('install')), false);
+      const harness = nativeCommandHarness(state, { marketplaceCommit });
+      await assert.rejects(
+        installerPreflight().install(installContext(state, harness.commands)),
+        /did not resolve to a Git commit/,
+      );
+      assert.equal(
+        harness.calls.some((argv) => argv.includes('install')),
+        false,
+      );
     }
   });
 
@@ -248,7 +315,10 @@ describe('Claude plugin installer', () => {
     const harness = nativeCommandHarness(state);
     const context = installContext(state, harness.commands);
     context.stateDirectories.delete(CLAUDE_PLUGIN_STATE_ID);
-    await assert.rejects(installerPreflight().install(context), /state is unavailable/);
+    await assert.rejects(
+      installerPreflight().install(context),
+      /state is unavailable/,
+    );
     assert.equal(harness.calls.length, 0);
   });
 
@@ -268,7 +338,10 @@ describe('Claude plugin installer', () => {
       prepared.install(installContext(state, harness.commands)),
       /source/,
     );
-    assert.equal(harness.calls.some((argv) => argv.includes('install')), false);
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('install')),
+      false,
+    );
   });
 
   it('supports latest entries stored in the marketplace or in an archive', async () => {
@@ -294,14 +367,18 @@ describe('Claude plugin installer', () => {
       const receipt = await installerPreflight().install(
         installContext(state, harness.commands),
       );
-      assert.ok(state.snapshot().has(
-        `cache/claude-plugins-official/stripe/${candidate.version}/.claude-plugin/plugin.json`,
-      ));
+      assert.ok(
+        state
+          .snapshot()
+          .has(
+            `cache/claude-plugins-official/stripe/${candidate.version}/.claude-plugin/plugin.json`,
+          ),
+      );
       assert.deepEqual(
         receipt.source,
         typeof candidate.source === 'string'
-          ? {kind: 'marketplace-path'}
-          : {kind: 'archive'},
+          ? { kind: 'marketplace-path' }
+          : { kind: 'archive' },
       );
     }
   });
@@ -324,69 +401,85 @@ describe('Claude plugin installer', () => {
 
   it('rejects a native commit which differs from the catalog source assertion', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {installedCommit: 'c'.repeat(40)});
-    await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
-      /does not match the marketplace commit/);
+    const harness = nativeCommandHarness(state, {
+      installedCommit: 'c'.repeat(40),
+    });
+    await assert.rejects(
+      installerPreflight().install(installContext(state, harness.commands)),
+      /does not match the marketplace commit/,
+    );
   });
 
   it('rejects a missing native commit when the catalog supplies an assertion', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {installedCommit: null});
-    await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
-      /does not match the marketplace commit/);
+    const harness = nativeCommandHarness(state, { installedCommit: null });
+    await assert.rejects(
+      installerPreflight().install(installContext(state, harness.commands)),
+      /does not match the marketplace commit/,
+    );
   });
 
   it('accepts an unpinned Git source without requiring observed commit metadata', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, {
-      catalogSource: {source: 'github', repo: 'example/plugin', ref: 'main'},
+      catalogSource: { source: 'github', repo: 'example/plugin', ref: 'main' },
       installedCommit: null,
     });
-    const receipt = await installerPreflight().install(installContext(state, harness.commands));
-    assert.deepEqual(receipt.source, {kind: 'github'});
+    const receipt = await installerPreflight().install(
+      installContext(state, harness.commands),
+    );
+    assert.deepEqual(receipt.source, { kind: 'github' });
   });
 
   it('records the native source revision when an unpinned Git source reports one', async () => {
     const state = createMemoryWorkspace();
     const commit = 'd'.repeat(40);
     const harness = nativeCommandHarness(state, {
-      catalogSource: {source: 'github', repo: 'example/plugin', ref: 'main'},
+      catalogSource: { source: 'github', repo: 'example/plugin', ref: 'main' },
       installedCommit: commit,
     });
-    const receipt = await installerPreflight().install(installContext(state, harness.commands));
-    assert.deepEqual(receipt.source, {kind: 'github', commit});
+    const receipt = await installerPreflight().install(
+      installContext(state, harness.commands),
+    );
+    assert.deepEqual(receipt.source, { kind: 'github', commit });
   });
 
   it('rejects a malformed source revision reported by an unpinned Git installation', async () => {
     for (const installedCommit of ['not-a-commit', 'D'.repeat(40)]) {
       const state = createMemoryWorkspace();
       const harness = nativeCommandHarness(state, {
-        catalogSource: {source: 'github', repo: 'example/plugin', ref: 'main'},
+        catalogSource: {
+          source: 'github',
+          repo: 'example/plugin',
+          ref: 'main',
+        },
         installedCommit,
       });
-      await assert.rejects(installerPreflight().install(installContext(state, harness.commands)),
-        /returned an invalid Git commit/);
+      await assert.rejects(
+        installerPreflight().install(installContext(state, harness.commands)),
+        /returned an invalid Git commit/,
+      );
     }
   });
 
   it('accepts the version currently resolved by the marketplace', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {installedVersion: '0.9.3'});
+    const harness = nativeCommandHarness(state, { installedVersion: '0.9.3' });
     const prepared = installerPreflight();
 
     await prepared.install(installContext(state, harness.commands));
 
     const installed = JSON.parse(
-      Buffer.from(
-        state.snapshot().get('installed_plugins.json')!,
-      ).toString('utf8'),
-    ) as {plugins: Record<string, Array<{version: string}>>};
+      Buffer.from(state.snapshot().get('installed_plugins.json')!).toString(
+        'utf8',
+      ),
+    ) as { plugins: Record<string, Array<{ version: string }>> };
     assert.equal(Object.values(installed.plugins)[0]?.[0]?.version, '0.9.3');
   });
 
   it('rejects an unplanned transitive plugin dependency', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {extraPlugin: true});
+    const harness = nativeCommandHarness(state, { extraPlugin: true });
     const prepared = installerPreflight();
 
     await assert.rejects(
@@ -431,7 +524,7 @@ function installerPreflight(selected: PluginSelectionV1 = distribution) {
 function runtimeSelection() {
   return {
     adapter: 'docker' as const,
-    image: {kind: 'forge' as const},
+    image: { kind: 'forge' as const },
     platform: 'linux/amd64' as const,
     resources: {
       memory_bytes: 1024 * 1024 * 1024,
@@ -447,10 +540,8 @@ function installContext(
 ) {
   return {
     runId: 'run-plugin',
-    paths: {workspace: '/workspace', home: '/home/forge'},
-    stateDirectories: new Map([
-      [CLAUDE_PLUGIN_STATE_ID, state.mutable],
-    ]),
+    paths: { workspace: '/workspace', home: '/home/forge' },
+    stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, state.mutable]]),
     commands,
     signal: new AbortController().signal,
   };
@@ -469,13 +560,13 @@ function nativeCommandHarness(
     readonly pluginStatePath?: string;
     readonly listedInstallPath?: string;
   } = {},
-): {readonly commands: CommandRunner; readonly calls: readonly string[][]} {
+): { readonly commands: CommandRunner; readonly calls: readonly string[][] } {
   const calls: string[][] = [];
   const pluginStatePath = options.pluginStatePath ?? CLAUDE_PLUGIN_STATE_PATH;
   const catalogSource = options.catalogSource ?? DEFAULT_CATALOG_SOURCE;
   const catalog = JSON.stringify({
     name: 'claude-plugins-official',
-    owner: {name: 'Anthropic'},
+    owner: { name: 'Anthropic' },
     plugins: [
       {
         name: 'stripe',
@@ -495,13 +586,27 @@ function nativeCommandHarness(
       const gitIndex = command.indexOf('git');
       if (gitIndex >= 0) {
         const git = command.slice(gitIndex + 1);
-        const root = git.includes('-C') ? git[git.indexOf('-C') + 1] : undefined;
-        assert.equal(root, `${pluginStatePath}/marketplaces/claude-plugins-official`);
-        if (options.requireSafeDirectory && !git.includes(`safe.directory=${root}`)) {
-          return {...result(), exitCode: 128, stderr: 'fatal: detected dubious ownership'};
+        const root = git.includes('-C')
+          ? git[git.indexOf('-C') + 1]
+          : undefined;
+        assert.equal(
+          root,
+          `${pluginStatePath}/marketplaces/claude-plugins-official`,
+        );
+        if (
+          options.requireSafeDirectory &&
+          !git.includes(`safe.directory=${root}`)
+        ) {
+          return {
+            ...result(),
+            exitCode: 128,
+            stderr: 'fatal: detected dubious ownership',
+          };
         }
-        if (git.includes('rev-parse')) return result(options.marketplaceCommit ?? CATALOG_COMMIT);
-        if (git.includes('get-url')) return result(options.origin ?? MARKETPLACE_REPOSITORY);
+        if (git.includes('rev-parse'))
+          return result(options.marketplaceCommit ?? CATALOG_COMMIT);
+        if (git.includes('get-url'))
+          return result(options.origin ?? MARKETPLACE_REPOSITORY);
         if (git.includes('show')) return result(catalog);
         assert.fail('Unexpected Git command.');
       }
@@ -510,7 +615,10 @@ function nativeCommandHarness(
       if (marketplaceIndex >= 0 && command[marketplaceIndex + 1] === 'add') {
         assert.equal(command[marketplaceIndex + 2], distribution.marketplace);
         const relative = 'marketplaces/claude-plugins-official';
-        await state.mutable.writeFile(`${relative}/.git/HEAD`, Buffer.from('ref'));
+        await state.mutable.writeFile(
+          `${relative}/.git/HEAD`,
+          Buffer.from('ref'),
+        );
         await state.mutable.writeFile(
           `${relative}/.claude-plugin/marketplace.json`,
           Buffer.from(catalog),
@@ -520,7 +628,7 @@ function nativeCommandHarness(
           Buffer.from(
             JSON.stringify({
               'claude-plugins-official': {
-                source: {source: 'github', repo: distribution.marketplace},
+                source: { source: 'github', repo: distribution.marketplace },
                 installLocation: `${pluginStatePath}/${relative}`,
               },
             }),
@@ -535,31 +643,43 @@ function nativeCommandHarness(
         const [plugin, marketplace] = nativePluginId.split('@');
         const version = options.installedVersion ?? LATEST_VERSION;
         const installPath = `${pluginStatePath}/cache/${marketplace}/${plugin}/${version}`;
-        const relativeInstallPath = stateRelativePath(installPath, pluginStatePath);
+        const relativeInstallPath = stateRelativePath(
+          installPath,
+          pluginStatePath,
+        );
         await state.mutable.writeFile(
           `${relativeInstallPath}/.claude-plugin/plugin.json`,
-          Buffer.from(JSON.stringify({name: plugin, version})),
+          Buffer.from(JSON.stringify({ name: plugin, version })),
         );
         const plugins = readInstalledState(state);
-        const commit = options.installedCommit === null
-          ? undefined
-          : options.installedCommit ?? (plugin === 'stripe' ? catalogSourceCommit(catalogSource) : undefined);
-        plugins[nativePluginId] = [{
-          scope: 'user',
-          installPath,
-          version,
-          ...(commit === undefined ? {} : {gitCommitSha: commit}),
-        }];
-        if (options.extraPlugin) {
-          plugins['dependency@unexpected'] = [{
+        const commit =
+          options.installedCommit === null
+            ? undefined
+            : (options.installedCommit ??
+              (plugin === 'stripe'
+                ? catalogSourceCommit(catalogSource)
+                : undefined));
+        plugins[nativePluginId] = [
+          {
             scope: 'user',
-            installPath: `${pluginStatePath}/cache/unexpected/dependency/1.0.0`,
-            version: '1.0.0',
-          }];
+            installPath,
+            version,
+            ...(commit === undefined ? {} : { gitCommitSha: commit }),
+          },
+        ];
+        if (options.extraPlugin) {
+          plugins['dependency@unexpected'] = [
+            {
+              scope: 'user',
+              installPath: `${pluginStatePath}/cache/unexpected/dependency/1.0.0`,
+              version: '1.0.0',
+            },
+          ];
         }
-        await state.mutable.writeFile('installed_plugins.json', Buffer.from(
-          JSON.stringify({version: 2, plugins}),
-        ));
+        await state.mutable.writeFile(
+          'installed_plugins.json',
+          Buffer.from(JSON.stringify({ version: 2, plugins })),
+        );
         return result(
           JSON.stringify({
             command: 'install',
@@ -573,16 +693,22 @@ function nativeCommandHarness(
       }
 
       if (command.includes('list')) {
-        const rows = Object.entries(readInstalledState(state)).map(([id, records]) => ({
-          ...records[0], id, enabled: true,
-          ...(options.listedInstallPath === undefined ? {} : {installPath: options.listedInstallPath}),
-        }));
+        const rows = Object.entries(readInstalledState(state)).map(
+          ([id, records]) => ({
+            ...records[0],
+            id,
+            enabled: true,
+            ...(options.listedInstallPath === undefined
+              ? {}
+              : { installPath: options.listedInstallPath }),
+          }),
+        );
         return result(JSON.stringify(rows));
       }
       assert.fail('Unexpected native command.');
     },
   };
-  return {commands, calls};
+  return { commands, calls };
 }
 
 interface NativeInstalledRecord {
@@ -592,15 +718,22 @@ interface NativeInstalledRecord {
   gitCommitSha?: string;
 }
 
-function readInstalledState(state: MemoryWorkspaceFixture): Record<string, NativeInstalledRecord[]> {
+function readInstalledState(
+  state: MemoryWorkspaceFixture,
+): Record<string, NativeInstalledRecord[]> {
   const file = state.snapshot().get('installed_plugins.json');
   if (file === undefined) return {};
-  return (JSON.parse(Buffer.from(file).toString('utf8')) as {
-    plugins: Record<string, NativeInstalledRecord[]>;
-  }).plugins;
+  return (
+    JSON.parse(Buffer.from(file).toString('utf8')) as {
+      plugins: Record<string, NativeInstalledRecord[]>;
+    }
+  ).plugins;
 }
 
-function stateRelativePath(absolutePath: string, pluginStatePath: string): string {
+function stateRelativePath(
+  absolutePath: string,
+  pluginStatePath: string,
+): string {
   assert.ok(absolutePath.startsWith(`${pluginStatePath}/`));
   return absolutePath.slice(pluginStatePath.length + 1);
 }
@@ -615,5 +748,5 @@ function catalogSourceCommit(source: unknown): string | undefined {
 }
 
 function result(stdout = ''): CommandResult {
-  return {stdout, stderr: '', exitCode: 0, durationMs: 1};
+  return { stdout, stderr: '', exitCode: 0, durationMs: 1 };
 }

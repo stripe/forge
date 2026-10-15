@@ -9,12 +9,12 @@ import type {
   StrictCompletionResponseSchema,
 } from '../../contracts/completion.js';
 import {
-  credentialReference,
   type CredentialReference,
+  credentialReference,
 } from '../../contracts/credentials.js';
-import {isSafeMetadata, isSafeSimpleIdentifier} from '../../model/paths.js';
-import type {ModelRefV1} from '../../model/types.js';
-import {FORGE_VERSION} from '../../version.js';
+import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.js';
+import type { ModelRefV1 } from '../../model/types.js';
+import { FORGE_VERSION } from '../../version.js';
 
 export const ANTHROPIC_MESSAGES_API_VERSION = '2023-06-01' as const;
 export const ANTHROPIC_STRUCTURED_OUTPUT_FORMAT = 'json_schema' as const;
@@ -99,18 +99,23 @@ export function createAnthropicCompletionProvider(
 ): CompletionProvider {
   const id = options.id ?? 'anthropic';
   if (!isSafeSimpleIdentifier(id)) {
-    throw new TypeError('Anthropic completion provider id must be a safe identifier.');
+    throw new TypeError(
+      'Anthropic completion provider id must be a safe identifier.',
+    );
   }
   const compatibleEndpoint = options.baseUrl !== undefined;
-  const baseUrl = normalizeBaseUrl(options.baseUrl ?? ANTHROPIC_DEFAULT_BASE_URL);
+  const baseUrl = normalizeBaseUrl(
+    options.baseUrl ?? ANTHROPIC_DEFAULT_BASE_URL,
+  );
   const endpoint = `${baseUrl}/v1/messages`;
   const auth = options.auth ?? (compatibleEndpoint ? 'bearer' : 'api-key');
   if (auth !== 'api-key' && auth !== 'bearer') {
     throw new TypeError('Anthropic auth must be api-key or bearer.');
   }
-  const credentialName = auth === 'bearer'
-    ? ANTHROPIC_AUTH_TOKEN_CREDENTIAL
-    : ANTHROPIC_API_KEY_CREDENTIAL;
+  const credentialName =
+    auth === 'bearer'
+      ? ANTHROPIC_AUTH_TOKEN_CREDENTIAL
+      : ANTHROPIC_API_KEY_CREDENTIAL;
   const credential = normalizeCredentialReference(
     options.credential,
     auth === 'bearer' ? 'anthropic.auth-token' : 'anthropic.api-key',
@@ -122,7 +127,7 @@ export function createAnthropicCompletionProvider(
   }
   const requirements = Object.freeze({
     credentials: Object.freeze({
-      [credentialName]: Object.freeze({reference: credential}),
+      [credentialName]: Object.freeze({ reference: credential }),
     }),
   });
 
@@ -136,7 +141,9 @@ export function createAnthropicCompletionProvider(
   return Object.freeze({
     id,
     version: FORGE_VERSION,
-    metadata: Object.freeze({endpoint_mode: compatibleEndpoint ? 'custom' : 'default'}),
+    metadata: Object.freeze({
+      endpoint_mode: compatibleEndpoint ? 'custom' : 'default',
+    }),
     requirements(input: CompletionProviderRequirementInput) {
       validateCapability(input);
       return requirements;
@@ -149,7 +156,7 @@ export function createAnthropicCompletionProvider(
     },
     async complete(
       request: CompletionRequest,
-      context: {credentials: CompletionProviderCredentials},
+      context: { credentials: CompletionProviderCredentials },
     ): Promise<CompletionResponse> {
       throwIfAborted(request.signal);
       validateCapability(request);
@@ -162,8 +169,8 @@ export function createAnthropicCompletionProvider(
         'anthropic-version': ANTHROPIC_MESSAGES_API_VERSION,
         'content-type': 'application/json',
         ...(auth === 'bearer'
-          ? {authorization: `Bearer ${secret}`}
-          : {'x-api-key': secret}),
+          ? { authorization: `Bearer ${secret}` }
+          : { 'x-api-key': secret }),
       };
       const body = serializeRequest(request);
 
@@ -265,7 +272,9 @@ function boundedTimeout(value: number | undefined): number {
   return timeout;
 }
 
-function assertPurpose(value: unknown): asserts value is 'role_player' | 'judge' {
+function assertPurpose(
+  value: unknown,
+): asserts value is 'role_player' | 'judge' {
   if (value !== 'role_player' && value !== 'judge') {
     throw new AnthropicCompletionError(
       'invalid_request',
@@ -312,7 +321,8 @@ function validateRequest(request: CompletionRequest): void {
       (message.role !== 'user' && message.role !== 'assistant') ||
       typeof message.content !== 'string' ||
       message.content.length === 0 ||
-      Buffer.byteLength(message.content, 'utf8') > ANTHROPIC_MAX_MESSAGE_BYTES ||
+      Buffer.byteLength(message.content, 'utf8') >
+        ANTHROPIC_MAX_MESSAGE_BYTES ||
       message.content.includes('\0')
     ) {
       throw new AnthropicCompletionError(
@@ -324,7 +334,8 @@ function validateRequest(request: CompletionRequest): void {
   if (
     request.systemPrompt !== undefined &&
     (request.systemPrompt.length === 0 ||
-      Buffer.byteLength(request.systemPrompt, 'utf8') > ANTHROPIC_MAX_MESSAGE_BYTES ||
+      Buffer.byteLength(request.systemPrompt, 'utf8') >
+        ANTHROPIC_MAX_MESSAGE_BYTES ||
       request.systemPrompt.includes('\0'))
   ) {
     throw new AnthropicCompletionError(
@@ -361,8 +372,7 @@ function validateRequest(request: CompletionRequest): void {
 
 function validateResponseSchema(schema: StrictCompletionResponseSchema): void {
   if (
-    !schema ||
-    schema.strict !== true ||
+    schema?.strict !== true ||
     !SCHEMA_NAME.test(schema.name) ||
     !isRecord(schema.schema) ||
     (schema.description !== undefined &&
@@ -375,7 +385,7 @@ function validateResponseSchema(schema: StrictCompletionResponseSchema): void {
     );
   }
   try {
-    assertJsonValue(schema.schema, new Set(), {nodes: 0}, 0);
+    assertJsonValue(schema.schema, new Set(), { nodes: 0 }, 0);
   } catch {
     throw new AnthropicCompletionError(
       'invalid_request',
@@ -387,7 +397,7 @@ function validateResponseSchema(schema: StrictCompletionResponseSchema): void {
 function assertJsonValue(
   value: unknown,
   ancestors: Set<object>,
-  count: {nodes: number},
+  count: { nodes: number },
   depth: number,
 ): void {
   count.nodes += 1;
@@ -415,7 +425,8 @@ function assertJsonValue(
       throw new TypeError('JSON object has a custom prototype.');
     }
     for (const [key, entry] of Object.entries(value)) {
-      if (!isSafeMetadata(key, 1_024)) throw new TypeError('JSON key is invalid.');
+      if (!isSafeMetadata(key, 1_024))
+        throw new TypeError('JSON key is invalid.');
       assertJsonValue(entry, ancestors, count, depth + 1);
     }
   }
@@ -451,10 +462,10 @@ function serializeRequest(request: CompletionRequest): string {
       messages: request.messages,
       ...(request.systemPrompt === undefined
         ? {}
-        : {system: request.systemPrompt}),
+        : { system: request.systemPrompt }),
       ...(request.temperature === undefined
         ? {}
-        : {temperature: request.temperature}),
+        : { temperature: request.temperature }),
       ...(request.responseSchema === undefined
         ? {}
         : {
@@ -519,7 +530,10 @@ function projectAnthropicSchema(
       continue;
     }
     if (
-      (key === 'allOf' || key === 'anyOf' || key === 'oneOf' || key === 'prefixItems') &&
+      (key === 'allOf' ||
+        key === 'anyOf' ||
+        key === 'oneOf' ||
+        key === 'prefixItems') &&
       Array.isArray(value)
     ) {
       projected[key] = value.map((child) =>
@@ -569,7 +583,11 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   } catch {
     throw invalidResponse();
   }
-  if (!isRecord(value) || value.type !== 'message' || value.role !== 'assistant') {
+  if (
+    !isRecord(value) ||
+    value.type !== 'message' ||
+    value.role !== 'assistant'
+  ) {
     throw invalidResponse();
   }
   if (!Array.isArray(value.content) || value.content.length === 0) {
@@ -577,7 +595,11 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   }
   const text: string[] = [];
   for (const block of value.content) {
-    if (!isRecord(block) || block.type !== 'text' || typeof block.text !== 'string') {
+    if (
+      !isRecord(block) ||
+      block.type !== 'text' ||
+      typeof block.text !== 'string'
+    ) {
       throw invalidResponse();
     }
     text.push(block.text);
@@ -620,7 +642,7 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
       outputTokens: output,
       cachedInputTokens: cacheRead,
     }),
-    ...(costUsd === undefined ? {} : {costUsd}),
+    ...(costUsd === undefined ? {} : { costUsd }),
   });
 }
 

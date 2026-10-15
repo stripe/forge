@@ -2,25 +2,26 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, describe, it} from 'node:test';
-
-import {inspectExperimentRun, parseExperimentRunReport} from './experiment.js';
+import { afterEach, describe, it } from 'node:test';
+import type { ForgeComposition } from './contracts/composition.js';
+import { createForgeEngine, defaultForgeEngine } from './engine.js';
+import { executeEvalWithTestHooks } from './execution/execute.js';
 import {
+  inspectExperimentRun,
+  parseExperimentRunReport,
+} from './experiment.js';
+import {
+  createExperimentCliOptions,
   EXPERIMENT_CLI_OPTIONS,
   ExperimentCommandError,
+  type ExperimentCommandOptions,
+  type ExperimentLoadContext,
   ExperimentUsageError,
-  createExperimentCliOptions,
   parseExperimentArgs,
   runExperimentCommand,
-  type ExperimentCommandOptions,
-  type ExperimentCommandResult,
-  type ExperimentLoadContext,
 } from './experimentCli.js';
-import type {ForgeComposition} from './contracts/composition.js';
-import {createForgeEngine, defaultForgeEngine} from './engine.js';
-import {executeEvalWithTestHooks} from './execution/execute.js';
-import {createArtifactStore} from './results/index.js';
-import {defineSetupActionBundle} from './setup/index.js';
+import { createArtifactStore } from './results/index.js';
+import { defineSetupActionBundle } from './setup/index.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -31,28 +32,46 @@ import {
 } from './testing/index.js';
 
 const hostOptions = {
-  experiment: {type: 'string', short: 'e'},
-  case: {type: 'string', short: 'c'},
-  upload: {type: 'boolean'},
-  label: {type: 'string', multiple: true},
+  experiment: { type: 'string', short: 'e' },
+  case: { type: 'string', short: 'c' },
+  upload: { type: 'boolean' },
+  label: { type: 'string', multiple: true },
 } as const;
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})));
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((root) => fs.rm(root, { recursive: true, force: true })),
+  );
 });
 
 describe('shared experiment command', () => {
   it('keeps command APIs on their subpath and rejects option/alias collisions', () => {
     assert.equal(typeof runExperimentCommand, 'function');
-    assert.deepEqual(Object.keys(EXPERIMENT_CLI_OPTIONS), ['output', 'run-id', 'resume', 'jobs']);
+    assert.deepEqual(Object.keys(EXPERIMENT_CLI_OPTIONS), [
+      'output',
+      'run-id',
+      'resume',
+      'jobs',
+    ]);
     for (const definitions of [
-      {jobs: {type: 'boolean' as const}},
-      {upload: {type: 'boolean' as const, short: 'j'}},
-      {j: {type: 'string' as const}},
-      {first: {type: 'string' as const, short: 'x'}, second: {type: 'boolean' as const, short: 'x'}},
-      {x: {type: 'string' as const}, second: {type: 'boolean' as const, short: 'x'}},
+      { jobs: { type: 'boolean' as const } },
+      { upload: { type: 'boolean' as const, short: 'j' } },
+      { j: { type: 'string' as const } },
+      {
+        first: { type: 'string' as const, short: 'x' },
+        second: { type: 'boolean' as const, short: 'x' },
+      },
+      {
+        x: { type: 'string' as const },
+        second: { type: 'boolean' as const, short: 'x' },
+      },
     ]) {
-      assert.throws(() => createExperimentCliOptions(definitions), ExperimentUsageError);
+      assert.throws(
+        () => createExperimentCliOptions(definitions),
+        ExperimentUsageError,
+      );
     }
     assert.equal(createExperimentCliOptions(hostOptions).jobs.short, 'j');
   });
@@ -60,39 +79,87 @@ describe('shared experiment command', () => {
   it('returns the experiment checkpoint reference', async () => {
     const fixture = await createFixture();
     const result = await fixture.run(['--case', 'testing/second']);
-    assert.equal(result.checkpoint, path.join(result.location, 'experiment.json'));
+    assert.equal(
+      result.checkpoint,
+      path.join(result.location, 'experiment.json'),
+    );
     assert.ok((await fs.stat(result.checkpoint)).isFile());
-    assert.equal(new ExperimentCommandError(result, new Error('failed')).name, 'ExperimentCommandError');
-    assert.equal(new ExperimentUsageError('invalid').name, 'ExperimentUsageError');
+    assert.equal(
+      new ExperimentCommandError(result, new Error('failed')).name,
+      'ExperimentCommandError',
+    );
+    assert.equal(
+      new ExperimentUsageError('invalid').name,
+      'ExperimentUsageError',
+    );
   });
 
   it('parses host flags, repeats, aliases and positionals alongside shared flags', () => {
-    const parsed = parseExperimentArgs(['case-a', '-e', 'host.yaml', '--upload',
-      '--label=one', '--label', 'two', '-j3', '-o', 'out'], {hostOptions, allowPositionals: true});
+    const parsed = parseExperimentArgs(
+      [
+        'case-a',
+        '-e',
+        'host.yaml',
+        '--upload',
+        '--label=one',
+        '--label',
+        'two',
+        '-j3',
+        '-o',
+        'out',
+      ],
+      { hostOptions, allowPositionals: true },
+    );
     assert.equal(parsed.values.experiment, 'host.yaml');
     assert.equal(parsed.values.upload, true);
     assert.deepEqual(parsed.values.label, ['one', 'two']);
     assert.deepEqual(parsed.positionals, ['case-a']);
     assert.equal(parsed.jobs, 3);
     assert.equal(parsed.values.output, 'out');
-    assert.deepEqual(parsed.suppliedOptions, ['experiment', 'upload', 'label', 'jobs', 'output']);
-    assert.throws(() => parseExperimentArgs(['case-a'], {hostOptions}), /positional/);
-    assert.throws(() => parseExperimentArgs(['--unknown'], {hostOptions}), /Unknown option/);
+    assert.deepEqual(parsed.suppliedOptions, [
+      'experiment',
+      'upload',
+      'label',
+      'jobs',
+      'output',
+    ]);
+    assert.throws(
+      () => parseExperimentArgs(['case-a'], { hostOptions }),
+      /positional/,
+    );
+    assert.throws(
+      () => parseExperimentArgs(['--unknown'], { hostOptions }),
+      /Unknown option/,
+    );
   });
 
   it('rejects invalid shared flags before loading inputs or generating an ID', async () => {
     let calls = 0;
     const options: ExperimentCommandOptions<typeof hostOptions> = {
-      hostOptions, selectorOptions: ['case'], engine: defaultForgeEngine,
-      experimentRunIdFactory: () => {calls += 1; return 'never';},
-      loadExperiment: async () => {calls += 1; throw new Error('never');},
+      hostOptions,
+      selectorOptions: ['case'],
+      engine: defaultForgeEngine,
+      experimentRunIdFactory: () => {
+        calls += 1;
+        return 'never';
+      },
+      loadExperiment: async () => {
+        calls += 1;
+        throw new Error('never');
+      },
     };
     for (const args of [
-      ['--resume'], ['--jobs'], ['--resume', '../escape'], ['--run-id', '../escape'],
-      ['--output='], ['--output', 'bad\0path'],
+      ['--resume'],
+      ['--jobs'],
+      ['--resume', '../escape'],
+      ['--run-id', '../escape'],
+      ['--output='],
+      ['--output', 'bad\0path'],
       ['--resume', 'exp-1', '--case', 'testing/first'],
       ['--resume', 'exp-1', '--run-id', 'run-1'],
-      ...['0', '-1', '1.5', '01', 'NaN', 'Infinity', '9007199254740992'].map((jobs) => [`--jobs=${jobs}`]),
+      ...['0', '-1', '1.5', '01', 'NaN', 'Infinity', '9007199254740992'].map(
+        (jobs) => [`--jobs=${jobs}`],
+      ),
     ]) {
       await assert.rejects(runExperimentCommand(args, options));
     }
@@ -100,37 +167,63 @@ describe('shared experiment command', () => {
   });
 
   it('distinguishes explicit resume selectors from configured defaults', () => {
-    const options = {hostOptions: {case: {type: 'string', default: 'testing/second'} as const}, selectorOptions: ['case'] as const};
+    const options = {
+      hostOptions: {
+        case: { type: 'string', default: 'testing/second' } as const,
+      },
+      selectorOptions: ['case'] as const,
+    };
     const parsed = parseExperimentArgs(['--resume', 'exp-1'], options);
     assert.equal(parsed.values.case, 'testing/second');
     assert.deepEqual(parsed.suppliedOptions, ['resume']);
-    assert.throws(() => parseExperimentArgs(['--resume', 'exp-1', '--case', 'testing/second'], options), /saved selections/);
+    assert.throws(
+      () =>
+        parseExperimentArgs(
+          ['--resume', 'exp-1', '--case', 'testing/second'],
+          options,
+        ),
+      /saved selections/,
+    );
   });
 
   it('allows the host to validate its own positional grammar before input loading', async () => {
     const fixture = await createFixture();
     let loaded = 0;
     const options: ExperimentCommandOptions<typeof hostOptions> = {
-      ...fixture.options, allowPositionals: true,
-      validateHostArgs: ({positionals, values}) => {
-        if (positionals.length > 1) throw new ExperimentUsageError('Expected at most one case.');
-        if (values.resume !== undefined && positionals.length) throw new ExperimentUsageError('Omit the case on resume.');
+      ...fixture.options,
+      allowPositionals: true,
+      validateHostArgs: ({ positionals, values }) => {
+        if (positionals.length > 1)
+          throw new ExperimentUsageError('Expected at most one case.');
+        if (values.resume !== undefined && positionals.length)
+          throw new ExperimentUsageError('Omit the case on resume.');
       },
       loadExperiment: async (context) => {
         loaded += 1;
         assert.deepEqual(context.positionals, ['testing/second']);
-        return {plans: [fixture.plans[1]!], composition: makeComposition(context.root)};
+        return {
+          plans: [fixture.plans[1]!],
+          composition: makeComposition(context.root),
+        };
       },
     };
-    await assert.rejects(runExperimentCommand(['first', 'second'], options), /at most one case/);
-    await assert.rejects(runExperimentCommand(['first', '--resume', 'missing'], options), /Omit the case/);
+    await assert.rejects(
+      runExperimentCommand(['first', 'second'], options),
+      /at most one case/,
+    );
+    await assert.rejects(
+      runExperimentCommand(['first', '--resume', 'missing'], options),
+      /Omit the case/,
+    );
     assert.equal(loaded, 0);
     const result = await fixture.run(['testing/second'], options);
     assert.equal(result.total, 1);
     assert.equal(loaded, 1);
   });
 
-  it('shares bounded execution and restores original selections before preparing inputs', {timeout: 10_000}, async () => {
+  it('shares bounded execution and restores original selections before preparing inputs', {
+    timeout: 10_000,
+  }, async () => {
     const fixture = await createFixture();
     let fail = true;
     let active = 0;
@@ -141,38 +234,60 @@ describe('shared experiment command', () => {
     const options: ExperimentCommandOptions<typeof hostOptions> = {
       ...fixture.options,
       loadExperiment: async (context) => {
-        loadedSelections.push(context.savedSelections?.map((selection) => selection.case_id));
+        loadedSelections.push(
+          context.savedSelections?.map((selection) => selection.case_id),
+        );
         const loaded = await fixture.options.loadExperiment(context);
-        return {...loaded, execute: async (input) => {
-          active += 1;
-          maximum = Math.max(maximum, active);
-          executed.push(input.plan.selection.case_id);
-          if (active === 2) bothStarted.resolve();
-          try {
-            if (fail) await bothStarted.promise;
-            if (fail && input.plan.selection.case_id === 'testing/second') throw new Error('private host error');
-            return await context.engine.executeEval({...input, composition: makeComposition(context.root)});
-          } finally {
-            active -= 1;
-          }
-        }};
+        return {
+          ...loaded,
+          execute: async (input) => {
+            active += 1;
+            maximum = Math.max(maximum, active);
+            executed.push(input.plan.selection.case_id);
+            if (active === 2) bothStarted.resolve();
+            try {
+              if (fail) await bothStarted.promise;
+              if (fail && input.plan.selection.case_id === 'testing/second')
+                throw new Error('private host error');
+              return await context.engine.executeEval({
+                ...input,
+                composition: makeComposition(context.root),
+              });
+            } finally {
+              active -= 1;
+            }
+          },
+        };
       },
     };
-    const first = await fixture.run(['--jobs', '2', '--upload', '--label', 'test'], options);
+    const first = await fixture.run(
+      ['--jobs', '2', '--upload', '--label', 'test'],
+      options,
+    );
     assert.equal(maximum, 2);
     assert.equal(first.completed, 1);
     assert.equal(first.errored, 1);
     assert.equal(first.arguments.values.upload, true);
     assert.deepEqual(first.arguments.values.label, ['test']);
-    assert.deepEqual(first.outcomes.map((outcome) => outcome.selection.case_id), ['testing/first', 'testing/second']);
+    assert.deepEqual(
+      first.outcomes.map((outcome) => outcome.selection.case_id),
+      ['testing/first', 'testing/second'],
+    );
     assert.equal(first.outcomes[0]!.artifact!.evaluation.status, 'failed');
     assert.equal(first.outcomes[1]!.artifact, null);
     assert.equal(first.outcomes[1]!.error_code, 'execution_error');
     assert.equal(JSON.stringify(first).includes('private host error'), false);
     fail = false;
     const resumed = await fixture.run(['--resume', 'exp-1', '-j3'], options);
-    assert.deepEqual(loadedSelections, [undefined, ['testing/first', 'testing/second']]);
-    assert.deepEqual(executed, ['testing/first', 'testing/second', 'testing/second']);
+    assert.deepEqual(loadedSelections, [
+      undefined,
+      ['testing/first', 'testing/second'],
+    ]);
+    assert.deepEqual(executed, [
+      'testing/first',
+      'testing/second',
+      'testing/second',
+    ]);
     assert.equal(resumed.executed, 1);
     assert.equal(resumed.skipped, 1);
     assert.equal(resumed.outcomes[0]!.run_id, first.outcomes[0]!.run_id);
@@ -188,15 +303,28 @@ describe('shared experiment command', () => {
     assert.equal(resumed.executed, 0);
     let executed = 0;
     let disposed = 0;
-    await assert.rejects(fixture.run(['--resume', 'exp-1'], {
-      ...fixture.options,
-      loadExperiment: async (context) => ({
-        plans: [createTestResolvedRunPlan({caseId: 'testing/second', prompt: 'changed'})],
-        composition: makeComposition(context.root),
-        execute: async () => {executed += 1; throw new Error('never');},
-        dispose: async () => {disposed += 1;},
+    await assert.rejects(
+      fixture.run(['--resume', 'exp-1'], {
+        ...fixture.options,
+        loadExperiment: async (context) => ({
+          plans: [
+            createTestResolvedRunPlan({
+              caseId: 'testing/second',
+              prompt: 'changed',
+            }),
+          ],
+          composition: makeComposition(context.root),
+          execute: async () => {
+            executed += 1;
+            throw new Error('never');
+          },
+          dispose: async () => {
+            disposed += 1;
+          },
+        }),
       }),
-    }), /resolved plans differ/);
+      /resolved plans differ/,
+    );
     assert.equal(executed, 0);
     assert.equal(disposed, 1);
   });
@@ -205,14 +333,23 @@ describe('shared experiment command', () => {
     const fixture = await createFixture();
     const first = await fixture.run([]);
     const checkpoint = await fs.readFile(first.checkpoint);
-    const inspected = await inspectExperimentRun({root: `${first.location}/.`, engine: defaultForgeEngine});
+    const inspected = await inspectExperimentRun({
+      root: `${first.location}/.`,
+      engine: defaultForgeEngine,
+    });
     assert.deepEqual(inspected.outcomes, first.outcomes);
     assert.deepEqual(await fs.readFile(first.checkpoint), checkpoint);
     const resumed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(resumed.executed, 0);
     assert.deepEqual(resumed.outcomes, first.outcomes);
-    await fs.appendFile(path.join(first.outcomes[0]!.artifact!.location, 'plan.json'), 'tampered');
-    const corrupt = await inspectExperimentRun({root: first.location, engine: defaultForgeEngine});
+    await fs.appendFile(
+      path.join(first.outcomes[0]!.artifact!.location, 'plan.json'),
+      'tampered',
+    );
+    const corrupt = await inspectExperimentRun({
+      root: first.location,
+      engine: defaultForgeEngine,
+    });
     assert.equal(corrupt.outcomes[0]!.artifact, null);
     assert.equal(corrupt.outcomes[0]!.error_code, 'invalid_artifacts');
     assert.deepEqual(await fs.readFile(first.checkpoint), checkpoint);
@@ -221,34 +358,50 @@ describe('shared experiment command', () => {
   it('uses the supplied custom engine for loading, preflight, execution and verification', async () => {
     const fixture = await createFixture();
     const bundle = defineSetupActionBundle({
-      manifest: {namespace: 'acme-evals', version: '1.0.0', sha256: `sha256:${'a'.repeat(64)}`},
-      actions: [{
-        uses: 'acme-evals/seed', parseWith: () => ({}),
-        preflight: () => ({requirements: {}, apply: async () => undefined})
-      }],
+      manifest: {
+        namespace: 'acme-evals',
+        version: '1.0.0',
+        sha256: `sha256:${'a'.repeat(64)}`,
+      },
+      actions: [
+        {
+          uses: 'acme-evals/seed',
+          parseWith: () => ({}),
+          preflight: () => ({ requirements: {}, apply: async () => undefined }),
+        },
+      ],
     });
-    const engine = createForgeEngine({setupActionBundles: [bundle]});
+    const engine = createForgeEngine({ setupActionBundles: [bundle] });
     const raw = structuredClone(createTestResolvedRunPlan());
     raw.provenance.forge.action_bundles = [bundle.manifest];
-    raw.treatment.setup = [{uses: 'acme-evals/seed', with: {}}];
+    raw.treatment.setup = [{ uses: 'acme-evals/seed', with: {} }];
     raw.setup = [...raw.treatment.setup];
     const plan = engine.parseResolvedRunPlan(raw);
     const result = await fixture.run([], {
-      ...fixture.options, engine,
+      ...fixture.options,
+      engine,
       loadExperiment: async (context) => {
         assert.equal(context.engine, engine);
-        return {plans: [plan], composition: makeComposition(context.root)};
+        return { plans: [plan], composition: makeComposition(context.root) };
       },
     });
     assert.equal(result.completed, 1);
     assert.equal(result.outcomes[0]!.artifact!.evaluation.status, 'passed');
     assert.equal(result.report, path.join(result.location, 'report.json'));
-    const report = parseExperimentRunReport(JSON.parse(await fs.readFile(result.report, 'utf8')));
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(result.report, 'utf8')),
+    );
     assert.equal(report.summary.completed, 1);
     assert.equal(report.cases[0]!.case_id, plan.selection.case_id);
-    const inspected = await inspectExperimentRun({root: result.location, engine});
+    const inspected = await inspectExperimentRun({
+      root: result.location,
+      engine,
+    });
     assert.deepEqual(inspected.outcomes, result.outcomes);
-    const wrongEngine = await inspectExperimentRun({root: result.location, engine: defaultForgeEngine});
+    const wrongEngine = await inspectExperimentRun({
+      root: result.location,
+      engine: defaultForgeEngine,
+    });
     assert.equal(wrongEngine.outcomes[0]!.artifact, null);
   });
 
@@ -258,13 +411,22 @@ describe('shared experiment command', () => {
     const before = await fs.readFile(result.checkpoint);
     const controller = new AbortController();
     const reason = new Error('inspection cancelled');
-    const engine = {...defaultForgeEngine, async verifyCompletedRun(location: string) {
-      const completed = await defaultForgeEngine.verifyCompletedRun(location);
-      controller.abort(reason);
-      return completed;
-    }};
-    await assert.rejects(inspectExperimentRun({root: result.location, engine, signal: controller.signal}),
-      (error: unknown) => error === reason);
+    const engine = {
+      ...defaultForgeEngine,
+      async verifyCompletedRun(location: string) {
+        const completed = await defaultForgeEngine.verifyCompletedRun(location);
+        controller.abort(reason);
+        return completed;
+      },
+    };
+    await assert.rejects(
+      inspectExperimentRun({
+        root: result.location,
+        engine,
+        signal: controller.signal,
+      }),
+      (error: unknown) => error === reason,
+    );
     assert.deepEqual(await fs.readFile(result.checkpoint), before);
   });
 
@@ -274,16 +436,19 @@ describe('shared experiment command', () => {
     const original = JSON.parse(await fs.readFile(result.checkpoint, 'utf8'));
     const selection = original.entries[0].selection;
     for (const changed of [
-      {...selection, case_id: 'testing/wrong'},
-      {...selection, treatment: 'wrong'},
-      {...selection, agent: {...selection.agent, model: 'wrong'}},
-      {...selection, repetition: 1},
+      { ...selection, case_id: 'testing/wrong' },
+      { ...selection, treatment: 'wrong' },
+      { ...selection, agent: { ...selection.agent, model: 'wrong' } },
+      { ...selection, repetition: 1 },
     ]) {
       const corrupt = structuredClone(original);
       corrupt.entries[0].selection = changed;
       const body = JSON.stringify(corrupt);
       await fs.writeFile(result.checkpoint, body);
-      const inspected = await inspectExperimentRun({root: result.location, engine: defaultForgeEngine});
+      const inspected = await inspectExperimentRun({
+        root: result.location,
+        engine: defaultForgeEngine,
+      });
       assert.equal(inspected.outcomes[0]!.artifact, null);
       assert.equal(inspected.outcomes[0]!.state, 'errored');
       assert.equal(inspected.outcomes[0]!.error_code, 'invalid_artifacts');
@@ -293,32 +458,50 @@ describe('shared experiment command', () => {
 
   it('returns verified role-player failures as publishable artifacts and retries their execution', async () => {
     const fixture = await createFixture();
-    const plan = createTestResolvedRunPlan({mode: 'multi_turn',
-      rolePlayer: {provider: 'scripted', model: 'role-player'}});
+    const plan = createTestResolvedRunPlan({
+      mode: 'multi_turn',
+      rolePlayer: { provider: 'scripted', model: 'role-player' },
+    });
     const options: ExperimentCommandOptions<typeof hostOptions> = {
       ...fixture.options,
       loadExperiment: async (context) => {
-        const provider = createScriptedCompletionProvider({id: 'scripted',
-          responses: Array.from({length: 3}, () => new Error('unavailable'))}).provider;
-        return {plans: [plan], composition: {...makeComposition(context.root),
-          completionProviders: new Map([[provider.id, provider]])},
-          execute: (request) => executeEvalWithTestHooks(request, {
-            waitBeforeCompletionRetry: async () => undefined,
-          })};
+        const provider = createScriptedCompletionProvider({
+          id: 'scripted',
+          responses: Array.from({ length: 3 }, () => new Error('unavailable')),
+        }).provider;
+        return {
+          plans: [plan],
+          composition: {
+            ...makeComposition(context.root),
+            completionProviders: new Map([[provider.id, provider]]),
+          },
+          execute: (request) =>
+            executeEvalWithTestHooks(request, {
+              waitBeforeCompletionRetry: async () => undefined,
+            }),
+        };
       },
     };
     const first = await fixture.run([], options);
     assert.equal(first.errored, 1);
     assert.equal(first.outcomes[0]!.error_code, 'role_player_error');
     assert.equal(first.outcomes[0]!.artifact!.failure, 'role_player_error');
-    const report = parseExperimentRunReport(JSON.parse(await fs.readFile(first.report, 'utf8')));
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(first.report, 'utf8')),
+    );
     assert.equal(report.summary.completed, 0);
     assert.equal(report.summary.errored, 1);
     assert.equal(report.summary.pass_rate, null);
     assert.equal(report.runs[0]!.evaluation, null);
     assert.equal(report.runs[0]!.error_code, 'role_player_error');
-    assert.equal(report.runs[0]!.result_path, `runs/${first.outcomes[0]!.run_id}/result.json`);
-    const inspected = await inspectExperimentRun({root: first.location, engine: defaultForgeEngine});
+    assert.equal(
+      report.runs[0]!.result_path,
+      `runs/${first.outcomes[0]!.run_id}/result.json`,
+    );
+    const inspected = await inspectExperimentRun({
+      root: first.location,
+      engine: defaultForgeEngine,
+    });
     assert.deepEqual(inspected.outcomes, first.outcomes);
     const resumed = await fixture.run(['--resume', 'exp-1'], options);
     assert.equal(resumed.executed, 1);
@@ -328,19 +511,28 @@ describe('shared experiment command', () => {
 
   it('retains verified artifacts when an execution callback fails after committing', async () => {
     const fixture = await createFixture();
-    const first = await fixture.run(['--case', 'testing/second'], {...fixture.options,
-      loadExperiment: async (context) => ({plans: [fixture.plans[1]!], composition: makeComposition(context.root),
+    const first = await fixture.run(['--case', 'testing/second'], {
+      ...fixture.options,
+      loadExperiment: async (context) => ({
+        plans: [fixture.plans[1]!],
+        composition: makeComposition(context.root),
         execute: async (request) => {
           await context.engine.executeEval(request);
           throw new Error('private cleanup error');
-        }}),
+        },
+      }),
     });
     assert.equal(first.errored, 1);
     assert.equal(first.outcomes[0]!.error_code, 'execution_error');
     assert.equal(first.outcomes[0]!.artifact!.evaluation.status, 'passed');
-    assert.equal(JSON.stringify(first).includes('private cleanup error'), false);
+    assert.equal(
+      JSON.stringify(first).includes('private cleanup error'),
+      false,
+    );
     // The report uses the same committed-result recovery as the next resume.
-    const report = parseExperimentRunReport(JSON.parse(await fs.readFile(first.report, 'utf8')));
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(first.report, 'utf8')),
+    );
     assert.equal(report.summary.completed, 1);
     assert.equal(report.summary.errored, 0);
     assert.equal(report.runs[0]!.evaluation!.status, 'passed');
@@ -353,15 +545,21 @@ describe('shared experiment command', () => {
     const fixture = await createFixture();
     const primary = new Error('progress failed');
     try {
-      await fixture.run([], {...fixture.options, progress: (event) => {
-        if (event.state === 'running') throw primary;
-      }});
+      await fixture.run([], {
+        ...fixture.options,
+        progress: (event) => {
+          if (event.state === 'running') throw primary;
+        },
+      });
       assert.fail('expected failure');
     } catch (error) {
       assert.ok(error instanceof ExperimentCommandError);
       assert.equal(error.cause, primary);
       const before = await fs.readFile(error.reference.checkpoint);
-      const inspected = await inspectExperimentRun({root: error.reference.location, engine: defaultForgeEngine});
+      const inspected = await inspectExperimentRun({
+        root: error.reference.location,
+        engine: defaultForgeEngine,
+      });
       assert.equal(inspected.outcomes[0]!.artifact, null);
       assert.equal(inspected.outcomes[0]!.error_code, 'invalid_artifacts');
       assert.equal(inspected.outcomes[1]!.state, 'pending');
@@ -375,19 +573,37 @@ describe('shared experiment command', () => {
     const primary = new Error('unsupported final plan');
     let executed = 0;
     let disposed = 0;
-    const engine = {...defaultForgeEngine, preflightEval() {throw primary;}};
+    const engine = {
+      ...defaultForgeEngine,
+      preflightEval() {
+        throw primary;
+      },
+    };
     try {
-      await fixture.run([], {...fixture.options, engine,
-        loadExperiment: async (context) => ({plans: fixture.plans, composition: makeComposition(context.root),
-          execute: async () => {executed += 1; throw new Error('never');},
-          dispose: async () => {disposed += 1; throw new Error('cleanup also failed');}}),
+      await fixture.run([], {
+        ...fixture.options,
+        engine,
+        loadExperiment: async (context) => ({
+          plans: fixture.plans,
+          composition: makeComposition(context.root),
+          execute: async () => {
+            executed += 1;
+            throw new Error('never');
+          },
+          dispose: async () => {
+            disposed += 1;
+            throw new Error('cleanup also failed');
+          },
+        }),
       });
       assert.fail('expected failure');
     } catch (error) {
       assert.ok(error instanceof ExperimentCommandError);
       assert.equal(error.cause, primary);
       assert.equal(error.reference.experiment_run_id, 'exp-1');
-      await assert.rejects(fs.stat(error.reference.location), {code: 'ENOENT'});
+      await assert.rejects(fs.stat(error.reference.location), {
+        code: 'ENOENT',
+      });
     }
     assert.equal(executed, 0);
     assert.equal(disposed, 1);
@@ -398,21 +614,34 @@ describe('shared experiment command', () => {
     const primary = new Error('dispose failed');
     let disposed = 0;
     try {
-      await fixture.run([], {...fixture.options,
-        loadExperiment: async (context) => ({...await fixture.options.loadExperiment(context),
-          dispose: async () => {disposed += 1; throw primary;}}),
+      await fixture.run([], {
+        ...fixture.options,
+        loadExperiment: async (context) => ({
+          ...(await fixture.options.loadExperiment(context)),
+          dispose: async () => {
+            disposed += 1;
+            throw primary;
+          },
+        }),
       });
       assert.fail('expected failure');
     } catch (error) {
       assert.ok(error instanceof ExperimentCommandError);
       assert.equal(error.cause, primary);
-      const inspected = await inspectExperimentRun({root: error.reference.location, engine: defaultForgeEngine});
-      assert.ok(inspected.outcomes.every((outcome) => outcome.artifact !== null));
+      const inspected = await inspectExperimentRun({
+        root: error.reference.location,
+        engine: defaultForgeEngine,
+      });
+      assert.ok(
+        inspected.outcomes.every((outcome) => outcome.artifact !== null),
+      );
     }
     assert.equal(disposed, 1);
   });
 
-  it('finishes disposal but rejects success when cancellation arrives during that cleanup', {timeout: 10_000}, async () => {
+  it('finishes disposal but rejects success when cancellation arrives during that cleanup', {
+    timeout: 10_000,
+  }, async () => {
     const fixture = await createFixture();
     const entered = gate();
     const release = gate();
@@ -420,20 +649,28 @@ describe('shared experiment command', () => {
     const reason = new Error('cancelled during disposal');
     let disposed = 0;
     let publicationReached = false;
-    const running = fixture.run(['--case', 'testing/second'], {...fixture.options,
-      signal: controller.signal,
-      loadExperiment: async (context) => ({...await fixture.options.loadExperiment(context),
-        dispose: async () => {
-          entered.resolve();
-          await release.promise;
-          disposed += 1;
-        }}),
-    }).then((result) => {
-      publicationReached = true;
-      return result;
-    });
-    const rejected = assert.rejects(running, (error: unknown) =>
-      error instanceof ExperimentCommandError && error.cause === reason);
+    const running = fixture
+      .run(['--case', 'testing/second'], {
+        ...fixture.options,
+        signal: controller.signal,
+        loadExperiment: async (context) => ({
+          ...(await fixture.options.loadExperiment(context)),
+          dispose: async () => {
+            entered.resolve();
+            await release.promise;
+            disposed += 1;
+          },
+        }),
+      })
+      .then((result) => {
+        publicationReached = true;
+        return result;
+      });
+    const rejected = assert.rejects(
+      running,
+      (error: unknown) =>
+        error instanceof ExperimentCommandError && error.cause === reason,
+    );
     await entered.promise;
     controller.abort(reason);
     release.resolve();
@@ -445,7 +682,9 @@ describe('shared experiment command', () => {
     assert.equal(resumed.skipped, 1);
   });
 
-  it('drains aborted callbacks before releasing the lock and disposing prepared inputs', {timeout: 10_000}, async () => {
+  it('drains aborted callbacks before releasing the lock and disposing prepared inputs', {
+    timeout: 10_000,
+  }, async () => {
     const fixture = await createFixture();
     const controller = new AbortController();
     const started = gate();
@@ -453,13 +692,19 @@ describe('shared experiment command', () => {
     const releaseCleanup = gate();
     let active = 0;
     let disposed = 0;
-    const running = fixture.run(['--jobs', '2'], {...fixture.options, signal: controller.signal,
-      loadExperiment: async (context) => ({plans: fixture.plans, composition: makeComposition(context.root),
-        execute: async ({signal}) => {
+    const running = fixture.run(['--jobs', '2'], {
+      ...fixture.options,
+      signal: controller.signal,
+      loadExperiment: async (context) => ({
+        plans: fixture.plans,
+        composition: makeComposition(context.root),
+        execute: async ({ signal }) => {
           assert.ok(signal);
           active += 1;
           if (active === 2) started.resolve();
-          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), {once: true}));
+          await new Promise<void>((resolve) =>
+            signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
           cleaning.resolve();
           await releaseCleanup.promise;
           active -= 1;
@@ -468,7 +713,10 @@ describe('shared experiment command', () => {
         },
         dispose: async () => {
           assert.equal(active, 0);
-          await assert.rejects(fs.stat(path.join(context.root, '.experiment.lock')), {code: 'ENOENT'});
+          await assert.rejects(
+            fs.stat(path.join(context.root, '.experiment.lock')),
+            { code: 'ENOENT' },
+          );
           disposed += 1;
         },
       }),
@@ -482,7 +730,9 @@ describe('shared experiment command', () => {
     try {
       assert.equal(disposed, 0);
       assert.equal(active, 2);
-      assert.ok((await fs.stat(path.join(root, '.experiment.lock'))).isDirectory());
+      assert.ok(
+        (await fs.stat(path.join(root, '.experiment.lock'))).isDirectory(),
+      );
     } finally {
       releaseCleanup.resolve();
     }
@@ -495,12 +745,25 @@ describe('shared experiment command', () => {
   it('rejects explicit eval IDs for multiple plans and cleans loaded inputs', async () => {
     const fixture = await createFixture();
     let disposed = 0;
-    await assert.rejects(fixture.run(['--run-id', 'named'], {...fixture.options,
-      loadExperiment: async (context) => ({...await fixture.options.loadExperiment(context),
-        dispose: async () => {disposed += 1;}}),
-    }), /exactly one/);
+    await assert.rejects(
+      fixture.run(['--run-id', 'named'], {
+        ...fixture.options,
+        loadExperiment: async (context) => ({
+          ...(await fixture.options.loadExperiment(context)),
+          dispose: async () => {
+            disposed += 1;
+          },
+        }),
+      }),
+      /exactly one/,
+    );
     assert.equal(disposed, 1);
-    const single = await fixture.run(['--case', 'testing/second', '--run-id', 'named']);
+    const single = await fixture.run([
+      '--case',
+      'testing/second',
+      '--run-id',
+      'named',
+    ]);
     assert.equal(single.outcomes[0]!.run_id, 'named');
   });
 });
@@ -510,35 +773,71 @@ async function createFixture() {
   temporaryDirectories.push(directory);
   const output = path.join(directory, 'results');
   const plans = [
-    createTestResolvedRunPlan({caseId: 'testing/first', checks: {files_created: ['missing.txt']}}),
-    createTestResolvedRunPlan({caseId: 'testing/second'}),
+    createTestResolvedRunPlan({
+      caseId: 'testing/first',
+      checks: { files_created: ['missing.txt'] },
+    }),
+    createTestResolvedRunPlan({ caseId: 'testing/second' }),
   ];
   let nextRun = 0;
   const options: ExperimentCommandOptions<typeof hostOptions> = {
-    hostOptions, selectorOptions: ['case'], engine: defaultForgeEngine,
+    hostOptions,
+    selectorOptions: ['case'],
+    engine: defaultForgeEngine,
     experimentRunIdFactory: () => 'exp-1',
     runIdFactory: () => `run-${++nextRun}`,
-    loadExperiment: async (context: ExperimentLoadContext<typeof hostOptions>) => {
-      const selected = context.savedSelections === undefined
-        ? plans.filter((plan) => context.values.case === undefined || plan.selection.case_id === context.values.case)
-        : context.savedSelections.map((selection) => plans.find((plan) => plan.selection.case_id === selection.case_id)!);
-      return {plans: selected, composition: makeComposition(context.root),
-        execute: (request) => context.engine.executeEval({...request, composition: makeComposition(context.root)})};
+    loadExperiment: async (
+      context: ExperimentLoadContext<typeof hostOptions>,
+    ) => {
+      const selected =
+        context.savedSelections === undefined
+          ? plans.filter(
+              (plan) =>
+                context.values.case === undefined ||
+                plan.selection.case_id === context.values.case,
+            )
+          : context.savedSelections.map(
+              (selection) =>
+                plans.find(
+                  (plan) => plan.selection.case_id === selection.case_id,
+                )!,
+            );
+      return {
+        plans: selected,
+        composition: makeComposition(context.root),
+        execute: (request) =>
+          context.engine.executeEval({
+            ...request,
+            composition: makeComposition(context.root),
+          }),
+      };
     },
   };
-  return {directory, output, plans, options,
-    run: (args: readonly string[], overrides = options) => runExperimentCommand(['--output', output, ...args], overrides)};
+  return {
+    directory,
+    output,
+    plans,
+    options,
+    run: (args: readonly string[], overrides = options) =>
+      runExperimentCommand(['--output', output, ...args], overrides),
+  };
 }
 
 function makeComposition(root: string): ForgeComposition {
   const agent = createScriptedAgentAdapter();
-  return {runtime: createFakeRuntimeAdapter().adapter, agents: new Map([[agent.adapter.id, agent.adapter]]),
-    credentialResolver: createStaticCredentialResolver(), inputProvider: createMemoryRunInputProvider(),
-    artifactStore: createArtifactStore({root})};
+  return {
+    runtime: createFakeRuntimeAdapter().adapter,
+    agents: new Map([[agent.adapter.id, agent.adapter]]),
+    credentialResolver: createStaticCredentialResolver(),
+    inputProvider: createMemoryRunInputProvider(),
+    artifactStore: createArtifactStore({ root }),
+  };
 }
 
 function gate() {
   let resolve!: () => void;
-  const promise = new Promise<void>((ready) => {resolve = ready;});
-  return {promise, resolve};
+  const promise = new Promise<void>((ready) => {
+    resolve = ready;
+  });
+  return { promise, resolve };
 }

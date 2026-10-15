@@ -1,16 +1,15 @@
-import type {AgentAdapterMetadata} from './metadata.js';
-
-import type {AgentSelectionV1, ResolvedRunPlanV1} from '../model/types.js';
-import type {RunInputProvider} from './inputs.js';
-import type {EnvironmentSpecification} from './credentials.js';
+import type { AgentSelectionV1, ResolvedRunPlanV1 } from '../model/types.js';
+import type { CommandRunner } from './command.js';
+import type { EnvironmentSpecification } from './credentials.js';
+import type { RunInputProvider } from './inputs.js';
+import type { AgentAdapterMetadata } from './metadata.js';
+import type { AgentPluginInstaller } from './plugin.js';
 import type {
   MutableWorkspace,
   ReadonlyWorkspace,
   RuntimeLogicalPaths,
   RuntimeStateDirectoryRequirement,
 } from './runtime.js';
-import type {CommandRunner} from './command.js';
-import type {AgentPluginInstaller} from './plugin.js';
 
 export interface AgentToolCall {
   readonly id?: string;
@@ -99,7 +98,7 @@ export type AgentNativeEvidenceResult =
   | AgentNativeEvidenceUnavailable;
 
 export interface AgentSession {
-  send(message: string, options: {signal: AbortSignal}): Promise<AgentTurn>;
+  send(message: string, options: { signal: AbortSignal }): Promise<AgentTurn>;
   sessionId(): string | undefined;
 }
 
@@ -190,7 +189,9 @@ export interface AgentAdapter {
    * Read exact session evidence only after runtime mutation has stopped.
    * Completed-run provenance must identify `context.sessionId`.
    */
-  collectEvidence(context: AgentEvidenceContext): Promise<AgentNativeEvidenceResult>;
+  collectEvidence(
+    context: AgentEvidenceContext,
+  ): Promise<AgentNativeEvidenceResult>;
   /**
    * Optionally retain the exact root-session source independently from its
    * normalized evidence. Forge assigns the final artifact path and treats the

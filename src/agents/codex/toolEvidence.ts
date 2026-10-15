@@ -1,19 +1,20 @@
-import {isDeepStrictEqual} from 'node:util';
-
-import {assertBoundedJsonValue} from '../../atif/parser.js';
-import type {AtifContent, JsonObject} from '../../atif/index.js';
-import type {AgentNativeEvidenceWarning} from '../../contracts/agent.js';
-import {isSafeSimpleIdentifier} from '../../model/paths.js';
-import {nativeJsonValue} from './nativeJson.js';
-import {codexTruncationBudget} from './truncation.js';
+import { isDeepStrictEqual } from 'node:util';
+import type { AtifContent, JsonObject } from '../../atif/index.js';
+import { assertBoundedJsonValue } from '../../atif/parser.js';
+import type { AgentNativeEvidenceWarning } from '../../contracts/agent.js';
+import { isSafeSimpleIdentifier } from '../../model/paths.js';
+import { nativeJsonValue } from './nativeJson.js';
+import { codexTruncationBudget } from './truncation.js';
 
 type NativeObject = Record<string, unknown>;
 type NativeOutputBlock =
-  | {type: 'input_text'; text: string}
-  | {type: 'input_image'; image_url: string; detail?: string};
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; image_url: string; detail?: string };
 
-const IMAGE_OMITTED = '[Codex image content retained only in the native artifact.]';
-const IMAGE_DECODE_OMITTED = 'image content omitted because it could not be processed';
+const IMAGE_OMITTED =
+  '[Codex image content retained only in the native artifact.]';
+const IMAGE_DECODE_OMITTED =
+  'image content omitted because it could not be processed';
 const MCP_OUTPUT_HEADER = /^Wall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:/;
 
 /** Known native tool shapes which cannot be normalized faithfully fail closed. */
@@ -31,13 +32,14 @@ export function normalizeCodexToolOutput(
   const output = validateToolOutput(value);
   if (typeof output === 'string') return output;
   return output.map((block, index) => {
-    if (block.type === 'input_text') return {type: 'text', text: block.text};
+    if (block.type === 'input_text') return { type: 'text', text: block.text };
     warnings.push({
       code: 'value_omitted',
-      message: 'Codex image content was retained only in the restricted native artifact.',
+      message:
+        'Codex image content was retained only in the restricted native artifact.',
       path: `line:${recordIndex + 1}.output[${index}]`,
     });
-    return {type: 'text', text: IMAGE_OMITTED};
+    return { type: 'text', text: IMAGE_OMITTED };
   });
 }
 
@@ -46,8 +48,12 @@ export function codexToolSearchArguments(payload: NativeObject): JsonObject {
   const arguments_ = object(payload.arguments);
   onlyKeys(arguments_, ['query', 'limit']);
   nonempty(arguments_.query);
-  if (arguments_.limit !== undefined &&
-      (!Number.isSafeInteger(arguments_.limit) || (arguments_.limit as number) <= 0)) fail();
+  if (
+    arguments_.limit !== undefined &&
+    (!Number.isSafeInteger(arguments_.limit) ||
+      (arguments_.limit as number) <= 0)
+  )
+    fail();
   return arguments_ as JsonObject;
 }
 
@@ -61,7 +67,14 @@ export function codexToolSearchOutput(payload: NativeObject): string {
     if (namespace.description !== undefined) string(namespace.description);
     for (const entry of array(namespace.tools)) {
       const tool = object(entry);
-      onlyKeys(tool, ['type', 'name', 'description', 'strict', 'defer_loading', 'parameters']);
+      onlyKeys(tool, [
+        'type',
+        'name',
+        'description',
+        'strict',
+        'defer_loading',
+        'parameters',
+      ]);
       if (tool.type !== 'function') fail();
       nonempty(tool.name);
       if (tool.description !== undefined) string(tool.description);
@@ -71,7 +84,7 @@ export function codexToolSearchOutput(payload: NativeObject): string {
     }
   }
   // Tool definitions are observable discovery results, not recorder metadata.
-  return JSON.stringify({tools: payload.tools});
+  return JSON.stringify({ tools: payload.tools });
 }
 
 /** Validate the MCP recorder mirror before borrowing its tool-error status. */
@@ -80,14 +93,34 @@ export function validateCodexMcpSnapshot(
   call: NativeObject,
   output: NativeObject,
   rawRecord: string,
-): {isError: boolean; truncated: boolean} {
-  onlyKeys(item, ['type', 'id', 'server', 'tool', 'arguments', 'readOnlyHint', 'pluginId', 'status', 'result', 'error', 'duration']);
+): { isError: boolean; truncated: boolean } {
+  onlyKeys(item, [
+    'type',
+    'id',
+    'server',
+    'tool',
+    'arguments',
+    'readOnlyHint',
+    'pluginId',
+    'status',
+    'result',
+    'error',
+    'duration',
+  ]);
   const server = nonempty(item.server);
   const tool = nonempty(item.tool);
-  if (item.type !== 'McpToolCall' || call.type !== 'function_call' || output.type !== 'function_call_output' ||
-      item.id !== call.call_id || item.id !== output.call_id) fail();
+  if (
+    item.type !== 'McpToolCall' ||
+    call.type !== 'function_call' ||
+    output.type !== 'function_call_output' ||
+    item.id !== call.call_id ||
+    item.id !== output.call_id
+  )
+    fail();
   const namespaced = call.namespace === `mcp__${server}` && call.name === tool;
-  const qualified = (call.namespace === undefined || call.namespace === '') && call.name === `mcp__${server}__${tool}`;
+  const qualified =
+    (call.namespace === undefined || call.namespace === '') &&
+    call.name === `mcp__${server}__${tool}`;
   if (!namespaced && !qualified) fail();
   const arguments_: unknown = JSON.parse(string(call.arguments));
   assertBoundedJsonValue(arguments_);
@@ -108,7 +141,7 @@ export function validateCodexMcpSnapshot(
     onlyKeys(error, ['message']);
     if (item.result !== undefined && item.result !== null) fail();
     failed = true;
-    expectedContent = [{type: 'text', text: string(error.message)}];
+    expectedContent = [{ type: 'text', text: string(error.message) }];
   } else {
     const result = object(item.result);
     onlyKeys(result, ['content', 'structuredContent', 'isError']);
@@ -120,7 +153,9 @@ export function validateCodexMcpSnapshot(
         string(block.text);
       } else if (block.type === 'image') {
         onlyKeys(block, ['type', 'data', 'mimeType', 'annotations', '_meta']);
-        validateInlineImage(`data:${string(block.mimeType)};base64,${nonempty(block.data)}`);
+        validateInlineImage(
+          `data:${string(block.mimeType)};base64,${nonempty(block.data)}`,
+        );
       } else fail();
       // These extension objects are opaque tool data, not Forge control fields.
       // The rollout parser already bounds the complete snapshot's JSON graph.
@@ -128,22 +163,35 @@ export function validateCodexMcpSnapshot(
       if (block._meta !== undefined) object(block._meta);
       return block;
     });
-    if (result.structuredContent !== undefined) structuredContent = object(result.structuredContent);
+    if (result.structuredContent !== undefined)
+      structuredContent = object(result.structuredContent);
   }
   // 0.149.0 reports tool-level isError and RPC errors as failed snapshots;
   // a completed call record alone never proves successful tool execution.
   if (item.status !== (failed ? 'failed' : 'completed')) fail();
-  if (output.is_error !== undefined && boolean(output.is_error) !== failed) fail();
+  if (output.is_error !== undefined && boolean(output.is_error) !== failed)
+    fail();
   const rawContent = () => {
     const path = ['payload', 'item'];
     if (item.error !== undefined && item.error !== null) {
       const message = nativeJsonValue(rawRecord, [...path, 'error', 'message']);
-      return message === undefined ? undefined : `[{"type":"text","text":${message}}]`;
+      return message === undefined
+        ? undefined
+        : `[{"type":"text","text":${message}}]`;
     }
-    return nativeJsonValue(rawRecord, [...path, 'result', structuredContent === undefined ? 'content' : 'structuredContent']);
+    return nativeJsonValue(rawRecord, [
+      ...path,
+      'result',
+      structuredContent === undefined ? 'content' : 'structuredContent',
+    ]);
   };
-  const truncated = validateMcpOutputMirror(output.output, expectedContent, structuredContent, rawContent);
-  return {isError: failed, truncated};
+  const truncated = validateMcpOutputMirror(
+    output.output,
+    expectedContent,
+    structuredContent,
+    rawContent,
+  );
+  return { isError: failed, truncated };
 }
 
 function validateMcpOutputMirror(
@@ -158,22 +206,38 @@ function validateMcpOutputMirror(
     if (!header || output[header.length] !== '\n') fail();
     // The CLI chooses structuredContent when present; otherwise it serializes
     // text MCP blocks. Image blocks use the separate native array form.
-    if (structured === undefined && content.some((block) => block.type === 'image')) fail();
+    if (
+      structured === undefined &&
+      content.some((block) => block.type === 'image')
+    )
+      fail();
     // Preserve ordinary semantic equality (including literal marker text).
     // A legitimate clip can cut a JSON escape, so parsing the body is optional
     // only when the exact truncation can be proven from the raw snapshot span.
     let body: unknown;
-    try {body = JSON.parse(output.slice(header.length + 1));} catch { /* Try a validated clip below. */ }
+    try {
+      body = JSON.parse(output.slice(header.length + 1));
+    } catch {
+      /* Try a validated clip below. */
+    }
     if (body !== undefined) {
       assertBoundedJsonValue(body);
       if (isDeepStrictEqual(body, structured ?? content)) return false;
     }
     const original = rawContent();
-    if (original !== undefined && codexTruncationBudget(`${header}\n${original}`, output) !== undefined) return true;
+    if (
+      original !== undefined &&
+      codexTruncationBudget(`${header}\n${original}`, output) !== undefined
+    )
+      return true;
     fail();
   }
-  if (structured !== undefined || output[0]?.type !== 'input_text' ||
-      MCP_OUTPUT_HEADER.exec(output[0].text)?.[0] !== output[0].text) fail();
+  if (
+    structured !== undefined ||
+    output[0]?.type !== 'input_text' ||
+    MCP_OUTPUT_HEADER.exec(output[0].text)?.[0] !== output[0].text
+  )
+    fail();
   // Arrays spend one shared text budget in order: a clipped block exhausts it;
   // later text blocks (even empty ones) are dropped, while images survive.
   let cursor = 1;
@@ -190,15 +254,23 @@ function validateMcpOutputMirror(
       cursor += 1;
       continue;
     }
-    const expected = block.type === 'text' ? string(block.text) : IMAGE_DECODE_OMITTED;
-    if (exhausted) {omitted += 1; continue;}
+    const expected =
+      block.type === 'text' ? string(block.text) : IMAGE_DECODE_OMITTED;
+    if (exhausted) {
+      omitted += 1;
+      continue;
+    }
     if (rendered?.type === 'input_text' && rendered.text === expected) {
       // A source block can itself equal the final omission marker. If literal
       // matching would leave unmatched source blocks, validate it as the marker
       // for that entire tail instead. No later image can have survived here.
       const tailCount = content.length - index;
-      if (tailCount > 1 && cursor === output.length - 1 && !trailingEmptyText &&
-          rendered.text === `[omitted ${tailCount} text items ...]`) {
+      if (
+        tailCount > 1 &&
+        cursor === output.length - 1 &&
+        !trailingEmptyText &&
+        rendered.text === `[omitted ${tailCount} text items ...]`
+      ) {
         omitted = tailCount;
         break;
       }
@@ -206,7 +278,10 @@ function validateMcpOutputMirror(
       cursor += 1;
       continue;
     }
-    if (rendered?.type === 'input_text' && codexTruncationBudget(expected, rendered.text) !== undefined) {
+    if (
+      rendered?.type === 'input_text' &&
+      codexTruncationBudget(expected, rendered.text) !== undefined
+    ) {
       truncated = true;
       cursor += 1;
     } else {
@@ -219,7 +294,11 @@ function validateMcpOutputMirror(
   }
   if (omitted > 0) {
     const marker = output[cursor++];
-    if (marker?.type !== 'input_text' || marker.text !== `[omitted ${omitted} text items ...]`) fail();
+    if (
+      marker?.type !== 'input_text' ||
+      marker.text !== `[omitted ${omitted} text items ...]`
+    )
+      fail();
   }
   if (cursor !== output.length) fail();
   return truncated || omitted > 0;
@@ -231,15 +310,24 @@ function validateToolOutput(value: unknown): string | NativeOutputBlock[] {
     const block = object(part);
     if (block.type === 'input_text') {
       onlyKeys(block, ['type', 'text']);
-      return {type: 'input_text', text: string(block.text)};
+      return { type: 'input_text', text: string(block.text) };
     }
     if (block.type !== 'input_image') fail();
     onlyKeys(block, ['type', 'image_url', 'detail']);
     const url = nonempty(block.image_url);
     validateImageUrl(url);
-    if (block.detail !== undefined && block.detail !== 'auto' && block.detail !== 'low' && block.detail !== 'high') fail();
-    return {type: 'input_image', image_url: url,
-      ...(block.detail === undefined ? {} : {detail: string(block.detail)})};
+    if (
+      block.detail !== undefined &&
+      block.detail !== 'auto' &&
+      block.detail !== 'low' &&
+      block.detail !== 'high'
+    )
+      fail();
+    return {
+      type: 'input_image',
+      image_url: url,
+      ...(block.detail === undefined ? {} : { detail: string(block.detail) }),
+    };
   });
 }
 
@@ -249,13 +337,28 @@ function validateImageUrl(value: string): void {
     return;
   }
   let url: URL;
-  try {url = new URL(value);} catch {fail();}
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) fail();
+  try {
+    url = new URL(value);
+  } catch {
+    fail();
+  }
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    url.username ||
+    url.password
+  )
+    fail();
   // References are omitted too: no fetch, fabricated path, or URL disclosure.
 }
 
 function validateInlineImage(value: string): void {
-  if (!/^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value) || value.endsWith(',')) fail();
+  if (
+    !/^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      value,
+    ) ||
+    value.endsWith(',')
+  )
+    fail();
 }
 
 function requireCompletedSearch(payload: NativeObject): void {
@@ -265,15 +368,22 @@ function requireCompletedSearch(payload: NativeObject): void {
 function validateDuration(value: unknown): void {
   const duration = object(value);
   onlyKeys(duration, ['secs', 'nanos']);
-  if (!Number.isSafeInteger(duration.secs) || (duration.secs as number) < 0 ||
-      !Number.isSafeInteger(duration.nanos) || (duration.nanos as number) < 0 || (duration.nanos as number) >= 1_000_000_000) fail();
+  if (
+    !Number.isSafeInteger(duration.secs) ||
+    (duration.secs as number) < 0 ||
+    !Number.isSafeInteger(duration.nanos) ||
+    (duration.nanos as number) < 0 ||
+    (duration.nanos as number) >= 1_000_000_000
+  )
+    fail();
 }
 
 function onlyKeys(value: NativeObject, allowed: readonly string[]): void {
   if (Object.keys(value).some((key) => !allowed.includes(key))) fail();
 }
 function object(value: unknown): NativeObject {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail();
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    fail();
   return value as NativeObject;
 }
 function array(value: unknown): unknown[] {
@@ -294,5 +404,7 @@ function boolean(value: unknown): boolean {
   return value;
 }
 function fail(): never {
-  throw new CodexToolEvidenceError('Codex native tool evidence is incomplete or unsupported.');
+  throw new CodexToolEvidenceError(
+    'Codex native tool evidence is incomplete or unsupported.',
+  );
 }

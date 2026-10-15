@@ -1,30 +1,29 @@
-import type {CommandResult, CommandRunner} from '../../contracts/command.js';
+import type { CommandResult, CommandRunner } from '../../contracts/command.js';
 import type {
   AgentPluginInstallationReceipt,
   AgentPluginInstallContext,
   AgentPluginInstaller,
   AgentPluginPreflightContext,
 } from '../../contracts/plugin.js';
-import type {MutableWorkspace} from '../../contracts/runtime.js';
-import type {PluginSelectionV1} from '../../model/types.js';
+import type { MutableWorkspace } from '../../contracts/runtime.js';
 import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../../model/paths.js';
+import type { PluginSelectionV1 } from '../../model/types.js';
+import {
+  assertClaudeRuntimeLayout,
+  type ClaudeCodeLayout,
+  resolveClaudeCodeLayout,
+} from './layout.js';
 import {
   inspectInstalledPluginTree,
   pluginSourceReceipt,
 } from './pluginReceipt.js';
-import {
-  assertClaudeRuntimeLayout,
-  resolveClaudeCodeLayout,
-  type ClaudeCodeLayout,
-} from './layout.js';
 
 export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugins' as const;
-export const CLAUDE_PLUGIN_STATE_PATH =
-  '/home/forge/.claude/plugins' as const;
+export const CLAUDE_PLUGIN_STATE_PATH = '/home/forge/.claude/plugins' as const;
 
 const MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_CATALOG_PLUGINS = 10_000;
@@ -70,7 +69,9 @@ export function createClaudePluginInstaller(
       context: AgentPluginPreflightContext,
     ) {
       if (context.selection.adapter !== adapterId) {
-        throw new TypeError('Claude plugin installer does not match the selected adapter.');
+        throw new TypeError(
+          'Claude plugin installer does not match the selected adapter.',
+        );
       }
       const selected = freezeDistribution(distribution);
       const identity = parseQualifiedPluginId(selected.plugin);
@@ -91,9 +92,13 @@ export function createClaudePluginInstaller(
           installContext: AgentPluginInstallContext,
         ): Promise<AgentPluginInstallationReceipt> {
           assertClaudeRuntimeLayout(layout, installContext.paths);
-          const state = installContext.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID);
+          const state = installContext.stateDirectories.get(
+            CLAUDE_PLUGIN_STATE_ID,
+          );
           if (!state || installContext.stateDirectories.size !== 1) {
-            throw new TypeError('Claude plugin installation state is unavailable.');
+            throw new TypeError(
+              'Claude plugin installation state is unavailable.',
+            );
           }
           installContext.signal.throwIfAborted();
           // Capture the pre-install inventory so native dependencies cannot
@@ -139,11 +144,7 @@ export function createClaudePluginInstaller(
           expectedPluginIds.add(nativePluginId);
           const listResult = await runChecked(
             installContext.commands,
-            claudePluginCommand(executable, [
-              'plugin',
-              'list',
-              '--json',
-            ]),
+            claudePluginCommand(executable, ['plugin', 'list', '--json']),
             installContext.signal,
             'Claude could not verify the selected plugin.',
           );
@@ -160,7 +161,9 @@ export function createClaudePluginInstaller(
             installed.version,
           );
           if (installed.installPath !== installedLocation.absolute) {
-            throw new Error('Claude plugin list returned an invalid installation path.');
+            throw new Error(
+              'Claude plugin list returned an invalid installation path.',
+            );
           }
           const sourceCommit = await assertInstalledPluginRecord(
             state,
@@ -226,9 +229,13 @@ async function ensureMarketplaceCheckout(input: {
     registered.source.source !== 'github' ||
     registered.source.repo !== input.distribution.marketplace
   ) {
-    throw new Error('Claude plugin marketplace state does not match its repository or path.');
+    throw new Error(
+      'Claude plugin marketplace state does not match its repository or path.',
+    );
   }
-  const head = await input.state.inspect(`${input.marketplaceRelativePath}/.git/HEAD`);
+  const head = await input.state.inspect(
+    `${input.marketplaceRelativePath}/.git/HEAD`,
+  );
   if (head.kind !== 'file') {
     throw new Error('Plugin marketplace checkout state is malformed.');
   }
@@ -242,7 +249,9 @@ async function ensureMarketplaceCheckout(input: {
   );
   const commit = revision.stdout.trim();
   if (!FULL_GIT_COMMIT.test(commit)) {
-    throw new Error('Plugin marketplace checkout did not resolve to a Git commit.');
+    throw new Error(
+      'Plugin marketplace checkout did not resolve to a Git commit.',
+    );
   }
 
   const remote = await runGit(
@@ -254,9 +263,14 @@ async function ensureMarketplaceCheckout(input: {
   );
   if (
     remote.stdout.trim().replace(/\.git$/, '') !==
-    marketplaceRepositoryUrl(input.distribution.marketplace).replace(/\.git$/, '')
+    marketplaceRepositoryUrl(input.distribution.marketplace).replace(
+      /\.git$/,
+      '',
+    )
   ) {
-    throw new Error('Plugin marketplace checkout does not match its repository.');
+    throw new Error(
+      'Plugin marketplace checkout does not match its repository.',
+    );
   }
   return commit;
 }
@@ -283,7 +297,9 @@ async function readSelectedMarketplaceEntry(input: {
   const catalog = parseJson(shown.stdout, 'plugin marketplace catalog');
   assertBoundedJson(catalog, 'plugin marketplace catalog');
   if (!isPlainRecord(catalog) || catalog.name !== input.identity.marketplace) {
-    throw new Error('Fetched catalog does not match the plugin marketplace identity.');
+    throw new Error(
+      'Fetched catalog does not match the plugin marketplace identity.',
+    );
   }
   if (
     !Array.isArray(catalog.plugins) ||
@@ -296,7 +312,9 @@ async function readSelectedMarketplaceEntry(input: {
     (entry) => isPlainRecord(entry) && entry.name === input.identity.name,
   );
   if (matches.length !== 1 || !isPlainRecord(matches[0])) {
-    throw new Error('Plugin marketplace snapshot does not contain one selected entry.');
+    throw new Error(
+      'Plugin marketplace snapshot does not contain one selected entry.',
+    );
   }
   const entry = matches[0] as MarketplaceEntry;
   if (
@@ -305,8 +323,13 @@ async function readSelectedMarketplaceEntry(input: {
   ) {
     throw new Error('Plugin marketplace entry has an invalid version.');
   }
-  if (Object.hasOwn(entry, 'headers') || Object.hasOwn(entry, 'headersHelper')) {
-    throw new Error('Authenticated archive plugin sources are not supported by v1.');
+  if (
+    Object.hasOwn(entry, 'headers') ||
+    Object.hasOwn(entry, 'headersHelper')
+  ) {
+    throw new Error(
+      'Authenticated archive plugin sources are not supported by v1.',
+    );
   }
   if (
     Object.hasOwn(entry, 'dependencies') &&
@@ -329,7 +352,7 @@ async function knownMarketplaces(
   }
   const value = parseJson(
     Buffer.from(
-      await state.readFile(path, {maxBytes: MAX_COMMAND_OUTPUT_BYTES}),
+      await state.readFile(path, { maxBytes: MAX_COMMAND_OUTPUT_BYTES }),
     ).toString('utf8'),
     'Claude known marketplaces',
   );
@@ -351,11 +374,15 @@ async function installedPluginRecords(
   }
   const value = parseJson(
     Buffer.from(
-      await state.readFile(path, {maxBytes: MAX_COMMAND_OUTPUT_BYTES}),
+      await state.readFile(path, { maxBytes: MAX_COMMAND_OUTPUT_BYTES }),
     ).toString('utf8'),
     'Claude installed plugin state',
   );
-  if (!isPlainRecord(value) || value.version !== 2 || !isPlainRecord(value.plugins)) {
+  if (
+    !isPlainRecord(value) ||
+    value.version !== 2 ||
+    !isPlainRecord(value.plugins)
+  ) {
     throw new Error('Claude installed plugin state is malformed.');
   }
   assertBoundedJson(value, 'Claude installed plugin state');
@@ -403,7 +430,9 @@ function inspectPluginList(
       typeof row.installPath !== 'string' ||
       !row.installPath.startsWith(`${pluginStatePath}/cache/`)
     ) {
-      throw new Error('Claude plugin list returned an invalid installed plugin.');
+      throw new Error(
+        'Claude plugin list returned an invalid installed plugin.',
+      );
     }
     if (
       (Object.hasOwn(row, 'errors') &&
@@ -418,8 +447,13 @@ function inspectPluginList(
     }
     actualIds.add(row.id);
   }
-  if (!setsEqual(actualIds, expectedPluginIds) || !actualIds.has(selectedPluginId)) {
-    throw new Error('Claude installed an unexpected plugin dependency or identity.');
+  if (
+    !setsEqual(actualIds, expectedPluginIds) ||
+    !actualIds.has(selectedPluginId)
+  ) {
+    throw new Error(
+      'Claude installed an unexpected plugin dependency or identity.',
+    );
   }
   const selected = value.find(
     (row) => isPlainRecord(row) && row.id === selectedPluginId,
@@ -448,11 +482,19 @@ async function assertInstalledPluginRecord(
   const plugins = await installedPluginRecords(state);
   const actualIds = new Set(Object.keys(plugins));
   if (!setsEqual(actualIds, expectedPluginIds)) {
-    throw new Error('Claude installed plugin state contains an unexpected plugin.');
+    throw new Error(
+      'Claude installed plugin state contains an unexpected plugin.',
+    );
   }
   const records = plugins[selectedPluginId];
-  if (!Array.isArray(records) || records.length !== 1 || !isPlainRecord(records[0])) {
-    throw new Error('Claude installed plugin state omitted the selected plugin.');
+  if (
+    !Array.isArray(records) ||
+    records.length !== 1 ||
+    !isPlainRecord(records[0])
+  ) {
+    throw new Error(
+      'Claude installed plugin state omitted the selected plugin.',
+    );
   }
   const record = records[0];
   if (
@@ -460,17 +502,29 @@ async function assertInstalledPluginRecord(
     record.version !== expectedVersion ||
     record.installPath !== expectedInstallPath
   ) {
-    throw new Error('Claude installed plugin state does not match the expected plugin.');
+    throw new Error(
+      'Claude installed plugin state does not match the expected plugin.',
+    );
   }
   const expectedCommit = marketplaceSourceCommit(marketplaceSource);
   if (expectedCommit !== undefined && record.gitCommitSha !== expectedCommit) {
-    throw new Error('Claude installed plugin state does not match the marketplace commit.');
+    throw new Error(
+      'Claude installed plugin state does not match the marketplace commit.',
+    );
   }
-  if (!isGitMarketplaceSource(marketplaceSource) || !Object.hasOwn(record, 'gitCommitSha')) {
+  if (
+    !isGitMarketplaceSource(marketplaceSource) ||
+    !Object.hasOwn(record, 'gitCommitSha')
+  ) {
     return undefined;
   }
-  if (typeof record.gitCommitSha !== 'string' || !FULL_GIT_COMMIT.test(record.gitCommitSha)) {
-    throw new Error('Claude installed plugin state returned an invalid Git commit.');
+  if (
+    typeof record.gitCommitSha !== 'string' ||
+    !FULL_GIT_COMMIT.test(record.gitCommitSha)
+  ) {
+    throw new Error(
+      'Claude installed plugin state returned an invalid Git commit.',
+    );
   }
   return record.gitCommitSha;
 }
@@ -480,7 +534,7 @@ function installedPluginLocation(
   marketplace: string,
   pluginName: string,
   version: string,
-): Readonly<{relative: string; absolute: string}> {
+): Readonly<{ relative: string; absolute: string }> {
   const relative = `cache/${marketplace}/${pluginName}/${version}`;
   return Object.freeze({
     relative,
@@ -630,10 +684,12 @@ function parseQualifiedPluginId(value: string): QualifiedPluginId {
   ) {
     throw new TypeError('Claude plugin ID must be plugin@marketplace.');
   }
-  return Object.freeze({name, marketplace});
+  return Object.freeze({ name, marketplace });
 }
 
-function isGitMarketplaceSource(value: unknown): value is Record<string, unknown> {
+function isGitMarketplaceSource(
+  value: unknown,
+): value is Record<string, unknown> {
   return (
     isPlainRecord(value) &&
     (value.source === 'github' ||
@@ -648,7 +704,9 @@ function marketplaceSourceCommit(value: unknown): string | undefined {
     : undefined;
 }
 
-function hasSafeOptionalGitCoordinates(value: Record<string, unknown>): boolean {
+function hasSafeOptionalGitCoordinates(
+  value: Record<string, unknown>,
+): boolean {
   return (
     (!Object.hasOwn(value, 'ref') ||
       (typeof value.ref === 'string' && isSafeGitReference(value.ref))) &&
@@ -659,9 +717,7 @@ function hasSafeOptionalGitCoordinates(value: Record<string, unknown>): boolean 
 
 function isSafeGitReference(value: string): boolean {
   return (
-    value.length > 0 &&
-    value.length <= 4_096 &&
-    !/[\0-\x1f\x7f]/.test(value)
+    value.length > 0 && value.length <= 4_096 && !/[\0-\x1f\x7f]/.test(value)
   );
 }
 
@@ -671,13 +727,19 @@ function isSafeGitRepository(value: string): boolean {
 
 function marketplaceRepositoryUrl(repository: string): string {
   if (!isSafeGitHubRepository(repository)) {
-    throw new TypeError('Plugin marketplace must be a GitHub owner/repository.');
+    throw new TypeError(
+      'Plugin marketplace must be a GitHub owner/repository.',
+    );
   }
   return `https://github.com/${repository}.git`;
 }
 
 function isSafeHttpsUrl(value: string): boolean {
-  if (value.length === 0 || value.length > 4_096 || /\s|[\0-\x1f\x7f]/.test(value)) {
+  if (
+    value.length === 0 ||
+    value.length > 4_096 ||
+    /\s|[\0-\x1f\x7f]/.test(value)
+  ) {
     return false;
   }
   try {
@@ -713,12 +775,14 @@ function parseJson(source: string, label: string): unknown {
   try {
     return JSON.parse(source) as unknown;
   } catch (error) {
-    throw new Error(`${label} is not valid JSON.`, {cause: error});
+    throw new Error(`${label} is not valid JSON.`, { cause: error });
   }
 }
 
 function assertBoundedJson(value: unknown, label: string): void {
-  const pending: Array<{value: unknown; depth: number}> = [{value, depth: 0}];
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value, depth: 0 },
+  ];
   let nodes = 0;
   while (pending.length > 0) {
     const current = pending.pop()!;
@@ -728,11 +792,11 @@ function assertBoundedJson(value: unknown, label: string): void {
     }
     if (Array.isArray(current.value)) {
       for (const child of current.value) {
-        pending.push({value: child, depth: current.depth + 1});
+        pending.push({ value: child, depth: current.depth + 1 });
       }
     } else if (isPlainRecord(current.value)) {
       for (const child of Object.values(current.value)) {
-        pending.push({value: child, depth: current.depth + 1});
+        pending.push({ value: child, depth: current.depth + 1 });
       }
     } else if (
       current.value !== null &&
@@ -745,15 +809,22 @@ function assertBoundedJson(value: unknown, label: string): void {
   }
 }
 
-function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
-  return left.size === right.size && [...left].every((value) => right.has(value));
+function setsEqual(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
+  return (
+    left.size === right.size && [...left].every((value) => right.has(value))
+  );
 }
 
 function hasExactKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
 ): boolean {
-  return Reflect.ownKeys(value).length === keys.length && hasOnlyKeys(value, keys);
+  return (
+    Reflect.ownKeys(value).length === keys.length && hasOnlyKeys(value, keys)
+  );
 }
 
 function hasOnlyKeys(

@@ -1,18 +1,22 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
-import {getMatrixGroups} from './matrix.js';
-import type {ExperimentMatrixGroupV1, ExperimentMatrixV1} from './types.js';
+import { getMatrixGroups } from './matrix.js';
+import type { ExperimentMatrixGroupV1, ExperimentMatrixV1 } from './types.js';
 
 describe('matrix group views', () => {
   const group: ExperimentMatrixGroupV1 = {
     cases: ['cases/case/a/case.yaml'],
     treatments: ['baseline'],
-    agents: [{adapter: 'codex', provider: 'openai', model: 'gpt'}],
+    agents: [{ adapter: 'codex', provider: 'openai', model: 'gpt' }],
   };
 
   it('views a flat matrix as one group without changing authored shape', () => {
-    const matrix: ExperimentMatrixV1 = {...structuredClone(group), repetitions: 2, retries: 1};
+    const matrix: ExperimentMatrixV1 = {
+      ...structuredClone(group),
+      repetitions: 2,
+      retries: 1,
+    };
     const before = structuredClone(matrix);
     const groups = getMatrixGroups(matrix);
     assert.equal(groups.length, 1);
@@ -20,20 +24,30 @@ describe('matrix group views', () => {
     assert.equal(groups[0]!.cases, matrix.cases);
     assert.equal(groups[0]!.treatments, matrix.treatments);
     assert.equal(groups[0]!.agents, matrix.agents);
-    assert.deepEqual(Object.keys(groups[0]!).sort(), ['agents', 'cases', 'treatments']);
+    assert.deepEqual(Object.keys(groups[0]!).sort(), [
+      'agents',
+      'cases',
+      'treatments',
+    ]);
     assert.deepEqual(matrix, before);
     assert.equal(Object.hasOwn(matrix, 'groups'), false);
   });
 
   it('retains grouped order and boundaries without changing authored shape', () => {
     const matrix: ExperimentMatrixV1 = {
-      groups: [structuredClone(group), {...structuredClone(group), cases: ['cases/case-b.case.yaml']}],
+      groups: [
+        structuredClone(group),
+        { ...structuredClone(group), cases: ['cases/case-b.case.yaml'] },
+      ],
       repetitions: 2,
       retries: 1,
     };
     const before = structuredClone(matrix);
     assert.equal(getMatrixGroups(matrix), matrix.groups);
-    assert.deepEqual(getMatrixGroups(matrix).map(({cases}) => cases), [['cases/case/a/case.yaml'], ['cases/case-b.case.yaml']]);
+    assert.deepEqual(
+      getMatrixGroups(matrix).map(({ cases }) => cases),
+      [['cases/case/a/case.yaml'], ['cases/case-b.case.yaml']],
+    );
     assert.deepEqual(matrix, before);
     assert.equal(Object.hasOwn(matrix, 'cases'), false);
   });

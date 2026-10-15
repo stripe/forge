@@ -1,20 +1,17 @@
 #!/usr/bin/env node
 
-import {spawnSync} from 'node:child_process';
-import {
-  existsSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-} from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import * as path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
-import {parseDocument} from 'yaml';
+import { parseDocument } from 'yaml';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+const packageJson = JSON.parse(
+  readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
+);
 const markdownPaths = [
   'README.md',
   'AGENTS.md',
@@ -37,9 +34,7 @@ for (const document of documents.values()) {
 
 const packageExports = new Set(
   Object.keys(packageJson.exports).map((entry) =>
-    entry === '.'
-      ? packageJson.name
-      : `${packageJson.name}${entry.slice(1)}`,
+    entry === '.' ? packageJson.name : `${packageJson.name}${entry.slice(1)}`,
   ),
 );
 validateDocumentedExports(
@@ -98,13 +93,16 @@ function parseMarkdown(relativePath) {
       const baseAnchor = githubAnchor(text);
       const duplicate = anchorCounts.get(baseAnchor) ?? 0;
       anchorCounts.set(baseAnchor, duplicate + 1);
-      const anchor = duplicate === 0 ? baseAnchor : `${baseAnchor}-${duplicate}`;
-      headings.push({level, text, line: index + 1, anchor});
+      const anchor =
+        duplicate === 0 ? baseAnchor : `${baseAnchor}-${duplicate}`;
+      headings.push({ level, text, line: index + 1, anchor });
       anchors.add(anchor);
     }
 
-    for (const match of line.matchAll(/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
-      links.push({href: match[1], line: index + 1});
+    for (const match of line.matchAll(
+      /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
+    )) {
+      links.push({ href: match[1], line: index + 1 });
     }
   }
 
@@ -131,16 +129,27 @@ function validateSnippet(relativePath, fence, endLine) {
     try {
       JSON.parse(source);
     } catch (error) {
-      addError(relativePath, fence.startLine, `invalid JSON snippet: ${error.message}`);
+      addError(
+        relativePath,
+        fence.startLine,
+        `invalid JSON snippet: ${error.message}`,
+      );
     }
     return;
   }
 
   if (language === 'yaml' || language === 'yml') {
     checkedSnippets += 1;
-    const document = parseDocument(source, {prettyErrors: false, uniqueKeys: true});
+    const document = parseDocument(source, {
+      prettyErrors: false,
+      uniqueKeys: true,
+    });
     for (const error of document.errors) {
-      addError(relativePath, fence.startLine, `invalid YAML snippet: ${error.message}`);
+      addError(
+        relativePath,
+        fence.startLine,
+        `invalid YAML snippet: ${error.message}`,
+      );
     }
     return;
   }
@@ -184,7 +193,7 @@ function validateSnippet(relativePath, fence, endLine) {
 }
 
 function validateLinks(document) {
-  for (const {href, line} of document.links) {
+  for (const { href, line } of document.links) {
     if (href.startsWith('mailto:')) continue;
     if (href.startsWith('http://') || href.startsWith('https://')) {
       validateRepositoryLink(document.relativePath, line, href);
@@ -192,29 +201,38 @@ function validateLinks(document) {
     }
 
     const [pathPart, anchor] = href.split('#', 2);
-    const targetPath = pathPart === ''
-      ? document.relativePath
-      : relativeToProject(
-          path.resolve(
-            projectRoot,
-            path.dirname(document.relativePath),
-            decodeURIComponent(pathPart),
-          ),
-        );
-    if (targetPath === undefined || !existsSync(path.join(projectRoot, targetPath))) {
-      addError(document.relativePath, line, `link target does not exist: ${href}`);
+    const targetPath =
+      pathPart === ''
+        ? document.relativePath
+        : relativeToProject(
+            path.resolve(
+              projectRoot,
+              path.dirname(document.relativePath),
+              decodeURIComponent(pathPart),
+            ),
+          );
+    if (
+      targetPath === undefined ||
+      !existsSync(path.join(projectRoot, targetPath))
+    ) {
+      addError(
+        document.relativePath,
+        line,
+        `link target does not exist: ${href}`,
+      );
       continue;
     }
     if (anchor !== undefined) {
       const targetDocument = documents.get(targetPath);
       if (targetDocument !== undefined && !targetDocument.anchors.has(anchor)) {
-        addError(document.relativePath, line, `link anchor does not exist: ${href}`);
+        addError(
+          document.relativePath,
+          line,
+          `link anchor does not exist: ${href}`,
+        );
       }
     }
-    if (
-      isPublished(document.relativePath) &&
-      !isPublished(targetPath)
-    ) {
+    if (isPublished(document.relativePath) && !isPublished(targetPath)) {
       addError(
         document.relativePath,
         line,
@@ -225,12 +243,19 @@ function validateLinks(document) {
 }
 
 function validateRepositoryLink(relativePath, line, href) {
-  const match = /^https:\/\/github\.com\/stripe\/forge\/(blob|tree)\/main\/([^#?]+)(?:#[^?]+)?$/.exec(href);
+  const match =
+    /^https:\/\/github\.com\/stripe\/forge\/(blob|tree)\/main\/([^#?]+)(?:#[^?]+)?$/.exec(
+      href,
+    );
   if (match === null) return;
   const targetPath = decodeURIComponent(match[2]);
   const absolutePath = path.join(projectRoot, targetPath);
   if (!existsSync(absolutePath)) {
-    addError(relativePath, line, `repository link target does not exist: ${href}`);
+    addError(
+      relativePath,
+      line,
+      `repository link target does not exist: ${href}`,
+    );
     return;
   }
   const expectedKind = statSync(absolutePath).isDirectory() ? 'tree' : 'blob';
@@ -245,7 +270,9 @@ function validateRepositoryLink(relativePath, line, href) {
 
 function validateDocumentedExports(relativePath, headingText, expected) {
   const document = documents.get(relativePath);
-  const headingIndex = document.headings.findIndex(({text}) => text === headingText);
+  const headingIndex = document.headings.findIndex(
+    ({ text }) => text === headingText,
+  );
   if (headingIndex < 0) {
     addError(relativePath, 1, `missing export section: ${headingText}`);
     return;
@@ -253,7 +280,7 @@ function validateDocumentedExports(relativePath, headingText, expected) {
   const heading = document.headings[headingIndex];
   const nextHeading = document.headings
     .slice(headingIndex + 1)
-    .find(({level}) => level <= heading.level);
+    .find(({ level }) => level <= heading.level);
   const endLine = nextHeading?.line ?? document.lines.length + 1;
   const section = document.lines.slice(heading.line, endLine - 1).join('\n');
   const actual = new Set(
@@ -279,7 +306,8 @@ function isPublished(relativePath) {
 
 function relativeToProject(absolutePath) {
   const relativePath = path.relative(projectRoot, absolutePath);
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) return undefined;
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath))
+    return undefined;
   return relativePath.split(path.sep).join('/');
 }
 
@@ -294,7 +322,9 @@ function githubAnchor(text) {
 }
 
 function setsEqual(left, right) {
-  return left.size === right.size && [...left].every((value) => right.has(value));
+  return (
+    left.size === right.size && [...left].every((value) => right.has(value))
+  );
 }
 
 function formatSet(values) {

@@ -79,6 +79,11 @@ or package checks from `package.json`:
 pnpm test -- path/to/file.test.ts
 ```
 
+Use Biome for formatting, import organization, and linting. Run `pnpm lint`
+for code changes; it is also included in `pnpm check`. Use `pnpm lint:fix`
+for safe automatic fixes, and preserve the exclusions in `biome.json` for
+integrity-pinned inputs and assets.
+
 Run `pnpm check` before handing off changes that affect code, public types,
 exports, execution, packaging, or release artifacts. For a documentation-only
 change, run `pnpm check:docs` and review the affected content. Broaden or repeat

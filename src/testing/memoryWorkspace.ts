@@ -1,4 +1,3 @@
-import {isSafeWorkspaceRelativePath} from '../model/paths.js';
 import type {
   MutableWorkspace,
   ReadonlyWorkspace,
@@ -6,6 +5,7 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.js';
+import { isSafeWorkspaceRelativePath } from '../model/paths.js';
 
 export type TestFileContents = string | Uint8Array;
 
@@ -42,14 +42,14 @@ export function createMemoryWorkspace(
       });
     }
     if (directories(files).has(relativePath)) {
-      return Object.freeze({path: relativePath, kind: 'directory' as const});
+      return Object.freeze({ path: relativePath, kind: 'directory' as const });
     }
-    return Object.freeze({path: relativePath, kind: 'absent' as const});
+    return Object.freeze({ path: relativePath, kind: 'absent' as const });
   };
 
   const readFile = async (
     relativePath: string,
-    options: {maxBytes?: number} = {},
+    options: { maxBytes?: number } = {},
   ): Promise<Uint8Array> => {
     assertWorkspacePath(relativePath, false);
     const contents = files.get(relativePath);
@@ -85,8 +85,12 @@ export function createMemoryWorkspace(
     const prefix = under === '.' ? '' : `${under}/`;
     const entries: WorkspaceEntry[] = [];
     for (const directory of allDirectories) {
-      if (directory !== '.' && directory !== under && directory.startsWith(prefix)) {
-        entries.push(Object.freeze({path: directory, kind: 'directory'}));
+      if (
+        directory !== '.' &&
+        directory !== under &&
+        directory.startsWith(prefix)
+      ) {
+        entries.push(Object.freeze({ path: directory, kind: 'directory' }));
       }
     }
     for (const [relativePath, contents] of files) {
@@ -124,11 +128,15 @@ export function createMemoryWorkspace(
       if (sealed) throw new Error('Memory workspace is sealed.');
       assertWorkspacePath(relativePath, false);
       if (!(body instanceof Uint8Array)) {
-        throw new TypeError('Memory workspace writes require Uint8Array bytes.');
+        throw new TypeError(
+          'Memory workspace writes require Uint8Array bytes.',
+        );
       }
       const mode = options.mode ?? 0o644;
       if (!Number.isSafeInteger(mode) || mode < 0 || mode > 0o777) {
-        throw new TypeError('Workspace file mode must be between 0000 and 0777.');
+        throw new TypeError(
+          'Workspace file mode must be between 0000 and 0777.',
+        );
       }
       const parentSegments = relativePath.split('/');
       for (let index = 1; index < parentSegments.length; index += 1) {
@@ -138,7 +146,9 @@ export function createMemoryWorkspace(
         }
       }
       if (directories(files).has(relativePath)) {
-        throw new Error(`Workspace path is an existing directory: ${relativePath}`);
+        throw new Error(
+          `Workspace path is an existing directory: ${relativePath}`,
+        );
       }
       files.set(relativePath, copyUint8Array(body));
     },
@@ -194,7 +204,7 @@ function copyUint8Array(contents: Uint8Array): Uint8Array {
 }
 
 function assertWorkspacePath(value: string, allowRoot: boolean): void {
-  if (!isSafeWorkspaceRelativePath(value, {allowRoot})) {
+  if (!isSafeWorkspaceRelativePath(value, { allowRoot })) {
     throw new TypeError(`Invalid workspace-relative path: ${String(value)}`);
   }
 }

@@ -1,4 +1,4 @@
-import type {RuntimePlatform} from '../../contracts/runtime.js';
+import type { RuntimePlatform } from '../../contracts/runtime.js';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
@@ -24,7 +24,7 @@ export async function detectDockerRuntimePlatform(
     {
       timeoutMs: options.timeoutMs ?? 30_000,
       maxOutputBytes: 64 * 1024,
-      ...(options.signal === undefined ? {} : {signal: options.signal}),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
   );
   if (result.exitCode !== 0) {

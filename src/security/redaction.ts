@@ -6,7 +6,10 @@ export interface RedactionResult<T> {
 }
 
 /** Replace exact resolved credential values throughout a JSON-compatible value. */
-export function redactSecrets<T>(value: T, secrets: readonly string[]): RedactionResult<T> {
+export function redactSecrets<T>(
+  value: T,
+  secrets: readonly string[],
+): RedactionResult<T> {
   const normalizedSecrets = normalizeSecrets(secrets);
   let replacements = 0;
 
@@ -23,7 +26,11 @@ export function redactSecrets<T>(value: T, secrets: readonly string[]): Redactio
 
   const visit = (input: unknown, seen: Set<object>): unknown => {
     if (typeof input === 'string') return redactString(input);
-    if (input === null || typeof input === 'boolean' || typeof input === 'number') {
+    if (
+      input === null ||
+      typeof input === 'boolean' ||
+      typeof input === 'number'
+    ) {
       return input;
     }
     if (Array.isArray(input)) {
@@ -40,7 +47,9 @@ export function redactSecrets<T>(value: T, secrets: readonly string[]): Redactio
       for (const [key, child] of Object.entries(input)) {
         const redactedKey = redactString(key);
         if (Object.hasOwn(output, redactedKey)) {
-          throw new TypeError('Secret redaction produced duplicate object keys.');
+          throw new TypeError(
+            'Secret redaction produced duplicate object keys.',
+          );
         }
         Object.defineProperty(output, redactedKey, {
           configurable: true,
@@ -52,10 +61,12 @@ export function redactSecrets<T>(value: T, secrets: readonly string[]): Redactio
       seen.delete(input);
       return output;
     }
-    throw new TypeError('Secret redaction accepts only JSON-compatible values.');
+    throw new TypeError(
+      'Secret redaction accepts only JSON-compatible values.',
+    );
   };
 
-  return {value: visit(value, new Set()) as T, replacements};
+  return { value: visit(value, new Set()) as T, replacements };
 }
 
 /** Fail closed when a logical JSON value contains a resolved credential. */
@@ -75,7 +86,8 @@ export function assertNoSecrets(
   secrets: readonly string[],
   label: string,
 ): void {
-  const text = typeof body === 'string' ? body : Buffer.from(body).toString('utf8');
+  const text =
+    typeof body === 'string' ? body : Buffer.from(body).toString('utf8');
   if (normalizeSecrets(secrets).some((secret) => text.includes(secret))) {
     throw new SecretLeakError(label);
   }
@@ -85,7 +97,9 @@ export class SecretLeakError extends Error {
   readonly code = 'secret_leak_detected' as const;
 
   constructor(readonly artifact: string) {
-    super(`Refusing to persist ${artifact} because it contains a resolved credential.`);
+    super(
+      `Refusing to persist ${artifact} because it contains a resolved credential.`,
+    );
     this.name = 'SecretLeakError';
   }
 }

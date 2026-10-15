@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
-import {FORGE_VERSION} from '../version.js';
-import {BenchmarkModelError} from './errors.js';
-import {parseResolvedRunPlan} from './parse.js';
-import type {ResolvedRunPlanV1} from './types.js';
+import { FORGE_VERSION } from '../version.js';
+import { BenchmarkModelError } from './errors.js';
+import { parseResolvedRunPlan } from './parse.js';
+import type { ResolvedRunPlanV1 } from './types.js';
 
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
@@ -12,10 +12,10 @@ function validPlan(): ResolvedRunPlanV1 {
   const setup = [
     {
       uses: 'forge/write' as const,
-      with: {target: 'prompt.txt', source: {content: 'hello'}},
+      with: { target: 'prompt.txt', source: { content: 'hello' } },
     },
   ];
-  const checks = {files_created: ['prompt.txt']};
+  const checks = { files_created: ['prompt.txt'] };
   const agent = {
     adapter: 'claude-code',
     provider: 'anthropic',
@@ -25,7 +25,7 @@ function validPlan(): ResolvedRunPlanV1 {
     selection: {
       case_id: 'sample/write',
       treatment: 'baseline',
-      agent: {...agent},
+      agent: { ...agent },
       repetition: 0,
     },
     provenance: {
@@ -42,7 +42,7 @@ function validPlan(): ResolvedRunPlanV1 {
         id: 'sample/write',
         path: 'cases/sample/write/eval.yaml',
       },
-      forge: {version: FORGE_VERSION},
+      forge: { version: FORGE_VERSION },
     },
     case: {
       id: 'sample/write',
@@ -52,7 +52,7 @@ function validPlan(): ResolvedRunPlanV1 {
       judging_criteria: [],
       checks,
     },
-    treatment: {id: 'baseline', setup: []},
+    treatment: { id: 'baseline', setup: [] },
     setup,
     interaction: {
       mode: 'one_shot',
@@ -61,11 +61,11 @@ function validPlan(): ResolvedRunPlanV1 {
       effective_prompt: 'Create the requested file.',
       max_turns: 1,
     },
-    evaluation: {judging_criteria: [], checks},
+    evaluation: { judging_criteria: [], checks },
     agent,
     runtime: {
       adapter: 'docker',
-      image: {kind: 'forge'},
+      image: { kind: 'forge' },
       platform: 'linux/amd64',
       resources: {
         memory_bytes: 4 * 1024 * 1024 * 1024,
@@ -73,7 +73,7 @@ function validPlan(): ResolvedRunPlanV1 {
         process_count: 512,
       },
     },
-    limits: {run_timeout_ms: 30 * 60 * 1_000},
+    limits: { run_timeout_ms: 30 * 60 * 1_000 },
   };
 }
 
@@ -89,57 +89,109 @@ describe('parseResolvedRunPlan', () => {
   });
   it('preserves saved Codex plans without a hook policy and rejects policy drift', () => {
     const input = validPlan();
-    input.agent = {adapter: 'codex', provider: 'openai', model: 'gpt-test'};
-    input.selection.agent = {...input.agent};
+    input.agent = { adapter: 'codex', provider: 'openai', model: 'gpt-test' };
+    input.selection.agent = { ...input.agent };
     assert.deepEqual(parseResolvedRunPlan(input), input);
     assert.equal(parseResolvedRunPlan(input).agent.hook_trust, undefined);
 
     input.agent.hook_trust = 'native';
-    assert.throws(() => parseResolvedRunPlan(input), {message: /selection agent must match/});
+    assert.throws(() => parseResolvedRunPlan(input), {
+      message: /selection agent must match/,
+    });
     input.selection.agent.hook_trust = 'native';
     assert.deepEqual(parseResolvedRunPlan(input), input);
     input.selection.agent.hook_trust = 'automation';
-    assert.throws(() => parseResolvedRunPlan(input), {message: /selection agent must match/});
+    assert.throws(() => parseResolvedRunPlan(input), {
+      message: /selection agent must match/,
+    });
   });
 
   it('rejects removed plan schema and source digest fields', () => {
-    assert.throws(() => parseResolvedRunPlan({...validPlan(), schema_version: 2}), BenchmarkModelError);
+    assert.throws(
+      () => parseResolvedRunPlan({ ...validPlan(), schema_version: 2 }),
+      BenchmarkModelError,
+    );
     for (const source of ['experiment', 'case'] as const) {
       const plan = validPlan();
-      assert.throws(() => parseResolvedRunPlan({
-        ...plan,
-        provenance: {
-          ...plan.provenance,
-          [source]: {...plan.provenance[source], sha256: DIGEST},
-        },
-      }), BenchmarkModelError);
+      assert.throws(
+        () =>
+          parseResolvedRunPlan({
+            ...plan,
+            provenance: {
+              ...plan.provenance,
+              [source]: { ...plan.provenance[source], sha256: DIGEST },
+            },
+          }),
+        BenchmarkModelError,
+      );
     }
   });
 
   it('checks official producer compatibility before interpreting the plan payload', () => {
-    assert.throws(() => parseResolvedRunPlan({provenance: {forge: {version: '99.0.0'}}}),
-      (error: unknown) => error instanceof BenchmarkModelError &&
-        error.cause instanceof TypeError && /Forge 99\.0\.0 is incompatible/.test(error.cause.message));
+    assert.throws(
+      () =>
+        parseResolvedRunPlan({ provenance: { forge: { version: '99.0.0' } } }),
+      (error: unknown) =>
+        error instanceof BenchmarkModelError &&
+        error.cause instanceof TypeError &&
+        /Forge 99\.0\.0 is incompatible/.test(error.cause.message),
+    );
     const input = validPlan();
-    assert.throws(() => parseResolvedRunPlan({...input, provenance: {...input.provenance, forge: {}}}), BenchmarkModelError);
+    assert.throws(
+      () =>
+        parseResolvedRunPlan({
+          ...input,
+          provenance: { ...input.provenance, forge: {} },
+        }),
+      BenchmarkModelError,
+    );
   });
 
   it('preserves source provenance without using development commit identity as a compatibility gate', () => {
     for (const length of [40, 64]) {
       const input = validPlan();
-      input.provenance.forge = {version: FORGE_VERSION, commit_sha: 'a'.repeat(length), dirty: true};
+      input.provenance.forge = {
+        version: FORGE_VERSION,
+        commit_sha: 'a'.repeat(length),
+        dirty: true,
+      };
       const parsed = parseResolvedRunPlan(input);
       assert.deepEqual(parsed.provenance.forge, input.provenance.forge);
       assert.equal(Object.isFrozen(parsed.provenance.forge), true);
-      assert.throws(() => parseResolvedRunPlan({...input, provenance: {...input.provenance,
-        forge: {...input.provenance.forge, commit_sha: 'short'}}}), BenchmarkModelError);
-      assert.throws(() => parseResolvedRunPlan({...input, provenance: {...input.provenance,
-        forge: {...input.provenance.forge, unexpected: true}}}), BenchmarkModelError);
+      assert.throws(
+        () =>
+          parseResolvedRunPlan({
+            ...input,
+            provenance: {
+              ...input.provenance,
+              forge: { ...input.provenance.forge, commit_sha: 'short' },
+            },
+          }),
+        BenchmarkModelError,
+      );
+      assert.throws(
+        () =>
+          parseResolvedRunPlan({
+            ...input,
+            provenance: {
+              ...input.provenance,
+              forge: { ...input.provenance.forge, unexpected: true },
+            },
+          }),
+        BenchmarkModelError,
+      );
     }
     if (FORGE_VERSION.includes('-dev.')) {
       const input = validPlan();
-      input.provenance.forge = {version: '0.0.0-dev.1', commit_sha: 'b'.repeat(40), dirty: false};
-      assert.deepEqual(parseResolvedRunPlan(input).provenance.forge, input.provenance.forge);
+      input.provenance.forge = {
+        version: '0.0.0-dev.1',
+        commit_sha: 'b'.repeat(40),
+        dirty: false,
+      };
+      assert.deepEqual(
+        parseResolvedRunPlan(input).provenance.forge,
+        input.provenance.forge,
+      );
     }
   });
 
@@ -152,7 +204,11 @@ describe('parseResolvedRunPlan', () => {
     assert.equal(Object.isFrozen(parsed), true);
     assert.equal(Object.isFrozen(parsed.setup), true);
     assert.equal(Object.isFrozen(parsed.case), true);
-    assert.equal('resources' in parsed.runtime && Object.isFrozen(parsed.runtime.resources), true);
+    assert.equal(
+      'resources' in parsed.runtime &&
+        Object.isFrozen(parsed.runtime.resources),
+      true,
+    );
     assert.equal(Object.isFrozen(input), false);
     input.case.setup[0]!.with.target = 'changed.txt';
     assert.equal(parsed.case.setup[0]!.with.target, 'prompt.txt');
@@ -162,46 +218,69 @@ describe('parseResolvedRunPlan', () => {
   it('rejects selection identity drift from the resolved case and agent', () => {
     const input = validPlan();
     input.selection.case_id = 'sample/other';
-    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /case IDs must match/});
+    assert.throws(() => parseResolvedRunPlan(input), {
+      code: 'invalid_plan',
+      message: /case IDs must match/,
+    });
 
     const changedAgent = validPlan();
     changedAgent.selection.agent.model = 'other-model';
-    assert.throws(() => parseResolvedRunPlan(changedAgent), {code: 'invalid_plan', message: /selection agent must match/});
+    assert.throws(() => parseResolvedRunPlan(changedAgent), {
+      code: 'invalid_plan',
+      message: /selection agent must match/,
+    });
   });
 
   it('rejects reordered case and treatment setup in a serialized plan', () => {
     const input = validPlan();
     const treatmentStep = {
       uses: 'forge/write',
-      with: {target: 'treatment.txt', source: {content: 'treatment'}},
+      with: { target: 'treatment.txt', source: { content: 'treatment' } },
     };
     input.selection.treatment = 'with-file';
-    input.treatment = {id: 'with-file', setup: [treatmentStep]};
+    input.treatment = { id: 'with-file', setup: [treatmentStep] };
     input.setup = [...input.case.setup, treatmentStep];
     assert.deepEqual(parseResolvedRunPlan(input).setup, input.setup);
     input.setup = [...input.setup].reverse();
-    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /case setup followed by treatment setup/});
+    assert.throws(() => parseResolvedRunPlan(input), {
+      code: 'invalid_plan',
+      message: /case setup followed by treatment setup/,
+    });
   });
 
   it('rejects evaluation checks edited independently of the selected case', () => {
     const input = validPlan();
-    input.evaluation.checks = {files_created: ['other.txt']};
-    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /evaluation checks must match/});
+    input.evaluation.checks = { files_created: ['other.txt'] };
+    assert.throws(() => parseResolvedRunPlan(input), {
+      code: 'invalid_plan',
+      message: /evaluation checks must match/,
+    });
   });
 
   it('binds judging criteria to the selected case and rejects former plan fields', () => {
     const input = validPlan();
     input.case.judging_criteria = ['The task is complete.'];
     input.evaluation.judging_criteria = [...input.case.judging_criteria];
-    input.evaluation.judge = {provider: 'anthropic', model: 'claude-judge'};
+    input.evaluation.judge = { provider: 'anthropic', model: 'claude-judge' };
     assert.deepEqual(parseResolvedRunPlan(input), input);
     for (const section of ['case', 'evaluation'] as const) {
-      assert.throws(() => parseResolvedRunPlan({
-        ...input, [section]: {...input[section], success_guidelines: input[section].judging_criteria},
-      }), BenchmarkModelError);
+      assert.throws(
+        () =>
+          parseResolvedRunPlan({
+            ...input,
+            [section]: {
+              ...input[section],
+              success_guidelines: input[section].judging_criteria,
+            },
+          }),
+        BenchmarkModelError,
+      );
     }
     input.evaluation.judging_criteria = ['A different requirement.'];
-    assert.throws(() => parseResolvedRunPlan(input), {code: 'invalid_plan', message: /evaluation criteria must match/});
+    assert.throws(() => parseResolvedRunPlan(input), {
+      code: 'invalid_plan',
+      message: /evaluation criteria must match/,
+    });
   });
 
   it('rejects inconsistent duplicated execution fields', () => {
@@ -212,11 +291,13 @@ describe('parseResolvedRunPlan', () => {
       parseResolvedRunPlan(input);
       throw new Error('Expected the resolved plan to be rejected.');
     } catch (error) {
-      assert.ok((error instanceof BenchmarkModelError));
+      assert.ok(error instanceof BenchmarkModelError);
       assert.equal((error as BenchmarkModelError).code, 'invalid_plan');
-      assert.ok(error !== null && typeof error === 'object' && 'message' in error);
-      assert.equal(typeof error['message'], 'string');
-      assert.ok((error['message'] as string).includes('effective prompt'));
+      assert.ok(
+        error !== null && typeof error === 'object' && 'message' in error,
+      );
+      assert.equal(typeof error.message, 'string');
+      assert.ok((error.message as string).includes('effective prompt'));
     }
   });
 
@@ -226,10 +307,15 @@ describe('parseResolvedRunPlan', () => {
       id: 'sample/write',
       initial_prompt: 'Create the requested file.',
     };
-    assert.throws(() => parseResolvedRunPlan(missingDefaults), BenchmarkModelError);
+    assert.throws(
+      () => parseResolvedRunPlan(missingDefaults),
+      BenchmarkModelError,
+    );
 
-    assert.throws(() =>
-      parseResolvedRunPlan({...validPlan(), private_overlay: true}), BenchmarkModelError);
+    assert.throws(
+      () => parseResolvedRunPlan({ ...validPlan(), private_overlay: true }),
+      BenchmarkModelError,
+    );
   });
 
   it('rejects completion models when their score-affecting behavior is unused', () => {
@@ -238,14 +324,18 @@ describe('parseResolvedRunPlan', () => {
       provider: 'anthropic',
       model: 'claude-role-player',
     };
-    assert.throws(() => parseResolvedRunPlan(withRolePlayer), {message: /cannot include a role_player model/});
+    assert.throws(() => parseResolvedRunPlan(withRolePlayer), {
+      message: /cannot include a role_player model/,
+    });
 
     const withJudge = validPlan();
     withJudge.evaluation.judge = {
       provider: 'anthropic',
       model: 'claude-judge',
     };
-    assert.throws(() => parseResolvedRunPlan(withJudge), {message: /cannot include a judge model/});
+    assert.throws(() => parseResolvedRunPlan(withJudge), {
+      message: /cannot include a judge model/,
+    });
   });
 
   it('classifies structural failures as invalid plans', () => {
@@ -256,7 +346,7 @@ describe('parseResolvedRunPlan', () => {
       parseResolvedRunPlan(cyclic);
       throw new Error('Expected the cyclic plan to be rejected.');
     } catch (error) {
-      assert.ok((error instanceof BenchmarkModelError));
+      assert.ok(error instanceof BenchmarkModelError);
       assert.equal((error as BenchmarkModelError).code, 'invalid_plan');
     }
   });

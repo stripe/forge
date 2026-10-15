@@ -1,4 +1,4 @@
-export {BenchmarkModelError, type BenchmarkModelErrorCode} from './errors.js';
+export { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.js';
 export {
   isSha256Digest,
   isSha256Hex,
@@ -6,17 +6,17 @@ export {
   sha256Digest,
   sha256Hex,
 } from './hashes.js';
-export {loadDataset, loadExperimentConfig} from './loaders.js';
-export {getMatrixGroups} from './matrix.js';
+export { loadDataset, loadExperimentConfig } from './loaders.js';
+export { getMatrixGroups } from './matrix.js';
 export {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
-  parseExperimentConfig,
-  parseExperimentConfigYaml,
   parseDatasetManifest,
   parseDatasetManifestJson,
   parseEvalCase,
   parseEvalCaseYaml,
+  parseExperimentConfig,
+  parseExperimentConfigYaml,
   parseResolvedRunPlan,
   parseRunSelection,
   parseSetupStep,

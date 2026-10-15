@@ -110,12 +110,11 @@ interface AtifSubagentTrajectoryRefCommon {
 }
 
 /** A subagent reference must have at least one real resolution mechanism. */
-export type AtifSubagentTrajectoryRef =
-  AtifSubagentTrajectoryRefCommon &
-    (
-      | {trajectory_id: string; trajectory_path?: string | null}
-      | {trajectory_id?: string | null; trajectory_path: string}
-    );
+export type AtifSubagentTrajectoryRef = AtifSubagentTrajectoryRefCommon &
+  (
+    | { trajectory_id: string; trajectory_path?: string | null }
+    | { trajectory_id?: string | null; trajectory_path: string }
+  );
 
 export interface AtifObservationResult {
   source_call_id?: string | null;

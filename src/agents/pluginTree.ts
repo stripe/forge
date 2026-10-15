@@ -1,9 +1,9 @@
-import {createHash} from 'node:crypto';
+import { createHash } from 'node:crypto';
 
-import type {AgentPluginInstallationReceipt} from '../contracts/plugin.js';
-import type {MutableWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
-import {sha256Digest} from '../model/hashes.js';
-import {serializeCanonicalJson} from '../serialization.js';
+import type { AgentPluginInstallationReceipt } from '../contracts/plugin.js';
+import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.js';
+import { sha256Digest } from '../model/hashes.js';
+import { serializeCanonicalJson } from '../serialization.js';
 
 const MAX_PLUGIN_FILES = 100_000;
 const MAX_PLUGIN_FILE_BYTES = 64 * 1024 * 1024;
@@ -37,12 +37,15 @@ export async function inspectInstalledPluginTree(
     entries.length === 0 ||
     entries.some((entry) => entry.kind !== 'file' && entry.kind !== 'directory')
   ) {
-    throw new Error('Installed plugin tree contains an unsupported filesystem entry.');
+    throw new Error(
+      'Installed plugin tree contains an unsupported filesystem entry.',
+    );
   }
 
   // Define receipt ordering independently of adapter listing order or locale.
   const orderedEntries = [...entries].sort((left, right) =>
-    left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
   const hash = createHash('sha256');
   hash.update('forge-plugin-tree-v1\n');
   const prefix = `${relativePath}/`;
@@ -55,7 +58,9 @@ export async function inspectInstalledPluginTree(
     }
     const pluginPath = entry.path.slice(prefix.length);
     if (entry.kind === 'directory') {
-      hash.update(serializeCanonicalJson({kind: 'directory', path: pluginPath}));
+      hash.update(
+        serializeCanonicalJson({ kind: 'directory', path: pluginPath }),
+      );
       continue;
     }
     if (
@@ -67,18 +72,24 @@ export async function inspectInstalledPluginTree(
     ) {
       throw new Error('Installed plugin tree exceeds Forge byte limits.');
     }
-    const body = await state.readFile(entry.path, {maxBytes: MAX_PLUGIN_FILE_BYTES});
+    const body = await state.readFile(entry.path, {
+      maxBytes: MAX_PLUGIN_FILE_BYTES,
+    });
     if (body.byteLength !== entry.size) {
-      throw new Error('Installed plugin tree changed while Forge inspected it.');
+      throw new Error(
+        'Installed plugin tree changed while Forge inspected it.',
+      );
     }
     fileCount += 1;
     sizeBytes += body.byteLength;
-    hash.update(serializeCanonicalJson({
-      kind: 'file',
-      path: pluginPath,
-      sha256: sha256Digest(body),
-      size_bytes: body.byteLength,
-    }));
+    hash.update(
+      serializeCanonicalJson({
+        kind: 'file',
+        path: pluginPath,
+        sha256: sha256Digest(body),
+        size_bytes: body.byteLength,
+      }),
+    );
   }
   if (fileCount === 0) {
     throw new Error('Installed plugin tree does not contain a regular file.');

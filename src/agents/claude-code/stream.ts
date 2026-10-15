@@ -1,4 +1,4 @@
-import type {AgentToolCall, AgentTurn} from '../../contracts/agent.js';
+import type { AgentToolCall, AgentTurn } from '../../contracts/agent.js';
 
 const MAX_STREAM_LINES = 100_000;
 const MAX_STREAM_LINE_BYTES = 1024 * 1024;
@@ -47,14 +47,19 @@ export function parseClaudeStream(stdout: string): AgentTurn {
       for (const block of event.message?.content ?? []) {
         if (block.type === 'text' && typeof block.text === 'string') {
           lastAssistantText = block.text;
-        } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+        } else if (
+          block.type === 'tool_use' &&
+          typeof block.name === 'string'
+        ) {
           toolCalls.push({
-            ...(typeof block.id === 'string' ? {id: block.id} : {}),
+            ...(typeof block.id === 'string' ? { id: block.id } : {}),
             name: block.name,
-            ...(block.input === undefined ? {} : {input: block.input}),
+            ...(block.input === undefined ? {} : { input: block.input }),
           });
           if (toolCalls.length > MAX_TOOL_CALLS) {
-            throw new ClaudeStreamError('Claude output exceeded its tool-call limit.');
+            throw new ClaudeStreamError(
+              'Claude output exceeded its tool-call limit.',
+            );
           }
         }
       }
@@ -72,13 +77,15 @@ export function parseClaudeStream(stdout: string): AgentTurn {
   }
 
   if (!sessionId || !isSafeSessionId(sessionId)) {
-    throw new ClaudeStreamError('Claude produced no valid terminal session ID.');
+    throw new ClaudeStreamError(
+      'Claude produced no valid terminal session ID.',
+    );
   }
   return {
     text: resultText ?? lastAssistantText,
     sessionId,
     toolCalls,
-    ...(costUsd === undefined ? {} : {costUsd}),
+    ...(costUsd === undefined ? {} : { costUsd }),
   };
 }
 

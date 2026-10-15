@@ -1,80 +1,114 @@
-import {z} from 'zod';
+import { z } from 'zod';
 
-import {experimentRunErrorCodeSchema, experimentRunIdSchema} from './experimentModel.js';
-import {sha256Digest} from './model/hashes.js';
-import {parseRunSelection} from './model/parse.js';
-import {serializeCanonicalJson} from './serialization.js';
-import {assertCompatibleForgeVersion, FORGE_BUILD_IDENTITY, parseForgeBuildIdentity} from './version.js';
+import {
+  experimentRunErrorCodeSchema,
+  experimentRunIdSchema,
+} from './experimentModel.js';
+import { sha256Digest } from './model/hashes.js';
+import { parseRunSelection } from './model/parse.js';
+import { serializeCanonicalJson } from './serialization.js';
+import {
+  assertCompatibleForgeVersion,
+  FORGE_BUILD_IDENTITY,
+  parseForgeBuildIdentity,
+} from './version.js';
 
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const selectionSchema = z.unknown().transform(parseRunSelection);
-const evaluationSchema = z.object({
-  status: z.enum(['passed', 'partial', 'failed']),
-  score: ratio,
-  judging_criteria_passed: count,
-  judging_criteria_total: count,
-  checks_passed: count,
-  checks_total: count,
-}).strict().refine((value) => value.judging_criteria_passed <= value.judging_criteria_total &&
-  value.checks_passed <= value.checks_total, 'Passed counts exceed totals.');
-const runSchema = z.object({
-  selection_index: count,
-  selection: selectionSchema,
-  run_id: experimentRunIdSchema.nullable(),
-  state: z.enum(['pending', 'completed', 'errored']),
-  error_code: experimentRunErrorCodeSchema.nullable(),
-  attempt_count: count.max(10_000),
-  result_path: z.string().max(160).nullable(),
-  evaluation: evaluationSchema.nullable(),
-}).strict().superRefine((run, context) => {
-  const pending = run.state === 'pending';
-  const completed = run.state === 'completed';
-  if ((pending !== (run.run_id === null)) || (pending !== (run.attempt_count === 0)) ||
+const evaluationSchema = z
+  .object({
+    status: z.enum(['passed', 'partial', 'failed']),
+    score: ratio,
+    judging_criteria_passed: count,
+    judging_criteria_total: count,
+    checks_passed: count,
+    checks_total: count,
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.judging_criteria_passed <= value.judging_criteria_total &&
+      value.checks_passed <= value.checks_total,
+    'Passed counts exceed totals.',
+  );
+const runSchema = z
+  .object({
+    selection_index: count,
+    selection: selectionSchema,
+    run_id: experimentRunIdSchema.nullable(),
+    state: z.enum(['pending', 'completed', 'errored']),
+    error_code: experimentRunErrorCodeSchema.nullable(),
+    attempt_count: count.max(10_000),
+    result_path: z.string().max(160).nullable(),
+    evaluation: evaluationSchema.nullable(),
+  })
+  .strict()
+  .superRefine((run, context) => {
+    const pending = run.state === 'pending';
+    const completed = run.state === 'completed';
+    if (
+      pending !== (run.run_id === null) ||
+      pending !== (run.attempt_count === 0) ||
       (pending && run.result_path !== null) ||
-      (completed !== (run.evaluation !== null)) ||
-      ((run.state === 'errored') !== (run.error_code !== null)) ||
+      completed !== (run.evaluation !== null) ||
+      (run.state === 'errored') !== (run.error_code !== null) ||
       (completed && run.result_path === null) ||
-      (run.result_path !== null && run.result_path !== `runs/${run.run_id}/result.json`)) {
-    context.addIssue({code: z.ZodIssueCode.custom, message: 'Run identity, state and result metadata disagree.'});
-  }
-});
-const statisticsSchema = z.object({
-  selections: count,
-  completed: count,
-  errored: count,
-  pending: count,
-  passed: count,
-  partial: count,
-  failed: count,
-  attempts_total: count,
-  retry_attempts: count,
-  coverage: ratio.nullable(),
-  pass_rate: ratio.nullable(),
-  judging_score: z.object({mean: ratio.nullable(), evaluations: count}).strict(),
-}).strict();
-const coordinates = z.object({
-  case_id: z.string().min(1).max(4096),
-  treatment: z.string().min(1).max(4096),
-  agent: z.object({
-    adapter: z.string().min(1).max(4096),
-    provider: z.string().min(1).max(4096),
-    model: z.string().min(1).max(4096),
-    hook_trust: z.enum(['native', 'automation']).optional(),
-  }).strict(),
-}).strict();
+      (run.result_path !== null &&
+        run.result_path !== `runs/${run.run_id}/result.json`)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Run identity, state and result metadata disagree.',
+      });
+    }
+  });
+const statisticsSchema = z
+  .object({
+    selections: count,
+    completed: count,
+    errored: count,
+    pending: count,
+    passed: count,
+    partial: count,
+    failed: count,
+    attempts_total: count,
+    retry_attempts: count,
+    coverage: ratio.nullable(),
+    pass_rate: ratio.nullable(),
+    judging_score: z
+      .object({ mean: ratio.nullable(), evaluations: count })
+      .strict(),
+  })
+  .strict();
+const coordinates = z
+  .object({
+    case_id: z.string().min(1).max(4096),
+    treatment: z.string().min(1).max(4096),
+    agent: z
+      .object({
+        adapter: z.string().min(1).max(4096),
+        provider: z.string().min(1).max(4096),
+        model: z.string().min(1).max(4096),
+        hook_trust: z.enum(['native', 'automation']).optional(),
+      })
+      .strict(),
+  })
+  .strict();
 const caseSchema = coordinates.merge(statisticsSchema);
-const reportSchema = z.object({
-  forge: z.unknown().transform(parseForgeBuildIdentity),
-  experiment_run_id: experimentRunIdSchema,
-  generated_at: z.string().datetime(),
-  checkpoint_sha256: digest,
-  summary: statisticsSchema,
-  cases: z.array(caseSchema).min(1).max(100_000),
-  runs: z.array(runSchema).min(1).max(100_000),
-}).strict();
+const reportSchema = z
+  .object({
+    forge: z.unknown().transform(parseForgeBuildIdentity),
+    experiment_run_id: experimentRunIdSchema,
+    generated_at: z.string().datetime(),
+    checkpoint_sha256: digest,
+    summary: statisticsSchema,
+    cases: z.array(caseSchema).min(1).max(100_000),
+    runs: z.array(runSchema).min(1).max(100_000),
+  })
+  .strict();
 
 export type ExperimentRunReportEvaluationV1 = z.infer<typeof evaluationSchema>;
 export type ExperimentRunReportRunV1 = z.infer<typeof runSchema>;
@@ -83,19 +117,30 @@ export type ExperimentRunReportCaseV1 = z.infer<typeof caseSchema>;
 export type ExperimentRunReportV1 = z.infer<typeof reportSchema>;
 
 /** Check the producing release, then verify every aggregate against its run rows. */
-export function parseExperimentRunReport(input: unknown): ExperimentRunReportV1 {
-  const header = z.object({forge: z.unknown()}).passthrough().parse(input);
+export function parseExperimentRunReport(
+  input: unknown,
+): ExperimentRunReportV1 {
+  const header = z.object({ forge: z.unknown() }).passthrough().parse(input);
   const forge = parseForgeBuildIdentity(header.forge);
   assertCompatibleForgeVersion(forge.version);
   const report = reportSchema.parse(input);
   if (report.runs.some((run, index) => run.selection_index !== index)) {
-    throw new Error('Report selection indices must be contiguous and zero-based.');
+    throw new Error(
+      'Report selection indices must be contiguous and zero-based.',
+    );
   }
-  const runIds = report.runs.flatMap((run) => run.run_id === null ? [] : [run.run_id]);
-  if (new Set(runIds).size !== runIds.length) throw new Error('Report contains duplicate run IDs.');
+  const runIds = report.runs.flatMap((run) =>
+    run.run_id === null ? [] : [run.run_id],
+  );
+  if (new Set(runIds).size !== runIds.length)
+    throw new Error('Report contains duplicate run IDs.');
   const aggregate = aggregateRuns(report.runs);
-  if (serializeCanonicalJson(report.summary) !== serializeCanonicalJson(aggregate.summary) ||
-      serializeCanonicalJson(report.cases) !== serializeCanonicalJson(aggregate.cases)) {
+  if (
+    serializeCanonicalJson(report.summary) !==
+      serializeCanonicalJson(aggregate.summary) ||
+    serializeCanonicalJson(report.cases) !==
+      serializeCanonicalJson(aggregate.cases)
+  ) {
     throw new Error('Report statistics do not match its run rows.');
   }
   assertReportBytes(serializeCanonicalJson(report));
@@ -120,39 +165,53 @@ export function buildExperimentRunReport(input: {
 }
 
 /** Human-readable JSON with deterministic key and selection order. */
-export function serializeExperimentRunReport(report: ExperimentRunReportV1): string {
+export function serializeExperimentRunReport(
+  report: ExperimentRunReportV1,
+): string {
   const body = `${JSON.stringify(JSON.parse(serializeCanonicalJson(report)), null, 2)}\n`;
   assertReportBytes(body);
   return body;
 }
 
 function assertReportBytes(body: string): void {
-  if (Buffer.byteLength(body) > MAX_REPORT_BYTES) throw new Error('Experiment run report exceeds its byte limit.');
+  if (Buffer.byteLength(body) > MAX_REPORT_BYTES)
+    throw new Error('Experiment run report exceeds its byte limit.');
 }
 
 function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
   summary: ExperimentRunReportStatisticsV1;
   cases: ExperimentRunReportCaseV1[];
 } {
-  const groups = new Map<string, {coordinates: z.infer<typeof coordinates>; runs: ExperimentRunReportRunV1[]}>();
+  const groups = new Map<
+    string,
+    {
+      coordinates: z.infer<typeof coordinates>;
+      runs: ExperimentRunReportRunV1[];
+    }
+  >();
   for (const run of runs) {
-    const {case_id, treatment, agent} = run.selection;
-    const selected = {case_id, treatment, agent};
+    const { case_id, treatment, agent } = run.selection;
+    const selected = { case_id, treatment, agent };
     const key = serializeCanonicalJson(selected);
     let group = groups.get(key);
     if (group === undefined) {
-      group = {coordinates: selected, runs: []};
+      group = { coordinates: selected, runs: [] };
       groups.set(key, group);
     }
     group.runs.push(run);
   }
   return {
     summary: statistics(runs),
-    cases: [...groups.values()].map((group) => ({...group.coordinates, ...statistics(group.runs)})),
+    cases: [...groups.values()].map((group) => ({
+      ...group.coordinates,
+      ...statistics(group.runs),
+    })),
   };
 }
 
-function statistics(runs: ExperimentRunReportRunV1[]): ExperimentRunReportStatisticsV1 {
+function statistics(
+  runs: ExperimentRunReportRunV1[],
+): ExperimentRunReportStatisticsV1 {
   let completed = 0;
   let errored = 0;
   let pending = 0;
@@ -181,11 +240,21 @@ function statistics(runs: ExperimentRunReportRunV1[]): ExperimentRunReportStatis
     }
   }
   return {
-    selections: runs.length, completed, errored, pending, passed, partial, failed,
-    attempts_total: attempts, retry_attempts: retries,
+    selections: runs.length,
+    completed,
+    errored,
+    pending,
+    passed,
+    partial,
+    failed,
+    attempts_total: attempts,
+    retry_attempts: retries,
     coverage: runs.length === 0 ? null : completed / runs.length,
     pass_rate: completed === 0 ? null : passed / completed,
-    judging_score: {mean: criterionEvaluations === 0 ? null : criterionSum / criterionEvaluations,
-      evaluations: criterionEvaluations},
+    judging_score: {
+      mean:
+        criterionEvaluations === 0 ? null : criterionSum / criterionEvaluations,
+      evaluations: criterionEvaluations,
+    },
   };
 }

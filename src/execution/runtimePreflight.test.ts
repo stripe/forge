@@ -1,38 +1,51 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
-import type {ForgeComposition} from '../contracts/composition.js';
-import {credentialReference} from '../contracts/credentials.js';
-import type {RuntimeAdapter} from '../contracts/runtime.js';
-import type {ForgeExternalRuntimeV1} from '../model/types.js';
+import { describe, it } from 'node:test';
+import type { ForgeComposition } from '../contracts/composition.js';
+import { credentialReference } from '../contracts/credentials.js';
+import type { RuntimeAdapter } from '../contracts/runtime.js';
+import type { ForgeExternalRuntimeV1 } from '../model/types.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
 } from '../testing/fakes.js';
-import {createMemoryRunInputProvider} from '../testing/memoryInputs.js';
-import {createTestResolvedRunPlan} from '../testing/plans.js';
-import {executeEval, preflightEval} from './execute.js';
+import { createMemoryRunInputProvider } from '../testing/memoryInputs.js';
+import { createTestResolvedRunPlan } from '../testing/plans.js';
+import { executeEval, preflightEval } from './execute.js';
 
 const selected: ForgeExternalRuntimeV1 = {
   adapter: 'acme/process',
-  platform: 'linux/amd64', config: {profile: 'test'},
+  platform: 'linux/amd64',
+  config: { profile: 'test' },
 };
 
-function fixture(runtime: RuntimeAdapter): {composition: ForgeComposition; resolutions: string[]} {
+function fixture(runtime: RuntimeAdapter): {
+  composition: ForgeComposition;
+  resolutions: string[];
+} {
   const resolutions: string[] = [];
-  const agent = createScriptedAgentAdapter({requirements: {
-    executables: ['test-agent'],
-    stateDirectories: [{id: 'agent-state', containerPath: '/run/agent-state'}],
-    environment: {credentials: {AGENT_TOKEN: {reference: credentialReference('test.token')}}},
-  }});
+  const agent = createScriptedAgentAdapter({
+    requirements: {
+      executables: ['test-agent'],
+      stateDirectories: [
+        { id: 'agent-state', containerPath: '/run/agent-state' },
+      ],
+      environment: {
+        credentials: {
+          AGENT_TOKEN: { reference: credentialReference('test.token') },
+        },
+      },
+    },
+  });
   return {
     resolutions,
     composition: {
       runtime,
       agents: new Map([[agent.adapter.id, agent.adapter]]),
       credentialResolver: createStaticCredentialResolver(
-        {'test.token': 'test-only-value'}, {onResolve: (reference) => resolutions.push(reference)},
+        { 'test.token': 'test-only-value' },
+        { onResolve: (reference) => resolutions.push(reference) },
       ),
       inputProvider: createMemoryRunInputProvider(),
       artifactStore: createMemoryArtifactStore().store,
@@ -42,90 +55,152 @@ function fixture(runtime: RuntimeAdapter): {composition: ForgeComposition; resol
 
 describe('runtime composition preflight', () => {
   it('supplies frozen merged requirements and the exact external configuration without resolving authority', () => {
-    const fake = createFakeRuntimeAdapter({id: selected.adapter});
+    const fake = createFakeRuntimeAdapter({ id: selected.adapter });
     let calls = 0;
-    const current = fixture({...fake.adapter, preflight({plan, requirements, environment}) {
-      calls += 1;
-      assert.deepEqual(plan.runtime, selected);
-      assert(Object.isFrozen(plan.runtime));
-      assert(Object.isFrozen(requirements));
-      assert(Object.isFrozen(requirements.stateDirectories));
-      assert(Object.isFrozen(environment));
-      assert(Object.isFrozen(environment.credentials));
-      assert.deepEqual(environment.credentials, {
-        AGENT_TOKEN: {reference: 'test.token', scopes: ['agent']},
-      });
-      assert.equal(JSON.stringify(environment).includes('test-only-value'), false);
-      assert.deepEqual(requirements.executables, ['plugin-install', 'test-agent']);
-      assert.deepEqual(requirements.stateDirectories, [
-        {id: 'agent-state', containerPath: '/run/agent-state'},
-        {id: 'plugin-state', containerPath: '/run/plugin-state', sealAfterSetup: true},
-      ]);
-    }});
-    const plan = createTestResolvedRunPlan({runtime: selected, caseSetup: [{
-      uses: 'forge/plugin', with: {agents: {
-        'test-agent': {plugin: 'example@marketplace', marketplace: 'acme/plugins'},
-      }},
-    }]});
-    const baseAgent = current.composition.agents.get('test-agent')!;
-    preflightEval({plan, composition: {
-      ...current.composition,
-      agents: new Map([[baseAgent.id, {
-        ...baseAgent,
-        pluginInstaller: {
-          preflight() {
-            return {
-              requirements: {
-                executables: ['plugin-install'],
-                stateDirectories: [{id: 'plugin-state', containerPath: '/run/plugin-state', sealAfterSetup: true}],
+    const current = fixture({
+      ...fake.adapter,
+      preflight({ plan, requirements, environment }) {
+        calls += 1;
+        assert.deepEqual(plan.runtime, selected);
+        assert(Object.isFrozen(plan.runtime));
+        assert(Object.isFrozen(requirements));
+        assert(Object.isFrozen(requirements.stateDirectories));
+        assert(Object.isFrozen(environment));
+        assert(Object.isFrozen(environment.credentials));
+        assert.deepEqual(environment.credentials, {
+          AGENT_TOKEN: { reference: 'test.token', scopes: ['agent'] },
+        });
+        assert.equal(
+          JSON.stringify(environment).includes('test-only-value'),
+          false,
+        );
+        assert.deepEqual(requirements.executables, [
+          'plugin-install',
+          'test-agent',
+        ]);
+        assert.deepEqual(requirements.stateDirectories, [
+          { id: 'agent-state', containerPath: '/run/agent-state' },
+          {
+            id: 'plugin-state',
+            containerPath: '/run/plugin-state',
+            sealAfterSetup: true,
+          },
+        ]);
+      },
+    });
+    const plan = createTestResolvedRunPlan({
+      runtime: selected,
+      caseSetup: [
+        {
+          uses: 'forge/plugin',
+          with: {
+            agents: {
+              'test-agent': {
+                plugin: 'example@marketplace',
+                marketplace: 'acme/plugins',
               },
-              async install() {throw new Error('Pure preflight must not install.');},
-            };
+            },
           },
         },
-      }]]),
-    }});
+      ],
+    });
+    const baseAgent = current.composition.agents.get('test-agent')!;
+    preflightEval({
+      plan,
+      composition: {
+        ...current.composition,
+        agents: new Map([
+          [
+            baseAgent.id,
+            {
+              ...baseAgent,
+              pluginInstaller: {
+                preflight() {
+                  return {
+                    requirements: {
+                      executables: ['plugin-install'],
+                      stateDirectories: [
+                        {
+                          id: 'plugin-state',
+                          containerPath: '/run/plugin-state',
+                          sealAfterSetup: true,
+                        },
+                      ],
+                    },
+                    async install() {
+                      throw new Error('Pure preflight must not install.');
+                    },
+                  };
+                },
+              },
+            },
+          ],
+        ]),
+      },
+    });
     assert.equal(calls, 1);
     assert.deepEqual(current.resolutions, []);
     assert.equal(fake.runs.length, 0);
   });
 
   it('rejects identity mismatches, absent validation and invalid config before credentials or prepare', async () => {
-    const fake = createFakeRuntimeAdapter({id: selected.adapter});
+    const fake = createFakeRuntimeAdapter({ id: selected.adapter });
     const variants: RuntimeAdapter[] = [
-      {...fake.adapter, id: 'acme/other'},
-      {id: fake.adapter.id, prepare: fake.adapter.prepare} as RuntimeAdapter,
-      {...fake.adapter, preflight() {throw new TypeError('Unknown execution profile.');}},
-      {...fake.adapter, async preflight() {throw new TypeError('Async validation is unsupported.');}},
+      { ...fake.adapter, id: 'acme/other' },
+      { id: fake.adapter.id, prepare: fake.adapter.prepare } as RuntimeAdapter,
+      {
+        ...fake.adapter,
+        preflight() {
+          throw new TypeError('Unknown execution profile.');
+        },
+      },
+      {
+        ...fake.adapter,
+        async preflight() {
+          throw new TypeError('Async validation is unsupported.');
+        },
+      },
     ];
     for (const runtime of variants) {
       const current = fixture(runtime);
-      await assert.rejects(executeEval({
-        runId: 'preflight-only', plan: createTestResolvedRunPlan({runtime: selected}),
-        composition: current.composition,
-      }));
+      await assert.rejects(
+        executeEval({
+          runId: 'preflight-only',
+          plan: createTestResolvedRunPlan({ runtime: selected }),
+          composition: current.composition,
+        }),
+      );
       assert.deepEqual(current.resolutions, []);
       assert.equal(fake.runs.length, 0);
     }
   });
 
   it('rejects substituting a different runtime into a Docker plan', () => {
-    const fake = createFakeRuntimeAdapter({id: selected.adapter});
+    const fake = createFakeRuntimeAdapter({ id: selected.adapter });
     const current = fixture(fake.adapter);
-    assert.throws(() => preflightEval({
-      plan: createTestResolvedRunPlan(), composition: current.composition,
-    }));
+    assert.throws(() =>
+      preflightEval({
+        plan: createTestResolvedRunPlan(),
+        composition: current.composition,
+      }),
+    );
     assert.deepEqual(current.resolutions, []);
   });
 
   it('accepts only the built-in Docker identity without rewriting the plan', () => {
     const plan = createTestResolvedRunPlan();
     const before = JSON.stringify(plan);
-    preflightEval({plan, composition: fixture(createFakeRuntimeAdapter().adapter).composition});
-    assert.equal(JSON.stringify(plan), before);
-    assert.throws(() => preflightEval({
+    preflightEval({
       plan,
-      composition: fixture(createFakeRuntimeAdapter({id: 'docker'}).adapter).composition,
-    }));
+      composition: fixture(createFakeRuntimeAdapter().adapter).composition,
+    });
+    assert.equal(JSON.stringify(plan), before);
+    assert.throws(() =>
+      preflightEval({
+        plan,
+        composition: fixture(createFakeRuntimeAdapter({ id: 'docker' }).adapter)
+          .composition,
+      }),
+    );
   });
 });

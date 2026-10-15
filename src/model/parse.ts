@@ -1,13 +1,17 @@
-import {parseDocument} from 'yaml';
-import {z} from 'zod';
-
-import {assertCompatibleForgeVersion, parseForgeBuildIdentity} from '../version.js';
+import { parseDocument } from 'yaml';
+import { z } from 'zod';
 import {
-  BenchmarkModelError,
-  type BenchmarkModelErrorCode,
-} from './errors.js';
-import {isSha256Digest, isSha256Hex} from './hashes.js';
-import {agentSelectionKey} from './matrix.js';
+  defaultSetupActionRegistry,
+  type SetupActionDefinition,
+  type SetupActionRegistry,
+} from '../setup/registry.js';
+import {
+  assertCompatibleForgeVersion,
+  parseForgeBuildIdentity,
+} from '../version.js';
+import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.js';
+import { isSha256Digest, isSha256Hex } from './hashes.js';
+import { agentSelectionKey } from './matrix.js';
 import {
   isAuthoredCaseId,
   isCaseDefinitionPath,
@@ -20,19 +24,14 @@ import {
   isSafeWorkspaceRelativePath,
 } from './paths.js';
 import {
-  defaultSetupActionRegistry,
-  type SetupActionDefinition,
-  type SetupActionRegistry,
-} from '../setup/registry.js';
-import {
+  type DatasetManifestV1,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
   DEFAULT_DOCKER_PROCESS_COUNT,
   DEFAULT_MAX_TURNS,
   DEFAULT_RUN_TIMEOUT_MS,
-  type ExperimentConfigV1,
-  type DatasetManifestV1,
   type EvalCaseV1,
+  type ExperimentConfigV1,
   type JsonObject,
   type JsonValue,
   type ResolvedRunPlanV1,
@@ -65,18 +64,32 @@ const JudgingCriterionTextSchema = z
   .refine(isBoundedText);
 const JudgingCriterionSchema = z.union([
   JudgingCriterionTextSchema,
-  z.object({
-    value: JudgingCriterionTextSchema,
-    label: z.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
-    include_in_score: z.boolean().optional(),
-  }).strict(),
+  z
+    .object({
+      value: JudgingCriterionTextSchema,
+      label: z
+        .string()
+        .regex(/^[a-z][a-z0-9_]*$/)
+        .optional(),
+      include_in_score: z.boolean().optional(),
+    })
+    .strict(),
 ]);
-const JudgingCriteriaSchema = z.array(JudgingCriterionSchema).max(1_000)
+const JudgingCriteriaSchema = z
+  .array(JudgingCriterionSchema)
+  .max(1_000)
   .superRefine((criteria, context) => {
-    if (criteria.length > 0 && criteria.every((criterion) =>
-      typeof criterion !== 'string' && criterion.include_in_score === false)) {
-      context.addIssue({code: z.ZodIssueCode.custom,
-        message: 'at least one judging criterion must be included in scoring'});
+    if (
+      criteria.length > 0 &&
+      criteria.every(
+        (criterion) =>
+          typeof criterion !== 'string' && criterion.include_in_score === false,
+      )
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'at least one judging criterion must be included in scoring',
+      });
     }
   });
 const MetadataSchema = z.string().trim().min(1).refine(isSafeMetadata);
@@ -89,10 +102,12 @@ const VersionSchema = z
 const CaseIdSchema = z
   .string()
   .refine(isSafeCaseId, 'must be a canonical dataset-relative case ID');
-const AuthoredCaseIdSchema = z.string().refine(
-  isAuthoredCaseId,
-  'case ID must use lowercase slash-separated kebab-case segments',
-);
+const AuthoredCaseIdSchema = z
+  .string()
+  .refine(
+    isAuthoredCaseId,
+    'case ID must use lowercase slash-separated kebab-case segments',
+  );
 const DatasetPathSchema = z
   .string()
   .refine(
@@ -140,9 +155,7 @@ const SetupActionBundleReferenceSchema = z
   .object({
     namespace: SimpleIdentifierSchema,
     version: VersionSchema,
-    sha256: z
-      .string()
-      .refine(isSha256Digest, 'must be a sha256: digest'),
+    sha256: z.string().refine(isSha256Digest, 'must be a sha256: digest'),
   })
   .strict();
 
@@ -152,33 +165,43 @@ const ActionBundleReferencesSchema = z
   .max(MAX_ACTION_BUNDLES)
   .superRefine((references, context) => {
     addDuplicateIssues(
-      references.map(({namespace}) => namespace),
+      references.map(({ namespace }) => namespace),
       context,
       [],
       'namespace',
     );
   });
 
-const AuthoredForgeSchema = z.object({
-  action_bundles: ActionBundleReferencesSchema,
-}).strict();
+const AuthoredForgeSchema = z
+  .object({
+    action_bundles: ActionBundleReferencesSchema,
+  })
+  .strict();
 
-const ForgeProvenanceSchema = z.object({
-  version: VersionSchema,
-  commit_sha: z.string().optional(),
-  dirty: z.boolean().optional(),
-  action_bundles: ActionBundleReferencesSchema.optional(),
-}).strict().superRefine((value, context) => {
-  try {
-    parseForgeBuildIdentity({
-      version: value.version,
-      ...(value.commit_sha === undefined ? {} : {commit_sha: value.commit_sha}),
-      ...(value.dirty === undefined ? {} : {dirty: value.dirty}),
-    });
-  } catch {
-    context.addIssue({code: z.ZodIssueCode.custom, message: 'Invalid Forge build identity.'});
-  }
-});
+const ForgeProvenanceSchema = z
+  .object({
+    version: VersionSchema,
+    commit_sha: z.string().optional(),
+    dirty: z.boolean().optional(),
+    action_bundles: ActionBundleReferencesSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    try {
+      parseForgeBuildIdentity({
+        version: value.version,
+        ...(value.commit_sha === undefined
+          ? {}
+          : { commit_sha: value.commit_sha }),
+        ...(value.dirty === undefined ? {} : { dirty: value.dirty }),
+      });
+    } catch {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Invalid Forge build identity.',
+      });
+    }
+  });
 
 const FilesystemCheckSchema = z
   .object({
@@ -188,7 +211,8 @@ const FilesystemCheckSchema = z
     contains: z
       .string()
       .refine(
-        (pattern) => Buffer.byteLength(pattern, 'utf8') <= MAX_CHECK_REGEX_BYTES,
+        (pattern) =>
+          Buffer.byteLength(pattern, 'utf8') <= MAX_CHECK_REGEX_BYTES,
         `contains must not exceed ${MAX_CHECK_REGEX_BYTES} bytes`,
       )
       .superRefine((pattern, context) => {
@@ -264,7 +288,7 @@ const CompatibleEvalCaseSchema = z
 
 const EvalCaseSchema = z.intersection(
   CompatibleEvalCaseSchema,
-  z.object({id: AuthoredCaseIdSchema}),
+  z.object({ id: AuthoredCaseIdSchema }),
 );
 
 const DatasetIdentitySchema = z
@@ -290,19 +314,14 @@ const DatasetManifestSchema = z
   })
   .strict()
   .superRefine((manifest, context) => {
+    addDuplicateIssues(manifest.cases, context, ['cases'], 'path');
     addDuplicateIssues(
-      manifest.cases,
-      context,
-      ['cases'],
-      'path',
-    );
-    addDuplicateIssues(
-      manifest.files.map(({path}) => path),
+      manifest.files.map(({ path }) => path),
       context,
       ['files'],
       'path',
     );
-    const files = new Set(manifest.files.map(({path}) => path));
+    const files = new Set(manifest.files.map(({ path }) => path));
     for (const [index, casePath] of manifest.cases.entries()) {
       if (!files.has(casePath)) {
         context.addIssue({
@@ -324,12 +343,17 @@ const ModelRefSchema = z
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
-}).strict().superRefine((agent, context) => {
-  if (agent.adapter === 'claude-code' && agent.hook_trust !== undefined) {
-    context.addIssue({code: z.ZodIssueCode.custom, path: ['hook_trust'],
-      message: 'hook_trust is not supported by Claude Code'});
-  }
-});
+})
+  .strict()
+  .superRefine((agent, context) => {
+    if (agent.adapter === 'claude-code' && agent.hook_trust !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['hook_trust'],
+        message: 'hook_trust is not supported by Claude Code',
+      });
+    }
+  });
 
 const RunSelectionSchema = z
   .object({
@@ -349,7 +373,7 @@ const TreatmentSchema = z
 const DockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
-    image: z.object({kind: z.literal('forge')}).strict(),
+    image: z.object({ kind: z.literal('forge') }).strict(),
     platform: z.enum(['linux/amd64', 'linux/arm64', 'native']),
     resources: z
       .object({
@@ -371,27 +395,37 @@ const DockerRuntimeSchema = z
 // Provider-specific semantics are validated by the explicitly supplied runtime
 // during pure execution preflight. Parsing and offline verification need no
 // private implementation, and never transform this materialized configuration.
-const ExternalRuntimeSchema = z.object({
-  adapter: z.string().refine(
-    (value) => value.length <= 257 && value !== 'forge/docker' &&
-      value.split('/').length === 2 &&
-      value.split('/').every(isSafeSimpleIdentifier),
-    'must be a namespaced external runtime identifier',
-  ),
-  platform: z.enum(['linux/amd64', 'linux/arm64']),
-  config: z.unknown().superRefine((value, context) => {
-    try {
-      assertBoundedDataGraph(value, 'runtime config', 'invalid_plan');
-      assertPlainJsonGraph(value, 'runtime config', 'invalid_plan');
-      assertRuntimeConfigBytes(value);
-    } catch {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Runtime config must be bounded plain JSON without unsafe object keys.',
-      });
-    }
-  }).pipe(JsonObjectSchema),
-}).strict();
+const ExternalRuntimeSchema = z
+  .object({
+    adapter: z
+      .string()
+      .refine(
+        (value) =>
+          value.length <= 257 &&
+          value !== 'forge/docker' &&
+          value.split('/').length === 2 &&
+          value.split('/').every(isSafeSimpleIdentifier),
+        'must be a namespaced external runtime identifier',
+      ),
+    platform: z.enum(['linux/amd64', 'linux/arm64']),
+    config: z
+      .unknown()
+      .superRefine((value, context) => {
+        try {
+          assertBoundedDataGraph(value, 'runtime config', 'invalid_plan');
+          assertPlainJsonGraph(value, 'runtime config', 'invalid_plan');
+          assertRuntimeConfigBytes(value);
+        } catch {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              'Runtime config must be bounded plain JSON without unsafe object keys.',
+          });
+        }
+      })
+      .pipe(JsonObjectSchema),
+  })
+  .strict();
 
 const RuntimeSchema = z.union([DockerRuntimeSchema, ExternalRuntimeSchema]);
 
@@ -401,7 +435,8 @@ function assertRuntimeConfigBytes(value: unknown): void {
   const pending: unknown[] = [value];
   let bytes = 0;
   const textBytes = (text: string): number => {
-    if (Buffer.byteLength(text, 'utf8') > MAX_TEXT_BYTES) throw new TypeError('Oversized config.');
+    if (Buffer.byteLength(text, 'utf8') > MAX_TEXT_BYTES)
+      throw new TypeError('Oversized config.');
     return Buffer.byteLength(JSON.stringify(text), 'utf8');
   };
   while (pending.length > 0) {
@@ -412,11 +447,16 @@ function assertRuntimeConfigBytes(value: unknown): void {
       const keys = Object.keys(current);
       bytes += 2 + Math.max(0, keys.length - 1);
       for (const key of keys) {
-        if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+        if (
+          key === '__proto__' ||
+          key === 'prototype' ||
+          key === 'constructor'
+        ) {
           throw new TypeError('Unsafe config key.');
         }
         const descriptor = Object.getOwnPropertyDescriptor(current, key)!;
-        if (!('value' in descriptor)) throw new TypeError('Config accessors are unsupported.');
+        if (!('value' in descriptor))
+          throw new TypeError('Config accessors are unsupported.');
         if (!Array.isArray(current)) bytes += textBytes(key) + 1;
         pending.push(descriptor.value);
       }
@@ -440,18 +480,27 @@ const MatrixRunPolicySchema = {
   retries: NonnegativeIntegerSchema.max(100).default(0),
 };
 
-const FlatExperimentMatrixSchema = ExperimentMatrixGroupSchema
-  .extend(MatrixRunPolicySchema).strict();
-const GroupedExperimentMatrixSchema = z.object({
-  groups: z.array(ExperimentMatrixGroupSchema).min(1).max(1_000),
-  ...MatrixRunPolicySchema,
-}).strict();
+const FlatExperimentMatrixSchema = ExperimentMatrixGroupSchema.extend(
+  MatrixRunPolicySchema,
+).strict();
+const GroupedExperimentMatrixSchema = z
+  .object({
+    groups: z.array(ExperimentMatrixGroupSchema).min(1).max(1_000),
+    ...MatrixRunPolicySchema,
+  })
+  .strict();
 const ExperimentMatrixSchema = z.unknown().transform((matrix, context) => {
-  const grouped = matrix !== null && typeof matrix === 'object' && Object.hasOwn(matrix, 'groups');
-  const parsed = (grouped ? GroupedExperimentMatrixSchema : FlatExperimentMatrixSchema).safeParse(matrix);
+  const grouped =
+    matrix !== null &&
+    typeof matrix === 'object' &&
+    Object.hasOwn(matrix, 'groups');
+  const parsed = (
+    grouped ? GroupedExperimentMatrixSchema : FlatExperimentMatrixSchema
+  ).safeParse(matrix);
   if (!parsed.success) {
     // Keep diagnostics specific to the authored form, including existing flat axes.
-    for (const issue of parsed.error.issues) context.addIssue({...issue, fatal: true});
+    for (const issue of parsed.error.issues)
+      context.addIssue({ ...issue, fatal: true });
     return z.NEVER;
   }
   return parsed.data;
@@ -462,10 +511,15 @@ const ExperimentConfigSchema = z
     id: CaseIdSchema,
     version: VersionSchema,
     dataset: DatasetIdentitySchema.extend({
-      path: z.string().min(1).max(4096).refine(
-        (value) => value === value.trim() && !value.includes('\0'),
-        'must be a non-empty dataset location without NUL bytes',
-      ).optional(),
+      path: z
+        .string()
+        .min(1)
+        .max(4096)
+        .refine(
+          (value) => value === value.trim() && !value.includes('\0'),
+          'must be a non-empty dataset location without NUL bytes',
+        )
+        .optional(),
       manifest_sha256: z
         .string()
         .refine(isSha256Digest, 'must be a sha256: digest'),
@@ -550,15 +604,19 @@ const ExperimentConfigSchema = z
       };
       // Cartesian products overlap exactly when all three axes intersect.
       // Check their sets without materializing a potentially huge product.
-      if (previousGroups.some((previous) =>
-        setsIntersect(currentGroup.cases, previous.cases) &&
-        setsIntersect(currentGroup.treatments, previous.treatments) &&
-        setsIntersect(currentGroup.agents, previous.agents)
-      )) {
+      if (
+        previousGroups.some(
+          (previous) =>
+            setsIntersect(currentGroup.cases, previous.cases) &&
+            setsIntersect(currentGroup.treatments, previous.treatments) &&
+            setsIntersect(currentGroup.agents, previous.agents),
+        )
+      ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: parent,
-          message: 'matrix groups must not contain duplicate resolved selections',
+          message:
+            'matrix groups must not contain duplicate resolved selections',
         });
       }
       previousGroups.push(currentGroup);
@@ -581,7 +639,7 @@ const MaterializedEvalCaseSchema = z.intersection(
 const ResolvedDockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
-    image: z.object({kind: z.literal('forge')}).strict(),
+    image: z.object({ kind: z.literal('forge') }).strict(),
     platform: z.enum(['linux/amd64', 'linux/arm64']),
     resources: z
       .object({
@@ -630,9 +688,7 @@ const ResolvedRunPlanSchema = z
         setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
       })
       .strict(),
-    setup: z
-      .array(SetupStepEnvelopeSchema)
-      .max(MAX_RESOLVED_SETUP_STEPS),
+    setup: z.array(SetupStepEnvelopeSchema).max(MAX_RESOLVED_SETUP_STEPS),
     interaction: z
       .object({
         mode: z.enum(['multi_turn', 'one_shot']),
@@ -830,7 +886,7 @@ export function parseDatasetManifestJson(source: string): DatasetManifestV1 {
     throw new BenchmarkModelError(
       'invalid_manifest',
       'Dataset manifest is not valid JSON.',
-      {cause: error},
+      { cause: error },
     );
   }
   assertBoundedDataGraph(value, 'dataset manifest');
@@ -873,7 +929,10 @@ export function parseEvalCaseYamlWithSetupActions(
   source: string,
   setupActions: SetupActionRegistry,
 ): EvalCaseV1 {
-  return parseEvalCaseWithSetupActions(parseYaml(source, 'eval case'), setupActions);
+  return parseEvalCaseWithSetupActions(
+    parseYaml(source, 'eval case'),
+    setupActions,
+  );
 }
 
 export function parseExperimentConfig(value: unknown): ExperimentConfigV1 {
@@ -911,7 +970,7 @@ export function parseExperimentConfigWithSetupActions(
   const config: ExperimentConfigV1 = {
     ...parsed,
     treatments: {
-      baseline: {setup: []},
+      baseline: { setup: [] },
       ...treatments,
     },
   };
@@ -925,7 +984,7 @@ export function parseExperimentConfigWithSetupActions(
     throw new BenchmarkModelError(
       'invalid_experiment_config',
       'Invalid experiment config: setup action bundle references do not match its actions.',
-      {cause: error},
+      { cause: error },
     );
   }
   return config;
@@ -982,12 +1041,21 @@ export function parseResolvedRunPlanWithSetupActions(
   // Check the producer before interpreting a release-owned plan format.
   try {
     assertBoundedDataGraph(value, 'resolved run plan');
-    const envelope = z.object({
-      provenance: z.object({forge: z.object({version: VersionSchema}).passthrough()}).passthrough(),
-    }).passthrough().parse(value);
+    const envelope = z
+      .object({
+        provenance: z
+          .object({ forge: z.object({ version: VersionSchema }).passthrough() })
+          .passthrough(),
+      })
+      .passthrough()
+      .parse(value);
     assertCompatibleForgeVersion(envelope.provenance.forge.version);
   } catch (error) {
-    throw new BenchmarkModelError('invalid_plan', 'Invalid resolved run plan: incompatible Forge release or missing provenance.', {cause: error});
+    throw new BenchmarkModelError(
+      'invalid_plan',
+      'Invalid resolved run plan: incompatible Forge release or missing provenance.',
+      { cause: error },
+    );
   }
   const parsed = parseWithSchema(
     ResolvedRunPlanSchema,
@@ -1036,12 +1104,10 @@ export function parseResolvedRunPlanWithSetupActions(
     throw new BenchmarkModelError(
       'invalid_plan',
       'Invalid resolved run plan: setup action bundle provenance is not the exact canonical set required by its actions.',
-      {cause: error},
+      { cause: error },
     );
   }
-  return deepFreeze(
-    rechecked,
-  );
+  return deepFreeze(rechecked);
 }
 
 function parseYaml(source: string, label: string): unknown {
@@ -1056,7 +1122,7 @@ function parseYaml(source: string, label: string): unknown {
     if (document.errors.length > 0 || document.warnings.length > 0) {
       throw new Error('YAML parser reported an issue.');
     }
-    const value: unknown = document.toJS({maxAliasCount: 100});
+    const value: unknown = document.toJS({ maxAliasCount: 100 });
     assertBoundedDataGraph(value, label);
     return value;
   } catch (error) {
@@ -1084,7 +1150,7 @@ function parseWithSchema(
   throw new BenchmarkModelError(
     code,
     `Invalid ${label}${first ? `: ${first.message}` : '.'}`,
-    {cause: result.error},
+    { cause: result.error },
   );
 }
 
@@ -1093,7 +1159,7 @@ function addPlanIssue(
   path: (string | number)[],
   message: string,
 ): void {
-  context.addIssue({code: z.ZodIssueCode.custom, path, message});
+  context.addIssue({ code: z.ZodIssueCode.custom, path, message });
 }
 
 function jsonValuesEqual(left: unknown, right: unknown): boolean {
@@ -1132,7 +1198,11 @@ function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function assertSourceSize(source: string, maximum: number, label: string): void {
+function assertSourceSize(
+  source: string,
+  maximum: number,
+  label: string,
+): void {
   if (Buffer.byteLength(source, 'utf8') > maximum) {
     throw new BenchmarkModelError(
       label === 'dataset manifest' ? 'invalid_manifest' : 'invalid_yaml',
@@ -1144,15 +1214,14 @@ function assertSourceSize(source: string, maximum: number, label: string): void 
 function assertBoundedDataGraph(
   value: unknown,
   label: string,
-  code: BenchmarkModelErrorCode =
-    label === 'dataset manifest' ? 'invalid_manifest' : 'invalid_yaml',
+  code: BenchmarkModelErrorCode = label === 'dataset manifest'
+    ? 'invalid_manifest'
+    : 'invalid_yaml',
 ): void {
   type Frame =
-    | {kind: 'enter'; value: unknown; depth: number}
-    | {kind: 'leave'; value: object};
-  const pending: Frame[] = [
-    {kind: 'enter', value, depth: 0},
-  ];
+    | { kind: 'enter'; value: unknown; depth: number }
+    | { kind: 'leave'; value: object };
+  const pending: Frame[] = [{ kind: 'enter', value, depth: 0 }];
   const ancestors = new Set<object>();
   let nodes = 0;
   while (pending.length > 0) {
@@ -1185,7 +1254,7 @@ function assertBoundedDataGraph(
       );
     }
     ancestors.add(frame.value);
-    pending.push({kind: 'leave', value: frame.value});
+    pending.push({ kind: 'leave', value: frame.value });
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       pending.push({
         kind: 'enter',
@@ -1229,8 +1298,12 @@ function rejectUnsafeObjectKeys(
   }
 }
 
-function setsIntersect(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
-  const [smaller, larger] = left.size <= right.size ? [left, right] : [right, left];
+function setsIntersect(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
+  const [smaller, larger] =
+    left.size <= right.size ? [left, right] : [right, left];
   for (const value of smaller) {
     if (larger.has(value)) return true;
   }
@@ -1249,8 +1322,7 @@ function deepFreeze<T>(value: T): T {
 
 function isBoundedText(value: string): boolean {
   return (
-    Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES &&
-    !value.includes('\0')
+    Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES && !value.includes('\0')
   );
 }
 
@@ -1321,12 +1393,7 @@ function normalizeSetupStep(
     );
   }
 
-  const normalizedWith = parseSetupActionWith(
-    action,
-    envelope,
-    code,
-    label,
-  );
+  const normalizedWith = parseSetupActionWith(action, envelope, code, label);
   if (mode === 'canonical') {
     if (!jsonValuesEqual(envelope.with, normalizedWith)) {
       throw new BenchmarkModelError(
@@ -1339,7 +1406,7 @@ function normalizeSetupStep(
     try {
       reparsedWith = parseSetupActionWith(
         action,
-        {uses: envelope.uses, with: normalizedWith},
+        { uses: envelope.uses, with: normalizedWith },
         code,
         `${label} normalized output`,
       );
@@ -1347,7 +1414,7 @@ function normalizeSetupStep(
       throw new BenchmarkModelError(
         code,
         `Invalid ${label}: action ${JSON.stringify(envelope.uses)} did not produce a stable canonical with payload.`,
-        {cause: error},
+        { cause: error },
       );
     }
     if (!jsonValuesEqual(normalizedWith, reparsedWith)) {
@@ -1377,7 +1444,7 @@ function parseSetupActionWith(
     throw new BenchmarkModelError(
       code,
       `Invalid ${label}: action ${JSON.stringify(step.uses)} rejected its with payload.`,
-      {cause: error},
+      { cause: error },
     );
   }
   const normalizedLabel = `${label} normalized with payload`;

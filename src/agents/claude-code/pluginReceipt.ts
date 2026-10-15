@@ -1,16 +1,17 @@
-import type {AgentPluginInstallationReceipt} from '../../contracts/plugin.js';
+import type { AgentPluginInstallationReceipt } from '../../contracts/plugin.js';
 
-export {inspectInstalledPluginTree} from '../pluginTree.js';
+export { inspectInstalledPluginTree } from '../pluginTree.js';
 
 export function pluginSourceReceipt(
   source: unknown,
   resolvedCommit: string | undefined,
 ): AgentPluginInstallationReceipt['source'] {
-  if (typeof source === 'string') return Object.freeze({kind: 'marketplace-path'});
+  if (typeof source === 'string')
+    return Object.freeze({ kind: 'marketplace-path' });
   if (!isPlainRecord(source) || typeof source.source !== 'string') {
     throw new Error('Marketplace plugin source is malformed.');
   }
-  if (source.source === 'archive') return Object.freeze({kind: 'archive'});
+  if (source.source === 'archive') return Object.freeze({ kind: 'archive' });
   if (
     source.source === 'github' ||
     source.source === 'url' ||
@@ -18,7 +19,7 @@ export function pluginSourceReceipt(
   ) {
     return Object.freeze({
       kind: source.source,
-      ...(resolvedCommit === undefined ? {} : {commit: resolvedCommit}),
+      ...(resolvedCommit === undefined ? {} : { commit: resolvedCommit }),
     });
   }
   throw new Error('Marketplace plugin source resolution is incomplete.');

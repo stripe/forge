@@ -5,7 +5,7 @@ export type SerializableJson =
   | number
   | string
   | SerializableJson[]
-  | {[key: string]: SerializableJson};
+  | { [key: string]: SerializableJson };
 
 /**
  * Serialize JSON with recursively sorted object keys and a trailing newline.
@@ -55,7 +55,7 @@ function normalize(
     }
     enter(value, seen, path);
     try {
-      const output: {[key: string]: SerializableJson} = {};
+      const output: { [key: string]: SerializableJson } = {};
       for (const key of Object.keys(value).sort(compareStrings)) {
         const child = (value as Record<string, unknown>)[key];
         if (child === undefined) {
@@ -72,7 +72,7 @@ function normalize(
 }
 
 function defineOwnValue(
-  output: {[key: string]: SerializableJson},
+  output: { [key: string]: SerializableJson },
   key: string,
   value: SerializableJson,
 ): void {

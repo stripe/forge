@@ -1,25 +1,24 @@
-import {randomUUID} from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
-import {parseArgs, type ParseArgsOptionsConfig} from 'node:util';
-
+import { type ParseArgsOptionsConfig, parseArgs } from 'node:util';
+import type { ForgeComposition } from './contracts/composition.js';
+import type { ForgeEngine } from './engine.js';
 import {
-  readExperimentRunSelections,
-  runExperiment,
   type ExperimentRunOptions,
   type ExperimentRunOutcome,
   type ExperimentRunProgressEvent,
   type ExperimentRunSummary,
+  readExperimentRunSelections,
+  runExperiment,
 } from './experiment.js';
-import type {ForgeComposition} from './contracts/composition.js';
-import type {ForgeEngine} from './engine.js';
-import type {ResolvedRunPlanV1, RunSelection} from './model/types.js';
+import type { ResolvedRunPlanV1, RunSelection } from './model/types.js';
 
 /** Operational flags shared by command hosts; input and selection flags are host-owned. */
 export const EXPERIMENT_CLI_OPTIONS = Object.freeze({
-  output: Object.freeze({type: 'string', short: 'o'} as const),
-  'run-id': Object.freeze({type: 'string'} as const),
-  resume: Object.freeze({type: 'string'} as const),
-  jobs: Object.freeze({type: 'string', short: 'j'} as const),
+  output: Object.freeze({ type: 'string', short: 'o' } as const),
+  'run-id': Object.freeze({ type: 'string' } as const),
+  resume: Object.freeze({ type: 'string' } as const),
+  jobs: Object.freeze({ type: 'string', short: 'j' } as const),
 });
 
 export class ExperimentUsageError extends Error {
@@ -35,16 +34,20 @@ export function createExperimentCliOptions<H extends ParseArgsOptionsConfig>(
 ): typeof EXPERIMENT_CLI_OPTIONS & H {
   for (const name of Object.keys(hostOptions)) {
     if (Object.hasOwn(EXPERIMENT_CLI_OPTIONS, name)) {
-      throw new ExperimentUsageError(`Host option --${name} conflicts with a shared experiment run option.`);
+      throw new ExperimentUsageError(
+        `Host option --${name} conflicts with a shared experiment run option.`,
+      );
     }
   }
-  const combined = {...EXPERIMENT_CLI_OPTIONS, ...hostOptions};
+  const combined = { ...EXPERIMENT_CLI_OPTIONS, ...hostOptions };
   const names = new Set(Object.keys(combined));
   const aliases = new Set<string>();
   for (const [name, option] of Object.entries(combined)) {
     if (option.short === undefined) continue;
     if (names.has(option.short) || aliases.has(option.short)) {
-      throw new ExperimentUsageError(`Alias -${option.short} for --${name} conflicts with another option.`);
+      throw new ExperimentUsageError(
+        `Alias -${option.short} for --${name} conflicts with another option.`,
+      );
     }
     aliases.add(option.short);
   }
@@ -66,17 +69,29 @@ export interface ExperimentArguments<H extends ParseArgsOptionsConfig> {
   readonly jobs: number;
 }
 
-type HostValue<O> = O extends {type: 'string'} ? string :
-  O extends {type: 'boolean'} ? boolean : string | boolean;
+type HostValue<O> = O extends { type: 'string' }
+  ? string
+  : O extends { type: 'boolean' }
+    ? boolean
+    : string | boolean;
 
-type HostOptionValue<O extends ParseArgsOptionsConfig[string]> = 'multiple' extends keyof O
-  ? O['multiple'] extends true ? readonly HostValue<O>[]
-    : true extends O['multiple'] ? HostValue<O> | readonly HostValue<O>[] : HostValue<O>
-  : HostValue<O>;
+type HostOptionValue<O extends ParseArgsOptionsConfig[string]> =
+  'multiple' extends keyof O
+    ? O['multiple'] extends true
+      ? readonly HostValue<O>[]
+      : true extends O['multiple']
+        ? HostValue<O> | readonly HostValue<O>[]
+        : HostValue<O>
+    : HostValue<O>;
 
 export type ExperimentValues<H extends ParseArgsOptionsConfig> = {
   readonly [K in keyof H]?: HostOptionValue<H[K]>;
-} & {readonly output?: string; readonly 'run-id'?: string; readonly resume?: string; readonly jobs?: string};
+} & {
+  readonly output?: string;
+  readonly 'run-id'?: string;
+  readonly resume?: string;
+  readonly jobs?: string;
+};
 
 /** Parse shared operational flags alongside a host's own argument definitions. */
 export function parseExperimentArgs<H extends ParseArgsOptionsConfig>(
@@ -88,7 +103,9 @@ export function parseExperimentArgs<H extends ParseArgsOptionsConfig>(
       throw new ExperimentUsageError(`Unknown host selector --${selector}.`);
     }
   }
-  const definitions: ParseArgsOptionsConfig = createExperimentCliOptions(options.hostOptions);
+  const definitions: ParseArgsOptionsConfig = createExperimentCliOptions(
+    options.hostOptions,
+  );
   const parsed = parseArgs({
     args: [...argv],
     options: definitions,
@@ -97,25 +114,45 @@ export function parseExperimentArgs<H extends ParseArgsOptionsConfig>(
     tokens: true,
   });
   const values = parsed.values as ExperimentValues<H>;
-  const suppliedOptions = [...new Set(parsed.tokens
-    .filter((token) => token.kind === 'option').map((token) => token.name))];
+  const suppliedOptions = [
+    ...new Set(
+      parsed.tokens
+        .filter((token) => token.kind === 'option')
+        .map((token) => token.name),
+    ),
+  ];
   const value = values.jobs;
-  if (value !== undefined && (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value)))) {
+  if (
+    value !== undefined &&
+    (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value)))
+  ) {
     throw new ExperimentUsageError('--jobs must be a positive safe integer.');
   }
-  if (values.output !== undefined &&
-      (values.output.length === 0 || values.output.includes('\0'))) {
+  if (
+    values.output !== undefined &&
+    (values.output.length === 0 || values.output.includes('\0'))
+  ) {
     throw new ExperimentUsageError('--output must be a safe path.');
   }
-  if (values['run-id'] !== undefined) assertExperimentRunId(values['run-id'], '--run-id');
+  if (values['run-id'] !== undefined)
+    assertExperimentRunId(values['run-id'], '--run-id');
   if (values.resume !== undefined) {
     assertExperimentRunId(values.resume, '--resume');
-    if (values['run-id'] !== undefined ||
-        options.selectorOptions?.some((name) => suppliedOptions.includes(name))) {
-      throw new ExperimentUsageError('--resume uses the saved selections and fresh eval IDs; omit selection options and --run-id.');
+    if (
+      values['run-id'] !== undefined ||
+      options.selectorOptions?.some((name) => suppliedOptions.includes(name))
+    ) {
+      throw new ExperimentUsageError(
+        '--resume uses the saved selections and fresh eval IDs; omit selection options and --run-id.',
+      );
     }
   }
-  return {values, positionals: parsed.positionals, suppliedOptions, jobs: value === undefined ? 1 : Number(value)};
+  return {
+    values,
+    positionals: parsed.positionals,
+    suppliedOptions,
+    jobs: value === undefined ? 1 : Number(value),
+  };
 }
 
 export interface ExperimentCommandReference {
@@ -124,7 +161,8 @@ export interface ExperimentCommandReference {
   readonly checkpoint: string;
 }
 
-export interface ExperimentLoadContext<H extends ParseArgsOptionsConfig> extends ExperimentArguments<H> {
+export interface ExperimentLoadContext<H extends ParseArgsOptionsConfig>
+  extends ExperimentArguments<H> {
   readonly cwd: string;
   readonly engine: ForgeEngine;
   readonly signal: AbortSignal;
@@ -144,21 +182,30 @@ export interface LoadedExperimentRun {
   readonly dispose?: () => Promise<void>;
 }
 
-export interface ExperimentCommandOptions<H extends ParseArgsOptionsConfig> extends ExperimentArgumentOptions<H> {
+export interface ExperimentCommandOptions<H extends ParseArgsOptionsConfig>
+  extends ExperimentArgumentOptions<H> {
   readonly engine: ForgeEngine;
   /** Validate host grammar and positional selectors before any input loading. */
-  readonly validateHostArgs?: (args: ExperimentArguments<H>) => void | Promise<void>;
+  readonly validateHostArgs?: (
+    args: ExperimentArguments<H>,
+  ) => void | Promise<void>;
   /** Clean partial preparation on rejection; successful preparation is disposed by the wrapper. */
-  readonly loadExperiment: (context: ExperimentLoadContext<H>) => Promise<LoadedExperimentRun>;
+  readonly loadExperiment: (
+    context: ExperimentLoadContext<H>,
+  ) => Promise<LoadedExperimentRun>;
   readonly cwd?: string;
   readonly signal?: AbortSignal;
   readonly experimentRunIdFactory?: () => string;
   readonly runIdFactory?: () => string;
-  readonly progress?: (event: ExperimentRunProgressEvent & {readonly experiment_run_id: string}) => void;
+  readonly progress?: (
+    event: ExperimentRunProgressEvent & { readonly experiment_run_id: string },
+  ) => void;
 }
 
-export interface ExperimentCommandResult<H extends ParseArgsOptionsConfig = ParseArgsOptionsConfig>
-  extends ExperimentCommandReference, ExperimentRunSummary {
+export interface ExperimentCommandResult<
+  H extends ParseArgsOptionsConfig = ParseArgsOptionsConfig,
+> extends ExperimentCommandReference,
+    ExperimentRunSummary {
   /** Host arguments remain available to the caller's rendering and publication stages. */
   readonly arguments: ExperimentArguments<H>;
   /** Verified effective outcomes in selection order, including skipped results. */
@@ -169,7 +216,10 @@ export interface ExperimentCommandResult<H extends ParseArgsOptionsConfig = Pars
 export class ExperimentCommandError extends Error {
   readonly reference: ExperimentCommandReference;
   constructor(reference: ExperimentCommandReference, cause: unknown) {
-    super(cause instanceof Error ? cause.message : 'Experiment command failed.', {cause});
+    super(
+      cause instanceof Error ? cause.message : 'Experiment command failed.',
+      { cause },
+    );
     this.name = 'ExperimentCommandError';
     this.reference = reference;
   }
@@ -183,32 +233,66 @@ export async function runExperimentCommand<H extends ParseArgsOptionsConfig>(
   const args = parseExperimentArgs(argv, options);
   await options.validateHostArgs?.(args);
   const cwd = path.resolve(options.cwd ?? process.cwd());
-  const experimentRunId = args.values.resume ?? (options.experimentRunIdFactory ?? randomUUID)();
+  const experimentRunId =
+    args.values.resume ?? (options.experimentRunIdFactory ?? randomUUID)();
   assertExperimentRunId(experimentRunId, 'Experiment run ID');
-  const root = path.resolve(cwd, args.values.output ?? 'results', 'experiments', experimentRunId);
-  const reference = {experiment_run_id: experimentRunId, location: root, checkpoint: path.join(root, 'experiment.json')};
+  const root = path.resolve(
+    cwd,
+    args.values.output ?? 'results',
+    'experiments',
+    experimentRunId,
+  );
+  const reference = {
+    experiment_run_id: experimentRunId,
+    location: root,
+    checkpoint: path.join(root, 'experiment.json'),
+  };
   const signal = options.signal ?? new AbortController().signal;
   let loaded: LoadedExperimentRun | undefined;
   let failed = false;
   try {
     signal.throwIfAborted();
     const resume = args.values.resume !== undefined;
-    const savedSelections = resume ? await readExperimentRunSelections(root) : undefined;
-    loaded = await options.loadExperiment({...args, cwd, engine: options.engine, signal,
-      root, experimentRunId, resume, savedSelections});
+    const savedSelections = resume
+      ? await readExperimentRunSelections(root)
+      : undefined;
+    loaded = await options.loadExperiment({
+      ...args,
+      cwd,
+      engine: options.engine,
+      signal,
+      root,
+      experimentRunId,
+      resume,
+      savedSelections,
+    });
     if (args.values['run-id'] !== undefined && loaded.plans.length !== 1) {
-      throw new ExperimentUsageError('--run-id requires exactly one selected eval combination.');
+      throw new ExperimentUsageError(
+        '--run-id requires exactly one selected eval combination.',
+      );
     }
     const outcomes: ExperimentRunOutcome[] = [];
     const summary = await runExperiment({
-      root, plans: loaded.plans, composition: loaded.composition, engine: options.engine,
-      resume, jobs: args.jobs, signal,
-      execute: loaded.execute ?? ((request) => options.engine.executeEval(request)),
-      runIdFactory: args.values['run-id'] === undefined ? options.runIdFactory ?? randomUUID : () => args.values['run-id']!,
-      progress: (event) => options.progress?.({...event, experiment_run_id: experimentRunId}),
-      onOutcome: (outcome, index) => {outcomes[index] = outcome;},
+      root,
+      plans: loaded.plans,
+      composition: loaded.composition,
+      engine: options.engine,
+      resume,
+      jobs: args.jobs,
+      signal,
+      execute:
+        loaded.execute ?? ((request) => options.engine.executeEval(request)),
+      runIdFactory:
+        args.values['run-id'] === undefined
+          ? (options.runIdFactory ?? randomUUID)
+          : () => args.values['run-id']!,
+      progress: (event) =>
+        options.progress?.({ ...event, experiment_run_id: experimentRunId }),
+      onOutcome: (outcome, index) => {
+        outcomes[index] = outcome;
+      },
     });
-    return {...reference, ...summary, arguments: args, outcomes};
+    return { ...reference, ...summary, arguments: args, outcomes };
   } catch (error) {
     failed = true;
     // Usage failures stay distinguishable from execution/coordinator failures.
@@ -221,7 +305,10 @@ export async function runExperimentCommand<H extends ParseArgsOptionsConfig>(
       // receive success and start publication after an interrupted command.
       if (!failed) signal.throwIfAborted();
     } catch (error) {
-      if (!failed) throw new ExperimentCommandError(reference, error);
+      if (!failed) {
+        // biome-ignore lint/correctness/noUnsafeFinally: Cleanup failure replaces only a successful result.
+        throw new ExperimentCommandError(reference, error);
+      }
     }
   }
 }

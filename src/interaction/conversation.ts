@@ -1,5 +1,5 @@
-import type {AgentSession, AgentToolCall} from '../contracts/agent.js';
-import type {AvaError, AvaNeed, AvaRolePlayer, AvaTurn} from './ava.js';
+import type { AgentSession, AgentToolCall } from '../contracts/agent.js';
+import type { AvaError, AvaNeed, AvaRolePlayer, AvaTurn } from './ava.js';
 
 export interface ConversationTurn {
   readonly turn: number;
@@ -110,12 +110,7 @@ export async function runConversation(
       // be sent is not retained as a public conversation message.
       decisions.push(
         Object.freeze({
-          ...decisionAudit(
-            avaTurn,
-            decisions.length + 1,
-            turns.length,
-            false,
-          ),
+          ...decisionAudit(avaTurn, decisions.length + 1, turns.length, false),
           message: '',
           focusNeedId: null,
         }),
@@ -175,7 +170,7 @@ export async function runConversation(
     totalCostUsd,
     failure:
       stopReason === 'role_player_error'
-        ? decisions.at(-1)?.error ?? null
+        ? (decisions.at(-1)?.error ?? null)
         : null,
   });
 }
@@ -194,17 +189,19 @@ function decisionAudit(
     remainingNeedIds:
       turn.remainingNeeds === null
         ? null
-        : Object.freeze(turn.remainingNeeds.map(({id}) => id)),
+        : Object.freeze(turn.remainingNeeds.map(({ id }) => id)),
     focusNeedId: turn.focusNeedId,
     codingAgentInvoked,
     source: turn.source,
-    ...(turn.error === undefined ? {} : {error: Object.freeze({...turn.error})}),
+    ...(turn.error === undefined
+      ? {}
+      : { error: Object.freeze({ ...turn.error }) }),
   });
 }
 
 function snapshotNeeds(needs: readonly AvaNeed[]): readonly AvaNeed[] {
   return Object.freeze(
-    needs.map(({id, description}) => Object.freeze({id, description})),
+    needs.map(({ id, description }) => Object.freeze({ id, description })),
   );
 }
 
@@ -218,11 +215,11 @@ export function snapshotAgentToolCalls(
   return Object.freeze(
     toolCalls.map((call) =>
       Object.freeze({
-        ...(call.id === undefined ? {} : {id: call.id}),
+        ...(call.id === undefined ? {} : { id: call.id }),
         name: call.name,
         ...(call.input === undefined
           ? {}
-          : {input: snapshotToolInput(call.input)}),
+          : { input: snapshotToolInput(call.input) }),
       }),
     ),
   );

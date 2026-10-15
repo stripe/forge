@@ -1,11 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-
+import { indexLoadedDatasetCases } from '../model/loaders.js';
 import {
   isCaseDefinitionPath,
   isSafeDatasetRelativePath,
 } from '../model/paths.js';
-import {indexLoadedDatasetCases} from '../model/loaders.js';
 import type {
   CaseId,
   DatasetRelativePath,
@@ -61,9 +60,7 @@ export async function resolveManifestCaseIdFromFile(
       'The selected file is not a case declared by the dataset manifest.',
     );
   }
-  const matches = manifestCases.filter(
-    (casePath) => casePath === datasetPath,
-  );
+  const matches = manifestCases.filter((casePath) => casePath === datasetPath);
   if (matches.length === 0) {
     throw new ManifestCaseFileError(
       'case_file_not_in_manifest',
@@ -88,10 +85,7 @@ export async function resolveManifestCaseIdFromFile(
   try {
     loadedCase = indexLoadedDatasetCases(dataset).get(match);
   } catch (error) {
-    throw invalidLoadedDataset(
-      'The loaded case index is unavailable.',
-      error,
-    );
+    throw invalidLoadedDataset('The loaded case index is unavailable.', error);
   }
   if (
     loadedCase === undefined ||
@@ -129,7 +123,9 @@ async function canonicalDatasetRoot(dataset: LoadedDatasetV1): Promise<string> {
   }
   const requestedRoot = path.resolve(dataset.root);
   if (requestedRoot === path.parse(requestedRoot).root) {
-    throw invalidLoadedDataset('The loaded dataset root cannot be a filesystem root.');
+    throw invalidLoadedDataset(
+      'The loaded dataset root cannot be a filesystem root.',
+    );
   }
   try {
     const stat = await fs.lstat(requestedRoot);
@@ -147,7 +143,10 @@ async function canonicalDatasetRoot(dataset: LoadedDatasetV1): Promise<string> {
     return canonical;
   } catch (error) {
     if (error instanceof ManifestCaseFileError) throw error;
-    throw invalidLoadedDataset('The loaded dataset root is unavailable.', error);
+    throw invalidLoadedDataset(
+      'The loaded dataset root is unavailable.',
+      error,
+    );
   }
 }
 
@@ -167,10 +166,7 @@ function validatedManifestCases(
     );
   }
   for (const entry of dataset.manifest.cases) {
-    if (
-      typeof entry !== 'string' ||
-      !isCaseDefinitionPath(entry)
-    ) {
+    if (typeof entry !== 'string' || !isCaseDefinitionPath(entry)) {
       throw invalidLoadedDataset(
         'The loaded dataset manifest contains an invalid case entry.',
       );
@@ -211,7 +207,7 @@ async function canonicalCaseFile(
     throw new ManifestCaseFileError(
       'invalid_case_file',
       'The selected case file is unavailable or is not a regular file.',
-      {cause: error},
+      { cause: error },
     );
   }
   return canonicalRegularFile(
@@ -247,7 +243,7 @@ async function assertDatasetPathHasNoSymlinks(
     throw new ManifestCaseFileError(
       'invalid_case_file',
       'The selected case file is unavailable or is not a regular file.',
-      {cause: error},
+      { cause: error },
     );
   }
 }
@@ -309,7 +305,7 @@ async function canonicalRegularFile(
     return canonical;
   } catch (error) {
     if (error instanceof ManifestCaseFileError) throw error;
-    throw new ManifestCaseFileError(code, message, {cause: error});
+    throw new ManifestCaseFileError(code, message, { cause: error });
   }
 }
 
@@ -334,6 +330,6 @@ function invalidLoadedDataset(
   return new ManifestCaseFileError(
     'invalid_loaded_dataset',
     message,
-    cause === undefined ? undefined : {cause},
+    cause === undefined ? undefined : { cause },
   );
 }

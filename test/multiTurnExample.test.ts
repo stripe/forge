@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
-import {runCli} from '../src/cli.js';
-import {loadExperimentConfig, loadDataset} from '../src/model/index.js';
-import {expandExperiment, resolveRunPlan} from '../src/planning/index.js';
+import { runCli } from '../src/cli.js';
+import { loadDataset, loadExperimentConfig } from '../src/model/index.js';
+import { expandExperiment, resolveRunPlan } from '../src/planning/index.js';
 
 const fixtureRoot = path.join(process.cwd(), 'test', 'fixtures', 'multi-turn');
 const datasetRoot = path.join(fixtureRoot, 'dataset');
@@ -23,9 +23,14 @@ describe('multi-turn fixture', () => {
       loadExperimentConfig(experimentPath),
     ]);
 
-    assert.equal(dataset.manifestSha256, experiment.config.dataset.manifest_sha256);
-    assert.deepEqual(dataset.manifest.files.map(({path}) => path),
-      ['cases/examples/release-summary.case.yaml']);
+    assert.equal(
+      dataset.manifestSha256,
+      experiment.config.dataset.manifest_sha256,
+    );
+    assert.deepEqual(
+      dataset.manifest.files.map(({ path }) => path),
+      ['cases/examples/release-summary.case.yaml'],
+    );
 
     const selections = expandExperiment(experiment, dataset);
     assert.deepEqual(selections, [
@@ -82,8 +87,12 @@ describe('multi-turn fixture', () => {
         'claude-sonnet-4-6',
       ],
       {
-        stdout: (text) => { stdout += text; },
-        stderr: (text) => { stderr += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
       },
     );
 

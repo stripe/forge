@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict';
-import {createServer, type IncomingHttpHeaders, type Server} from 'node:http';
-import type {AddressInfo} from 'node:net';
-import {describe, it} from 'node:test';
-
-import {FORGE_VERSION} from '../../version.js';
+import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { describe, it } from 'node:test';
 import type {
   CompletionRequest,
-  CompletionResponse,
   StrictCompletionResponseSchema,
 } from '../../contracts/completion.js';
+import { FORGE_VERSION } from '../../version.js';
 import {
   ANTHROPIC_API_KEY_CREDENTIAL,
   ANTHROPIC_AUTH_TOKEN_CREDENTIAL,
@@ -16,8 +14,8 @@ import {
   ANTHROPIC_DEFAULT_MAX_TOKENS,
   ANTHROPIC_MAX_MESSAGE_BYTES,
   ANTHROPIC_MAX_REQUEST_BYTES,
-  ANTHROPIC_MAX_TOKENS,
   ANTHROPIC_MAX_RESPONSE_BYTES,
+  ANTHROPIC_MAX_TOKENS,
   ANTHROPIC_MESSAGES_API_VERSION,
   ANTHROPIC_STRUCTURED_OUTPUT_FORMAT,
   AnthropicCompletionError,
@@ -31,7 +29,7 @@ const schema: StrictCompletionResponseSchema = {
   strict: true,
   schema: {
     type: 'object',
-    properties: {message: {type: 'string'}},
+    properties: { message: { type: 'string' } },
     required: ['message'],
     additionalProperties: false,
   },
@@ -49,23 +47,23 @@ describe('Anthropic completion provider', () => {
 
     assert.equal(provider.id, 'anthropic');
     assert.equal(provider.version, FORGE_VERSION);
-    assert.deepEqual(provider.metadata, {endpoint_mode: 'default'});
+    assert.deepEqual(provider.metadata, { endpoint_mode: 'default' });
     assert.deepEqual(
       provider.requirements({
-        model: {provider: 'anthropic', model: 'claude-sonnet-4-6'},
+        model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
         purpose: 'judge',
       }),
       {
         credentials: {
-          [ANTHROPIC_API_KEY_CREDENTIAL]: {reference: 'anthropic.api-key'},
+          [ANTHROPIC_API_KEY_CREDENTIAL]: { reference: 'anthropic.api-key' },
         },
       },
     );
     await provider.preflight?.({
       runId: 'run-1',
-      model: {provider: 'anthropic', model: 'claude-sonnet-4-6'},
+      model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
       purpose: 'judge',
-      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+      credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
       signal: new AbortController().signal,
     });
     assert.equal(fetchCalls, 0);
@@ -84,7 +82,9 @@ describe('Anthropic completion provider', () => {
         },
       }),
     );
-    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
 
     const response = await provider.complete(
       completionRequest({
@@ -93,13 +93,13 @@ describe('Anthropic completion provider', () => {
         maxTokens: 400,
         responseSchema: schema,
       }),
-      {credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'}},
+      { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
     );
 
     assert.deepEqual(response, {
       content: '{"message":"continue"}',
       stopReason: 'end_turn',
-      usage: {inputTokens: 15, outputTokens: 4, cachedInputTokens: 3},
+      usage: { inputTokens: 15, outputTokens: 4, cachedInputTokens: 3 },
       costUsd: 0.125,
     });
     assert.equal(transport.calls.length, 1);
@@ -107,16 +107,19 @@ describe('Anthropic completion provider', () => {
     assert.equal(call.url, `${ANTHROPIC_DEFAULT_BASE_URL}/v1/messages`);
     assert.equal(call.init.method, 'POST');
     const headers = new Headers(call.init.headers);
-    assert.equal(headers.get('anthropic-version'), ANTHROPIC_MESSAGES_API_VERSION);
+    assert.equal(
+      headers.get('anthropic-version'),
+      ANTHROPIC_MESSAGES_API_VERSION,
+    );
     assert.equal(headers.get('x-api-key'), 'test-direct-key');
     assert.equal(headers.has('authorization'), false);
     assert.deepEqual(JSON.parse(String(call.init.body)), {
       model: 'claude-sonnet-4-6',
       max_tokens: 400,
       messages: [
-        {role: 'user', content: 'Do the task.'},
-        {role: 'assistant', content: 'I inspected it.'},
-        {role: 'user', content: 'Finish it.'},
+        { role: 'user', content: 'Do the task.' },
+        { role: 'assistant', content: 'I inspected it.' },
+        { role: 'user', content: 'Finish it.' },
       ],
       system: 'Act as a role player.',
       temperature: 0.3,
@@ -166,15 +169,23 @@ describe('Anthropic completion provider', () => {
               additionalProperties: false,
             },
           },
-          optional_items: {type: 'array', minItems: 0, items: {type: 'string'}},
-          required_items: {type: 'array', minItems: 1, items: {type: 'string'}},
+          optional_items: {
+            type: 'array',
+            minItems: 0,
+            items: { type: 'string' },
+          },
+          required_items: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string' },
+          },
         },
         allOf: [
-          {$ref: '#/$defs/non_negative'},
-          {properties: {score: {type: 'number', maximum: 1}}},
+          { $ref: '#/$defs/non_negative' },
+          { properties: { score: { type: 'number', maximum: 1 } } },
         ],
         $defs: {
-          non_negative: {type: 'number', minimum: 0},
+          non_negative: { type: 'number', minimum: 0 },
         },
         required: ['summary', 'score', 'needs'],
         additionalProperties: false,
@@ -182,37 +193,50 @@ describe('Anthropic completion provider', () => {
     };
     const originalSchema = structuredClone(neutralSchema);
     const transport = recordingFetch(() =>
-      messageResponse({content: '{"summary":"done","score":1,"needs":[]}'}),
+      messageResponse({ content: '{"summary":"done","score":1,"needs":[]}' }),
     );
-    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
-
-    await provider.complete(completionRequest({responseSchema: neutralSchema}), {
-      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
     });
+
+    await provider.complete(
+      completionRequest({ responseSchema: neutralSchema }),
+      {
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
+      },
+    );
 
     const body = JSON.parse(String(transport.calls[0]?.init.body));
     assert.deepEqual(body.output_config.format.schema, {
       type: 'object',
       properties: {
-        summary: {type: 'string', pattern: '\\S'},
-        score: {type: 'number'},
+        summary: { type: 'string', pattern: '\\S' },
+        score: { type: 'number' },
         needs: {
           type: 'array',
           items: {
             type: 'object',
-            properties: {description: {type: 'string'}},
+            properties: { description: { type: 'string' } },
             required: ['description'],
             additionalProperties: false,
           },
         },
-        optional_items: {type: 'array', minItems: 0, items: {type: 'string'}},
-        required_items: {type: 'array', minItems: 1, items: {type: 'string'}},
+        optional_items: {
+          type: 'array',
+          minItems: 0,
+          items: { type: 'string' },
+        },
+        required_items: {
+          type: 'array',
+          minItems: 1,
+          items: { type: 'string' },
+        },
       },
       allOf: [
-        {$ref: '#/$defs/non_negative'},
-        {properties: {score: {type: 'number'}}},
+        { $ref: '#/$defs/non_negative' },
+        { properties: { score: { type: 'number' } } },
       ],
-      $defs: {non_negative: {type: 'number'}},
+      $defs: { non_negative: { type: 'number' } },
       required: ['summary', 'score', 'needs'],
       additionalProperties: false,
     });
@@ -221,7 +245,7 @@ describe('Anthropic completion provider', () => {
 
   it('uses bearer authentication for a Messages-compatible base URL', async () => {
     const transport = recordingFetch(() =>
-      messageResponse({stopReason: 'future_safe_reason'}),
+      messageResponse({ stopReason: 'future_safe_reason' }),
     );
     const provider = createAnthropicCompletionProvider({
       id: 'stripe-gateway',
@@ -230,14 +254,11 @@ describe('Anthropic completion provider', () => {
       fetch: transport.fetch,
     });
 
-    assert.equal(
-      provider.version,
-      FORGE_VERSION,
-    );
-    assert.deepEqual(provider.metadata, {endpoint_mode: 'custom'});
+    assert.equal(provider.version, FORGE_VERSION);
+    assert.deepEqual(provider.metadata, { endpoint_mode: 'custom' });
     assert.deepEqual(
       provider.requirements({
-        model: {provider: 'stripe-gateway', model: 'claude-opus-4-6'},
+        model: { provider: 'stripe-gateway', model: 'claude-opus-4-6' },
         purpose: 'role_player',
       }),
       {
@@ -250,9 +271,13 @@ describe('Anthropic completion provider', () => {
     );
     const response = await provider.complete(
       completionRequest({
-        model: {provider: 'stripe-gateway', model: 'claude-opus-4-6'},
+        model: { provider: 'stripe-gateway', model: 'claude-opus-4-6' },
       }),
-      {credentials: {[ANTHROPIC_AUTH_TOKEN_CREDENTIAL]: 'test-gateway-token'}},
+      {
+        credentials: {
+          [ANTHROPIC_AUTH_TOKEN_CREDENTIAL]: 'test-gateway-token',
+        },
+      },
     );
 
     assert.equal(response.stopReason, 'other');
@@ -280,17 +305,17 @@ describe('Anthropic completion provider', () => {
 
     assert.deepEqual(
       provider.requirements({
-        model: {provider: 'anthropic', model: 'claude-sonnet-4-6'},
+        model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
         purpose: 'judge',
       }),
       {
         credentials: {
-          [ANTHROPIC_API_KEY_CREDENTIAL]: {reference: 'gateway.api-key'},
+          [ANTHROPIC_API_KEY_CREDENTIAL]: { reference: 'gateway.api-key' },
         },
       },
     );
     await provider.complete(completionRequest(), {
-      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'custom-api-key'},
+      credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'custom-api-key' },
     });
     const headers = new Headers(transport.calls[0]?.init.headers);
     assert.equal(headers.get('x-api-key'), 'custom-api-key');
@@ -298,12 +323,14 @@ describe('Anthropic completion provider', () => {
   });
 
   it('uses native HTTP transport and reconstructs fragmented UTF-8 text blocks', async (t) => {
-    let recordedRequest: {
-      method: string | undefined;
-      url: string | undefined;
-      headers: IncomingHttpHeaders;
-      body: unknown;
-    } | undefined;
+    let recordedRequest:
+      | {
+          method: string | undefined;
+          url: string | undefined;
+          headers: IncomingHttpHeaders;
+          body: unknown;
+        }
+      | undefined;
     const server = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -313,18 +340,20 @@ describe('Anthropic completion provider', () => {
         headers: request.headers,
         body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
       };
-      const bytes = Buffer.from(JSON.stringify({
-        type: 'message',
-        role: 'assistant',
-        content: [
-          {type: 'text', text: '{"message":"'},
-          {type: 'text', text: '漢字"}'},
-        ],
-        stop_reason: 'end_turn',
-        usage: {input_tokens: 3, output_tokens: 2},
-      }));
+      const bytes = Buffer.from(
+        JSON.stringify({
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '{"message":"' },
+            { type: 'text', text: '漢字"}' },
+          ],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 3, output_tokens: 2 },
+        }),
+      );
       const split = bytes.indexOf(Buffer.from('漢')) + 1;
-      response.writeHead(200, {'content-type': 'application/json'});
+      response.writeHead(200, { 'content-type': 'application/json' });
       response.write(bytes.subarray(0, split));
       setImmediate(() => response.end(bytes.subarray(split)));
     });
@@ -335,14 +364,17 @@ describe('Anthropic completion provider', () => {
       auth: 'api-key',
       timeoutMs: 5_000,
     });
-    const result = await provider.complete(completionRequest({responseSchema: schema}), {
-      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'synthetic-local-key'},
-    });
+    const result = await provider.complete(
+      completionRequest({ responseSchema: schema }),
+      {
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'synthetic-local-key' },
+      },
+    );
 
     assert.deepEqual(result, {
       content: '{"message":"漢字"}',
       stopReason: 'end_turn',
-      usage: {inputTokens: 3, outputTokens: 2, cachedInputTokens: 0},
+      usage: { inputTokens: 3, outputTokens: 2, cachedInputTokens: 0 },
     });
     assert.equal(recordedRequest?.method, 'POST');
     assert.equal(recordedRequest?.url, '/gateway/v1/messages');
@@ -352,15 +384,17 @@ describe('Anthropic completion provider', () => {
       model: 'claude-sonnet-4-6',
       max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
       messages: completionRequest().messages,
-      output_config: {format: {type: 'json_schema', schema: schema.schema}},
+      output_config: { format: { type: 'json_schema', schema: schema.schema } },
     });
   });
 
   it('aborts native HTTP body reads after response headers arrive', async (t) => {
     let responseStarted!: () => void;
-    const started = new Promise<void>((resolve) => { responseStarted = resolve; });
+    const started = new Promise<void>((resolve) => {
+      responseStarted = resolve;
+    });
     const server = createServer((_request, response) => {
-      response.writeHead(200, {'content-type': 'application/json'});
+      response.writeHead(200, { 'content-type': 'application/json' });
       response.write('{"type":"message",');
     });
     const baseUrl = await listenLoopback(server);
@@ -375,9 +409,14 @@ describe('Anthropic completion provider', () => {
         return response;
       },
     });
-    const completion = provider.complete(completionRequest({signal: controller.signal}), {
-      credentials: {[ANTHROPIC_AUTH_TOKEN_CREDENTIAL]: 'synthetic-local-token'},
-    });
+    const completion = provider.complete(
+      completionRequest({ signal: controller.signal }),
+      {
+        credentials: {
+          [ANTHROPIC_AUTH_TOKEN_CREDENTIAL]: 'synthetic-local-token',
+        },
+      },
+    );
 
     await started;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -398,24 +437,36 @@ describe('Anthropic completion provider', () => {
     let sourceRequests = 0;
     const source = createServer((_request, response) => {
       sourceRequests += 1;
-      response.writeHead(307, {location: `${destinationUrl}/different-origin`});
+      response.writeHead(307, {
+        location: `${destinationUrl}/different-origin`,
+      });
       response.end('private redirect response body');
     });
     const baseUrl = await listenLoopback(source);
     t.after(() => closeServer(source));
 
     for (const auth of ['api-key', 'bearer'] as const) {
-      const credentialName = auth === 'api-key'
-        ? ANTHROPIC_API_KEY_CREDENTIAL
-        : ANTHROPIC_AUTH_TOKEN_CREDENTIAL;
-      const provider = createAnthropicCompletionProvider({baseUrl, auth, timeoutMs: 5_000});
-      const error = await captureRejection(provider.complete(completionRequest(), {
-        credentials: {[credentialName]: 'synthetic-scoped-secret'},
-      }));
+      const credentialName =
+        auth === 'api-key'
+          ? ANTHROPIC_API_KEY_CREDENTIAL
+          : ANTHROPIC_AUTH_TOKEN_CREDENTIAL;
+      const provider = createAnthropicCompletionProvider({
+        baseUrl,
+        auth,
+        timeoutMs: 5_000,
+      });
+      const error = await captureRejection(
+        provider.complete(completionRequest(), {
+          credentials: { [credentialName]: 'synthetic-scoped-secret' },
+        }),
+      );
 
       assert.equal(hasCode(error, 'http_error'), true);
       assert.match(String(error), /HTTP 307/);
-      assert.doesNotMatch(String(error), /synthetic-scoped-secret|private redirect response body/);
+      assert.doesNotMatch(
+        String(error),
+        /synthetic-scoped-secret|private redirect response body/,
+      );
     }
     assert.equal(sourceRequests, 2);
     assert.equal(destinationRequests, 0);
@@ -423,12 +474,14 @@ describe('Anthropic completion provider', () => {
 
   it('rejects provider mismatches and unsupported structured-output models before fetch', async () => {
     const transport = recordingFetch(() => messageResponse());
-    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
 
     assert.throws(
       () =>
         provider.requirements({
-          model: {provider: 'openai', model: 'claude-sonnet-4-6'},
+          model: { provider: 'openai', model: 'claude-sonnet-4-6' },
           purpose: 'judge',
         }),
       (error) => hasCode(error, 'invalid_request'),
@@ -436,17 +489,17 @@ describe('Anthropic completion provider', () => {
     await rejectsWithCode(
       provider.complete(
         completionRequest({
-          model: {provider: 'anthropic', model: 'claude-sonnet-4-4'},
+          model: { provider: 'anthropic', model: 'claude-sonnet-4-4' },
           responseSchema: schema,
         }),
-        {credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'}},
+        { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
       ),
       'invalid_request',
     );
     await rejectsWithCode(
       provider.complete(
-        completionRequest({maxTokens: ANTHROPIC_MAX_TOKENS + 1}),
-        {credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'}},
+        completionRequest({ maxTokens: ANTHROPIC_MAX_TOKENS + 1 }),
+        { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
       ),
       'invalid_request',
     );
@@ -454,10 +507,13 @@ describe('Anthropic completion provider', () => {
       provider.complete(
         completionRequest({
           messages: [
-            {role: 'user', content: 'é'.repeat(ANTHROPIC_MAX_MESSAGE_BYTES / 2 + 1)},
+            {
+              role: 'user',
+              content: 'é'.repeat(ANTHROPIC_MAX_MESSAGE_BYTES / 2 + 1),
+            },
           ],
         }),
-        {credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'}},
+        { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
       ),
       'invalid_request',
     );
@@ -466,20 +522,24 @@ describe('Anthropic completion provider', () => {
 
   it('bounds the complete serialized request after individually bounded messages', async () => {
     const transport = recordingFetch(() => messageResponse());
-    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
-    const messages = Array.from({length: 4}, () => ({
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
+    const messages = Array.from({ length: 4 }, () => ({
       role: 'user' as const,
       content: 'x'.repeat(ANTHROPIC_MAX_MESSAGE_BYTES),
     }));
     messages[3]!.content = '';
-    const overhead = Buffer.byteLength(JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
-      messages,
-    }));
+    const overhead = Buffer.byteLength(
+      JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+        messages,
+      }),
+    );
     messages[3]!.content = 'x'.repeat(ANTHROPIC_MAX_REQUEST_BYTES - overhead);
-    await provider.complete(completionRequest({messages}), {
-      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+    await provider.complete(completionRequest({ messages }), {
+      credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
     });
     assert.equal(
       Buffer.byteLength(String(transport.calls[0]?.init.body)),
@@ -487,41 +547,54 @@ describe('Anthropic completion provider', () => {
     );
 
     messages[3]!.content += 'x';
-    await rejectsWithCode(provider.complete(completionRequest({messages}), {
-      credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
-    }), 'invalid_request');
+    await rejectsWithCode(
+      provider.complete(completionRequest({ messages }), {
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
+      }),
+      'invalid_request',
+    );
     assert.equal(transport.calls.length, 1);
   });
 
   it('rejects cyclic and excessively nested response schemas before fetch', async () => {
     const transport = recordingFetch(() => messageResponse());
-    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
-    const cyclic: Record<string, unknown> = {type: 'object'};
-    cyclic.properties = {self: cyclic};
-    let nested: Record<string, unknown> = {type: 'string'};
-    for (let depth = 0; depth < 101; depth += 1) nested = {items: nested};
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
+    const cyclic: Record<string, unknown> = { type: 'object' };
+    cyclic.properties = { self: cyclic };
+    let nested: Record<string, unknown> = { type: 'string' };
+    for (let depth = 0; depth < 101; depth += 1) nested = { items: nested };
 
     for (const invalid of [cyclic, nested]) {
-      await rejectsWithCode(provider.complete(completionRequest({
-        responseSchema: {...schema, schema: invalid},
-      }), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
-      }), 'invalid_request');
+      await rejectsWithCode(
+        provider.complete(
+          completionRequest({
+            responseSchema: { ...schema, schema: invalid },
+          }),
+          {
+            credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
+          },
+        ),
+        'invalid_request',
+      );
     }
     assert.equal(transport.calls.length, 0);
   });
 
   it('rejects missing, extra, or unsafe credentials before fetch', async () => {
     const transport = recordingFetch(() => messageResponse());
-    const provider = createAnthropicCompletionProvider({fetch: transport.fetch});
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
 
     for (const credentials of [
       {},
-      {[ANTHROPIC_API_KEY_CREDENTIAL]: 'key', extra: 'extra'},
-      {[ANTHROPIC_API_KEY_CREDENTIAL]: 'unsafe\nkey'},
+      { [ANTHROPIC_API_KEY_CREDENTIAL]: 'key', extra: 'extra' },
+      { [ANTHROPIC_API_KEY_CREDENTIAL]: 'unsafe\nkey' },
     ]) {
       await rejectsWithCode(
-        provider.complete(completionRequest(), {credentials}),
+        provider.complete(completionRequest(), { credentials }),
         'invalid_credentials',
       );
     }
@@ -553,7 +626,7 @@ describe('Anthropic completion provider', () => {
 
     await rejectsWithCode(
       provider.complete(completionRequest(), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
       }),
       'timeout',
     );
@@ -562,8 +635,8 @@ describe('Anthropic completion provider', () => {
     const controller = new AbortController();
     controller.abort();
     await rejectsWithCode(
-      provider.complete(completionRequest({signal: controller.signal}), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+      provider.complete(completionRequest({ signal: controller.signal }), {
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
       }),
       'aborted',
     );
@@ -572,22 +645,29 @@ describe('Anthropic completion provider', () => {
   it('bounds streamed response bytes before parsing', async () => {
     let pulledChunks = 0;
     let cancelled = false;
-    const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulledChunks += 1;
-        controller.enqueue(new Uint8Array(
-          pulledChunks === 1 ? ANTHROPIC_MAX_RESPONSE_BYTES : 1,
-        ));
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulledChunks += 1;
+          controller.enqueue(
+            new Uint8Array(
+              pulledChunks === 1 ? ANTHROPIC_MAX_RESPONSE_BYTES : 1,
+            ),
+          );
+        },
+        cancel() {
+          cancelled = true;
+        },
       },
-      cancel() { cancelled = true; },
-    }, {highWaterMark: 0});
+      { highWaterMark: 0 },
+    );
     const provider = createAnthropicCompletionProvider({
-      fetch: async () => new Response(stream, {status: 200}),
+      fetch: async () => new Response(stream, { status: 200 }),
     });
 
     await rejectsWithCode(
       provider.complete(completionRequest(), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
       }),
       'response_too_large',
     );
@@ -599,15 +679,18 @@ describe('Anthropic completion provider', () => {
     const secret = 'provider-secret-value';
     const sensitiveBody = 'sensitive upstream response';
     const httpProvider = createAnthropicCompletionProvider({
-      fetch: async () => new Response(sensitiveBody, {status: 429}),
+      fetch: async () => new Response(sensitiveBody, { status: 429 }),
     });
     const httpError = await captureRejection(
       httpProvider.complete(completionRequest(), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: secret},
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: secret },
       }),
     );
     assert.equal(hasCode(httpError, 'http_error'), true);
-    assert.doesNotMatch(String(httpError), new RegExp(`${secret}|${sensitiveBody}`));
+    assert.doesNotMatch(
+      String(httpError),
+      new RegExp(`${secret}|${sensitiveBody}`),
+    );
 
     const transportProvider = createAnthropicCompletionProvider({
       fetch: async () => {
@@ -616,18 +699,18 @@ describe('Anthropic completion provider', () => {
     });
     const transportError = await captureRejection(
       transportProvider.complete(completionRequest(), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: secret},
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: secret },
       }),
     );
     assert.equal(hasCode(transportError, 'transport_error'), true);
     assert.doesNotMatch(String(transportError), new RegExp(secret));
 
     const malformedProvider = createAnthropicCompletionProvider({
-      fetch: async () => new Response(sensitiveBody, {status: 200}),
+      fetch: async () => new Response(sensitiveBody, { status: 200 }),
     });
     const malformedError = await captureRejection(
       malformedProvider.complete(completionRequest(), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: secret},
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: secret },
       }),
     );
     assert.equal(hasCode(malformedError, 'invalid_response'), true);
@@ -636,20 +719,26 @@ describe('Anthropic completion provider', () => {
 
   it('strictly validates the response envelope and structured JSON content', async () => {
     for (const response of [
-      {type: 'message', role: 'assistant', content: [], stop_reason: 'end_turn', usage: {}},
       {
         type: 'message',
         role: 'assistant',
-        content: [{type: 'tool_use', id: 'tool-1'}],
-        stop_reason: 'tool_use',
-        usage: {input_tokens: 1, output_tokens: 1},
+        content: [],
+        stop_reason: 'end_turn',
+        usage: {},
       },
       {
         type: 'message',
         role: 'assistant',
-        content: [{type: 'text', text: '{}'}],
+        content: [{ type: 'tool_use', id: 'tool-1' }],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: '{}' }],
         stop_reason: 'end_turn',
-        usage: {input_tokens: -1, output_tokens: 1},
+        usage: { input_tokens: -1, output_tokens: 1 },
       },
     ]) {
       const provider = createAnthropicCompletionProvider({
@@ -657,18 +746,18 @@ describe('Anthropic completion provider', () => {
       });
       await rejectsWithCode(
         provider.complete(completionRequest(), {
-          credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+          credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
         }),
         'invalid_response',
       );
     }
 
     const nonJsonProvider = createAnthropicCompletionProvider({
-      fetch: async () => messageResponse({content: 'not structured JSON'}),
+      fetch: async () => messageResponse({ content: 'not structured JSON' }),
     });
     await rejectsWithCode(
-      nonJsonProvider.complete(completionRequest({responseSchema: schema}), {
-        credentials: {[ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key'},
+      nonJsonProvider.complete(completionRequest({ responseSchema: schema }), {
+        credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
       }),
       'invalid_response',
     );
@@ -692,15 +781,21 @@ describe('Anthropic completion provider', () => {
       assert.equal(supportsAnthropicStructuredOutputModel(model), false);
     }
     assert.throws(
-      () => createAnthropicCompletionProvider({baseUrl: 'https://user:secret@example.test'}),
+      () =>
+        createAnthropicCompletionProvider({
+          baseUrl: 'https://user:secret@example.test',
+        }),
       /must not contain credentials/,
     );
     assert.throws(
-      () => createAnthropicCompletionProvider({baseUrl: 'http://gateway.example.test'}),
+      () =>
+        createAnthropicCompletionProvider({
+          baseUrl: 'http://gateway.example.test',
+        }),
       /loopback/,
     );
     assert.throws(
-      () => createAnthropicCompletionProvider({timeoutMs: 300_001}),
+      () => createAnthropicCompletionProvider({ timeoutMs: 300_001 }),
       /timeoutMs/,
     );
   });
@@ -712,11 +807,11 @@ function completionRequest(
   return {
     runId: 'run-1',
     purpose: 'role_player',
-    model: {provider: 'anthropic', model: 'claude-sonnet-4-6'},
+    model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     messages: [
-      {role: 'user', content: 'Do the task.'},
-      {role: 'assistant', content: 'I inspected it.'},
-      {role: 'user', content: 'Finish it.'},
+      { role: 'user', content: 'Do the task.' },
+      { role: 'assistant', content: 'I inspected it.' },
+      { role: 'user', content: 'Finish it.' },
     ],
     signal: new AbortController().signal,
     ...overrides,
@@ -734,7 +829,7 @@ async function listenLoopback(server: Server): Promise<string> {
 async function closeServer(server: Server): Promise<void> {
   server.closeAllConnections();
   await new Promise<void>((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 
@@ -749,10 +844,10 @@ function messageResponse(
     id: 'msg_test',
     type: 'message',
     role: 'assistant',
-    content: [{type: 'text', text: options.content ?? 'done'}],
+    content: [{ type: 'text', text: options.content ?? 'done' }],
     model: 'claude-sonnet-4-6',
     stop_reason: options.stopReason ?? 'end_turn',
-    usage: options.usage ?? {input_tokens: 3, output_tokens: 2},
+    usage: options.usage ?? { input_tokens: 3, output_tokens: 2 },
   });
 }
 
@@ -769,7 +864,7 @@ function recordingFetch(response: () => Response): {
   return {
     calls,
     fetch: (async (input, init = {}) => {
-      calls.push({url: String(input), init});
+      calls.push({ url: String(input), init });
       return response();
     }) as typeof fetch,
   };

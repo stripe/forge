@@ -14,11 +14,11 @@ export class BenchmarkModelError extends Error {
   constructor(
     code: BenchmarkModelErrorCode,
     message: string,
-    options: {cause?: unknown} = {},
+    options: { cause?: unknown } = {},
   ) {
     super(
       message,
-      options.cause === undefined ? undefined : {cause: options.cause},
+      options.cause === undefined ? undefined : { cause: options.cause },
     );
     this.name = 'BenchmarkModelError';
     this.code = code;

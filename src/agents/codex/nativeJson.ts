@@ -15,12 +15,20 @@ const MAX_DEPTH = 64;
  * iterative. Duplicate decoded keys along the requested path are ambiguous,
  * even when JSON.parse would have chosen their last occurrence.
  */
-export function nativeJsonValue(source: string, path: readonly string[]): string | undefined {
-  if (source.length > MAX_SOURCE_CODE_UNITS || path.length > MAX_DEPTH) return undefined;
+export function nativeJsonValue(
+  source: string,
+  path: readonly string[],
+): string | undefined {
+  if (source.length > MAX_SOURCE_CODE_UNITS || path.length > MAX_DEPTH)
+    return undefined;
   const start = skipWhitespace(source, 0, source.length);
   const end = valueEnd(source, start, source.length);
-  if (end === undefined || skipWhitespace(source, end, source.length) !== source.length) return undefined;
-  let selected: Span = {start, end};
+  if (
+    end === undefined ||
+    skipWhitespace(source, end, source.length) !== source.length
+  )
+    return undefined;
+  let selected: Span = { start, end };
   for (const key of path) {
     const next = propertySpan(source, selected, key);
     if (next === undefined) return undefined;
@@ -29,8 +37,13 @@ export function nativeJsonValue(source: string, path: readonly string[]): string
   return compact(source, selected);
 }
 
-function propertySpan(source: string, parent: Span, wanted: string): Span | undefined {
-  if (source[parent.start] !== '{' || source[parent.end - 1] !== '}') return undefined;
+function propertySpan(
+  source: string,
+  parent: Span,
+  wanted: string,
+): Span | undefined {
+  if (source[parent.start] !== '{' || source[parent.end - 1] !== '}')
+    return undefined;
   const objectEnd = parent.end - 1;
   let cursor = skipWhitespace(source, parent.start + 1, objectEnd);
   let selected: Span | undefined;
@@ -52,7 +65,7 @@ function propertySpan(source: string, parent: Span, wanted: string): Span | unde
     if (end === undefined) return undefined;
     if (key === wanted) {
       if (selected !== undefined) return undefined;
-      selected = {start, end};
+      selected = { start, end };
     }
     cursor = skipWhitespace(source, end, objectEnd);
     if (cursor === objectEnd) return selected;
@@ -64,14 +77,24 @@ function propertySpan(source: string, parent: Span, wanted: string): Span | unde
 }
 
 /** Exclusive end of one value, without parsing or reserializing its contents. */
-function valueEnd(source: string, start: number, end: number): number | undefined {
+function valueEnd(
+  source: string,
+  start: number,
+  end: number,
+): number | undefined {
   if (start >= end) return undefined;
   const first = source[start];
   if (first === '"') return stringEnd(source, start, end);
   if (first !== '{' && first !== '[') {
     let cursor = start;
-    while (cursor < end && !isWhitespace(source.charCodeAt(cursor)) &&
-           source[cursor] !== ',' && source[cursor] !== ']' && source[cursor] !== '}') cursor += 1;
+    while (
+      cursor < end &&
+      !isWhitespace(source.charCodeAt(cursor)) &&
+      source[cursor] !== ',' &&
+      source[cursor] !== ']' &&
+      source[cursor] !== '}'
+    )
+      cursor += 1;
     return cursor === start ? undefined : cursor;
   }
 
@@ -97,7 +120,11 @@ function valueEnd(source: string, start: number, end: number): number | undefine
   return undefined;
 }
 
-function stringEnd(source: string, start: number, end: number): number | undefined {
+function stringEnd(
+  source: string,
+  start: number,
+  end: number,
+): number | undefined {
   for (let cursor = start + 1; cursor < end; cursor += 1) {
     if (source[cursor] === '\\') cursor += 1;
     else if (source[cursor] === '"') return cursor + 1;

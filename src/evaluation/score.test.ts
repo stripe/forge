@@ -1,19 +1,33 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
-import {scoreEvaluation} from './score.js';
+import { scoreEvaluation } from './score.js';
 
 describe('scoreEvaluation', () => {
   it('retains excluded judgments without counting them or allowing them to mask an incorrect answer', () => {
     for (const passed of [true, false]) {
       const criteria = [
-        {criterion: 'Correct answer', label: 'correctness', passed, explanation: ''},
-        {criterion: 'Read docs', label: 'source', include_in_score: false, passed: !passed, explanation: ''},
+        {
+          criterion: 'Correct answer',
+          label: 'correctness',
+          passed,
+          explanation: '',
+        },
+        {
+          criterion: 'Read docs',
+          label: 'source',
+          include_in_score: false,
+          passed: !passed,
+          explanation: '',
+        },
       ];
-      for (const checks of [[], [{name: 'file', passed: false}]]) {
+      for (const checks of [[], [{ name: 'file', passed: false }]]) {
         const result = scoreEvaluation(criteria, checks);
         assert.equal(result.score, passed ? 1 : 0);
-        assert.equal(result.status, passed ? (checks.length ? 'partial' : 'passed') : 'failed');
+        assert.equal(
+          result.status,
+          passed ? (checks.length ? 'partial' : 'passed') : 'failed',
+        );
         assert.equal(result.judging_criteria_total, 1);
         assert.equal(result.judging_criteria_passed, passed ? 1 : 0);
         assert.deepEqual(result.judging_criteria, criteria);
@@ -23,7 +37,7 @@ describe('scoreEvaluation', () => {
 
   it('preserves the checks-only score-zero behavior', () => {
     {
-      const actual = scoreEvaluation([], [{name: 'file', passed: true}]);
+      const actual = scoreEvaluation([], [{ name: 'file', passed: true }]);
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'passed');
@@ -35,10 +49,10 @@ describe('scoreEvaluation', () => {
     {
       const actual = scoreEvaluation(
         [
-          {criterion: 'one', passed: true, explanation: 'yes'},
-          {criterion: 'two', passed: true, explanation: 'yes'},
+          { criterion: 'one', passed: true, explanation: 'yes' },
+          { criterion: 'two', passed: true, explanation: 'yes' },
         ],
-        [{name: 'file', passed: false}],
+        [{ name: 'file', passed: false }],
       );
       assert.ok(actual);
       assert.equal(actual.score, 1);
@@ -50,10 +64,14 @@ describe('scoreEvaluation', () => {
 
   it('does not include deterministic checks in the criterion denominator', () => {
     const criteria = [
-      {criterion: 'one', passed: true, explanation: 'yes'},
-      {criterion: 'two', passed: false, explanation: 'no'},
+      { criterion: 'one', passed: true, explanation: 'yes' },
+      { criterion: 'two', passed: false, explanation: 'no' },
     ];
-    for (const checks of [[], [{name: 'file', passed: true}], [{name: 'file', passed: false}]]) {
+    for (const checks of [
+      [],
+      [{ name: 'file', passed: true }],
+      [{ name: 'file', passed: false }],
+    ]) {
       {
         const actual = scoreEvaluation(criteria, checks);
         assert.ok(actual);
@@ -66,7 +84,7 @@ describe('scoreEvaluation', () => {
   });
 
   it('requires actual successful checks to establish partial success when no criterion passes', () => {
-    const criteria = [{criterion: 'one', passed: false, explanation: 'no'}];
+    const criteria = [{ criterion: 'one', passed: false, explanation: 'no' }];
     {
       const actual = scoreEvaluation(criteria, []);
       assert.ok(actual);
@@ -74,13 +92,15 @@ describe('scoreEvaluation', () => {
       assert.equal(actual.status, 'failed');
     }
     {
-      const actual = scoreEvaluation(criteria, [{name: 'file', passed: true}]);
+      const actual = scoreEvaluation(criteria, [
+        { name: 'file', passed: true },
+      ]);
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'partial');
     }
     {
-      const actual = scoreEvaluation([], [{name: 'file', passed: false}]);
+      const actual = scoreEvaluation([], [{ name: 'file', passed: false }]);
       assert.ok(actual);
       assert.equal(actual.score, 0);
       assert.equal(actual.status, 'failed');

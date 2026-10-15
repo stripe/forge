@@ -5,7 +5,7 @@ import {
   type RunInputProvider,
   type RunInputReadOptions,
 } from '../contracts/inputs.js';
-import type {TestFileContents} from './memoryWorkspace.js';
+import type { TestFileContents } from './memoryWorkspace.js';
 
 export interface MemoryRunInputProviderOptions {
   readonly maxBytes?: number;
@@ -51,14 +51,11 @@ export function createMemoryRunInputProvider(
         });
       }
       if (allDirectories.has(datasetPath)) {
-        return Object.freeze({path: datasetPath, kind: 'directory' as const});
+        return Object.freeze({ path: datasetPath, kind: 'directory' as const });
       }
       throw new Error(`Memory dataset input does not exist: ${datasetPath}`);
     },
-    async read(
-      datasetPath: string,
-      readOptions: RunInputReadOptions = {},
-    ) {
+    async read(datasetPath: string, readOptions: RunInputReadOptions = {}) {
       readOptions.signal?.throwIfAborted();
       assertDatasetPath(datasetPath);
       const contents = files.get(datasetPath);
@@ -83,7 +80,9 @@ export function createMemoryRunInputProvider(
       listOptions.signal?.throwIfAborted();
       assertDatasetPath(datasetPath);
       if (!allDirectories.has(datasetPath)) {
-        throw new Error(`Memory dataset directory does not exist: ${datasetPath}`);
+        throw new Error(
+          `Memory dataset directory does not exist: ${datasetPath}`,
+        );
       }
       const limit = positiveInteger(
         listOptions.maxEntries ?? Number.MAX_SAFE_INTEGER,
@@ -101,7 +100,9 @@ export function createMemoryRunInputProvider(
         )
         .sort((left, right) => compareCodeUnits(left.path, right.path));
       if (entries.length > limit) {
-        throw new Error(`Memory dataset tree exceeds its ${limit} entry limit.`);
+        throw new Error(
+          `Memory dataset tree exceeds its ${limit} entry limit.`,
+        );
       }
       return Object.freeze(entries);
     },

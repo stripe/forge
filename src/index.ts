@@ -1,11 +1,12 @@
 /** Stable package-root surface for the portable Forge engine and contracts. */
+
+export * from './contracts/index.js';
 export {
   createForgeEngine,
   defaultForgeEngine,
   type ForgeEngine,
   type ForgeEngineOptions,
 } from './engine.js';
-export * from './contracts/index.js';
 export * from './evaluation/index.js';
 export * from './execution/index.js';
 export * from './model/index.js';

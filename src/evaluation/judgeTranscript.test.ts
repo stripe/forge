@@ -1,23 +1,20 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
+import { type AtifTrajectoryV1_8, AtifValidationError } from '../atif/index.js';
+import { serializeCanonicalJson } from '../serialization.js';
 import {
-  AtifValidationError,
-  type AtifTrajectoryV1_8,
-} from '../atif/index.js';
-import {serializeCanonicalJson} from '../serialization.js';
-import {
+  createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
-  createJudgeTranscriptProjection,
-  parseJudgeTranscriptProjection,
   type JudgeTranscriptProjectionV1,
   type JudgeVisibleStepV1,
+  MAX_JUDGE_TRANSCRIPT_BYTES,
+  parseJudgeTranscriptProjection,
 } from './judgeTranscript.js';
 
 describe('createJudgeTranscriptProjection', () => {
@@ -34,10 +31,10 @@ describe('createJudgeTranscriptProjection', () => {
         step_id: 3,
         source: 'user',
         message: [
-          {type: 'text', text: 'Inspect the result.'},
+          { type: 'text', text: 'Inspect the result.' },
           {
             type: 'image',
-            source: {media_type: 'image/png', path: 'expected.png'},
+            source: { media_type: 'image/png', path: 'expected.png' },
           },
         ],
       },
@@ -45,7 +42,7 @@ describe('createJudgeTranscriptProjection', () => {
         step_id: 4,
         source: 'agent',
         message: [
-          {type: 'text', text: 'I used the tool.'},
+          { type: 'text', text: 'I used the tool.' },
           {
             type: 'audio',
             source: {
@@ -61,13 +58,13 @@ describe('createJudgeTranscriptProjection', () => {
             function_name: 'inspect',
             arguments: {
               reasoning_content: 'observable input',
-              nested: {reasoning_effort: 7},
+              nested: { reasoning_effort: 7 },
             },
           },
           {
             tool_call_id: 'call-2',
             function_name: 'read',
-            arguments: {path: 'result.txt'},
+            arguments: { path: 'result.txt' },
           },
         ],
         observation: {
@@ -79,7 +76,7 @@ describe('createJudgeTranscriptProjection', () => {
             },
             {
               source_call_id: 'call-2',
-              content: [{type: 'text', text: 'read failed'}],
+              content: [{ type: 'text', text: 'read failed' }],
               is_error: true,
             },
             {
@@ -108,9 +105,9 @@ describe('createJudgeTranscriptProjection', () => {
   it('omits null, empty, and dropped-only optional structures', () => {
     const trajectory: AtifTrajectoryV1_8 = {
       schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
+      agent: { name: 'test-agent', version: '1' },
       steps: [
-        {step_id: 1, source: 'user', message: 'Do it.'},
+        { step_id: 1, source: 'user', message: 'Do it.' },
         {
           step_id: 2,
           source: 'agent',
@@ -118,9 +115,9 @@ describe('createJudgeTranscriptProjection', () => {
           tool_calls: [],
           observation: {
             results: [
-              {source_call_id: null, content: null},
+              { source_call_id: null, content: null },
               {
-                subagent_trajectory_ref: [{trajectory_id: 'child'}],
+                subagent_trajectory_ref: [{ trajectory_id: 'child' }],
                 extra: {
                   provider_note: 'not evidence',
                   is_error: 'true',
@@ -128,7 +125,7 @@ describe('createJudgeTranscriptProjection', () => {
               },
               {
                 content: 'uncorrelated visible result',
-                extra: {is_error: false},
+                extra: { is_error: false },
               },
             ],
           },
@@ -138,8 +135,8 @@ describe('createJudgeTranscriptProjection', () => {
         {
           schema_version: 'ATIF-v1.8',
           trajectory_id: 'child',
-          agent: {name: 'child', version: '1'},
-          steps: [{step_id: 1, source: 'agent', message: 'hidden'}],
+          agent: { name: 'child', version: '1' },
+          steps: [{ step_id: 1, source: 'agent', message: 'hidden' }],
         },
       ],
     };
@@ -147,14 +144,14 @@ describe('createJudgeTranscriptProjection', () => {
     assert.deepEqual(
       JSON.parse(createJudgeTranscriptProjection(trajectory).transcriptJson),
       [
-        {step_id: 1, source: 'user', message: 'Do it.'},
+        { step_id: 1, source: 'user', message: 'Do it.' },
         {
           step_id: 2,
           source: 'agent',
           message: 'Done.',
           observation: {
             results: [
-              {content: 'uncorrelated visible result', is_error: false},
+              { content: 'uncorrelated visible result', is_error: false },
             ],
           },
         },
@@ -165,25 +162,25 @@ describe('createJudgeTranscriptProjection', () => {
   it('preserves order and IDs while filtering creates gaps', () => {
     const trajectory: AtifTrajectoryV1_8 = {
       schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
+      agent: { name: 'test-agent', version: '1' },
       steps: [
-        {step_id: 1, source: 'system', message: 'hidden'},
-        {step_id: 2, source: 'user', message: 'first'},
+        { step_id: 1, source: 'system', message: 'hidden' },
+        { step_id: 2, source: 'user', message: 'first' },
         {
           step_id: 3,
           source: 'agent',
           message: 'copied',
           is_copied_context: true,
         },
-        {step_id: 4, source: 'agent', message: 'second'},
+        { step_id: 4, source: 'agent', message: 'second' },
       ],
     };
 
     assert.deepEqual(
       JSON.parse(createJudgeTranscriptProjection(trajectory).transcriptJson),
       [
-        {step_id: 2, source: 'user', message: 'first'},
-        {step_id: 4, source: 'agent', message: 'second'},
+        { step_id: 2, source: 'user', message: 'first' },
+        { step_id: 4, source: 'agent', message: 'second' },
       ],
     );
   });
@@ -191,9 +188,9 @@ describe('createJudgeTranscriptProjection', () => {
   it('retains tool behavior when an agent message has no visible text', () => {
     const trajectory: AtifTrajectoryV1_8 = {
       schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
+      agent: { name: 'test-agent', version: '1' },
       steps: [
-        {step_id: 1, source: 'user', message: 'Read the file.'},
+        { step_id: 1, source: 'user', message: 'Read the file.' },
         {
           step_id: 2,
           source: 'agent',
@@ -202,7 +199,7 @@ describe('createJudgeTranscriptProjection', () => {
             {
               tool_call_id: 'call-1',
               function_name: 'read',
-              arguments: {path: 'answer.txt'},
+              arguments: { path: 'answer.txt' },
             },
           ],
         },
@@ -212,7 +209,7 @@ describe('createJudgeTranscriptProjection', () => {
     assert.deepEqual(
       JSON.parse(createJudgeTranscriptProjection(trajectory).transcriptJson),
       [
-        {step_id: 1, source: 'user', message: 'Read the file.'},
+        { step_id: 1, source: 'user', message: 'Read the file.' },
         {
           step_id: 2,
           source: 'agent',
@@ -221,7 +218,7 @@ describe('createJudgeTranscriptProjection', () => {
             {
               tool_call_id: 'call-1',
               function_name: 'read',
-              arguments: {path: 'answer.txt'},
+              arguments: { path: 'answer.txt' },
             },
           ],
         },
@@ -246,9 +243,9 @@ describe('createJudgeTranscriptProjection', () => {
   it('serializes an empty array when every root step is excluded', () => {
     const trajectory: AtifTrajectoryV1_8 = {
       schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
+      agent: { name: 'test-agent', version: '1' },
       steps: [
-        {step_id: 1, source: 'system', message: 'system'},
+        { step_id: 1, source: 'system', message: 'system' },
         {
           step_id: 2,
           source: 'user',
@@ -267,7 +264,7 @@ describe('createJudgeTranscriptProjection', () => {
   it('validates ATIF before producing judge-visible bytes', () => {
     const invalid = {
       schema_version: 'ATIF-v1.8',
-      agent: {name: 'test-agent', version: '1'},
+      agent: { name: 'test-agent', version: '1' },
       steps: [
         {
           step_id: 1,
@@ -306,22 +303,22 @@ describe('parseJudgeTranscriptProjection', () => {
 
     assert.throws(() => parseJudgeTranscriptProjection(rawAtif));
     assert.throws(() =>
-      parseJudgeTranscriptProjection({...valid, unexpected: true}),
+      parseJudgeTranscriptProjection({ ...valid, unexpected: true }),
     );
-    const cyclic = {...valid} as Record<string, unknown>;
+    const cyclic = { ...valid } as Record<string, unknown>;
     cyclic.self = cyclic;
     assert.throws(
       () => parseJudgeTranscriptProjection(cyclic),
       /metadata is not bounded JSON/,
     );
     for (const changed of [
-      {...valid, source: 'interaction.json'},
-      {...valid, projectionId: 'another-projection'},
-      {...valid, projectionVersion: 1},
-      {...valid, trajectoryScope: 'all'},
-      {...valid, includedStepSources: ['agent', 'user']},
-      {...valid, copiedContext: 'included'},
-      {...valid, includedFields: [...valid.includedFields].reverse()},
+      { ...valid, source: 'interaction.json' },
+      { ...valid, projectionId: 'another-projection' },
+      { ...valid, projectionVersion: 1 },
+      { ...valid, trajectoryScope: 'all' },
+      { ...valid, includedStepSources: ['agent', 'user'] },
+      { ...valid, copiedContext: 'included' },
+      { ...valid, includedFields: [...valid.includedFields].reverse() },
     ]) {
       assert.throws(() => parseJudgeTranscriptProjection(changed));
     }
@@ -330,22 +327,24 @@ describe('parseJudgeTranscriptProjection', () => {
   it('rejects invalid or noncanonical transcript bytes', () => {
     const valid = createJudgeTranscriptProjection(richTrajectory());
 
-    assert.throws(() =>
-      parseJudgeTranscriptProjection({...valid, transcriptJson: '{'}),
+    assert.throws(
+      () => parseJudgeTranscriptProjection({ ...valid, transcriptJson: '{' }),
       /not valid JSON/,
     );
-    assert.throws(() =>
-      parseJudgeTranscriptProjection({
-        ...valid,
-        transcriptJson: valid.transcriptJson.trimEnd(),
-      }),
+    assert.throws(
+      () =>
+        parseJudgeTranscriptProjection({
+          ...valid,
+          transcriptJson: valid.transcriptJson.trimEnd(),
+        }),
       /canonical JSON with a final LF/,
     );
-    assert.throws(() =>
-      parseJudgeTranscriptProjection({
-        ...valid,
-        transcriptJson: '[ {"source":"user","message":"x","step_id":1} ]\n',
-      }),
+    assert.throws(
+      () =>
+        parseJudgeTranscriptProjection({
+          ...valid,
+          transcriptJson: '[ {"source":"user","message":"x","step_id":1} ]\n',
+        }),
       /canonical JSON with a final LF/,
     );
   });
@@ -356,7 +355,7 @@ describe('parseJudgeTranscriptProjection', () => {
       () =>
         createJudgeTranscriptProjection({
           schema_version: 'ATIF-v1.8',
-          agent: {name: 'test-agent', version: '1'},
+          agent: { name: 'test-agent', version: '1' },
           steps: [
             {
               step_id: 1,
@@ -395,7 +394,7 @@ describe('parseJudgeTranscriptProjection', () => {
           {
             tool_call_id: 'call',
             function_name: 'tool',
-            arguments: {values: new Array(100_001).fill(null)},
+            arguments: { values: new Array(100_001).fill(null) },
           },
         ],
       },
@@ -403,7 +402,10 @@ describe('parseJudgeTranscriptProjection', () => {
     assert.ok(Buffer.byteLength(tooManyNodes) <= MAX_JUDGE_TRANSCRIPT_BYTES);
     assert.throws(
       () =>
-        parseJudgeTranscriptProjection({...valid, transcriptJson: tooManyNodes}),
+        parseJudgeTranscriptProjection({
+          ...valid,
+          transcriptJson: tooManyNodes,
+        }),
       /transcript is not bounded JSON/,
     );
   });
@@ -411,7 +413,7 @@ describe('parseJudgeTranscriptProjection', () => {
   it('strictly rejects every non-allowlisted step field and source', () => {
     const valid = createJudgeTranscriptProjection(richTrajectory());
     const invalidSteps = [
-      [{step_id: 1, source: 'system', message: 'hidden'}],
+      [{ step_id: 1, source: 'system', message: 'hidden' }],
       [
         {
           step_id: 1,
@@ -438,7 +440,7 @@ describe('parseJudgeTranscriptProjection', () => {
               tool_call_id: 'call-1',
               function_name: 'read',
               arguments: {},
-              extra: {provider: 'secret'},
+              extra: { provider: 'secret' },
             },
           ],
         },
@@ -448,7 +450,7 @@ describe('parseJudgeTranscriptProjection', () => {
           step_id: 1,
           source: 'agent',
           message: 'answer',
-          observation: {results: [{extra: {is_error: true}}]},
+          observation: { results: [{ extra: { is_error: true } }] },
         },
       ],
     ];
@@ -466,26 +468,26 @@ describe('parseJudgeTranscriptProjection', () => {
   it('rejects empty optional structures and broken ordering or correlation', () => {
     const valid = createJudgeTranscriptProjection(richTrajectory());
     const invalidSteps = [
-      [{step_id: 1, source: 'agent', message: ''}],
+      [{ step_id: 1, source: 'agent', message: '' }],
       [
         {
           step_id: 1,
           source: 'agent',
-          message: [{type: 'text', text: ''}],
+          message: [{ type: 'text', text: '' }],
         },
       ],
-      [{step_id: 1, source: 'agent', message: 'x', tool_calls: []}],
+      [{ step_id: 1, source: 'agent', message: 'x', tool_calls: [] }],
       [
         {
           step_id: 1,
           source: 'agent',
           message: 'x',
-          observation: {results: []},
+          observation: { results: [] },
         },
       ],
       [
-        {step_id: 2, source: 'user', message: 'first'},
-        {step_id: 1, source: 'agent', message: 'second'},
+        { step_id: 2, source: 'user', message: 'first' },
+        { step_id: 1, source: 'agent', message: 'second' },
       ],
       [
         {
@@ -493,7 +495,7 @@ describe('parseJudgeTranscriptProjection', () => {
           source: 'agent',
           message: 'x',
           observation: {
-            results: [{source_call_id: 'missing', content: 'result'}],
+            results: [{ source_call_id: 'missing', content: 'result' }],
           },
         },
       ],
@@ -518,7 +520,7 @@ function richTrajectory(): AtifTrajectoryV1_8 {
       name: 'test-agent',
       version: '1',
       model_name: 'provider-model',
-      extra: {provider_private: true},
+      extra: { provider_private: true },
     },
     steps: [
       {
@@ -526,7 +528,7 @@ function richTrajectory(): AtifTrajectoryV1_8 {
         source: 'system',
         message: 'system instructions',
         timestamp: '2026-09-16T12:00:00Z',
-        extra: {provider: 'provider-private'},
+        extra: { provider: 'provider-private' },
       },
       {
         step_id: 2,
@@ -538,21 +540,21 @@ function richTrajectory(): AtifTrajectoryV1_8 {
         step_id: 3,
         source: 'user',
         message: [
-          {type: 'text', text: 'Inspect the result.'},
+          { type: 'text', text: 'Inspect the result.' },
           {
             type: 'image',
-            source: {media_type: 'image/png', path: 'expected.png'},
+            source: { media_type: 'image/png', path: 'expected.png' },
           },
         ],
         timestamp: '2026-09-16T12:00:01Z',
         llm_call_count: 0,
-        extra: {provider: 'provider-private'},
+        extra: { provider: 'provider-private' },
       },
       {
         step_id: 4,
         source: 'agent',
         message: [
-          {type: 'text', text: 'I used the tool.'},
+          { type: 'text', text: 'I used the tool.' },
           {
             type: 'audio',
             source: {
@@ -571,7 +573,7 @@ function richTrajectory(): AtifTrajectoryV1_8 {
           prompt_tokens: 10,
           completion_tokens: 20,
           prompt_token_ids: [1, 2],
-          extra: {provider: 'provider-private'},
+          extra: { provider: 'provider-private' },
         },
         tool_calls: [
           {
@@ -579,14 +581,14 @@ function richTrajectory(): AtifTrajectoryV1_8 {
             function_name: 'inspect',
             arguments: {
               reasoning_content: 'observable input',
-              nested: {reasoning_effort: 7},
+              nested: { reasoning_effort: 7 },
             },
-            extra: {provider: 'provider-private'},
+            extra: { provider: 'provider-private' },
           },
           {
             tool_call_id: 'call-2',
             function_name: 'read',
-            arguments: {path: 'result.txt'},
+            arguments: { path: 'result.txt' },
           },
         ],
         observation: {
@@ -602,25 +604,25 @@ function richTrajectory(): AtifTrajectoryV1_8 {
             },
             {
               source_call_id: 'call-2',
-              content: [{type: 'text', text: 'read failed'}],
-              extra: {is_error: true},
+              content: [{ type: 'text', text: 'read failed' }],
+              extra: { is_error: true },
             },
             {
               content: 'Observable result without a provider call ID.',
-              extra: {is_error: false},
+              extra: { is_error: false },
             },
             {
               subagent_trajectory_ref: [
                 {
                   trajectory_id: 'child-1',
                   session_id: 'child-session',
-                  extra: {provider: 'provider-private'},
+                  extra: { provider: 'provider-private' },
                 },
               ],
             },
           ],
         },
-        extra: {provider: 'provider-private'},
+        extra: { provider: 'provider-private' },
       },
       {
         step_id: 5,
@@ -635,13 +637,13 @@ function richTrajectory(): AtifTrajectoryV1_8 {
       },
     ],
     notes: 'root metadata',
-    final_metrics: {total_steps: 6, total_cost_usd: 0.5},
-    extra: {provider: 'provider-private'},
+    final_metrics: { total_steps: 6, total_cost_usd: 0.5 },
+    extra: { provider: 'provider-private' },
     subagent_trajectories: [
       {
         schema_version: 'ATIF-v1.8',
         trajectory_id: 'child-1',
-        agent: {name: 'child-agent', version: '1'},
+        agent: { name: 'child-agent', version: '1' },
         steps: [
           {
             step_id: 1,
@@ -657,7 +659,7 @@ function richTrajectory(): AtifTrajectoryV1_8 {
 function metadataOf(
   projection: JudgeTranscriptProjectionV1,
 ): Omit<JudgeTranscriptProjectionV1, 'transcriptJson'> {
-  const {transcriptJson: _, ...metadata} = projection;
+  const { transcriptJson: _, ...metadata } = projection;
   return metadata;
 }
 

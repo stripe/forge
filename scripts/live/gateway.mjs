@@ -1,7 +1,7 @@
-import {createHash, randomBytes, timingSafeEqual} from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as http from 'node:http';
 import * as https from 'node:https';
-import {runBoundedCommand} from './command.mjs';
+import { runBoundedCommand } from './command.mjs';
 
 const MAX_BRIDGE_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_BRIDGE_CONCURRENCY = 8;
@@ -23,9 +23,11 @@ const HOP_BY_HOP_HEADERS = new Set([
 
 function gatewayBridgePaths(prefix, protocol) {
   if (protocol === 'responses') return new Set([`/${prefix}/responses`]);
-  if (protocol === 'messages') return new Set([
-    `/${prefix}/v1/messages`, `/${prefix}/v1/messages/count_tokens`,
-  ]);
+  if (protocol === 'messages')
+    return new Set([
+      `/${prefix}/v1/messages`,
+      `/${prefix}/v1/messages/count_tokens`,
+    ]);
   throw new TypeError('Unsupported live gateway protocol.');
 }
 
@@ -34,7 +36,11 @@ function gatewayBridgeUpstreamPath(upstream, target, prefix) {
   return `${upstream.pathname.replace(/\/+$/, '')}${suffix}${target.search}`;
 }
 
-export async function startLoopbackGatewayBridge({upstream, upstreamCredential, protocol}) {
+export async function startLoopbackGatewayBridge({
+  upstream,
+  upstreamCredential,
+  protocol,
+}) {
   const prefix = randomBytes(32).toString('hex');
   const bridgeCredential = randomBytes(32).toString('base64url');
   const expectedAuthorizationDigest = authorizationDigest(bridgeCredential);
@@ -107,7 +113,11 @@ export async function startLoopbackGatewayBridge({upstream, upstreamCredential, 
       response.once('close', finish);
       response.once('finish', finish);
 
-      const upstreamPath = gatewayBridgeUpstreamPath(upstream, parsedTarget, prefix);
+      const upstreamPath = gatewayBridgeUpstreamPath(
+        upstream,
+        parsedTarget,
+        prefix,
+      );
       const headers = sanitizedProxyHeaders(request.headers);
       headers.host = upstream.host;
       headers.authorization = `Bearer ${upstreamCredential}`;
@@ -132,7 +142,9 @@ export async function startLoopbackGatewayBridge({upstream, upstreamCredential, 
         },
       );
       upstreamRequests.add(upstreamRequest);
-      upstreamRequest.once('close', () => upstreamRequests.delete(upstreamRequest));
+      upstreamRequest.once('close', () =>
+        upstreamRequests.delete(upstreamRequest),
+      );
       upstreamRequest.setTimeout(BRIDGE_REQUEST_TIMEOUT_MS, () => {
         upstreamRequest.destroy();
       });
@@ -151,10 +163,7 @@ export async function startLoopbackGatewayBridge({upstream, upstreamCredential, 
           request.destroy();
           return;
         }
-        if (
-          !upstreamRequest.destroyed &&
-          !upstreamRequest.write(chunk)
-        ) {
+        if (!upstreamRequest.destroyed && !upstreamRequest.write(chunk)) {
           request.pause();
           upstreamRequest.once('drain', () => request.resume());
         }
@@ -237,8 +246,7 @@ function filterAnthropicBetaHeader(headers) {
     .flatMap((value) => value.split(','))
     .map((value) => value.trim())
     .filter(
-      (value) =>
-        value.length > 0 && !BLOCKED_ANTHROPIC_BETA_FLAGS.has(value),
+      (value) => value.length > 0 && !BLOCKED_ANTHROPIC_BETA_FLAGS.has(value),
     );
   if (kept.length === 0) delete headers['anthropic-beta'];
   else headers['anthropic-beta'] = kept.join(',');
@@ -260,13 +268,10 @@ async function closeBridgeServer(server, sockets, upstreamRequests) {
   });
 }
 
-export async function assertDockerCanReachBridge({
-  bridge,
-  dockerExecutable,
-  platform,
-  imageId,
-  signal: executionSignal,
-}, runCommand = runBoundedCommand) {
+export async function assertDockerCanReachBridge(
+  { bridge, dockerExecutable, platform, imageId, signal: executionSignal },
+  runCommand = runBoundedCommand,
+) {
   if (typeof imageId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(imageId)) {
     throw new Error('The bridge probe requires an immutable Docker image ID.');
   }

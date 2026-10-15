@@ -1,7 +1,6 @@
 /** Private sentinel retained for configured-opening compatibility. */
 export const AVA_STOP_SENTINEL = '###STOP###';
 
-
 export interface AvaPromptInputs {
   readonly task: string;
   readonly context?: string;
@@ -109,7 +108,7 @@ export function buildAvaContinuationPrompt(
   state: AvaPrivatePromptState,
 ): string {
   const needs = state.needs
-    .map(({id, description}) => `- ${id}: ${description}`)
+    .map(({ id, description }) => `- ${id}: ${description}`)
     .join('\n');
   const remaining = state.remainingNeedIds.join(', ') || '(none)';
   return `${roleAndTask(inputs)}

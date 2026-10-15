@@ -1,7 +1,7 @@
-import {z} from 'zod';
+import { z } from 'zod';
 
-import {parseAtifTrajectory} from './parser.js';
-import type {AtifTrajectoryV1_8} from './types.js';
+import { parseAtifTrajectory } from './parser.js';
+import type { AtifTrajectoryV1_8 } from './types.js';
 
 const MAX_METADATA_TEXT_LENGTH = 4_096;
 const MAX_WARNING_MESSAGE_LENGTH = 64 * 1_024;
@@ -63,7 +63,7 @@ const NormalizedTrajectorySchema = z
       .object({
         source: NormalizationSourceSchema,
         adapter: z
-          .object({id: MetadataTextSchema, version: MetadataTextSchema})
+          .object({ id: MetadataTextSchema, version: MetadataTextSchema })
           .strict(),
       })
       .strict(),
@@ -168,10 +168,7 @@ export interface AtifNormalizationWarning {
   path?: string;
 }
 
-export type AtifNormalizationCompleteness =
-  | 'complete'
-  | 'partial'
-  | 'fallback';
+export type AtifNormalizationCompleteness = 'complete' | 'partial' | 'fallback';
 
 /**
  * In-memory evidence envelope. Persist trajectory as standalone
@@ -211,12 +208,14 @@ export class NormalizedTrajectoryValidationError extends Error {
       }.`,
     );
     this.name = 'NormalizedTrajectoryValidationError';
-    this.issues = issues.map((issue) => ({...issue, path: [...issue.path]}));
+    this.issues = issues.map((issue) => ({ ...issue, path: [...issue.path] }));
   }
 }
 
 /** Parse the complete adapter-to-engine evidence envelope at runtime. */
-export function parseNormalizedTrajectory(input: unknown): NormalizedTrajectory {
+export function parseNormalizedTrajectory(
+  input: unknown,
+): NormalizedTrajectory {
   const result = NormalizedTrajectorySchema.safeParse(input);
   if (!result.success) {
     throw new NormalizedTrajectoryValidationError(

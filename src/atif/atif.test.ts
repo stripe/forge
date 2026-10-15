@@ -1,22 +1,22 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   ATIF_SCHEMA_VERSION,
+  type AtifTrajectoryV1_8,
   AtifValidationError,
   createNormalizedTrajectory,
   NormalizedTrajectoryValidationError,
   parseAtifTrajectory,
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
-  type AtifTrajectoryV1_8,
 } from './index.js';
 
 function minimalTrajectory(): AtifTrajectoryV1_8 {
   return {
     schema_version: ATIF_SCHEMA_VERSION,
-    agent: {name: 'test-agent', version: '1.0.0'},
-    steps: [{step_id: 1, source: 'user', message: 'hello'}],
+    agent: { name: 'test-agent', version: '1.0.0' },
+    steps: [{ step_id: 1, source: 'user', message: 'hello' }],
   };
 }
 
@@ -32,9 +32,7 @@ function expectInvalid(
       captured = error;
       if (messageFragment !== undefined) {
         assert.ok(
-          error.issues.some((issue) =>
-            issue.message.includes(messageFragment),
-          ),
+          error.issues.some((issue) => issue.message.includes(messageFragment)),
           `expected an issue containing ${JSON.stringify(messageFragment)}`,
         );
       }
@@ -46,40 +44,43 @@ function expectInvalid(
 
 describe('parseAtifTrajectory', () => {
   it('parses the exact ATIF-v1.8 discriminator', () => {
-    assert.deepEqual(parseAtifTrajectory(minimalTrajectory()),
-      minimalTrajectory());
+    assert.deepEqual(
+      parseAtifTrajectory(minimalTrajectory()),
+      minimalTrajectory(),
+    );
 
     expectInvalid(
-      {...minimalTrajectory(), schema_version: 'ATIF-v1.7'},
+      { ...minimalTrajectory(), schema_version: 'ATIF-v1.7' },
       'Invalid literal value',
     );
-    const withoutVersion = {...minimalTrajectory()} as Record<string, unknown>;
+    const withoutVersion = { ...minimalTrajectory() } as Record<
+      string,
+      unknown
+    >;
     delete withoutVersion.schema_version;
     const missingVersion = expectInvalid(withoutVersion);
     assert.ok(
-      missingVersion.issues.some(
-        (issue) => issue.path[0] === 'schema_version',
-      ),
+      missingVersion.issues.some((issue) => issue.path[0] === 'schema_version'),
     );
   });
 
   it('rejects undeclared fields while preserving explicit extra objects', () => {
-    expectInvalid({...minimalTrajectory(), private_field: true});
+    expectInvalid({ ...minimalTrajectory(), private_field: true });
 
     const parsed = parseAtifTrajectory({
       ...minimalTrajectory(),
-      extra: {vendor: {enabled: true}},
+      extra: { vendor: { enabled: true } },
       steps: [
         {
           step_id: 1,
           source: 'user',
           message: 'hello',
-          extra: {native_event: 7},
+          extra: { native_event: 7 },
         },
       ],
     });
-    assert.deepEqual(parsed.extra, {vendor: {enabled: true}});
-    assert.deepEqual(parsed.steps[0]?.extra, {native_event: 7});
+    assert.deepEqual(parsed.extra, { vendor: { enabled: true } });
+    assert.deepEqual(parsed.steps[0]?.extra, { native_event: 7 });
   });
 
   it('validates and canonicalizes ATIF-v1.8 content parts', () => {
@@ -90,7 +91,7 @@ describe('parseAtifTrajectory', () => {
           step_id: 1,
           source: 'user',
           message: [
-            {type: 'text', text: 'listen'},
+            { type: 'text', text: 'listen' },
             {
               type: 'audio',
               source: {
@@ -101,7 +102,7 @@ describe('parseAtifTrajectory', () => {
             },
             {
               type: 'image',
-              source: {media_type: 'image/png', path: 'media/prompt.png'},
+              source: { media_type: 'image/png', path: 'media/prompt.png' },
             },
           ],
         },
@@ -121,7 +122,9 @@ describe('parseAtifTrajectory', () => {
         {
           step_id: 1,
           source: 'user',
-          message: [{type: 'audio', source: {media_type: 'image/png', path: 'x'}}],
+          message: [
+            { type: 'audio', source: { media_type: 'image/png', path: 'x' } },
+          ],
         },
       ],
     });
@@ -131,7 +134,13 @@ describe('parseAtifTrajectory', () => {
         {
           step_id: 1,
           source: 'user',
-          message: [{type: 'text', text: 'x', source: {media_type: 'image/png', path: 'x'}}],
+          message: [
+            {
+              type: 'text',
+              text: 'x',
+              source: { media_type: 'image/png', path: 'x' },
+            },
+          ],
         },
       ],
     });
@@ -164,7 +173,7 @@ describe('parseAtifTrajectory', () => {
                 source_call_id: null,
                 content: null,
                 subagent_trajectory_ref: [
-                  {trajectory_id: 'child-1', trajectory_path: null},
+                  { trajectory_id: 'child-1', trajectory_path: null },
                 ],
               },
             ],
@@ -227,9 +236,7 @@ describe('parseAtifTrajectory', () => {
       expectInvalid(
         {
           ...minimalTrajectory(),
-          steps: [
-            {step_id: 1, source: 'user', message: 'hello', timestamp},
-          ],
+          steps: [{ step_id: 1, source: 'user', message: 'hello', timestamp }],
         },
         'ISO 8601',
       );
@@ -272,7 +279,7 @@ describe('parseAtifTrajectory', () => {
     expectInvalid(
       {
         ...minimalTrajectory(),
-        steps: [{step_id: 2, source: 'user', message: 'hello'}],
+        steps: [{ step_id: 2, source: 'user', message: 'hello' }],
       },
       'sequential from 1',
     );
@@ -286,10 +293,10 @@ describe('parseAtifTrajectory', () => {
             source: 'agent',
             message: 'done',
             tool_calls: [
-              {tool_call_id: 'call-1', function_name: 'shell', arguments: {}},
+              { tool_call_id: 'call-1', function_name: 'shell', arguments: {} },
             ],
             observation: {
-              results: [{source_call_id: 'call-2', content: 'missing'}],
+              results: [{ source_call_id: 'call-2', content: 'missing' }],
             },
           },
         ],
@@ -298,30 +305,47 @@ describe('parseAtifTrajectory', () => {
     );
 
     const toolCall = {
-      tool_call_id: 'call-1', function_name: 'shell', arguments: {},
+      tool_call_id: 'call-1',
+      function_name: 'shell',
+      arguments: {},
     };
-    const duplicate = expectInvalid({
-      ...minimalTrajectory(),
-      steps: [{
-        step_id: 1,
-        source: 'agent',
-        message: '',
-        tool_calls: [toolCall, {...toolCall}],
-      }],
-    }, 'unique within a step');
-    assert.deepEqual(duplicate.issues[0]?.path,
-      ['steps', 0, 'tool_calls', 1, 'tool_call_id']);
+    const duplicate = expectInvalid(
+      {
+        ...minimalTrajectory(),
+        steps: [
+          {
+            step_id: 1,
+            source: 'agent',
+            message: '',
+            tool_calls: [toolCall, { ...toolCall }],
+          },
+        ],
+      },
+      'unique within a step',
+    );
+    assert.deepEqual(duplicate.issues[0]?.path, [
+      'steps',
+      0,
+      'tool_calls',
+      1,
+      'tool_call_id',
+    ]);
 
-    assert.equal(parseAtifTrajectory({
-      ...minimalTrajectory(),
-      steps: [1, 2].map((step_id) => ({
-        step_id,
-        source: 'agent',
-        message: '',
-        tool_calls: [toolCall],
-        observation: {results: [{source_call_id: 'call-1', content: 'ok'}]},
-      })),
-    }).steps.length, 2);
+    assert.equal(
+      parseAtifTrajectory({
+        ...minimalTrajectory(),
+        steps: [1, 2].map((step_id) => ({
+          step_id,
+          source: 'agent',
+          message: '',
+          tool_calls: [toolCall],
+          observation: {
+            results: [{ source_call_id: 'call-1', content: 'ok' }],
+          },
+        })),
+      }).steps.length,
+      2,
+    );
   });
 
   it('validates embedded subagents and their resolution keys', () => {
@@ -339,7 +363,7 @@ describe('parseAtifTrajectory', () => {
           observation: {
             results: [
               {
-                subagent_trajectory_ref: [{trajectory_id: 'child-1'}],
+                subagent_trajectory_ref: [{ trajectory_id: 'child-1' }],
               },
             ],
           },
@@ -352,44 +376,56 @@ describe('parseAtifTrajectory', () => {
       'child-1',
     );
 
-    expectInvalid({
-      ...parent,
-      subagent_trajectories: [{...minimalTrajectory()}],
-    }, 'required on an embedded subagent');
-    expectInvalid({
-      ...parent,
-      subagent_trajectories: [child, {...child}],
-    }, 'unique within subagent_trajectories');
-    expectInvalid({
-      ...parent,
-      subagent_trajectories: [],
-    }, 'must resolve to subagent_trajectories');
-    expectInvalid({
-      ...parent,
-      steps: [
-        {
-          step_id: 1,
-          source: 'agent',
-          message: 'delegated',
-          observation: {
-            results: [
-              {subagent_trajectory_ref: [{session_id: 'informational'}]},
-            ],
+    expectInvalid(
+      {
+        ...parent,
+        subagent_trajectories: [{ ...minimalTrajectory() }],
+      },
+      'required on an embedded subagent',
+    );
+    expectInvalid(
+      {
+        ...parent,
+        subagent_trajectories: [child, { ...child }],
+      },
+      'unique within subagent_trajectories',
+    );
+    expectInvalid(
+      {
+        ...parent,
+        subagent_trajectories: [],
+      },
+      'must resolve to subagent_trajectories',
+    );
+    expectInvalid(
+      {
+        ...parent,
+        steps: [
+          {
+            step_id: 1,
+            source: 'agent',
+            message: 'delegated',
+            observation: {
+              results: [
+                { subagent_trajectory_ref: [{ session_id: 'informational' }] },
+              ],
+            },
           },
-        },
-      ],
-    }, 'session_id is informational only');
+        ],
+      },
+      'session_id is informational only',
+    );
   });
 
   it('requires a note when aggregate total_steps differs', () => {
     expectInvalid(
-      {...minimalTrajectory(), final_metrics: {total_steps: 2}},
+      { ...minimalTrajectory(), final_metrics: { total_steps: 2 } },
       'must be explained in notes',
     );
     assert.equal(
       parseAtifTrajectory({
         ...minimalTrajectory(),
-        final_metrics: {total_steps: 2},
+        final_metrics: { total_steps: 2 },
         notes: 'The aggregate includes one omitted initialization step.',
       }).final_metrics?.total_steps,
       2,
@@ -397,18 +433,16 @@ describe('parseAtifTrajectory', () => {
   });
 
   it('rejects non-JSON and cyclic values before recursive schema parsing', () => {
-    const cyclic: Record<string, unknown> = minimalTrajectory() as unknown as Record<
-      string,
-      unknown
-    >;
+    const cyclic: Record<string, unknown> =
+      minimalTrajectory() as unknown as Record<string, unknown>;
     cyclic.self = cyclic;
     const error = expectInvalid(cyclic, 'cyclic');
     assert.equal(error.issues[0]?.code, 'invalid_json_value');
 
-    expectInvalid({...minimalTrajectory(), extra: {missing: undefined}});
-    expectInvalid({...minimalTrajectory(), extra: {bad: Number.NaN}});
+    expectInvalid({ ...minimalTrajectory(), extra: { missing: undefined } });
+    expectInvalid({ ...minimalTrajectory(), extra: { bad: Number.NaN } });
 
-    const sparse = {...minimalTrajectory(), steps: new Array(1)};
+    const sparse = { ...minimalTrajectory(), steps: new Array(1) };
     expectInvalid(sparse, 'arrays must be dense');
 
     const unsafeKey = JSON.parse(
@@ -423,7 +457,7 @@ describe('parseAtifTrajectory', () => {
         throw new Error('oversized array keys must not be enumerated');
       },
     });
-    const error = expectInvalid({...minimalTrajectory(), steps: oversized});
+    const error = expectInvalid({ ...minimalTrajectory(), steps: oversized });
     assert.equal(error.issues[0]?.code, 'input_limit_exceeded');
   });
 
@@ -434,24 +468,53 @@ describe('parseAtifTrajectory', () => {
       throw new Error('JSON parsing must not invoke accessors');
     };
     const objectAccessor = Object.defineProperty({}, 'value', {
-      enumerable: true, get: accessor,
+      enumerable: true,
+      get: accessor,
     });
     const arrayAccessor = Object.defineProperty([null], '0', {
-      enumerable: true, get: accessor,
+      enumerable: true,
+      get: accessor,
     });
-    const hidden = Object.defineProperty({}, 'hidden', {value: true});
-    const namedArray = Object.assign([null], {label: 'named'});
+    const hidden = Object.defineProperty({}, 'hidden', { value: true });
+    const namedArray = Object.assign([null], { label: 'named' });
     const cases = [
-      {value: new Date(0), path: ['extra', 'value'], message: 'plain JSON objects'},
-      {value: objectAccessor, path: ['extra', 'value', 'value'], message: 'plain data values'},
-      {value: arrayAccessor, path: ['extra', 'value', 0], message: 'plain data values'},
-      {value: hidden, path: ['extra', 'value', 'hidden'], message: 'enumerable'},
-      {value: {[Symbol('private')]: true}, path: ['extra', 'value'], message: 'symbol keys'},
-      {value: namedArray, path: ['extra', 'value'], message: 'named properties'},
+      {
+        value: new Date(0),
+        path: ['extra', 'value'],
+        message: 'plain JSON objects',
+      },
+      {
+        value: objectAccessor,
+        path: ['extra', 'value', 'value'],
+        message: 'plain data values',
+      },
+      {
+        value: arrayAccessor,
+        path: ['extra', 'value', 0],
+        message: 'plain data values',
+      },
+      {
+        value: hidden,
+        path: ['extra', 'value', 'hidden'],
+        message: 'enumerable',
+      },
+      {
+        value: { [Symbol('private')]: true },
+        path: ['extra', 'value'],
+        message: 'symbol keys',
+      },
+      {
+        value: namedArray,
+        path: ['extra', 'value'],
+        message: 'named properties',
+      },
     ];
 
-    for (const {value, path, message} of cases) {
-      const error = expectInvalid({...minimalTrajectory(), extra: {value}}, message);
+    for (const { value, path, message } of cases) {
+      const error = expectInvalid(
+        { ...minimalTrajectory(), extra: { value } },
+        message,
+      );
       assert.equal(error.issues[0]?.code, 'invalid_json_value');
       assert.deepEqual(error.issues[0]?.path, path);
     }
@@ -460,25 +523,33 @@ describe('parseAtifTrajectory', () => {
 
   it('bounds nesting while accepting shared acyclic objects as fresh projections', () => {
     let nested: unknown = null;
-    for (let depth = 0; depth < 62; depth += 1) nested = {value: nested};
-    const atLimit = {...minimalTrajectory(), extra: {value: nested}};
+    for (let depth = 0; depth < 62; depth += 1) nested = { value: nested };
+    const atLimit = { ...minimalTrajectory(), extra: { value: nested } };
     assert.deepEqual(parseAtifTrajectory(atLimit), atLimit);
-    const tooDeep = expectInvalid({
-      ...minimalTrajectory(), extra: {value: {value: nested}},
-    }, 'maximum depth');
+    const tooDeep = expectInvalid(
+      {
+        ...minimalTrajectory(),
+        extra: { value: { value: nested } },
+      },
+      'maximum depth',
+    );
     assert.equal(tooDeep.issues[0]?.code, 'input_limit_exceeded');
     assert.equal(tooDeep.issues[0]?.path.length, 65);
 
-    const shared = Object.assign(Object.create(null) as {value: string[]}, {
+    const shared = Object.assign(Object.create(null) as { value: string[] }, {
       value: ['original'],
     });
-    const input = {...minimalTrajectory(), extra: {left: shared, right: shared}};
+    const input = {
+      ...minimalTrajectory(),
+      extra: { left: shared, right: shared },
+    };
     const parsed = parseAtifTrajectory(input);
     assert.deepEqual(parsed.extra, {
-      left: {value: ['original']}, right: {value: ['original']},
+      left: { value: ['original'] },
+      right: { value: ['original'] },
     });
-    const left = parsed.extra?.left as {value: string[]};
-    const right = parsed.extra?.right as {value: string[]};
+    const left = parsed.extra?.left as { value: string[] };
+    const right = parsed.extra?.right as { value: string[] };
     left.value.push('changed');
     assert.deepEqual(right.value, ['original']);
     assert.deepEqual(shared.value, ['original']);
@@ -510,44 +581,51 @@ describe('serializeAtifTrajectory', () => {
   it('is invariant to input object insertion order', () => {
     const left = {
       ...minimalTrajectory(),
-      extra: {z: 1, nested: {z: false, a: true}, a: 2},
+      extra: { z: 1, nested: { z: false, a: true }, a: 2 },
     };
     const right = {
       steps: minimalTrajectory().steps,
-      extra: {a: 2, nested: {a: true, z: false}, z: 1},
+      extra: { a: 2, nested: { a: true, z: false }, z: 1 },
       agent: minimalTrajectory().agent,
       schema_version: ATIF_SCHEMA_VERSION,
     };
-    assert.equal(
-      serializeAtifTrajectory(left),
-      serializeAtifTrajectory(right),
-    );
+    assert.equal(serializeAtifTrajectory(left), serializeAtifTrajectory(right));
   });
 
   it('revalidates typed inputs and canonicalizes audio without mutating content order', () => {
     const input = {
       ...minimalTrajectory(),
-      steps: [{
-        step_id: 1,
-        source: 'user',
-        message: [
-          {type: 'text', text: 'first'},
-          {type: 'audio', source: {media_type: ' Audio/X-WAV ', path: 'sound.wav'}},
-          {type: 'text', text: 'last'},
-        ],
-      }],
+      steps: [
+        {
+          step_id: 1,
+          source: 'user',
+          message: [
+            { type: 'text', text: 'first' },
+            {
+              type: 'audio',
+              source: { media_type: ' Audio/X-WAV ', path: 'sound.wav' },
+            },
+            { type: 'text', text: 'last' },
+          ],
+        },
+      ],
     };
     const before = structuredClone(input);
     const serialized = serializeAtifTrajectory(input as AtifTrajectoryV1_8);
     assert.deepEqual(JSON.parse(serialized).steps[0].message, [
-      {type: 'text', text: 'first'},
-      {type: 'audio', source: {media_type: 'audio/wav', path: 'sound.wav'}},
-      {type: 'text', text: 'last'},
+      { type: 'text', text: 'first' },
+      { type: 'audio', source: { media_type: 'audio/wav', path: 'sound.wav' } },
+      { type: 'text', text: 'last' },
     ]);
     assert.deepEqual(input, before);
-    assert.throws(() => serializeAtifTrajectory({
-      ...minimalTrajectory(), schema_version: 'ATIF-v1.7',
-    } as unknown as AtifTrajectoryV1_8), AtifValidationError);
+    assert.throws(
+      () =>
+        serializeAtifTrajectory({
+          ...minimalTrajectory(),
+          schema_version: 'ATIF-v1.7',
+        } as unknown as AtifTrajectoryV1_8),
+      AtifValidationError,
+    );
   });
 });
 
@@ -561,7 +639,7 @@ describe('createNormalizedTrajectory', () => {
           format: 'claude-code-jsonl',
           sessionId: 'native-session',
         },
-        adapter: {id: 'claude-code', version: '1'},
+        adapter: { id: 'claude-code', version: '1' },
       },
       completeness: 'partial',
       warnings: [
@@ -584,8 +662,8 @@ describe('createNormalizedTrajectory', () => {
     const normalized = createNormalizedTrajectory({
       trajectory: minimalTrajectory(),
       provenance: {
-        source: {kind: 'native_log', format: 'test-jsonl'},
-        adapter: {id: 'test-agent', version: '1'},
+        source: { kind: 'native_log', format: 'test-jsonl' },
+        adapter: { id: 'test-agent', version: '1' },
       },
       completeness: 'complete',
     });
@@ -595,8 +673,8 @@ describe('createNormalizedTrajectory', () => {
         parseNormalizedTrajectory({
           ...normalized,
           provenance: {
-            source: {kind: 'bogus', format: 3},
-            adapter: {id: '', version: ''},
+            source: { kind: 'bogus', format: 3 },
+            adapter: { id: '', version: '' },
           },
           completeness: 'bogus',
         }),
@@ -608,19 +686,20 @@ describe('createNormalizedTrajectory', () => {
       ['undeclared', true],
     ] as const) {
       assert.throws(
-        () => parseNormalizedTrajectory({...normalized, [field]: value}),
+        () => parseNormalizedTrajectory({ ...normalized, [field]: value }),
         NormalizedTrajectoryValidationError,
       );
     }
     assert.throws(
-      () => parseNormalizedTrajectory({...normalized, trajectory: {}}),
+      () => parseNormalizedTrajectory({ ...normalized, trajectory: {} }),
       AtifValidationError,
     );
     assert.throws(
-      () => parseNormalizedTrajectory({
-        ...normalized,
-        trajectory: {...normalized.trajectory, schema_version: 'ATIF-v1.7'},
-      }),
+      () =>
+        parseNormalizedTrajectory({
+          ...normalized,
+          trajectory: { ...normalized.trajectory, schema_version: 'ATIF-v1.7' },
+        }),
       AtifValidationError,
     );
   });
@@ -629,55 +708,103 @@ describe('createNormalizedTrajectory', () => {
     const normalized = createNormalizedTrajectory({
       trajectory: minimalTrajectory(),
       provenance: {
-        source: {kind: 'native_log', format: 'test-jsonl'},
-        adapter: {id: 'test-agent', version: '1'},
+        source: { kind: 'native_log', format: 'test-jsonl' },
+        adapter: { id: 'test-agent', version: '1' },
       },
       completeness: 'complete',
     });
-    const incomplete = {code: 'source_incomplete', message: 'Truncated event.'};
-    const fallback = {code: 'fallback_used', message: 'Using driver turns.'};
+    const incomplete = {
+      code: 'source_incomplete',
+      message: 'Truncated event.',
+    };
+    const fallback = { code: 'fallback_used', message: 'Using driver turns.' };
     const fallbackProvenance = {
       ...normalized.provenance,
-      source: {kind: 'driver_fallback', format: 'forge-driver-turns'},
+      source: { kind: 'driver_fallback', format: 'forge-driver-turns' },
     };
     const cases = [
-      {change: {warnings: [incomplete]}, path: ['warnings'], message: 'complete evidence cannot'},
-      {change: {completeness: 'partial'}, path: ['warnings'], message: 'partial evidence requires'},
-      {change: {provenance: fallbackProvenance}, path: ['completeness'], message: 'fallback provenance and fallback completeness'},
-      {change: {completeness: 'fallback', warnings: [fallback]}, path: ['completeness'], message: 'fallback provenance and fallback completeness'},
-      {change: {provenance: fallbackProvenance, completeness: 'fallback', warnings: [incomplete]}, path: ['warnings'], message: 'requires a fallback_used warning'},
-      {change: {completeness: 'partial', warnings: [fallback]}, path: ['warnings'], message: 'valid only for fallback evidence'},
+      {
+        change: { warnings: [incomplete] },
+        path: ['warnings'],
+        message: 'complete evidence cannot',
+      },
+      {
+        change: { completeness: 'partial' },
+        path: ['warnings'],
+        message: 'partial evidence requires',
+      },
+      {
+        change: { provenance: fallbackProvenance },
+        path: ['completeness'],
+        message: 'fallback provenance and fallback completeness',
+      },
+      {
+        change: { completeness: 'fallback', warnings: [fallback] },
+        path: ['completeness'],
+        message: 'fallback provenance and fallback completeness',
+      },
+      {
+        change: {
+          provenance: fallbackProvenance,
+          completeness: 'fallback',
+          warnings: [incomplete],
+        },
+        path: ['warnings'],
+        message: 'requires a fallback_used warning',
+      },
+      {
+        change: { completeness: 'partial', warnings: [fallback] },
+        path: ['warnings'],
+        message: 'valid only for fallback evidence',
+      },
     ];
-    for (const {change, path, message} of cases) {
-      assert.throws(() => parseNormalizedTrajectory({...normalized, ...change}),
+    for (const { change, path, message } of cases) {
+      assert.throws(
+        () => parseNormalizedTrajectory({ ...normalized, ...change }),
         (error) => {
           assert.ok(error instanceof NormalizedTrajectoryValidationError);
           assert.equal(error.code, 'invalid_normalized_trajectory');
-          const issue = error.issues.find((item) => item.message.includes(message));
+          const issue = error.issues.find((item) =>
+            item.message.includes(message),
+          );
           assert.ok(issue, message);
           assert.deepEqual(issue.path, path);
           return true;
-        });
+        },
+      );
     }
 
-    assert.equal(parseNormalizedTrajectory({
-      ...normalized,
-      provenance: fallbackProvenance,
-      completeness: 'fallback',
-      warnings: [fallback],
-    }).completeness, 'fallback');
+    assert.equal(
+      parseNormalizedTrajectory({
+        ...normalized,
+        provenance: fallbackProvenance,
+        completeness: 'fallback',
+        warnings: [fallback],
+      }).completeness,
+      'fallback',
+    );
   });
 
   it('preserves source ATIF provenance and clones adapter-owned metadata', () => {
     const input = {
       trajectory: minimalTrajectory(),
       provenance: {
-        source: {kind: 'atif' as const, format: 'atif' as const,
-          schemaVersion: 'ATIF-v1.7', sessionId: 'source-session'},
-        adapter: {id: 'test-agent', version: '1'},
+        source: {
+          kind: 'atif' as const,
+          format: 'atif' as const,
+          schemaVersion: 'ATIF-v1.7',
+          sessionId: 'source-session',
+        },
+        adapter: { id: 'test-agent', version: '1' },
       },
       completeness: 'partial' as const,
-      warnings: [{code: 'value_omitted' as const, message: 'Omitted private value.', path: 'steps.0.extra'}],
+      warnings: [
+        {
+          code: 'value_omitted' as const,
+          message: 'Omitted private value.',
+          path: 'steps.0.extra',
+        },
+      ],
     };
     const before = structuredClone(input);
     const normalized = createNormalizedTrajectory(input);

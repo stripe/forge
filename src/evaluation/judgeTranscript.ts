@@ -1,18 +1,15 @@
-import {z} from 'zod';
+import { z } from 'zod';
 
 import {
-  parseAtifTrajectory,
   type AtifAgentStep,
   type AtifContent,
   type AtifObservationResult,
   type AtifTrajectoryV1_8,
   type JsonObject,
+  parseAtifTrajectory,
 } from '../atif/index.js';
-import {
-  assertBoundedJsonValue,
-  AtifValidationError,
-} from '../atif/parser.js';
-import {serializeCanonicalJson} from '../serialization.js';
+import { AtifValidationError, assertBoundedJsonValue } from '../atif/parser.js';
+import { serializeCanonicalJson } from '../serialization.js';
 
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
@@ -20,23 +17,22 @@ export const JUDGE_TRANSCRIPT_PROJECTION_ID =
 /** Portable upper bound before workspace, criterion, and prompt text are added. */
 export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
-export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze(
-  ['user', 'agent'] as const,
-);
+export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze([
+  'user',
+  'agent',
+] as const);
 export const JUDGE_TRANSCRIPT_COPIED_CONTEXT = 'excluded' as const;
-export const JUDGE_TRANSCRIPT_INCLUDED_FIELDS = Object.freeze(
-  [
-    'step_id',
-    'source',
-    'message',
-    'tool_calls[].tool_call_id',
-    'tool_calls[].function_name',
-    'tool_calls[].arguments',
-    'observation.results[].source_call_id',
-    'observation.results[].content',
-    'observation.results[].is_error',
-  ] as const,
-);
+export const JUDGE_TRANSCRIPT_INCLUDED_FIELDS = Object.freeze([
+  'step_id',
+  'source',
+  'message',
+  'tool_calls[].tool_call_id',
+  'tool_calls[].function_name',
+  'tool_calls[].arguments',
+  'observation.results[].source_call_id',
+  'observation.results[].content',
+  'observation.results[].is_error',
+] as const);
 
 /** Message or media-reference content visible to a criterion judge. */
 export type JudgeVisibleContentV1 = AtifContent;
@@ -166,25 +162,24 @@ function projectAgentStep(step: AtifAgentStep): JudgeVisibleAgentStepV1 {
   }));
   const results = (step.observation?.results ?? [])
     .map(projectObservationResult)
-    .filter((result): result is JudgeVisibleObservationResultV1 =>
-      result !== undefined,
+    .filter(
+      (result): result is JudgeVisibleObservationResultV1 =>
+        result !== undefined,
     );
 
   return {
     step_id: step.step_id,
     source: step.source,
     message: step.message,
-    ...(toolCalls.length > 0 ? {tool_calls: toolCalls} : {}),
-    ...(results.length > 0 ? {observation: {results}} : {}),
+    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    ...(results.length > 0 ? { observation: { results } } : {}),
   };
 }
 
 interface JudgeVisibleAgentBehaviorShape {
   readonly message: unknown;
   readonly tool_calls?: readonly unknown[] | undefined;
-  readonly observation?:
-    | {readonly results: readonly unknown[]}
-    | undefined;
+  readonly observation?: { readonly results: readonly unknown[] } | undefined;
 }
 
 function hasJudgeVisibleAgentBehavior(
@@ -203,7 +198,10 @@ function hasJudgeVisibleMessage(message: unknown): boolean {
   if (!Array.isArray(message)) return false;
   return message.some((part) => {
     if (typeof part !== 'object' || part === null) return false;
-    const candidate = part as {readonly type?: unknown; readonly text?: unknown};
+    const candidate = part as {
+      readonly type?: unknown;
+      readonly text?: unknown;
+    };
     if (candidate.type === 'text') {
       return typeof candidate.text === 'string' && candidate.text.length > 0;
     }
@@ -217,10 +215,10 @@ function projectObservationResult(
   const isError = result.extra?.is_error;
   const projected: JudgeVisibleObservationResultV1 = {
     ...(result.source_call_id != null
-      ? {source_call_id: result.source_call_id}
+      ? { source_call_id: result.source_call_id }
       : {}),
-    ...(result.content != null ? {content: result.content} : {}),
-    ...(typeof isError === 'boolean' ? {is_error: isError} : {}),
+    ...(result.content != null ? { content: result.content } : {}),
+    ...(typeof isError === 'boolean' ? { is_error: isError } : {}),
   };
 
   return Object.keys(projected).length > 0 ? projected : undefined;
@@ -258,7 +256,7 @@ function assertBoundedProjectionJson(
     if (error instanceof AtifValidationError) {
       throw new TypeError(
         `Judge transcript projection ${scope} is not bounded JSON.`,
-        {cause: error},
+        { cause: error },
       );
     }
     throw error;
@@ -303,9 +301,13 @@ const ContentSchema = z.union([
   z.string(),
   z.array(
     z.discriminatedUnion('type', [
-      z.object({type: z.literal('text'), text: z.string()}).strict(),
-      z.object({type: z.literal('image'), source: ImageSourceSchema}).strict(),
-      z.object({type: z.literal('audio'), source: AudioSourceSchema}).strict(),
+      z.object({ type: z.literal('text'), text: z.string() }).strict(),
+      z
+        .object({ type: z.literal('image'), source: ImageSourceSchema })
+        .strict(),
+      z
+        .object({ type: z.literal('audio'), source: AudioSourceSchema })
+        .strict(),
     ]),
   ),
 ]);
@@ -327,7 +329,7 @@ const ObservationResultSchema = z
     message: 'A judge-visible observation result cannot be empty.',
   });
 const ObservationSchema = z
-  .object({results: z.array(ObservationResultSchema).min(1)})
+  .object({ results: z.array(ObservationResultSchema).min(1) })
   .strict();
 const UserStepSchema = z
   .object({
@@ -360,9 +362,7 @@ const AgentStepSchema = z
       }
       toolCallIds.add(call.tool_call_id);
     }
-    for (const [index, result] of (
-      step.observation?.results ?? []
-    ).entries()) {
+    for (const [index, result] of (step.observation?.results ?? []).entries()) {
       if (
         result.source_call_id !== undefined &&
         !toolCallIds.has(result.source_call_id)
@@ -370,7 +370,8 @@ const AgentStepSchema = z
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['observation', 'results', index, 'source_call_id'],
-          message: 'source_call_id must reference a tool call from the same step',
+          message:
+            'source_call_id must reference a tool call from the same step',
         });
       }
     }

@@ -1,14 +1,14 @@
-import {parseResolvedRunPlan} from '../model/parse.js';
-import {FORGE_BUILD_IDENTITY} from '../version.js';
+import { parseResolvedRunPlan } from '../model/parse.js';
 import type {
-  JudgingCriterionV1,
   AgentSelectionV1,
   ChecksV1,
   ForgeRuntimeV1,
+  JudgingCriterionV1,
   ModelRefV1,
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
+import { FORGE_BUILD_IDENTITY } from '../version.js';
 
 const DATASET_DIGEST = `sha256:${'1'.repeat(64)}` as const;
 
@@ -44,21 +44,26 @@ export function createTestResolvedRunPlan(
     provider: 'test-provider',
     model: 'test-model',
   };
-  const agent = {...selectedAgent, ...(selectedAgent.adapter === 'codex'
-    ? {hook_trust: selectedAgent.hook_trust ?? 'native'} : {})};
+  const agent = {
+    ...selectedAgent,
+    ...(selectedAgent.adapter === 'codex'
+      ? { hook_trust: selectedAgent.hook_trust ?? 'native' }
+      : {}),
+  };
   const caseSetup = [...(options.caseSetup ?? [])];
   const treatmentSetup = [...(options.treatmentSetup ?? [])];
   const setup = [...caseSetup, ...treatmentSetup];
   const checks = options.checks;
   const judgingCriteria = [...(options.judgingCriteria ?? [])];
-  const initialPrompt = options.initialPrompt ?? (mode === 'one_shot' ? prompt : undefined);
+  const initialPrompt =
+    options.initialPrompt ?? (mode === 'one_shot' ? prompt : undefined);
   const maxTurns = mode === 'one_shot' ? 1 : (options.maxTurns ?? 10);
 
   return parseResolvedRunPlan({
     selection: {
       case_id: caseId,
       treatment,
-      agent: {...agent},
+      agent: { ...agent },
       repetition: 0,
     },
     provenance: {
@@ -75,22 +80,29 @@ export function createTestResolvedRunPlan(
         id: caseId,
         path: `cases/${caseId}/case.yaml`,
       },
-      forge: {...FORGE_BUILD_IDENTITY, ...(options.forgeVersion === undefined ? {} : {version: options.forgeVersion})},
+      forge: {
+        ...FORGE_BUILD_IDENTITY,
+        ...(options.forgeVersion === undefined
+          ? {}
+          : { version: options.forgeVersion }),
+      },
     },
     case: {
       id: caseId,
-      ...(mode === 'one_shot' ? {initial_prompt: initialPrompt!} : {task: prompt}),
+      ...(mode === 'one_shot'
+        ? { initial_prompt: initialPrompt! }
+        : { task: prompt }),
       ...(mode === 'multi_turn' && initialPrompt !== undefined
-        ? {initial_prompt: initialPrompt}
+        ? { initial_prompt: initialPrompt }
         : {}),
-      ...(options.context === undefined ? {} : {context: options.context}),
+      ...(options.context === undefined ? {} : { context: options.context }),
       execution_mode: mode,
-      ...(mode === 'multi_turn' ? {max_turns: maxTurns} : {}),
+      ...(mode === 'multi_turn' ? { max_turns: maxTurns } : {}),
       setup: caseSetup,
       judging_criteria: judgingCriteria,
-      ...(checks === undefined ? {} : {checks}),
+      ...(checks === undefined ? {} : { checks }),
     },
-    treatment: {id: treatment, setup: treatmentSetup},
+    treatment: { id: treatment, setup: treatmentSetup },
     setup,
     interaction: {
       mode,
@@ -102,8 +114,12 @@ export function createTestResolvedRunPlan(
           }
         : {
             task: prompt,
-            ...(options.context === undefined ? {} : {context: options.context}),
-            ...(initialPrompt === undefined ? {} : {initial_prompt: initialPrompt}),
+            ...(options.context === undefined
+              ? {}
+              : { context: options.context }),
+            ...(initialPrompt === undefined
+              ? {}
+              : { initial_prompt: initialPrompt }),
             initial_prompt_source:
               initialPrompt === undefined
                 ? ('case.task' as const)
@@ -114,16 +130,16 @@ export function createTestResolvedRunPlan(
     },
     evaluation: {
       judging_criteria: judgingCriteria,
-      ...(checks === undefined ? {} : {checks}),
-      ...(options.judge === undefined ? {} : {judge: {...options.judge}}),
+      ...(checks === undefined ? {} : { checks }),
+      ...(options.judge === undefined ? {} : { judge: { ...options.judge } }),
     },
     ...(options.rolePlayer === undefined
       ? {}
-      : {role_player: {...options.rolePlayer}}),
-    agent: {...agent},
+      : { role_player: { ...options.rolePlayer } }),
+    agent: { ...agent },
     runtime: options.runtime ?? {
       adapter: 'docker',
-      image: {kind: 'forge'},
+      image: { kind: 'forge' },
       platform: 'linux/amd64',
       resources: {
         memory_bytes: 4 * 1024 * 1024 * 1024,
@@ -131,6 +147,6 @@ export function createTestResolvedRunPlan(
         process_count: 512,
       },
     },
-    limits: {run_timeout_ms: 30_000},
+    limits: { run_timeout_ms: 30_000 },
   });
 }
