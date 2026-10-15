@@ -3,8 +3,8 @@ import { type ChildProcess, fork } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { describe, it } from 'vitest';
 import {
   type ExperimentRunSummary,
   parseExperimentRunReport,
@@ -12,7 +12,7 @@ import {
 import { verifyCompletedRun } from '../src/results/index.js';
 
 const childFile = fileURLToPath(
-  new URL('./support/experimentProcess.js', import.meta.url),
+  new URL('./support/experimentProcess.ts', import.meta.url),
 );
 
 describe('experiment run recovery across real process death', () => {
@@ -123,6 +123,7 @@ describe('experiment run recovery across real process death', () => {
 
 function launch(root: string, mode: string) {
   const child = fork(childFile, [root, mode], {
+    execArgv: ['--import', import.meta.resolve('tsx')],
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
   let stderr = '';

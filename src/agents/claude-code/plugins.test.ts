@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import type { CommandResult, CommandRunner } from '../../contracts/command.js';
 import type { PluginSelectionV1 } from '../../model/types.js';

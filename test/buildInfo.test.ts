@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { describe, it } from 'vitest';
 
 import type { ForgeBuildIdentity } from '../src/version.js';
 

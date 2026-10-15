@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
 import { setImmediate as nextEventLoopTurn } from 'node:timers/promises';
+import { describe, it, vi } from 'vitest';
 import {
   AvaRolePlayer,
   MAX_AVA_ATTEMPTS,
@@ -266,7 +266,10 @@ describe('AvaRolePlayer', () => {
   });
 
   it('uses the fixed one- and five-second retry waits', async (testContext) => {
-    testContext.mock.timers.enable({ apis: ['setTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    testContext.onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const completion = scriptedCompletion(
       new Error('temporary request failure'),
       '{invalid json',
@@ -278,16 +281,16 @@ describe('AvaRolePlayer', () => {
     ).nextTurn();
     await nextEventLoopTurn();
 
-    testContext.mock.timers.tick(999);
+    vi.advanceTimersByTime(999);
     await nextEventLoopTurn();
     assert.equal(completion.calls.length, 1);
-    testContext.mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     await nextEventLoopTurn();
     assert.equal(completion.calls.length, 2);
-    testContext.mock.timers.tick(4_999);
+    vi.advanceTimersByTime(4_999);
     await nextEventLoopTurn();
     assert.equal(completion.calls.length, 2);
-    testContext.mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
 
     assert.equal((await pending).message, 'How should checkout work?');
     assert.equal(completion.calls.length, MAX_AVA_ATTEMPTS);
@@ -312,7 +315,7 @@ describe('AvaRolePlayer', () => {
     assert.equal(completion.calls.length, 1);
   });
 
-  it('fails closed after bounded invalid structured outputs', async (testContext) => {
+  describe('fails closed after bounded invalid structured outputs', () => {
     const invalidCases: Array<[string, string]> = [
       [
         'duplicate needs',
@@ -366,7 +369,7 @@ describe('AvaRolePlayer', () => {
     ];
 
     for (const [name, response] of invalidCases) {
-      await testContext.test(name, async () => {
+      it(name, async () => {
         const completion = scriptedCompletion(response);
         const turn = await new AvaRolePlayer(
           { task: 'x' },

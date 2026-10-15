@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import { parseAtifTrajectory } from '../atif/index.js';
 import { credentialReference } from '../contracts/credentials.js';
@@ -65,7 +65,7 @@ describe('executeEval multi-turn and judging integration', () => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-long-opening-'),
     );
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     const initialPrompt = [
       'Create a complete answer file.',
       '',

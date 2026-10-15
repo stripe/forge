@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import type { ForgeComposition } from '../contracts/composition.js';
 import { credentialReference } from '../contracts/credentials.js';
 import type { RuntimeAdapter } from '../contracts/runtime.js';

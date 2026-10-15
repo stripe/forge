@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
 import { parse } from 'toml';
+import { describe, it } from 'vitest';
 
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
 import { prepareCodexPluginConfiguration } from './pluginConfig.js';

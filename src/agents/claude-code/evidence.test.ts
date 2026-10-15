@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { parseAtifTrajectory } from '../../atif/index.js';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.js';

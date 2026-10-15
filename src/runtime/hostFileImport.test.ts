@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it, vi } from 'vitest';
 import { importHostFileIntoState } from './hostFileImport.js';
 
 const roots: string[] = [];
@@ -61,7 +61,7 @@ describe('host import publication', () => {
     assert.deepEqual(await fs.readdir(test.staging), []);
   });
 
-  it('cleans up an allocated staging file when cancellation interrupts the first read', async (t) => {
+  it('cleans up an allocated staging file when cancellation interrupts the first read', async () => {
     const test = await fixture(Buffer.alloc(1024 * 1024, 'a'));
     const controller = new AbortController();
     const reason = new Error('cancel staged transfer');
@@ -70,23 +70,19 @@ describe('host import publication', () => {
     const createReadStream = prototype.createReadStream;
     await handle.close();
     let started = false;
-    t.mock.method(
-      prototype,
-      'createReadStream',
-      function (
-        this: typeof handle,
-        ...args: Parameters<typeof createReadStream>
-      ) {
-        const stream = createReadStream.apply(this, args);
-        // The source stream is created only after the staging file is allocated.
-        // Abort synchronously on its first chunk, before async iteration resumes.
-        stream.once('data', () => {
-          started = true;
-          controller.abort(reason);
-        });
-        return stream;
-      },
-    );
+    vi.spyOn(prototype, 'createReadStream').mockImplementation(function (
+      this: typeof handle,
+      ...args: Parameters<typeof createReadStream>
+    ) {
+      const stream = createReadStream.apply(this, args);
+      // The source stream is created only after the staging file is allocated.
+      // Abort synchronously on its first chunk, before async iteration resumes.
+      stream.once('data', () => {
+        started = true;
+        controller.abort(reason);
+      });
+      return stream;
+    });
     await assert.rejects(
       importHostFileIntoState(
         test.state,

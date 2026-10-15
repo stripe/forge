@@ -76,7 +76,7 @@ While iterating, run the narrowest relevant tests, plus applicable type, build,
 or package checks from `package.json`:
 
 ```sh
-pnpm test -- path/to/file.test.ts
+pnpm test path/to/file.test.ts
 ```
 
 Use Biome for formatting, import organization, and linting. Run `pnpm lint`

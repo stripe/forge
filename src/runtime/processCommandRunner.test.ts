@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it, vi } from 'vitest';
 import { createHostCommandRunner } from './processCommandRunner.js';
 
 const roots: string[] = [];
@@ -153,7 +153,10 @@ describe('host command runner with real subprocesses', () => {
   it('times out a ready command and waits for the real process to exit', {
     timeout: 10_000,
   }, async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    t.onTestFinished(() => {
+      vi.useRealTimers();
+    });
     let markReady!: (pid: number) => void;
     const ready = new Promise<number>((resolve) => {
       markReady = resolve;
@@ -173,7 +176,7 @@ describe('host command runner with real subprocesses', () => {
     try {
       pid = await ready;
       assert.equal(await running(pid), true);
-      t.mock.timers.tick(500);
+      vi.advanceTimersByTime(500);
       await rejected;
       assert.equal(await running(pid), false);
     } finally {

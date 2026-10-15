@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import type { CommandResult } from '../../contracts/command.js';
 import type { HostCommandRunner } from '../processCommandRunner.js';
 import { detectDockerRuntimePlatform } from './platform.js';

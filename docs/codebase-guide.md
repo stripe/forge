@@ -21,7 +21,7 @@ run.
 
 ## Development and verification
 
-From a source checkout, use Node.js 22 or newer and the pinned package manager:
+Development uses Node.js 22.12 or newer and the pinned package manager:
 
 ```sh
 corepack enable
@@ -30,11 +30,13 @@ pnpm build
 ```
 
 Use `node dist/cli.js` to run the built CLI with the README's
-[sample walkthrough](../README.md#run-your-first-experiment). Run the narrowest
-relevant tests while iterating:
+[sample walkthrough](../README.md#run-your-first-experiment). `pnpm test` runs
+Vitest directly against TypeScript sources; it does not build the package or
+typecheck tests. Use `pnpm typecheck` for type checking. Run the narrowest
+relevant tests while iterating, or use `pnpm test:watch` for watch mode:
 
 ```sh
-pnpm test -- path/to/file.test.ts
+pnpm test path/to/file.test.ts
 ```
 
 `pnpm lint` checks formatting, import organization, and lint rules with Biome
@@ -758,8 +760,10 @@ deterministic tests and the opt-in live suite; their manifest sizes and hashes
 are verified by `pnpm check:cases` and loader tests.
 
 The normal suite combines focused unit tests, deterministic integration tests,
-real local subprocesses, and loopback HTTP transport tests. It requires no
-Docker, provider credentials, or external network access. See
+real local subprocesses, and loopback HTTP transport tests. Subprocess tests
+use `tsx` to load source files; the separate package smoke test exercises
+built JavaScript from an installed tarball with plain Node.js. The normal suite
+requires no Docker, provider credentials, or external network access. See
 [opt-in live tests](#opt-in-live-tests) for real-runtime commands, credentials,
 gateway behavior, and suite configuration.
 
@@ -770,7 +774,7 @@ gateway behavior, and suite configuration.
 | [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
 | [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
-| [`scripts/run-tests.mjs`](https://github.com/stripe/forge/blob/main/scripts/run-tests.mjs) | Test entry point used by `pnpm test`. |
+| [`vitest.config.ts`](https://github.com/stripe/forge/blob/main/vitest.config.ts) | Vitest discovery, Node environment, process isolation, and mock restoration. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
 | [`scripts/build-info.mjs`](https://github.com/stripe/forge/blob/main/scripts/build-info.mjs) | Captures source commit and dirty state into packaged build metadata when Git is available. |
 | [`scripts/package-smoke.mjs`](https://github.com/stripe/forge/blob/main/scripts/package-smoke.mjs) | Verifies published package entry points and assets. |
@@ -778,7 +782,6 @@ gateway behavior, and suite configuration.
 | [`package.json`](../package.json) | Public exports, binary, Node/package-manager pins, scripts, and package file inventory. |
 | [`tsconfig.json`](https://github.com/stripe/forge/blob/main/tsconfig.json) | Strict NodeNext development/test typechecking. |
 | [`tsconfig.build.json`](https://github.com/stripe/forge/blob/main/tsconfig.build.json) | Production declaration/JavaScript build. |
-| [`tsconfig.test.json`](https://github.com/stripe/forge/blob/main/tsconfig.test.json) | Compiles source and repository tests into the temporary test build. |
 
 ## Public versus internal imports
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import type { AtifTrajectoryV1_8 } from '../atif/index.js';
 import type {
