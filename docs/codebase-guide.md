@@ -89,6 +89,19 @@ mode uses scripted host completions for multi-turn coverage, so it needs no
 Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
 setup without upstream calls.
 
+OpenCode setup mode exercises the real pinned CLI against a deterministic
+authenticated Chat Completions endpoint, including tools, one-shot and Ava
+turns, exact-session exports, restricted artifacts, and cleanup:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup FORGE_LIVE_AGENT=opencode pnpm test:live
+```
+
+It needs Docker with `host.docker.internal` support and network access for
+runtime installation, but no upstream model credentials or billable calls.
+OpenCode full mode is not yet available. Its executable and Docker validation
+remain pending; deterministic adapter tests do not substitute for this suite.
+
 The live suite can create temporary authenticated host bridges for Codex
 Responses requests and loopback Claude endpoints. The real upstream key
 stays host-side; the container receives a per-run bridge credential. The host
@@ -426,7 +439,7 @@ implementations.
 | --- | --- | --- |
 | [`composition.ts`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
-| [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
+| [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by coding-agent adapters and testing fakes; consumed by `execution` and `evidence` |
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
@@ -622,6 +635,17 @@ Both plugin installers use
 to bound installed contents, reject unsafe entries, and compute the shared
 tree receipt.
 
+### `src/agents/opencode`
+
+`index.ts` owns routing, isolated state, version verification, stdin execution,
+exact-session resumption, and pre-quiescence exports. `config.ts` validates the
+authored model definition; `launcher.ts` supplies the prompt file to stdin.
+`stream.ts` validates completed live part snapshots. `evidence.ts` reads the
+sealed export and converts supported native content to ATIF, using bounded
+JSON helpers in `native.ts`. `layout.ts` validates external-runtime paths.
+See the architecture's [adapter contract](architecture.md#coding-agent-adapters)
+for supported configuration and evidence limits.
+
 ## `src/providers`: host-side model transport
 
 [`src/providers/anthropic/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/anthropic/index.ts) is the
@@ -756,7 +780,7 @@ CLI, package, and embedding tests live under [`test`](https://github.com/stripe/
 - `quickstart.e2e.test.ts`: one-shot CLI execution;
 - `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava execution and multi-turn planning;
 - `externalRuntime.e2e.test.ts`: external runtime composition;
-- `claudeCode.e2e.test.ts` and `codex.e2e.test.ts`: actual adapter integration
+- `claudeCode.e2e.test.ts`, `codex.e2e.test.ts`, and `opencode.e2e.test.ts`: actual adapter integration
   through a fake command transport and verified local artifacts;
 - `cliProcess.test.ts` and `experimentProcess.test.ts`: real CLI subprocesses and
   experiment run recovery after process death;

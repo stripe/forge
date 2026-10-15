@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import { createOpenCodeAdapter } from './agents/opencode/index.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
@@ -183,9 +184,14 @@ export async function createDefaultCliComposition(
     credential: OPENAI_API_KEY_REFERENCE,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
+  const opencodeBaseUrl = environment.OPENCODE_BASE_URL;
+  const opencode = createOpenCodeAdapter({
+    ...(opencodeBaseUrl === undefined ? {} : { baseUrl: opencodeBaseUrl }),
+  });
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
     [OPENAI_API_KEY_REFERENCE, CODEX_API_KEY_ENVIRONMENT],
+    ['opencode.api-key', 'OPENCODE_API_KEY'],
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
   const credentialResolver = createEnvironmentCredentialResolver({
@@ -198,6 +204,7 @@ export async function createDefaultCliComposition(
     agents: new Map([
       [claude.id, claude],
       [codex.id, codex],
+      [opencode.id, opencode],
     ]),
     completionProviders: new Map([[completionProvider.id, completionProvider]]),
     credentialResolver,

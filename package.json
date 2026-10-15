@@ -62,6 +62,10 @@
       "types": "./dist/agents/codex/index.d.ts",
       "import": "./dist/agents/codex/index.js"
     },
+    "./agents/opencode": {
+      "types": "./dist/agents/opencode/index.d.ts",
+      "import": "./dist/agents/opencode/index.js"
+    },
     "./providers/anthropic": {
       "types": "./dist/providers/anthropic/index.d.ts",
       "import": "./dist/providers/anthropic/index.js"

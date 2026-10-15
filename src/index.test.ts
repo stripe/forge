@@ -44,6 +44,20 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('keeps OpenCode on its documented implementation subpath', async () => {
+    assert.equal('createOpenCodeAdapter' in rootExports, false);
+    const opencode = await import('./agents/opencode/index.js');
+    assert.deepEqual(
+      Object.keys(opencode).sort(),
+      [
+        'OPENCODE_STATE_ID',
+        'OpenCodeStreamError',
+        'createOpenCodeAdapter',
+        'loadOpenCodeEvidence',
+        'parseOpenCodeStream',
+      ].sort(),
+    );
+  });
   it('keeps experiment run orchestration on its documented subpath', () => {
     assert.equal('runExperiment' in rootExports, false);
     assert.equal('readExperimentRunSelections' in rootExports, false);

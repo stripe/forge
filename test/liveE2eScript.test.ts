@@ -46,6 +46,86 @@ const verifiers = createRunVerifiers({
 });
 
 describe('unified live end-to-end suite', () => {
+  it('serves deterministic authenticated OpenCode Chat Completions without an upstream', async () => {
+    const { startOpenCodeFixtureEndpoint, OPENCODE_FIXTURE_MODEL } =
+      await liveModule('opencode');
+    const endpoint = await startOpenCodeFixtureEndpoint();
+    try {
+      const url = `${endpoint.baseUrl}/chat/completions`;
+      const payload = {
+        model: OPENCODE_FIXTURE_MODEL,
+        stream: true,
+        messages: [{ role: 'user', content: 'Create answer.txt' }],
+        tools: [{ type: 'function', function: { name: 'bash' } }],
+      };
+      const unauthorized = await fetch(url, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      assert.equal(unauthorized.status, 401);
+      const headers = {
+        authorization: `Bearer ${endpoint.credential}`,
+        'content-type': 'application/json',
+      };
+      const first = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+      assert.equal(first.status, 200);
+      const stream = await first.text();
+      assert.match(stream, /tool_calls/);
+      assert.match(stream, /answer.txt/);
+      assert.match(stream, /\[DONE\]/);
+      const second = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...payload,
+          stream: false,
+          messages: [
+            ...payload.messages,
+            { role: 'tool', content: 'complete' },
+          ],
+        }),
+      });
+      const completed = (await second.json()) as {
+        choices: { finish_reason: string }[];
+      };
+      assert.equal(completed.choices[0]!.finish_reason, 'stop');
+      assert.equal(
+        (
+          await fetch(`${endpoint.baseUrl}/responses`, {
+            method: 'POST',
+            headers,
+            body: '{}',
+          })
+        ).status,
+        404,
+      );
+      assert.equal(endpoint.requests.length, 2);
+      assert.deepEqual(endpoint.failures, []);
+      const config = readLiveConfiguration(
+        {
+          FORGE_LIVE: '1',
+          FORGE_LIVE_AGENT: 'opencode',
+          FORGE_LIVE_MODE: 'setup',
+        },
+        repositoryRoot,
+      );
+      assert.equal(config.upstreamCredential, undefined);
+      assert.throws(
+        () =>
+          readLiveConfiguration(
+            { FORGE_LIVE: '1', FORGE_LIVE_AGENT: 'opencode' },
+            repositoryRoot,
+          ),
+        /FORGE_LIVE_MODE=setup/,
+      );
+    } finally {
+      await endpoint.close();
+    }
+  });
   it('is the only live package command and has valid JavaScript syntax', async () => {
     const packageJson = JSON.parse(
       await fs.readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
@@ -186,7 +266,7 @@ describe('unified live end-to-end suite', () => {
           FORGE_LIVE: '1',
           FORGE_LIVE_AGENT: 'unsupported-agent',
         }),
-      /FORGE_LIVE_AGENT must be claude-code or codex/,
+      /FORGE_LIVE_AGENT must be claude-code, codex, or opencode/,
     );
   });
 

@@ -1262,7 +1262,7 @@ describe('Forge CLI', () => {
     assert.ok(stderr.includes('Selection does not match the benchmark matrix'));
   });
 
-  it('assembles the public Docker/Claude/Codex defaults with explicit credentials', async () => {
+  it('assembles the public Docker and agent defaults with explicit credentials', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
@@ -1271,9 +1271,13 @@ describe('Forge CLI', () => {
     });
 
     assert.equal(composition.runtime.id, 'forge/docker');
-    assert.deepEqual([...composition.agents.keys()], ['claude-code', 'codex']);
+    assert.deepEqual(
+      [...composition.agents.keys()],
+      ['claude-code', 'codex', 'opencode'],
+    );
     assert.equal(composition.agents.get('claude-code')?.version, FORGE_VERSION);
     assert.equal(composition.agents.get('codex')?.version, FORGE_VERSION);
+    assert.equal(composition.agents.get('opencode')?.version, FORGE_VERSION);
     assert.deepEqual(
       [
         ...(
@@ -1393,6 +1397,65 @@ describe('Forge CLI', () => {
         },
       ),
       'explicit-key',
+    );
+  });
+
+  it('binds the OpenCode endpoint and credentials explicitly, including reference overrides', async () => {
+    const fixture = await createBenchmarkFixture();
+    for (const override of [false, true]) {
+      const composition = await createDefaultCliComposition({
+        datasetRoot: fixture.datasetRoot,
+        resultsRoot: path.join(fixture.root, 'results'),
+        environment: {
+          OPENCODE_BASE_URL: 'https://gateway.example/v1',
+          OPENCODE_API_KEY: 'opencode-key',
+          MY_GATEWAY_KEY: 'override-key',
+          OPENAI_API_KEY: 'must-not-infer',
+          CODEX_API_KEY: 'codex-key',
+        },
+        ...(override
+          ? { credentialBindings: { 'opencode.api-key': 'MY_GATEWAY_KEY' } }
+          : {}),
+      });
+      const selected = composition.agents.get('opencode')!;
+      const requirements = selected.requirements({
+        adapter: 'opencode',
+        provider: 'openai-compatible',
+        model: 'gateway/model',
+      });
+      const config = JSON.parse(
+        requirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
+      );
+      assert.equal(
+        config.provider.forge.options.baseURL,
+        'https://gateway.example/v1',
+      );
+      assert.equal(config.model, 'forge/gateway/model');
+      assert.equal(
+        await composition.credentialResolver.resolve(
+          credentialReference('opencode.api-key'),
+          {
+            runId: 'opencode-cli',
+            purpose: 'agent',
+            signal: new AbortController().signal,
+          },
+        ),
+        override ? 'override-key' : 'opencode-key',
+      );
+    }
+    const composition = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      environment: { OPENAI_BASE_URL: 'https://not-inferred.example/v1' },
+    });
+    assert.throws(
+      () =>
+        composition.agents.get('opencode')!.requirements({
+          adapter: 'opencode',
+          provider: 'openai-compatible',
+          model: 'test',
+        }),
+      /OPENCODE_BASE_URL/,
     );
   });
 
