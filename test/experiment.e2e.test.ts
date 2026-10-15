@@ -5,7 +5,7 @@ import fsPromises, * as fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it, vi } from 'vitest';
 
 import { type RunCliOptions, runCli } from '../src/cli.js';
 import { defaultForgeEngine } from '../src/engine.js';
@@ -325,7 +325,7 @@ describe('resumable CLI experiment runs', () => {
     }
   });
 
-  it('stops scheduling on checkpoint failure and recovers a sibling committed before cancellation', async (context) => {
+  it('stops scheduling on checkpoint failure and recovers a sibling committed before cancellation', async () => {
     const fixture = await createFixture();
     const started = [createGate(), createGate()];
     const commit = createGate();
@@ -333,9 +333,7 @@ describe('resumable CLI experiment runs', () => {
     const cleanup = createGate();
     let failWrites = false;
     const originalRename = fsPromises.rename;
-    context.mock.method(
-      fsPromises,
-      'rename',
+    vi.spyOn(fsPromises, 'rename').mockImplementation(
       async (...args: Parameters<typeof originalRename>) => {
         if (args[1] === fixture.checkpoint && failWrites)
           throw new Error('checkpoint disk failure');
@@ -409,7 +407,7 @@ describe('resumable CLI experiment runs', () => {
       commit.resolve();
       cleanup.resolve();
       await running;
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });
@@ -1044,7 +1042,7 @@ describe('resumable CLI experiment runs', () => {
     await assert.rejects(fs.stat(lock), { code: 'ENOENT' });
   });
 
-  it('rejects a delayed competing stale-owner removal without disturbing the active writer', async (context) => {
+  it('rejects a delayed competing stale-owner removal without disturbing the active writer', async () => {
     const fixture = await createFixture();
     await fixture.run(['--repetition', '0'], {
       execute: async () => {
@@ -1060,9 +1058,7 @@ describe('resumable CLI experiment runs', () => {
     let removalCount = 0;
     let executions = 0;
     const originalUnlink = fsPromises.unlink;
-    context.mock.method(
-      fsPromises,
-      'unlink',
+    vi.spyOn(fsPromises, 'unlink').mockImplementation(
       async (...args: Parameters<typeof originalUnlink>) => {
         if (args[0] === ownerFile && removalCount < 2) {
           const gate = removals[removalCount++]!;
@@ -1111,12 +1107,12 @@ describe('resumable CLI experiment runs', () => {
         first,
         ...(second === undefined ? [] : [second]),
       ]);
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });
 
-  it('rejects delayed empty-lock cleanup after another writer publishes its owner', async (context) => {
+  it('rejects delayed empty-lock cleanup after another writer publishes its owner', async () => {
     const fixture = await createFixture();
     await fixture.run(['--repetition', '0'], {
       execute: async () => {
@@ -1131,9 +1127,7 @@ describe('resumable CLI experiment runs', () => {
     let delayed = false;
     let executions = 0;
     const originalRmdir = fsPromises.rmdir;
-    context.mock.method(
-      fsPromises,
-      'rmdir',
+    vi.spyOn(fsPromises, 'rmdir').mockImplementation(
       async (...args: Parameters<typeof originalRmdir>) => {
         if (args[0] === lock && !delayed) {
           delayed = true;
@@ -1177,7 +1171,7 @@ describe('resumable CLI experiment runs', () => {
         first,
         ...(second === undefined ? [] : [second]),
       ]);
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });
@@ -1193,15 +1187,13 @@ describe('resumable CLI experiment runs', () => {
     await assert.rejects(fs.stat(lock), { code: 'ENOENT' });
   });
 
-  it('reclaims a stale lock when directory contention reports Windows EPERM', async (context) => {
+  it('reclaims a stale lock when directory contention reports Windows EPERM', async () => {
     const fixture = await createFixture();
     await fixture.run();
     const { lock } = await createDeadOwnerLock(fixture.root);
     const originalRename = fsPromises.rename;
     let collision = false;
-    context.mock.method(
-      fsPromises,
-      'rename',
+    vi.spyOn(fsPromises, 'rename').mockImplementation(
       async (...args: Parameters<typeof originalRename>) => {
         if (args[1] === lock && !collision) {
           collision = true;
@@ -1220,17 +1212,15 @@ describe('resumable CLI experiment runs', () => {
       assert.equal(collision, true);
       await assert.rejects(fs.stat(lock), { code: 'ENOENT' });
     } finally {
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });
 
-  it('preserves a genuine publication permission error when no lock exists', async (context) => {
+  it('preserves a genuine publication permission error when no lock exists', async () => {
     const fixture = await createFixture();
     const originalRename = fsPromises.rename;
-    context.mock.method(
-      fsPromises,
-      'rename',
+    vi.spyOn(fsPromises, 'rename').mockImplementation(
       async (...args: Parameters<typeof originalRename>) => {
         if (path.basename(String(args[1])) === '.experiment.lock') {
           throw Object.assign(new Error('Publication permission denied'), {
@@ -1247,7 +1237,7 @@ describe('resumable CLI experiment runs', () => {
       assert.match(first.stderr, /Publication permission denied/);
       await assert.rejects(fs.stat(fixture.checkpoint), { code: 'ENOENT' });
     } finally {
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });

@@ -91,7 +91,8 @@
     "check:cases:built": "node scripts/check-cases.mjs",
     "check:package": "publint && pnpm test:types && pnpm test:package",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node scripts/run-tests.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest --watch",
     "test:live": "pnpm build && node scripts/live-e2e.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm check:cases:built && pnpm check:docs:built && pnpm check:package",
     "test:package": "node scripts/package-smoke.mjs",
@@ -109,6 +110,8 @@
     "@biomejs/biome": "2.5.15",
     "@types/node": "^22.15.30",
     "publint": "^0.3.12",
-    "typescript": "^5.9.3"
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "5.0.3"
   }
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { it } from 'node:test';
+import { it } from 'vitest';
 import {
   CLAUDE_PROJECTS_STATE_ID,
   createClaudeCodeAdapter,
@@ -204,7 +204,7 @@ async function artifact(location: string, name: string): Promise<unknown> {
 
 it('runs the real Claude adapter through two turns, native selection, redaction, and verified commit', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-claude-e2e-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   const rolePlayer = { provider: 'test-completions', model: 'role-test' };
   const plan = createTestResolvedRunPlan({
     agent: selection,
@@ -307,7 +307,7 @@ it('uses driver fallback for user-only Claude native evidence while preserving e
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), 'forge-claude-fallback-'),
   );
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   const plan = createTestResolvedRunPlan({
     agent: selection,
     prompt: 'Complete the answer.',

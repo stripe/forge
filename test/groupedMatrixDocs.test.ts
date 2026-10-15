@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { it } from 'node:test';
+import { it } from 'vitest';
 
 import {
   expandExperiment,
@@ -20,7 +20,7 @@ it('expands the architecture guide grouped matrix into its documented selections
   assert.ok(match?.[1], 'architecture guide grouped matrix example is present');
 
   const root = await mkdtemp(path.join(tmpdir(), 'forge-grouped-matrix-docs-'));
-  context.after(() => rm(root, { recursive: true, force: true }));
+  context.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const cases = [
     { id: 'examples/payment', path: 'cases/examples/payment.case.yaml' },
     {

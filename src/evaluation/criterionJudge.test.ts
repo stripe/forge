@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, vi } from 'vitest';
 import {
   buildCriterionJudgePrompt,
   CRITERION_JUDGMENT_RESPONSE_SCHEMA,
@@ -499,7 +499,10 @@ describe('judgeCriteria', () => {
   });
 
   it('uses the default one-second and five-second retry waits', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    t.onTestFinished(() => {
+      vi.useRealTimers();
+    });
     let calls = 0;
     const pending = judgeCriteria(
       { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
@@ -512,16 +515,16 @@ describe('judgeCriteria', () => {
       new Promise<void>((resolve) => setImmediate(resolve));
     await nextTurn();
     assert.equal(calls, 1);
-    t.mock.timers.tick(999);
+    vi.advanceTimersByTime(999);
     await nextTurn();
     assert.equal(calls, 1);
-    t.mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     await nextTurn();
     assert.equal(calls, 2);
-    t.mock.timers.tick(4_999);
+    vi.advanceTimersByTime(4_999);
     await nextTurn();
     assert.equal(calls, 2);
-    t.mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     const results = await pending;
     assert.equal(calls, 3);
     assert.equal(results[0]?.passed, false);

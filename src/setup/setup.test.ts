@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
 import { inspect } from 'node:util';
+import { describe, it } from 'vitest';
 import type { CommandResult } from '../contracts/command.js';
 import { credentialReference } from '../contracts/credentials.js';
 import type { AgentPluginInstaller } from '../contracts/plugin.js';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import { runCli } from '../src/cli.js';
 import { loadDataset, loadExperimentConfig } from '../src/model/index.js';

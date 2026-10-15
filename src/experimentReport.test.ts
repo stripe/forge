@@ -3,7 +3,7 @@ import fsPromises, * as fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it, vi } from 'vitest';
 import { defaultForgeEngine } from './engine.js';
 import {
   type ExperimentRunOptions,
@@ -498,14 +498,12 @@ describe('experiment run scorecards', () => {
     });
   });
 
-  it('atomically preserves the previous report on write failure and retains completed evals', async (context) => {
+  it('atomically preserves the previous report on write failure and retains completed evals', async () => {
     const fixture = await experimentRunFixture();
     const first = await runExperiment(fixture.options);
     const previous = await fs.readFile(first.report);
     const rename = fsPromises.rename;
-    context.mock.method(
-      fsPromises,
-      'rename',
+    vi.spyOn(fsPromises, 'rename').mockImplementation(
       async (...args: Parameters<typeof rename>) => {
         if (args[1] === first.report)
           throw new Error('private filesystem detail');
@@ -532,23 +530,21 @@ describe('experiment run scorecards', () => {
         false,
       );
     } finally {
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
     const resumed = await runExperiment({ ...fixture.options, resume: true });
     assert.equal(resumed.executed, 0);
   });
 
-  it('holds the experiment run lock through report persistence and rejects late cancellation', async (context) => {
+  it('holds the experiment run lock through report persistence and rejects late cancellation', async () => {
     const fixture = await experimentRunFixture();
     const controller = new AbortController();
     fixture.options.signal = controller.signal;
     const rename = fsPromises.rename;
     const reportPath = path.join(fixture.root, 'report.json');
     let blocked = false;
-    context.mock.method(
-      fsPromises,
-      'rename',
+    vi.spyOn(fsPromises, 'rename').mockImplementation(
       async (...args: Parameters<typeof rename>) => {
         if (args[1] === reportPath) {
           await assert.rejects(
@@ -574,21 +570,19 @@ describe('experiment run scorecards', () => {
       assert.equal(blocked, true);
       assert.equal((await readReport(reportPath)).summary.completed, 2);
     } finally {
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });
 
-  it('preserves a coordinator failure even when writing its partial report also fails', async (context) => {
+  it('preserves a coordinator failure even when writing its partial report also fails', async () => {
     const fixture = await experimentRunFixture();
     const original = new Error('primary callback failure');
     fixture.options.progress = (event) => {
       if (event.state === 'started') throw original;
     };
     const rename = fsPromises.rename;
-    context.mock.method(
-      fsPromises,
-      'rename',
+    vi.spyOn(fsPromises, 'rename').mockImplementation(
       async (...args: Parameters<typeof rename>) => {
         if (args[1] === path.join(fixture.root, 'report.json'))
           throw new Error('secondary report failure');
@@ -606,7 +600,7 @@ describe('experiment run scorecards', () => {
         { code: 'ENOENT' },
       );
     } finally {
-      context.mock.restoreAll();
+      vi.restoreAllMocks();
       syncBuiltinESMExports();
     }
   });

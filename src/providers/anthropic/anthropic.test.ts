@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import type {
   CompletionRequest,
   StrictCompletionResponseSchema,
@@ -358,7 +358,7 @@ describe('Anthropic completion provider', () => {
       setImmediate(() => response.end(bytes.subarray(split)));
     });
     const baseUrl = await listenLoopback(server);
-    t.after(() => closeServer(server));
+    t.onTestFinished(() => closeServer(server));
     const provider = createAnthropicCompletionProvider({
       baseUrl: `${baseUrl}/gateway/`,
       auth: 'api-key',
@@ -398,7 +398,7 @@ describe('Anthropic completion provider', () => {
       response.write('{"type":"message",');
     });
     const baseUrl = await listenLoopback(server);
-    t.after(() => closeServer(server));
+    t.onTestFinished(() => closeServer(server));
     const controller = new AbortController();
     const provider = createAnthropicCompletionProvider({
       baseUrl,
@@ -433,7 +433,7 @@ describe('Anthropic completion provider', () => {
       response.end('unexpected redirected request');
     });
     const destinationUrl = await listenLoopback(destination);
-    t.after(() => closeServer(destination));
+    t.onTestFinished(() => closeServer(destination));
     let sourceRequests = 0;
     const source = createServer((_request, response) => {
       sourceRequests += 1;
@@ -443,7 +443,7 @@ describe('Anthropic completion provider', () => {
       response.end('private redirect response body');
     });
     const baseUrl = await listenLoopback(source);
-    t.after(() => closeServer(source));
+    t.onTestFinished(() => closeServer(source));
 
     for (const auth of ['api-key', 'bearer'] as const) {
       const credentialName =

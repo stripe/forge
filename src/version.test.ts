@@ -3,8 +3,9 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { tsImport } from 'tsx/esm/api';
+import { describe, it } from 'vitest';
 
 import {
   assertCompatibleForgeVersion,
@@ -72,8 +73,9 @@ describe('Forge package version', () => {
   it('requires official producer and reader versions to match exactly', async () => {
     const fixture = await versionModuleFixture('1.2.3');
     try {
-      const version = (await import(
-        fixture.module.href
+      const version = (await tsImport(
+        fixture.module.href,
+        import.meta.url,
       )) as typeof import('./version.js');
       assert.doesNotThrow(() => version.assertCompatibleForgeVersion('1.2.3'));
       for (const producer of ['1.2.4', '1.2.3-dev.1', '1.2.3-rc.1']) {
@@ -90,8 +92,9 @@ describe('Forge package version', () => {
   it('allows different explicit development snapshots but rejects other release identities', async () => {
     const fixture = await versionModuleFixture('1.2.3-dev.1');
     try {
-      const version = (await import(
-        fixture.module.href
+      const version = (await tsImport(
+        fixture.module.href,
+        import.meta.url,
       )) as typeof import('./version.js');
       assert.doesNotThrow(() =>
         version.assertCompatibleForgeVersion('9.8.7-dev.42'),
@@ -128,8 +131,9 @@ describe('Forge package version', () => {
     };
     const fixture = await versionModuleFixture(identity.version, identity);
     try {
-      const version = (await import(
-        fixture.module.href
+      const version = (await tsImport(
+        fixture.module.href,
+        import.meta.url,
       )) as typeof import('./version.js');
       assert.deepEqual(version.FORGE_BUILD_IDENTITY, identity);
     } finally {
@@ -141,7 +145,7 @@ describe('Forge package version', () => {
     const fixture = await versionModuleFixture('1.2.3', { version: '1.2.4' });
     try {
       await assert.rejects(
-        import(fixture.module.href),
+        tsImport(fixture.module.href, import.meta.url),
         /does not match the installed package version/,
       );
     } finally {
@@ -166,12 +170,12 @@ async function versionModuleFixture(
     }),
   );
   await cp(
-    new URL('./version.js', import.meta.url),
-    path.join(root, 'version.js'),
+    new URL('./version.ts', import.meta.url),
+    path.join(root, 'version.ts'),
   );
   await cp(
-    new URL('./model/paths.js', import.meta.url),
-    path.join(root, 'model', 'paths.js'),
+    new URL('./model/paths.ts', import.meta.url),
+    path.join(root, 'model', 'paths.ts'),
   );
   if (identity !== undefined) {
     await writeFile(
@@ -179,5 +183,5 @@ async function versionModuleFixture(
       JSON.stringify(identity),
     );
   }
-  return { root, module: pathToFileURL(path.join(root, 'version.js')) };
+  return { root, module: pathToFileURL(path.join(root, 'version.ts')) };
 }

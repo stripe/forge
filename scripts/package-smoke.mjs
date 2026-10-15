@@ -311,15 +311,15 @@ try {
   ]);
   await fs.writeFile(
     path.join(consumerRoot, 'public-api-types.ts'),
-    publicApiTest.replace(
-      /'\.\.\/src\/([A-Za-z]+)\.js'/g,
-      (specifier, module) => {
+    // The isolated consumer needs no Vitest dependency to typecheck this contract.
+    publicApiTest
+      .replace("from 'vitest'", "from 'node:test'")
+      .replace(/'\.\.\/src\/([A-Za-z]+)\.js'/g, (specifier, module) => {
         const target = consumerImports.get(module);
         if (target === undefined)
           throw new Error(`Unknown public API test import: ${specifier}`);
         return `'${target}'`;
-      },
-    ),
+      }),
   );
   run(
     process.execPath,

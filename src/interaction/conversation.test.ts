@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import type { AgentSession, AgentTurn } from '../contracts/agent.js';
 import { AvaRolePlayer } from './ava.js';

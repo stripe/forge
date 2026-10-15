@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describe, it } from 'vitest';
 import type { DatasetManifestV1 } from '../src/index.js';
 import { loadDataset } from '../src/index.js';
 
@@ -39,7 +39,7 @@ describe('repository case check', () => {
 
   it('ignores datasets outside the explicit repository roots', async (context) => {
     const root = await fixture();
-    context.after(() => fs.rm(root, { recursive: true, force: true }));
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     const unrelated = path.join(
       root,
       'test',
@@ -62,7 +62,7 @@ describe('repository case check', () => {
 
   it('reports a malformed authored case and still validates the next dataset', async (context) => {
     const root = await fixture();
-    context.after(() => fs.rm(root, { recursive: true, force: true }));
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     const datasetRoot = path.join(root, REPOSITORY_DATASET_ROOTS[0]!);
     const manifestPath = path.join(datasetRoot, 'manifest.json');
     const manifest = JSON.parse(
@@ -90,7 +90,7 @@ describe('repository case check', () => {
 
   it('reports missing explicit roots in their declared order', async (context) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-case-check-'));
-    context.after(() => fs.rm(root, { recursive: true, force: true }));
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     const result = await checkRepositoryCases({ root, loadDataset });
     assert.equal(result.datasets, 3);
     assert.equal(result.cases, 0);
@@ -100,25 +100,28 @@ describe('repository case check', () => {
     );
   });
 
-  it('uses the compiled public loader and exits unsuccessfully for invalid repository cases', async (context) => {
+  it('uses the public loader and exits unsuccessfully for invalid repository cases', async (context) => {
     const root = await fixture();
-    context.after(() => fs.rm(root, { recursive: true, force: true }));
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     await fs.mkdir(path.join(root, 'scripts'));
     await fs.mkdir(path.join(root, 'dist'));
     const entry = path.join(root, 'scripts', 'check-cases.mjs');
     await fs.copyFile(scriptPath, entry);
-    // The test compiler has already built the real public entry point. Use it
-    // for the CLI fixture without depending on an earlier package build.
+    // Load the real source entry point through tsx without a package build.
     await fs.symlink(
-      fileURLToPath(new URL('../src/index.js', import.meta.url)),
+      fileURLToPath(new URL('../src/index.ts', import.meta.url)),
       path.join(root, 'dist', 'index.js'),
     );
     const invoke = () =>
-      spawnSync(process.execPath, [entry], {
-        cwd: root,
-        encoding: 'utf8',
-        timeout: 10_000,
-      });
+      spawnSync(
+        process.execPath,
+        ['--import', import.meta.resolve('tsx'), entry],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          timeout: 10_000,
+        },
+      );
     const valid = invoke();
     assert.equal(valid.status, 0, valid.stderr);
     assert.equal(valid.stdout, 'cases: checked 3 datasets and 3 cases\n');

@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it, vi } from 'vitest';
 import { sha256Hex } from '../model/hashes.js';
 import { loadDataset } from '../model/loaders.js';
 import { writeSetupHandler } from '../setup/forgeWrite.js';
@@ -165,12 +165,12 @@ describe('createDirectoryRunInputProvider', () => {
     }
   });
 
-  it('checks streamed byte limits after the file size check', async (t) => {
+  it('checks streamed byte limits after the file size check', async () => {
     const { root, inputs } = await verifiedDatasetInputs();
     const probe = await fs.open(path.join(root, 'fixtures/hello.txt'), 'r');
     const fileHandlePrototype = Object.getPrototypeOf(probe);
     await probe.close();
-    t.mock.method(fileHandlePrototype, 'createReadStream', () =>
+    vi.spyOn(fileHandlePrototype, 'createReadStream').mockImplementation(() =>
       Readable.from([Buffer.from('larger')]),
     );
     await assert.rejects(
@@ -262,16 +262,18 @@ describe('createDirectoryRunInputProvider', () => {
   }, async (t) => {
     const { root, inputs } = await verifiedDatasetInputs();
     const probe = await fs.open(path.join(root, 'fixtures/hello.txt'), 'r');
-    const fileHandlePrototype = Object.getPrototypeOf(probe);
+    const fileHandlePrototype = Object.getPrototypeOf(probe) as {
+      createReadStream(
+        options?: Parameters<fs.FileHandle['createReadStream']>[0],
+      ): Readable;
+    };
     await probe.close();
     let announceStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       announceStarted = resolve;
     });
     let stalled: PassThrough | undefined;
-    t.mock.method(
-      fileHandlePrototype,
-      'createReadStream',
+    vi.spyOn(fileHandlePrototype, 'createReadStream').mockImplementation(
       (options: Parameters<fs.FileHandle['createReadStream']>[0]) => {
         stalled = new PassThrough({
           ...(options?.signal === undefined ? {} : { signal: options.signal }),
@@ -280,7 +282,7 @@ describe('createDirectoryRunInputProvider', () => {
         return stalled;
       },
     );
-    t.after(() => {
+    t.onTestFinished(() => {
       stalled?.destroy();
     });
     const controller = new AbortController();

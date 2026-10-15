@@ -6,8 +6,8 @@ import * as http from 'node:http';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { describe, it } from 'vitest';
 import { parseAtifTrajectory } from '../src/atif/index.js';
 import * as forge from '../src/index.js';
 import { createAnthropicCompletionProvider } from '../src/providers/anthropic/index.js';
@@ -340,7 +340,7 @@ describe('unified live end-to-end suite', () => {
       requestStarted = resolve;
     });
     const upstream = await fakeUpstream((request) => requestStarted(request));
-    t.after(() => upstream.close());
+    t.onTestFinished(() => upstream.close());
     const startBridge = startLoopbackGatewayBridge;
     await assert.rejects(
       startBridge({

@@ -318,12 +318,17 @@ for verification, judge-visible projections, and fidelity limits.
 
 ## Development
 
-From a source checkout with dependencies installed, type-check and run Biome:
+Development requires Node.js 22.12 or newer. From a source checkout with
+dependencies installed, run tests, type-check, and run Biome:
 
 ```sh
+pnpm test
 pnpm run typecheck
 pnpm biome check .
 ```
+
+Use `pnpm test path/to/file.test.ts` to select tests or `pnpm test:watch`
+for Vitest watch mode.
 
 See [development and verification](docs/codebase-guide.md#development-and-verification)
 for setup, tests, automatic fixes, and the full check suite.

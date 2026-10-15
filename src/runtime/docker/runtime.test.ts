@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it } from 'vitest';
 import type { CommandResult } from '../../contracts/command.js';
 import type { RuntimePreparation } from '../../contracts/runtime.js';
 import type { ResolvedRunPlanV1 } from '../../model/types.js';
