@@ -39,7 +39,7 @@ pnpm test -- path/to/file.test.ts
 
 `pnpm lint` checks formatting, import organization, and lint rules with Biome
 without changing files. Use `pnpm lint:fix` to apply safe fixes, or `pnpm format`
-to format only. The [Biome configuration](https://github.com/stripe/forge/blob/main/biome.jsonc)
+to format only. The [Biome configuration](https://github.com/stripe/forge/blob/main/biome.json)
 excludes dataset releases, test fixtures, and packaged Docker assets so their
 integrity-pinned bytes are not rewritten.
 

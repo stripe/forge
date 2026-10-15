@@ -9,7 +9,6 @@
     "includes": [
       "**/*.{js,mjs,cjs,ts,tsx,json,jsonc}",
       "!**/package.json",
-      // Dataset bytes and packaged assets have integrity pins.
       "!!datasets",
       "!!test/fixtures",
       "!!src/runtime/docker/assets"
@@ -32,11 +31,9 @@
     "rules": {
       "preset": "recommended",
       "style": {
-        // Guarded indexing and validated parser results use explicit assertions.
         "noNonNullAssertion": "off"
       },
       "suspicious": {
-        // Input validators intentionally match control characters.
         "noControlCharactersInRegex": "off"
       }
     }
@@ -52,7 +49,6 @@
       "linter": {
         "rules": {
           "suspicious": {
-            // Security tests exercise prototype-sensitive object keys.
             "noProto": "off"
           }
         }
