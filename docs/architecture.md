@@ -693,7 +693,7 @@ or inferred host settings do not belong in runtime config.
 
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
 with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
-builds an image with pinned Claude Code and Codex versions, and records the
+builds an image with pinned Claude Code, Codex, and OpenCode versions, and records the
 built image ID. Image builds begin during runtime preparation or explicit
 `validate --host`; ordinary validation, planning, and a resume that skips every
 selection do not build an image. A runtime adapter shares its build per platform,
@@ -838,7 +838,7 @@ An [`AgentAdapter`](https://github.com/stripe/forge/blob/main/src/contracts/agen
 It does not choose the case prompt, setup order, turn policy, evidence
 fallback, judge projection, score, or artifact layout.
 
-Forge ships two adapters:
+Forge ships these adapters:
 
 - **Claude Code** verifies the pinned CLI, starts with an explicit session ID,
   resumes that exact ID on later turns, parses `stream-json`, stores project
@@ -854,7 +854,35 @@ Forge ships two adapters:
   selected hook policy applies on every turn; see
   [Marketplace plugin treatments](plugin-action.md) for its scope.
 
-Both adapters support explicit logical layouts for external runtimes and reject
+- **OpenCode** uses an explicit OpenAI-compatible Chat Completions endpoint and
+  API key. It runs the native `build` agent with automatic permission approval,
+  preserves prompts through a declared-state file supplied to stdin by a Node
+  launcher, and resumes only the session ID observed on the first turn. Its
+  XDG configuration, data, cache, prompts, and exports live under one declared
+  `opencode-state` directory. Sharing, updates, and live model-catalog fetching
+  are disabled; the main and small model are the selected gateway alias.
+
+OpenCode snapshots the setup-authored workspace `opencode.json` before opening
+the session and restores that snapshot before each invocation. JSONC and
+automatic project configuration and AGENTS.md discovery are not supported. The selected
+`provider.forge.models` entry must declare positive context/output limits,
+boolean reasoning/temperature/attachment capabilities, and `tool_call: true`.
+Model aliases must equal the selection; per-model provider, headers, options,
+and variants, provider routing/authentication options, and authored per-agent
+model overrides are rejected. Only the selected model definition is loaded.
+The adapter supplies its provider package, endpoint, and scoped credential.
+Other native configuration, such as explicit MCP or skill paths, can enter
+through the authored file and setup commands. Because this file is relocated,
+local `{file:...}` references, instruction globs, skill paths, and local plugin
+paths must use absolute runtime paths (for example `/workspace/AGENTS.md`).
+Relative forms are rejected; HTTP(S) instruction URLs and npm plugin names
+remain usable. There is no OpenCode
+`forge/plugin` installer. `createOpenCodeAdapter` accepts explicit `baseUrl`,
+`credential`, `id`, `executable`, `expectedVersion`, and logical `layout`
+options; the CLI supplies its endpoint and credential binding as documented
+in the [README](../README.md#opencode-setup).
+
+All adapters support explicit logical layouts for external runtimes and reject
 runtime paths that do not match the pinned adapter layout. Built-in adapters and
 completion providers use the Forge package version as their implementation
 identity; independently released integrations supply their own versions. Narrow
@@ -955,7 +983,12 @@ had text, and at least the observed count of every comparable tool kind,
 including each named MCP tool. Native-only tool discovery cannot compensate for
 a missing executed tool. These are lower-bound coverage checks, not exact
 one-to-one matching; they apply by native source format, including for custom
-Codex adapter IDs.
+Codex adapter IDs. OpenCode's `opencode-session-json` source preserves the
+same part snapshots as its live stream: coverage requires the observed
+assistant text and unique tool call IDs, names, and inputs for every turn.
+Tools are correlated by ID because parallel completion order can differ
+from the export's creation order.
+These checks also run during completed-run verification.
 
 If the adapter reports that native evidence is unavailable, invalid, or
 incomplete, or if a structurally valid candidate fails completed-turn coverage,
@@ -974,7 +1007,7 @@ the [whole-prompt budget](#judge-visible-projection). If Ava
 fails before any agent turn, the system-only fallback instead identifies
 `role_player_error` and has no agent session ID.
 
-When an adapter captured the exact root-session JSONL, those bytes remain a
+When an adapter captured the exact root-session native source, those bytes remain a
 restricted supplemental artifact even if normalization falls back. The built-in
 adapters do not filter, redact, normalize, or reserialize that copy, and do not
 crawl sibling sessions or subagent traces. It can contain prompts, credentials,
@@ -1083,6 +1116,17 @@ source; normalized results contain an explicit omission marker and
 fabricate image-file references, fetch image URLs, or attach those native bytes
 to a text-only judge. Incomplete, compacted, ambiguous, or unsupported
 conversation records still trigger whole-trajectory fallback.
+
+OpenCode exports the exact session after each completed turn, while commands
+are still permitted. Before another turn, the adapter invalidates the previous
+export so a failed capture cannot leave stale native evidence eligible. An
+export failure preserves the completed driver turn; cancellation propagates.
+After quiescence, evidence collection only reads the saved JSON. Normalization
+validates session/version/model identity and retains user text, assistant text,
+reasoning, correlated tool results and errors, and available usage. Compaction,
+attachments, unsupported conversation parts, or incomplete tools trigger
+explicit fallback. Exact parseable session exports remain restricted artifacts
+even when their content cannot be normalized.
 
 Before persistence or scoring, Forge redacts every resolved run and completion
 secret from the normalized trajectory. Provenance in `result.json` records:
@@ -1519,6 +1563,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
+| `@stripe/forge/agents/opencode` | Experimental OpenCode Chat Completions adapter, stream parser, and exact-session export loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
 | `@stripe/forge/providers/openai` | OpenAI Responses-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
@@ -1543,8 +1588,9 @@ engine APIs:
 - `run` supplies its argument validation and input loader to the shared
   experiment run command stage for bounded execution and explicit resume.
 
-Its default composition registers the built-in Docker runtime, Claude Code and
-Codex agent adapters, Anthropic and OpenAI host completion providers, an explicit
+Its default composition registers the built-in Docker runtime, Claude Code,
+Codex, and OpenCode agent adapters, Anthropic and OpenAI host completion
+providers, an explicit
 environment-backed credential resolver, a directory input provider, and the
 local artifact store. Embedding hosts can replace this composition or use an
 external runtime without changing core lifecycle semantics.
@@ -1592,7 +1638,7 @@ variable `CODEX_API_KEY`; embedding hosts choose and authorize its source.
 | [`src/setup`](https://github.com/stripe/forge/tree/main/src/setup) | Built-in actions, immutable registries, requirement aggregation, and ordered execution |
 | [`src/execution`](https://github.com/stripe/forge/tree/main/src/execution) | Lifecycle controller, completion runtime, phase events, and stable errors |
 | [`src/interaction`](https://github.com/stripe/forge/tree/main/src/interaction) | Engine-owned Ava prompts/state machine and persistent conversation loop |
-| [`src/agents`](https://github.com/stripe/forge/tree/main/src/agents) | Claude Code and Codex execution/evidence adapters |
+| [`src/agents`](https://github.com/stripe/forge/tree/main/src/agents) | Coding-agent execution/evidence adapters |
 | [`src/providers`](https://github.com/stripe/forge/tree/main/src/providers) | Host-side completion transports |
 | [`src/runtime`](https://github.com/stripe/forge/tree/main/src/runtime) | Workspace/command mechanics and built-in Docker runtime |
 | [`src/evidence`](https://github.com/stripe/forge/tree/main/src/evidence) | Native evidence validation, coverage, and driver fallback |
@@ -1608,9 +1654,14 @@ variable `CODEX_API_KEY`; embedding hosts choose and authorize its source.
 
 The public CLI and built-in composition currently have these limits:
 
-- Claude Code and Codex are the built-in agents. Cursor and interactive human
+- Claude Code, Codex, and experimental OpenCode are the built-in agents. Cursor and interactive human
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
+- OpenCode currently accepts only `openai-compatible` Chat Completions.
+  Real Docker/OpenCode and upstream model validation remain pending; protocol
+  compatibility alone does not establish model compatibility. OpenRouter,
+  native OpenAI Responses, Anthropic, OAuth/subscription login, and remote
+  OpenCode servers are not supported.
 - Multi-turn automation uses fixed Ava semantics. Anthropic and OpenAI are
   built-in host completion providers; other providers require an explicit
   [completion-provider implementation](#host-side-completion-providers) and

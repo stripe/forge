@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import { createOpenCodeAdapter } from './agents/opencode/index.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
   type CredentialResolver,
@@ -74,6 +75,7 @@ const CLI_CREDENTIAL_ENVIRONMENTS: ReadonlyMap<string, string> = new Map([
   [ANTHROPIC_COMPLETION_AUTH_TOKEN_REFERENCE, ANTHROPIC_AUTH_TOKEN_ENVIRONMENT],
   [OPENAI_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
   [OPENAI_COMPLETION_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
+  ['opencode.api-key', 'OPENCODE_API_KEY'],
 ]);
 
 const HOST_CLI_OPTIONS = {
@@ -215,6 +217,10 @@ export async function createDefaultCliComposition(
     credentialEnvironmentName: OPENAI_API_KEY_ENVIRONMENT,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
+  const opencodeBaseUrl = environment.OPENCODE_BASE_URL;
+  const opencode = createOpenCodeAdapter({
+    ...(opencodeBaseUrl === undefined ? {} : { baseUrl: opencodeBaseUrl }),
+  });
   const credentialResolver =
     options.credentialResolver ??
     createCliCredentialResolver(bindings, environment);
@@ -228,6 +234,7 @@ export async function createDefaultCliComposition(
     agents: new Map([
       [claude.id, claude],
       [codex.id, codex],
+      [opencode.id, opencode],
     ]),
     completionProviders: new Map([
       [completionProvider.id, completionProvider],

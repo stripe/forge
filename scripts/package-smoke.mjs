@@ -69,6 +69,7 @@ try {
       import * as experimentCli from '@stripe/forge/experiment/cli';
       import * as claude from '@stripe/forge/agents/claude-code';
       import * as codex from '@stripe/forge/agents/codex';
+      import * as opencode from '@stripe/forge/agents/opencode';
       import * as anthropic from '@stripe/forge/providers/anthropic';
       import * as openai from '@stripe/forge/providers/openai';
       import * as docker from '@stripe/forge/runtime/docker';
@@ -153,6 +154,15 @@ try {
         await assert.rejects(import(removed), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
       }
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
+      assert.equal(typeof opencode.createOpenCodeAdapter, 'function');
+      assert.equal(typeof opencode.parseOpenCodeStream, 'function');
+      assert.equal(typeof opencode.loadOpenCodeEvidence, 'function');
+      assert.equal(opencode.createOpenCodeAdapter().version, forge.FORGE_VERSION);
+      assert.equal('createOpenCodeAdapter' in forge, false);
+      assert.equal(docker.FORGE_OPENCODE_VERSION, '1.19.0');
+      const openCodeRequirements = opencode.createOpenCodeAdapter({baseUrl: 'https://gateway.example/v1'}).requirements({adapter: 'opencode', provider: 'openai-compatible', model: 'gateway/model'});
+      assert.equal(openCodeRequirements.environment.credentials.OPENCODE_API_KEY.reference, 'opencode.api-key');
+      assert.equal(JSON.parse(openCodeRequirements.environment.variables.OPENCODE_CONFIG_CONTENT).model, 'forge/gateway/model');
       assert.equal(typeof codex.createCodexAdapter, 'function');
       assert.equal(typeof codex.parseCodexStream, 'function');
       assert.equal(typeof codex.loadCodexEvidence, 'function');
