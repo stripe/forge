@@ -777,6 +777,13 @@ sent to the coding agent. A configured
 initial prompt is sent verbatim before Ava initializes; otherwise Ava generates
 the opening turn.
 
+Ava's prompts guide integration requests to use supplied fixtures or code, or
+code already created in the conversation, and otherwise request an integration
+from scratch without inventing existing code. Descriptive scenario context is
+not evidence that code was supplied. Recommendation requests pursue advice
+without requiring code changes; Ava has no direct workspace or fixture inventory
+access.
+
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
 and sends through one agent session. Ava assesses every completed response,
 including the final allowed turn. The loop stops with:

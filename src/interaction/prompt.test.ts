@@ -7,6 +7,33 @@ import {
 } from './prompt.js';
 
 describe('Ava prompts', () => {
+  for (const [phase, buildPrompt] of [
+    ['initialization', buildAvaInitializationPrompt],
+    ['continuation', (inputs: Parameters<typeof buildAvaInitializationPrompt>[0]) =>
+      buildAvaContinuationPrompt(inputs, {
+        needs: [{id: 'need_1', description: 'Complete the requested task'}],
+        remainingNeedIds: ['need_1'],
+      })],
+  ] as const) {
+    it(`grounds ${phase} integration requests in available code rather than fictional existing work`, () => {
+      const prompt = buildPrompt({
+        task: 'Add a payout integration.',
+        context: 'A developer running an existing marketplace.',
+      });
+
+      assert.match(prompt, /work with fixtures or code actually supplied for the\n  task or already created by the coding assistant in the conversation/);
+      assert.match(prompt, /If none\n  is available, ask the coding assistant to create the integration from scratch/);
+      assert.match(prompt, /A scenario describing an existing application or business does not mean its\n  code is supplied/);
+      assert.match(prompt, /Do not invent an existing repository, payout implementation,\n  or prior integration, or promise to paste nonexistent code/);
+    });
+
+    it(`keeps ${phase} recommendation requests advice-only`, () => {
+      const prompt = buildPrompt({task: 'Recommend a payment provider for a new store.'});
+
+      assert.match(prompt, /For recommendation tasks, pursue the requested advice without requiring code\n  changes/);
+    });
+  }
+
   it('binds the trimmed task and context, with a fallback for blank background', () => {
     const inputs = Object.freeze({
       task: '  Add a receipt link\nwithout changing checkout.  ',

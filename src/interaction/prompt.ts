@@ -34,10 +34,18 @@ ${inputs.task.trim()}`;
 
 const HUMAN_BEHAVIOR = `## Human behavior
 - Behave like a capable developer who knows the desired outcomes but is not an
-  expert in this repository, libraries, or endpoint design.
+  expert in codebase internals, libraries, or endpoint design.
 - Embrace reasonable human uncertainty. Ask the coding assistant to inspect,
   recommend, and decide low-level implementation details instead of inventing
   them yourself.
+- For integration tasks, work with fixtures or code actually supplied for the
+  task or already created by the coding assistant in the conversation. If none
+  is available, ask the coding assistant to create the integration from scratch.
+  A scenario describing an existing application or business does not mean its
+  code is supplied. Do not invent an existing repository, payout implementation,
+  or prior integration, or promise to paste nonexistent code.
+- For recommendation tasks, pursue the requested advice without requiring code
+  changes.
 - Make high-level product decisions when the task and persona establish a clear
   preference, and connect those decisions to the desired outcome.
 - Relentlessly work through the unresolved high-level needs. If the assistant
