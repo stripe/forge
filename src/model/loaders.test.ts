@@ -2,18 +2,26 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {afterEach, describe, it} from 'node:test';
-
-import {sha256Digest, sha256Hex} from './hashes.js';
-import {loadDataset, loadExperimentConfig} from './loaders.js';
-import {MAX_BENCHMARK_YAML_BYTES, MAX_DATASET_MANIFEST_BYTES} from './parse.js';
-import {expandExperiment, resolveRunPlan, serializeResolvedRunPlan} from '../planning/planner.js';
+import { afterEach, describe, it } from 'node:test';
+import {
+  expandExperiment,
+  resolveRunPlan,
+  serializeResolvedRunPlan,
+} from '../planning/planner.js';
+import { sha256Digest, sha256Hex } from './hashes.js';
+import { loadDataset, loadExperimentConfig } from './loaders.js';
+import {
+  MAX_BENCHMARK_YAML_BYTES,
+  MAX_DATASET_MANIFEST_BYTES,
+} from './parse.js';
 
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryRoots.splice(0).map((root) => fs.rm(root, {recursive: true, force: true})),
+    temporaryRoots
+      .splice(0)
+      .map((root) => fs.rm(root, { recursive: true, force: true })),
   );
 });
 
@@ -23,39 +31,64 @@ describe('benchmark filesystem loaders', () => {
     const loaded = await loadDataset(fixture.root);
 
     assert.equal(loaded.manifestSha256, sha256Digest(fixture.manifestRaw));
-    assert.equal(loaded.cases.get('smoke/write')?.definition.task, 'Create greeting.txt');
+    assert.equal(
+      loaded.cases.get('smoke/write')?.definition.task,
+      'Create greeting.txt',
+    );
     assert.equal('sha256' in loaded.cases.get('smoke/write')!, false);
   });
 
   it('fails closed for tampered, extra, and symlinked payloads', async () => {
     const tampered = await createDataset();
     await fs.appendFile(tampered.casePath, '\n# changed');
-    await assert.rejects(loadDataset(tampered.root), {code: 'dataset_integrity_mismatch'});
+    await assert.rejects(loadDataset(tampered.root), {
+      code: 'dataset_integrity_mismatch',
+    });
 
     const extra = await createDataset();
     await fs.writeFile(path.join(extra.root, 'extra.txt'), 'not declared');
-    await assert.rejects(loadDataset(extra.root), {code: 'dataset_integrity_mismatch'});
+    await assert.rejects(loadDataset(extra.root), {
+      code: 'dataset_integrity_mismatch',
+    });
 
     const linked = await createDataset();
     await fs.symlink(linked.casePath, path.join(linked.root, 'linked.yaml'));
-    await assert.rejects(loadDataset(linked.root), {code: 'unsafe_path'});
+    await assert.rejects(loadDataset(linked.root), { code: 'unsafe_path' });
   });
 
   it('checks hashes for same-size case and fixture corruption', async () => {
     const caseFixture = await createDataset();
-    const changedCase = caseFixture.caseYaml.replace('greeting.txt', 'farewell.txt');
-    assert.equal(Buffer.byteLength(changedCase), Buffer.byteLength(caseFixture.caseYaml));
+    const changedCase = caseFixture.caseYaml.replace(
+      'greeting.txt',
+      'farewell.txt',
+    );
+    assert.equal(
+      Buffer.byteLength(changedCase),
+      Buffer.byteLength(caseFixture.caseYaml),
+    );
     await fs.writeFile(caseFixture.casePath, changedCase);
-    await assert.rejects(loadDataset(caseFixture.root), {code: 'dataset_integrity_mismatch', message: /declared size or hash/});
+    await assert.rejects(loadDataset(caseFixture.root), {
+      code: 'dataset_integrity_mismatch',
+      message: /declared size or hash/,
+    });
 
     const inputFixture = await createDataset();
-    await fs.writeFile(path.join(inputFixture.root, 'fixtures', 'seed.txt'), 'reed');
-    await assert.rejects(loadDataset(inputFixture.root), {code: 'dataset_integrity_mismatch', message: /declared size or hash/});
+    await fs.writeFile(
+      path.join(inputFixture.root, 'fixtures', 'seed.txt'),
+      'reed',
+    );
+    await assert.rejects(loadDataset(inputFixture.root), {
+      code: 'dataset_integrity_mismatch',
+      message: /declared size or hash/,
+    });
   });
 
   it('derives case identity from the definition independently of its filename', async () => {
     const fixture = await createDataset();
-    const changedCase = fixture.caseYaml.replace('id: smoke/write', 'id: smoke/other');
+    const changedCase = fixture.caseYaml.replace(
+      'id: smoke/write',
+      'id: smoke/other',
+    );
     await replaceCasePayload(fixture, Buffer.from(changedCase));
     const loaded = await loadDataset(fixture.root);
     assert.equal(loaded.cases.has('smoke/write'), false);
@@ -64,11 +97,20 @@ describe('benchmark filesystem loaders', () => {
 
   it('rejects duplicate authored IDs across every case before overwriting the index', async () => {
     const fixture = await createDataset();
-    await appendCase(fixture.root, 'other/case', 'cases/unselected/first.case.yaml');
-    await appendCase(fixture.root, 'other/case', 'cases/unselected/second/case.yaml');
+    await appendCase(
+      fixture.root,
+      'other/case',
+      'cases/unselected/first.case.yaml',
+    );
+    await appendCase(
+      fixture.root,
+      'other/case',
+      'cases/unselected/second/case.yaml',
+    );
     await assert.rejects(loadDataset(fixture.root), {
       code: 'dataset_integrity_mismatch',
-      message: /Duplicate case ID "other\/case".*"cases\/unselected\/first.case.yaml".*"cases\/unselected\/second\/case.yaml"/,
+      message:
+        /Duplicate case ID "other\/case".*"cases\/unselected\/first.case.yaml".*"cases\/unselected\/second\/case.yaml"/,
     });
   });
 
@@ -76,19 +118,31 @@ describe('benchmark filesystem loaders', () => {
     for (const id of ['invalid_case', '']) {
       const fixture = await createDataset();
       await appendCase(fixture.root, id, 'cases/unselected.case.yaml');
-      await assert.rejects(loadDataset(fixture.root), {code: 'invalid_case'});
+      await assert.rejects(loadDataset(fixture.root), { code: 'invalid_case' });
     }
   });
 
   it('rejects oversized documents before parsing their bytes', async () => {
     const fixture = await createDataset();
-    await fs.truncate(path.join(fixture.root, 'manifest.json'), MAX_DATASET_MANIFEST_BYTES + 1);
-    await assert.rejects(loadDataset(fixture.root), {code: 'invalid_manifest', message: /byte limit/});
+    await fs.truncate(
+      path.join(fixture.root, 'manifest.json'),
+      MAX_DATASET_MANIFEST_BYTES + 1,
+    );
+    await assert.rejects(loadDataset(fixture.root), {
+      code: 'invalid_manifest',
+      message: /byte limit/,
+    });
 
-    const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
+    const experimentPath = path.join(
+      await temporaryDirectory(),
+      'experiment.yaml',
+    );
     await fs.writeFile(experimentPath, '');
     await fs.truncate(experimentPath, MAX_BENCHMARK_YAML_BYTES + 1);
-    await assert.rejects(loadExperimentConfig(experimentPath), {code: 'invalid_yaml', message: /byte limit/});
+    await assert.rejects(loadExperimentConfig(experimentPath), {
+      code: 'invalid_yaml',
+      message: /byte limit/,
+    });
   });
 
   it('requires a present regular experiment file without following symlinks', async () => {
@@ -97,8 +151,11 @@ describe('benchmark filesystem loaders', () => {
     const link = path.join(root, 'linked.yaml');
     await fs.writeFile(target, experimentConfigYaml('a'.repeat(64)));
     await fs.symlink(target, link);
-    await assert.rejects(loadExperimentConfig(link), {code: 'unsafe_path'});
-    await assert.rejects(loadExperimentConfig(path.join(root, 'missing.yaml')), {code: 'unsafe_path'});
+    await assert.rejects(loadExperimentConfig(link), { code: 'unsafe_path' });
+    await assert.rejects(
+      loadExperimentConfig(path.join(root, 'missing.yaml')),
+      { code: 'unsafe_path' },
+    );
   });
 
   it('loads an experiment config without an unused source digest', async () => {
@@ -116,64 +173,115 @@ describe('benchmark filesystem loaders', () => {
   it('resolves the same selected plan after a comment-only experiment edit', async () => {
     const fixture = await createDataset();
     const dataset = await loadDataset(fixture.root);
-    const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
-    await fs.writeFile(experimentPath, experimentConfigYaml(dataset.manifestSha256.slice(7)));
+    const experimentPath = path.join(
+      await temporaryDirectory(),
+      'experiment.yaml',
+    );
+    await fs.writeFile(
+      experimentPath,
+      experimentConfigYaml(dataset.manifestSha256.slice(7)),
+    );
     const original = await loadExperimentConfig(experimentPath);
-    await fs.appendFile(experimentPath, '\n# Clarify the experiment without changing it.\n');
+    await fs.appendFile(
+      experimentPath,
+      '\n# Clarify the experiment without changing it.\n',
+    );
     const edited = await loadExperimentConfig(experimentPath);
     const selection = expandExperiment(original, dataset)[0]!;
-    assert.equal(serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: edited, selection})), serializeResolvedRunPlan(resolveRunPlan({dataset, experiment: original, selection})));
+    assert.equal(
+      serializeResolvedRunPlan(
+        resolveRunPlan({ dataset, experiment: edited, selection }),
+      ),
+      serializeResolvedRunPlan(
+        resolveRunPlan({ dataset, experiment: original, selection }),
+      ),
+    );
   });
 
   it('rejects malformed UTF-8 instead of replacing bytes before parsing', async () => {
     const fixture = await createDataset();
-    await fs.writeFile(path.join(fixture.root, 'manifest.json'), Buffer.concat([
-      Buffer.from(fixture.manifestRaw), Buffer.from([0x80]),
-    ]));
-    await assert.rejects(loadDataset(fixture.root), {code: 'invalid_manifest', message: /valid UTF-8/});
+    await fs.writeFile(
+      path.join(fixture.root, 'manifest.json'),
+      Buffer.concat([Buffer.from(fixture.manifestRaw), Buffer.from([0x80])]),
+    );
+    await assert.rejects(loadDataset(fixture.root), {
+      code: 'invalid_manifest',
+      message: /valid UTF-8/,
+    });
 
-    const experimentPath = path.join(await temporaryDirectory(), 'experiment.yaml');
-    await fs.writeFile(experimentPath, Buffer.concat([
-      Buffer.from(`${experimentConfigYaml('a'.repeat(64))}\n# `),
-      Buffer.from([0x80]), Buffer.from('\n'),
-    ]));
-    await assert.rejects(loadExperimentConfig(experimentPath), {code: 'invalid_yaml', message: /valid UTF-8/});
+    const experimentPath = path.join(
+      await temporaryDirectory(),
+      'experiment.yaml',
+    );
+    await fs.writeFile(
+      experimentPath,
+      Buffer.concat([
+        Buffer.from(`${experimentConfigYaml('a'.repeat(64))}\n# `),
+        Buffer.from([0x80]),
+        Buffer.from('\n'),
+      ]),
+    );
+    await assert.rejects(loadExperimentConfig(experimentPath), {
+      code: 'invalid_yaml',
+      message: /valid UTF-8/,
+    });
 
     const caseFixture = await createDataset();
-    await replaceCasePayload(caseFixture, Buffer.concat([
-      Buffer.from(`${caseFixture.caseYaml}\n# `), Buffer.from([0x80]), Buffer.from('\n'),
-    ]));
-    await assert.rejects(loadDataset(caseFixture.root), {code: 'invalid_yaml', message: /valid UTF-8/});
+    await replaceCasePayload(
+      caseFixture,
+      Buffer.concat([
+        Buffer.from(`${caseFixture.caseYaml}\n# `),
+        Buffer.from([0x80]),
+        Buffer.from('\n'),
+      ]),
+    );
+    await assert.rejects(loadDataset(caseFixture.root), {
+      code: 'invalid_yaml',
+      message: /valid UTF-8/,
+    });
   });
 });
 
-async function appendCase(root: string, id: string, casePath: string): Promise<void> {
+async function appendCase(
+  root: string,
+  id: string,
+  casePath: string,
+): Promise<void> {
   const manifestPath = path.join(root, 'manifest.json');
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as {
     cases: string[];
-    files: {path: string; size: number; sha256: string}[];
+    files: { path: string; size: number; sha256: string }[];
   };
   const body = `${id === '' ? '' : `id: ${id}\n`}execution_mode: one_shot\ninitial_prompt: Complete the task.\n`;
   const absolutePath = path.join(root, ...casePath.split('/'));
-  await fs.mkdir(path.dirname(absolutePath), {recursive: true});
+  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
   await fs.writeFile(absolutePath, body);
   manifest.cases.push(casePath);
-  manifest.files.push({path: casePath, size: Buffer.byteLength(body), sha256: sha256Hex(body)});
+  manifest.files.push({
+    path: casePath,
+    size: Buffer.byteLength(body),
+    sha256: sha256Hex(body),
+  });
   await fs.writeFile(manifestPath, JSON.stringify(manifest));
 }
 
 async function replaceCasePayload(
-  fixture: {root: string; casePath: string; manifestRaw: string},
+  fixture: { root: string; casePath: string; manifestRaw: string },
   body: Buffer,
 ): Promise<void> {
   const manifest = JSON.parse(fixture.manifestRaw) as {
-    files: {path: string; size: number; sha256: string}[];
+    files: { path: string; size: number; sha256: string }[];
   };
-  const entry = manifest.files.find(({path: relative}) => relative === 'cases/smoke/write/case.yaml')!;
+  const entry = manifest.files.find(
+    ({ path: relative }) => relative === 'cases/smoke/write/case.yaml',
+  )!;
   entry.size = body.byteLength;
   entry.sha256 = sha256Hex(body);
   await fs.writeFile(fixture.casePath, body);
-  await fs.writeFile(path.join(fixture.root, 'manifest.json'), JSON.stringify(manifest));
+  await fs.writeFile(
+    path.join(fixture.root, 'manifest.json'),
+    JSON.stringify(manifest),
+  );
 }
 
 async function createDataset(): Promise<{
@@ -196,12 +304,12 @@ setup:
       source: {dataset_path: fixtures/seed.txt}
 `;
   const input = 'seed';
-  await fs.mkdir(path.dirname(casePath), {recursive: true});
-  await fs.mkdir(path.dirname(inputPath), {recursive: true});
+  await fs.mkdir(path.dirname(casePath), { recursive: true });
+  await fs.mkdir(path.dirname(inputPath), { recursive: true });
   await fs.writeFile(casePath, caseYaml);
   await fs.writeFile(inputPath, input);
   const manifestRaw = `${JSON.stringify({
-    dataset: {id: 'forge-smoke', version: '2026.09.0'},
+    dataset: { id: 'forge-smoke', version: '2026.09.0' },
     cases: ['cases/smoke/write/case.yaml'],
     files: [
       {
@@ -217,7 +325,7 @@ setup:
     ],
   })}\n`;
   await fs.writeFile(path.join(root, 'manifest.json'), manifestRaw);
-  return {root, casePath, caseYaml, manifestRaw};
+  return { root, casePath, caseYaml, manifestRaw };
 }
 
 async function temporaryDirectory(): Promise<string> {

@@ -1,9 +1,9 @@
-import {randomUUID, createHash} from 'node:crypto';
-import {constants} from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type {HostFileImport} from '../contracts/runtime.js';
-import {isSafeWorkspaceRelativePath} from '../model/paths.js';
+import type { HostFileImport } from '../contracts/runtime.js';
+import { isSafeWorkspaceRelativePath } from '../model/paths.js';
 
 /** Copy through bounded chunks, then hash the staged bytes before publishing. */
 export async function importHostFileIntoState(
@@ -11,7 +11,7 @@ export async function importHostFileIntoState(
   stagingRoot: string,
   input: HostFileImport,
   signal?: AbortSignal,
-  writeOwner?: Readonly<{uid: number; gid: number}>,
+  writeOwner?: Readonly<{ uid: number; gid: number }>,
 ): Promise<void> {
   validateImport(input);
   signal?.throwIfAborted();
@@ -21,7 +21,10 @@ export async function importHostFileIntoState(
   // This directory is outside every container mount, so setup commands cannot
   // replace the staged file while the host is hashing or chmod-ing it.
   const staged = path.join(stagingRoot, `.forge-import-${randomUUID()}`);
-  const source = await fs.open(input.sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const source = await fs.open(
+    input.sourcePath,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
   try {
     const stat = await source.stat();
     if (!stat.isFile() || stat.size > input.maxBytes) {
@@ -30,7 +33,7 @@ export async function importHostFileIntoState(
     const target = await fs.open(staged, 'wx', 0o600);
     try {
       let copied = 0;
-      for await (const chunk of source.createReadStream({autoClose: false})) {
+      for await (const chunk of source.createReadStream({ autoClose: false })) {
         signal?.throwIfAborted();
         copied += chunk.byteLength;
         if (copied > input.maxBytes) {
@@ -38,16 +41,26 @@ export async function importHostFileIntoState(
         }
         let offset = 0;
         while (offset < chunk.byteLength) {
-          const result = await target.write(chunk, offset, chunk.byteLength - offset, null);
-          if (result.bytesWritten === 0) throw new Error('Host import copy made no progress.');
+          const result = await target.write(
+            chunk,
+            offset,
+            chunk.byteLength - offset,
+            null,
+          );
+          if (result.bytesWritten === 0)
+            throw new Error('Host import copy made no progress.');
           offset += result.bytesWritten;
         }
       }
     } finally {
       await target.close();
     }
-    if ((await hashRegularFile(staged, input.maxBytes, signal)) !== input.sha256) {
-      throw new Error('Imported host file does not match its expected SHA-256.');
+    if (
+      (await hashRegularFile(staged, input.maxBytes, signal)) !== input.sha256
+    ) {
+      throw new Error(
+        'Imported host file does not match its expected SHA-256.',
+      );
     }
     signal?.throwIfAborted();
     if (writeOwner !== undefined) {
@@ -58,7 +71,7 @@ export async function importHostFileIntoState(
     await fs.rename(staged, destination);
   } finally {
     await source.close();
-    await fs.rm(staged, {force: true}).catch(() => undefined);
+    await fs.rm(staged, { force: true }).catch(() => undefined);
   }
 }
 
@@ -89,8 +102,11 @@ function validateImport(input: HostFileImport): void {
     input.maxBytes <= 0 ||
     !/^sha256:[a-f0-9]{64}$/.test(input.sha256) ||
     (input.mode !== undefined &&
-      (!Number.isInteger(input.mode) || input.mode < 0 || input.mode > 0o777)) ||
-    (input.verifyAfterSetup !== undefined && typeof input.verifyAfterSetup !== 'boolean')
+      (!Number.isInteger(input.mode) ||
+        input.mode < 0 ||
+        input.mode > 0o777)) ||
+    (input.verifyAfterSetup !== undefined &&
+      typeof input.verifyAfterSetup !== 'boolean')
   ) {
     throw new TypeError('Invalid host file import.');
   }
@@ -110,10 +126,11 @@ async function hashRegularFile(
     }
     const hash = createHash('sha256');
     let size = 0;
-    for await (const chunk of handle.createReadStream({autoClose: false})) {
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
       signal?.throwIfAborted();
       size += chunk.byteLength;
-      if (size > maxBytes) throw new Error('Imported state file exceeded its byte limit.');
+      if (size > maxBytes)
+        throw new Error('Imported state file exceeded its byte limit.');
       hash.update(chunk);
     }
     return `sha256:${hash.digest('hex')}`;
@@ -123,9 +140,12 @@ async function hashRegularFile(
 }
 
 function isSafeFilename(value: unknown): value is string {
-  return typeof value === 'string' &&
-    isSafeWorkspaceRelativePath(value, {allowRoot: false}) &&
-    !value.includes('/') && !value.includes('\\');
+  return (
+    typeof value === 'string' &&
+    isSafeWorkspaceRelativePath(value, { allowRoot: false }) &&
+    !value.includes('/') &&
+    !value.includes('\\')
+  );
 }
 
 async function rejectUnsafeDestination(destination: string): Promise<void> {

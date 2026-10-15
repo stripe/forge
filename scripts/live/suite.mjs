@@ -1,10 +1,18 @@
 import * as path from 'node:path';
-import {MODEL, CODEX_MODEL, parseGatewayUrl, isLoopbackHostname} from './configuration.mjs';
-import {startLoopbackGatewayBridge, assertDockerCanReachBridge} from './gateway.mjs';
-import {createRunVerifiers} from './verification.mjs';
-import {assertRuntimeCleanup} from './cleanup.mjs';
-import {runCodexPluginIntegrationSuite} from './codex.mjs';
-import {runCriterionJudgmentRegression} from './judgment.mjs';
+import { assertRuntimeCleanup } from './cleanup.mjs';
+import { runCodexPluginIntegrationSuite } from './codex.mjs';
+import {
+  CODEX_MODEL,
+  isLoopbackHostname,
+  MODEL,
+  parseGatewayUrl,
+} from './configuration.mjs';
+import {
+  assertDockerCanReachBridge,
+  startLoopbackGatewayBridge,
+} from './gateway.mjs';
+import { runCriterionJudgmentRegression } from './judgment.mjs';
+import { createRunVerifiers } from './verification.mjs';
 
 export function createFullSuite(forge, options, overrides = {}) {
   const {
@@ -26,34 +34,78 @@ export function createFullSuite(forge, options, overrides = {}) {
     FORGE_CODEX_VERSION,
     assertRuntimeAdapterConforms,
   } = forge;
-  const {repositoryRoot, resultsRoot, runtimeRoot, suiteId, runIds, signal, dockerExecutable, progress,
-    codexSelected, liveAgent, gatewayBaseUrl, gatewaySelected, gatewayEnvironmentName,
-    credentialEnvironmentName, upstreamCredential} = options;
+  const {
+    repositoryRoot,
+    resultsRoot,
+    runtimeRoot,
+    suiteId,
+    runIds,
+    signal,
+    dockerExecutable,
+    progress,
+    codexSelected,
+    liveAgent,
+    gatewayBaseUrl,
+    gatewaySelected,
+    gatewayEnvironmentName,
+    credentialEnvironmentName,
+    upstreamCredential,
+  } = options;
   let bridge;
   const checks = {
-    assertRuntimeCleanup, startLoopbackGatewayBridge, assertDockerCanReachBridge, runDockerConformance,
-    runClaudePluginConformance, runCodexPluginIntegrationSuite, runSelection,
-    runCriterionJudgmentRegression: (input) => runCriterionJudgmentRegression(forge, input),
-    ...createRunVerifiers(forge), ...overrides
+    assertRuntimeCleanup,
+    startLoopbackGatewayBridge,
+    assertDockerCanReachBridge,
+    runDockerConformance,
+    runClaudePluginConformance,
+    runCodexPluginIntegrationSuite,
+    runSelection,
+    runCriterionJudgmentRegression: (input) =>
+      runCriterionJudgmentRegression(forge, input),
+    ...createRunVerifiers(forge),
+    ...overrides,
   };
-  return {run: async () => {try {return await run();} finally {await bridge?.close();} }, runDockerConformance};
+  return {
+    run: async () => {
+      try {
+        return await run();
+      } finally {
+        await bridge?.close();
+      }
+    },
+    runDockerConformance,
+  };
 
   async function checked(runId, action) {
-    try {return await action();} finally {await checks.assertRuntimeCleanup({dockerExecutable, runtimeRoot, runId});}
+    try {
+      return await action();
+    } finally {
+      await checks.assertRuntimeCleanup({
+        dockerExecutable,
+        runtimeRoot,
+        runId,
+      });
+    }
   }
 
   async function run() {
-    const gatewayUrl = gatewayBaseUrl === undefined && !codexSelected
-      ? undefined
-      : parseGatewayUrl(gatewayBaseUrl ?? 'https://api.openai.com/v1', gatewayEnvironmentName);
+    const gatewayUrl =
+      gatewayBaseUrl === undefined && !codexSelected
+        ? undefined
+        : parseGatewayUrl(
+            gatewayBaseUrl ?? 'https://api.openai.com/v1',
+            gatewayEnvironmentName,
+          );
     // Codex always receives a one-run bridge token, never the upstream API key.
-    bridge = gatewayUrl !== undefined && (codexSelected || isLoopbackHostname(gatewayUrl.hostname))
-      ? await checks.startLoopbackGatewayBridge({
-        upstream: gatewayUrl,
-        upstreamCredential,
-        protocol: codexSelected ? 'responses' : 'messages',
-      })
-      : undefined;
+    bridge =
+      gatewayUrl !== undefined &&
+      (codexSelected || isLoopbackHostname(gatewayUrl.hostname))
+        ? await checks.startLoopbackGatewayBridge({
+            upstream: gatewayUrl,
+            upstreamCredential,
+            protocol: codexSelected ? 'responses' : 'messages',
+          })
+        : undefined;
 
     const agentCredentialReference = credentialReference(
       bridge === undefined
@@ -64,60 +116,82 @@ export function createFullSuite(forge, options, overrides = {}) {
       'live.completion-credential',
     );
     const agentCredential = bridge?.credential ?? upstreamCredential;
-    const runtime = createDockerRuntimeAdapter({dockerExecutable, temporaryRoot: runtimeRoot});
+    const runtime = createDockerRuntimeAdapter({
+      dockerExecutable,
+      temporaryRoot: runtimeRoot,
+    });
     const agentOptions = {
       credential: agentCredentialReference,
       credentialEnvironmentName,
       ...(gatewayBaseUrl === undefined && bridge === undefined
         ? {}
-        : {baseUrl: bridge?.agentBaseUrl ?? gatewayBaseUrl}),
+        : { baseUrl: bridge?.agentBaseUrl ?? gatewayBaseUrl }),
     };
     const agent = codexSelected
       ? createCodexAdapter(agentOptions)
       : createClaudeCodeAdapter(agentOptions);
-    const completionProvider = codexSelected ? undefined : createAnthropicCompletionProvider({
-      credential: completionCredentialReference,
-      ...(gatewayBaseUrl === undefined
-        ? {auth: 'api-key'}
-        : {auth: 'bearer', baseUrl: gatewayBaseUrl}),
-    });
+    const completionProvider = codexSelected
+      ? undefined
+      : createAnthropicCompletionProvider({
+          credential: completionCredentialReference,
+          ...(gatewayBaseUrl === undefined
+            ? { auth: 'api-key' }
+            : { auth: 'bearer', baseUrl: gatewayBaseUrl }),
+        });
     const credentialValues = new Map([
       [agentCredentialReference, agentCredential],
-      ...(codexSelected ? [] : [[completionCredentialReference, upstreamCredential]]),
+      ...(codexSelected
+        ? []
+        : [[completionCredentialReference, upstreamCredential]]),
     ]);
     const credentialResolver = Object.freeze({
       async resolve(reference, context) {
         context.signal.throwIfAborted();
         const value = credentialValues.get(reference);
         if (value === undefined) {
-          throw new Error('The live suite received an unexpected credential reference.');
+          throw new Error(
+            'The live suite received an unexpected credential reference.',
+          );
         }
         return value;
       },
     });
-    const compositionFactory = async ({datasetRoot, resultsRoot: selectedRoot}) =>
+    const compositionFactory = async ({
+      datasetRoot,
+      resultsRoot: selectedRoot,
+    }) =>
       Object.freeze({
         runtime,
         agents: new Map([[agent.id, agent]]),
-        ...(completionProvider === undefined ? {} : {
-          completionProviders: new Map([[completionProvider.id, completionProvider]]),
-        }),
+        ...(completionProvider === undefined
+          ? {}
+          : {
+              completionProviders: new Map([
+                [completionProvider.id, completionProvider],
+              ]),
+            }),
         credentialResolver,
         inputProvider: await createDirectoryRunInputProvider(datasetRoot),
-        artifactStore: createArtifactStore({root: selectedRoot}),
+        artifactStore: createArtifactStore({ root: selectedRoot }),
       });
 
     progress('checking the real Docker runtime lifecycle');
-    const dockerReport = await checks.runDockerConformance(runtime, runIds.docker, signal);
+    const dockerReport = await checks.runDockerConformance(
+      runtime,
+      runIds.docker,
+      signal,
+    );
     let pluginReport;
     if (!codexSelected) {
       progress('checking latest Claude plugin installation');
-      pluginReport = await checked(runIds.plugin, () => checks.runClaudePluginConformance({
-        agent,
-        runtime,
-        runId: runIds.plugin,
-        signal,
-      }));
+      pluginReport = await checked(runIds.plugin, () =>
+        checks.runClaudePluginConformance({
+          agent,
+          runtime,
+          runId: runIds.plugin,
+          signal,
+        }),
+      );
     } else {
       pluginReport = await checks.runCodexPluginIntegrationSuite(options);
     }
@@ -132,34 +206,46 @@ export function createFullSuite(forge, options, overrides = {}) {
       });
     }
 
-    progress(`running the one-shot ${codexSelected ? 'Codex' : 'Claude Code'} evaluation`);
-    const oneShotCompleted = await checked(runIds.oneShot, () => checks.runSelection({
-      label: 'one-shot',
-      fixture: codexSelected ? 'codex' : 'one-shot',
-      datasetFixture: 'one-shot',
-      agent: liveAgent,
-      model: codexSelected ? CODEX_MODEL : MODEL,
-      casePath: ['cases', 'examples', 'hello-file.case.yaml'],
-      runId: runIds.oneShot,
-      compositionFactory,
-      signal,
-    }));
-    const oneShotReport = await checks.verifyOneShotRun(oneShotCompleted, codexSelected ? {
-      format: 'codex-rollout-jsonl', version: FORGE_CODEX_VERSION,
-    } : undefined);
+    progress(
+      `running the one-shot ${codexSelected ? 'Codex' : 'Claude Code'} evaluation`,
+    );
+    const oneShotCompleted = await checked(runIds.oneShot, () =>
+      checks.runSelection({
+        label: 'one-shot',
+        fixture: codexSelected ? 'codex' : 'one-shot',
+        datasetFixture: 'one-shot',
+        agent: liveAgent,
+        model: codexSelected ? CODEX_MODEL : MODEL,
+        casePath: ['cases', 'examples', 'hello-file.case.yaml'],
+        runId: runIds.oneShot,
+        compositionFactory,
+        signal,
+      }),
+    );
+    const oneShotReport = await checks.verifyOneShotRun(
+      oneShotCompleted,
+      codexSelected
+        ? {
+            format: 'codex-rollout-jsonl',
+            version: FORGE_CODEX_VERSION,
+          }
+        : undefined,
+    );
 
     let multiTurnReport;
     let judgmentReport;
     if (!codexSelected) {
       progress('running the multi-turn Ava and criterion evaluation');
-      const multiTurnCompleted = await checked(runIds.multiTurn, () => checks.runSelection({
-        label: 'multi-turn',
-        fixture: 'multi-turn',
-        casePath: ['cases', 'examples', 'release-summary.case.yaml'],
-        runId: runIds.multiTurn,
-        compositionFactory,
-        signal,
-      }));
+      const multiTurnCompleted = await checked(runIds.multiTurn, () =>
+        checks.runSelection({
+          label: 'multi-turn',
+          fixture: 'multi-turn',
+          casePath: ['cases', 'examples', 'release-summary.case.yaml'],
+          runId: runIds.multiTurn,
+          compositionFactory,
+          signal,
+        }),
+      );
       multiTurnReport = await checks.verifyMultiTurnRun(multiTurnCompleted);
       progress('checking native structured judgment JSON escaping');
       judgmentReport = await checks.runCriterionJudgmentRegression({
@@ -173,17 +259,20 @@ export function createFullSuite(forge, options, overrides = {}) {
     return {
       verified: true,
       suite_id: suiteId,
-      authentication_mode: bridge === undefined
-        ? gatewaySelected
-          ? 'messages_compatible_gateway'
-          : 'direct_anthropic'
-        : 'loopback_gateway_bridge',
+      authentication_mode:
+        bridge === undefined
+          ? gatewaySelected
+            ? 'messages_compatible_gateway'
+            : 'direct_anthropic'
+          : 'loopback_gateway_bridge',
       docker: dockerReport,
-      ...(pluginReport === undefined ? {} : {plugin: pluginReport}),
-      ...(judgmentReport === undefined ? {} : {judgment: judgmentReport}),
+      ...(pluginReport === undefined ? {} : { plugin: pluginReport }),
+      ...(judgmentReport === undefined ? {} : { judgment: judgmentReport }),
       runs: {
         one_shot: oneShotReport,
-        ...(multiTurnReport === undefined ? {} : {multi_turn: multiTurnReport}),
+        ...(multiTurnReport === undefined
+          ? {}
+          : { multi_turn: multiTurnReport }),
       },
     };
   }
@@ -195,26 +284,38 @@ export function createFullSuite(forge, options, overrides = {}) {
     signal: executionSignal,
   }) {
     const [dataset, experiment] = await Promise.all([
-      loadDataset(path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'dataset')),
+      loadDataset(
+        path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'dataset'),
+      ),
       loadExperimentConfig(
-        path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'experiment.yaml'),
+        path.join(
+          repositoryRoot,
+          'test',
+          'fixtures',
+          'one-shot',
+          'experiment.yaml',
+        ),
       ),
     ]);
     const selection = expandExperiment(experiment, dataset)[0];
     if (selection === undefined) {
-      throw new Error('The one-shot fixture experiment config contains no run selection.');
+      throw new Error(
+        'The one-shot fixture experiment config contains no run selection.',
+      );
     }
-    const plan = resolveRunPlan({dataset, experiment, selection});
+    const plan = resolveRunPlan({ dataset, experiment, selection });
     const installer = agent.pluginInstaller;
     if (installer === undefined) {
-      throw new Error('The live Claude adapter does not expose plugin installation.');
+      throw new Error(
+        'The live Claude adapter does not expose plugin installation.',
+      );
     }
     const installation = installer.preflight(
       {
         plugin: 'stripe@claude-plugins-official',
         marketplace: 'anthropics/claude-plugins-official',
       },
-      {selection: plan.agent, runtime: plan.runtime},
+      { selection: plan.agent, runtime: plan.runtime },
     );
     const agentRequirements = agent.requirements(plan.agent);
     let prepared;
@@ -222,7 +323,7 @@ export function createFullSuite(forge, options, overrides = {}) {
       prepared = await runtime.prepare({
         runId,
         plan,
-        environment: {variables: {}, credentials: {}},
+        environment: { variables: {}, credentials: {} },
         requirements: {
           executables: [
             ...new Set([
@@ -247,7 +348,7 @@ export function createFullSuite(forge, options, overrides = {}) {
           workspace: prepared.workspace,
           paths: prepared.paths,
           stateDirectories: prepared.stateDirectories,
-          commands: {uncredentialed: prepared.commands.uncredentialed},
+          commands: { uncredentialed: prepared.commands.uncredentialed },
         },
         inputs: {},
         signal: executionSignal,
@@ -259,21 +360,31 @@ export function createFullSuite(forge, options, overrides = {}) {
       const receipt = await installation.install({
         runId,
         paths: prepared.paths,
-        stateDirectories: new Map([
-          [CLAUDE_PLUGIN_STATE_ID, pluginState],
-        ]),
+        stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, pluginState]]),
         commands: prepared.commands.uncredentialed,
         signal: executionSignal,
       });
-      const containerIdentity = ['node', '-e', 'process.stdout.write(require("node:os").hostname())'];
+      const containerIdentity = [
+        'node',
+        '-e',
+        'process.stdout.write(require("node:os").hostname())',
+      ];
       const beforeFinalization = await prepared.commands.uncredentialed.run(
         containerIdentity,
-        {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+        {
+          signal: executionSignal,
+          timeoutMs: 30_000,
+          maxOutputBytes: 64 * 1024,
+        },
       );
       await prepared.finalizeSetup();
       const afterFinalization = await prepared.commands.agent.run(
         containerIdentity,
-        {signal: executionSignal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+        {
+          signal: executionSignal,
+          timeoutMs: 30_000,
+          maxOutputBytes: 64 * 1024,
+        },
       );
       if (
         beforeFinalization.exitCode !== 0 ||
@@ -293,22 +404,26 @@ export function createFullSuite(forge, options, overrides = {}) {
         },
       );
       if (listed.exitCode !== 0) {
-        throw new Error('Claude could not list the installed plugin after setup.');
+        throw new Error(
+          'Claude could not list the installed plugin after setup.',
+        );
       }
       let plugins;
       try {
         plugins = JSON.parse(listed.stdout);
       } catch (error) {
-        throw new Error('Claude returned invalid plugin-list JSON.', {cause: error});
+        throw new Error('Claude returned invalid plugin-list JSON.', {
+          cause: error,
+        });
       }
       const installed = Array.isArray(plugins)
         ? plugins.find(
-          (plugin) =>
-            plugin !== null &&
-            typeof plugin === 'object' &&
-            typeof plugin.id === 'string' &&
-            plugin.id === 'stripe@claude-plugins-official',
-        )
+            (plugin) =>
+              plugin !== null &&
+              typeof plugin === 'object' &&
+              typeof plugin.id === 'string' &&
+              plugin.id === 'stripe@claude-plugins-official',
+          )
         : undefined;
       if (
         !Array.isArray(plugins) ||
@@ -322,13 +437,18 @@ export function createFullSuite(forge, options, overrides = {}) {
         receipt.native_plugin_id !== installed.id ||
         receipt.version !== installed.version ||
         !/^sha256:[a-f0-9]{64}$/.test(receipt.installed_tree.sha256) ||
-        installed.installPath !== `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}`
+        installed.installPath !==
+          `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}`
       ) {
-        throw new Error('Claude did not load the latest plugin from native user settings.');
+        throw new Error(
+          'Claude did not load the latest plugin from native user settings.',
+        );
       }
       const mutation = await prepared.commands.agent.run(
         [
-          'node', '-e', `
+          'node',
+          '-e',
+          `
             const fs = require('node:fs');
             const path = require('node:path');
             const [root, settingsPath, dataRoot, pluginId] = process.argv.slice(1);
@@ -359,24 +479,39 @@ export function createFullSuite(forge, options, overrides = {}) {
         },
       );
       if (mutation.exitCode !== 0) {
-        throw new Error('Claude plugin files, settings, or hook data were not writable.');
+        throw new Error(
+          'Claude plugin files, settings, or hook data were not writable.',
+        );
       }
       const changedList = await prepared.commands.agent.run(
         ['claude', 'plugin', 'list', '--json'],
-        {signal: executionSignal, timeoutMs: 60_000, maxOutputBytes: 1024 * 1024},
+        {
+          signal: executionSignal,
+          timeoutMs: 60_000,
+          maxOutputBytes: 1024 * 1024,
+        },
       );
       if (
         changedList.exitCode !== 0 ||
-        !JSON.parse(changedList.stdout).some((plugin) =>
-          plugin.id === installed.id && plugin.enabled === false)
+        !JSON.parse(changedList.stdout).some(
+          (plugin) => plugin.id === installed.id && plugin.enabled === false,
+        )
       ) {
-        throw new Error('Claude did not honor the changed native plugin settings.');
+        throw new Error(
+          'Claude did not honor the changed native plugin settings.',
+        );
       }
       const sealed = await prepared.quiesce();
-      const dataFile = await sealed.stateDirectories.get(CLAUDE_PLUGIN_STATE_ID)
-        ?.readFile('data/conformance-data-write', {maxBytes: 64});
-      if (dataFile === undefined || Buffer.from(dataFile).toString('utf8') !== 'writable') {
-        throw new Error('Claude plugin hook data was not retained until quiescence.');
+      const dataFile = await sealed.stateDirectories
+        .get(CLAUDE_PLUGIN_STATE_ID)
+        ?.readFile('data/conformance-data-write', { maxBytes: 64 });
+      if (
+        dataFile === undefined ||
+        Buffer.from(dataFile).toString('utf8') !== 'writable'
+      ) {
+        throw new Error(
+          'Claude plugin hook data was not retained until quiescence.',
+        );
       }
       return Object.freeze({
         valid: true,
@@ -398,16 +533,26 @@ export function createFullSuite(forge, options, overrides = {}) {
   async function runDockerConformance(runtime, runId, executionSignal) {
     return checked(runId, async () => {
       const [dataset, experiment] = await Promise.all([
-        loadDataset(path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'dataset')),
+        loadDataset(
+          path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'dataset'),
+        ),
         loadExperimentConfig(
-          path.join(repositoryRoot, 'test', 'fixtures', 'one-shot', 'experiment.yaml'),
+          path.join(
+            repositoryRoot,
+            'test',
+            'fixtures',
+            'one-shot',
+            'experiment.yaml',
+          ),
         ),
       ]);
       const selection = expandExperiment(experiment, dataset)[0];
       if (selection === undefined) {
-        throw new Error('The one-shot fixture experiment config contains no run selection.');
+        throw new Error(
+          'The one-shot fixture experiment config contains no run selection.',
+        );
       }
-      const plan = resolveRunPlan({dataset, experiment, selection});
+      const plan = resolveRunPlan({ dataset, experiment, selection });
       let imageId;
       const report = await assertRuntimeAdapterConforms(
         {
@@ -427,33 +572,40 @@ export function createFullSuite(forge, options, overrides = {}) {
         {
           runId,
           plan,
-          environment: {variables: {}, credentials: {}},
-          requirements: {executables: [], stateDirectories: []},
+          environment: { variables: {}, credentials: {} },
+          requirements: { executables: [], stateDirectories: [] },
           signal: executionSignal,
         },
         {
           probePath: '.forge-conformance/live-e2e.bin',
           probeBody: Buffer.from('forge-live-e2e\n', 'utf8'),
-          commandProbes: [{
-            scope: 'uncredentialed',
-            argv: [
-              '/bin/sh',
-              '-c',
-              'printf %s "$1" > "$2" && chmod 0600 "$2" && mkdir -m 0700 "$3" && printf private > "$3/evidence"',
-              'forge-filesystem-ownership-probe',
-              'forge-live-e2e\n',
-              '.forge-conformance/live-e2e.bin',
-              '.forge-conformance/private',
-            ],
-          }],
+          commandProbes: [
+            {
+              scope: 'uncredentialed',
+              argv: [
+                '/bin/sh',
+                '-c',
+                'printf %s "$1" > "$2" && chmod 0600 "$2" && mkdir -m 0700 "$3" && printf private > "$3/evidence"',
+                'forge-filesystem-ownership-probe',
+                'forge-live-e2e\n',
+                '.forge-conformance/live-e2e.bin',
+                '.forge-conformance/private',
+              ],
+            },
+          ],
         },
       );
-      if (typeof imageId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(imageId)) {
-        throw new Error('Docker conformance did not identify the executed image.');
+      if (
+        typeof imageId !== 'string' ||
+        !/^sha256:[a-f0-9]{64}$/.test(imageId)
+      ) {
+        throw new Error(
+          'Docker conformance did not identify the executed image.',
+        );
       }
       return Object.freeze({
         valid: true,
-        adapter: {id: runtime.id},
+        adapter: { id: runtime.id },
         platform: plan.runtime.platform,
         image_id: imageId,
         run_id: report.runtimeId,
@@ -479,7 +631,13 @@ export function createFullSuite(forge, options, overrides = {}) {
       [
         'run',
         '--experiment',
-        path.join(repositoryRoot, 'test', 'fixtures', fixture, 'experiment.yaml'),
+        path.join(
+          repositoryRoot,
+          'test',
+          'fixtures',
+          fixture,
+          'experiment.yaml',
+        ),
         '--case-file',
         path.join(
           repositoryRoot,
@@ -513,7 +671,8 @@ export function createFullSuite(forge, options, overrides = {}) {
     );
     if (exitCode !== 0) {
       throw new Error(
-        `The live ${label} run failed with exit code ${exitCode}.${hadStderr ? ' See the preceding Forge diagnostic.' : ''
+        `The live ${label} run failed with exit code ${exitCode}.${
+          hadStderr ? ' See the preceding Forge diagnostic.' : ''
         }`,
       );
     }
@@ -537,5 +696,4 @@ export function createFullSuite(forge, options, overrides = {}) {
     }
     return verifyCompletedRun(path.join(summary.location, 'runs', runId));
   }
-
 }

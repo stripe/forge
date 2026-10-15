@@ -1,24 +1,24 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
-import {inspect} from 'node:util';
-import type {CommandResult} from '../contracts/command.js';
-import {credentialReference} from '../contracts/credentials.js';
-import type {AgentPluginInstaller} from '../contracts/plugin.js';
-import type {MutableWorkspace, WorkspaceEntry} from '../contracts/runtime.js';
-import type {SetupStepV1} from '../model/types.js';
-import {parseSetupStep} from '../model/parse.js';
+import { describe, it } from 'node:test';
+import { inspect } from 'node:util';
+import type { CommandResult } from '../contracts/command.js';
+import { credentialReference } from '../contracts/credentials.js';
+import type { AgentPluginInstaller } from '../contracts/plugin.js';
+import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.js';
+import { parseSetupStep } from '../model/parse.js';
+import type { SetupStepV1 } from '../model/types.js';
 import {
   createSetupExecutor,
   createSetupExecutorWithHandlers,
   firstPartySetupHandlers,
 } from './executor.js';
-import {SetupActionError} from './types.js';
 import type {
   PreparedSetupStep,
   SetupApplyContext,
   SetupStepHandler,
   SetupStepRequirements,
 } from './types.js';
+import { SetupActionError } from './types.js';
 
 const setupTarget = Object.freeze({
   selection: Object.freeze({
@@ -28,7 +28,7 @@ const setupTarget = Object.freeze({
   }),
   runtime: Object.freeze({
     adapter: 'docker' as const,
-    image: Object.freeze({kind: 'forge' as const}),
+    image: Object.freeze({ kind: 'forge' as const }),
     platform: 'linux/amd64' as const,
     resources: Object.freeze({
       memory_bytes: 1024,
@@ -39,7 +39,7 @@ const setupTarget = Object.freeze({
 });
 
 function result(exitCode = 0): CommandResult {
-  return {stdout: '', stderr: '', exitCode, durationMs: 1};
+  return { stdout: '', stderr: '', exitCode, durationMs: 1 };
 }
 
 describe('portable setup actions', () => {
@@ -48,7 +48,10 @@ describe('portable setup actions', () => {
     const writes = new Map<string, Uint8Array>();
     const workspace: MutableWorkspace = {
       async inspect(relativePath): Promise<WorkspaceEntry> {
-        return {path: relativePath, kind: writes.has(relativePath) ? 'file' : 'absent'};
+        return {
+          path: relativePath,
+          kind: writes.has(relativePath) ? 'file' : 'absent',
+        };
       },
       async readFile(relativePath) {
         return writes.get(relativePath) ?? new Uint8Array();
@@ -64,25 +67,25 @@ describe('portable setup actions', () => {
     const steps: SetupStepV1[] = [
       {
         uses: 'forge/write',
-        with: {target: 'notes/inline.txt', source: {content: 'inline'}},
+        with: { target: 'notes/inline.txt', source: { content: 'inline' } },
       },
       {
         uses: 'forge/write',
         with: {
           target: 'notes/fixture.txt',
-          source: {dataset_path: 'fixtures/source.txt'},
+          source: { dataset_path: 'fixtures/source.txt' },
         },
       },
       {
         uses: 'forge/command',
-        with: {argv: ['node', '--version'], cwd: '.', timeout_ms: 1234},
+        with: { argv: ['node', '--version'], cwd: '.', timeout_ms: 1234 },
       },
     ];
 
     const prepared = createSetupExecutor().preflight(steps, setupTarget);
     const applied = await prepared.apply({
       runId: 'run-1',
-      paths: {workspace: '/workspace', home: '/home/forge'},
+      paths: { workspace: '/workspace', home: '/home/forge' },
       workspace,
       stateDirectories: new Map(),
       commands: {
@@ -95,12 +98,14 @@ describe('portable setup actions', () => {
           },
         },
         setup() {
-          throw new Error('credential-free commands must not use setup credentials');
+          throw new Error(
+            'credential-free commands must not use setup credentials',
+          );
         },
       },
       inputs: {
         async inspect(datasetPath) {
-          return {path: datasetPath, kind: 'file', size: 7};
+          return { path: datasetPath, kind: 'file', size: 7 };
         },
         async read(datasetPath) {
           assert.equal(datasetPath, 'fixtures/source.txt');
@@ -119,11 +124,14 @@ describe('portable setup actions', () => {
       'command:node --version',
     ]);
     assert.deepEqual(applied.steps, [
-      {index: 0, uses: 'forge/write'},
-      {index: 1, uses: 'forge/write'},
-      {index: 2, uses: 'forge/command'},
+      { index: 0, uses: 'forge/write' },
+      { index: 1, uses: 'forge/write' },
+      { index: 2, uses: 'forge/command' },
     ]);
-    assert.equal(Buffer.from(writes.get('notes/fixture.txt')!).toString(), 'fixture');
+    assert.equal(
+      Buffer.from(writes.get('notes/fixture.txt')!).toString(),
+      'fixture',
+    );
   });
 
   it('routes forge/plugin through only the selected agent capability', async () => {
@@ -146,15 +154,22 @@ describe('portable setup actions', () => {
             ],
           },
           async install(installContext) {
-            assert.deepEqual([...installContext.stateDirectories.keys()], [
-              'plugin-state',
-            ]);
+            assert.deepEqual(
+              [...installContext.stateDirectories.keys()],
+              ['plugin-state'],
+            );
             assert.equal(
               installContext.stateDirectories.get('plugin-state'),
               pluginState,
             );
-            assert.equal(installContext.stateDirectories.has('unrelated-state'), false);
-            assert.equal(Object.isFrozen(installContext.stateDirectories), true);
+            assert.equal(
+              installContext.stateDirectories.has('unrelated-state'),
+              false,
+            );
+            assert.equal(
+              Object.isFrozen(installContext.stateDirectories),
+              true,
+            );
             assert.equal('set' in installContext.stateDirectories, false);
             events.push('install');
             return {
@@ -164,7 +179,7 @@ describe('portable setup actions', () => {
               marketplace_commit: 'a'.repeat(40),
               native_plugin_id: 'formatter@forge-test',
               version: '1.0.0',
-              source: {kind: 'marketplace-path'},
+              source: { kind: 'marketplace-path' },
               installed_tree: {
                 format: 'forge-plugin-tree-v1',
                 sha256: `sha256:${'b'.repeat(64)}`,
@@ -209,7 +224,7 @@ describe('portable setup actions', () => {
 
     const applied = await prepared.apply({
       runId: 'run-plugin',
-      paths: {workspace: '/workspace', home: '/home/forge'},
+      paths: { workspace: '/workspace', home: '/home/forge' },
       workspace: emptyWorkspace(),
       stateDirectories: new Map([
         ['plugin-state', pluginState],
@@ -234,7 +249,7 @@ describe('portable setup actions', () => {
           marketplace_commit: 'a'.repeat(40),
           native_plugin_id: 'formatter@forge-test',
           version: '1.0.0',
-          source: {kind: 'marketplace-path'},
+          source: { kind: 'marketplace-path' },
           installed_tree: {
             format: 'forge-plugin-tree-v1',
             sha256: `sha256:${'b'.repeat(64)}`,
@@ -297,8 +312,8 @@ describe('portable setup actions', () => {
       new Map([[mutatingHandler.uses, mutatingHandler]]),
     );
     const steps: SetupStepV1[] = [
-      {uses: mutatingHandler.uses, with: {}} as unknown as SetupStepV1,
-      {uses: 'example/missing', with: {}} as unknown as SetupStepV1,
+      { uses: mutatingHandler.uses, with: {} } as unknown as SetupStepV1,
+      { uses: 'example/missing', with: {} } as unknown as SetupStepV1,
     ];
     assert.throws(
       () => executor.preflight(steps, setupTarget),
@@ -321,7 +336,7 @@ describe('portable setup actions', () => {
         );
         return {
           requirements: {
-            variables: {FEATURE_MODE: 'enabled'},
+            variables: { FEATURE_MODE: 'enabled' },
             credentials: {
               setup: {
                 PACKAGE_TOKEN: {
@@ -347,18 +362,18 @@ describe('portable setup actions', () => {
     const prepared = createSetupExecutorWithHandlers(
       new Map([[handler.uses, handler]]),
     ).preflight(
-      [{uses: handler.uses, with: {}} as unknown as SetupStepV1],
+      [{ uses: handler.uses, with: {} } as unknown as SetupStepV1],
       setupTarget,
     );
 
     assert.deepEqual(prepared.requirements, {
-      variables: {FEATURE_MODE: 'enabled'},
+      variables: { FEATURE_MODE: 'enabled' },
       credentials: {
         setup: {
-          PACKAGE_TOKEN: {reference: 'acme.package-token'},
+          PACKAGE_TOKEN: { reference: 'acme.package-token' },
         },
         agent: {
-          SERVICE_TOKEN: {reference: 'acme.service-token'},
+          SERVICE_TOKEN: { reference: 'acme.service-token' },
         },
       },
     });
@@ -366,7 +381,7 @@ describe('portable setup actions', () => {
 
     await prepared.apply({
       runId: 'run-requirements',
-      paths: {workspace: '/workspace', home: '/home/forge'},
+      paths: { workspace: '/workspace', home: '/home/forge' },
       workspace: emptyWorkspace(),
       stateDirectories: new Map(),
       commands: {
@@ -397,7 +412,7 @@ describe('portable setup actions', () => {
     await assert.rejects(
       prepared.apply({
         runId: 'run-requirements-repeated',
-        paths: {workspace: '/workspace', home: '/home/forge'},
+        paths: { workspace: '/workspace', home: '/home/forge' },
         workspace: emptyWorkspace(),
         stateDirectories: new Map(),
         commands: inertCommandProjections(),
@@ -416,10 +431,10 @@ describe('portable setup actions', () => {
           requirements: {
             credentials: {
               setup: {
-                SHARED_TOKEN: {reference: credentialReference('setup-token')},
+                SHARED_TOKEN: { reference: credentialReference('setup-token') },
               },
               agent: {
-                SHARED_TOKEN: {reference: credentialReference('agent-token')},
+                SHARED_TOKEN: { reference: credentialReference('agent-token') },
               },
             },
           },
@@ -429,12 +444,13 @@ describe('portable setup actions', () => {
     };
 
     assert.throws(
-      () => createSetupExecutorWithHandlers(
-        new Map([[handler.uses, handler]]),
-      ).preflight(
-        [{uses: handler.uses, with: {}} as unknown as SetupStepV1],
-        setupTarget,
-      ),
+      () =>
+        createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ).preflight(
+          [{ uses: handler.uses, with: {} } as unknown as SetupStepV1],
+          setupTarget,
+        ),
       /conflicting references/,
     );
   });
@@ -458,9 +474,7 @@ describe('portable setup actions', () => {
             credentials: {
               [payload.scope ?? 'setup']: {
                 [credentialName]: {
-                  reference: credentialReference(
-                    payload.credential_reference,
-                  ),
+                  reference: credentialReference(payload.credential_reference),
                 },
               },
             },
@@ -503,14 +517,17 @@ describe('portable setup actions', () => {
 
     await prepared.apply({
       runId: 'run-projected-credentials',
-      paths: {workspace: '/workspace', home: '/home/forge'},
+      paths: { workspace: '/workspace', home: '/home/forge' },
       workspace: emptyWorkspace(),
       stateDirectories: new Map(),
       commands: {
         uncredentialed: {
           async run(argv) {
             assert.deepEqual(argv, ['install', 'TOKEN_C']);
-            projections.push({credentialEnvironmentNames: [], argv: [...argv]});
+            projections.push({
+              credentialEnvironmentNames: [],
+              argv: [...argv],
+            });
             return result();
           },
         },
@@ -532,23 +549,23 @@ describe('portable setup actions', () => {
     });
 
     assert.deepEqual(projections, [
-      {credentialEnvironmentNames: ['TOKEN_A'], argv: ['install', 'TOKEN_A']},
-      {credentialEnvironmentNames: ['TOKEN_B'], argv: ['install', 'TOKEN_B']},
-      {credentialEnvironmentNames: [], argv: ['install', 'TOKEN_C']},
+      { credentialEnvironmentNames: ['TOKEN_A'], argv: ['install', 'TOKEN_A'] },
+      { credentialEnvironmentNames: ['TOKEN_B'], argv: ['install', 'TOKEN_B'] },
+      { credentialEnvironmentNames: [], argv: ['install', 'TOKEN_C'] },
     ]);
   });
 
   it('binds prepared operations to an immutable setup-step snapshot', async () => {
     const inputStep = {
       uses: 'acme/capture',
-      with: {value: 'before'},
+      with: { value: 'before' },
     };
     let frozenDuringPreflight = false;
     let appliedValue: string | undefined;
     const handler: SetupStepHandler = {
       uses: inputStep.uses,
       preflight(step) {
-        const payload = step.with as unknown as Readonly<{value: string}>;
+        const payload = step.with as unknown as Readonly<{ value: string }>;
         frozenDuringPreflight =
           Object.isFrozen(step) && Object.isFrozen(step.with);
         return {
@@ -566,7 +583,7 @@ describe('portable setup actions', () => {
     inputStep.with.value = 'after';
     await prepared.apply({
       runId: 'run-immutable-step',
-      paths: {workspace: '/workspace', home: '/home/forge'},
+      paths: { workspace: '/workspace', home: '/home/forge' },
       workspace: emptyWorkspace(),
       stateDirectories: new Map(),
       commands: inertCommandProjections(),
@@ -599,12 +616,13 @@ describe('portable setup actions', () => {
     };
 
     assert.throws(
-      () => createSetupExecutorWithHandlers(
-        new Map([[handler.uses, handler]]),
-      ).preflight(
-        [{uses: handler.uses, with: {}} as unknown as SetupStepV1],
-        setupTarget,
-      ),
+      () =>
+        createSetupExecutorWithHandlers(
+          new Map([[handler.uses, handler]]),
+        ).preflight(
+          [{ uses: handler.uses, with: {} } as unknown as SetupStepV1],
+          setupTarget,
+        ),
       /binding TOKEN is invalid/,
     );
   });
@@ -612,13 +630,13 @@ describe('portable setup actions', () => {
   it('strictly rejects malformed extension requirement collections and bindings', () => {
     const malformed: unknown[] = [
       new Date(),
-      {variables: null},
-      {variables: []},
-      {variables: new Date()},
-      {executables: 'git'},
-      {executables: ['git', 'git']},
-      {stateDirectories: {}},
-      {stateDirectories: [{id: 'state', containerPath: 'relative'}]},
+      { variables: null },
+      { variables: [] },
+      { variables: new Date() },
+      { executables: 'git' },
+      { executables: ['git', 'git'] },
+      { stateDirectories: {} },
+      { stateDirectories: [{ id: 'state', containerPath: 'relative' }] },
       {
         stateDirectories: [
           {
@@ -630,16 +648,16 @@ describe('portable setup actions', () => {
       },
       {
         stateDirectories: [
-          {id: 'one', containerPath: '/home/forge/state'},
-          {id: 'two', containerPath: '/home/forge/state/nested'},
+          { id: 'one', containerPath: '/home/forge/state' },
+          { id: 'two', containerPath: '/home/forge/state/nested' },
         ],
       },
-      {credentials: null},
-      {credentials: []},
-      {credentials: {setup: null}},
-      {credentials: {agent: []}},
-      {credentials: {setup: new Date()}},
-      Object.assign({}, {[Symbol('unexpected')]: true}),
+      { credentials: null },
+      { credentials: [] },
+      { credentials: { setup: null } },
+      { credentials: { agent: [] } },
+      { credentials: { setup: new Date() } },
+      Object.assign({}, { [Symbol('unexpected')]: true }),
       {
         credentials: {
           setup: {
@@ -665,10 +683,7 @@ describe('portable setup actions', () => {
       assert.throws(() =>
         createSetupExecutorWithHandlers(
           new Map([[handler.uses, handler]]),
-        ).preflight(
-          [{uses: handler.uses, with: {}}],
-          setupTarget,
-        ),
+        ).preflight([{ uses: handler.uses, with: {} }], setupTarget),
       );
     }
   });
@@ -689,22 +704,27 @@ describe('portable setup actions', () => {
       () =>
         createSetupExecutorWithHandlers(
           new Map([[handler.uses, handler]]),
-        ).preflight([{uses: handler.uses, with: {}}], setupTarget),
+        ).preflight([{ uses: handler.uses, with: {} }], setupTarget),
       /invalid prepared step/,
     );
   });
 
   it('snapshots plain JSON resolutions and rejects invalid output', async () => {
-    const source = {nested: {value: 'before'}};
+    const source = { nested: { value: 'before' } };
     const valid: SetupStepHandler = {
       uses: 'acme/resolution',
       preflight() {
-        return {requirements: {}, async apply() { return source; }};
+        return {
+          requirements: {},
+          async apply() {
+            return source;
+          },
+        };
       },
     };
     const context = {
       runId: 'run-resolution',
-      paths: {workspace: '/workspace', home: '/home/forge'},
+      paths: { workspace: '/workspace', home: '/home/forge' },
       workspace: emptyWorkspace(),
       stateDirectories: new Map(),
       commands: inertCommandProjections(),
@@ -713,13 +733,15 @@ describe('portable setup actions', () => {
     };
     const applied = await createSetupExecutorWithHandlers(
       new Map([[valid.uses, valid]]),
-    ).preflight([{uses: valid.uses, with: {}}], setupTarget).apply(context);
+    )
+      .preflight([{ uses: valid.uses, with: {} }], setupTarget)
+      .apply(context);
     source.nested.value = 'after';
     assert.deepEqual(applied.steps, [
       {
         index: 0,
         uses: valid.uses,
-        resolution: {nested: {value: 'before'}},
+        resolution: { nested: { value: 'before' } },
       },
     ]);
     assert.ok(Object.isFrozen(applied.steps[0]?.resolution));
@@ -737,9 +759,9 @@ describe('portable setup actions', () => {
       },
     };
     await assert.rejects(
-      createSetupExecutorWithHandlers(
-        new Map([[invalid.uses, invalid]]),
-      ).preflight([{uses: invalid.uses, with: {}}], setupTarget).apply(context),
+      createSetupExecutorWithHandlers(new Map([[invalid.uses, invalid]]))
+        .preflight([{ uses: invalid.uses, with: {} }], setupTarget)
+        .apply(context),
       (error: unknown) => {
         assert.ok(error instanceof SetupActionError);
         assert.match(String(error.cause), /invalid resolution/);
@@ -756,15 +778,17 @@ describe('portable setup actions', () => {
     const snapshot = [...exportedView];
     try {
       exportedView.clear();
-      assert.doesNotThrow(() => createSetupExecutor().preflight(
-        [
-          {
-            uses: 'forge/write',
-            with: {target: 'ready.txt', source: {content: 'ready'}},
-          },
-        ],
-        setupTarget,
-      ));
+      assert.doesNotThrow(() =>
+        createSetupExecutor().preflight(
+          [
+            {
+              uses: 'forge/write',
+              with: { target: 'ready.txt', source: { content: 'ready' } },
+            },
+          ],
+          setupTarget,
+        ),
+      );
     } finally {
       for (const [uses, handler] of snapshot) exportedView.set(uses, handler);
     }
@@ -772,19 +796,23 @@ describe('portable setup actions', () => {
 
   it('does not attach potentially sensitive command output to setup errors', async () => {
     const prepared = createSetupExecutor().preflight(
-      [{uses: 'forge/command', with: {argv: ['false']}}],
+      [{ uses: 'forge/command', with: { argv: ['false'] } }],
       setupTarget,
     );
     await assert.rejects(
       prepared.apply({
         runId: 'run-1',
-        paths: {workspace: '/workspace', home: '/home/forge'},
+        paths: { workspace: '/workspace', home: '/home/forge' },
         workspace: {
           async inspect(path): Promise<WorkspaceEntry> {
-            return {path, kind: 'absent'};
+            return { path, kind: 'absent' };
           },
-          async readFile() { return new Uint8Array(); },
-          async listFiles() { return []; },
+          async readFile() {
+            return new Uint8Array();
+          },
+          async listFiles() {
+            return [];
+          },
           async writeFile() {},
         },
         stateDirectories: new Map(),
@@ -804,9 +832,15 @@ describe('portable setup actions', () => {
           },
         },
         inputs: {
-          async inspect(path) { return {path, kind: 'file'}; },
-          async read() { return new Uint8Array(); },
-          async listFiles() { return []; },
+          async inspect(path) {
+            return { path, kind: 'file' };
+          },
+          async read() {
+            return new Uint8Array();
+          },
+          async listFiles() {
+            return [];
+          },
         },
         signal: new AbortController().signal,
       }),
@@ -814,8 +848,14 @@ describe('portable setup actions', () => {
         assert.ok(error instanceof SetupActionError);
         assert.equal(error.uses, 'forge/command');
         assert.equal(error.stepIndex, 0);
-        assert.equal(String(error.cause), 'Error: Setup command exited with status 9.');
-        assert.equal(inspect(error, {depth: null}).includes('TOP_SECRET'), false);
+        assert.equal(
+          String(error.cause),
+          'Error: Setup command exited with status 9.',
+        );
+        assert.equal(
+          inspect(error, { depth: null }).includes('TOP_SECRET'),
+          false,
+        );
         return true;
       },
     );
@@ -839,7 +879,7 @@ describe('portable setup actions', () => {
     const prepared = createSetupExecutorWithHandlers(
       new Map([[handler.uses, handler]]),
     ).preflight(
-      Array.from({length: 3}, () => ({uses: handler.uses, with: {}})),
+      Array.from({ length: 3 }, () => ({ uses: handler.uses, with: {} })),
       setupTarget,
     );
     const context = setupApplyContext();
@@ -875,12 +915,15 @@ describe('portable setup actions', () => {
     const prepared = createSetupExecutorWithHandlers(
       new Map([[handler.uses, handler]]),
     ).preflight(
-      [{uses: handler.uses, with: {}}, {uses: handler.uses, with: {}}],
+      [
+        { uses: handler.uses, with: {} },
+        { uses: handler.uses, with: {} },
+      ],
       setupTarget,
     );
 
     await assert.rejects(
-      prepared.apply(setupApplyContext({signal: controller.signal})),
+      prepared.apply(setupApplyContext({ signal: controller.signal })),
       (error: unknown) => error === cancellation,
     );
     assert.deepEqual(mutations, [0]);
@@ -894,35 +937,46 @@ describe('portable setup actions', () => {
       preflight() {
         return {
           requirements: {
-            stateDirectories: [{id: 'required-state', containerPath: '/opt/state'}],
+            stateDirectories: [
+              { id: 'required-state', containerPath: '/opt/state' },
+            ],
             credentials: {
-              setup: {TOKEN: {reference: credentialReference('acme.token')}},
+              setup: {
+                TOKEN: { reference: credentialReference('acme.token') },
+              },
             },
           },
-          async apply() { invoked = true; },
+          async apply() {
+            invoked = true;
+          },
         };
       },
     };
     const prepared = createSetupExecutorWithHandlers(
       new Map([[handler.uses, handler]]),
-    ).preflight([{uses: handler.uses, with: {}}], setupTarget);
+    ).preflight([{ uses: handler.uses, with: {} }], setupTarget);
 
     await assert.rejects(
-      prepared.apply(setupApplyContext({
-        stateDirectories: new Map([['unrelated-state', emptyWorkspace()]]),
-        commands: {
-          uncredentialed: inertCommandProjections().uncredentialed,
-          setup() {
-            projected = true;
-            return inertCommandProjections().uncredentialed;
+      prepared.apply(
+        setupApplyContext({
+          stateDirectories: new Map([['unrelated-state', emptyWorkspace()]]),
+          commands: {
+            uncredentialed: inertCommandProjections().uncredentialed,
+            setup() {
+              projected = true;
+              return inertCommandProjections().uncredentialed;
+            },
           },
-        },
-      })),
+        }),
+      ),
       (error: unknown) => {
         assert.ok(error instanceof SetupActionError);
         assert.equal(error.uses, handler.uses);
         assert.equal(error.stepIndex, 0);
-        assert.match(String(error.cause), /omitted setup state directory required-state/);
+        assert.match(
+          String(error.cause),
+          /omitted setup state directory required-state/,
+        );
         return true;
       },
     );
@@ -937,76 +991,115 @@ describe('portable setup actions', () => {
       ['fixtures/project/src/data.bin', Buffer.from([0, 255, 1])],
     ]);
     const writes = new Map<string, Uint8Array>();
-    const prepared = createSetupExecutor().preflight([
-      {
-        uses: 'forge/write',
-        with: {target: 'repo', source: {dataset_path: 'fixtures/project'}},
-      },
-    ], setupTarget);
+    const prepared = createSetupExecutor().preflight(
+      [
+        {
+          uses: 'forge/write',
+          with: {
+            target: 'repo',
+            source: { dataset_path: 'fixtures/project' },
+          },
+        },
+      ],
+      setupTarget,
+    );
 
-    const applied = await prepared.apply(setupApplyContext({
-      signal: controller.signal,
-      workspace: {
-        ...emptyWorkspace(),
-        async writeFile(target, body) { writes.set(target, body); },
-      },
-      inputs: {
-        async inspect(datasetPath) {
-          assert.equal(datasetPath, 'fixtures/project');
-          return {path: datasetPath, kind: 'directory'};
+    const applied = await prepared.apply(
+      setupApplyContext({
+        signal: controller.signal,
+        workspace: {
+          ...emptyWorkspace(),
+          async writeFile(target, body) {
+            writes.set(target, body);
+          },
         },
-        async listFiles(datasetPath, options) {
-          assert.equal(datasetPath, 'fixtures/project');
-          assert.equal(options?.signal, controller.signal);
-          assert.equal(options?.maxEntries, 100_000);
-          return [...files].map(([path, body]) => ({path, kind: 'file', size: body.length}));
+        inputs: {
+          async inspect(datasetPath) {
+            assert.equal(datasetPath, 'fixtures/project');
+            return { path: datasetPath, kind: 'directory' };
+          },
+          async listFiles(datasetPath, options) {
+            assert.equal(datasetPath, 'fixtures/project');
+            assert.equal(options?.signal, controller.signal);
+            assert.equal(options?.maxEntries, 100_000);
+            return [...files].map(([path, body]) => ({
+              path,
+              kind: 'file',
+              size: body.length,
+            }));
+          },
+          async read(datasetPath, options) {
+            assert.equal(options?.signal, controller.signal);
+            assert.equal(options?.maxBytes, 64 * 1024 * 1024);
+            assert.ok(files.has(datasetPath));
+            return files.get(datasetPath)!;
+          },
         },
-        async read(datasetPath, options) {
-          assert.equal(options?.signal, controller.signal);
-          assert.equal(options?.maxBytes, 64 * 1024 * 1024);
-          assert.ok(files.has(datasetPath));
-          return files.get(datasetPath)!;
-        },
-      },
-    }));
+      }),
+    );
 
-    assert.deepEqual([...writes], [
-      ['repo/README.md', files.get('fixtures/project/README.md')],
-      ['repo/src/data.bin', files.get('fixtures/project/src/data.bin')],
-    ]);
-    assert.deepEqual(applied.steps, [{index: 0, uses: 'forge/write'}]);
+    assert.deepEqual(
+      [...writes],
+      [
+        ['repo/README.md', files.get('fixtures/project/README.md')],
+        ['repo/src/data.bin', files.get('fixtures/project/src/data.bin')],
+      ],
+    );
+    assert.deepEqual(applied.steps, [{ index: 0, uses: 'forge/write' }]);
   });
 
   it('rejects an oversized dataset tree before reading or writing any file', async () => {
     let read = false;
     let written = false;
-    const prepared = createSetupExecutor().preflight([
-      {
-        uses: 'forge/write',
-        with: {target: 'repo', source: {dataset_path: 'fixtures/project'}},
-      },
-    ], setupTarget);
+    const prepared = createSetupExecutor().preflight(
+      [
+        {
+          uses: 'forge/write',
+          with: {
+            target: 'repo',
+            source: { dataset_path: 'fixtures/project' },
+          },
+        },
+      ],
+      setupTarget,
+    );
 
     await assert.rejects(
-      prepared.apply(setupApplyContext({
-        workspace: {
-          ...emptyWorkspace(),
-          async writeFile() { written = true; },
-        },
-        inputs: {
-          async inspect(path) { return {path, kind: 'directory'}; },
-          async listFiles() {
-            return [
-              {path: 'fixtures/project/large.bin', kind: 'file', size: 64 * 1024 * 1024},
-              {path: 'fixtures/project/one.bin', kind: 'file', size: 1},
-            ];
+      prepared.apply(
+        setupApplyContext({
+          workspace: {
+            ...emptyWorkspace(),
+            async writeFile() {
+              written = true;
+            },
           },
-          async read() { read = true; return new Uint8Array(); },
-        },
-      })),
+          inputs: {
+            async inspect(path) {
+              return { path, kind: 'directory' };
+            },
+            async listFiles() {
+              return [
+                {
+                  path: 'fixtures/project/large.bin',
+                  kind: 'file',
+                  size: 64 * 1024 * 1024,
+                },
+                { path: 'fixtures/project/one.bin', kind: 'file', size: 1 },
+              ];
+            },
+            async read() {
+              read = true;
+              return new Uint8Array();
+            },
+          },
+        }),
+      ),
       (error: unknown) => {
         assert.ok(error instanceof SetupActionError);
-        assert.match(String(error.cause), /Setup input tree exceeds 67108864 bytes/);
+        assert.match(
+          String(error.cause),
+          /Setup input tree exceeds 67108864 bytes/,
+        );
         return true;
       },
     );
@@ -1021,36 +1114,50 @@ describe('portable setup actions', () => {
       const controller = new AbortController();
       const cancellation = new Error(`cancelled after ${kind} read`);
       const writes: string[] = [];
-      const prepared = createSetupExecutor().preflight([
-        {
-          uses: 'forge/write',
-          with: {target: 'out', source: {dataset_path: 'fixtures/source'}},
-        },
-      ], setupTarget);
+      const prepared = createSetupExecutor().preflight(
+        [
+          {
+            uses: 'forge/write',
+            with: {
+              target: 'out',
+              source: { dataset_path: 'fixtures/source' },
+            },
+          },
+        ],
+        setupTarget,
+      );
 
       await assert.rejects(
-        prepared.apply(setupApplyContext({
-          signal: controller.signal,
-          workspace: {
-            ...emptyWorkspace(),
-            async writeFile(path) { writes.push(path); },
-          },
-          inputs: {
-            async inspect(path) { return {path, kind}; },
-            async listFiles() {
-              return [{path: 'fixtures/source/one.txt', kind: 'file', size: 1}];
+        prepared.apply(
+          setupApplyContext({
+            signal: controller.signal,
+            workspace: {
+              ...emptyWorkspace(),
+              async writeFile(path) {
+                writes.push(path);
+              },
             },
-            async read(_path, options) {
-              assert.equal(options?.signal, controller.signal);
-              options?.signal?.throwIfAborted();
-              const body = Buffer.from('x');
-              // Deliver cancellation after read completion and before the
-              // awaiting handler resumes to write the returned bytes.
-              queueMicrotask(() => controller.abort(cancellation));
-              return body;
+            inputs: {
+              async inspect(path) {
+                return { path, kind };
+              },
+              async listFiles() {
+                return [
+                  { path: 'fixtures/source/one.txt', kind: 'file', size: 1 },
+                ];
+              },
+              async read(_path, options) {
+                assert.equal(options?.signal, controller.signal);
+                options?.signal?.throwIfAborted();
+                const body = Buffer.from('x');
+                // Deliver cancellation after read completion and before the
+                // awaiting handler resumes to write the returned bytes.
+                queueMicrotask(() => controller.abort(cancellation));
+                return body;
+              },
             },
-          },
-        })),
+          }),
+        ),
         (error: unknown) => error === cancellation,
       );
       assert.deepEqual(writes, [], kind);
@@ -1058,10 +1165,12 @@ describe('portable setup actions', () => {
   });
 });
 
-function setupApplyContext(overrides: Partial<SetupApplyContext> = {}): SetupApplyContext {
+function setupApplyContext(
+  overrides: Partial<SetupApplyContext> = {},
+): SetupApplyContext {
   return {
     runId: 'run-setup-boundary',
-    paths: {workspace: '/workspace', home: '/home/forge'},
+    paths: { workspace: '/workspace', home: '/home/forge' },
     workspace: emptyWorkspace(),
     stateDirectories: new Map(),
     commands: inertCommandProjections(),
@@ -1073,24 +1182,44 @@ function setupApplyContext(overrides: Partial<SetupApplyContext> = {}): SetupApp
 
 function emptyWorkspace(): MutableWorkspace {
   return {
-    async inspect(path): Promise<WorkspaceEntry> { return {path, kind: 'absent'}; },
-    async readFile() { return new Uint8Array(); },
-    async listFiles() { return []; },
+    async inspect(path): Promise<WorkspaceEntry> {
+      return { path, kind: 'absent' };
+    },
+    async readFile() {
+      return new Uint8Array();
+    },
+    async listFiles() {
+      return [];
+    },
     async writeFile() {},
   };
 }
 
 function emptyInputs() {
   return {
-    async inspect(path: string) { return {path, kind: 'file' as const}; },
-    async read() { return new Uint8Array(); },
-    async listFiles() { return []; },
+    async inspect(path: string) {
+      return { path, kind: 'file' as const };
+    },
+    async read() {
+      return new Uint8Array();
+    },
+    async listFiles() {
+      return [];
+    },
   };
 }
 
 function inertCommandProjections() {
   return {
-    uncredentialed: {async run() { return result(); }},
-    setup: () => ({async run() { return result(); }}),
+    uncredentialed: {
+      async run() {
+        return result();
+      },
+    },
+    setup: () => ({
+      async run() {
+        return result();
+      },
+    }),
   };
 }

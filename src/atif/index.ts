@@ -1,4 +1,29 @@
 export {
+  type AtifNormalizationCompleteness,
+  type AtifNormalizationProvenance,
+  type AtifNormalizationSource,
+  type AtifNormalizationWarning,
+  type AtifNormalizationWarningCode,
+  type CreateNormalizedTrajectoryInput,
+  createNormalizedTrajectory,
+  type NormalizedTrajectory,
+  NormalizedTrajectoryValidationError,
+  type NormalizedTrajectoryValidationIssue,
+  type NormalizedTrajectoryValidationPath,
+  parseNormalizedTrajectory,
+} from './normalization.js';
+
+export {
+  AtifValidationError,
+  type AtifValidationIssue,
+  type AtifValidationIssueCode,
+  type AtifValidationPath,
+  parseAtifTrajectory,
+} from './parser.js';
+
+export { serializeAtifTrajectory } from './serializer.js';
+export { isAtifTimestamp } from './timestamp.js';
+export {
   ATIF_SCHEMA_VERSION,
   type AtifAgent,
   type AtifAgentStep,
@@ -28,30 +53,4 @@ export {
   type JsonValue,
 } from './types.js';
 
-export {
-  AtifValidationError,
-  parseAtifTrajectory,
-  type AtifValidationIssue,
-  type AtifValidationIssueCode,
-  type AtifValidationPath,
-} from './parser.js';
-
-export {serializeAtifTrajectory} from './serializer.js';
-export {isAtifTimestamp} from './timestamp.js';
-
-export {
-  createNormalizedTrajectory,
-  NormalizedTrajectoryValidationError,
-  parseNormalizedTrajectory,
-  type AtifNormalizationCompleteness,
-  type AtifNormalizationProvenance,
-  type AtifNormalizationSource,
-  type AtifNormalizationWarning,
-  type AtifNormalizationWarningCode,
-  type CreateNormalizedTrajectoryInput,
-  type NormalizedTrajectory,
-  type NormalizedTrajectoryValidationIssue,
-  type NormalizedTrajectoryValidationPath,
-} from './normalization.js';
-
-export {ATIF_UPSTREAM_SOURCE} from './upstream.js';
+export { ATIF_UPSTREAM_SOURCE } from './upstream.js';

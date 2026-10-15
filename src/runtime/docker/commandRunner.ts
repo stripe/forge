@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
@@ -6,13 +6,13 @@ import type {
   CommandResult,
   CommandRunner,
 } from '../../contracts/command.js';
-import {CommandExecutionError} from '../../contracts/command.js';
+import { CommandExecutionError } from '../../contracts/command.js';
 import type {
   CredentialScope,
   ResolvedEnvironment,
 } from '../../contracts/credentials.js';
-import {isSafeWorkspaceRelativePath} from '../../model/paths.js';
-import type {HostCommandRunner} from '../processCommandRunner.js';
+import { isSafeWorkspaceRelativePath } from '../../model/paths.js';
+import type { HostCommandRunner } from '../processCommandRunner.js';
 
 interface DockerCommandControllerOptions {
   readonly dockerExecutable: string;
@@ -75,10 +75,16 @@ export class DockerCommandController {
     this.closed = true;
     const settled = await Promise.allSettled([...this.active]);
     const failures = settled
-      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
+      )
       .map((result) => result.reason as unknown);
     if (failures.length > 0) {
-      throw new AggregateError(failures, 'Active runtime commands failed while quiescing.');
+      throw new AggregateError(
+        failures,
+        'Active runtime commands failed while quiescing.',
+      );
     }
   }
 
@@ -99,7 +105,10 @@ export class DockerCommandController {
     this.setupFinalized = true;
     const settled = await Promise.allSettled([...this.active]);
     const failures = settled
-      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
+      )
       .map((result) => result.reason as unknown);
     if (failures.length > 0) {
       throw new AggregateError(
@@ -130,7 +139,7 @@ export class DockerCommandController {
     }
     assertArgv(argv);
     const cwd = options.cwd ?? '.';
-    if (!isSafeWorkspaceRelativePath(cwd, {allowRoot: true})) {
+    if (!isSafeWorkspaceRelativePath(cwd, { allowRoot: true })) {
       throw new TypeError(`Invalid workspace command directory: ${cwd}`);
     }
     const timeoutMs = clampPositive(
@@ -201,7 +210,7 @@ export class DockerCommandController {
       const body = input.environmentNames
         .map((name) => `${name}=${input.environment[name] ?? ''}`)
         .join('\n');
-      await fs.writeFile(environmentFile, body, {flag: 'wx', mode: 0o600});
+      await fs.writeFile(environmentFile, body, { flag: 'wx', mode: 0o600 });
       const dockerArgv = [
         this.options.dockerExecutable,
         'exec',
@@ -217,14 +226,14 @@ export class DockerCommandController {
         maxOutputBytes: input.maxOutputBytes,
         ...(input.options.onStdoutLine === undefined
           ? {}
-          : {onStdoutLine: input.options.onStdoutLine}),
+          : { onStdoutLine: input.options.onStdoutLine }),
         ...(input.options.signal === undefined
           ? {}
-          : {signal: input.options.signal}),
+          : { signal: input.options.signal }),
         timeoutMs: input.timeoutMs,
       });
     } finally {
-      await fs.rm(environmentFile, {force: true}).catch(() => undefined);
+      await fs.rm(environmentFile, { force: true }).catch(() => undefined);
     }
   }
 }
@@ -240,7 +249,9 @@ function normalizeCredentialEnvironmentNames(
   const names = new Set<string>();
   for (const name of input) {
     if (typeof name !== 'string' || names.has(name)) {
-      throw new TypeError('Credential environment names must be unique strings.');
+      throw new TypeError(
+        'Credential environment names must be unique strings.',
+      );
     }
     const binding = Object.hasOwn(environment.credentials, name)
       ? environment.credentials[name]
@@ -259,13 +270,19 @@ function assertArgv(argv: readonly string[]): void {
   if (
     !Array.isArray(argv) ||
     argv.length === 0 ||
-    argv.some((argument) => typeof argument !== 'string' || argument.includes('\0'))
+    argv.some(
+      (argument) => typeof argument !== 'string' || argument.includes('\0'),
+    )
   ) {
     throw new TypeError('Command argv must contain non-NUL strings.');
   }
 }
 
-function clampPositive(requested: number, maximum: number, name: string): number {
+function clampPositive(
+  requested: number,
+  maximum: number,
+  name: string,
+): number {
   if (!Number.isSafeInteger(requested) || requested <= 0) {
     throw new TypeError(`${name} must be a positive integer.`);
   }

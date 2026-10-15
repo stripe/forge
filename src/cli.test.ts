@@ -2,17 +2,25 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, describe, it} from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
-import {createDefaultCliComposition, runCli as invokeCli, type RunCliOptions} from './cli.js';
-import {credentialReference} from './contracts/credentials.js';
-import {createForgeEngine, defaultForgeEngine} from './engine.js';
-import type {ExecuteEvalInput} from './execution/execute.js';
-import {createArtifactStore} from './results/index.js';
-import {FORGE_VERSION} from './execution/index.js';
-import {parseExperimentConfigYaml, sha256Digest, sha256Hex} from './model/index.js';
-import {defineSetupActionBundle} from './setup/index.js';
-import {serializeResolvedRunPlan} from './planning/index.js';
+import {
+  createDefaultCliComposition,
+  runCli as invokeCli,
+  type RunCliOptions,
+} from './cli.js';
+import { credentialReference } from './contracts/credentials.js';
+import { createForgeEngine, defaultForgeEngine } from './engine.js';
+import type { ExecuteEvalInput } from './execution/execute.js';
+import { FORGE_VERSION } from './execution/index.js';
+import {
+  parseExperimentConfigYaml,
+  sha256Digest,
+  sha256Hex,
+} from './model/index.js';
+import { serializeResolvedRunPlan } from './planning/index.js';
+import { createArtifactStore } from './results/index.js';
+import { defineSetupActionBundle } from './setup/index.js';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -24,26 +32,33 @@ const temporaryDirectories: string[] = [];
 
 function runCli(argv: readonly string[], options: RunCliOptions = {}) {
   const experiment = argv[argv.indexOf('--experiment') + 1];
-  const cwd = argv[0] === 'run' && experiment && path.isAbsolute(experiment)
-    ? path.dirname(experiment)
-    : process.cwd();
-  return invokeCli(argv, {cwd, stderr: () => undefined, ...options});
+  const cwd =
+    argv[0] === 'run' && experiment && path.isAbsolute(experiment)
+      ? path.dirname(experiment)
+      : process.cwd();
+  return invokeCli(argv, { cwd, stderr: () => undefined, ...options });
 }
 
 async function executeOffline(input: ExecuteEvalInput) {
   const runtime = createFakeRuntimeAdapter();
-  const agent = createScriptedAgentAdapter({id: input.plan.selection.agent.adapter});
+  const agent = createScriptedAgentAdapter({
+    id: input.plan.selection.agent.adapter,
+  });
   return defaultForgeEngine.executeEval({
     ...input,
-    composition: {...input.composition, runtime: runtime.adapter, agents: new Map([[agent.adapter.id, agent.adapter]])},
+    composition: {
+      ...input.composition,
+      runtime: runtime.adapter,
+      agents: new Map([[agent.adapter.id, agent.adapter]]),
+    },
   });
 }
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      fs.rm(directory, {recursive: true, force: true}),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => fs.rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -51,7 +66,9 @@ describe('Forge CLI', () => {
   it('reports the installed package version', async () => {
     let stdout = '';
     const exitCode = await runCli(['--version'], {
-      stdout: (text) => { stdout += text; },
+      stdout: (text) => {
+        stdout += text;
+      },
       stderr: () => undefined,
     });
     assert.equal(exitCode, 0);
@@ -67,19 +84,55 @@ describe('Forge CLI', () => {
       environment: {},
       experimentRunIdFactory: () => 'public-experiment',
       runIdFactory: () => 'public-eval',
-      stdout: (text) => {stdout += text;},
-      execute: async (input) => {executed += 1; return executeOffline(input);},
+      stdout: (text) => {
+        stdout += text;
+      },
+      execute: async (input) => {
+        executed += 1;
+        return executeOffline(input);
+      },
     };
-    assert.equal(await runCli(['run', '--experiment', fixture.experimentPath, '--output', output], options), 0);
-    const summary = JSON.parse(stdout) as {experiment_run_id: string; location: string; checkpoint: string; report: string};
+    assert.equal(
+      await runCli(
+        ['run', '--experiment', fixture.experimentPath, '--output', output],
+        options,
+      ),
+      0,
+    );
+    const summary = JSON.parse(stdout) as {
+      experiment_run_id: string;
+      location: string;
+      checkpoint: string;
+      report: string;
+    };
     assert.equal(summary.experiment_run_id, 'public-experiment');
-    assert.equal(summary.checkpoint, path.join(summary.location, 'experiment.json'));
+    assert.equal(
+      summary.checkpoint,
+      path.join(summary.location, 'experiment.json'),
+    );
     assert.equal(summary.report, path.join(summary.location, 'report.json'));
     stdout = '';
-    assert.equal(await runCli(['run', '--experiment', fixture.experimentPath, '--output', output,
-      '--resume', summary.experiment_run_id], options), 0);
+    assert.equal(
+      await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--output',
+          output,
+          '--resume',
+          summary.experiment_run_id,
+        ],
+        options,
+      ),
+      0,
+    );
     assert.equal(executed, 1);
-    const resumed = JSON.parse(stdout) as {checkpoint: string; skipped: number; executed: number};
+    const resumed = JSON.parse(stdout) as {
+      checkpoint: string;
+      skipped: number;
+      executed: number;
+    };
     assert.equal(resumed.checkpoint, summary.checkpoint);
     assert.equal(resumed.skipped, 1);
     assert.equal(resumed.executed, 0);
@@ -95,20 +148,35 @@ describe('Forge CLI', () => {
       environment: {},
       experimentRunIdFactory: () => 'saved-subset',
       runIdFactory: () => 'saved-eval',
-      stdout: (text) => {stdout += text;},
-      execute: async (input) => {executed += 1; return executeOffline(input);},
+      stdout: (text) => {
+        stdout += text;
+      },
+      execute: async (input) => {
+        executed += 1;
+        return executeOffline(input);
+      },
     };
-    assert.equal(await runCli([
-      'run', '--experiment', fixture.experimentPath, '--output', output,
-    ], options), 0);
-    const summary = JSON.parse(stdout) as {experiment_run_id: string};
+    assert.equal(
+      await runCli(
+        ['run', '--experiment', fixture.experimentPath, '--output', output],
+        options,
+      ),
+      0,
+    );
+    const summary = JSON.parse(stdout) as { experiment_run_id: string };
 
-    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
     assert.ok(config.matrix.groups === undefined);
     const selectedAgent = config.matrix.agents[0]!;
-    config.matrix.agents = [selectedAgent, ...Array.from({length: 999}, (_, index) => ({
-      ...selectedAgent, model: `unselected-${index}`,
-    }))];
+    config.matrix.agents = [
+      selectedAgent,
+      ...Array.from({ length: 999 }, (_, index) => ({
+        ...selectedAgent,
+        model: `unselected-${index}`,
+      })),
+    ];
     config.matrix.repetitions = 10_000;
     await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
 
@@ -116,24 +184,55 @@ describe('Forge CLI', () => {
     const engine = {
       ...defaultForgeEngine,
       loadExperimentConfig: async (experimentPath: string) => {
-        const experiment = await defaultForgeEngine.loadExperimentConfig(experimentPath);
+        const experiment =
+          await defaultForgeEngine.loadExperimentConfig(experimentPath);
         assert.ok(experiment.config.matrix.groups === undefined);
         // Stop an accidental ten-million-selection expansion immediately. Matrix
         // membership checks use array.some and do not enumerate Cartesian axes.
-        Object.defineProperty(experiment.config.matrix.agents, Symbol.iterator, {value: () => {
-          agentEnumerations += 1;
-          throw new Error('Resume must not expand unsaved matrix combinations.');
-        }});
+        Object.defineProperty(
+          experiment.config.matrix.agents,
+          Symbol.iterator,
+          {
+            value: () => {
+              agentEnumerations += 1;
+              throw new Error(
+                'Resume must not expand unsaved matrix combinations.',
+              );
+            },
+          },
+        );
         return experiment;
       },
     };
     stdout = '';
     let stderr = '';
-    assert.equal(await runCli([
-      'run', '--experiment', fixture.experimentPath, '--output', output,
-      '--resume', summary.experiment_run_id,
-    ], {...options, engine, stderr: (text) => {stderr += text;}}), 0, stderr);
-    const resumed = JSON.parse(stdout) as {total: number; skipped: number; executed: number};
+    assert.equal(
+      await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--output',
+          output,
+          '--resume',
+          summary.experiment_run_id,
+        ],
+        {
+          ...options,
+          engine,
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      ),
+      0,
+      stderr,
+    );
+    const resumed = JSON.parse(stdout) as {
+      total: number;
+      skipped: number;
+      executed: number;
+    };
     assert.equal(resumed.total, 1);
     assert.equal(resumed.skipped, 1);
     assert.equal(resumed.executed, 0);
@@ -143,68 +242,99 @@ describe('Forge CLI', () => {
 
   it('checks default-composition input bytes against the manifest loaded for the run', async () => {
     const fixture = await createBenchmarkFixture();
-    const exitCode = await runCli([
-      'run', '--experiment', fixture.experimentPath,
-    ], {
-      environment: {},
-      stdout: () => undefined,
-      execute: async (input) => {
-        const {composition} = input;
-        const original = await fs.readFile(fixture.caseFilePath, 'utf8');
-        await fs.writeFile(fixture.caseFilePath, original.replace('Do the thing', 'Do bad thing'));
-        await assert.rejects(composition.inputProvider.read('cases/example.case.yaml'), /SHA-256/);
-        await fs.writeFile(path.join(fixture.datasetRoot, 'cases/extra.yaml'), 'extra');
-        await assert.rejects(composition.inputProvider.listFiles('cases'), /manifest inventory/);
-        await fs.writeFile(fixture.caseFilePath, original);
-        await fs.rm(path.join(fixture.datasetRoot, 'cases/extra.yaml'));
-        return executeOffline(input);
+    const exitCode = await runCli(
+      ['run', '--experiment', fixture.experimentPath],
+      {
+        environment: {},
+        stdout: () => undefined,
+        execute: async (input) => {
+          const { composition } = input;
+          const original = await fs.readFile(fixture.caseFilePath, 'utf8');
+          await fs.writeFile(
+            fixture.caseFilePath,
+            original.replace('Do the thing', 'Do bad thing'),
+          );
+          await assert.rejects(
+            composition.inputProvider.read('cases/example.case.yaml'),
+            /SHA-256/,
+          );
+          await fs.writeFile(
+            path.join(fixture.datasetRoot, 'cases/extra.yaml'),
+            'extra',
+          );
+          await assert.rejects(
+            composition.inputProvider.listFiles('cases'),
+            /manifest inventory/,
+          );
+          await fs.writeFile(fixture.caseFilePath, original);
+          await fs.rm(path.join(fixture.datasetRoot, 'cases/extra.yaml'));
+          return executeOffline(input);
+        },
       },
-    });
+    );
     assert.equal(exitCode, 0);
   });
 
   it('supplies the selected external runtime to the host factory for validation and execution', async () => {
     const fixture = await createBenchmarkFixture();
-    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
     const descriptor = {
       adapter: 'acme/process',
-      platform: 'linux/amd64' as const, config: {profile: 'test-worker'},
+      platform: 'linux/amd64' as const,
+      config: { profile: 'test-worker' },
     };
-    await fs.writeFile(fixture.experimentPath, JSON.stringify({...config, runtime: descriptor}));
-    const runtime = createFakeRuntimeAdapter({id: descriptor.adapter});
-    const agent = createScriptedAgentAdapter({id: 'claude-code'});
+    await fs.writeFile(
+      fixture.experimentPath,
+      JSON.stringify({ ...config, runtime: descriptor }),
+    );
+    const runtime = createFakeRuntimeAdapter({ id: descriptor.adapter });
+    const agent = createScriptedAgentAdapter({ id: 'claude-code' });
     let factoryCalls = 0;
     for (const command of ['validate', 'run']) {
       let stderr = '';
-      const exitCode = await runCli([
-        command, '--experiment', fixture.experimentPath,
-      ], {
-        compositionFactory: async (options) => {
-          factoryCalls += 1;
-          assert.deepEqual(options.runtime, descriptor);
-          assert.equal(options.datasetManifest?.dataset.id, 'example-dataset');
-          return {
-            runtime: runtime.adapter,
-            agents: new Map([[agent.adapter.id, agent.adapter]]),
-            credentialResolver: createStaticCredentialResolver(),
-            inputProvider: createMemoryRunInputProvider(),
-            artifactStore: createArtifactStore({root: options.resultsRoot}),
-          };
+      const exitCode = await runCli(
+        [command, '--experiment', fixture.experimentPath],
+        {
+          compositionFactory: async (options) => {
+            factoryCalls += 1;
+            assert.deepEqual(options.runtime, descriptor);
+            assert.equal(
+              options.datasetManifest?.dataset.id,
+              'example-dataset',
+            );
+            return {
+              runtime: runtime.adapter,
+              agents: new Map([[agent.adapter.id, agent.adapter]]),
+              credentialResolver: createStaticCredentialResolver(),
+              inputProvider: createMemoryRunInputProvider(),
+              artifactStore: createArtifactStore({ root: options.resultsRoot }),
+            };
+          },
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
         },
-        stdout: () => undefined,
-        stderr: (text) => {stderr += text;},
-      });
-      assert.ok(!(stderr).includes('forge:'));
+      );
+      assert.ok(!stderr.includes('forge:'));
       assert.equal(exitCode, 0);
     }
     assert.equal(factoryCalls, 2);
     assert.equal(runtime.runs.length, 1);
     let stderr = '';
-    const exitCode = await runCli([
-      'validate', '--experiment', fixture.experimentPath,
-    ], {stdout: () => undefined, stderr: (text) => {stderr += text;}});
+    const exitCode = await runCli(
+      ['validate', '--experiment', fixture.experimentPath],
+      {
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
     assert.notEqual(exitCode, 0);
-    assert.ok((stderr).includes('host-supplied compositionFactory'));
+    assert.ok(stderr.includes('host-supplied compositionFactory'));
   });
 
   it('validates a dataset/experiment pair and emits its resolved run count', async () => {
@@ -213,20 +343,20 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'validate',
-        '--experiment',
-        'experiments/default.yaml',
-      ],
+      ['validate', '--experiment', 'experiments/default.yaml'],
       {
         cwd: fixture.root,
-        stdout: (text) => { stdout += text; },
-        stderr: (text) => { stderr += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
       },
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     {
       const actual = JSON.parse(stdout);
       assert.ok(actual);
@@ -244,19 +374,26 @@ describe('Forge CLI', () => {
     const selections: Array<readonly string[]> = [];
     let stdout = '';
     let stderr = '';
-    const exitCode = await runCli(['validate', '--experiment', fixture.experimentPath], {
-      environment: {},
-      stdout: (text) => {stdout += text;},
-      stderr: (text) => {stderr += text;},
-      engine: {
-        ...defaultForgeEngine,
-        preflightEval: (input) => {
-          const {case_id, treatment, agent} = input.plan.selection;
-          selections.push([case_id, treatment, agent.model]);
-          return defaultForgeEngine.preflightEval(input);
+    const exitCode = await runCli(
+      ['validate', '--experiment', fixture.experimentPath],
+      {
+        environment: {},
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        engine: {
+          ...defaultForgeEngine,
+          preflightEval: (input) => {
+            const { case_id, treatment, agent } = input.plan.selection;
+            selections.push([case_id, treatment, agent.model]);
+            return defaultForgeEngine.preflightEval(input);
+          },
         },
       },
-    });
+    );
     assert.equal(exitCode, 0, stderr);
     assert.equal(JSON.parse(stdout).run_count, 3);
     assert.deepEqual(selections, [
@@ -277,30 +414,54 @@ describe('Forge CLI', () => {
     ] as const) {
       let stdout = '';
       let stderr = '';
-      const exitCode = await runCli([
-        'plan', '--experiment', fixture.experimentPath, '--case-file', caseFile,
-        '--treatment', treatment, '--model', model,
-      ], {
-        stdout: (text) => {stdout += text;},
-        stderr: (text) => {stderr += text;},
-      });
+      const exitCode = await runCli(
+        [
+          'plan',
+          '--experiment',
+          fixture.experimentPath,
+          '--case-file',
+          caseFile,
+          '--treatment',
+          treatment,
+          '--model',
+          model,
+        ],
+        {
+          stdout: (text) => {
+            stdout += text;
+          },
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      );
       assert.equal(exitCode, expectedCode, stderr);
       if (expectedCode === 0) {
-        const plan = defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout));
+        const plan = defaultForgeEngine.parseResolvedRunPlan(
+          JSON.parse(stdout),
+        );
         assert.equal(plan.selection.treatment, treatment);
         assert.equal(plan.selection.agent.model, model);
-        assert.equal(plan.selection.case_id,
-          caseFile === fixture.caseFilePath ? 'case/example' : 'case/unselected');
+        assert.equal(
+          plan.selection.case_id,
+          caseFile === fixture.caseFilePath
+            ? 'case/example'
+            : 'case/unselected',
+        );
       } else {
         assert.equal(stdout, '');
-        assert.ok(stderr.includes('Selection does not match the benchmark matrix'));
+        assert.ok(
+          stderr.includes('Selection does not match the benchmark matrix'),
+        );
       }
     }
   });
 
   it('checks references in all matrix groups before allocating a filtered run', async () => {
     const fixture = await createGroupedBenchmarkFixture();
-    const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
     assert.ok(config.matrix.groups !== undefined);
     config.matrix.groups[1]!.cases = ['cases/not-in-dataset.case.yaml'];
     assert.equal(config.runtime.adapter, 'docker');
@@ -310,21 +471,34 @@ describe('Forge CLI', () => {
     let executions = 0;
     let detections = 0;
     let stderr = '';
-    const exitCode = await runCli([
-      'run', '--experiment', fixture.experimentPath, '--case', 'case/example',
-    ], {
-      environment: {},
-      stdout: () => undefined,
-      stderr: (text) => {stderr += text;},
-      detectDockerPlatform: async () => {detections += 1; return 'linux/amd64';},
-      compositionFactory: async (options) => {
-        preparations += 1;
-        return createDefaultCliComposition(options);
+    const exitCode = await runCli(
+      ['run', '--experiment', fixture.experimentPath, '--case', 'case/example'],
+      {
+        environment: {},
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+        detectDockerPlatform: async () => {
+          detections += 1;
+          return 'linux/amd64';
+        },
+        compositionFactory: async (options) => {
+          preparations += 1;
+          return createDefaultCliComposition(options);
+        },
+        execute: async (input) => {
+          executions += 1;
+          return executeOffline(input);
+        },
       },
-      execute: async (input) => {executions += 1; return executeOffline(input);},
-    });
+    );
     assert.equal(exitCode, 1);
-    assert.ok(stderr.includes('references a case file absent from the loaded dataset manifest'));
+    assert.ok(
+      stderr.includes(
+        'references a case file absent from the loaded dataset manifest',
+      ),
+    );
     assert.equal(detections, 0);
     assert.equal(preparations, 0);
     assert.equal(executions, 0);
@@ -341,11 +515,7 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'validate',
-        '--experiment',
-        fixture.experimentPath,
-      ],
+      ['validate', '--experiment', fixture.experimentPath],
       {
         detectDockerPlatform: async () => {
           throw new Error('Docker must not be contacted');
@@ -364,7 +534,7 @@ describe('Forge CLI', () => {
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     assert.deepEqual(platforms, ['linux/amd64', 'linux/arm64']);
   });
 
@@ -380,15 +550,10 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'validate',
-        '--experiment',
-        fixture.experimentPath,
-        '--host',
-      ],
+      ['validate', '--experiment', fixture.experimentPath, '--host'],
       {
         detectDockerPlatform: async () => 'linux/arm64',
-        validateDockerHost: async ({platform}) => {
+        validateDockerHost: async ({ platform }) => {
           validatedPlatforms.push(platform);
           return {
             platform,
@@ -405,7 +570,7 @@ describe('Forge CLI', () => {
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     assert.deepEqual(validatedPlatforms, ['linux/arm64']);
     assert.deepEqual(JSON.parse(stdout).host, {
       docker_platform: 'linux/arm64',
@@ -427,17 +592,12 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'validate',
-        '--experiment',
-        fixture.experimentPath,
-        '--host',
-      ],
+      ['validate', '--experiment', fixture.experimentPath, '--host'],
       {
         detectDockerPlatform: async () => 'linux/arm64',
-        validateDockerHost: async ({platform}) => {
+        validateDockerHost: async ({ platform }) => {
           hostValidationCalled = true;
-          return {platform, imageId: `sha256:${'a'.repeat(64)}`};
+          return { platform, imageId: `sha256:${'a'.repeat(64)}` };
         },
         stdout: () => undefined,
         stderr: (text) => {
@@ -447,7 +607,7 @@ describe('Forge CLI', () => {
     );
 
     assert.equal(exitCode, 1);
-    assert.ok((stderr).includes('agent adapter'));
+    assert.ok(stderr.includes('agent adapter'));
     assert.equal(hostValidationCalled, false);
   });
 
@@ -477,19 +637,19 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'validate',
-        '--experiment',
-        fixture.experimentPath,
-      ],
+      ['validate', '--experiment', fixture.experimentPath],
       {
-        stdout: (text) => { stdout += text; },
-        stderr: (text) => { stderr += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
       },
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     {
       const actual = JSON.parse(stdout);
       assert.ok(actual);
@@ -520,11 +680,20 @@ describe('Forge CLI', () => {
         '--repetition',
         '0',
       ],
-      {stdout: (text) => { stdout += text; }},
+      {
+        stdout: (text) => {
+          stdout += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 0);
-    assert.equal(stdout, serializeResolvedRunPlan(defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout))));
+    assert.equal(
+      stdout,
+      serializeResolvedRunPlan(
+        defaultForgeEngine.parseResolvedRunPlan(JSON.parse(stdout)),
+      ),
+    );
     {
       const actual = JSON.parse(stdout);
       assert.ok(actual);
@@ -551,11 +720,7 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'plan',
-        '--experiment',
-        fixture.experimentPath,
-      ],
+      ['plan', '--experiment', fixture.experimentPath],
       {
         runtimePlatform: 'linux/arm64',
         stdout: (text) => {
@@ -568,7 +733,7 @@ describe('Forge CLI', () => {
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     assert.equal(JSON.parse(stdout).runtime.platform, 'linux/arm64');
   });
 
@@ -603,14 +768,14 @@ describe('Forge CLI', () => {
                 if (
                   input === null ||
                   typeof input !== 'object' ||
-                  typeof (input as {name?: unknown}).name !== 'string'
+                  typeof (input as { name?: unknown }).name !== 'string'
                 ) {
                   throw new TypeError('invalid tool');
                 }
-                return {name: (input as {name: string}).name};
+                return { name: (input as { name: string }).name };
               },
               preflight() {
-                return {requirements: {}, async apply() {}};
+                return { requirements: {}, async apply() {} };
               },
             },
           ],
@@ -621,27 +786,39 @@ describe('Forge CLI', () => {
     let stderr = '';
 
     const exitCode = await runCli(
-      [
-        'plan',
-        '--experiment',
-        fixture.experimentPath,
-      ],
+      ['plan', '--experiment', fixture.experimentPath],
       {
         engine,
-        stdout: (text) => { stdout += text; },
-        stderr: (text) => { stderr += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
       },
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     {
       const actual = JSON.parse(stdout);
       assert.ok(actual);
-      assert.deepEqual(actual.setup.map((item: {uses: string; with: {name: string}}) => ({uses: item.uses, with: {name: item.with.name}})), [{uses: 'acme-evals/tool', with: {name: 'formatter'}}]);
-      assert.deepEqual(actual.provenance.forge.action_bundles.map((item: {namespace: string; version: string}) => ({namespace: item.namespace, version: item.version})), [
-        {namespace: 'acme-evals', version: '1.0.0'},
-      ]);
+      assert.deepEqual(
+        actual.setup.map((item: { uses: string; with: { name: string } }) => ({
+          uses: item.uses,
+          with: { name: item.with.name },
+        })),
+        [{ uses: 'acme-evals/tool', with: { name: 'formatter' } }],
+      );
+      assert.deepEqual(
+        actual.provenance.forge.action_bundles.map(
+          (item: { namespace: string; version: string }) => ({
+            namespace: item.namespace,
+            version: item.version,
+          }),
+        ),
+        [{ namespace: 'acme-evals', version: '1.0.0' }],
+      );
     }
   });
 
@@ -677,11 +854,11 @@ describe('Forge CLI', () => {
                 if (
                   input === null ||
                   typeof input !== 'object' ||
-                  typeof (input as {name?: unknown}).name !== 'string'
+                  typeof (input as { name?: unknown }).name !== 'string'
                 ) {
                   throw new TypeError('invalid tool');
                 }
-                return {name: (input as {name: string}).name};
+                return { name: (input as { name: string }).name };
               },
               preflight() {
                 return {
@@ -696,8 +873,8 @@ describe('Forge CLI', () => {
         }),
       ],
     });
-    const runtime = createFakeRuntimeAdapter({id: 'forge/docker'});
-    const agent = createScriptedAgentAdapter({id: 'claude-code'});
+    const runtime = createFakeRuntimeAdapter({ id: 'forge/docker' });
+    const agent = createScriptedAgentAdapter({ id: 'claude-code' });
     let stdout = '';
     let stderr = '';
 
@@ -711,29 +888,39 @@ describe('Forge CLI', () => {
       ],
       {
         engine,
-        compositionFactory: async ({resultsRoot}) => ({
+        compositionFactory: async ({ resultsRoot }) => ({
           runtime: runtime.adapter,
           agents: new Map([[agent.adapter.id, agent.adapter]]),
           credentialResolver: createStaticCredentialResolver(),
           inputProvider: createMemoryRunInputProvider(),
-          artifactStore: createArtifactStore({root: resultsRoot}),
+          artifactStore: createArtifactStore({ root: resultsRoot }),
         }),
-        stdout: (text) => { stdout += text; },
-        stderr: (text) => { stderr += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
       },
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     assert.equal(applied, true);
-    const completed = await engine.verifyCompletedRun(path.join(JSON.parse(stdout).location, 'runs', 'host-action-run'));
+    const completed = await engine.verifyCompletedRun(
+      path.join(JSON.parse(stdout).location, 'runs', 'host-action-run'),
+    );
     {
       const actual = completed;
       assert.ok(actual);
       assert.equal(actual.runId, 'host-action-run');
-      assert.deepEqual(actual.result.forge.action_bundles!.map((item) => ({namespace: item.namespace, version: item.version})), [
-        {namespace: 'acme-evals', version: '1.0.0'},
-      ]);
+      assert.deepEqual(
+        actual.result.forge.action_bundles!.map((item) => ({
+          namespace: item.namespace,
+          version: item.version,
+        })),
+        [{ namespace: 'acme-evals', version: '1.0.0' }],
+      );
     }
   });
 
@@ -755,13 +942,17 @@ describe('Forge CLI', () => {
         'claude-sonnet',
       ],
       {
-        stdout: (text) => { stdout += text; },
-        stderr: (text) => { stderr += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
       },
     );
 
     assert.equal(exitCode, 0);
-    assert.ok(!(stderr).includes('forge:'));
+    assert.ok(!stderr.includes('forge:'));
     {
       const actual = JSON.parse(stdout).selection;
       assert.ok(actual);
@@ -785,7 +976,9 @@ describe('Forge CLI', () => {
       ],
       {
         cwd: fixture.root,
-        stdout: (text) => { stdout += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
       },
     );
 
@@ -809,9 +1002,11 @@ describe('Forge CLI', () => {
         'case-file-run',
       ],
       {
-        stdout: (text) => { stdout += text; },
+        stdout: (text) => {
+          stdout += text;
+        },
         execute: async (input) => {
-          const {plan} = input;
+          const { plan } = input;
           selectedCaseId = plan.selection.case_id;
           return executeOffline(input);
         },
@@ -827,13 +1022,30 @@ describe('Forge CLI', () => {
       assert.equal(actual.errored, 0);
     }
     let expectedPlan = '';
-    assert.equal(await runCli(['plan', '--experiment', fixture.experimentPath, '--case', 'case/example'], {
-      stdout: (text) => {expectedPlan += text;},
-    }), 0);
-    const experimentRun = JSON.parse(stdout) as {location: string};
-    const storedPlan = await fs.readFile(path.join(experimentRun.location, 'runs', 'case-file-run', 'plan.json'), 'utf8');
+    assert.equal(
+      await runCli(
+        [
+          'plan',
+          '--experiment',
+          fixture.experimentPath,
+          '--case',
+          'case/example',
+        ],
+        {
+          stdout: (text) => {
+            expectedPlan += text;
+          },
+        },
+      ),
+      0,
+    );
+    const experimentRun = JSON.parse(stdout) as { location: string };
+    const storedPlan = await fs.readFile(
+      path.join(experimentRun.location, 'runs', 'case-file-run', 'plan.json'),
+      'utf8',
+    );
     assert.equal(storedPlan, expectedPlan);
-    assert.ok(!(storedPlan).includes(fixture.caseFilePath));
+    assert.ok(!storedPlan.includes(fixture.caseFilePath));
   });
 
   it('rejects combining case ID and case file selectors', async () => {
@@ -850,11 +1062,15 @@ describe('Forge CLI', () => {
         '--case-file',
         fixture.caseFilePath,
       ],
-      {stderr: (text) => { stderr += text; }},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
-    assert.ok((stderr).includes('--case and --case-file cannot be combined'));
+    assert.ok(stderr.includes('--case and --case-file cannot be combined'));
   });
 
   it('rejects a case-file traversal that resolves outside the dataset', async () => {
@@ -871,7 +1087,11 @@ describe('Forge CLI', () => {
         '--case-file',
         path.join(fixture.datasetRoot, 'cases', '..', '..', 'outside.yaml'),
       ],
-      {stderr: (text) => { stderr += text; }},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
@@ -890,7 +1110,11 @@ describe('Forge CLI', () => {
         '--case-file',
         path.join(fixture.datasetRoot, 'manifest.json'),
       ],
-      {stderr: (text) => { stderr += text; }},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
@@ -898,7 +1122,9 @@ describe('Forge CLI', () => {
   });
 
   it('rejects a manifest case that is not an experiment matrix member', async () => {
-    const fixture = await createBenchmarkFixture({includeUnselectedCase: true});
+    const fixture = await createBenchmarkFixture({
+      includeUnselectedCase: true,
+    });
     let stderr = '';
 
     const exitCode = await runCli(
@@ -909,11 +1135,15 @@ describe('Forge CLI', () => {
         '--case-file',
         fixture.unselectedCaseFilePath!,
       ],
-      {stderr: (text) => { stderr += text; }},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
-    assert.ok((stderr).includes('Selection does not match the benchmark matrix'));
+    assert.ok(stderr.includes('Selection does not match the benchmark matrix'));
   });
 
   it('assembles the public Docker/Claude/Codex defaults with explicit credentials', async () => {
@@ -921,44 +1151,69 @@ describe('Forge CLI', () => {
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
-      environment: {ANTHROPIC_API_KEY: 'test-api-key'},
+      environment: { ANTHROPIC_API_KEY: 'test-api-key' },
     });
 
     assert.equal(composition.runtime.id, 'forge/docker');
     assert.deepEqual([...composition.agents.keys()], ['claude-code', 'codex']);
     assert.equal(composition.agents.get('claude-code')?.version, FORGE_VERSION);
     assert.equal(composition.agents.get('codex')?.version, FORGE_VERSION);
-    assert.deepEqual([...(composition.completionProviders as ReadonlyMap<string, unknown>).keys()], ['anthropic']);
-    assert.equal((composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
-      'anthropic',
-    )?.version, FORGE_VERSION);
-    assert.equal((await composition.credentialResolver.resolve(
-      credentialReference('anthropic.api-key'),
-      {
-        runId: 'run-1',
-        purpose: 'agent',
-        signal: new AbortController().signal,
-      },
-    )), 'test-api-key');
+    assert.deepEqual(
+      [
+        ...(
+          composition.completionProviders as ReadonlyMap<string, unknown>
+        ).keys(),
+      ],
+      ['anthropic'],
+    );
+    assert.equal(
+      (
+        composition.completionProviders as ReadonlyMap<
+          string,
+          { version: string }
+        >
+      ).get('anthropic')?.version,
+      FORGE_VERSION,
+    );
+    assert.equal(
+      await composition.credentialResolver.resolve(
+        credentialReference('anthropic.api-key'),
+        {
+          runId: 'run-1',
+          purpose: 'agent',
+          signal: new AbortController().signal,
+        },
+      ),
+      'test-api-key',
+    );
   });
 
   it('validates and plans the Codex fixture without credentials or Docker', async () => {
     for (const command of ['validate', 'plan']) {
       let stdout = '';
       let stderr = '';
-      const code = await runCli([
-        command, '--experiment', 'test/fixtures/codex/experiment.yaml',
-      ], {
-        environment: {},
-        stdout: (value) => {stdout += value;},
-        stderr: (value) => {stderr += value;},
-      });
-      assert.ok(!(stderr).includes('forge:'));
+      const code = await runCli(
+        [command, '--experiment', 'test/fixtures/codex/experiment.yaml'],
+        {
+          environment: {},
+          stdout: (value) => {
+            stdout += value;
+          },
+          stderr: (value) => {
+            stderr += value;
+          },
+        },
+      );
+      assert.ok(!stderr.includes('forge:'));
       assert.equal(code, 0);
       if (command === 'validate') assert.equal(JSON.parse(stdout).valid, true);
-      else assert.deepEqual(JSON.parse(stdout).selection.agent, {
-        adapter: 'codex', provider: 'openai', model: 'gpt-5.4', hook_trust: 'native',
-      });
+      else
+        assert.deepEqual(JSON.parse(stdout).selection.agent, {
+          adapter: 'codex',
+          provider: 'openai',
+          model: 'gpt-5.4',
+          hook_trust: 'native',
+        });
     }
   });
 
@@ -971,30 +1226,58 @@ describe('Forge CLI', () => {
         environment: {
           CODEX_API_KEY: 'codex-test-key',
           OPENAI_API_KEY: 'must-not-be-inferred',
-          ...(compatible ? {OPENAI_BASE_URL: 'https://gateway.example.test/v1'} : {}),
+          ...(compatible
+            ? { OPENAI_BASE_URL: 'https://gateway.example.test/v1' }
+            : {}),
         },
       });
       const codex = composition.agents.get('codex')!;
       assert.equal(codex.version, FORGE_VERSION);
       {
-        const actual = codex.requirements({adapter: 'codex', provider: 'openai', model: 'gpt-5.4'});
+        const actual = codex.requirements({
+          adapter: 'codex',
+          provider: 'openai',
+          model: 'gpt-5.4',
+        });
         assert.ok(actual);
-        assert.equal(actual.environment.variables!.CODEX_HOME, '/home/forge/.codex');
-        assert.equal(actual.environment.credentials!.CODEX_API_KEY!.reference, 'openai.api-key');
+        assert.equal(
+          actual.environment.variables!.CODEX_HOME,
+          '/home/forge/.codex',
+        );
+        assert.equal(
+          actual.environment.credentials!.CODEX_API_KEY!.reference,
+          'openai.api-key',
+        );
       }
-      assert.equal((await composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
-        runId: 'codex-cli', purpose: 'agent', signal: new AbortController().signal,
-      })), 'codex-test-key');
+      assert.equal(
+        await composition.credentialResolver.resolve(
+          credentialReference('openai.api-key'),
+          {
+            runId: 'codex-cli',
+            purpose: 'agent',
+            signal: new AbortController().signal,
+          },
+        ),
+        'codex-test-key',
+      );
     }
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
-      credentialBindings: {'openai.api-key': 'MY_CODEX_KEY'},
-      environment: {MY_CODEX_KEY: 'explicit-key'},
+      credentialBindings: { 'openai.api-key': 'MY_CODEX_KEY' },
+      environment: { MY_CODEX_KEY: 'explicit-key' },
     });
-    assert.equal((await composition.credentialResolver.resolve(credentialReference('openai.api-key'), {
-      runId: 'codex-cli', purpose: 'agent', signal: new AbortController().signal,
-    })), 'explicit-key');
+    assert.equal(
+      await composition.credentialResolver.resolve(
+        credentialReference('openai.api-key'),
+        {
+          runId: 'codex-cli',
+          purpose: 'agent',
+          signal: new AbortController().signal,
+        },
+      ),
+      'explicit-key',
+    );
   });
 
   it('selects standard gateway authentication when ANTHROPIC_BASE_URL is set', async () => {
@@ -1011,9 +1294,15 @@ describe('Forge CLI', () => {
     const claude = composition.agents.get('claude-code');
     assert.notEqual(claude, undefined);
     assert.equal(claude!.version, FORGE_VERSION);
-    assert.equal((composition.completionProviders as ReadonlyMap<string, {version: string}>).get(
-      'anthropic',
-    )?.version, FORGE_VERSION);
+    assert.equal(
+      (
+        composition.completionProviders as ReadonlyMap<
+          string,
+          { version: string }
+        >
+      ).get('anthropic')?.version,
+      FORGE_VERSION,
+    );
     const requirements = claude!.requirements({
       adapter: 'claude-code',
       provider: 'anthropic',
@@ -1028,23 +1317,29 @@ describe('Forge CLI', () => {
         reference: 'anthropic.auth-token',
       },
     });
-    assert.ok(!('ANTHROPIC_API_KEY' in (requirements.environment.credentials)));
-    assert.equal((await composition.credentialResolver.resolve(
-      credentialReference('anthropic.auth-token'),
-      {
-        runId: 'run-1',
-        purpose: 'agent',
-        signal: new AbortController().signal,
-      },
-    )), 'gateway-token');
-    await assert.rejects(composition.credentialResolver.resolve(
-      credentialReference('anthropic.api-key'),
-      {
-        runId: 'run-1',
-        purpose: 'agent',
-        signal: new AbortController().signal,
-      },
-    ), /No environment binding exists/);
+    assert.ok(!('ANTHROPIC_API_KEY' in requirements.environment.credentials));
+    assert.equal(
+      await composition.credentialResolver.resolve(
+        credentialReference('anthropic.auth-token'),
+        {
+          runId: 'run-1',
+          purpose: 'agent',
+          signal: new AbortController().signal,
+        },
+      ),
+      'gateway-token',
+    );
+    await assert.rejects(
+      composition.credentialResolver.resolve(
+        credentialReference('anthropic.api-key'),
+        {
+          runId: 'run-1',
+          purpose: 'agent',
+          signal: new AbortController().signal,
+        },
+      ),
+      /No environment binding exists/,
+    );
   });
 
   it('binds explicit credential references to host environment variables for run', async () => {
@@ -1067,7 +1362,7 @@ describe('Forge CLI', () => {
           UNDECLARED_TOKEN: 'must-not-be-selected',
         },
         execute: async (input) => {
-          const {runId, composition} = input;
+          const { runId, composition } = input;
           resolved = await composition.credentialResolver.resolve(
             credentialReference('stripe.mcp-token'),
             {
@@ -1090,21 +1385,24 @@ describe('Forge CLI', () => {
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
-      credentialBindings: {'anthropic.api-key': 'ALTERNATE_ANTHROPIC_KEY'},
+      credentialBindings: { 'anthropic.api-key': 'ALTERNATE_ANTHROPIC_KEY' },
       environment: {
         ANTHROPIC_API_KEY: 'default-key',
         ALTERNATE_ANTHROPIC_KEY: 'alternate-key',
       },
     });
 
-    assert.equal((await composition.credentialResolver.resolve(
-      credentialReference('anthropic.api-key'),
-      {
-        runId: 'run-override',
-        purpose: 'test',
-        signal: new AbortController().signal,
-      },
-    )), 'alternate-key');
+    assert.equal(
+      await composition.credentialResolver.resolve(
+        credentialReference('anthropic.api-key'),
+        {
+          runId: 'run-override',
+          purpose: 'test',
+          signal: new AbortController().signal,
+        },
+      ),
+      'alternate-key',
+    );
   });
 
   it('rejects malformed credential mappings without echoing their value', async () => {
@@ -1120,12 +1418,16 @@ describe('Forge CLI', () => {
         '--credential-env',
         `stripe.token=${accidentalSecret}`,
       ],
-      {stderr: (text) => {stderr += text;}},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
-    assert.ok((stderr).includes('--credential-env must be'));
-    assert.ok(!(stderr).includes(accidentalSecret));
+    assert.ok(stderr.includes('--credential-env must be'));
+    assert.ok(!stderr.includes(accidentalSecret));
   });
 
   it('rejects conflicting credential mappings without echoing host variable names', async () => {
@@ -1142,33 +1444,37 @@ describe('Forge CLI', () => {
         '--credential-env',
         'stripe.token=SECOND_SECRET_NAME',
       ],
-      {stderr: (text) => { stderr += text; }},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
-    assert.ok((stderr).includes('stripe.token'));
-    assert.ok(!(stderr).includes('FIRST_SECRET_NAME'));
-    assert.ok(!(stderr).includes('SECOND_SECRET_NAME'));
+    assert.ok(stderr.includes('stripe.token'));
+    assert.ok(!stderr.includes('FIRST_SECRET_NAME'));
+    assert.ok(!stderr.includes('SECOND_SECRET_NAME'));
   });
 
   it('returns a usage exit code when a selection is ambiguous', async () => {
-    const fixture = await createBenchmarkFixture({repetitions: 2});
+    const fixture = await createBenchmarkFixture({ repetitions: 2 });
     let stderr = '';
     const exitCode = await runCli(
-      [
-        'plan',
-        '--experiment',
-        fixture.experimentPath,
-      ],
-      {stderr: (text) => { stderr += text; }},
+      ['plan', '--experiment', fixture.experimentPath],
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
-    assert.ok((stderr).includes('Selection matches 2 matrix entries'));
+    assert.ok(stderr.includes('Selection matches 2 matrix entries'));
   });
 
   it('keeps ambiguity checks after resolving a case file', async () => {
-    const fixture = await createBenchmarkFixture({repetitions: 2});
+    const fixture = await createBenchmarkFixture({ repetitions: 2 });
     let stderr = '';
     const exitCode = await runCli(
       [
@@ -1178,42 +1484,63 @@ describe('Forge CLI', () => {
         '--case-file',
         fixture.caseFilePath,
       ],
-      {stderr: (text) => { stderr += text; }},
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
     );
 
     assert.equal(exitCode, 2);
-    assert.ok((stderr).includes('Selection matches 2 matrix entries'));
+    assert.ok(stderr.includes('Selection matches 2 matrix entries'));
   });
 });
 
 async function createGroupedBenchmarkFixture() {
-  const fixture = await createBenchmarkFixture({includeUnselectedCase: true});
-  const config = parseExperimentConfigYaml(await fs.readFile(fixture.experimentPath, 'utf8'));
-  await fs.writeFile(fixture.experimentPath, JSON.stringify({
-    ...config,
-    treatments: {...config.treatments, enhanced: {setup: []}},
-    matrix: {
-      groups: [
-        {
-          cases: ['cases/example.case.yaml'],
-          treatments: ['baseline'],
-          agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-sonnet'}],
-        },
-        {
-          cases: ['cases/unselected.case.yaml'],
-          treatments: ['baseline', 'enhanced'],
-          agents: [{adapter: 'claude-code', provider: 'anthropic', model: 'claude-opus-4-6'}],
-        },
-      ],
-      repetitions: 1,
-      retries: 0,
-    },
-  }));
+  const fixture = await createBenchmarkFixture({ includeUnselectedCase: true });
+  const config = parseExperimentConfigYaml(
+    await fs.readFile(fixture.experimentPath, 'utf8'),
+  );
+  await fs.writeFile(
+    fixture.experimentPath,
+    JSON.stringify({
+      ...config,
+      treatments: { ...config.treatments, enhanced: { setup: [] } },
+      matrix: {
+        groups: [
+          {
+            cases: ['cases/example.case.yaml'],
+            treatments: ['baseline'],
+            agents: [
+              {
+                adapter: 'claude-code',
+                provider: 'anthropic',
+                model: 'claude-sonnet',
+              },
+            ],
+          },
+          {
+            cases: ['cases/unselected.case.yaml'],
+            treatments: ['baseline', 'enhanced'],
+            agents: [
+              {
+                adapter: 'claude-code',
+                provider: 'anthropic',
+                model: 'claude-opus-4-6',
+              },
+            ],
+          },
+        ],
+        repetitions: 1,
+        retries: 0,
+      },
+    }),
+  );
   return fixture;
 }
 
 async function createBenchmarkFixture(
-  options: {repetitions?: number; includeUnselectedCase?: boolean} = {},
+  options: { repetitions?: number; includeUnselectedCase?: boolean } = {},
 ): Promise<{
   root: string;
   datasetRoot: string;
@@ -1227,8 +1554,8 @@ async function createBenchmarkFixture(
   const casesRoot = path.join(datasetRoot, 'cases');
   const experimentsRoot = path.join(root, 'experiments');
   await Promise.all([
-    fs.mkdir(casesRoot, {recursive: true}),
-    fs.mkdir(experimentsRoot, {recursive: true}),
+    fs.mkdir(casesRoot, { recursive: true }),
+    fs.mkdir(experimentsRoot, { recursive: true }),
   ]);
 
   const caseBody = `id: case/example
@@ -1253,9 +1580,7 @@ judging_criteria: []
   }
   const cases = [
     casePath,
-    ...(options.includeUnselectedCase
-      ? [unselectedCasePath]
-      : []),
+    ...(options.includeUnselectedCase ? [unselectedCasePath] : []),
   ];
   const files = [
     {
@@ -1273,11 +1598,15 @@ judging_criteria: []
         ]
       : []),
   ];
-  const manifestRaw = `${JSON.stringify({
-    dataset: {id: 'example-dataset', version: '2026.09.0'},
-    cases,
-    files,
-  }, null, 2)}\n`;
+  const manifestRaw = `${JSON.stringify(
+    {
+      dataset: { id: 'example-dataset', version: '2026.09.0' },
+      cases,
+      files,
+    },
+    null,
+    2,
+  )}\n`;
   await fs.writeFile(path.join(datasetRoot, 'manifest.json'), manifestRaw);
 
   const experimentPath = path.join(experimentsRoot, 'default.yaml');
@@ -1320,6 +1649,6 @@ limits:
     datasetRoot,
     experimentPath,
     caseFilePath,
-    ...(options.includeUnselectedCase ? {unselectedCaseFilePath} : {}),
+    ...(options.includeUnselectedCase ? { unselectedCaseFilePath } : {}),
   };
 }

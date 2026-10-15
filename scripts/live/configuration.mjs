@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 
 export const MODEL = 'claude-sonnet-4-6';
@@ -21,18 +21,27 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     throw new Error('FORGE_LIVE_AGENT must be claude-code or codex.');
   }
   const codexSelected = liveAgent === 'codex';
-  const gatewayEnvironmentName = codexSelected ? 'OPENAI_BASE_URL' : 'ANTHROPIC_BASE_URL';
-  const gatewayBaseUrl = mode === 'setup' ? undefined : optionalEnvironment(gatewayEnvironmentName);
+  const gatewayEnvironmentName = codexSelected
+    ? 'OPENAI_BASE_URL'
+    : 'ANTHROPIC_BASE_URL';
+  const gatewayBaseUrl =
+    mode === 'setup' ? undefined : optionalEnvironment(gatewayEnvironmentName);
   const gatewaySelected = gatewayBaseUrl !== undefined;
   const credentialEnvironmentName = codexSelected
     ? 'CODEX_API_KEY'
-    : gatewaySelected ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
-  const upstreamCredential = mode === 'setup' ? undefined : requiredEnvironment(credentialEnvironmentName);
+    : gatewaySelected
+      ? 'ANTHROPIC_AUTH_TOKEN'
+      : 'ANTHROPIC_API_KEY';
+  const upstreamCredential =
+    mode === 'setup'
+      ? undefined
+      : requiredEnvironment(credentialEnvironmentName);
   const timeoutMs = positiveIntegerEnvironment(
     'FORGE_LIVE_TIMEOUT_MS',
     DEFAULT_TIMEOUT_MS,
   );
-  const dockerExecutable = optionalEnvironment('FORGE_DOCKER_EXECUTABLE') ?? 'docker';
+  const dockerExecutable =
+    optionalEnvironment('FORGE_DOCKER_EXECUTABLE') ?? 'docker';
   const resultsRoot = path.resolve(
     repositoryRoot,
     optionalEnvironment('FORGE_LIVE_RESULTS_ROOT') ?? 'results/live',
@@ -45,9 +54,20 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     multiTurn: `${suiteId}-multi-turn`,
   });
   return Object.freeze({
-    mode, liveAgent, codexSelected, gatewayEnvironmentName, gatewayBaseUrl,
-    gatewaySelected, credentialEnvironmentName, upstreamCredential, timeoutMs, dockerExecutable,
-    repositoryRoot, resultsRoot, suiteId, runIds
+    mode,
+    liveAgent,
+    codexSelected,
+    gatewayEnvironmentName,
+    gatewayBaseUrl,
+    gatewaySelected,
+    credentialEnvironmentName,
+    upstreamCredential,
+    timeoutMs,
+    dockerExecutable,
+    repositoryRoot,
+    resultsRoot,
+    suiteId,
+    runIds,
   });
 
   function liveSuiteId(configured) {
@@ -89,7 +109,6 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     }
     return parsed;
   }
-
 }
 
 export function parseGatewayUrl(value, environmentName = 'ANTHROPIC_BASE_URL') {

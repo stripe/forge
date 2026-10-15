@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type {RuntimeLogicalPaths} from '../../contracts/runtime.js';
+import type { RuntimeLogicalPaths } from '../../contracts/runtime.js';
 
 /** Runtime-visible, run-owned Linux paths, fixed before capability preflight. */
 export interface ClaudeCodeLayout {
@@ -30,7 +30,9 @@ export function resolveClaudeCodeLayout(
     !Object.hasOwn(value, 'home') ||
     !Object.hasOwn(value, 'configDirectory')
   ) {
-    throw new TypeError('Claude layout must contain workspace, home, and configDirectory.');
+    throw new TypeError(
+      'Claude layout must contain workspace, home, and configDirectory.',
+    );
   }
   const layout = Object.freeze({
     workspace: canonicalLinuxDirectory(value.workspace),
@@ -43,7 +45,9 @@ export function resolveClaudeCodeLayout(
     layout.home === layout.configDirectory ||
     layout.home.startsWith(`${layout.configDirectory}/`)
   ) {
-    throw new TypeError('Claude layout must keep workspace, home, and configuration state separate.');
+    throw new TypeError(
+      'Claude layout must keep workspace, home, and configuration state separate.',
+    );
   }
   canonicalLinuxDirectory(claudeProjectDirectory(layout));
   canonicalLinuxDirectory(`${layout.configDirectory}/plugins`);
@@ -51,9 +55,11 @@ export function resolveClaudeCodeLayout(
 }
 
 export function usesDefaultClaudeCodeLayout(layout: ClaudeCodeLayout): boolean {
-  return layout.workspace === DEFAULT_CLAUDE_CODE_LAYOUT.workspace &&
+  return (
+    layout.workspace === DEFAULT_CLAUDE_CODE_LAYOUT.workspace &&
     layout.home === DEFAULT_CLAUDE_CODE_LAYOUT.home &&
-    layout.configDirectory === DEFAULT_CLAUDE_CODE_LAYOUT.configDirectory;
+    layout.configDirectory === DEFAULT_CLAUDE_CODE_LAYOUT.configDirectory
+  );
 }
 
 export function assertClaudeRuntimeLayout(
@@ -61,7 +67,9 @@ export function assertClaudeRuntimeLayout(
   paths: RuntimeLogicalPaths,
 ): void {
   if (paths.home !== layout.home || paths.workspace !== layout.workspace) {
-    throw new TypeError('Claude runtime paths do not match the declared layout.');
+    throw new TypeError(
+      'Claude runtime paths do not match the declared layout.',
+    );
   }
 }
 
@@ -90,11 +98,17 @@ function canonicalLinuxDirectory(value: string): string {
     path.posix.normalize(value) !== value ||
     value.endsWith('/')
   ) {
-    throw new TypeError('Claude layout paths must be bounded, canonical absolute Linux directories.');
+    throw new TypeError(
+      'Claude layout paths must be bounded, canonical absolute Linux directories.',
+    );
   }
   return value;
 }
 
 function pathsOverlap(left: string, right: string): boolean {
-  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+  return (
+    left === right ||
+    left.startsWith(`${right}/`) ||
+    right.startsWith(`${left}/`)
+  );
 }

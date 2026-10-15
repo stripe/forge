@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type {RuntimeLogicalPaths} from '../../contracts/runtime.js';
+import type { RuntimeLogicalPaths } from '../../contracts/runtime.js';
 
 export const CODEX_HOME_STATE_ID = 'codex-home' as const;
 
@@ -18,15 +18,22 @@ const DEFAULT_LAYOUT: CodexLayout = Object.freeze({
   configDirectory: '/home/forge/.codex',
 });
 
-export function resolveCodexLayout(input: CodexLayout | undefined): CodexLayout {
+export function resolveCodexLayout(
+  input: CodexLayout | undefined,
+): CodexLayout {
   const value = input === undefined ? DEFAULT_LAYOUT : input;
   if (
-    typeof value !== 'object' || value === null ||
+    typeof value !== 'object' ||
+    value === null ||
     ![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
     Reflect.ownKeys(value).length !== 3 ||
-    !['workspace', 'home', 'configDirectory'].every((key) => Object.hasOwn(value, key))
+    !['workspace', 'home', 'configDirectory'].every((key) =>
+      Object.hasOwn(value, key),
+    )
   ) {
-    throw new TypeError('Codex layout requires workspace, home, and configDirectory.');
+    throw new TypeError(
+      'Codex layout requires workspace, home, and configDirectory.',
+    );
   }
   const layout = Object.freeze({
     workspace: directory(value.workspace),
@@ -39,37 +46,55 @@ export function resolveCodexLayout(input: CodexLayout | undefined): CodexLayout 
     layout.home === layout.configDirectory ||
     layout.home.startsWith(`${layout.configDirectory}/`)
   ) {
-    throw new TypeError('Codex workspace must be separate from home and configuration state.');
+    throw new TypeError(
+      'Codex workspace must be separate from home and configuration state.',
+    );
   }
   return layout;
 }
 
 export function usesDefaultCodexLayout(layout: CodexLayout): boolean {
-  return layout.workspace === DEFAULT_LAYOUT.workspace &&
+  return (
+    layout.workspace === DEFAULT_LAYOUT.workspace &&
     layout.home === DEFAULT_LAYOUT.home &&
-    layout.configDirectory === DEFAULT_LAYOUT.configDirectory;
+    layout.configDirectory === DEFAULT_LAYOUT.configDirectory
+  );
 }
 
-export function assertCodexRuntimeLayout(layout: CodexLayout, paths: RuntimeLogicalPaths): void {
+export function assertCodexRuntimeLayout(
+  layout: CodexLayout,
+  paths: RuntimeLogicalPaths,
+): void {
   if (layout.workspace !== paths.workspace || layout.home !== paths.home) {
-    throw new TypeError('Codex runtime paths do not match the declared layout.');
+    throw new TypeError(
+      'Codex runtime paths do not match the declared layout.',
+    );
   }
 }
 
 function directory(value: string): string {
   if (
-    typeof value !== 'string' || !value.startsWith('/') || value === '/' ||
+    typeof value !== 'string' ||
+    !value.startsWith('/') ||
+    value === '/' ||
     Buffer.byteLength(value, 'utf8') > 3_500 ||
     value.normalize('NFC') !== value ||
     /[\\\u0000-\u001f\u007f]/.test(value) ||
-    path.posix.normalize(value) !== value || value.endsWith('/') ||
+    path.posix.normalize(value) !== value ||
+    value.endsWith('/') ||
     value.split('/').some((segment) => Buffer.byteLength(segment, 'utf8') > 255)
   ) {
-    throw new TypeError('Codex paths must be bounded, canonical absolute Linux directories.');
+    throw new TypeError(
+      'Codex paths must be bounded, canonical absolute Linux directories.',
+    );
   }
   return value;
 }
 
 function overlap(left: string, right: string): boolean {
-  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+  return (
+    left === right ||
+    left.startsWith(`${right}/`) ||
+    right.startsWith(`${left}/`)
+  );
 }

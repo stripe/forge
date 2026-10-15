@@ -1,20 +1,22 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
-import {setImmediate as nextEventLoopTurn} from 'node:timers/promises';
-
-import type {
-  InteractionCompletionInvoker,
-  InteractionCompletionRequest,
-} from './completion.js';
+import { describe, it } from 'node:test';
+import { setImmediate as nextEventLoopTurn } from 'node:timers/promises';
 import {
   AvaRolePlayer,
   MAX_AVA_ATTEMPTS,
   MAX_AVA_MESSAGE_CHARACTERS,
-  MAX_AVA_NEEDS,
   MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
+  MAX_AVA_NEEDS,
 } from './ava.js';
+import type {
+  InteractionCompletionInvoker,
+  InteractionCompletionRequest,
+} from './completion.js';
 
-type CompletionStep = string | Error | ((request: InteractionCompletionRequest) => string);
+type CompletionStep =
+  | string
+  | Error
+  | ((request: InteractionCompletionRequest) => string);
 
 function scriptedCompletion(...steps: CompletionStep[]): {
   readonly calls: InteractionCompletionRequest[];
@@ -30,7 +32,8 @@ function scriptedCompletion(...steps: CompletionStep[]): {
       index += 1;
       if (step instanceof Error) throw step;
       if (typeof step === 'function') return completionResponse(step(request));
-      if (step === undefined) throw new Error('No scripted completion remains.');
+      if (step === undefined)
+        throw new Error('No scripted completion remains.');
       return completionResponse(step);
     },
   };
@@ -40,7 +43,7 @@ function completionResponse(content: string) {
   return {
     content,
     stopReason: 'end_turn' as const,
-    usage: {inputTokens: 0, outputTokens: 0, cachedInputTokens: 0},
+    usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
   };
 }
 
@@ -51,14 +54,14 @@ function initialResponse(
   }>,
   message: string,
 ): string {
-  return JSON.stringify({user_needs: needs, message});
+  return JSON.stringify({ user_needs: needs, message });
 }
 
 function continuationResponse(
   remainingNeedIds: string[],
   message: string,
 ): string {
-  return JSON.stringify({remaining_need_ids: remainingNeedIds, message});
+  return JSON.stringify({ remaining_need_ids: remainingNeedIds, message });
 }
 
 const TWO_NEEDS = [
@@ -80,12 +83,12 @@ describe('AvaRolePlayer', () => {
   it('initializes bounded private needs with a strict structured request', async () => {
     const completion = scriptedCompletion(
       initialResponse(
-        TWO_NEEDS.map((need) => ({...need, status: 'satisfied'})),
+        TWO_NEEDS.map((need) => ({ ...need, status: 'satisfied' })),
         'What should the checkout feel like?',
       ),
     );
     const ava = new AvaRolePlayer(
-      {task: 'Add Checkout', context: 'A developer upgrading an application'},
+      { task: 'Add Checkout', context: 'A developer upgrading an application' },
       completion.invoke,
     );
 
@@ -93,12 +96,12 @@ describe('AvaRolePlayer', () => {
       message: 'What should the checkout feel like?',
       stop: false,
       remainingNeeds: [
-        {id: 'need_1', description: TWO_NEEDS[0]!.description},
-        {id: 'need_2', description: TWO_NEEDS[1]!.description},
+        { id: 'need_1', description: TWO_NEEDS[0]!.description },
+        { id: 'need_2', description: TWO_NEEDS[1]!.description },
       ],
       needs: [
-        {id: 'need_1', description: TWO_NEEDS[0]!.description},
-        {id: 'need_2', description: TWO_NEEDS[1]!.description},
+        { id: 'need_1', description: TWO_NEEDS[0]!.description },
+        { id: 'need_2', description: TWO_NEEDS[1]!.description },
       ],
       focusNeedId: 'need_1',
       source: 'generated',
@@ -124,9 +127,11 @@ describe('AvaRolePlayer', () => {
       properties: {
         user_needs: {
           maxItems: number;
-          items: {properties: {description: {maxLength: number; pattern: string}}};
+          items: {
+            properties: { description: { maxLength: number; pattern: string } };
+          };
         };
-        message: {maxLength: number};
+        message: { maxLength: number };
       };
     };
     assert.equal(schema.properties.user_needs.maxItems, MAX_AVA_NEEDS);
@@ -134,19 +139,25 @@ describe('AvaRolePlayer', () => {
       schema.properties.user_needs.items.properties.description.maxLength,
       MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
     );
-    assert.equal(schema.properties.user_needs.items.properties.description.pattern, '\\S');
-    assert.equal(schema.properties.message.maxLength, MAX_AVA_MESSAGE_CHARACTERS);
+    assert.equal(
+      schema.properties.user_needs.items.properties.description.pattern,
+      '\\S',
+    );
+    assert.equal(
+      schema.properties.message.maxLength,
+      MAX_AVA_MESSAGE_CHARACTERS,
+    );
   });
 
   it('uses a configured opening verbatim, then initializes from agent history', async () => {
     const completion = scriptedCompletion(
       initialResponse(
-        [{description: 'Finish the requested work', status: 'satisfied'}],
+        [{ description: 'Finish the requested work', status: 'satisfied' }],
         'This closing prose is discarded.',
       ),
     );
     const ava = new AvaRolePlayer(
-      {task: 'Do the work', initialPrompt: 'Please inspect the repository.'},
+      { task: 'Do the work', initialPrompt: 'Please inspect the repository.' },
       completion.invoke,
     );
 
@@ -165,8 +176,8 @@ describe('AvaRolePlayer', () => {
     assert.equal(terminal.message, '');
     assert.deepEqual(terminal.remainingNeeds, []);
     assert.deepEqual(completion.calls[0]!.messages, [
-      {role: 'assistant', content: 'Please inspect the repository.'},
-      {role: 'user', content: 'The repository is ready.'},
+      { role: 'assistant', content: 'Please inspect the repository.' },
+      { role: 'user', content: 'The repository is ready.' },
     ]);
   });
 
@@ -179,23 +190,20 @@ describe('AvaRolePlayer', () => {
       continuationResponse(['need_2'], 'How did you verify the result?'),
       continuationResponse([], 'Thanks, that is everything.'),
     );
-    const ava = new AvaRolePlayer({task: 'Add Checkout'}, completion.invoke);
+    const ava = new AvaRolePlayer({ task: 'Add Checkout' }, completion.invoke);
 
     const opening = await ava.nextTurn();
     assert.equal(opening.message, 'What should happen next?');
     const followUp = await ava.nextTurn('I implemented hosted Checkout.');
     assert.equal(followUp.focusNeedId, 'need_2');
     assert.deepEqual(followUp.remainingNeeds, [
-      {id: 'need_2', description: TWO_NEEDS[1]!.description},
+      { id: 'need_2', description: TWO_NEEDS[1]!.description },
     ]);
     assert.equal(completion.calls[1]!.maxTokens, 400);
-    assert.equal(
-      completion.calls[1]!.responseSchema.name,
-      'ava_turn',
-    );
+    assert.equal(completion.calls[1]!.responseSchema.name, 'ava_turn');
     assert.deepEqual(completion.calls[1]!.messages, [
-      {role: 'assistant', content: 'What should happen next?'},
-      {role: 'user', content: 'I implemented hosted Checkout.'},
+      { role: 'assistant', content: 'What should happen next?' },
+      { role: 'user', content: 'I implemented hosted Checkout.' },
     ]);
     assert.doesNotMatch(
       JSON.stringify(completion.calls[1]!.messages),
@@ -219,7 +227,7 @@ describe('AvaRolePlayer', () => {
       continuationResponse(['need_2'], 'Could you verify the result?'),
     );
     const ava = new AvaRolePlayer(
-      {task: 'Add Checkout'},
+      { task: 'Add Checkout' },
       completion.invoke,
       noRetryWait,
     );
@@ -228,24 +236,29 @@ describe('AvaRolePlayer', () => {
     const followUp = await ava.nextTurn('Implemented checkout.');
     assert.equal(followUp.focusNeedId, 'need_2');
     assert.deepEqual(followUp.remainingNeeds, [
-      {id: 'need_2', description: TWO_NEEDS[1]!.description},
+      { id: 'need_2', description: TWO_NEEDS[1]!.description },
     ]);
     const retried = await ava.nextTurn('I have not verified it yet.');
     assert.equal(retried.message, 'Could you verify the result?');
     assert.deepEqual(retried.remainingNeeds, followUp.remainingNeeds);
     assert.equal(completion.calls.length, 7);
-    assert.deepEqual(completion.calls[2]!.messages, completion.calls[3]!.messages);
+    assert.deepEqual(
+      completion.calls[2]!.messages,
+      completion.calls[3]!.messages,
+    );
     const retryRequest = completion.calls[4]!;
     assert.deepEqual(retryRequest.messages, [
-      {role: 'assistant', content: 'How should checkout work?'},
-      {role: 'user', content: 'Implemented checkout.'},
-      {role: 'assistant', content: 'How did you verify the result?'},
-      {role: 'user', content: 'I have not verified it yet.'},
+      { role: 'assistant', content: 'How should checkout work?' },
+      { role: 'user', content: 'Implemented checkout.' },
+      { role: 'assistant', content: 'How did you verify the result?' },
+      { role: 'user', content: 'I have not verified it yet.' },
     ]);
     const schema = retryRequest.responseSchema.schema as {
-      properties: {remaining_need_ids: {items: {enum: string[]}}};
+      properties: { remaining_need_ids: { items: { enum: string[] } } };
     };
-    assert.deepEqual(schema.properties.remaining_need_ids.items.enum, ['need_2']);
+    assert.deepEqual(schema.properties.remaining_need_ids.items.enum, [
+      'need_2',
+    ]);
     for (const request of completion.calls.slice(5)) {
       assert.deepEqual(request.messages, retryRequest.messages);
       assert.deepEqual(request.responseSchema, retryRequest.responseSchema);
@@ -253,14 +266,14 @@ describe('AvaRolePlayer', () => {
   });
 
   it('uses the fixed one- and five-second retry waits', async (testContext) => {
-    testContext.mock.timers.enable({apis: ['setTimeout']});
+    testContext.mock.timers.enable({ apis: ['setTimeout'] });
     const completion = scriptedCompletion(
       new Error('temporary request failure'),
       '{invalid json',
       initialResponse(TWO_NEEDS, 'How should checkout work?'),
     );
     const pending = new AvaRolePlayer(
-      {task: 'Add Checkout'},
+      { task: 'Add Checkout' },
       completion.invoke,
     ).nextTurn();
     await nextEventLoopTurn();
@@ -283,9 +296,11 @@ describe('AvaRolePlayer', () => {
   it('cancels the production retry wait without another completion attempt', async () => {
     const controller = new AbortController();
     const reason = new DOMException('cancelled during backoff', 'AbortError');
-    const completion = scriptedCompletion(new Error('temporary request failure'));
+    const completion = scriptedCompletion(
+      new Error('temporary request failure'),
+    );
     const pending = new AvaRolePlayer(
-      {task: 'Add Checkout', signal: controller.signal},
+      { task: 'Add Checkout', signal: controller.signal },
       completion.invoke,
     ).nextTurn();
     await nextEventLoopTurn();
@@ -303,8 +318,8 @@ describe('AvaRolePlayer', () => {
         'duplicate needs',
         initialResponse(
           [
-            {description: 'Same need', status: 'remaining'},
-            {description: 'same need', status: 'remaining'},
+            { description: 'Same need', status: 'remaining' },
+            { description: 'same need', status: 'remaining' },
           ],
           'Question?',
         ),
@@ -312,7 +327,7 @@ describe('AvaRolePlayer', () => {
       [
         'too many needs',
         initialResponse(
-          Array.from({length: MAX_AVA_NEEDS + 1}, (_, index) => ({
+          Array.from({ length: MAX_AVA_NEEDS + 1 }, (_, index) => ({
             description: `Outcome ${index + 1}`,
             status: 'remaining' as const,
           })),
@@ -333,14 +348,14 @@ describe('AvaRolePlayer', () => {
       ],
       [
         'oversized message',
-        initialResponse(
-          TWO_NEEDS,
-          'x'.repeat(MAX_AVA_MESSAGE_CHARACTERS + 1),
-        ),
+        initialResponse(TWO_NEEDS, 'x'.repeat(MAX_AVA_MESSAGE_CHARACTERS + 1)),
       ],
       ['list', initialResponse(TWO_NEEDS, '- First\n- Second')],
       ['code', initialResponse(TWO_NEEDS, '```ts\nconst x = 1;\n```')],
-      ['private terminology', initialResponse(TWO_NEEDS, 'My remaining needs are unclear.')],
+      [
+        'private terminology',
+        initialResponse(TWO_NEEDS, 'My remaining needs are unclear.'),
+      ],
       [
         'non-focused need leakage',
         initialResponse(
@@ -354,7 +369,7 @@ describe('AvaRolePlayer', () => {
       await testContext.test(name, async () => {
         const completion = scriptedCompletion(response);
         const turn = await new AvaRolePlayer(
-          {task: 'x'},
+          { task: 'x' },
           completion.invoke,
           noRetryWait,
         ).nextTurn();
@@ -376,7 +391,7 @@ describe('AvaRolePlayer', () => {
       initialResponse(TWO_NEEDS, 'Question?'),
     );
     const recoveredTurn = await new AvaRolePlayer(
-      {task: 'x'},
+      { task: 'x' },
       recovered.invoke,
       noRetryWait,
     ).nextTurn();
@@ -387,7 +402,7 @@ describe('AvaRolePlayer', () => {
       new Error('provider response contains sensitive detail'),
     );
     const failedTurn = await new AvaRolePlayer(
-      {task: 'x'},
+      { task: 'x' },
       failed.invoke,
       noRetryWait,
     ).nextTurn();
@@ -410,12 +425,12 @@ describe('AvaRolePlayer', () => {
       throw controller.signal.reason;
     };
     const ava = new AvaRolePlayer(
-      {task: 'x', signal: controller.signal},
+      { task: 'x', signal: controller.signal },
       completion,
       noRetryWait,
     );
 
-    await assert.rejects(ava.nextTurn(), {name: 'AbortError'});
+    await assert.rejects(ava.nextTurn(), { name: 'AbortError' });
     assert.equal(calls, 1);
   });
 });

@@ -1,16 +1,15 @@
-import {z} from 'zod';
-
-import type {JsonObject} from '../model/types.js';
+import { z } from 'zod';
 import {
   isSafeDatasetRelativePath,
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeWorkspaceRelativePath,
 } from '../model/paths.js';
-import {commandSetupHandler} from './forgeCommand.js';
-import {pluginSetupHandler} from './forgePlugin.js';
-import {writeSetupHandler} from './forgeWrite.js';
-import type {SetupActionDefinition} from './registry.js';
+import type { JsonObject } from '../model/types.js';
+import { commandSetupHandler } from './forgeCommand.js';
+import { pluginSetupHandler } from './forgePlugin.js';
+import { writeSetupHandler } from './forgeWrite.js';
+import type { SetupActionDefinition } from './registry.js';
 
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_COMMAND_ARGUMENTS = 256;
@@ -31,7 +30,7 @@ const WorkspacePathSchema = z
 const WorkspaceDirectorySchema = z
   .string()
   .refine(
-    (value) => isSafeWorkspaceRelativePath(value, {allowRoot: true}),
+    (value) => isSafeWorkspaceRelativePath(value, { allowRoot: true }),
     'must be a canonical workspace-relative POSIX directory',
   );
 const PositiveIntegerSchema = z.number().finite().int().safe().positive();
@@ -40,8 +39,8 @@ const WriteSetupWithSchema = z
   .object({
     target: WorkspacePathSchema,
     source: z.union([
-      z.object({content: z.string().refine(isBoundedText)}).strict(),
-      z.object({dataset_path: DatasetPathSchema}).strict(),
+      z.object({ content: z.string().refine(isBoundedText) }).strict(),
+      z.object({ dataset_path: DatasetPathSchema }).strict(),
     ]),
   })
   .strict();
@@ -63,7 +62,10 @@ const GitHubRepositorySchema = z
   .refine(isSafeGitHubRepository, 'must be a GitHub owner/repository');
 const PluginIdSchema = z
   .string()
-  .refine(isQualifiedPluginId, 'must be plugin@marketplace using safe identifiers');
+  .refine(
+    isQualifiedPluginId,
+    'must be plugin@marketplace using safe identifiers',
+  );
 
 const PluginDistributionSchema = z
   .object({
@@ -74,8 +76,9 @@ const PluginDistributionSchema = z
 
 const PluginSetupWithSchema = z
   .object({
-    agents: z.record(z.string(), PluginDistributionSchema).superRefine(
-      (agents, context) => {
+    agents: z
+      .record(z.string(), PluginDistributionSchema)
+      .superRefine((agents, context) => {
         const names = Object.keys(agents);
         if (names.length === 0 || names.length > MAX_PLUGIN_DISTRIBUTIONS) {
           context.addIssue({
@@ -92,8 +95,7 @@ const PluginSetupWithSchema = z
             });
           }
         }
-      },
-    ),
+      }),
   })
   .strict();
 
@@ -123,8 +125,7 @@ export const builtInSetupActions: readonly SetupActionDefinition[] =
 
 function isBoundedText(value: string): boolean {
   return (
-    Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES &&
-    !value.includes('\0')
+    Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES && !value.includes('\0')
   );
 }
 

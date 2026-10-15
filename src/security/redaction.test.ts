@@ -1,30 +1,32 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
-  REDACTED_SECRET,
-  SecretLeakError,
   assertNoSecrets,
   assertNoSecretsInJsonValue,
+  REDACTED_SECRET,
   redactSecrets,
+  SecretLeakError,
 } from './redaction.js';
 
 describe('credential redaction', () => {
   it('redacts nested values and keys without mutating the input', () => {
     const input = Object.freeze({
       message: 'token=sk-secret',
-      nested: Object.freeze({'sk-secret': Object.freeze(['sk-secret', null, true, false, 7])}),
+      nested: Object.freeze({
+        'sk-secret': Object.freeze(['sk-secret', null, true, false, 7]),
+      }),
     });
     const result = redactSecrets(input, ['sk-secret']);
 
     assert.deepEqual(result.value, {
       message: `token=${REDACTED_SECRET}`,
-      nested: {[REDACTED_SECRET]: [REDACTED_SECRET, null, true, false, 7]},
+      nested: { [REDACTED_SECRET]: [REDACTED_SECRET, null, true, false, 7] },
     });
     assert.equal(result.replacements, 3);
     assert.deepEqual(input, {
       message: 'token=sk-secret',
-      nested: {'sk-secret': ['sk-secret', null, true, false, 7]},
+      nested: { 'sk-secret': ['sk-secret', null, true, false, 7] },
     });
     assert.notEqual(result.value, input);
     assert.notEqual(result.value.nested, input.nested);
@@ -35,7 +37,10 @@ describe('credential redaction', () => {
     const long = `${short}-extended`;
     const secrets = Object.freeze(['', short, long, short]);
 
-    const result = redactSecrets(`${long}|${short}${short}|syntheticZZ$token|safe`, secrets);
+    const result = redactSecrets(
+      `${long}|${short}${short}|syntheticZZ$token|safe`,
+      secrets,
+    );
 
     assert.deepEqual(result, {
       value: `${REDACTED_SECRET}|${REDACTED_SECRET}${REDACTED_SECRET}|syntheticZZ$token|safe`,
@@ -46,12 +51,16 @@ describe('credential redaction', () => {
 
   it('fails closed when redaction would overwrite another object key', () => {
     for (const input of [
-      {'synthetic-token-one': 'first', 'synthetic-token-two': 'second'},
-      {[REDACTED_SECRET]: 'first', 'synthetic-token-one': 'second'},
+      { 'synthetic-token-one': 'first', 'synthetic-token-two': 'second' },
+      { [REDACTED_SECRET]: 'first', 'synthetic-token-one': 'second' },
     ]) {
       assert.throws(
-        () => redactSecrets(input, ['synthetic-token-one', 'synthetic-token-two']),
-        {name: 'TypeError', message: 'Secret redaction produced duplicate object keys.'},
+        () =>
+          redactSecrets(input, ['synthetic-token-one', 'synthetic-token-two']),
+        {
+          name: 'TypeError',
+          message: 'Secret redaction produced duplicate object keys.',
+        },
       );
       assert.equal(Object.keys(input).length, 2);
       assert.deepEqual(Object.values(input), ['first', 'second']);
@@ -59,15 +68,20 @@ describe('credential redaction', () => {
   });
 
   it('redacts shared children independently while rejecting object and array cycles', () => {
-    const shared = Object.freeze({token: 'synthetic-shared-token'});
-    const result = redactSecrets({left: shared, right: shared}, ['synthetic-shared-token']);
+    const shared = Object.freeze({ token: 'synthetic-shared-token' });
+    const result = redactSecrets({ left: shared, right: shared }, [
+      'synthetic-shared-token',
+    ]);
 
     assert.deepEqual(result, {
-      value: {left: {token: REDACTED_SECRET}, right: {token: REDACTED_SECRET}},
+      value: {
+        left: { token: REDACTED_SECRET },
+        right: { token: REDACTED_SECRET },
+      },
       replacements: 2,
     });
     assert.notEqual(result.value.left, result.value.right);
-    assert.deepEqual(shared, {token: 'synthetic-shared-token'});
+    assert.deepEqual(shared, { token: 'synthetic-shared-token' });
 
     const objectCycle: Record<string, unknown> = {};
     objectCycle.self = objectCycle;
@@ -82,7 +96,7 @@ describe('credential redaction', () => {
   });
 
   it('rejects unsupported nested values instead of silently omitting them', () => {
-    assert.throws(() => redactSecrets({nested: [undefined]}, []), {
+    assert.throws(() => redactSecrets({ nested: [undefined] }, []), {
       name: 'TypeError',
       message: 'Secret redaction accepts only JSON-compatible values.',
     });
@@ -94,24 +108,27 @@ describe('credential redaction', () => {
 
     assert.equal(Object.hasOwn(result.value as object, '__proto__'), true);
     assert.deepEqual(result.value, {
-      ['__proto__']: {token: REDACTED_SECRET},
+      ['__proto__']: { token: REDACTED_SECRET },
     });
-    assert.equal(({} as {token?: string}).token, undefined);
+    assert.equal(({} as { token?: string }).token, undefined);
   });
 
   it('rejects text and UTF-8 bytes without exposing the credential in the error', () => {
     const secret = 'synthetic-café-🔒';
     const body = `before ${secret} after`;
     for (const input of [body, Uint8Array.from(Buffer.from(body))]) {
-      assert.throws(() => assertNoSecrets(input, ['', secret, secret], 'result.json'), (error) => {
-        assert.ok(error instanceof SecretLeakError);
-        assert.equal(error.code, 'secret_leak_detected');
-        assert.equal(error.artifact, 'result.json');
-        assert.equal(error.name, 'SecretLeakError');
-        assert.ok(error.message.includes('result.json'));
-        assert.equal(error.message.includes(secret), false);
-        return true;
-      });
+      assert.throws(
+        () => assertNoSecrets(input, ['', secret, secret], 'result.json'),
+        (error) => {
+          assert.ok(error instanceof SecretLeakError);
+          assert.equal(error.code, 'secret_leak_detected');
+          assert.equal(error.artifact, 'result.json');
+          assert.equal(error.name, 'SecretLeakError');
+          assert.ok(error.message.includes('result.json'));
+          assert.equal(error.message.includes(secret), false);
+          return true;
+        },
+      );
     }
   });
 
@@ -122,19 +139,26 @@ describe('credential redaction', () => {
     const safeView = bytes.subarray(secret.length + 1, secret.length + 5);
 
     assertNoSecrets(safeView, ['', secret], 'safe.txt');
-    assertNoSecretsInJsonValue({safe: [null, false, 0, 'ordinary text']}, ['', secret], 'safe.json');
+    assertNoSecretsInJsonValue(
+      { safe: [null, false, 0, 'ordinary text'] },
+      ['', secret],
+      'safe.json',
+    );
     assert.deepEqual(bytes, before);
-    assert.deepEqual(redactSecrets({safe: 'ordinary text'}, ['', secret]), {
-      value: {safe: 'ordinary text'},
+    assert.deepEqual(redactSecrets({ safe: 'ordinary text' }, ['', secret]), {
+      value: { safe: 'ordinary text' },
       replacements: 0,
     });
   });
 
   it('rejects a credential in logical JSON even when serialization escapes it', () => {
     const secret = 'quoted"credential\\suffix';
-    const value = {resolution: {message: `before ${secret} after`}};
+    const value = { resolution: { message: `before ${secret} after` } };
 
-    assert.ok(!(JSON.stringify(value)).includes(secret));
-    assert.throws(() => assertNoSecretsInJsonValue(value, [secret], 'setup.json'), SecretLeakError);
+    assert.ok(!JSON.stringify(value).includes(secret));
+    assert.throws(
+      () => assertNoSecretsInJsonValue(value, [secret], 'setup.json'),
+      SecretLeakError,
+    );
   });
 });

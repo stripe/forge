@@ -37,8 +37,14 @@ relevant tests while iterating:
 pnpm test -- path/to/file.test.ts
 ```
 
-`pnpm check` runs type checking, tests, build, dataset validation, documentation
-validation, and package checks. PRs targeting `main`, including drafts, run the
+`pnpm lint` checks formatting, import organization, and lint rules with Biome
+without changing files. Use `pnpm lint:fix` to apply safe fixes, or `pnpm format`
+to format only. The [Biome configuration](https://github.com/stripe/forge/blob/main/biome.jsonc)
+excludes dataset releases, test fixtures, and packaged Docker assets so their
+integrity-pinned bytes are not rewritten.
+
+`pnpm check` runs Biome, type checking, tests, build, dataset validation,
+documentation validation, and package checks. PRs targeting `main`, including drafts, run the
 same checks through the [PR workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
 The publishing workflow checks and publishes versioned development snapshots
 after pushes to `main`; stable release commits are skipped.

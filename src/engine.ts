@@ -1,4 +1,7 @@
-import type {ExecuteEvalInput, PreflightEvalInput} from './execution/execute.js';
+import type {
+  ExecuteEvalInput,
+  PreflightEvalInput,
+} from './execution/execute.js';
 import {
   executeEvalWithSetupActions,
   preflightEvalWithSetupActions,
@@ -26,9 +29,9 @@ import type {
   SetupActionBundleReferenceV1,
   SetupStepV1,
 } from './model/types.js';
-import {resolveRunPlanWithSetupActions} from './planning/planner.js';
-import type {CompletedRun, CompletedRunV1} from './results/types.js';
-import {verifyCompletedRunWithPlanParser} from './results/localStore.js';
+import { resolveRunPlanWithSetupActions } from './planning/planner.js';
+import { verifyCompletedRunWithPlanParser } from './results/localStore.js';
+import type { CompletedRun, CompletedRunV1 } from './results/types.js';
 import {
   createSetupActionRegistry,
   type SetupActionBundle,
@@ -50,7 +53,9 @@ export interface ForgeEngine {
   parseResolvedRunPlan(value: unknown): ResolvedRunPlanV1;
   parseSetupStep(value: unknown): SetupStepV1;
   loadDataset(datasetRoot: string): Promise<LoadedDatasetV1>;
-  loadExperimentConfig(experimentPath: string): Promise<LoadedExperimentConfigV1>;
+  loadExperimentConfig(
+    experimentPath: string,
+  ): Promise<LoadedExperimentConfigV1>;
   resolveRunPlan(input: {
     readonly dataset: LoadedDatasetV1;
     readonly experiment: LoadedExperimentConfigV1;
@@ -112,9 +117,8 @@ export function createForgeEngine(
       return executeEvalWithSetupActions(request, setupActions);
     },
     verifyCompletedRun(location) {
-      return verifyCompletedRunWithPlanParser(
-        location,
-        (value) => parseResolvedRunPlanWithSetupActions(value, setupActions),
+      return verifyCompletedRunWithPlanParser(location, (value) =>
+        parseResolvedRunPlanWithSetupActions(value, setupActions),
       );
     },
   };

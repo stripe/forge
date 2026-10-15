@@ -1,8 +1,8 @@
+import type { CommandRunner } from '../contracts/command.js';
 import type {
   RuntimeAdapter,
   RuntimePreparation,
 } from '../contracts/runtime.js';
-import type {CommandRunner} from '../contracts/command.js';
 
 export interface RuntimeAdapterConformanceOptions {
   readonly probePath?: string;
@@ -21,7 +21,7 @@ export interface RuntimeAdapterConformanceOptions {
     readonly timeoutMs?: number;
     readonly maxOutputBytes?: number;
   } & (
-    | {readonly scope: 'uncredentialed' | 'agent'}
+    | { readonly scope: 'uncredentialed' | 'agent' }
     | {
         readonly scope: 'setup';
         readonly credentialEnvironmentNames: readonly string[];
@@ -85,7 +85,7 @@ export async function assertRuntimeAdapterConforms(
     }
     assertLogicalPaths(prepared.paths);
     assertRequiredStateDirectories(
-      input.requirements.stateDirectories.map(({id}) => id),
+      input.requirements.stateDirectories.map(({ id }) => id),
       prepared.stateDirectories,
       'prepared runtime',
     );
@@ -100,7 +100,9 @@ export async function assertRuntimeAdapterConforms(
     const setupCommands = prepared.commands.setup([]);
     const probedCommands: Array<{
       commands: CommandRunner;
-      probe: NonNullable<RuntimeAdapterConformanceOptions['commandProbes']>[number];
+      probe: NonNullable<
+        RuntimeAdapterConformanceOptions['commandProbes']
+      >[number];
     }> = [];
     for (const requirement of input.requirements.stateDirectories) {
       await prepared.stateDirectories
@@ -109,26 +111,24 @@ export async function assertRuntimeAdapterConforms(
     }
     for (const probe of options.commandProbes ?? []) {
       if (probe.scope === 'agent') continue;
-      const commands = probe.scope === 'setup'
-        ? prepared.commands.setup(probe.credentialEnvironmentNames)
-        : prepared.commands.uncredentialed;
+      const commands =
+        probe.scope === 'setup'
+          ? prepared.commands.setup(probe.credentialEnvironmentNames)
+          : prepared.commands.uncredentialed;
       await assertCommandProbe(commands, probe, input.signal);
-      probedCommands.push({commands, probe});
+      probedCommands.push({ commands, probe });
     }
     await prepared.finalizeSetup();
 
-    for (const commands of [
-      prepared.commands.uncredentialed,
-      setupCommands,
-    ]) {
+    for (const commands of [prepared.commands.uncredentialed, setupCommands]) {
       await expectRejection(
         () => commands.run(['true']),
         'Setup command runner still accepted work after finalization.',
       );
     }
-    for (const {commands, probe} of probedCommands) {
+    for (const { commands, probe } of probedCommands) {
       await expectRejection(
-        () => commands.run(probe.argv, {signal: input.signal}),
+        () => commands.run(probe.argv, { signal: input.signal }),
         `Probed ${probe.scope} command runner still accepted work after finalization.`,
       );
     }
@@ -140,13 +140,16 @@ export async function assertRuntimeAdapterConforms(
           `Setup-sealed state ${requirement.id} remained mutable after finalization.`,
         );
       } else {
-        await state.writeFile('.forge-conformance/interaction-state.bin', probeBody);
+        await state.writeFile(
+          '.forge-conformance/interaction-state.bin',
+          probeBody,
+        );
       }
     }
     for (const probe of options.commandProbes ?? []) {
       if (probe.scope !== 'agent') continue;
       await assertCommandProbe(prepared.commands.agent, probe, input.signal);
-      probedCommands.push({commands: prepared.commands.agent, probe});
+      probedCommands.push({ commands: prepared.commands.agent, probe });
     }
     if (options.cancellationProbe) {
       await assertCommandCancellation(
@@ -168,7 +171,7 @@ export async function assertRuntimeAdapterConforms(
       fail('Runtime logical paths changed during quiescence.');
     }
     assertRequiredStateDirectories(
-      input.requirements.stateDirectories.map(({id}) => id),
+      input.requirements.stateDirectories.map(({ id }) => id),
       sealed.stateDirectories,
       'sealed runtime',
     );
@@ -188,10 +191,11 @@ export async function assertRuntimeAdapterConforms(
         () => state.writeFile('.forge-conformance/late-state.bin', probeBody),
         `State directory ${id} remained mutable after quiescence.`,
       );
-      const stateRead = await sealed.stateDirectories.get(id)!.readFile(
-        '.forge-conformance/setup-state.bin',
-        {maxBytes: probeBody.byteLength},
-      );
+      const stateRead = await sealed.stateDirectories
+        .get(id)!
+        .readFile('.forge-conformance/setup-state.bin', {
+          maxBytes: probeBody.byteLength,
+        });
       if (!bytesEqual(stateRead, probeBody)) {
         fail(`Sealed state directory ${id} did not preserve setup bytes.`);
       }
@@ -206,9 +210,9 @@ export async function assertRuntimeAdapterConforms(
         `${scope} command runner still accepted work after quiescence.`,
       );
     }
-    for (const {commands, probe} of probedCommands) {
+    for (const { commands, probe } of probedCommands) {
       await expectRejection(
-        () => commands.run(probe.argv, {signal: input.signal}),
+        () => commands.run(probe.argv, { signal: input.signal }),
         `Probed ${probe.scope} command runner still accepted work after quiescence.`,
       );
     }
@@ -226,7 +230,7 @@ export async function assertRuntimeAdapterConforms(
     if (error instanceof TestingConformanceError) throw error;
     throw new TestingConformanceError(
       'Runtime adapter conformance probe failed.',
-      {cause: error},
+      { cause: error },
     );
   }
 }
@@ -243,11 +247,15 @@ async function assertCommandProbe(
   });
   if (
     result.exitCode !== (probe.expectedExitCode ?? 0) ||
-    (probe.expectedStdout !== undefined && result.stdout !== probe.expectedStdout) ||
-    (probe.expectedStderr !== undefined && result.stderr !== probe.expectedStderr)
+    (probe.expectedStdout !== undefined &&
+      result.stdout !== probe.expectedStdout) ||
+    (probe.expectedStderr !== undefined &&
+      result.stderr !== probe.expectedStderr)
   ) {
     // Probe output may deliberately contain synthetic credential values.
-    fail(`Runtime command probe did not match its expected ${probe.scope} result.`);
+    fail(
+      `Runtime command probe did not match its expected ${probe.scope} result.`,
+    );
   }
 }
 
@@ -268,28 +276,32 @@ async function assertCommandCancellation(
   let ready = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const running = commands.run(probe.argv, {
-      signal: AbortSignal.any([signal, controller.signal]),
-      // The observation deadline must precede the requested command timeout,
-      // so a command which ignores cancellation cannot pass by timing out.
-      timeoutMs: Math.min(Number.MAX_SAFE_INTEGER, deadlineMs * 2),
-      maxOutputBytes: probe.maxOutputBytes ?? 64 * 1024,
-      onStdoutLine(line) {
-        if (line === probe.readyLine && !ready) {
-          ready = true;
-          controller.abort();
-        }
-      },
-    }).then(
-      () => ({kind: 'resolved'} as const),
-      (error: unknown) => ({kind: 'rejected', error} as const),
-    );
+    const running = commands
+      .run(probe.argv, {
+        signal: AbortSignal.any([signal, controller.signal]),
+        // The observation deadline must precede the requested command timeout,
+        // so a command which ignores cancellation cannot pass by timing out.
+        timeoutMs: Math.min(Number.MAX_SAFE_INTEGER, deadlineMs * 2),
+        maxOutputBytes: probe.maxOutputBytes ?? 64 * 1024,
+        onStdoutLine(line) {
+          if (line === probe.readyLine && !ready) {
+            ready = true;
+            controller.abort();
+          }
+        },
+      })
+      .then(
+        () => ({ kind: 'resolved' }) as const,
+        (error: unknown) => ({ kind: 'rejected', error }) as const,
+      );
     const deadline = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         controller.abort();
-        reject(new TestingConformanceError(
-          'Runtime cancellation probe did not settle before its deadline.',
-        ));
+        reject(
+          new TestingConformanceError(
+            'Runtime cancellation probe did not settle before its deadline.',
+          ),
+        );
       }, deadlineMs);
     });
     const outcome = await Promise.race([running, deadline]);
@@ -308,9 +320,10 @@ async function assertCommandCancellation(
 }
 
 function isCancellationError(error: unknown): boolean {
-  return error instanceof Error && (
-    error.name === 'AbortError' ||
-    ('code' in error && error.code === 'command_aborted')
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' ||
+      ('code' in error && error.code === 'command_aborted'))
   );
 }
 

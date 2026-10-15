@@ -18,9 +18,9 @@ import {
   type CommandRunner,
 } from '../contracts/command.js';
 import type {
-  CredentialScope,
   CredentialReference,
   CredentialResolver,
+  CredentialScope,
   ResolvedEnvironment,
 } from '../contracts/credentials.js';
 import type {
@@ -29,7 +29,7 @@ import type {
   RuntimePreparation,
   SealedRuntime,
 } from '../contracts/runtime.js';
-import type {TestFileContents} from './memoryWorkspace.js';
+import type { TestFileContents } from './memoryWorkspace.js';
 import {
   createMemoryWorkspace,
   type MemoryWorkspaceFixture,
@@ -137,7 +137,7 @@ export function createMemoryArtifactStore(): MemoryArtifactStoreFixture {
     },
   };
 
-  return Object.freeze({store, runs, events});
+  return Object.freeze({ store, runs, events });
 }
 
 export interface ScriptedAgentOptions {
@@ -162,13 +162,15 @@ export function createScriptedAgentAdapter(
 ): ScriptedAgentFixture {
   const id = options.id ?? 'test-agent';
   const version = options.version ?? '1';
-  const turns = (options.turns ?? [
-    {
-      text: 'Completed the requested task.',
-      sessionId: 'test-session',
-      toolCalls: [],
-    },
-  ]).map(copyAgentTurn);
+  const turns = (
+    options.turns ?? [
+      {
+        text: 'Completed the requested task.',
+        sessionId: 'test-session',
+        toolCalls: [],
+      },
+    ]
+  ).map(copyAgentTurn);
   const requirements = options.requirements ?? {
     executables: [],
     environment: {},
@@ -195,7 +197,7 @@ export function createScriptedAgentAdapter(
           `Scripted agent ${id} cannot serve adapter ${selection.adapter}.`,
         );
       }
-      return {name: id, version};
+      return { name: id, version };
     },
     async prepare(): Promise<void> {
       events.push('prepare');
@@ -234,7 +236,7 @@ export function createScriptedAgentAdapter(
     },
   };
 
-  return Object.freeze({adapter: Object.freeze(adapter), messages, events});
+  return Object.freeze({ adapter: Object.freeze(adapter), messages, events });
 }
 
 export type TestCommandScope = 'uncredentialed' | 'setup' | 'agent';
@@ -310,8 +312,11 @@ export function createFakeRuntimeAdapter(
       const activeCommands = new Map<Promise<void>, TestCommandScope>();
 
       const drainCommands = async (setupOnly = false): Promise<void> => {
-        await Promise.all([...activeCommands].filter(([, scope]) =>
-          !setupOnly || scope !== 'agent').map(([done]) => done));
+        await Promise.all(
+          [...activeCommands]
+            .filter(([, scope]) => !setupOnly || scope !== 'agent')
+            .map(([done]) => done),
+        );
       };
 
       const commandRunner = (
@@ -340,12 +345,14 @@ export function createFakeRuntimeAdapter(
               scope,
               credentialEnvironmentNames: selectedCredentialEnvironmentNames,
               argv: Object.freeze([...argv]),
-              options: Object.freeze({...commandOptions}),
+              options: Object.freeze({ ...commandOptions }),
             });
             commands.push(command);
             events.push(`command:${scope}`);
             let finish!: () => void;
-            const done = new Promise<void>((resolve) => {finish = resolve;});
+            const done = new Promise<void>((resolve) => {
+              finish = resolve;
+            });
             activeCommands.set(done, scope);
             try {
               const result = await (options.command?.(command) ?? {
@@ -355,7 +362,7 @@ export function createFakeRuntimeAdapter(
                 durationMs: 0,
               });
               emitStdoutLines(result.stdout, commandOptions.onStdoutLine);
-              return {...result};
+              return { ...result };
             } finally {
               activeCommands.delete(done);
               finish();
@@ -382,7 +389,7 @@ export function createFakeRuntimeAdapter(
       const prepared: PreparedRuntime = Object.freeze({
         runtimeId: input.runId,
         workspace: workspace.mutable,
-        paths: Object.freeze({workspace: '/workspace', home: '/home/forge'}),
+        paths: Object.freeze({ workspace: '/workspace', home: '/home/forge' }),
         stateDirectories: new Map(
           [...states].map(([stateId, state]) => [stateId, state.mutable]),
         ),
@@ -427,9 +434,15 @@ export function createFakeRuntimeAdapter(
             sealedRuntime = Object.freeze({
               runtimeId: input.runId,
               workspace: workspace.readonly,
-              paths: Object.freeze({workspace: '/workspace', home: '/home/forge'}),
+              paths: Object.freeze({
+                workspace: '/workspace',
+                home: '/home/forge',
+              }),
               stateDirectories: new Map(
-                [...states].map(([stateId, state]) => [stateId, state.readonly]),
+                [...states].map(([stateId, state]) => [
+                  stateId,
+                  state.readonly,
+                ]),
               ),
               metadata: Object.freeze({
                 adapter: id,
@@ -455,7 +468,7 @@ export function createFakeRuntimeAdapter(
     },
   };
 
-  return Object.freeze({adapter: Object.freeze(adapter), runs});
+  return Object.freeze({ adapter: Object.freeze(adapter), runs });
 }
 
 function validateCredentialProjection(
@@ -469,7 +482,9 @@ function validateCredentialProjection(
   const names = new Set<string>();
   for (const name of input) {
     if (typeof name !== 'string' || names.has(name)) {
-      throw new TypeError('Credential environment names must be unique strings.');
+      throw new TypeError(
+        'Credential environment names must be unique strings.',
+      );
     }
     const binding = Object.hasOwn(environment.credentials, name)
       ? environment.credentials[name]
@@ -504,8 +519,8 @@ function copyAgentTurn(turn: AgentTurn): AgentTurn {
   return {
     text: turn.text,
     sessionId: turn.sessionId,
-    toolCalls: turn.toolCalls.map((toolCall) => ({...toolCall})),
-    ...(turn.costUsd === undefined ? {} : {costUsd: turn.costUsd}),
+    toolCalls: turn.toolCalls.map((toolCall) => ({ ...toolCall })),
+    ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
   };
 }
 
@@ -516,7 +531,7 @@ function copyArtifact(artifact: RunArtifact): RunArtifact {
     body: Uint8Array.from(artifact.body),
     ...(artifact.sensitivity === undefined
       ? {}
-      : {sensitivity: artifact.sensitivity}),
+      : { sensitivity: artifact.sensitivity }),
   });
 }
 

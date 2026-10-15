@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
-import {parseAtifTrajectory} from '../../atif/index.js';
-import {createMemoryWorkspace} from '../../testing/memoryWorkspace.js';
-import {loadClaudeEvidence, loadClaudeNativeArtifact} from './evidence.js';
+import { describe, it } from 'node:test';
+import { parseAtifTrajectory } from '../../atif/index.js';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
+import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.js';
 
 function hookSuccessRecord(context: string) {
   return {
@@ -39,14 +39,18 @@ function hookAdditionalContextRecord(context: string) {
       hookName: 'context-renderer',
       toolUseID: 'context-id',
     },
-    rendered: [{content: `<system-reminder>\n${context}\n</system-reminder>`}],
+    rendered: [
+      { content: `<system-reminder>\n${context}\n</system-reminder>` },
+    ],
   };
 }
 
 async function nativeEvidence(raw: string) {
   return loadClaudeEvidence({
-    project: createMemoryWorkspace({'session-1.jsonl': raw}).readonly,
-    sessionId: 'session-1', agentVersion: '2.1.273', model: 'claude-test',
+    project: createMemoryWorkspace({ 'session-1.jsonl': raw }).readonly,
+    sessionId: 'session-1',
+    agentVersion: '2.1.273',
+    model: 'claude-test',
     signal: new AbortController().signal,
   });
 }
@@ -133,31 +137,32 @@ describe('Claude native evidence', () => {
     });
   });
 
-  for (const {description, marker} of [
+  for (const { description, marker } of [
     {
       description: 'compact summary flag',
-      marker: {type: 'summary', isCompactSummary: true},
+      marker: { type: 'summary', isCompactSummary: true },
     },
     {
       description: 'compact boundary subtype',
-      marker: {type: 'system', subtype: 'compact_boundary'},
+      marker: { type: 'system', subtype: 'compact_boundary' },
     },
   ]) {
     it(`classifies the ${description} as incomplete native evidence`, async () => {
-
-      const evidence = await nativeEvidence([
-        JSON.stringify(marker),
-        JSON.stringify({
-          type: 'user',
-          sessionId: 'session-1',
-          message: {content: 'Do the task'},
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          sessionId: 'session-1',
-          message: {content: 'Done'},
-        }),
-      ].join('\n'));
+      const evidence = await nativeEvidence(
+        [
+          JSON.stringify(marker),
+          JSON.stringify({
+            type: 'user',
+            sessionId: 'session-1',
+            message: { content: 'Do the task' },
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            sessionId: 'session-1',
+            message: { content: 'Done' },
+          }),
+        ].join('\n'),
+      );
 
       assert.deepEqual(evidence, {
         kind: 'unavailable',
@@ -170,44 +175,46 @@ describe('Claude native evidence', () => {
   }
 
   it('classifies an unknown root conversation record as incomplete', async () => {
-
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      '',
-      JSON.stringify({type: 'future-conversation-record'}),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        '',
+        JSON.stringify({ type: 'future-conversation-record' }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     assert.deepEqual(evidence, {
       kind: 'unavailable',
       reason: {
         code: 'source_incomplete',
-        message: 'Claude session evidence could not be normalized safely (unrecognized record at line 3).',
+        message:
+          'Claude session evidence could not be normalized safely (unrecognized record at line 3).',
       },
     });
   });
 
-  for (const {description, records} of [
+  for (const { description, records } of [
     {
       description: 'user',
       records: [
         {
           type: 'user',
           sessionId: 'session-1',
-          message: {content: [{type: 'future-user-block'}]},
+          message: { content: [{ type: 'future-user-block' }] },
         },
         {
           type: 'assistant',
           sessionId: 'session-1',
-          message: {content: 'Done'},
+          message: { content: 'Done' },
         },
       ],
     },
@@ -217,19 +224,20 @@ describe('Claude native evidence', () => {
         {
           type: 'user',
           sessionId: 'session-1',
-          message: {content: 'Do the task'},
+          message: { content: 'Do the task' },
         },
         {
           type: 'assistant',
           sessionId: 'session-1',
-          message: {content: [{type: 'future-assistant-block'}]},
+          message: { content: [{ type: 'future-assistant-block' }] },
         },
       ],
     },
   ]) {
     it(`classifies an unknown ${description} content block as incomplete`, async () => {
-
-      const evidence = await nativeEvidence(records.map((record) => JSON.stringify(record)).join('\n'));
+      const evidence = await nativeEvidence(
+        records.map((record) => JSON.stringify(record)).join('\n'),
+      );
 
       assert.deepEqual(evidence, {
         kind: 'unavailable',
@@ -255,31 +263,40 @@ describe('Claude native evidence', () => {
       'summary',
     ];
 
-    const evidence = await nativeEvidence([
-      ...metadataTypes.map((type) => JSON.stringify({type})),
-      JSON.stringify({type: 'atis-latch', atis: '', sessionId: 'session-1'}),
-      JSON.stringify({type: 'system', subtype: 'stop_hook_summary'}),
-      JSON.stringify({type: 'system', subtype: 'turn_duration'}),
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        ...metadataTypes.map((type) => JSON.stringify({ type })),
+        JSON.stringify({
+          type: 'atis-latch',
+          atis: '',
+          sessionId: 'session-1',
+        }),
+        JSON.stringify({ type: 'system', subtype: 'stop_hook_summary' }),
+        JSON.stringify({ type: 'system', subtype: 'turn_duration' }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
     }
     const trajectory = parseAtifTrajectory(evidence.trajectory);
-    assert.deepEqual(trajectory.steps.map(({source, message}) => ({source, message})), [
-      {source: 'user', message: 'Do the task'},
-      {source: 'agent', message: 'Done'},
-    ]);
+    assert.deepEqual(
+      trajectory.steps.map(({ source, message }) => ({ source, message })),
+      [
+        { source: 'user', message: 'Do the task' },
+        { source: 'agent', message: 'Done' },
+      ],
+    );
     assert.deepEqual(evidence.warnings, []);
   });
 
@@ -287,46 +304,51 @@ describe('Claude native evidence', () => {
     const rendered =
       '<system-reminder>\n# Environment\nPrimary working directory: /workspace\n</system-reminder>';
 
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'attachment',
-        sessionId: 'session-1',
-        timestamp: '2026-09-17T16:02:51.921Z',
-        attachment: {
-          type: 'environment',
-          snapshot: {workingDirectory: '/workspace'},
-        },
-        rendered: [{content: rendered}],
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'attachment',
+          sessionId: 'session-1',
+          timestamp: '2026-09-17T16:02:51.921Z',
+          attachment: {
+            type: 'environment',
+            snapshot: { workingDirectory: '/workspace' },
+          },
+          rendered: [{ content: rendered }],
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
     }
     const trajectory = parseAtifTrajectory(evidence.trajectory);
-    assert.deepEqual(trajectory.steps.map(({step_id, source, message}) => ({
-      step_id,
-      source,
-      message,
-    })), [
-      {step_id: 1, source: 'user', message: 'Do the task'},
-      {
-        step_id: 2,
-        source: 'system',
-        message: rendered,
-      },
-      {step_id: 3, source: 'agent', message: 'Done'},
-    ]);
+    assert.deepEqual(
+      trajectory.steps.map(({ step_id, source, message }) => ({
+        step_id,
+        source,
+        message,
+      })),
+      [
+        { step_id: 1, source: 'user', message: 'Do the task' },
+        {
+          step_id: 2,
+          source: 'system',
+          message: rendered,
+        },
+        { step_id: 3, source: 'agent', message: 'Done' },
+      ],
+    );
     {
       const actual = trajectory.steps[1];
       assert.ok(actual);
@@ -340,28 +362,48 @@ describe('Claude native evidence', () => {
   it('accepts a hook success only when its context is in the next rendered attachment', async () => {
     const context = 'Use the installed plugin for this task.';
 
-    const evidence = await nativeEvidence([
-      hookSuccessRecord(context),
-      hookAdditionalContextRecord(context),
-      {type: 'user', sessionId: 'session-1', message: {content: 'Do the task'}},
-      {type: 'assistant', sessionId: 'session-1', message: {content: 'Done'}},
-    ].map((record) => JSON.stringify(record)).join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        hookSuccessRecord(context),
+        hookAdditionalContextRecord(context),
+        {
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        },
+        {
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
     }
-    assert.deepEqual(parseAtifTrajectory(evidence.trajectory).steps.map(({source, message}) => ({
-      source,
-      message,
-    })), [
-      {source: 'system', message: `<system-reminder>\n${context}\n</system-reminder>`},
-      {source: 'user', message: 'Do the task'},
-      {source: 'agent', message: 'Done'},
-    ]);
+    assert.deepEqual(
+      parseAtifTrajectory(evidence.trajectory).steps.map(
+        ({ source, message }) => ({
+          source,
+          message,
+        }),
+      ),
+      [
+        {
+          source: 'system',
+          message: `<system-reminder>\n${context}\n</system-reminder>`,
+        },
+        { source: 'user', message: 'Do the task' },
+        { source: 'agent', message: 'Done' },
+      ],
+    );
     assert.deepEqual(evidence.warnings, []);
   });
 
-  for (const {description, hookRecords} of [
+  for (const { description, hookRecords } of [
     {
       description: 'missing context attachment',
       hookRecords: [hookSuccessRecord('plugin context')],
@@ -377,14 +419,14 @@ describe('Claude native evidence', () => {
       description: 'unrendered context attachment',
       hookRecords: [
         hookSuccessRecord('plugin context'),
-        {...hookAdditionalContextRecord('plugin context'), rendered: []},
+        { ...hookAdditionalContextRecord('plugin context'), rendered: [] },
       ],
     },
     {
       description: 'intervening metadata record',
       hookRecords: [
         hookSuccessRecord('plugin context'),
-        {type: 'summary'},
+        { type: 'summary' },
         hookAdditionalContextRecord('plugin context'),
       ],
     },
@@ -416,57 +458,70 @@ describe('Claude native evidence', () => {
     },
   ]) {
     it(`reports incomplete native evidence for ${description}`, async () => {
-
-      const evidence = await nativeEvidence([
-        ...hookRecords,
-        {type: 'user', sessionId: 'session-1', message: {content: 'Do the task'}},
-        {type: 'assistant', sessionId: 'session-1', message: {content: 'Done'}},
-      ].map((record) => JSON.stringify(record)).join('\n'));
+      const evidence = await nativeEvidence(
+        [
+          ...hookRecords,
+          {
+            type: 'user',
+            sessionId: 'session-1',
+            message: { content: 'Do the task' },
+          },
+          {
+            type: 'assistant',
+            sessionId: 'session-1',
+            message: { content: 'Done' },
+          },
+        ]
+          .map((record) => JSON.stringify(record))
+          .join('\n'),
+      );
 
       assert.deepEqual(evidence, {
         kind: 'unavailable',
         reason: {
           code: 'source_incomplete',
-          message: 'Claude session evidence could not be normalized safely (attachment/hook_success at line 1).',
+          message:
+            'Claude session evidence could not be normalized safely (attachment/hook_success at line 1).',
         },
       });
     });
   }
 
   it('drops empty session context and retains prompt snapshots as partial native detail', async () => {
-
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'attachment',
-        attachment: {type: 'session_context', context: {}},
-      }),
-      JSON.stringify({
-        type: 'attachment',
-        attachment: {
-          type: 'prompt_snapshot',
-          systemPrompt: ['System prompt'],
-        },
-      }),
-      JSON.stringify({
-        type: 'attachment',
-        attachment: {
-          type: 'prompt_snapshot',
-          systemPrompt: ['System prompt'],
-          cliPrefix: 'CLI prefix',
-          tools: [{name: 'Read'}],
-        },
-      }),
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'attachment',
+          attachment: { type: 'session_context', context: {} },
+        }),
+        JSON.stringify({
+          type: 'attachment',
+          attachment: {
+            type: 'prompt_snapshot',
+            systemPrompt: ['System prompt'],
+          },
+        }),
+        JSON.stringify({
+          type: 'attachment',
+          attachment: {
+            type: 'prompt_snapshot',
+            systemPrompt: ['System prompt'],
+            cliPrefix: 'CLI prefix',
+            tools: [{ name: 'Read' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
@@ -474,35 +529,38 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, [
       {
         code: 'unsupported_native_event',
-        message: 'Claude prompt snapshot detail was retained only in native evidence.',
+        message:
+          'Claude prompt snapshot detail was retained only in native evidence.',
         path: 'line:2',
       },
       {
         code: 'unsupported_native_event',
-        message: 'Claude prompt snapshot detail was retained only in native evidence.',
+        message:
+          'Claude prompt snapshot detail was retained only in native evidence.',
         path: 'line:3',
       },
     ]);
   });
 
   it('marks known Claude attachment context as omitted optional detail', async () => {
-
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'attachment',
-        attachment: {type: 'nested_memory'},
-      }),
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'attachment',
+          attachment: { type: 'nested_memory' },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
@@ -516,14 +574,14 @@ describe('Claude native evidence', () => {
     ]);
   });
 
-  for (const {description, record, diagnosticKind} of [
+  for (const { description, record, diagnosticKind } of [
     {
       description: 'queued command attachment',
       diagnosticKind: 'attachment/queued_command',
       record: {
         type: 'attachment',
-        attachment: {type: 'queued_command'},
-        rendered: [{content: 'Queued user command'}],
+        attachment: { type: 'queued_command' },
+        rendered: [{ content: 'Queued user command' }],
       },
     },
     {
@@ -531,8 +589,8 @@ describe('Claude native evidence', () => {
       diagnosticKind: 'attachment',
       record: {
         type: 'attachment',
-        attachment: {type: 'environment'},
-        rendered: [{content: 42}],
+        attachment: { type: 'environment' },
+        rendered: [{ content: 42 }],
       },
     },
     {
@@ -540,7 +598,7 @@ describe('Claude native evidence', () => {
       diagnosticKind: 'attachment/session_context',
       record: {
         type: 'attachment',
-        attachment: {type: 'session_context', context: {mode: 'future'}},
+        attachment: { type: 'session_context', context: { mode: 'future' } },
       },
     },
     {
@@ -548,7 +606,7 @@ describe('Claude native evidence', () => {
       diagnosticKind: 'attachment/prompt_snapshot',
       record: {
         type: 'attachment',
-        attachment: {type: 'prompt_snapshot', systemPrompt: 'not-an-array'},
+        attachment: { type: 'prompt_snapshot', systemPrompt: 'not-an-array' },
       },
     },
     {
@@ -556,40 +614,45 @@ describe('Claude native evidence', () => {
       diagnosticKind: 'attachment',
       record: {
         type: 'attachment',
-        attachment: {type: 'future_attachment', content: 'unknown content'},
+        attachment: { type: 'future_attachment', content: 'unknown content' },
       },
     },
     {
       description: 'nonempty ATIS latch',
       diagnosticKind: 'atis-latch',
-      record: {type: 'atis-latch', atis: 'future-state', sessionId: 'session-1'},
+      record: {
+        type: 'atis-latch',
+        atis: 'future-state',
+        sessionId: 'session-1',
+      },
     },
     {
       description: 'conversation-bearing system event',
       diagnosticKind: 'system',
-      record: {type: 'system', subtype: 'local_command'},
+      record: { type: 'system', subtype: 'local_command' },
     },
     {
       description: 'unclassified progress event',
       diagnosticKind: 'unrecognized record',
-      record: {type: 'progress'},
+      record: { type: 'progress' },
     },
   ]) {
     it(`classifies a ${description} as incomplete`, async () => {
-
-      const evidence = await nativeEvidence([
-        JSON.stringify(record),
-        JSON.stringify({
-          type: 'user',
-          sessionId: 'session-1',
-          message: {content: 'Do the task'},
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          sessionId: 'session-1',
-          message: {content: 'Done'},
-        }),
-      ].join('\n'));
+      const evidence = await nativeEvidence(
+        [
+          JSON.stringify(record),
+          JSON.stringify({
+            type: 'user',
+            sessionId: 'session-1',
+            message: { content: 'Do the task' },
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            sessionId: 'session-1',
+            message: { content: 'Done' },
+          }),
+        ].join('\n'),
+      );
 
       assert.deepEqual(evidence, {
         kind: 'unavailable',
@@ -602,45 +665,50 @@ describe('Claude native evidence', () => {
   }
 
   it('ignores meta user records before validating their conversation blocks', async () => {
-
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'user',
-        isMeta: true,
-        sessionId: 'session-1',
-        message: {content: [{type: 'future-meta-block'}]},
-      }),
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'user',
+          isMeta: true,
+          sessionId: 'session-1',
+          message: { content: [{ type: 'future-meta-block' }] },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
     }
     const trajectory = parseAtifTrajectory(evidence.trajectory);
-    assert.deepEqual(trajectory.steps.map(({source, message}) => ({source, message})), [
-      {source: 'user', message: 'Do the task'},
-      {source: 'agent', message: 'Done'},
-    ]);
+    assert.deepEqual(
+      trajectory.steps.map(({ source, message }) => ({ source, message })),
+      [
+        { source: 'user', message: 'Do the task' },
+        { source: 'agent', message: 'Done' },
+      ],
+    );
     assert.deepEqual(evidence.warnings, []);
   });
 
   it('classifies sidechain records as incomplete primary-session evidence', async () => {
-
-    const evidence = await nativeEvidence(JSON.stringify({
-      type: 'assistant',
-      isSidechain: true,
-      sessionId: 'session-1',
-      message: {content: 'Subagent response'},
-    }));
+    const evidence = await nativeEvidence(
+      JSON.stringify({
+        type: 'assistant',
+        isSidechain: true,
+        sessionId: 'session-1',
+        message: { content: 'Subagent response' },
+      }),
+    );
 
     assert.deepEqual(evidence, {
       kind: 'unavailable',
@@ -652,68 +720,83 @@ describe('Claude native evidence', () => {
   });
 
   it('preserves multiple tool-result records on their preceding agent step', async () => {
-
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {
-          content: [
-            {type: 'thinking', thinking: 'Use both tools.'},
-            {type: 'tool_use', id: 'call-1', name: 'Read', input: {path: 'a.txt'}},
-            {type: 'tool_use', id: 'call-2', name: 'Write', input: {path: 'b.txt'}},
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {
-          content: [
-            {
-              type: 'tool_use',
-              id: 'unrelated-call',
-              name: 'Edit',
-              input: {path: 'unrelated.txt'},
-            },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'user',
-        isMeta: true,
-        sessionId: 'session-1',
-        message: {
-          content: [
-            {type: 'tool_result', tool_use_id: 'call-1', content: 'read output'},
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'user',
-        sessionId: 'session-1',
-        message: {
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call-2',
-              content: 'write output',
-              is_error: true,
-            },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              { type: 'thinking', thinking: 'Use both tools.' },
+              {
+                type: 'tool_use',
+                id: 'call-1',
+                name: 'Read',
+                input: { path: 'a.txt' },
+              },
+              {
+                type: 'tool_use',
+                id: 'call-2',
+                name: 'Write',
+                input: { path: 'b.txt' },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'unrelated-call',
+                name: 'Edit',
+                input: { path: 'unrelated.txt' },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          isMeta: true,
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-1',
+                content: 'read output',
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-2',
+                content: 'write output',
+                is_error: true,
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
@@ -723,16 +806,24 @@ describe('Claude native evidence', () => {
     assert.ok(toolStep?.source === 'agent');
     assert.equal(toolStep.reasoning_content, 'Use both tools.');
     assert.deepEqual(toolStep.tool_calls, [
-      {tool_call_id: 'call-1', function_name: 'Read', arguments: {path: 'a.txt'}},
-      {tool_call_id: 'call-2', function_name: 'Write', arguments: {path: 'b.txt'}},
+      {
+        tool_call_id: 'call-1',
+        function_name: 'Read',
+        arguments: { path: 'a.txt' },
+      },
+      {
+        tool_call_id: 'call-2',
+        function_name: 'Write',
+        arguments: { path: 'b.txt' },
+      },
     ]);
     assert.equal(trajectory.session_id, 'session-1');
     assert.deepEqual(toolStep?.observation?.results, [
-      {source_call_id: 'call-1', content: 'read output'},
+      { source_call_id: 'call-1', content: 'read output' },
       {
         source_call_id: 'call-2',
         content: 'write output',
-        extra: {is_error: true},
+        extra: { is_error: true },
       },
     ]);
     assert.equal(trajectory.steps[2]?.observation, undefined);
@@ -741,21 +832,22 @@ describe('Claude native evidence', () => {
   });
 
   it('omits impossible native timestamps without discarding the session', async () => {
-
-    const evidence = await nativeEvidence([
-      JSON.stringify({
-        type: 'user',
-        timestamp: '2025-02-30T00:00:00Z',
-        sessionId: 'session-1',
-        message: {content: 'Do the task'},
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        timestamp: '2025-03-01T00:00:00Z',
-        sessionId: 'session-1',
-        message: {content: 'Done'},
-      }),
-    ].join('\n'));
+    const evidence = await nativeEvidence(
+      [
+        JSON.stringify({
+          type: 'user',
+          timestamp: '2025-02-30T00:00:00Z',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          timestamp: '2025-03-01T00:00:00Z',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
@@ -771,5 +863,4 @@ describe('Claude native evidence', () => {
       },
     ]);
   });
-
 });

@@ -1,4 +1,4 @@
-import {spawn} from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 export function runBoundedCommand(executable, argv, executionSignal) {
   return new Promise((resolve, reject) => {
@@ -34,7 +34,7 @@ export function runBoundedCommand(executable, argv, executionSignal) {
           ? executionSignal.reason
           : new Error('The Docker bridge probe was aborted.'),
       );
-    executionSignal.addEventListener('abort', onAbort, {once: true});
+    executionSignal.addEventListener('abort', onAbort, { once: true });
     child.stdout.on('data', (chunk) => capture(stdout, chunk));
     child.stderr.on('data', (chunk) => capture(stderr, chunk));
     child.once('error', (error) => fail(error));

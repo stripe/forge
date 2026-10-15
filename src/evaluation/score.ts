@@ -1,9 +1,9 @@
-import type {JudgingCriterionV1} from '../model/types.js';
+import type { JudgingCriterionV1 } from '../model/types.js';
 
 import type {
   CheckResultV1,
-  EvaluationResultV1,
   CriterionResultV1,
+  EvaluationResultV1,
 } from '../results/index.js';
 
 /** Use a criterion-ratio score and gate a clean pass on invariant checks. */
@@ -11,11 +11,16 @@ export function scoreEvaluation(
   criteria: readonly CriterionResultV1[],
   checks: readonly CheckResultV1[],
 ): EvaluationResultV1 {
-  const included = criteria.filter((criterion) => criterion.include_in_score !== false);
+  const included = criteria.filter(
+    (criterion) => criterion.include_in_score !== false,
+  );
   const criteriaTotal = included.length;
-  const criteriaPassed = included.filter((criterion) => criterion.passed).length;
+  const criteriaPassed = included.filter(
+    (criterion) => criterion.passed,
+  ).length;
   const score = criteriaTotal === 0 ? 0 : criteriaPassed / criteriaTotal;
-  const allChecksPass = checks.length === 0 || checks.every((check) => check.passed);
+  const allChecksPass =
+    checks.length === 0 || checks.every((check) => check.passed);
 
   let status: EvaluationResultV1['status'];
   if (criteriaTotal === 0) {
@@ -33,8 +38,8 @@ export function scoreEvaluation(
     status,
     judging_criteria_passed: criteriaPassed,
     judging_criteria_total: criteriaTotal,
-    judging_criteria: criteria.map((criterion) => ({...criterion})),
-    checks: checks.map((check) => ({...check})),
+    judging_criteria: criteria.map((criterion) => ({ ...criterion })),
+    checks: checks.map((check) => ({ ...check })),
   };
 }
 
@@ -45,7 +50,11 @@ export function criterionResultMatchesDefinition(
 ): boolean {
   const text = typeof definition === 'string' ? definition : definition.value;
   const label = typeof definition === 'string' ? undefined : definition.label;
-  const included = typeof definition === 'string' || definition.include_in_score !== false;
-  return result.criterion === text && result.label === label &&
-    (result.include_in_score !== false) === included;
+  const included =
+    typeof definition === 'string' || definition.include_in_score !== false;
+  return (
+    result.criterion === text &&
+    result.label === label &&
+    (result.include_in_score !== false) === included
+  );
 }

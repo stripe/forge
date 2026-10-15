@@ -1,28 +1,27 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-
+import { type AtifTrajectoryV1_8, parseAtifTrajectory } from '../atif/index.js';
 import type {
   CommittedRun,
   RunArtifact,
   RunArtifactStore,
   RunArtifactTransaction,
 } from '../contracts/artifacts.js';
-import {parseAgentPluginInstallationReceipt} from '../contracts/pluginReceipt.js';
-import {parseAtifTrajectory, type AtifTrajectoryV1_8} from '../atif/index.js';
-import {trajectoryCoversCompletedTurns} from '../evidence/selection.js';
-import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
-import {criterionResultMatchesDefinition} from '../evaluation/score.js';
-import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
-import {sha256Digest} from '../model/hashes.js';
+import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.js';
+import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.js';
+import { criterionResultMatchesDefinition } from '../evaluation/score.js';
+import { trajectoryCoversCompletedTurns } from '../evidence/selection.js';
+import { hasDeterministicWorkspaceChecks } from '../model/checks.js';
+import { sha256Digest } from '../model/hashes.js';
 import {
-  parseResolvedRunPlan,
   type PluginSetupStepV1,
+  parseResolvedRunPlan,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
-import {isSafeDatasetRelativePath} from '../model/paths.js';
-import {serializeResolvedRunPlan} from '../planning/index.js';
-import {serializeCanonicalJson} from '../serialization.js';
-import {assertCompatibleForgeVersion} from '../version.js';
+import { isSafeDatasetRelativePath } from '../model/paths.js';
+import { serializeResolvedRunPlan } from '../planning/index.js';
+import { serializeCanonicalJson } from '../serialization.js';
+import { assertCompatibleForgeVersion } from '../version.js';
 import {
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -31,10 +30,10 @@ import {
   parseWorkspaceEvidence,
 } from './parse.js';
 import {
-  MAX_SETUP_ARTIFACT_BYTES,
   type ArtifactDescriptorV1,
   type CompletedRun,
   type InteractionArtifactV1,
+  MAX_SETUP_ARTIFACT_BYTES,
   type RunResult,
 } from './types.js';
 
@@ -71,18 +70,20 @@ export function createArtifactStore(
       const root = await ensureStoreRoot(requestedRoot);
       const stagingRoot = path.join(root, '.staging');
       const runsRoot = path.join(root, 'runs');
-      await fs.mkdir(stagingRoot, {recursive: true, mode: 0o700});
-      await fs.mkdir(runsRoot, {recursive: true, mode: 0o755});
+      await fs.mkdir(stagingRoot, { recursive: true, mode: 0o700 });
+      await fs.mkdir(runsRoot, { recursive: true, mode: 0o755 });
       const finalRunDir = path.join(runsRoot, runId);
       if (await pathExists(finalRunDir)) throw new RunIdConflictError(runId);
-      const stagingRunDir = await fs.mkdtemp(path.join(stagingRoot, `${runId}-`));
+      const stagingRunDir = await fs.mkdtemp(
+        path.join(stagingRoot, `${runId}-`),
+      );
       const written = new Map<string, ArtifactDescriptorV1>();
       let closed = false;
 
       const rollback = async (): Promise<void> => {
         if (closed) return;
         closed = true;
-        await fs.rm(stagingRunDir, {recursive: true, force: true});
+        await fs.rm(stagingRunDir, { recursive: true, force: true });
       };
 
       return {
@@ -90,13 +91,19 @@ export function createArtifactStore(
           assertOpen(closed);
           assertArtifactPath(artifact.path);
           if (artifact.path === 'result.json') {
-            throw new ArtifactStoreError('result.json is reserved for atomic commit.');
+            throw new ArtifactStoreError(
+              'result.json is reserved for atomic commit.',
+            );
           }
           if (written.has(artifact.path)) {
-            throw new ArtifactStoreError(`Duplicate artifact path: ${artifact.path}`);
+            throw new ArtifactStoreError(
+              `Duplicate artifact path: ${artifact.path}`,
+            );
           }
           if (!(artifact.body instanceof Uint8Array) || !artifact.mediaType) {
-            throw new ArtifactStoreError('Artifacts require bytes and a media type.');
+            throw new ArtifactStoreError(
+              'Artifacts require bytes and a media type.',
+            );
           }
           if (
             artifact.sensitivity !== undefined &&
@@ -113,7 +120,11 @@ export function createArtifactStore(
             recursive: true,
             mode: restricted ? 0o700 : 0o755,
           });
-          const handle = await fs.open(destination, 'wx', restricted ? 0o600 : 0o644);
+          const handle = await fs.open(
+            destination,
+            'wx',
+            restricted ? 0o600 : 0o644,
+          );
           try {
             await handle.writeFile(artifact.body);
             await handle.sync();
@@ -127,19 +138,26 @@ export function createArtifactStore(
             sha256: sha256Digest(artifact.body),
             ...(artifact.sensitivity === undefined
               ? {}
-              : {sensitivity: artifact.sensitivity}),
+              : { sensitivity: artifact.sensitivity }),
           });
         },
-        async commit(value: Readonly<Record<string, unknown>>): Promise<CommittedRun> {
+        async commit(
+          value: Readonly<Record<string, unknown>>,
+        ): Promise<CommittedRun> {
           assertOpen(closed);
           let result: RunResult;
           try {
             result = parseRunResult(value);
             assertResultArtifacts(result, written);
             if (result.run_id !== runId) throw new RunIdConflictError(runId);
-            const resultBody = Buffer.from(serializeCanonicalJson(result), 'utf8');
+            const resultBody = Buffer.from(
+              serializeCanonicalJson(result),
+              'utf8',
+            );
             if (resultBody.byteLength > MAX_RESULT_BYTES) {
-              throw new ArtifactStoreError('result.json exceeds its byte limit.');
+              throw new ArtifactStoreError(
+                'result.json exceeds its byte limit.',
+              );
             }
             const resultPath = path.join(stagingRunDir, 'result.json');
             const handle = await fs.open(resultPath, 'wx', 0o644);
@@ -150,7 +168,8 @@ export function createArtifactStore(
               await handle.close();
             }
             await syncDirectory(stagingRunDir);
-            if (await pathExists(finalRunDir)) throw new RunIdConflictError(runId);
+            if (await pathExists(finalRunDir))
+              throw new RunIdConflictError(runId);
             await fs.rename(stagingRunDir, finalRunDir);
             closed = true;
             await syncDirectory(stagingRoot);
@@ -158,7 +177,7 @@ export function createArtifactStore(
           } catch (error) {
             if (!closed) {
               closed = true;
-              await fs.rm(stagingRunDir, {recursive: true, force: true});
+              await fs.rm(stagingRunDir, { recursive: true, force: true });
             }
             throw error;
           }
@@ -199,19 +218,28 @@ export async function verifyCompletedRunWithPlanParser(
   try {
     unknownResult = JSON.parse(resultBytes.toString('utf8'));
   } catch (error) {
-    throw new ArtifactStoreError('Completed result.json is invalid JSON.', {cause: error});
+    throw new ArtifactStoreError('Completed result.json is invalid JSON.', {
+      cause: error,
+    });
   }
   const result = parseRunResult(unknownResult);
   if (path.basename(runDir) !== result.run_id) {
-    throw new ArtifactStoreError('Completed run directory does not match run_id.');
+    throw new ArtifactStoreError(
+      'Completed run directory does not match run_id.',
+    );
   }
 
   const expectedPaths = new Set(['result.json']);
   const artifactBodies = new Map<string, Buffer>();
-  for (const descriptor of [...result.artifacts, ...result.supplemental_artifacts]) {
+  for (const descriptor of [
+    ...result.artifacts,
+    ...result.supplemental_artifacts,
+  ]) {
     assertArtifactPath(descriptor.path);
     if (expectedPaths.has(descriptor.path)) {
-      throw new ArtifactStoreError(`Duplicate claimed artifact: ${descriptor.path}`);
+      throw new ArtifactStoreError(
+        `Duplicate claimed artifact: ${descriptor.path}`,
+      );
     }
     expectedPaths.add(descriptor.path);
     const body = await readBoundedFile(
@@ -224,7 +252,9 @@ export async function verifyCompletedRunWithPlanParser(
       body.byteLength !== descriptor.size_bytes ||
       sha256Digest(body) !== descriptor.sha256
     ) {
-      throw new ArtifactStoreError(`Artifact does not match its descriptor: ${descriptor.path}`);
+      throw new ArtifactStoreError(
+        `Artifact does not match its descriptor: ${descriptor.path}`,
+      );
     }
     if (VERIFIED_ARTIFACT_PATHS.has(descriptor.path)) {
       artifactBodies.set(descriptor.path, body);
@@ -237,11 +267,7 @@ export async function verifyCompletedRunWithPlanParser(
   ) {
     throw new ArtifactStoreError('Completed run contains an unclaimed file.');
   }
-  const plan = verifyPlanArtifact(
-    result,
-    artifactBodies,
-    parsePlan,
-  );
+  const plan = verifyPlanArtifact(result, artifactBodies, parsePlan);
   verifySetupArtifact(result, plan, artifactBodies);
   const interaction = verifyInteractionArtifact(result, artifactBodies);
   const trajectory = verifyTrajectoryArtifact(
@@ -253,10 +279,11 @@ export async function verifyCompletedRunWithPlanParser(
   const workspaceBody = artifactBodies.get('workspace-evidence.json');
   if (workspaceBody !== undefined) {
     parseJsonArtifact('workspace-evidence.json', workspaceBody, (value) =>
-      parseWorkspaceEvidence(value, {forgeVersion: result.forge.version}));
+      parseWorkspaceEvidence(value, { forgeVersion: result.forge.version }),
+    );
   }
   verifyCanonicalArtifactInventory(result, plan);
-  return {runId: result.run_id, location: runDir, result};
+  return { runId: result.run_id, location: runDir, result };
 }
 
 export class ArtifactStoreError extends Error {
@@ -281,12 +308,16 @@ function assertResultArtifacts(
 ): void {
   const claimed = [...result.artifacts, ...result.supplemental_artifacts];
   if (claimed.length !== written.size) {
-    throw new ArtifactStoreError('Result does not claim every staged artifact.');
+    throw new ArtifactStoreError(
+      'Result does not claim every staged artifact.',
+    );
   }
   const claimedPaths = new Set<string>();
   for (const descriptor of claimed) {
     if (claimedPaths.has(descriptor.path)) {
-      throw new ArtifactStoreError(`Duplicate claimed artifact: ${descriptor.path}`);
+      throw new ArtifactStoreError(
+        `Duplicate claimed artifact: ${descriptor.path}`,
+      );
     }
     claimedPaths.add(descriptor.path);
     const actual = written.get(descriptor.path);
@@ -297,7 +328,9 @@ function assertResultArtifacts(
       actual.sha256 !== descriptor.sha256 ||
       actual.sensitivity !== descriptor.sensitivity
     ) {
-      throw new ArtifactStoreError(`Result descriptor mismatch: ${descriptor.path}`);
+      throw new ArtifactStoreError(
+        `Result descriptor mismatch: ${descriptor.path}`,
+      );
     }
   }
 }
@@ -330,16 +363,20 @@ function verifyPlanArtifact(
     ? result.runtime.adapter === plannedRuntime.adapter
     : result.runtime.adapter === 'forge/docker';
   if (!runtimeMatches || result.runtime.platform !== plannedRuntime.platform) {
-    throw new ArtifactStoreError('plan.json runtime does not match the completed result.');
+    throw new ArtifactStoreError(
+      'plan.json runtime does not match the completed result.',
+    );
   }
   const plannedCriteria = plan.evaluation.judging_criteria;
   const recordedCriteria = result.evaluation.judging_criteria;
   if (
     plannedCriteria.length !== recordedCriteria.length ||
-    recordedCriteria.some((entry, index) =>
-      !criterionResultMatchesDefinition(entry, plannedCriteria[index]!)) ||
+    recordedCriteria.some(
+      (entry, index) =>
+        !criterionResultMatchesDefinition(entry, plannedCriteria[index]!),
+    ) ||
     hasDeterministicWorkspaceChecks(plan.evaluation.checks) !==
-      (result.evaluation.checks.length > 0)
+      result.evaluation.checks.length > 0
   ) {
     throw new ArtifactStoreError(
       'plan.json evaluation configuration does not match the completed result.',
@@ -364,7 +401,7 @@ function verifyCanonicalArtifactInventory(
       ? ['judge-evidence.json']
       : []),
   ];
-  const actualPaths = result.artifacts.map(({path}) => path);
+  const actualPaths = result.artifacts.map(({ path }) => path);
   for (const expectedPath of expectedPaths) {
     if (!actualPaths.includes(expectedPath)) {
       throw new ArtifactStoreError(
@@ -379,12 +416,14 @@ function verifyCanonicalArtifactInventory(
       );
     }
   }
-  if (result.artifacts.some(({media_type}) => media_type !== 'application/json')) {
+  if (
+    result.artifacts.some(({ media_type }) => media_type !== 'application/json')
+  ) {
     throw new ArtifactStoreError(
       'Canonical run artifacts must use the application/json media type.',
     );
   }
-  if (result.artifacts.some(({sensitivity}) => sensitivity !== undefined)) {
+  if (result.artifacts.some(({ sensitivity }) => sensitivity !== undefined)) {
     throw new ArtifactStoreError(
       'Canonical run artifacts cannot contain restricted source bytes.',
     );
@@ -424,10 +463,8 @@ function verifySetupArtifact(
 ): void {
   const artifactPath = 'setup.json';
   const body = requireCoreArtifact(result, artifactBodies, artifactPath);
-  const setup = parseJsonArtifact(
-    artifactPath,
-    body,
-    (value) => parseSetupArtifact(value, {forgeVersion: result.forge.version}),
+  const setup = parseJsonArtifact(artifactPath, body, (value) =>
+    parseSetupArtifact(value, { forgeVersion: result.forge.version }),
   );
   if (body.toString('utf8') !== serializeCanonicalJson(setup)) {
     throw new ArtifactStoreError('Completed setup.json is not canonical.');
@@ -451,13 +488,13 @@ function verifySetupArtifact(
           'setup.json omitted a plugin installation resolution.',
         );
       }
-      let receipt;
+      let receipt: ReturnType<typeof parseAgentPluginInstallationReceipt>;
       try {
         receipt = parseAgentPluginInstallationReceipt(step.resolution);
       } catch (error) {
         throw new ArtifactStoreError(
           'setup.json contains an invalid plugin installation resolution.',
-          {cause: error},
+          { cause: error },
         );
       }
       const planned = plan.setup[index] as PluginSetupStepV1;
@@ -497,10 +534,8 @@ function verifyInteractionArtifact(
   artifactBodies: ReadonlyMap<string, Buffer>,
 ): InteractionArtifactV1 {
   const body = requireCoreArtifact(result, artifactBodies, 'interaction.json');
-  const interaction = parseJsonArtifact(
-    'interaction.json',
-    body,
-    (value) => parseInteractionArtifact(value, {forgeVersion: result.forge.version}),
+  const interaction = parseJsonArtifact('interaction.json', body, (value) =>
+    parseInteractionArtifact(value, { forgeVersion: result.forge.version }),
   );
   if (
     interaction.mode !== result.interaction.mode ||
@@ -597,10 +632,11 @@ function verifyJudgeEvidence(
     );
   }
   const judgeEvidence = parseJsonArtifact(path, body, (value) =>
-    parseJudgeEvidence(value, {forgeVersion: result.forge.version}));
+    parseJudgeEvidence(value, { forgeVersion: result.forge.version }),
+  );
   if (
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
-      createJudgeTranscriptProjection(trajectory).transcriptJson
+    createJudgeTranscriptProjection(trajectory).transcriptJson
   ) {
     throw new ArtifactStoreError(
       'judge-evidence.json transcript steps do not match the projection of trajectory.json.',
@@ -619,7 +655,9 @@ function requireCoreArtifact(
       `Completed result is missing canonical artifact ${artifactPath}.`,
     );
   }
-  if (!result.artifacts.some((descriptor) => descriptor.path === artifactPath)) {
+  if (
+    !result.artifacts.some((descriptor) => descriptor.path === artifactPath)
+  ) {
     throw new ArtifactStoreError(
       `Canonical artifact ${artifactPath} must be claimed in result artifacts.`,
     );
@@ -636,26 +674,27 @@ function parseJsonArtifact<T>(
   try {
     value = JSON.parse(body.toString('utf8'));
   } catch (error) {
-    throw new ArtifactStoreError(
-      `Completed ${artifactPath} is invalid JSON.`,
-      {cause: error},
-    );
+    throw new ArtifactStoreError(`Completed ${artifactPath} is invalid JSON.`, {
+      cause: error,
+    });
   }
   try {
     return parse(value);
   } catch (error) {
     throw new ArtifactStoreError(
       `Completed ${artifactPath} does not match its schema.`,
-      {cause: error},
+      { cause: error },
     );
   }
 }
 
 async function ensureStoreRoot(requestedRoot: string): Promise<string> {
-  await fs.mkdir(requestedRoot, {recursive: true, mode: 0o755});
+  await fs.mkdir(requestedRoot, { recursive: true, mode: 0o755 });
   const stat = await fs.lstat(requestedRoot);
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    throw new ArtifactStoreError('Artifact store root must be a real directory.');
+    throw new ArtifactStoreError(
+      'Artifact store root must be a real directory.',
+    );
   }
   return fs.realpath(requestedRoot);
 }
@@ -663,7 +702,9 @@ async function ensureStoreRoot(requestedRoot: string): Promise<string> {
 async function readBoundedFile(file: string, maximum: number): Promise<Buffer> {
   const stat = await fs.lstat(file);
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size > maximum) {
-    throw new ArtifactStoreError('Artifact is unsafe or exceeds its declared size.');
+    throw new ArtifactStoreError(
+      'Artifact is unsafe or exceeds its declared size.',
+    );
   }
   const body = await fs.readFile(file);
   if (body.byteLength > maximum) {
@@ -675,7 +716,7 @@ async function readBoundedFile(file: string, maximum: number): Promise<Buffer> {
 async function listRegularFiles(root: string): Promise<Set<string>> {
   const files = new Set<string>();
   const visit = async (directory: string, prefix: string): Promise<void> => {
-    const entries = await fs.readdir(directory, {withFileTypes: true});
+    const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const absolute = path.join(directory, entry.name);
@@ -685,7 +726,8 @@ async function listRegularFiles(root: string): Promise<Set<string>> {
       }
       if (stat.isDirectory()) await visit(absolute, relative);
       else if (stat.isFile()) files.add(relative);
-      else throw new ArtifactStoreError('Completed run contains a special file.');
+      else
+        throw new ArtifactStoreError('Completed run contains a special file.');
     }
   };
   await visit(root, '');
@@ -693,7 +735,8 @@ async function listRegularFiles(root: string): Promise<Set<string>> {
 }
 
 function assertRunId(runId: string): void {
-  if (!RUN_ID.test(runId)) throw new TypeError('runId is not a safe identifier.');
+  if (!RUN_ID.test(runId))
+    throw new TypeError('runId is not a safe identifier.');
 }
 
 function assertArtifactPath(value: string): void {

@@ -1,7 +1,7 @@
-import {z} from 'zod';
+import { z } from 'zod';
 
-import {parseAtifSchema} from './schema.js';
-import type {AtifTrajectoryV1_8} from './types.js';
+import { parseAtifSchema } from './schema.js';
+import type { AtifTrajectoryV1_8 } from './types.js';
 
 export type AtifValidationPath = readonly (string | number)[];
 
@@ -238,12 +238,12 @@ function addStringBudget(
 
 function failJson(path: AtifValidationPath, message: string): never {
   throw new AtifValidationError([
-    {code: 'invalid_json_value', path, message},
+    { code: 'invalid_json_value', path, message },
   ]);
 }
 
 function failLimit(path: AtifValidationPath, message: string): never {
   throw new AtifValidationError([
-    {code: 'input_limit_exceeded', path, message},
+    { code: 'input_limit_exceeded', path, message },
   ]);
 }

@@ -1,28 +1,23 @@
+import { isSha256Digest } from '../model/hashes.js';
 import {
   isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.js';
-import {isSha256Digest} from '../model/hashes.js';
 import type {
   JsonObject,
   SetupActionBundleReferenceV1,
   SetupStepV1,
 } from '../model/types.js';
-import {builtInSetupActions} from './builtins.js';
-import type {
-  SetupPreflightContext,
-  PreparedSetupStep,
-} from './types.js';
+import { builtInSetupActions } from './builtins.js';
+import type { PreparedSetupStep, SetupPreflightContext } from './types.js';
 
 const RESERVED_NAMESPACES = new Set(['forge', 'stripe']);
 const MAX_ACTION_BUNDLES = 100;
 const MAX_ACTIONS_PER_BUNDLE = 1_000;
 
 /** One namespaced setup action supplied by Forge or an explicitly imported bundle. */
-export interface SetupActionDefinition<
-  TWith extends JsonObject = JsonObject,
-> {
+export interface SetupActionDefinition<TWith extends JsonObject = JsonObject> {
   readonly uses: string;
   /** Purely normalize `with` to a canonical fixed point accepted unchanged. */
   parseWith(input: unknown): TWith;
@@ -81,7 +76,9 @@ export function defineSetupActionBundle(
     input.actions.length === 0 ||
     input.actions.length > MAX_ACTIONS_PER_BUNDLE
   ) {
-    throw new TypeError('Setup action bundle must contain a bounded non-empty action list.');
+    throw new TypeError(
+      'Setup action bundle must contain a bounded non-empty action list.',
+    );
   }
   const seen = new Set<string>();
   const actions = Array.from(input.actions, (action) => {
@@ -92,19 +89,24 @@ export function defineSetupActionBundle(
       );
     }
     if (seen.has(normalized.uses)) {
-      throw new TypeError(`Duplicate setup action: ${JSON.stringify(normalized.uses)}.`);
+      throw new TypeError(
+        `Duplicate setup action: ${JSON.stringify(normalized.uses)}.`,
+      );
     }
     seen.add(normalized.uses);
     return normalized;
   });
-  return Object.freeze({manifest, actions: Object.freeze(actions)});
+  return Object.freeze({ manifest, actions: Object.freeze(actions) });
 }
 
 /** Build the immutable built-in registry plus explicitly imported host bundles. */
 export function createSetupActionRegistry(
   actionBundles: readonly SetupActionBundle[] = [],
 ): SetupActionRegistry {
-  if (!Array.isArray(actionBundles) || actionBundles.length > MAX_ACTION_BUNDLES) {
+  if (
+    !Array.isArray(actionBundles) ||
+    actionBundles.length > MAX_ACTION_BUNDLES
+  ) {
     throw new TypeError('Setup action bundles must be a bounded array.');
   }
 
@@ -127,7 +129,7 @@ export function createSetupActionRegistry(
         `Duplicate built-in setup action: ${JSON.stringify(definition.uses)}.`,
       );
     }
-    actions.set(definition.uses, Object.freeze({definition}));
+    actions.set(definition.uses, Object.freeze({ definition }));
   }
 
   const bundles = new Map<string, SetupActionBundleReferenceV1>();
@@ -142,11 +144,13 @@ export function createSetupActionRegistry(
     bundles.set(namespace, bundle.manifest);
     for (const definition of bundle.actions) {
       if (actions.has(definition.uses)) {
-        throw new TypeError(`Duplicate setup action: ${JSON.stringify(definition.uses)}.`);
+        throw new TypeError(
+          `Duplicate setup action: ${JSON.stringify(definition.uses)}.`,
+        );
       }
       actions.set(
         definition.uses,
-        Object.freeze({definition, bundle: bundle.manifest}),
+        Object.freeze({ definition, bundle: bundle.manifest }),
       );
     }
   }
@@ -275,7 +279,9 @@ function normalizeBundleReferences(
   input: readonly SetupActionBundleReferenceV1[],
 ): readonly SetupActionBundleReferenceV1[] {
   if (!Array.isArray(input) || input.length > MAX_ACTION_BUNDLES) {
-    throw new TypeError('Setup action bundle references must be a bounded array.');
+    throw new TypeError(
+      'Setup action bundle references must be a bounded array.',
+    );
   }
   const seen = new Set<string>();
   const output = Array.from(input, (reference) => {
@@ -289,11 +295,15 @@ function normalizeBundleReferences(
     return normalized;
   });
   return Object.freeze(
-    output.sort((left, right) => compareCodeUnits(left.namespace, right.namespace)),
+    output.sort((left, right) =>
+      compareCodeUnits(left.namespace, right.namespace),
+    ),
   );
 }
 
-function normalizeBundleReference(input: unknown): SetupActionBundleReferenceV1 {
+function normalizeBundleReference(
+  input: unknown,
+): SetupActionBundleReferenceV1 {
   if (!isPlainRecord(input)) {
     throw new TypeError('Setup action bundle manifest must be an object.');
   }

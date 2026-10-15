@@ -1,23 +1,23 @@
 import {
   ATIF_SCHEMA_VERSION,
-  isAtifTimestamp,
-  parseAtifTrajectory,
   type AtifAgentStep,
   type AtifObservationResult,
   type AtifStep,
   type AtifSystemStep,
-  type AtifTrajectoryV1_8,
   type AtifToolCall,
+  type AtifTrajectoryV1_8,
+  isAtifTimestamp,
   type JsonObject,
   type JsonValue,
+  parseAtifTrajectory,
 } from '../../atif/index.js';
 import type {
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.js';
-import type {ReadonlyWorkspace} from '../../contracts/runtime.js';
-import {isSafeSessionId} from './stream.js';
+import type { ReadonlyWorkspace } from '../../contracts/runtime.js';
+import { isSafeSessionId } from './stream.js';
 
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
 const MAX_SESSION_LINES = 100_000;
@@ -51,10 +51,7 @@ const IGNORED_RECORD_TYPES = new Set([
   'queue-operation',
   'summary',
 ]);
-const IGNORED_SYSTEM_SUBTYPES = new Set([
-  'stop_hook_summary',
-  'turn_duration',
-]);
+const IGNORED_SYSTEM_SUBTYPES = new Set(['stop_hook_summary', 'turn_duration']);
 const OMITTED_ATTACHMENT_TYPES = new Set([
   'agent_listing_delta',
   'command_permissions',
@@ -93,7 +90,7 @@ interface SessionRecord {
   attachment?: unknown;
   rendered?: unknown;
   atis?: unknown;
-  message?: {content?: string | SessionBlock[]};
+  message?: { content?: string | SessionBlock[] };
 }
 
 interface LocatedSessionRecord {
@@ -142,10 +139,16 @@ export async function loadClaudeEvidence(
   const unavailable = (
     code: 'source_unavailable' | 'source_invalid' | 'source_incomplete',
     message: string,
-  ): AgentNativeEvidenceResult => ({kind: 'unavailable', reason: {code, message}});
+  ): AgentNativeEvidenceResult => ({
+    kind: 'unavailable',
+    reason: { code, message },
+  });
 
   if (!input.project || !isSafeSessionId(input.sessionId)) {
-    return unavailable('source_unavailable', 'The exact Claude session is unavailable.');
+    return unavailable(
+      'source_unavailable',
+      'The exact Claude session is unavailable.',
+    );
   }
   input.signal.throwIfAborted();
   try {
@@ -155,9 +158,15 @@ export async function loadClaudeEvidence(
       input.signal,
     );
     if (bytes === undefined) {
-      return unavailable('source_unavailable', 'The exact Claude session is unavailable.');
+      return unavailable(
+        'source_unavailable',
+        'The exact Claude session is unavailable.',
+      );
     }
-    const records = parseJsonl(Buffer.from(bytes).toString('utf8'), input.signal);
+    const records = parseJsonl(
+      Buffer.from(bytes).toString('utf8'),
+      input.signal,
+    );
     const converted = recordsToAtif(records, input);
     return {
       kind: 'available',
@@ -201,7 +210,7 @@ async function readExactSessionBytes(
 function recordsToAtif(
   records: readonly LocatedSessionRecord[],
   input: LoadClaudeEvidenceInput,
-): {trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[]} {
+): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
   const steps: AtifStep[] = [];
   const warnings: AgentNativeEvidenceWarning[] = [];
   let reportedSessionId: string | undefined;
@@ -209,7 +218,7 @@ function recordsToAtif(
   const toolStepsByCallId = new Map<string, AtifAgentStep>();
 
   const addStep = (step: Omit<AtifStep, 'step_id'>): void => {
-    const completed = {...step, step_id: steps.length + 1} as AtifStep;
+    const completed = { ...step, step_id: steps.length + 1 } as AtifStep;
     steps.push(completed);
     lastAgentStep = completed.source === 'agent' ? completed : undefined;
     if (completed.source === 'agent') {
@@ -224,10 +233,13 @@ function recordsToAtif(
     }
   };
 
-  for (const [position, {record, line}] of records.entries()) {
+  for (const [position, { record, line }] of records.entries()) {
     const recordIndex = line - 1;
     input.signal.throwIfAborted();
-    if (record.isCompactSummary === true || record.subtype === 'compact_boundary') {
+    if (
+      record.isCompactSummary === true ||
+      record.subtype === 'compact_boundary'
+    ) {
       throw new ClaudeSessionIncompleteError(
         'Compacted Claude sessions are not supported by Forge normalization.',
       );
@@ -241,7 +253,9 @@ function recordsToAtif(
     if (typeof recordSessionId === 'string') {
       reportedSessionId ??= recordSessionId;
       if (recordSessionId !== input.sessionId) {
-        throw new Error('Claude session identity changed inside its native log.');
+        throw new Error(
+          'Claude session identity changed inside its native log.',
+        );
       }
     }
     if (record.type === 'user') {
@@ -266,7 +280,9 @@ function recordsToAtif(
         });
       } else if (Array.isArray(content)) {
         assertSupportedUserBlocks(content);
-        const toolResults = content.filter((block) => block.type === 'tool_result');
+        const toolResults = content.filter(
+          (block) => block.type === 'tool_result',
+        );
         attachToolResults(
           lastAgentStep,
           toolStepsByCallId,
@@ -275,7 +291,9 @@ function recordsToAtif(
           recordIndex,
         );
         const userText = content
-          .filter((block) => block.type === 'text' && typeof block.text === 'string')
+          .filter(
+            (block) => block.type === 'text' && typeof block.text === 'string',
+          )
           .map((block) => block.text as string)
           .join('\n');
         if (userText) {
@@ -301,36 +319,51 @@ function recordsToAtif(
           'A Claude assistant record had unsupported conversation content.',
         );
       }
-      const blocks = typeof content === 'string'
-        ? [{type: 'text', text: content}]
-        : Array.isArray(content)
-          ? content
-          : [];
+      const blocks =
+        typeof content === 'string'
+          ? [{ type: 'text', text: content }]
+          : Array.isArray(content)
+            ? content
+            : [];
       assertSupportedAssistantBlocks(blocks, warnings, recordIndex);
       const text = blocks
-        .filter((block) => block.type === 'text' && typeof block.text === 'string')
+        .filter(
+          (block) => block.type === 'text' && typeof block.text === 'string',
+        )
         .map((block) => block.text as string)
         .join('\n');
       const reasoning = blocks
-        .filter((block) => block.type === 'thinking' && typeof block.thinking === 'string')
+        .filter(
+          (block) =>
+            block.type === 'thinking' && typeof block.thinking === 'string',
+        )
         .map((block) => block.thinking as string)
         .join('\n');
       const toolCalls = blocks
-        .filter((block) => block.type === 'tool_use' && typeof block.name === 'string')
-        .map((block, index): AtifToolCall => ({
-          tool_call_id:
-            typeof block.id === 'string'
-              ? block.id
-              : `claude-call-${steps.length + 1}-${index + 1}`,
-          function_name: block.name as string,
-          arguments: jsonObject(block.input, warnings, `line:${recordIndex + 1}`),
-        }));
+        .filter(
+          (block) =>
+            block.type === 'tool_use' && typeof block.name === 'string',
+        )
+        .map(
+          (block, index): AtifToolCall => ({
+            tool_call_id:
+              typeof block.id === 'string'
+                ? block.id
+                : `claude-call-${steps.length + 1}-${index + 1}`,
+            function_name: block.name as string,
+            arguments: jsonObject(
+              block.input,
+              warnings,
+              `line:${recordIndex + 1}`,
+            ),
+          }),
+        );
       addStep({
         source: 'agent',
         model_name: input.model,
         message: text,
-        ...(reasoning ? {reasoning_content: reasoning} : {}),
-        ...(toolCalls.length > 0 ? {tool_calls: toolCalls} : {}),
+        ...(reasoning ? { reasoning_content: reasoning } : {}),
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         ...timestampField(record.timestamp, warnings, recordIndex),
       });
     } else if (record.type !== undefined) {
@@ -348,10 +381,16 @@ function recordsToAtif(
     }
   }
 
-  if (reportedSessionId !== undefined && reportedSessionId !== input.sessionId) {
+  if (
+    reportedSessionId !== undefined &&
+    reportedSessionId !== input.sessionId
+  ) {
     throw new Error('Claude session ID does not match the selected session.');
   }
-  if (!steps.some(({source}) => source === 'user') || !steps.some(({source}) => source === 'agent')) {
+  if (
+    !steps.some(({ source }) => source === 'user') ||
+    !steps.some(({ source }) => source === 'agent')
+  ) {
     throw new Error('Claude session contains no complete conversation.');
   }
   return {
@@ -396,7 +435,8 @@ function assertSupportedAssistantBlocks(
       );
     }
     if (block.type === 'text' && typeof block.text === 'string') continue;
-    if (block.type === 'thinking' && typeof block.thinking === 'string') continue;
+    if (block.type === 'thinking' && typeof block.thinking === 'string')
+      continue;
     if (block.type === 'tool_use' && typeof block.name === 'string') continue;
     if (block.type === 'redacted_thinking') {
       warnings.push({
@@ -439,11 +479,11 @@ function attachToolResults(
     const result: AtifObservationResult = {
       ...(matchedStep === undefined || requestedCallId === undefined
         ? {}
-        : {source_call_id: requestedCallId}),
+        : { source_call_id: requestedCallId }),
       content: nativeContent(block.content),
       ...(block.is_error === undefined
         ? {}
-        : {extra: {is_error: block.is_error}}),
+        : { extra: { is_error: block.is_error } }),
     };
     if (!step) {
       warnings.push({
@@ -468,12 +508,16 @@ function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
     signal.throwIfAborted();
     lineCount += 1;
     if (lineCount > MAX_SESSION_LINES) {
-      throw new ClaudeSessionLimitError('Claude session exceeded its line limit.');
+      throw new ClaudeSessionLimitError(
+        'Claude session exceeded its line limit.',
+      );
     }
     const line = raw.slice(lineStart, end);
     lineStart = end + 1;
     if (Buffer.byteLength(line, 'utf8') > MAX_SESSION_LINE_BYTES) {
-      throw new ClaudeSessionLimitError('Claude session contained an oversized line.');
+      throw new ClaudeSessionLimitError(
+        'Claude session contained an oversized line.',
+      );
     }
     if (!line.trim()) continue;
     let value: unknown;
@@ -485,7 +529,7 @@ function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       throw new Error('Claude session contains a non-object record.');
     }
-    records.push({record: value as SessionRecord, line: lineCount});
+    records.push({ record: value as SessionRecord, line: lineCount });
   }
   return records;
 }
@@ -494,7 +538,7 @@ class ClaudeSessionLimitError extends Error {}
 class ClaudeSessionIncompleteError extends Error {
   constructor(
     message: string,
-    readonly location?: {line: number; kind: string},
+    readonly location?: { line: number; kind: string },
   ) {
     super(message);
   }
@@ -506,7 +550,8 @@ function jsonObject(
   path: string,
 ): JsonObject {
   const json = jsonValue(value);
-  if (json !== null && typeof json === 'object' && !Array.isArray(json)) return json;
+  if (json !== null && typeof json === 'object' && !Array.isArray(json))
+    return json;
   if (value !== undefined) {
     warnings.push({
       code: 'value_omitted',
@@ -514,7 +559,7 @@ function jsonObject(
       path,
     });
   }
-  return value === undefined ? {} : {value: json};
+  return value === undefined ? {} : { value: json };
 }
 
 function jsonValue(value: unknown): JsonValue {
@@ -538,9 +583,9 @@ function timestampField(
   value: string | undefined,
   warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
-): {timestamp?: string} {
+): { timestamp?: string } {
   if (value === undefined) return {};
-  if (isAtifTimestamp(value)) return {timestamp: value};
+  if (isAtifTimestamp(value)) return { timestamp: value };
   warnings.push({
     code: 'value_omitted',
     message: 'An invalid Claude timestamp was omitted.',
@@ -669,15 +714,14 @@ function handleNonConversationRecord(
       }
       warnings.push({
         code: 'unsupported_native_event',
-        message: 'Claude prompt snapshot detail was retained only in native evidence.',
+        message:
+          'Claude prompt snapshot detail was retained only in native evidence.',
         path: `line:${recordIndex + 1}`,
       });
       return;
     }
 
-    if (
-      OMITTED_ATTACHMENT_TYPES.has(attachmentType)
-    ) {
+    if (OMITTED_ATTACHMENT_TYPES.has(attachmentType)) {
       warnings.push({
         code: 'unsupported_native_event',
         message: 'Known Claude attachment context was omitted from ATIF.',
@@ -726,7 +770,11 @@ function hasPairedHookContext(
       'toolUseID',
     ]) ||
     !hasExactKeys(nextAttachment, [
-      'type', 'content', 'hookEvent', 'hookName', 'toolUseID',
+      'type',
+      'content',
+      'hookEvent',
+      'hookName',
+      'toolUseID',
     ]) ||
     nextAttachment.type !== 'hook_additional_context' ||
     typeof attachment.command !== 'string' ||
@@ -854,10 +902,13 @@ function isPromptSnapshot(value: Readonly<Record<string, unknown>>): boolean {
       hasExactKeys(value, ['type', 'systemPrompt', 'cliPrefix', 'tools'])) &&
     Array.isArray(systemPrompt) &&
     systemPrompt.every((part) => typeof part === 'string') &&
-    (cliPrefix === undefined || cliPrefix === null || typeof cliPrefix === 'string') &&
+    (cliPrefix === undefined ||
+      cliPrefix === null ||
+      typeof cliPrefix === 'string') &&
     (tools === undefined ||
       tools === null ||
-      (Array.isArray(tools) && tools.every((tool) => plainRecord(tool) !== undefined)))
+      (Array.isArray(tools) &&
+        tools.every((tool) => plainRecord(tool) !== undefined)))
   );
 }
 

@@ -41,5 +41,5 @@ export interface RunArtifactStore {
 
 /** Publication is intentionally downstream of a successful local commit. */
 export interface CommittedRunPublisher {
-  publish(run: CommittedRun, options: {signal: AbortSignal}): Promise<void>;
+  publish(run: CommittedRun, options: { signal: AbortSignal }): Promise<void>;
 }

@@ -1,9 +1,5 @@
-import {parseAtifTrajectory} from './parser.js';
-import type {
-  AtifTrajectoryV1_8,
-  JsonObject,
-  JsonValue,
-} from './types.js';
+import { parseAtifTrajectory } from './parser.js';
+import type { AtifTrajectoryV1_8, JsonObject, JsonValue } from './types.js';
 
 /**
  * Serialize an ATIF trajectory to deterministic UTF-8 JSON text.

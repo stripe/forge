@@ -1,4 +1,3 @@
-import {completionProviderMetadataSchema, type CompletionProviderMetadata} from '../contracts/metadata.js';
 import type {
   CompletionProvider,
   CompletionProviderCredentials,
@@ -9,15 +8,21 @@ import type {
   CompletionStopReason,
   StrictCompletionResponseSchema,
 } from '../contracts/completion.js';
-import type {CompletionProviderCollection} from '../contracts/composition.js';
+import type {
+  CompletionProviderCollection,
+  ForgeComposition,
+} from '../contracts/composition.js';
 import type {
   CredentialReference,
   CredentialResolver,
 } from '../contracts/credentials.js';
-import type {ForgeComposition} from '../contracts/composition.js';
-import type {ModelRefV1, ResolvedRunPlanV1} from '../model/types.js';
-import type {CompletionCallSummaryV1} from '../results/types.js';
-import {redactSecrets} from '../security/redaction.js';
+import {
+  type CompletionProviderMetadata,
+  completionProviderMetadataSchema,
+} from '../contracts/metadata.js';
+import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.js';
+import type { CompletionCallSummaryV1 } from '../results/types.js';
+import { redactSecrets } from '../security/redaction.js';
 
 const SAFE_PROVIDER_METADATA = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,255}$/;
 const SAFE_CREDENTIAL_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/;
@@ -80,12 +85,13 @@ export function completionBindingsForPlan(
   plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
 ): readonly CompletionBinding[] {
-  const requested: Array<{purpose: CompletionPurpose; model: ModelRefV1}> = [];
+  const requested: Array<{ purpose: CompletionPurpose; model: ModelRefV1 }> =
+    [];
   if (plan.role_player !== undefined) {
-    requested.push({purpose: 'role_player', model: plan.role_player});
+    requested.push({ purpose: 'role_player', model: plan.role_player });
   }
   if (plan.evaluation.judge !== undefined) {
-    requested.push({purpose: 'judge', model: plan.evaluation.judge});
+    requested.push({ purpose: 'judge', model: plan.evaluation.judge });
   }
   if (requested.length === 0) return Object.freeze([]);
 
@@ -97,19 +103,27 @@ export function completionBindingsForPlan(
   }
 
   return Object.freeze(
-    requested.map(({purpose, model}) => {
+    requested.map(({ purpose, model }) => {
       const provider = resolveProvider(collection, model);
       assertProvider(provider, model);
-      const metadata = completionProviderMetadataSchema.optional().parse(provider.metadata);
+      const metadata = completionProviderMetadataSchema
+        .optional()
+        .parse(provider.metadata);
       const identity = Object.freeze({
         id: provider.id,
         version: provider.version,
-        ...(metadata === undefined ? {} : {metadata}),
+        ...(metadata === undefined ? {} : { metadata }),
       });
       const requirements = normalizeRequirements(
-        provider.requirements({model, purpose}),
+        provider.requirements({ model, purpose }),
       );
-      return Object.freeze({purpose, model: Object.freeze({...model}), provider, identity, requirements});
+      return Object.freeze({
+        purpose,
+        model: Object.freeze({ ...model }),
+        provider,
+        identity,
+        requirements,
+      });
     }),
   );
 }
@@ -123,14 +137,23 @@ export async function prepareCompletionRuntime(input: {
   readonly redactionSecrets?: readonly string[];
   readonly signal: AbortSignal;
 }): Promise<PreparedCompletionRuntime> {
-  const prepared = new Map<CompletionPurpose, {
-    binding: CompletionBinding;
-    credentials: CompletionProviderCredentials;
-  }>();
+  const prepared = new Map<
+    CompletionPurpose,
+    {
+      binding: CompletionBinding;
+      credentials: CompletionProviderCredentials;
+    }
+  >();
   const secrets: string[] = [];
   for (const value of input.redactionSecrets ?? []) {
-    if (typeof value !== 'string' || value.length === 0 || value.includes('\0')) {
-      throw new TypeError('Completion redaction secrets must be non-empty strings.');
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.includes('\0')
+    ) {
+      throw new TypeError(
+        'Completion redaction secrets must be non-empty strings.',
+      );
     }
     if (!secrets.includes(value)) secrets.push(value);
   }
@@ -138,7 +161,9 @@ export async function prepareCompletionRuntime(input: {
   for (const binding of input.bindings) {
     input.signal.throwIfAborted();
     const credentials: Record<string, string> = {};
-    for (const [name, requirement] of Object.entries(binding.requirements.credentials)) {
+    for (const [name, requirement] of Object.entries(
+      binding.requirements.credentials,
+    )) {
       // Resolve independently for each score-affecting capability. A resolver
       // may authorize the same opaque reference differently by purpose.
       const value = await resolveCredential(
@@ -162,7 +187,7 @@ export async function prepareCompletionRuntime(input: {
         signal: input.signal,
       });
     }
-    prepared.set(binding.purpose, {binding, credentials: frozenCredentials});
+    prepared.set(binding.purpose, { binding, credentials: frozenCredentials });
   }
 
   const callSlots: Array<CompletionCallSummaryV1 | undefined> = [];
@@ -190,7 +215,8 @@ export async function prepareCompletionRuntime(input: {
     },
     has: (purpose: CompletionPurpose) => prepared.has(purpose),
     model: (purpose: CompletionPurpose) => required(purpose).binding.model,
-    provider: (purpose: CompletionPurpose) => required(purpose).binding.provider,
+    provider: (purpose: CompletionPurpose) =>
+      required(purpose).binding.provider,
     async invoke(
       purpose: CompletionPurpose,
       prompt: CompletionPromptInput,
@@ -210,12 +236,15 @@ export async function prepareCompletionRuntime(input: {
             ...redactedPrompt,
             signal,
           },
-          {credentials: selected.credentials},
+          { credentials: selected.credentials },
         );
         signal.throwIfAborted();
         const response = validateCompletionResponse(completed);
         const redactedResponse = redactSecrets(response.content, secrets);
-        const safeResponse = Object.freeze({...response, content: redactedResponse.value});
+        const safeResponse = Object.freeze({
+          ...response,
+          content: redactedResponse.value,
+        });
         callSlots[sequence - 1] = completionCallSummary(
           sequence,
           selected.binding,
@@ -250,9 +279,10 @@ function resolveProvider(
   collection: CompletionProviderCollection,
   model: ModelRefV1,
 ): CompletionProvider {
-  const provider = 'resolve' in collection
-    ? collection.resolve(model)
-    : collection.get(model.provider);
+  const provider =
+    'resolve' in collection
+      ? collection.resolve(model)
+      : collection.get(model.provider);
   if (provider === undefined) {
     throw new CompletionConfigurationError(
       `No completion provider is registered for ${model.provider}.`,
@@ -267,24 +297,40 @@ function assertProvider(provider: CompletionProvider, model: ModelRefV1): void {
       `Completion provider ${provider.id} cannot serve ${model.provider}.`,
     );
   }
-  if (!SAFE_PROVIDER_METADATA.test(provider.id) || !SAFE_PROVIDER_METADATA.test(provider.version)) {
+  if (
+    !SAFE_PROVIDER_METADATA.test(provider.id) ||
+    !SAFE_PROVIDER_METADATA.test(provider.version)
+  ) {
     throw new CompletionConfigurationError(
       'Completion provider identifiers and versions must be bounded safe metadata.',
     );
   }
-  if (typeof provider.requirements !== 'function' || typeof provider.complete !== 'function') {
-    throw new CompletionConfigurationError('Completion provider methods are invalid.');
+  if (
+    typeof provider.requirements !== 'function' ||
+    typeof provider.complete !== 'function'
+  ) {
+    throw new CompletionConfigurationError(
+      'Completion provider methods are invalid.',
+    );
   }
 }
 
 function normalizeRequirements(
   requirements: CompletionProviderRequirements,
 ): CompletionProviderRequirements {
-  if (!requirements || typeof requirements !== 'object' || Array.isArray(requirements)) {
-    throw new CompletionConfigurationError('Completion provider requirements are invalid.');
+  if (
+    !requirements ||
+    typeof requirements !== 'object' ||
+    Array.isArray(requirements)
+  ) {
+    throw new CompletionConfigurationError(
+      'Completion provider requirements are invalid.',
+    );
   }
-  const credentials: Record<string, {reference: CredentialReference}> = {};
-  for (const [name, requirement] of Object.entries(requirements.credentials ?? {})) {
+  const credentials: Record<string, { reference: CredentialReference }> = {};
+  for (const [name, requirement] of Object.entries(
+    requirements.credentials ?? {},
+  )) {
     if (!SAFE_CREDENTIAL_NAME.test(name)) {
       throw new CompletionConfigurationError(
         `Completion credential name is invalid: ${name}.`,
@@ -301,9 +347,13 @@ function normalizeRequirements(
         `Completion credential requirement ${name} is invalid.`,
       );
     }
-    defineRecordValue(credentials, name, Object.freeze({reference: requirement.reference}));
+    defineRecordValue(
+      credentials,
+      name,
+      Object.freeze({ reference: requirement.reference }),
+    );
   }
-  return Object.freeze({credentials: Object.freeze(credentials)});
+  return Object.freeze({ credentials: Object.freeze(credentials) });
 }
 
 async function resolveCredential(
@@ -322,7 +372,9 @@ async function resolveCredential(
   });
   signal.throwIfAborted();
   if (typeof value !== 'string' || value.length === 0 || value.includes('\0')) {
-    throw new TypeError('Credential resolver returned an invalid completion credential.');
+    throw new TypeError(
+      'Credential resolver returned an invalid completion credential.',
+    );
   }
   return value;
 }
@@ -333,7 +385,9 @@ function redactCompletionPrompt(
 ): CompletionPromptInput {
   const redacted = redactSecrets(
     {
-      ...(prompt.systemPrompt === undefined ? {} : {systemPrompt: prompt.systemPrompt}),
+      ...(prompt.systemPrompt === undefined
+        ? {}
+        : { systemPrompt: prompt.systemPrompt }),
       messages: prompt.messages,
     },
     secrets,
@@ -344,11 +398,14 @@ function redactCompletionPrompt(
   };
 }
 
-function validateCompletionResponse(response: CompletionResponse): CompletionResponse {
+function validateCompletionResponse(
+  response: CompletionResponse,
+): CompletionResponse {
   if (
     !response ||
     typeof response.content !== 'string' ||
-    Buffer.byteLength(response.content, 'utf8') > MAX_COMPLETION_CONTENT_BYTES ||
+    Buffer.byteLength(response.content, 'utf8') >
+      MAX_COMPLETION_CONTENT_BYTES ||
     !COMPLETION_STOP_REASONS.has(response.stopReason) ||
     !response.usage ||
     !nonnegativeInteger(response.usage.inputTokens) ||
@@ -374,7 +431,9 @@ function completionCallSummary(
     purpose: binding.purpose,
     provider: binding.identity.id,
     provider_version: binding.identity.version,
-    ...(binding.identity.metadata === undefined ? {} : {provider_metadata: binding.identity.metadata}),
+    ...(binding.identity.metadata === undefined
+      ? {}
+      : { provider_metadata: binding.identity.metadata }),
     model: binding.model.model,
     status,
     stop_reason: response?.stopReason ?? null,
@@ -413,7 +472,11 @@ function nonnegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function defineRecordValue<T>(record: Record<string, T>, name: string, value: T): void {
+function defineRecordValue<T>(
+  record: Record<string, T>,
+  name: string,
+  value: T,
+): void {
   Object.defineProperty(record, name, {
     configurable: true,
     enumerable: true,

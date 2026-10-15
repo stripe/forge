@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
-import type {CommandResult} from '../../contracts/command.js';
-import type {HostCommandRunner} from '../processCommandRunner.js';
-import {detectDockerRuntimePlatform} from './platform.js';
+import { describe, it } from 'node:test';
+import type { CommandResult } from '../../contracts/command.js';
+import type { HostCommandRunner } from '../processCommandRunner.js';
+import { detectDockerRuntimePlatform } from './platform.js';
 
 describe('detectDockerRuntimePlatform', () => {
   for (const [architecture, expected] of [
@@ -32,12 +32,7 @@ describe('detectDockerRuntimePlatform', () => {
         expected,
       );
       assert.deepEqual(calls, [
-        [
-          '/test/docker',
-          'info',
-          '--format',
-          '{{.OSType}}/{{.Architecture}}',
-        ],
+        ['/test/docker', 'info', '--format', '{{.OSType}}/{{.Architecture}}'],
       ]);
     });
   }
@@ -54,7 +49,7 @@ describe('detectDockerRuntimePlatform', () => {
       },
     };
     await assert.rejects(
-      detectDockerRuntimePlatform({hostCommands: runner}),
+      detectDockerRuntimePlatform({ hostCommands: runner }),
       /unsupported/,
     );
   });
@@ -71,7 +66,7 @@ describe('detectDockerRuntimePlatform', () => {
       },
     };
     await assert.rejects(
-      detectDockerRuntimePlatform({hostCommands: runner}),
+      detectDockerRuntimePlatform({ hostCommands: runner }),
       /unsupported/,
     );
   });
@@ -90,7 +85,7 @@ describe('detectDockerRuntimePlatform', () => {
         hostCommands: runner,
         signal: controller.signal,
       }),
-      {name: 'AbortError'},
+      { name: 'AbortError' },
     );
   });
 });

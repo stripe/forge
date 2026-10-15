@@ -87,9 +87,7 @@ export function normalizeEnvironmentSpecification(
   );
   const variables = Object.freeze(
     validatePlainVariables(
-      Object.hasOwn(specification, 'variables')
-        ? specification.variables
-        : {},
+      Object.hasOwn(specification, 'variables') ? specification.variables : {},
     ),
   );
   const credentialEntries = validateCredentialRequirements(
@@ -99,12 +97,8 @@ export function normalizeEnvironmentSpecification(
     variables,
   );
   const credentials: Record<string, CredentialRequirement> = {};
-  for (const {name, reference} of credentialEntries) {
-    defineRecordValue(
-      credentials,
-      name,
-      Object.freeze({reference}),
-    );
+  for (const { name, reference } of credentialEntries) {
+    defineRecordValue(credentials, name, Object.freeze({ reference }));
   }
   return Object.freeze({
     variables,
@@ -127,7 +121,7 @@ export function createEnvironmentResolver(
 
       // Every binding is validated above before the first authority-bearing
       // credential lookup occurs.
-      for (const [name, {reference, scopes}] of Object.entries(
+      for (const [name, { reference, scopes }] of Object.entries(
         normalized.credentials,
       )) {
         throwIfAborted(context.signal);
@@ -141,9 +135,11 @@ export function createEnvironmentResolver(
           value.length === 0 ||
           /[\0\r\n]/.test(value)
         ) {
-          throw new TypeError(`Credential resolver returned an invalid value for ${name}.`);
+          throw new TypeError(
+            `Credential resolver returned an invalid value for ${name}.`,
+          );
         }
-        defineRecordValue(credentials, name, Object.freeze({value, scopes}));
+        defineRecordValue(credentials, name, Object.freeze({ value, scopes }));
       }
 
       return Object.freeze({
@@ -169,9 +165,7 @@ export function normalizeScopedEnvironmentSpecification(
   );
   const variables = Object.freeze(
     validatePlainVariables(
-      Object.hasOwn(specification, 'variables')
-        ? specification.variables
-        : {},
+      Object.hasOwn(specification, 'variables') ? specification.variables : {},
     ),
   );
   const credentialEntries = validateCredentialBindings(
@@ -181,12 +175,8 @@ export function normalizeScopedEnvironmentSpecification(
     variables,
   );
   const credentials: Record<string, CredentialEnvironmentBinding> = {};
-  for (const {name, reference, scopes} of credentialEntries) {
-    defineRecordValue(
-      credentials,
-      name,
-      Object.freeze({reference, scopes}),
-    );
+  for (const { name, reference, scopes } of credentialEntries) {
+    defineRecordValue(credentials, name, Object.freeze({ reference, scopes }));
   }
   return Object.freeze({
     variables,
@@ -222,7 +212,9 @@ export function createEnvironmentCredentialResolver(
           `No environment binding exists for credential reference ${JSON.stringify(reference)}.`,
         );
       }
-      const value = Object.hasOwn(environment, name) ? environment[name] : undefined;
+      const value = Object.hasOwn(environment, name)
+        ? environment[name]
+        : undefined;
       if (
         typeof value !== 'string' ||
         value.length === 0 ||
@@ -251,9 +243,7 @@ export function credentialReference(reference: string): CredentialReference {
   return reference as CredentialReference;
 }
 
-function validatePlainVariables(
-  input: unknown,
-): Record<string, string> {
+function validatePlainVariables(input: unknown): Record<string, string> {
   assertPlainRecord(input, 'Environment variables');
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(input)) {
@@ -347,11 +337,15 @@ function normalizeScopes(
   name: string,
 ): readonly CredentialScope[] {
   if (!Array.isArray(input) || input.length === 0) {
-    throw new TypeError(`Credential binding ${name} must declare at least one scope.`);
+    throw new TypeError(
+      `Credential binding ${name} must declare at least one scope.`,
+    );
   }
   const scopes = [...new Set(input)];
   if (scopes.some((scope) => scope !== 'setup' && scope !== 'agent')) {
-    throw new TypeError(`Credential binding ${name} contains an invalid scope.`);
+    throw new TypeError(
+      `Credential binding ${name} contains an invalid scope.`,
+    );
   }
   return Object.freeze(
     (['setup', 'agent'] as const).filter((scope) => scopes.includes(scope)),
@@ -369,9 +363,13 @@ function assertPlainRecord(
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError(`${label} must be a plain object.`);
   }
-  if (Reflect.ownKeys(input).some((key) =>
-    typeof key !== 'string' || !Object.prototype.propertyIsEnumerable.call(input, key),
-  )) {
+  if (
+    Reflect.ownKeys(input).some(
+      (key) =>
+        typeof key !== 'string' ||
+        !Object.prototype.propertyIsEnumerable.call(input, key),
+    )
+  ) {
     throw new TypeError(`${label} must contain only enumerable string fields.`);
   }
 }

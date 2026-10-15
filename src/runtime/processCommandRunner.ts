@@ -1,7 +1,7 @@
-import {spawn} from 'node:child_process';
-import {StringDecoder} from 'node:string_decoder';
-import type {CommandResult} from '../contracts/command.js';
-import {CommandExecutionError} from '../contracts/command.js';
+import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
+import type { CommandResult } from '../contracts/command.js';
+import { CommandExecutionError } from '../contracts/command.js';
 
 export interface HostCommandOptions {
   readonly cwd?: string;
@@ -13,7 +13,10 @@ export interface HostCommandOptions {
 }
 
 export interface HostCommandRunner {
-  run(argv: readonly string[], options: HostCommandOptions): Promise<CommandResult>;
+  run(
+    argv: readonly string[],
+    options: HostCommandOptions,
+  ): Promise<CommandResult>;
 }
 
 /** Plain subprocess runner used for Docker CLI invocations. Never uses a shell. */
@@ -28,8 +31,8 @@ export function createHostCommandRunner(): HostCommandRunner {
       return new Promise<CommandResult>((resolve, reject) => {
         const startedAt = Date.now();
         const child = spawn(argv[0]!, argv.slice(1), {
-          ...(options.cwd === undefined ? {} : {cwd: options.cwd}),
-          env: {...process.env, ...options.environment},
+          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+          env: { ...process.env, ...options.environment },
           shell: false,
           stdio: ['ignore', 'pipe', 'pipe'],
           detached: process.platform !== 'win32',
@@ -48,7 +51,11 @@ export function createHostCommandRunner(): HostCommandRunner {
           killProcessTree(child.pid, 'SIGTERM');
           setTimeout(() => killProcessTree(child.pid, 'SIGKILL'), 250).unref();
         };
-        const capture = (target: Buffer[], chunk: Buffer, stdoutChunk: boolean): void => {
+        const capture = (
+          target: Buffer[],
+          chunk: Buffer,
+          stdoutChunk: boolean,
+        ): void => {
           outputBytes += chunk.byteLength;
           if (outputBytes > options.maxOutputBytes) {
             terminate(
@@ -68,14 +75,18 @@ export function createHostCommandRunner(): HostCommandRunner {
           }
         };
 
-        child.stdout.on('data', (chunk: Buffer) => capture(stdout, chunk, true));
-        child.stderr.on('data', (chunk: Buffer) => capture(stderr, chunk, false));
+        child.stdout.on('data', (chunk: Buffer) =>
+          capture(stdout, chunk, true),
+        );
+        child.stderr.on('data', (chunk: Buffer) =>
+          capture(stderr, chunk, false),
+        );
         child.once('error', (cause) => {
           terminate(
             new CommandExecutionError(
               'Command could not be started.',
               'command_start_failed',
-              {cause},
+              { cause },
             ),
           );
         });
@@ -83,18 +94,25 @@ export function createHostCommandRunner(): HostCommandRunner {
         const timer = setTimeout(
           () =>
             terminate(
-              new CommandExecutionError('Command timed out.', 'command_timeout'),
+              new CommandExecutionError(
+                'Command timed out.',
+                'command_timeout',
+              ),
             ),
           options.timeoutMs,
         );
         timer.unref();
         const abort = (): void =>
           terminate(
-            new CommandExecutionError('Command was aborted.', 'command_aborted', {
-              cause: options.signal?.reason,
-            }),
+            new CommandExecutionError(
+              'Command was aborted.',
+              'command_aborted',
+              {
+                cause: options.signal?.reason,
+              },
+            ),
           );
-        options.signal?.addEventListener('abort', abort, {once: true});
+        options.signal?.addEventListener('abort', abort, { once: true });
 
         child.once('close', (exitCode, signal) => {
           if (finished) return;
@@ -121,7 +139,10 @@ export function createHostCommandRunner(): HostCommandRunner {
   };
 }
 
-function killProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
+function killProcessTree(
+  pid: number | undefined,
+  signal: NodeJS.Signals,
+): void {
   if (pid === undefined) return;
   try {
     process.kill(process.platform === 'win32' ? pid : -pid, signal);
@@ -141,7 +162,9 @@ function validateArgv(argv: readonly string[]): void {
   if (
     !Array.isArray(argv) ||
     argv.length === 0 ||
-    argv.some((argument) => typeof argument !== 'string' || argument.includes('\0'))
+    argv.some(
+      (argument) => typeof argument !== 'string' || argument.includes('\0'),
+    )
   ) {
     throw new TypeError('Command argv must contain non-NUL strings.');
   }

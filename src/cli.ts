@@ -1,31 +1,31 @@
 #!/usr/bin/env node
 
+import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
-import {realpathSync} from 'node:fs';
-import {pathToFileURL} from 'node:url';
-import {parseArgs} from 'node:util';
+import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
-import {createClaudeCodeAdapter} from './agents/claude-code/index.js';
-import {createCodexAdapter} from './agents/codex/index.js';
+import { createClaudeCodeAdapter } from './agents/claude-code/index.js';
+import { createCodexAdapter } from './agents/codex/index.js';
+import type { ForgeComposition } from './contracts/composition.js';
+import { createEnvironmentCredentialResolver } from './contracts/credentials.js';
+import { createDirectoryRunInputProvider } from './contracts/inputs.js';
+import type { RuntimePlatform } from './contracts/runtime.js';
+import { defaultForgeEngine, type ForgeEngine } from './engine.js';
+import { type executeEval, FORGE_VERSION } from './execution/index.js';
 import {
+  createExperimentCliOptions,
   EXPERIMENT_CLI_OPTIONS,
   ExperimentCommandError,
   ExperimentUsageError,
-  createExperimentCliOptions,
   runExperimentCommand,
 } from './experimentCli.js';
-import type {ForgeComposition} from './contracts/composition.js';
-import type {RuntimePlatform} from './contracts/runtime.js';
-import {createEnvironmentCredentialResolver} from './contracts/credentials.js';
-import {createDirectoryRunInputProvider} from './contracts/inputs.js';
-import {executeEval, FORGE_VERSION} from './execution/index.js';
-import {defaultForgeEngine, type ForgeEngine} from './engine.js';
 import {
-  parseRunSelection,
   type DatasetManifestV1,
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
   type LoadedDatasetV1,
+  parseRunSelection,
   type RunSelection,
 } from './model/index.js';
 import {
@@ -34,15 +34,15 @@ import {
   resolveManifestCaseIdFromFile,
   serializeResolvedRunPlan,
 } from './planning/index.js';
-import {validateExperimentDataset} from './planning/planner.js';
-import {createArtifactStore} from './results/index.js';
+import { validateExperimentDataset } from './planning/planner.js';
+import { createAnthropicCompletionProvider } from './providers/anthropic/index.js';
+import { createArtifactStore } from './results/index.js';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
   validateDockerRuntimeHost,
 } from './runtime/docker/index.js';
-import {createAnthropicCompletionProvider} from './providers/anthropic/index.js';
-import {serializeCanonicalJson} from './serialization.js';
+import { serializeCanonicalJson } from './serialization.js';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
@@ -55,18 +55,18 @@ const CODEX_API_KEY_ENVIRONMENT = 'CODEX_API_KEY';
 const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
 
 const HOST_CLI_OPTIONS = {
-  experiment: {type: 'string', short: 'e'},
-  case: {type: 'string'},
-  'case-file': {type: 'string'},
-  treatment: {type: 'string'},
-  agent: {type: 'string'},
-  provider: {type: 'string'},
-  model: {type: 'string'},
-  repetition: {type: 'string'},
-  'credential-env': {type: 'string', multiple: true},
-  host: {type: 'boolean'},
-  help: {type: 'boolean', short: 'h'},
-  version: {type: 'boolean'},
+  experiment: { type: 'string', short: 'e' },
+  case: { type: 'string' },
+  'case-file': { type: 'string' },
+  treatment: { type: 'string' },
+  agent: { type: 'string' },
+  provider: { type: 'string' },
+  model: { type: 'string' },
+  repetition: { type: 'string' },
+  'credential-env': { type: 'string', multiple: true },
+  host: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean' },
 } as const;
 const CLI_OPTIONS = createExperimentCliOptions(HOST_CLI_OPTIONS);
 
@@ -151,7 +151,9 @@ export async function createDefaultCliComposition(
   options: DefaultCliCompositionOptions,
 ): Promise<ForgeComposition> {
   if (options.runtime && 'config' in options.runtime) {
-    throw new CliUsageError('External runtimes require a host-supplied compositionFactory.');
+    throw new CliUsageError(
+      'External runtimes require a host-supplied compositionFactory.',
+    );
   }
   const environment = options.environment ?? process.env;
   const baseUrl = environment[ANTHROPIC_BASE_URL_ENVIRONMENT];
@@ -165,17 +167,17 @@ export async function createDefaultCliComposition(
   const claude = createClaudeCodeAdapter({
     credential,
     credentialEnvironmentName,
-    ...(baseUrl === undefined ? {} : {baseUrl}),
+    ...(baseUrl === undefined ? {} : { baseUrl }),
   });
   const completionProvider = createAnthropicCompletionProvider({
     credential,
     auth: gatewaySelected ? 'bearer' : 'api-key',
-    ...(baseUrl === undefined ? {} : {baseUrl}),
+    ...(baseUrl === undefined ? {} : { baseUrl }),
   });
   const codexBaseUrl = environment[OPENAI_BASE_URL_ENVIRONMENT];
   const codex = createCodexAdapter({
     credential: OPENAI_API_KEY_REFERENCE,
-    ...(codexBaseUrl === undefined ? {} : {baseUrl: codexBaseUrl}),
+    ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
@@ -189,15 +191,18 @@ export async function createDefaultCliComposition(
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
-    agents: new Map([[claude.id, claude], [codex.id, codex]]),
-    completionProviders: new Map([
-      [completionProvider.id, completionProvider],
+    agents: new Map([
+      [claude.id, claude],
+      [codex.id, codex],
     ]),
+    completionProviders: new Map([[completionProvider.id, completionProvider]]),
     credentialResolver,
     inputProvider: await createDirectoryRunInputProvider(options.datasetRoot, {
-      ...(options.datasetManifest === undefined ? {} : {manifest: options.datasetManifest}),
+      ...(options.datasetManifest === undefined
+        ? {}
+        : { manifest: options.datasetManifest }),
     }),
-    artifactStore: createArtifactStore({root: options.resultsRoot}),
+    artifactStore: createArtifactStore({ root: options.resultsRoot }),
   });
 }
 
@@ -206,8 +211,10 @@ export async function runCli(
   argv: readonly string[],
   options: RunCliOptions = {},
 ): Promise<number> {
-  const stdout = options.stdout ?? ((text: string) => void process.stdout.write(text));
-  const stderr = options.stderr ?? ((text: string) => void process.stderr.write(text));
+  const stdout =
+    options.stdout ?? ((text: string) => void process.stdout.write(text));
+  const stderr =
+    options.stderr ?? ((text: string) => void process.stderr.write(text));
   const engine = options.engine ?? defaultForgeEngine;
 
   try {
@@ -235,7 +242,12 @@ export async function runCli(
       'experiment',
       ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
       ...(command === 'run'
-        ? [...Object.keys(EXPERIMENT_CLI_OPTIONS) as (keyof typeof EXPERIMENT_CLI_OPTIONS)[], 'credential-env' as const]
+        ? [
+            ...(Object.keys(
+              EXPERIMENT_CLI_OPTIONS,
+            ) as (keyof typeof EXPERIMENT_CLI_OPTIONS)[]),
+            'credential-env' as const,
+          ]
         : []),
     ];
     assertAllowedOptions(parsed.values, allowed);
@@ -249,7 +261,10 @@ export async function runCli(
       'experiment',
       cwd,
     );
-    if (parsed.values.case !== undefined && parsed.values['case-file'] !== undefined) {
+    if (
+      parsed.values.case !== undefined &&
+      parsed.values['case-file'] !== undefined
+    ) {
       throw new CliUsageError('--case and --case-file cannot be combined.');
     }
     const caseFilePath = resolveOptionalPath(
@@ -259,9 +274,13 @@ export async function runCli(
     );
     const experiment = await engine.loadExperimentConfig(experimentPath);
     if (experiment.config.dataset.path === undefined) {
-      throw new CliUsageError('The experiment must declare dataset.path, relative to the experiment file.');
+      throw new CliUsageError(
+        'The experiment must declare dataset.path, relative to the experiment file.',
+      );
     }
-    const dataset = await engine.loadDataset(path.resolve(experiment.root, experiment.config.dataset.path));
+    const dataset = await engine.loadDataset(
+      path.resolve(experiment.root, experiment.config.dataset.path),
+    );
     const nativeDocker =
       experiment.config.runtime.adapter === 'docker' &&
       experiment.config.runtime.platform === 'native';
@@ -284,9 +303,7 @@ export async function runCli(
         }
         const dockerPlatform = await (
           options.detectDockerPlatform ?? detectDockerRuntimePlatform
-        )(
-          options.signal === undefined ? {} : {signal: options.signal},
-        );
+        )(options.signal === undefined ? {} : { signal: options.signal });
         const runtimePlatform =
           experiment.config.runtime.platform === 'native'
             ? dockerPlatform
@@ -308,20 +325,20 @@ export async function runCli(
             dataset,
             experiment,
             selection,
-            ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+            ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
           }),
         );
         const composition = await compositionFactory({
           datasetRoot: dataset.root,
           datasetManifest: dataset.manifest,
-          ...(plans[0] === undefined ? {} : {runtime: plans[0].runtime}),
+          ...(plans[0] === undefined ? {} : { runtime: plans[0].runtime }),
           resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
           ...(options.environment === undefined
             ? {}
-            : {environment: options.environment}),
+            : { environment: options.environment }),
         });
         for (const plan of plans) {
-          engine.preflightEval({plan, composition});
+          engine.preflightEval({ plan, composition });
         }
       }
       const host =
@@ -334,7 +351,7 @@ export async function runCli(
                 platform: hostSelection.runtime_platform,
                 ...(options.signal === undefined
                   ? {}
-                  : {signal: options.signal}),
+                  : { signal: options.signal }),
               });
               return {
                 ...hostSelection,
@@ -348,7 +365,7 @@ export async function runCli(
             id: experiment.config.id,
             version: experiment.config.version,
           },
-          ...(host === undefined ? {} : {host}),
+          ...(host === undefined ? {} : { host }),
           run_count: selections.length,
           valid: true,
         }),
@@ -378,17 +395,15 @@ export async function runCli(
     const selection = selectOne(experiment.config, dataset, filters);
     const runtimePlatform = nativeDocker
       ? (options.runtimePlatform ??
-        (await (
-          options.detectDockerPlatform ?? detectDockerRuntimePlatform
-        )(
-          options.signal === undefined ? {} : {signal: options.signal},
+        (await (options.detectDockerPlatform ?? detectDockerRuntimePlatform)(
+          options.signal === undefined ? {} : { signal: options.signal },
         )))
       : undefined;
     const plan = engine.resolveRunPlan({
       dataset,
       experiment,
       selection,
-      ...(runtimePlatform === undefined ? {} : {runtimePlatform}),
+      ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
     });
     stdout(serializeResolvedRunPlan(plan));
     return 0;
@@ -400,63 +415,118 @@ export async function runCli(
 }
 
 async function runPublicExperiment(
-  argv: readonly string[], options: RunCliOptions, engine: ForgeEngine,
-  stdout: (text: string) => void, stderr: (text: string) => void,
+  argv: readonly string[],
+  options: RunCliOptions,
+  engine: ForgeEngine,
+  stdout: (text: string) => void,
+  stderr: (text: string) => void,
 ): Promise<number> {
   const result = await runExperimentCommand(argv, {
     hostOptions: HOST_CLI_OPTIONS,
     selectorOptions: SELECTOR_OPTIONS,
     allowPositionals: true,
     engine,
-    ...(options.cwd === undefined ? {} : {cwd: options.cwd}),
-    ...(options.signal === undefined ? {} : {signal: options.signal}),
-    ...(options.runIdFactory === undefined ? {} : {runIdFactory: options.runIdFactory}),
-    ...(options.experimentRunIdFactory === undefined ? {} : {experimentRunIdFactory: options.experimentRunIdFactory}),
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.runIdFactory === undefined
+      ? {}
+      : { runIdFactory: options.runIdFactory }),
+    ...(options.experimentRunIdFactory === undefined
+      ? {}
+      : { experimentRunIdFactory: options.experimentRunIdFactory }),
     progress: (event) => stderr(serializeCanonicalJson(event)),
-    validateHostArgs: ({values}) => {
-      resolveRequiredPath(values.experiment, 'experiment', options.cwd ?? process.cwd());
+    validateHostArgs: ({ values }) => {
+      resolveRequiredPath(
+        values.experiment,
+        'experiment',
+        options.cwd ?? process.cwd(),
+      );
       if (values.case !== undefined && values['case-file'] !== undefined) {
         throw new CliUsageError('--case and --case-file cannot be combined.');
       }
       parseRepetition(values.repetition);
       parseCredentialEnvironmentBindings(values['credential-env']);
     },
-    loadExperiment: async ({values, cwd, root, savedSelections, signal}) => {
-      const experiment = await engine.loadExperimentConfig(resolveRequiredPath(values.experiment, 'experiment', cwd));
+    loadExperiment: async ({ values, cwd, root, savedSelections, signal }) => {
+      const experiment = await engine.loadExperimentConfig(
+        resolveRequiredPath(values.experiment, 'experiment', cwd),
+      );
       if (experiment.config.dataset.path === undefined) {
-        throw new CliUsageError('The experiment must declare dataset.path, relative to the experiment file.');
+        throw new CliUsageError(
+          'The experiment must declare dataset.path, relative to the experiment file.',
+        );
       }
-      const dataset = await engine.loadDataset(path.resolve(experiment.root, experiment.config.dataset.path));
+      const dataset = await engine.loadDataset(
+        path.resolve(experiment.root, experiment.config.dataset.path),
+      );
       let caseId = values.case;
-      const caseFilePath = resolveOptionalPath(values['case-file'], 'case-file', cwd);
+      const caseFilePath = resolveOptionalPath(
+        values['case-file'],
+        'case-file',
+        cwd,
+      );
       if (caseFilePath !== undefined) {
         try {
           caseId = await resolveManifestCaseIdFromFile(dataset, caseFilePath);
         } catch (error) {
-          if (error instanceof ManifestCaseFileError) throw new CliUsageError(error.message);
+          if (error instanceof ManifestCaseFileError)
+            throw new CliUsageError(error.message);
           throw error;
         }
       }
-      if (savedSelections !== undefined) validateExperimentDataset(experiment, dataset);
-      const selections = savedSelections ?? selectMatching(experiment.config, dataset, {
-        caseId, treatment: values.treatment, adapter: values.agent,
-        provider: values.provider, model: values.model, repetition: parseRepetition(values.repetition),
+      if (savedSelections !== undefined)
+        validateExperimentDataset(experiment, dataset);
+      const selections =
+        savedSelections ??
+        selectMatching(experiment.config, dataset, {
+          caseId,
+          treatment: values.treatment,
+          adapter: values.agent,
+          provider: values.provider,
+          model: values.model,
+          repetition: parseRepetition(values.repetition),
+        });
+      const runtimePlatform =
+        experiment.config.runtime.adapter === 'docker' &&
+        experiment.config.runtime.platform === 'native'
+          ? (options.runtimePlatform ??
+            (await (
+              options.detectDockerPlatform ?? detectDockerRuntimePlatform
+            )({ signal })))
+          : undefined;
+      const plans = selections.map((selection) =>
+        engine.resolveRunPlan({
+          dataset,
+          experiment,
+          selection,
+          ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
+        }),
+      );
+      const credentialBindings = parseCredentialEnvironmentBindings(
+        values['credential-env'],
+      );
+      const composition = await (
+        options.compositionFactory ?? createDefaultCliComposition
+      )({
+        datasetRoot: dataset.root,
+        datasetManifest: dataset.manifest,
+        runtime: plans[0]!.runtime,
+        resultsRoot: root,
+        ...(options.environment === undefined
+          ? {}
+          : { environment: options.environment }),
+        ...(Object.keys(credentialBindings).length === 0
+          ? {}
+          : { credentialBindings }),
       });
-      const runtimePlatform = experiment.config.runtime.adapter === 'docker' && experiment.config.runtime.platform === 'native'
-        ? options.runtimePlatform ?? await (options.detectDockerPlatform ?? detectDockerRuntimePlatform)({signal})
-        : undefined;
-      const plans = selections.map((selection) => engine.resolveRunPlan({dataset, experiment, selection,
-        ...(runtimePlatform === undefined ? {} : {runtimePlatform})}));
-      const credentialBindings = parseCredentialEnvironmentBindings(values['credential-env']);
-      const composition = await (options.compositionFactory ?? createDefaultCliComposition)({
-        datasetRoot: dataset.root, datasetManifest: dataset.manifest, runtime: plans[0]!.runtime, resultsRoot: root,
-        ...(options.environment === undefined ? {} : {environment: options.environment}),
-        ...(Object.keys(credentialBindings).length === 0 ? {} : {credentialBindings}),
-      });
-      return {plans, composition, execute: options.execute ?? ((request) => engine.executeEval(request))};
+      return {
+        plans,
+        composition,
+        execute: options.execute ?? ((request) => engine.executeEval(request)),
+      };
     },
   });
-  const {outcomes: _outcomes, arguments: _arguments, ...summary} = result;
+  const { outcomes: _outcomes, arguments: _arguments, ...summary } = result;
   stdout(serializeCanonicalJson(summary));
   return result.errored === 0 ? 0 : 1;
 }
@@ -489,13 +559,19 @@ function selectMatching(
   dataset: LoadedDatasetV1,
   filters: SelectionFilters,
 ): RunSelection[] {
-  const matches = expandExperiment(experiment, dataset).filter((selection) =>
-    (filters.caseId === undefined || selection.case_id === filters.caseId) &&
-    (filters.treatment === undefined || selection.treatment === filters.treatment) &&
-    (filters.adapter === undefined || selection.agent.adapter === filters.adapter) &&
-    (filters.provider === undefined || selection.agent.provider === filters.provider) &&
-    (filters.model === undefined || selection.agent.model === filters.model) &&
-    (filters.repetition === undefined || selection.repetition === filters.repetition),
+  const matches = expandExperiment(experiment, dataset).filter(
+    (selection) =>
+      (filters.caseId === undefined || selection.case_id === filters.caseId) &&
+      (filters.treatment === undefined ||
+        selection.treatment === filters.treatment) &&
+      (filters.adapter === undefined ||
+        selection.agent.adapter === filters.adapter) &&
+      (filters.provider === undefined ||
+        selection.agent.provider === filters.provider) &&
+      (filters.model === undefined ||
+        selection.agent.model === filters.model) &&
+      (filters.repetition === undefined ||
+        selection.repetition === filters.repetition),
   );
   if (matches.length === 0) {
     throw new CliUsageError('Selection does not match the benchmark matrix.');
@@ -544,11 +620,7 @@ function assertAllowedOptions(
   >,
   allowed: readonly CliOptionName[],
 ): void {
-  const accepted = new Set<CliOptionName>([
-    ...allowed,
-    'help',
-    'version',
-  ]);
+  const accepted = new Set<CliOptionName>([...allowed, 'help', 'version']);
   for (const option of Object.keys(values) as CliOptionName[]) {
     if (!accepted.has(option)) {
       throw new CliUsageError(`--${option} is not valid for this command.`);
@@ -585,7 +657,9 @@ function parseCredentialEnvironmentBindings(
   return Object.freeze(Object.fromEntries(bindings));
 }
 
-function isCommand(value: string | undefined): value is 'validate' | 'plan' | 'run' {
+function isCommand(
+  value: string | undefined,
+): value is 'validate' | 'plan' | 'run' {
   return value === 'validate' || value === 'plan' || value === 'run';
 }
 
@@ -633,15 +707,17 @@ if (isMainModule()) {
   };
   process.once('SIGINT', abort);
   process.once('SIGTERM', abort);
-  void runCli(process.argv.slice(2), {signal: controller.signal}).then(
-    (exitCode) => {
-      process.exitCode = exitCode;
-    },
-    () => {
-      process.exitCode = 1;
-    },
-  ).finally(() => {
-    process.removeListener('SIGINT', abort);
-    process.removeListener('SIGTERM', abort);
-  });
+  void runCli(process.argv.slice(2), { signal: controller.signal })
+    .then(
+      (exitCode) => {
+        process.exitCode = exitCode;
+      },
+      () => {
+        process.exitCode = 1;
+      },
+    )
+    .finally(() => {
+      process.removeListener('SIGINT', abort);
+      process.removeListener('SIGTERM', abort);
+    });
 }

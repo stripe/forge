@@ -1,9 +1,3 @@
-import type {CommandRunner} from './command.js';
-import type {
-  MutableWorkspace,
-  RuntimeLogicalPaths,
-  RuntimeRequirements,
-} from './runtime.js';
 import type {
   AgentSelectionV1,
   JsonObject,
@@ -11,6 +5,12 @@ import type {
   ResolvedRunPlanV1,
   Sha256Digest,
 } from '../model/types.js';
+import type { CommandRunner } from './command.js';
+import type {
+  MutableWorkspace,
+  RuntimeLogicalPaths,
+  RuntimeRequirements,
+} from './runtime.js';
 
 export type AgentPluginSourceKind =
   | 'marketplace-path'

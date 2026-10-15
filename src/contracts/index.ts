@@ -5,8 +5,11 @@ export * from './completion.js';
 export * from './composition.js';
 export * from './credentials.js';
 export * from './inputs.js';
+export type {
+  AgentAdapterMetadata,
+  CompletionProviderMetadata,
+} from './metadata.js';
 export * from './observability.js';
 export * from './plugin.js';
 export * from './pluginReceipt.js';
 export * from './runtime.js';
-export type {AgentAdapterMetadata, CompletionProviderMetadata} from './metadata.js';

@@ -15,21 +15,26 @@ export function isSafeCaseId(value: string): boolean {
 
 /** Authored identities use lowercase, slash-separated kebab-case segments. */
 export function isAuthoredCaseId(value: string): boolean {
-  return isSafeCaseId(value) &&
-    /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(value);
+  return (
+    isSafeCaseId(value) &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(value)
+  );
 }
 
 /** Dataset case definitions have a recognizable name below cases/. */
 export function isCaseDefinitionPath(value: string): boolean {
-  if (!isSafeDatasetRelativePath(value) || !value.startsWith('cases/')) return false;
+  if (!isSafeDatasetRelativePath(value) || !value.startsWith('cases/'))
+    return false;
   const filename = path.posix.basename(value);
-  return filename === 'case.yaml' ||
-    (filename.endsWith('.case.yaml') && filename.length > '.case.yaml'.length);
+  return (
+    filename === 'case.yaml' ||
+    (filename.endsWith('.case.yaml') && filename.length > '.case.yaml'.length)
+  );
 }
 
 export function isSafeWorkspaceRelativePath(
   value: string,
-  options: {allowRoot?: boolean} = {},
+  options: { allowRoot?: boolean } = {},
 ): boolean {
   if (options.allowRoot === true && value === '.') return true;
   return isCanonicalRelativePosixPath(value, false);
@@ -60,9 +65,10 @@ export function isSafeVersion(value: string): boolean {
 
 export function isSafeGitHubRepository(value: string): boolean {
   if (value.length > 512 || CONTROL_CHARACTER.test(value)) return false;
-  const match = /^([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(
-    value,
-  );
+  const match =
+    /^([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(
+      value,
+    );
   return match !== null && !match[2]!.toLowerCase().endsWith('.git');
 }
 

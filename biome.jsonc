@@ -1,0 +1,62 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "**/*.{js,mjs,cjs,ts,tsx,json,jsonc}",
+      "!**/package.json",
+      // Dataset bytes and packaged assets have integrity pins.
+      "!!datasets",
+      "!!test/fixtures",
+      "!!src/runtime/docker/assets"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        // Guarded indexing and validated parser results use explicit assertions.
+        "noNonNullAssertion": "off"
+      },
+      "suspicious": {
+        // Input validators intentionally match control characters.
+        "noControlCharactersInRegex": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            // Security tests exercise prototype-sensitive object keys.
+            "noProto": "off"
+          }
+        }
+      }
+    }
+  ]
+}

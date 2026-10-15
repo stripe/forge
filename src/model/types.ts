@@ -1,4 +1,4 @@
-import type {ForgeBuildIdentity} from '../version.js';
+import type { ForgeBuildIdentity } from '../version.js';
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -52,7 +52,7 @@ export interface SetupStepV1<TWith extends JsonObject = JsonObject> {
 
 export interface WriteSetupWithV1 extends JsonObject {
   target: string;
-  source: {content: string} | {dataset_path: DatasetRelativePath};
+  source: { content: string } | { dataset_path: DatasetRelativePath };
 }
 
 export interface WriteSetupStepV1 extends SetupStepV1<WriteSetupWithV1> {
@@ -108,11 +108,13 @@ export interface ChecksV1 {
 }
 
 /** A repeatable category and scoring policy for one model-judged criterion. */
-export type JudgingCriterionV1 = string | {
-  value: string;
-  label?: string;
-  include_in_score?: boolean;
-};
+export type JudgingCriterionV1 =
+  | string
+  | {
+      value: string;
+      label?: string;
+      include_in_score?: boolean;
+    };
 
 /**
  * The benchmark case defines what is evaluated, never which agent runs it.
@@ -155,7 +157,7 @@ export interface DockerResourcesV1 {
 
 export interface ForgeDockerRuntimeV1 {
   adapter: 'docker';
-  image: {kind: 'forge'};
+  image: { kind: 'forge' };
   platform: 'linux/amd64' | 'linux/arm64';
   resources: DockerResourcesV1;
 }
@@ -163,7 +165,7 @@ export interface ForgeDockerRuntimeV1 {
 /** Docker authoring form; `native` is materialized before a run plan exists. */
 export interface ForgeDockerRuntimeConfigV1 {
   adapter: 'docker';
-  image: {kind: 'forge'};
+  image: { kind: 'forge' };
   platform: ForgeDockerRuntimeV1['platform'] | 'native';
   resources: DockerResourcesV1;
 }
@@ -222,7 +224,7 @@ export interface ExperimentConfigV1 {
     path?: string;
   };
   /** Required only when the experiment uses host-supplied setup actions. */
-  forge?: {action_bundles: SetupActionBundleReferenceV1[]};
+  forge?: { action_bundles: SetupActionBundleReferenceV1[] };
   runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;
@@ -264,14 +266,12 @@ export interface RunSelection {
   repetition: number;
 }
 
-export type InitialPromptSourceV1 =
-  | 'case.task'
-  | 'case.initial_prompt';
+export type InitialPromptSourceV1 = 'case.task' | 'case.initial_prompt';
 
 export interface ResolvedRunPlanV1 {
   selection: RunSelection;
   provenance: {
-    dataset: DatasetIdentityV1 & {manifest_sha256: Sha256Digest};
+    dataset: DatasetIdentityV1 & { manifest_sha256: Sha256Digest };
     experiment: {
       id: string;
       version: string;
@@ -285,7 +285,7 @@ export interface ResolvedRunPlanV1 {
     };
   };
   case: EvalCaseV1;
-  treatment: {id: TreatmentId; setup: SetupStepV1[]};
+  treatment: { id: TreatmentId; setup: SetupStepV1[] };
   /** Invariant case setup followed by the selected treatment setup. */
   setup: SetupStepV1[];
   interaction: {
@@ -306,5 +306,5 @@ export interface ResolvedRunPlanV1 {
   role_player?: ModelRefV1;
   agent: AgentSelectionV1;
   runtime: ForgeRuntimeV1;
-  limits: {run_timeout_ms: number};
+  limits: { run_timeout_ms: number };
 }

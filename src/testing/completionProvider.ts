@@ -7,7 +7,7 @@ import type {
   CompletionRequest,
   CompletionResponse,
 } from '../contracts/completion.js';
-import {FORGE_VERSION} from '../version.js';
+import { FORGE_VERSION } from '../version.js';
 
 /** A concise response value accepted by the scripted provider. */
 export type ScriptedCompletionValue = string | CompletionResponse;
@@ -67,7 +67,7 @@ export function createScriptedCompletionProvider(
   const id = options.id ?? 'test-provider';
   const version = options.version ?? FORGE_VERSION;
   const responses = [...(options.responses ?? [])];
-  const requirements = options.requirements ?? {credentials: {}};
+  const requirements = options.requirements ?? { credentials: {} };
   const requirementCalls: CompletionProviderRequirementInput[] = [];
   const preflightCalls: CompletionProviderPreflightInput[] = [];
   const calls: RecordedCompletionCall[] = [];
@@ -97,7 +97,9 @@ export function createScriptedCompletionProvider(
       events.push(`complete:${request.purpose}`);
       const step = responses[nextResponse];
       if (step === undefined) {
-        throw new Error('Scripted completion provider has no remaining response.');
+        throw new Error(
+          'Scripted completion provider has no remaining response.',
+        );
       }
       nextResponse += 1;
       if (step instanceof Error) throw step;
@@ -139,7 +141,7 @@ function normalizeResponse(value: ScriptedCompletionValue): CompletionResponse {
     ? {
         content: value,
         stopReason: 'end_turn',
-        usage: {inputTokens: 0, outputTokens: 0, cachedInputTokens: 0},
+        usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
       }
     : value;
 }
@@ -147,7 +149,10 @@ function normalizeResponse(value: ScriptedCompletionValue): CompletionResponse {
 function copyRequirementInput(
   input: CompletionProviderRequirementInput,
 ): CompletionProviderRequirementInput {
-  return Object.freeze({model: Object.freeze({...input.model}), purpose: input.purpose});
+  return Object.freeze({
+    model: Object.freeze({ ...input.model }),
+    purpose: input.purpose,
+  });
 }
 
 function copyRequirements(
@@ -158,7 +163,7 @@ function copyRequirements(
       Object.fromEntries(
         Object.entries(input.credentials).map(([name, requirement]) => [
           name,
-          Object.freeze({...requirement}),
+          Object.freeze({ ...requirement }),
         ]),
       ),
     ),
@@ -170,9 +175,9 @@ function copyPreflightInput(
 ): CompletionProviderPreflightInput {
   return Object.freeze({
     runId: input.runId,
-    model: Object.freeze({...input.model}),
+    model: Object.freeze({ ...input.model }),
     purpose: input.purpose,
-    credentials: Object.freeze({...input.credentials}),
+    credentials: Object.freeze({ ...input.credentials }),
     signal: input.signal,
   });
 }
@@ -180,30 +185,36 @@ function copyPreflightInput(
 function copyCallContext(
   context: CompletionProviderCallContext,
 ): CompletionProviderCallContext {
-  return Object.freeze({credentials: Object.freeze({...context.credentials})});
+  return Object.freeze({
+    credentials: Object.freeze({ ...context.credentials }),
+  });
 }
 
 function copyRequest(request: CompletionRequest): CompletionRequest {
   return Object.freeze({
     runId: request.runId,
     purpose: request.purpose,
-    model: Object.freeze({...request.model}),
+    model: Object.freeze({ ...request.model }),
     ...(request.systemPrompt === undefined
       ? {}
-      : {systemPrompt: request.systemPrompt}),
+      : { systemPrompt: request.systemPrompt }),
     messages: Object.freeze(
-      request.messages.map((message) => Object.freeze({...message})),
+      request.messages.map((message) => Object.freeze({ ...message })),
     ),
     ...(request.temperature === undefined
       ? {}
-      : {temperature: request.temperature}),
-    ...(request.maxTokens === undefined ? {} : {maxTokens: request.maxTokens}),
+      : { temperature: request.temperature }),
+    ...(request.maxTokens === undefined
+      ? {}
+      : { maxTokens: request.maxTokens }),
     ...(request.responseSchema === undefined
       ? {}
       : {
           responseSchema: Object.freeze({
             ...request.responseSchema,
-            schema: Object.freeze(structuredClone(request.responseSchema.schema)),
+            schema: Object.freeze(
+              structuredClone(request.responseSchema.schema),
+            ),
           }),
         }),
     signal: request.signal,
@@ -214,7 +225,7 @@ function copyResponse(response: CompletionResponse): CompletionResponse {
   return Object.freeze({
     content: response.content,
     stopReason: response.stopReason,
-    usage: Object.freeze({...response.usage}),
-    ...(response.costUsd === undefined ? {} : {costUsd: response.costUsd}),
+    usage: Object.freeze({ ...response.usage }),
+    ...(response.costUsd === undefined ? {} : { costUsd: response.costUsd }),
   });
 }

@@ -1,4 +1,4 @@
-import type {RunPhase} from '../contracts/observability.js';
+import type { RunPhase } from '../contracts/observability.js';
 
 export type ForgeExecutionErrorCode =
   | 'aborted'
@@ -27,9 +27,14 @@ export class ForgeExecutionError extends Error {
 
 export function throwIfAborted(signal: AbortSignal, phase: RunPhase): void {
   if (!signal.aborted) return;
-  throw new ForgeExecutionError('aborted', phase, 'The Forge run was aborted.', {
-    cause: signal.reason,
-  });
+  throw new ForgeExecutionError(
+    'aborted',
+    phase,
+    'The Forge run was aborted.',
+    {
+      cause: signal.reason,
+    },
+  );
 }
 
 export function executionError(
@@ -40,5 +45,5 @@ export function executionError(
 ): ForgeExecutionError {
   return cause instanceof ForgeExecutionError
     ? cause
-    : new ForgeExecutionError(code, phase, message, {cause});
+    : new ForgeExecutionError(code, phase, message, { cause });
 }

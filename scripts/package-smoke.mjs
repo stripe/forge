@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const packageMetadata = JSON.parse(
   await fs.readFile(path.join(projectRoot, 'package.json'), 'utf8'),
 );
-const {packageManager, version: packageVersion} = packageMetadata;
+const { packageManager, version: packageVersion } = packageMetadata;
 if (typeof packageManager !== 'string' || packageManager.length === 0) {
   throw new Error('package.json must declare a packageManager.');
 }
@@ -28,7 +28,10 @@ try {
 
   run('pnpm', ['pack', '--pack-destination', packRoot], projectRoot);
   const packagedBuildIdentity = JSON.parse(
-    await fs.readFile(path.join(projectRoot, 'dist', 'build-info.json'), 'utf8'),
+    await fs.readFile(
+      path.join(projectRoot, 'dist', 'build-info.json'),
+      'utf8',
+    ),
   );
   const archives = (await fs.readdir(packRoot)).filter((entry) =>
     entry.endsWith('.tgz'),
@@ -51,11 +54,7 @@ try {
       2,
     )}\n`,
   );
-  run(
-    'pnpm',
-    ['add', '--offline', '--ignore-scripts', archive],
-    consumerRoot,
-  );
+  run('pnpm', ['add', '--offline', '--ignore-scripts', archive], consumerRoot);
 
   await fs.writeFile(
     path.join(consumerRoot, 'esm.mjs'),
@@ -302,7 +301,8 @@ try {
   // Compile the same public API contract through the packed package's declared
   // exports, so source-only type imports cannot hide missing consumer types.
   const publicApiTest = await fs.readFile(
-    path.join(projectRoot, 'test', 'experimentPublicApi.test.ts'), 'utf8',
+    path.join(projectRoot, 'test', 'experimentPublicApi.test.ts'),
+    'utf8',
   );
   const consumerImports = new Map([
     ['index', '@stripe/forge'],
@@ -311,24 +311,46 @@ try {
   ]);
   await fs.writeFile(
     path.join(consumerRoot, 'public-api-types.ts'),
-    publicApiTest.replace(/'\.\.\/src\/([A-Za-z]+)\.js'/g, (specifier, module) => {
-      const target = consumerImports.get(module);
-      if (target === undefined) throw new Error(`Unknown public API test import: ${specifier}`);
-      return `'${target}'`;
-    }),
+    publicApiTest.replace(
+      /'\.\.\/src\/([A-Za-z]+)\.js'/g,
+      (specifier, module) => {
+        const target = consumerImports.get(module);
+        if (target === undefined)
+          throw new Error(`Unknown public API test import: ${specifier}`);
+        return `'${target}'`;
+      },
+    ),
   );
-  run(process.execPath, [
-    path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
-    '--noEmit', '--strict', '--exactOptionalPropertyTypes', '--noUncheckedIndexedAccess', '--verbatimModuleSyntax',
-    '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022', '--lib', 'ES2023',
-    '--types', 'node', '--typeRoots', path.join(projectRoot, 'node_modules', '@types'),
-    'public-api-types.ts',
-  ], consumerRoot);
+  run(
+    process.execPath,
+    [
+      path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+      '--noEmit',
+      '--strict',
+      '--exactOptionalPropertyTypes',
+      '--noUncheckedIndexedAccess',
+      '--verbatimModuleSyntax',
+      '--module',
+      'NodeNext',
+      '--moduleResolution',
+      'NodeNext',
+      '--target',
+      'ES2022',
+      '--lib',
+      'ES2023',
+      '--types',
+      'node',
+      '--typeRoots',
+      path.join(projectRoot, 'node_modules', '@types'),
+      'public-api-types.ts',
+    ],
+    consumerRoot,
+  );
   assert.equal(
     execFileSync(
       path.join(consumerRoot, 'node_modules', '.bin', 'forge'),
       ['--version'],
-      {cwd: consumerRoot, encoding: 'utf8', env: {...process.env, CI: '1'}},
+      { cwd: consumerRoot, encoding: 'utf8', env: { ...process.env, CI: '1' } },
     ),
     `${packageVersion}\n`,
   );
@@ -354,13 +376,13 @@ try {
   );
   run(process.execPath, ['commonjs.cjs'], consumerRoot);
 } finally {
-  await fs.rm(temporaryRoot, {recursive: true, force: true});
+  await fs.rm(temporaryRoot, { recursive: true, force: true });
 }
 
 function run(command, arguments_, cwd) {
   execFileSync(command, arguments_, {
     cwd,
     stdio: 'inherit',
-    env: {...process.env, CI: '1'},
+    env: { ...process.env, CI: '1' },
   });
 }

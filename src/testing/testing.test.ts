@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   CommandExecutionError,
   type CommandResult,
 } from '../contracts/command.js';
-import type {RuntimePreparation} from '../contracts/runtime.js';
-import {executeEval} from '../execution/index.js';
+import type { RuntimePreparation } from '../contracts/runtime.js';
+import { executeEval } from '../execution/index.js';
 import {
   assertRuntimeAdapterConforms,
   createFakeRuntimeAdapter,
@@ -25,11 +25,11 @@ describe('@stripe/forge/testing', () => {
     const report = await assertRuntimeAdapterConforms(runtime.adapter, {
       runId: 'conformance-1',
       plan,
-      environment: {variables: {}, credentials: {}},
+      environment: { variables: {}, credentials: {} },
       requirements: {
         executables: [],
         stateDirectories: [
-          {id: 'agent-state', containerPath: '/home/forge/.agent'},
+          { id: 'agent-state', containerPath: '/home/forge/.agent' },
           {
             id: 'setup-state',
             containerPath: '/home/forge/.setup',
@@ -57,10 +57,10 @@ describe('@stripe/forge/testing', () => {
       caseSetup: [
         {
           uses: 'forge/write',
-          with: {target: 'answer.txt', source: {content: 'done'}},
+          with: { target: 'answer.txt', source: { content: 'done' } },
         },
       ],
-      checks: {files_created: ['answer.txt']},
+      checks: { files_created: ['answer.txt'] },
     });
     const runtime = createFakeRuntimeAdapter();
     const agent = createScriptedAgentAdapter();
@@ -81,7 +81,7 @@ describe('@stripe/forge/testing', () => {
 
     assert.equal(completed.result.evaluation.status, 'passed');
     assert.deepEqual(agent.messages, ['Complete the test task.']);
-    assert.ok((runtime.runs[0]!.events).includes('quiesce'));
+    assert.ok(runtime.runs[0]!.events.includes('quiesce'));
     assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
     assert.equal(artifacts.runs.get('unit-run-1')?.artifacts.size, 5);
     assert.equal(artifacts.events.at(-1), 'commit:unit-run-1');
@@ -91,15 +91,22 @@ describe('@stripe/forge/testing', () => {
     const input = conformanceInput();
     const runtime = createFakeRuntimeAdapter({
       command(command) {
-        const visible = Object.fromEntries(command.credentialEnvironmentNames.map(
-          (name) => [name, input.environment.credentials[name]!.value],
-        ));
+        const visible = Object.fromEntries(
+          command.credentialEnvironmentNames.map((name) => [
+            name,
+            input.environment.credentials[name]!.value,
+          ]),
+        );
         return commandResult(JSON.stringify(visible));
       },
     });
     await assertRuntimeAdapterConforms(runtime.adapter, input, {
       commandProbes: [
-        {scope: 'uncredentialed', argv: ['probe-environment'], expectedStdout: '{}'},
+        {
+          scope: 'uncredentialed',
+          argv: ['probe-environment'],
+          expectedStdout: '{}',
+        },
         {
           scope: 'setup',
           credentialEnvironmentNames: ['SETUP_TOKEN'],
@@ -129,94 +136,134 @@ describe('@stripe/forge/testing', () => {
     const runtime = createFakeRuntimeAdapter({
       command: () => commandResult('synthetic-secret-must-not-appear'),
     });
-    await assert.rejects(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
-      commandProbes: [{
-        scope: 'uncredentialed',
-        argv: ['probe-environment'],
-        expectedStdout: '{}',
-      }],
-    }), /expected uncredentialed result/);
+    await assert.rejects(
+      assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+        commandProbes: [
+          {
+            scope: 'uncredentialed',
+            argv: ['probe-environment'],
+            expectedStdout: '{}',
+          },
+        ],
+      }),
+      /expected uncredentialed result/,
+    );
     assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('checks that credentialed setup projections close after finalization', async () => {
     const runtime = createFakeRuntimeAdapter();
-    await assert.rejects(assertRuntimeAdapterConforms({
-      ...runtime.adapter,
-      async prepare(input) {
-        const prepared = await runtime.adapter.prepare(input);
-        return {
-          ...prepared,
-          commands: {
-            ...prepared.commands,
-            setup(names) {
-              if (names.length === 0) return prepared.commands.setup(names);
-              // This faulty projection never closes, even though every other
-              // command capability obeys the runtime lifecycle.
-              return {run: async () => commandResult('setup-visible')};
-            },
+    await assert.rejects(
+      assertRuntimeAdapterConforms(
+        {
+          ...runtime.adapter,
+          async prepare(input) {
+            const prepared = await runtime.adapter.prepare(input);
+            return {
+              ...prepared,
+              commands: {
+                ...prepared.commands,
+                setup(names) {
+                  if (names.length === 0) return prepared.commands.setup(names);
+                  // This faulty projection never closes, even though every other
+                  // command capability obeys the runtime lifecycle.
+                  return { run: async () => commandResult('setup-visible') };
+                },
+              },
+            };
           },
-        };
-      },
-    }, conformanceInput(), {
-      commandProbes: [{
-        scope: 'setup',
-        credentialEnvironmentNames: ['SETUP_TOKEN'],
-        argv: ['probe-environment'],
-        expectedStdout: 'setup-visible',
-      }],
-    }), /Probed setup command runner still accepted work after finalization/);
+        },
+        conformanceInput(),
+        {
+          commandProbes: [
+            {
+              scope: 'setup',
+              credentialEnvironmentNames: ['SETUP_TOKEN'],
+              argv: ['probe-environment'],
+              expectedStdout: 'setup-visible',
+            },
+          ],
+        },
+      ),
+      /Probed setup command runner still accepted work after finalization/,
+    );
     assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('probes cancellation only after the command reports readiness', async () => {
     let observedAbort = false;
     const runtime = createFakeRuntimeAdapter({
-      command: ({options}) => new Promise<CommandResult>((_resolve, reject) => {
-        options.signal!.addEventListener('abort', () => {
-          observedAbort = true;
-          reject(new CommandExecutionError('Probe was aborted.', 'command_aborted'));
-        }, {once: true});
-        options.onStdoutLine?.('ready');
-      }),
+      command: ({ options }) =>
+        new Promise<CommandResult>((_resolve, reject) => {
+          options.signal!.addEventListener(
+            'abort',
+            () => {
+              observedAbort = true;
+              reject(
+                new CommandExecutionError(
+                  'Probe was aborted.',
+                  'command_aborted',
+                ),
+              );
+            },
+            { once: true },
+          );
+          options.onStdoutLine?.('ready');
+        }),
     });
     await assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
-      cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready'},
+      cancellationProbe: { argv: ['probe-wait'], readyLine: 'ready' },
     });
     assert.equal(observedAbort, true);
     assert.deepEqual(runtime.runs[0]?.events, [
-      'prepare', 'finalizeSetup', 'command:agent', 'quiesce', 'dispose',
+      'prepare',
+      'finalizeSetup',
+      'command:agent',
+      'quiesce',
+      'dispose',
     ]);
   });
 
   it('does not mistake startup failure for successful cancellation', async () => {
     const runtime = createFakeRuntimeAdapter({
       command: () => {
-        throw new CommandExecutionError('Probe could not start.', 'command_start_failed');
+        throw new CommandExecutionError(
+          'Probe could not start.',
+          'command_start_failed',
+        );
       },
     });
-    await assert.rejects(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
-      cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready'},
-    }), /never reported readiness/);
+    await assert.rejects(
+      assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+        cancellationProbe: { argv: ['probe-wait'], readyLine: 'ready' },
+      }),
+      /never reported readiness/,
+    );
     assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('rejects commands which resolve or time out after cancellation', async () => {
     for (const behavior of ['resolve', 'timeout'] as const) {
       const runtime = createFakeRuntimeAdapter({
-        command: ({options}) => {
+        command: ({ options }) => {
           options.onStdoutLine?.('ready');
           if (behavior === 'timeout') {
-            throw new CommandExecutionError('Probe timed out.', 'command_timeout');
+            throw new CommandExecutionError(
+              'Probe timed out.',
+              'command_timeout',
+            );
           }
           return commandResult('');
         },
       });
-      await assert.rejects(assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
-        cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready'},
-      }), behavior === 'resolve'
-        ? /resolved after cancellation/
-        : /reason other than cancellation/);
+      await assert.rejects(
+        assertRuntimeAdapterConforms(runtime.adapter, conformanceInput(), {
+          cancellationProbe: { argv: ['probe-wait'], readyLine: 'ready' },
+        }),
+        behavior === 'resolve'
+          ? /resolved after cancellation/
+          : /reason other than cancellation/,
+      );
       assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
     }
   });
@@ -224,9 +271,11 @@ describe('@stripe/forge/testing', () => {
   it('bounds the wait for a command which ignores cancellation', async () => {
     let stopCommand!: (result: CommandResult) => void;
     const runtime = createFakeRuntimeAdapter({
-      command: ({options}) => {
+      command: ({ options }) => {
         options.onStdoutLine?.('ready');
-        return new Promise<CommandResult>((resolve) => { stopCommand = resolve; });
+        return new Promise<CommandResult>((resolve) => {
+          stopCommand = resolve;
+        });
       },
     });
     const ignoresCancellation = {
@@ -244,35 +293,51 @@ describe('@stripe/forge/testing', () => {
         };
       },
     };
-    await assert.rejects(assertRuntimeAdapterConforms(ignoresCancellation, conformanceInput(), {
-      cancellationProbe: {argv: ['probe-wait'], readyLine: 'ready', deadlineMs: 10},
-    }), /did not settle before its deadline/);
+    await assert.rejects(
+      assertRuntimeAdapterConforms(ignoresCancellation, conformanceInput(), {
+        cancellationProbe: {
+          argv: ['probe-wait'],
+          readyLine: 'ready',
+          deadlineMs: 10,
+        },
+      }),
+      /did not settle before its deadline/,
+    );
     assert.equal(runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('detects changed sealed bytes and still disposes the runtime', async () => {
     const runtime = createFakeRuntimeAdapter();
-    await assert.rejects(assertRuntimeAdapterConforms({
-      ...runtime.adapter,
-      async prepare(input) {
-        const prepared = await runtime.adapter.prepare(input);
-        return {
-          ...prepared,
-          async quiesce() {
-            const sealed = await prepared.quiesce();
+    await assert.rejects(
+      assertRuntimeAdapterConforms(
+        {
+          ...runtime.adapter,
+          async prepare(input) {
+            const prepared = await runtime.adapter.prepare(input);
             return {
-              ...sealed,
-              workspace: {
-                ...sealed.workspace,
-                readFile: async () => new Uint8Array([9, 9, 9]),
+              ...prepared,
+              async quiesce() {
+                const sealed = await prepared.quiesce();
+                return {
+                  ...sealed,
+                  workspace: {
+                    ...sealed.workspace,
+                    readFile: async () => new Uint8Array([9, 9, 9]),
+                  },
+                };
               },
             };
           },
-        };
-      },
-    }, conformanceInput()), /Sealed workspace did not preserve probe bytes/);
+        },
+        conformanceInput(),
+      ),
+      /Sealed workspace did not preserve probe bytes/,
+    );
     assert.deepEqual(runtime.runs[0]?.events, [
-      'prepare', 'finalizeSetup', 'quiesce', 'dispose',
+      'prepare',
+      'finalizeSetup',
+      'quiesce',
+      'dispose',
     ]);
   });
 });
@@ -284,18 +349,21 @@ function conformanceInput(): RuntimePreparation {
     environment: {
       variables: {},
       credentials: {
-        SETUP_TOKEN: {value: 'synthetic-setup-value', scopes: ['setup']},
-        OTHER_SETUP_TOKEN: {value: 'synthetic-other-setup-value', scopes: ['setup']},
-        AGENT_TOKEN: {value: 'synthetic-agent-value', scopes: ['agent']},
+        SETUP_TOKEN: { value: 'synthetic-setup-value', scopes: ['setup'] },
+        OTHER_SETUP_TOKEN: {
+          value: 'synthetic-other-setup-value',
+          scopes: ['setup'],
+        },
+        AGENT_TOKEN: { value: 'synthetic-agent-value', scopes: ['agent'] },
       },
     },
-    requirements: {executables: [], stateDirectories: []},
+    requirements: { executables: [], stateDirectories: [] },
     signal: new AbortController().signal,
   };
 }
 
 function commandResult(stdout: string): CommandResult {
-  return {stdout, stderr: '', exitCode: 0, durationMs: 0};
+  return { stdout, stderr: '', exitCode: 0, durationMs: 0 };
 }
 
 function incrementingClock(): () => Date {

@@ -1,9 +1,14 @@
-import {createHash, randomUUID} from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {fileURLToPath} from 'node:url';
-import type {CommandRunner} from '../../contracts/command.js';
+import { fileURLToPath } from 'node:url';
+import type { CommandRunner } from '../../contracts/command.js';
+import {
+  assertEnvironmentName,
+  type CredentialScope,
+  type ResolvedEnvironment,
+} from '../../contracts/credentials.js';
 import type {
   HostFileImport,
   MutableWorkspace,
@@ -16,24 +21,22 @@ import type {
   SealedRuntime,
   WorkspaceWriteOptions,
 } from '../../contracts/runtime.js';
-import {
-  assertEnvironmentName,
-  type CredentialScope,
-  type ResolvedEnvironment,
-} from '../../contracts/credentials.js';
-import type {ForgeDockerRuntimeV1, ForgeRuntimeV1} from '../../model/types.js';
+import type {
+  ForgeDockerRuntimeV1,
+  ForgeRuntimeV1,
+} from '../../model/types.js';
+import { hashStateFile, importHostFileIntoState } from '../hostFileImport.js';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
 } from '../processCommandRunner.js';
-import {createOwnedWorkspace} from '../workspace.js';
-import {hashStateFile, importHostFileIntoState} from '../hostFileImport.js';
+import { createOwnedWorkspace } from '../workspace.js';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.js';
-import {DockerCommandController} from './commandRunner.js';
+import { DockerCommandController } from './commandRunner.js';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -122,7 +125,7 @@ export async function validateDockerRuntimeHost(
     'operationTimeoutMs',
   );
   const probeName = `stripe-forge-host-probe-${randomUUID()}`;
-  let probe;
+  let probe: Awaited<ReturnType<typeof hostCommands.run>>;
   try {
     probe = await hostCommands.run(
       [
@@ -162,9 +165,11 @@ export async function validateDockerRuntimeHost(
     );
   }
   if (probe.exitCode !== 0) {
-    throw new Error('Docker could not execute the selected Forge runtime image.');
+    throw new Error(
+      'Docker could not execute the selected Forge runtime image.',
+    );
   }
-  return Object.freeze({platform: options.platform, imageId: image.id});
+  return Object.freeze({ platform: options.platform, imageId: image.id });
 }
 
 /** Forge-owned, Docker CLI based runtime. It accepts no host Dockerfile. */
@@ -192,7 +197,10 @@ export function createDockerRuntimeAdapter(
   const filesystemIdentity = resolveFilesystemIdentity();
   const imageBuilds = new Map<RuntimePlatform, SharedImageBuild>();
 
-  async function imageFor(platform: RuntimePlatform, signal: AbortSignal): Promise<BuiltForgeImage> {
+  async function imageFor(
+    platform: RuntimePlatform,
+    signal: AbortSignal,
+  ): Promise<BuiltForgeImage> {
     signal.throwIfAborted();
     let build = imageBuilds.get(platform);
     if (!build) {
@@ -209,14 +217,18 @@ export function createDockerRuntimeAdapter(
           signal: controller.signal,
           temporaryRoot,
           userId: filesystemIdentity.containerUserId,
-        }).then((image) => {
-          created.settled = true;
-          return image;
-        }, (error: unknown) => {
-          created.settled = true;
-          if (imageBuilds.get(platform) === created) imageBuilds.delete(platform);
-          throw error;
-        }),
+        }).then(
+          (image) => {
+            created.settled = true;
+            return image;
+          },
+          (error: unknown) => {
+            created.settled = true;
+            if (imageBuilds.get(platform) === created)
+              imageBuilds.delete(platform);
+            throw error;
+          },
+        ),
       };
       imageBuilds.set(platform, created);
       build = created;
@@ -227,7 +239,7 @@ export function createDockerRuntimeAdapter(
     try {
       return await new Promise<BuiltForgeImage>((resolve, reject) => {
         abort = () => reject(signal.reason);
-        signal.addEventListener('abort', abort, {once: true});
+        signal.addEventListener('abort', abort, { once: true });
         if (signal.aborted) abort();
         shared.promise.then(resolve, reject);
       });
@@ -246,7 +258,7 @@ export function createDockerRuntimeAdapter(
 
   return Object.freeze({
     id: 'forge/docker',
-    preflight({plan, requirements}: RuntimePreflight) {
+    preflight({ plan, requirements }: RuntimePreflight) {
       validateRuntime(plan.runtime);
       validateExecutableRequirements(requirements.executables);
       validateStateRequirements(requirements.stateDirectories);
@@ -264,18 +276,20 @@ export function createDockerRuntimeAdapter(
       const image = await imageFor(runtime.platform, input.signal);
       input.signal.throwIfAborted();
 
-      const runRoot = await fs.mkdtemp(path.join(temporaryRoot, 'stripe-forge-run-'));
+      const runRoot = await fs.mkdtemp(
+        path.join(temporaryRoot, 'stripe-forge-run-'),
+      );
       const workspaceRoot = path.join(runRoot, 'workspace');
       const homeRoot = path.join(runRoot, 'home');
       const stateRoot = path.join(runRoot, 'state');
       const importRoot = path.join(runRoot, 'imports');
       const environmentFileRoot = path.join(runRoot, 'environment');
       const cidFile = path.join(runRoot, 'container-id');
-      await fs.mkdir(workspaceRoot, {mode: 0o777});
-      await fs.mkdir(homeRoot, {mode: 0o777});
-      await fs.mkdir(stateRoot, {mode: 0o700});
-      await fs.mkdir(importRoot, {mode: 0o700});
-      await fs.mkdir(environmentFileRoot, {mode: 0o700});
+      await fs.mkdir(workspaceRoot, { mode: 0o777 });
+      await fs.mkdir(homeRoot, { mode: 0o777 });
+      await fs.mkdir(stateRoot, { mode: 0o700 });
+      await fs.mkdir(importRoot, { mode: 0o700 });
+      await fs.mkdir(environmentFileRoot, { mode: 0o700 });
       // The unpredictable parent remains 0700; the Docker VM's non-root user
       // needs write access only to these two run-owned mount leaves.
       await fs.chmod(workspaceRoot, 0o777);
@@ -299,7 +313,7 @@ export function createDockerRuntimeAdapter(
       const ownedWorkspace = await createOwnedWorkspace(workspaceRoot, {
         ...(filesystemIdentity.hostWriteOwner === undefined
           ? {}
-          : {writeOwner: filesystemIdentity.hostWriteOwner}),
+          : { writeOwner: filesystemIdentity.hostWriteOwner }),
       });
       const workspace = guardedWorkspace(ownedWorkspace, () => mutationOpen);
       const sealedWorkspace = readonlyWorkspace(ownedWorkspace);
@@ -316,9 +330,11 @@ export function createDockerRuntimeAdapter(
           // the home bind mount, preventing the agent from writing settings
           // beside them and the host user from cleaning up the run.
           let target = homeRoot;
-          for (const segment of requirement.containerPath.slice(CONTAINER_HOME.length + 1).split('/')) {
+          for (const segment of requirement.containerPath
+            .slice(CONTAINER_HOME.length + 1)
+            .split('/')) {
             target = path.join(target, segment);
-            await fs.mkdir(target, {recursive: true, mode: 0o777});
+            await fs.mkdir(target, { recursive: true, mode: 0o777 });
             await fs.chmod(target, 0o777);
             if (filesystemIdentity.hostWriteOwner !== undefined) {
               await fs.chown(
@@ -330,7 +346,7 @@ export function createDockerRuntimeAdapter(
           }
         }
         const source = path.join(stateRoot, requirement.id);
-        await fs.mkdir(source, {mode: 0o777});
+        await fs.mkdir(source, { mode: 0o777 });
         await fs.chmod(source, 0o777);
         if (filesystemIdentity.hostWriteOwner !== undefined) {
           await fs.chown(
@@ -342,18 +358,20 @@ export function createDockerRuntimeAdapter(
         const ownedState = await createOwnedWorkspace(source, {
           ...(filesystemIdentity.hostWriteOwner === undefined
             ? {}
-            : {writeOwner: filesystemIdentity.hostWriteOwner}),
+            : { writeOwner: filesystemIdentity.hostWriteOwner }),
         });
         stateDirectories.set(
           requirement.id,
           guardedWorkspace(
             ownedState,
             () =>
-              mutationOpen &&
-              (!requirement.sealAfterSetup || !setupFinalized),
+              mutationOpen && (!requirement.sealAfterSetup || !setupFinalized),
           ),
         );
-        sealedStateDirectories.set(requirement.id, readonlyWorkspace(ownedState));
+        sealedStateDirectories.set(
+          requirement.id,
+          readonlyWorkspace(ownedState),
+        );
         stateMounts.push({
           source,
           target: requirement.containerPath,
@@ -382,7 +400,9 @@ export function createDockerRuntimeAdapter(
           timeoutMs: operationTimeoutMs,
         });
         if (started.exitCode !== 0) {
-          throw new Error('Docker could not start the Forge runtime container.');
+          throw new Error(
+            'Docker could not start the Forge runtime container.',
+          );
         }
         containerExists = true;
       } catch (error) {
@@ -394,13 +414,16 @@ export function createDockerRuntimeAdapter(
           operationTimeoutMs,
           maximumCommandOutputBytes,
         );
-        await fs.rm(runRoot, {recursive: true, force: true});
+        await fs.rm(runRoot, { recursive: true, force: true });
         throw error;
       }
 
       const controller = new DockerCommandController({
         containerName,
-        defaultTimeoutMs: Math.min(input.plan.limits.run_timeout_ms, 10 * 60_000),
+        defaultTimeoutMs: Math.min(
+          input.plan.limits.run_timeout_ms,
+          10 * 60_000,
+        ),
         dockerExecutable,
         environment: input.environment,
         environmentFileRoot,
@@ -416,10 +439,16 @@ export function createDockerRuntimeAdapter(
       const waitForImports = async (): Promise<void> => {
         const settled = await Promise.allSettled([...activeImports]);
         const failures = settled
-          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .filter(
+            (result): result is PromiseRejectedResult =>
+              result.status === 'rejected',
+          )
           .map((result) => result.reason as unknown);
         if (failures.length > 0) {
-          throw new AggregateError(failures, 'Active host file imports failed.');
+          throw new AggregateError(
+            failures,
+            'Active host file imports failed.',
+          );
         }
       };
       let sealedPromise: Promise<SealedRuntime> | undefined;
@@ -476,28 +505,41 @@ export function createDockerRuntimeAdapter(
           home: CONTAINER_HOME,
         }),
         stateDirectories,
-        importHostFile(request: HostFileImport, signal?: AbortSignal): Promise<void> {
-          if (!importsOpen || !mutationOpen || disposePromise || sealedPromise) {
-            throw new Error('Docker runtime host imports are no longer available.');
+        importHostFile(
+          request: HostFileImport,
+          signal?: AbortSignal,
+        ): Promise<void> {
+          if (
+            !importsOpen ||
+            !mutationOpen ||
+            disposePromise ||
+            sealedPromise
+          ) {
+            throw new Error(
+              'Docker runtime host imports are no longer available.',
+            );
           }
-          const snapshot = Object.freeze({...request});
+          const snapshot = Object.freeze({ ...request });
           const requirement = stateRequirements.find(
-            ({id}) => id === snapshot.stateDirectoryId,
+            ({ id }) => id === snapshot.stateDirectoryId,
           );
           if (!requirement) {
             throw new Error('Host import requires a declared state directory.');
           }
           if (snapshot.verifyAfterSetup && !requirement.sealAfterSetup) {
-            throw new Error('Post-setup host import verification requires a sealed state directory.');
+            throw new Error(
+              'Post-setup host import verification requires a sealed state directory.',
+            );
           }
           const key = `${requirement.id}/${snapshot.relativePath}`;
           if (importedFiles.has(key) || activeImportTargets.has(key)) {
             throw new Error('A host import already targets this state file.');
           }
           activeImportTargets.add(key);
-          const importSignal = signal === undefined
-            ? input.signal
-            : AbortSignal.any([input.signal, signal]);
+          const importSignal =
+            signal === undefined
+              ? input.signal
+              : AbortSignal.any([input.signal, signal]);
           const importing = (async () => {
             await importHostFileIntoState(
               path.join(stateRoot, requirement.id),
@@ -532,7 +574,9 @@ export function createDockerRuntimeAdapter(
         }),
         async finalizeSetup(): Promise<void> {
           if (disposePromise || sealedPromise) {
-            throw new Error('Docker runtime cannot finalize setup after shutdown.');
+            throw new Error(
+              'Docker runtime cannot finalize setup after shutdown.',
+            );
           }
           if (setupFinalized) {
             throw new Error('Docker runtime setup has already been finalized.');
@@ -541,7 +585,7 @@ export function createDockerRuntimeAdapter(
           await waitForImports();
           await controller.finalizeSetupAndWait();
           setupFinalized = true;
-          if (stateMounts.some(({sealAfterSetup}) => sealAfterSetup)) {
+          if (stateMounts.some(({ sealAfterSetup }) => sealAfterSetup)) {
             const stopped = await hostCommands.run(
               [dockerExecutable, 'stop', '--time', '10', containerName],
               {
@@ -550,7 +594,9 @@ export function createDockerRuntimeAdapter(
               },
             );
             if (stopped.exitCode !== 0) {
-              throw new Error('Docker could not stop the Forge setup container.');
+              throw new Error(
+                'Docker could not stop the Forge setup container.',
+              );
             }
             const removed = await hostCommands.run(
               [dockerExecutable, 'rm', '--force', '--volumes', containerName],
@@ -560,7 +606,9 @@ export function createDockerRuntimeAdapter(
               },
             );
             if (removed.exitCode !== 0) {
-              throw new Error('Docker could not replace the Forge setup container.');
+              throw new Error(
+                'Docker could not replace the Forge setup container.',
+              );
             }
             containerExists = false;
             for (const imported of importedFiles.values()) {
@@ -577,7 +625,7 @@ export function createDockerRuntimeAdapter(
                 );
               }
             }
-            await fs.rm(cidFile, {force: true});
+            await fs.rm(cidFile, { force: true });
             try {
               const restarted = await hostCommands.run(startArgv(true), {
                 maxOutputBytes: maximumCommandOutputBytes,
@@ -608,7 +656,9 @@ export function createDockerRuntimeAdapter(
         },
         quiesce(): Promise<SealedRuntime> {
           if (disposePromise) {
-            return Promise.reject(new Error('Docker runtime is already disposing.'));
+            return Promise.reject(
+              new Error('Docker runtime is already disposing.'),
+            );
           }
           mutationOpen = false;
           importsOpen = false;
@@ -623,7 +673,9 @@ export function createDockerRuntimeAdapter(
               },
             );
             if (stopped.exitCode !== 0) {
-              throw new Error('Docker could not quiesce the Forge runtime container.');
+              throw new Error(
+                'Docker could not quiesce the Forge runtime container.',
+              );
             }
             return sealedRuntime();
           })();
@@ -698,13 +750,17 @@ interface SharedImageBuild {
   settled: boolean;
 }
 
-async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeImage> {
+async function buildForgeImage(
+  input: BuildForgeImageInput,
+): Promise<BuiltForgeImage> {
   const buildRoot = await fs.mkdtemp(
     path.join(input.temporaryRoot, 'stripe-forge-build-'),
   );
   const image = imageTag(input.platform, input.userId);
   try {
-    const dockerfile = await fs.readFile(path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'));
+    const dockerfile = await fs.readFile(
+      path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'),
+    );
     const entrypoint = await fs.readFile(
       path.join(PACKAGED_ASSET_ROOT, 'entrypoint.sh'),
     );
@@ -714,10 +770,16 @@ async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeI
       .update(entrypoint)
       .digest('hex');
     if (digest !== FORGE_RUNTIME_ASSET_DIGEST) {
-      throw new Error('Packaged Forge Docker assets do not match their digest.');
+      throw new Error(
+        'Packaged Forge Docker assets do not match their digest.',
+      );
     }
-    await fs.writeFile(path.join(buildRoot, 'Dockerfile'), dockerfile, {mode: 0o644});
-    await fs.writeFile(path.join(buildRoot, 'entrypoint.sh'), entrypoint, {mode: 0o755});
+    await fs.writeFile(path.join(buildRoot, 'Dockerfile'), dockerfile, {
+      mode: 0o644,
+    });
+    await fs.writeFile(path.join(buildRoot, 'entrypoint.sh'), entrypoint, {
+      mode: 0o755,
+    });
     const built = await input.hostCommands.run(
       [
         input.dockerExecutable,
@@ -760,9 +822,9 @@ async function buildForgeImage(input: BuildForgeImageInput): Promise<BuiltForgeI
     if (inspected.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(id)) {
       throw new Error('Docker did not return an immutable Forge image ID.');
     }
-    return Object.freeze({tag: image, id});
+    return Object.freeze({ tag: image, id });
   } finally {
-    await fs.rm(buildRoot, {recursive: true, force: true});
+    await fs.rm(buildRoot, { recursive: true, force: true });
   }
 }
 
@@ -811,13 +873,9 @@ function dockerRunArgv(input: {
     mountArgument(input.workspaceRoot, '/workspace'),
     '--mount',
     mountArgument(input.homeRoot, '/home/forge'),
-    ...input.stateMounts.flatMap(({source, target, sealAfterSetup}) => [
+    ...input.stateMounts.flatMap(({ source, target, sealAfterSetup }) => [
       '--mount',
-      mountArgument(
-        source,
-        target,
-        input.sealSetupState && sealAfterSetup,
-      ),
+      mountArgument(source, target, input.sealSetupState && sealAfterSetup),
     ]),
     '--workdir',
     '/workspace',
@@ -844,21 +902,29 @@ async function disposeRuntime(input: {
   if (input.shouldRemoveContainer()) {
     try {
       const removed = await input.hostCommands.run(
-        [input.dockerExecutable, 'rm', '--force', '--volumes', input.containerName],
+        [
+          input.dockerExecutable,
+          'rm',
+          '--force',
+          '--volumes',
+          input.containerName,
+        ],
         {
           maxOutputBytes: input.maximumCommandOutputBytes,
           timeoutMs: input.operationTimeoutMs,
         },
       );
       if (removed.exitCode !== 0) {
-        failures.push(new Error('Docker could not remove the Forge runtime container.'));
+        failures.push(
+          new Error('Docker could not remove the Forge runtime container.'),
+        );
       }
     } catch (error) {
       failures.push(error);
     }
   }
   try {
-    await fs.rm(input.runRoot, {recursive: true, force: true});
+    await fs.rm(input.runRoot, { recursive: true, force: true });
   } catch (error) {
     failures.push(error);
   }
@@ -889,7 +955,9 @@ function validateRuntime(runtime: ForgeRuntimeV1): ForgeDockerRuntimeV1 {
     runtime.image.kind !== 'forge' ||
     (runtime.platform !== 'linux/amd64' && runtime.platform !== 'linux/arm64')
   ) {
-    throw new TypeError('Forge v1 supports only its owned Docker runtime image.');
+    throw new TypeError(
+      'Forge v1 supports only its owned Docker runtime image.',
+    );
   }
   positive(runtime.resources.memory_bytes, 'runtime.resources.memory_bytes');
   positive(runtime.resources.cpu_count, 'runtime.resources.cpu_count');
@@ -897,7 +965,9 @@ function validateRuntime(runtime: ForgeRuntimeV1): ForgeDockerRuntimeV1 {
   return runtime;
 }
 
-function validateEnvironment(environment: RuntimePreparation['environment']): void {
+function validateEnvironment(
+  environment: RuntimePreparation['environment'],
+): void {
   const seen = new Set<string>();
   for (const [name, value] of Object.entries(environment.variables)) {
     assertEnvironmentName(name);
@@ -909,7 +979,9 @@ function validateEnvironment(environment: RuntimePreparation['environment']): vo
   for (const [name, binding] of Object.entries(environment.credentials)) {
     assertEnvironmentName(name);
     if (seen.has(name)) {
-      throw new TypeError(`Environment variable ${name} has conflicting bindings.`);
+      throw new TypeError(
+        `Environment variable ${name} has conflicting bindings.`,
+      );
     }
     if (!binding.value || binding.value.includes('\0')) {
       throw new TypeError(`Invalid credential environment variable: ${name}`);
@@ -931,10 +1003,14 @@ function validateExecutableRequirements(
       executable.length > 1_024 ||
       executable.includes('\0')
     ) {
-      throw new TypeError('Runtime executable requirements must be bounded non-empty strings.');
+      throw new TypeError(
+        'Runtime executable requirements must be bounded non-empty strings.',
+      );
     }
     if (seen.has(executable)) {
-      throw new TypeError(`Duplicate runtime executable requirement: ${executable}`);
+      throw new TypeError(
+        `Duplicate runtime executable requirement: ${executable}`,
+      );
     }
     seen.add(executable);
     return executable;
@@ -957,10 +1033,12 @@ async function assertExecutablesAvailable(
         'forge-executable-check',
         executable,
       ],
-      {signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024},
+      { signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024 },
     );
     if (result.exitCode !== 0) {
-      throw new Error(`Required runtime executable is unavailable: ${executable}`);
+      throw new Error(
+        `Required runtime executable is unavailable: ${executable}`,
+      );
     }
   }
 }
@@ -978,9 +1056,7 @@ function validateStateRequirements(
       Reflect.ownKeys(requirement).some(
         (key) =>
           typeof key !== 'string' ||
-          (key !== 'id' &&
-            key !== 'containerPath' &&
-            key !== 'sealAfterSetup'),
+          (key !== 'id' && key !== 'containerPath' && key !== 'sealAfterSetup'),
       ) ||
       (Object.hasOwn(requirement, 'sealAfterSetup') &&
         typeof requirement.sealAfterSetup !== 'boolean')
@@ -988,10 +1064,14 @@ function validateStateRequirements(
       throw new TypeError('Invalid runtime state directory requirement.');
     }
     if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(requirement.id)) {
-      throw new TypeError(`Invalid runtime state directory id: ${requirement.id}`);
+      throw new TypeError(
+        `Invalid runtime state directory id: ${requirement.id}`,
+      );
     }
     if (ids.has(requirement.id)) {
-      throw new TypeError(`Duplicate runtime state directory id: ${requirement.id}`);
+      throw new TypeError(
+        `Duplicate runtime state directory id: ${requirement.id}`,
+      );
     }
     if (
       !(
@@ -1001,7 +1081,8 @@ function validateStateRequirements(
       ) ||
       requirement.containerPath.includes('\0') ||
       requirement.containerPath.includes('\\') ||
-      path.posix.normalize(requirement.containerPath) !== requirement.containerPath
+      path.posix.normalize(requirement.containerPath) !==
+        requirement.containerPath
     ) {
       throw new TypeError(
         `Runtime state directory must be a canonical child of ${CONTAINER_HOME}, or a sealed child of /opt: ${requirement.containerPath}`,
@@ -1041,14 +1122,15 @@ function containerNameFor(runId: string): string {
 
 function resolveFilesystemIdentity(): Readonly<{
   containerUserId: number;
-  hostWriteOwner?: Readonly<{uid: number; gid: number}>;
+  hostWriteOwner?: Readonly<{ uid: number; gid: number }>;
 }> {
-  const hostUserId = typeof process.getuid === 'function'
-    ? process.getuid()
-    : undefined;
+  const hostUserId =
+    typeof process.getuid === 'function' ? process.getuid() : undefined;
   if (
     hostUserId !== undefined &&
-    (!Number.isSafeInteger(hostUserId) || hostUserId < 0 || hostUserId > 0xffff_fffe)
+    (!Number.isSafeInteger(hostUserId) ||
+      hostUserId < 0 ||
+      hostUserId > 0xffff_fffe)
   ) {
     throw new Error('Forge Docker runtime cannot represent the host user ID.');
   }
@@ -1078,7 +1160,9 @@ function mountArgument(
   readonly = false,
 ): string {
   if (source.includes(',') || source.includes('\0')) {
-    throw new TypeError('Docker runtime mount path contains an unsupported character.');
+    throw new TypeError(
+      'Docker runtime mount path contains an unsupported character.',
+    );
   }
   return `type=bind,source=${source},target=${target}${readonly ? ',readonly' : ''}`;
 }

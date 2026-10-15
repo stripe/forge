@@ -1,6 +1,9 @@
-import type {ResolvedRunPlanV1} from '../model/types.js';
-import type {CommandRunner} from './command.js';
-import type {ResolvedEnvironment, ScopedEnvironmentSpecification} from './credentials.js';
+import type { ResolvedRunPlanV1 } from '../model/types.js';
+import type { CommandRunner } from './command.js';
+import type {
+  ResolvedEnvironment,
+  ScopedEnvironmentSpecification,
+} from './credentials.js';
 
 export type RuntimePlatform = 'linux/amd64' | 'linux/arm64';
 
@@ -71,7 +74,10 @@ export interface HostFileImport {
 
 export interface ReadonlyWorkspace {
   inspect(relativePath: string): Promise<WorkspaceEntry>;
-  readFile(relativePath: string, options?: {maxBytes?: number}): Promise<Uint8Array>;
+  readFile(
+    relativePath: string,
+    options?: { maxBytes?: number },
+  ): Promise<Uint8Array>;
   /** Stable lexical order. Symlinks are reported but never traversed. */
   listFiles(options?: WorkspaceListOptions): Promise<readonly WorkspaceEntry[]>;
 }

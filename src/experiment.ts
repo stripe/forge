@@ -1,38 +1,37 @@
-import {randomUUID} from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {z} from 'zod';
-
+import { z } from 'zod';
+import type { ForgeComposition } from './contracts/composition.js';
+import type { ForgeEngine } from './engine.js';
+import { ForgeExecutionError } from './execution/errors.js';
+import type { ExecuteEvalInput } from './execution/execute.js';
 import {
-  experimentRunIdSchema as runIdSchema,
-  parseExperimentRunCheckpoint,
-  type ExperimentRunCheckpoint,
   type ExperimentRunAttempt as Attempt,
+  type ExperimentRunCheckpoint,
+  parseExperimentRunCheckpoint,
+  experimentRunIdSchema as runIdSchema,
   type SettledExperimentRunAttempt as SettledAttempt,
 } from './experimentModel.js';
 import {
   buildExperimentRunReport,
-  serializeExperimentRunReport,
   type ExperimentRunReportEvaluationV1,
   type ExperimentRunReportRunV1,
+  serializeExperimentRunReport,
 } from './experimentReport.js';
-import type {ForgeComposition} from './contracts/composition.js';
-import type {ForgeEngine} from './engine.js';
-import {ForgeExecutionError} from './execution/errors.js';
-import type {ExecuteEvalInput} from './execution/execute.js';
-import type {ResolvedRunPlanV1, RunSelection} from './model/types.js';
-import {resolvedRunPlanSha256} from './planning/planner.js';
-import type {CompletedRunV1, EvalStatus} from './results/types.js';
-import {serializeCanonicalJson} from './serialization.js';
-import {FORGE_BUILD_IDENTITY} from './version.js';
+import type { ResolvedRunPlanV1, RunSelection } from './model/types.js';
+import { resolvedRunPlanSha256 } from './planning/planner.js';
+import type { CompletedRunV1, EvalStatus } from './results/types.js';
+import { serializeCanonicalJson } from './serialization.js';
+import { FORGE_BUILD_IDENTITY } from './version.js';
 
 export {
-  parseExperimentRunReport,
   type ExperimentRunReportCaseV1,
   type ExperimentRunReportEvaluationV1,
   type ExperimentRunReportRunV1,
   type ExperimentRunReportStatisticsV1,
   type ExperimentRunReportV1,
+  parseExperimentRunReport,
 } from './experimentReport.js';
 
 const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
@@ -41,7 +40,10 @@ const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
 export class ExperimentRunReportError extends Error {
   readonly report: string;
   constructor(report: string, cause: unknown) {
-    super(`Could not write experiment run report at ${report}. Saved evaluations can be resumed without rerunning completed entries.`, {cause});
+    super(
+      `Could not write experiment run report at ${report}. Saved evaluations can be resumed without rerunning completed entries.`,
+      { cause },
+    );
     this.name = 'ExperimentRunReportError';
     this.report = report;
   }
@@ -50,7 +52,7 @@ export class ExperimentRunReportError extends Error {
 /** Bounded metadata from a verified local commit, independent of publication. */
 export interface ExperimentRunArtifact {
   readonly location: string;
-  readonly evaluation: {readonly status: EvalStatus; readonly score: number};
+  readonly evaluation: { readonly status: EvalStatus; readonly score: number };
   readonly failure: 'role_player_error' | null;
 }
 
@@ -60,7 +62,9 @@ export interface ExperimentRunOutcome {
   readonly plan_sha256: string;
   readonly run_id: string | null;
   readonly state: 'pending' | 'completed' | 'errored';
-  readonly error_code: Extract<Attempt, {state: 'errored'}>['error_code'] | null;
+  readonly error_code:
+    | Extract<Attempt, { state: 'errored' }>['error_code']
+    | null;
   readonly artifact: ExperimentRunArtifact | null;
 }
 
@@ -72,7 +76,7 @@ export interface ExperimentRunInspection {
 }
 
 export type ExperimentRunProgressEvent =
-  | {readonly state: 'started' | 'resuming'; readonly location: string}
+  | { readonly state: 'started' | 'resuming'; readonly location: string }
   | {
       readonly state: 'running' | 'completed' | 'skipped';
       readonly selection: RunSelection;
@@ -82,7 +86,7 @@ export type ExperimentRunProgressEvent =
       readonly state: 'errored';
       readonly selection: RunSelection;
       readonly run_id: string;
-      readonly error_code: Extract<Attempt, {state: 'errored'}>['error_code'];
+      readonly error_code: Extract<Attempt, { state: 'errored' }>['error_code'];
     };
 
 export interface ExperimentRunSummary {
@@ -96,10 +100,12 @@ export interface ExperimentRunSummary {
 }
 
 /** Resume the original selection even when the new invocation has no filters. */
-export async function readExperimentRunSelections(root: string): Promise<RunSelection[]> {
+export async function readExperimentRunSelections(
+  root: string,
+): Promise<RunSelection[]> {
   root = path.resolve(root);
   const experimentRun = await requireExperimentRun(root);
-  return experimentRun.entries.map(({selection}) => selection);
+  return experimentRun.entries.map(({ selection }) => selection);
 }
 
 /** Verify latest committed attempts without loading inputs or changing state. */
@@ -116,23 +122,48 @@ export async function inspectExperimentRun(options: {
     options.signal?.throwIfAborted();
     const last = entry.attempts.at(-1);
     if (last === undefined) {
-      outcomes.push({selection: entry.selection, plan_sha256: entry.plan_sha256,
-        run_id: null, state: 'pending', error_code: null, artifact: null});
+      outcomes.push({
+        selection: entry.selection,
+        plan_sha256: entry.plan_sha256,
+        run_id: null,
+        state: 'pending',
+        error_code: null,
+        artifact: null,
+      });
       continue;
     }
-    const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, last.run_id, entry.selection);
-    const attempt = inspected.artifact === null && last.state === 'errored' ? last : inspected.attempt;
+    const inspected = await inspectAttempt(
+      options.engine,
+      root,
+      entry.plan_sha256,
+      last.run_id,
+      entry.selection,
+    );
+    const attempt =
+      inspected.artifact === null && last.state === 'errored'
+        ? last
+        : inspected.attempt;
     outcomes.push(experimentRunOutcome(entry, attempt, inspected.artifact));
   }
   options.signal?.throwIfAborted();
-  return {experiment_run_id: experimentRun.experiment_run_id, location: root,
-    checkpoint: path.join(root, 'experiment.json'), outcomes};
+  return {
+    experiment_run_id: experimentRun.experiment_run_id,
+    location: root,
+    checkpoint: path.join(root, 'experiment.json'),
+    outcomes,
+  };
 }
 
-async function requireExperimentRun(root: string): Promise<ExperimentRunCheckpoint> {
-  const experimentRun = await readExperimentRunCheckpoint(path.join(root, 'experiment.json'));
+async function requireExperimentRun(
+  root: string,
+): Promise<ExperimentRunCheckpoint> {
+  const experimentRun = await readExperimentRunCheckpoint(
+    path.join(root, 'experiment.json'),
+  );
   if (experimentRun === undefined) {
-    throw new Error('No experiment run with this ID exists in the output directory.');
+    throw new Error(
+      'No experiment run with this ID exists in the output directory.',
+    );
   }
   if (experimentRun.experiment_run_id !== path.basename(root)) {
     throw new Error('Experiment run ID does not match its checkpoint.');
@@ -159,11 +190,16 @@ export interface ExperimentRunOptions {
   readonly runIdFactory: () => string;
   readonly progress: (event: ExperimentRunProgressEvent) => void;
   /** Synchronous result collection, including verified selections skipped on resume. */
-  readonly onOutcome?: (outcome: ExperimentRunOutcome, selectionIndex: number) => void;
+  readonly onOutcome?: (
+    outcome: ExperimentRunOutcome,
+    selectionIndex: number,
+  ) => void;
 }
 
 /** Execute each pending selection once, retaining all earlier attempt IDs. */
-export async function runExperiment(options: ExperimentRunOptions): Promise<ExperimentRunSummary> {
+export async function runExperiment(
+  options: ExperimentRunOptions,
+): Promise<ExperimentRunSummary> {
   const jobs = options.jobs ?? 1;
   if (!Number.isSafeInteger(jobs) || jobs < 1) {
     throw new Error('Experiment run jobs must be a positive safe integer.');
@@ -180,29 +216,42 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
   parseExperimentRunCheckpoint({
     forge: FORGE_BUILD_IDENTITY,
     experiment_run_id: path.basename(root),
-    entries: identities.map((identity) => ({...identity, attempts: []})),
+    entries: identities.map((identity) => ({ ...identity, attempts: [] })),
   });
   for (const plan of options.plans) {
-    options.engine.preflightEval({plan, composition: options.composition});
+    options.engine.preflightEval({ plan, composition: options.composition });
   }
   options.signal.throwIfAborted();
   if (options.resume) {
     const stat = await fs.lstat(root);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid experiment run directory.');
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+      throw new Error('Invalid experiment run directory.');
   } else {
-    await fs.mkdir(path.dirname(root), {recursive: true});
+    await fs.mkdir(path.dirname(root), { recursive: true });
     await fs.mkdir(root);
   }
   const release = await acquireExperimentRunLock(root);
   const checkpoint = path.join(root, 'experiment.json');
   const reportPath = path.join(root, 'report.json');
   const inspections = new Map<string, CachedInspection>();
-  const inspect = async (entry: ExperimentRunCheckpoint['entries'][number], runId: string): Promise<AttemptInspection> => {
-    const identity = serializeCanonicalJson({selection: entry.selection, plan_sha256: entry.plan_sha256});
+  const inspect = async (
+    entry: ExperimentRunCheckpoint['entries'][number],
+    runId: string,
+  ): Promise<AttemptInspection> => {
+    const identity = serializeCanonicalJson({
+      selection: entry.selection,
+      plan_sha256: entry.plan_sha256,
+    });
     const cached = inspections.get(runId);
     if (cached?.identity === identity) return cached.inspected;
-    const inspected = await inspectAttempt(options.engine, root, entry.plan_sha256, runId, entry.selection);
-    inspections.set(runId, {identity, inspected});
+    const inspected = await inspectAttempt(
+      options.engine,
+      root,
+      entry.plan_sha256,
+      runId,
+      entry.selection,
+    );
+    inspections.set(runId, { identity, inspected });
     return inspected;
   };
   let reportReady = false;
@@ -210,30 +259,44 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
   try {
     let experimentRun = await readExperimentRunCheckpoint(checkpoint);
     if (experimentRun === undefined) {
-      if (options.resume) throw new Error('No experiment.json to resume in the output directory.');
+      if (options.resume)
+        throw new Error(
+          'No experiment.json to resume in the output directory.',
+        );
       experimentRun = parseExperimentRunCheckpoint({
         forge: FORGE_BUILD_IDENTITY,
         experiment_run_id: path.basename(root),
-        entries: identities.map((identity) => ({...identity, attempts: []})),
+        entries: identities.map((identity) => ({ ...identity, attempts: [] })),
       });
     } else {
       if (!options.resume) {
-        throw new Error('This experiment run already exists; resume it with its ID.');
+        throw new Error(
+          'This experiment run already exists; resume it with its ID.',
+        );
       }
       if (experimentRun.experiment_run_id !== path.basename(root)) {
         throw new Error('Experiment run ID does not match its checkpoint.');
       }
-      const storedIdentities = experimentRun.entries.map(({selection, plan_sha256}) => ({
-        selection, plan_sha256,
-      }));
-      if (serializeCanonicalJson(storedIdentities) !== serializeCanonicalJson(identities)) {
-        throw new Error('Cannot resume: the selected resolved plans differ from the saved experiment run.');
+      const storedIdentities = experimentRun.entries.map(
+        ({ selection, plan_sha256 }) => ({
+          selection,
+          plan_sha256,
+        }),
+      );
+      if (
+        serializeCanonicalJson(storedIdentities) !==
+        serializeCanonicalJson(identities)
+      ) {
+        throw new Error(
+          'Cannot resume: the selected resolved plans differ from the saved experiment run.',
+        );
       }
     }
     const runIds = new Set<string>();
     for (const entry of experimentRun.entries) {
       for (const attempt of entry.attempts) {
-        if (runIds.has(attempt.run_id)) throw new Error('Experiment run contains duplicate run IDs.');
+        if (runIds.has(attempt.run_id))
+          throw new Error('Experiment run contains duplicate run IDs.');
         runIds.add(attempt.run_id);
       }
     }
@@ -258,15 +321,25 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
         }
         if (recovered.state === 'completed') {
           skipped += 1;
-          options.onOutcome?.(experimentRunOutcome(entry, recovered, inspected.artifact), index);
-          options.progress({selection: entry.selection, run_id: last.run_id, state: 'skipped'});
+          options.onOutcome?.(
+            experimentRunOutcome(entry, recovered, inspected.artifact),
+            index,
+          );
+          options.progress({
+            selection: entry.selection,
+            run_id: last.run_id,
+            state: 'skipped',
+          });
           continue;
         }
       }
       pending.push(index);
     }
     await writeExperimentRunCheckpoint(checkpoint, experimentRun);
-    options.progress({state: options.resume ? 'resuming' : 'started', location: root});
+    options.progress({
+      state: options.resume ? 'resuming' : 'started',
+      location: root,
+    });
     let completed = skipped;
     let errored = 0;
     let executed = 0;
@@ -293,7 +366,10 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
           throw error;
         }
       });
-      updates = operation.then(() => undefined, () => undefined);
+      updates = operation.then(
+        () => undefined,
+        () => undefined,
+      );
       return operation;
     }
     async function worker() {
@@ -305,17 +381,24 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
             if (index === undefined) return undefined;
             const entry = experimentRun!.entries[index]!;
             const runId = runIdSchema.parse(options.runIdFactory());
-            if (runIds.has(runId) || await exists(path.join(root, 'runs', runId))) {
+            if (
+              runIds.has(runId) ||
+              (await exists(path.join(root, 'runs', runId)))
+            ) {
               throw new Error('Eval run ID already exists.');
             }
             runIds.add(runId);
-            entry.attempts.push({run_id: runId, state: 'running'});
+            entry.attempts.push({ run_id: runId, state: 'running' });
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            options.progress({selection: entry.selection, run_id: runId, state: 'running'});
-            return {index, runId, entry};
+            options.progress({
+              selection: entry.selection,
+              run_id: runId,
+              state: 'running',
+            });
+            return { index, runId, entry };
           });
           if (task === undefined) return;
-          const {index, runId, entry} = task;
+          const { index, runId, entry } = task;
           let attempt: SettledAttempt;
           let artifact: ExperimentRunArtifact | null = null;
           try {
@@ -332,7 +415,9 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
               fs.realpath(path.join(root, 'runs', runId)),
             ]);
             if (actualLocation !== expectedLocation) {
-              throw new Error('Experiment runs require the local artifact store at the selected output directory.');
+              throw new Error(
+                'Experiment runs require the local artifact store at the selected output directory.',
+              );
             }
             const inspected = await inspect(entry, runId);
             attempt = inspected.attempt;
@@ -343,8 +428,11 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
             attempt = {
               run_id: runId,
               state: 'errored',
-              error_code: signal.aborted ? 'aborted'
-                : error instanceof ForgeExecutionError ? error.code : 'execution_error',
+              error_code: signal.aborted
+                ? 'aborted'
+                : error instanceof ForgeExecutionError
+                  ? error.code
+                  : 'execution_error',
             };
             // A callback can fail after its local commit (for example during
             // host cleanup). Keep the execution error while exposing verified
@@ -354,10 +442,13 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            options.progress({selection: entry.selection, ...attempt});
+            options.progress({ selection: entry.selection, ...attempt });
             if (attempt.state === 'completed') completed += 1;
             else errored += 1;
-            options.onOutcome?.(experimentRunOutcome(entry, attempt, artifact), index);
+            options.onOutcome?.(
+              experimentRunOutcome(entry, attempt, artifact),
+              index,
+            );
           });
         }
       } catch (error) {
@@ -366,7 +457,9 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
     }
     // Retain the experiment run lock until every active callback has cleaned up,
     // including when cancellation or a coordinator failure stops new work.
-    await Promise.all(Array.from({length: Math.min(jobs, pending.length)}, () => worker()));
+    await Promise.all(
+      Array.from({ length: Math.min(jobs, pending.length) }, () => worker()),
+    );
     if (failed) throw failure;
     options.signal.throwIfAborted();
     succeeded = true;
@@ -386,33 +479,70 @@ export async function runExperiment(options: ExperimentRunOptions): Promise<Expe
           // Read the last durable checkpoint, including after coordinator
           // failures. Workers have drained and this process still owns the lock.
           const source = await readExperimentRunSource(checkpoint);
-          if (source === undefined) throw new Error('Experiment run checkpoint is missing.');
+          if (source === undefined) {
+            // biome-ignore lint/correctness/noUnsafeFinally: The report catch below preserves any original execution failure.
+            throw new Error('Experiment run checkpoint is missing.');
+          }
           if (source.experimentRun.experiment_run_id !== path.basename(root)) {
-            throw new Error('Experiment run checkpoint identity does not match its directory.');
+            // biome-ignore lint/correctness/noUnsafeFinally: The report catch below preserves any original execution failure.
+            throw new Error(
+              'Experiment run checkpoint identity does not match its directory.',
+            );
           }
           const runs: ExperimentRunReportRunV1[] = [];
           for (const [index, entry] of source.experimentRun.entries.entries()) {
             const last = entry.attempts.at(-1);
             if (last === undefined) {
-              runs.push({selection_index: index, selection: entry.selection, run_id: null,
-                state: 'pending', error_code: null, attempt_count: 0, result_path: null, evaluation: null});
+              runs.push({
+                selection_index: index,
+                selection: entry.selection,
+                run_id: null,
+                state: 'pending',
+                error_code: null,
+                attempt_count: 0,
+                result_path: null,
+                evaluation: null,
+              });
               continue;
             }
             const inspected = await inspect(entry, last.run_id);
-            const effective = inspected.artifact === null && last.state === 'errored' ? last : inspected.attempt;
-            runs.push({selection_index: index, selection: entry.selection, run_id: last.run_id,
-              state: effective.state, error_code: effective.state === 'errored' ? effective.error_code : null,
+            const effective =
+              inspected.artifact === null && last.state === 'errored'
+                ? last
+                : inspected.attempt;
+            runs.push({
+              selection_index: index,
+              selection: entry.selection,
+              run_id: last.run_id,
+              state: effective.state,
+              error_code:
+                effective.state === 'errored' ? effective.error_code : null,
               attempt_count: entry.attempts.length,
-              result_path: inspected.artifact === null ? null : `runs/${last.run_id}/result.json`,
-              evaluation: effective.state === 'completed' ? inspected.evaluation : null});
+              result_path:
+                inspected.artifact === null
+                  ? null
+                  : `runs/${last.run_id}/result.json`,
+              evaluation:
+                effective.state === 'completed' ? inspected.evaluation : null,
+            });
           }
-          const report = buildExperimentRunReport({experimentRunId: source.experimentRun.experiment_run_id,
-            generatedAt: new Date().toISOString(), checkpointBody: source.body, runs});
-          await writeAtomicDocument(reportPath, serializeExperimentRunReport(report));
+          const report = buildExperimentRunReport({
+            experimentRunId: source.experimentRun.experiment_run_id,
+            generatedAt: new Date().toISOString(),
+            checkpointBody: source.body,
+            runs,
+          });
+          await writeAtomicDocument(
+            reportPath,
+            serializeExperimentRunReport(report),
+          );
         } catch (error) {
           // Report generation is best effort after interruption. Preserve the
           // original failure, but surface reporting failure on normal completion.
-          if (succeeded && !options.signal.aborted) throw new ExperimentRunReportError(reportPath, error);
+          if (succeeded && !options.signal.aborted) {
+            // biome-ignore lint/correctness/noUnsafeFinally: Report failure replaces only a successful result.
+            throw new ExperimentRunReportError(reportPath, error);
+          }
         }
       }
       if (succeeded) options.signal.throwIfAborted();
@@ -442,23 +572,51 @@ async function inspectAttempt(
   try {
     const location = path.join(root, 'runs', runId);
     const completed = await engine.verifyCompletedRun(location);
-    const descriptor = completed.result.artifacts.find((artifact) => artifact.path === 'plan.json');
-    if (descriptor?.sha256 !== planDigest) throw new Error('Run belongs to a different plan.');
-    if (serializeCanonicalJson(completed.result.selection) !== serializeCanonicalJson(selection)) {
+    const descriptor = completed.result.artifacts.find(
+      (artifact) => artifact.path === 'plan.json',
+    );
+    if (descriptor?.sha256 !== planDigest)
+      throw new Error('Run belongs to a different plan.');
+    if (
+      serializeCanonicalJson(completed.result.selection) !==
+      serializeCanonicalJson(selection)
+    ) {
       throw new Error('Run belongs to a different selection.');
     }
-    const attempt: SettledAttempt = completed.result.failure === null
-      ? {run_id: runId, state: 'completed'}
-      : {run_id: runId, state: 'errored', error_code: 'role_player_error'};
+    const attempt: SettledAttempt =
+      completed.result.failure === null
+        ? { run_id: runId, state: 'completed' }
+        : { run_id: runId, state: 'errored', error_code: 'role_player_error' };
     const evaluation = completed.result.evaluation;
-    return {attempt, evaluation: {status: evaluation.status, score: evaluation.score,
-      judging_criteria_passed: evaluation.judging_criteria_passed, judging_criteria_total: evaluation.judging_criteria_total,
-      checks_passed: evaluation.checks.filter((check) => check.passed).length, checks_total: evaluation.checks.length},
-      artifact: {location,
-      evaluation: {status: completed.result.evaluation.status, score: completed.result.evaluation.score},
-      failure: completed.result.failure === null ? null : 'role_player_error'}};
+    return {
+      attempt,
+      evaluation: {
+        status: evaluation.status,
+        score: evaluation.score,
+        judging_criteria_passed: evaluation.judging_criteria_passed,
+        judging_criteria_total: evaluation.judging_criteria_total,
+        checks_passed: evaluation.checks.filter((check) => check.passed).length,
+        checks_total: evaluation.checks.length,
+      },
+      artifact: {
+        location,
+        evaluation: {
+          status: completed.result.evaluation.status,
+          score: completed.result.evaluation.score,
+        },
+        failure: completed.result.failure === null ? null : 'role_player_error',
+      },
+    };
   } catch {
-    return {attempt: {run_id: runId, state: 'errored', error_code: 'invalid_artifacts'}, artifact: null, evaluation: null};
+    return {
+      attempt: {
+        run_id: runId,
+        state: 'errored',
+        error_code: 'invalid_artifacts',
+      },
+      artifact: null,
+      evaluation: null,
+    };
   }
 }
 
@@ -467,35 +625,65 @@ function experimentRunOutcome(
   attempt: SettledAttempt,
   artifact: ExperimentRunArtifact | null,
 ): ExperimentRunOutcome {
-  return {selection: entry.selection, plan_sha256: entry.plan_sha256,
-    run_id: attempt.run_id, state: attempt.state,
-    error_code: attempt.state === 'errored' ? attempt.error_code : null, artifact};
+  return {
+    selection: entry.selection,
+    plan_sha256: entry.plan_sha256,
+    run_id: attempt.run_id,
+    state: attempt.state,
+    error_code: attempt.state === 'errored' ? attempt.error_code : null,
+    artifact,
+  };
 }
 
-async function readExperimentRunCheckpoint(checkpoint: string): Promise<ExperimentRunCheckpoint | undefined> {
+async function readExperimentRunCheckpoint(
+  checkpoint: string,
+): Promise<ExperimentRunCheckpoint | undefined> {
   return (await readExperimentRunSource(checkpoint))?.experimentRun;
 }
 
-async function readExperimentRunSource(checkpoint: string): Promise<{experimentRun: ExperimentRunCheckpoint; body: string} | undefined> {
+async function readExperimentRunSource(
+  checkpoint: string,
+): Promise<
+  { experimentRun: ExperimentRunCheckpoint; body: string } | undefined
+> {
   try {
     const stat = await fs.lstat(checkpoint);
-    if (!stat.isFile() || stat.size > MAX_EXPERIMENT_RUN_BYTES) throw new Error('Invalid experiment run checkpoint.');
+    if (!stat.isFile() || stat.size > MAX_EXPERIMENT_RUN_BYTES)
+      throw new Error('Invalid experiment run checkpoint.');
     const body = await fs.readFile(checkpoint, 'utf8');
-    if (Buffer.byteLength(body) > MAX_EXPERIMENT_RUN_BYTES) throw new Error('Invalid experiment run checkpoint.');
-    return {experimentRun: parseExperimentRunCheckpoint(JSON.parse(body)), body};
+    if (Buffer.byteLength(body) > MAX_EXPERIMENT_RUN_BYTES)
+      throw new Error('Invalid experiment run checkpoint.');
+    return {
+      experimentRun: parseExperimentRunCheckpoint(JSON.parse(body)),
+      body,
+    };
   } catch (error) {
     if (hasCode(error, 'ENOENT')) return undefined;
-    throw new Error('Cannot read a compatible Forge experiment.json.', {cause: error});
+    throw new Error('Cannot read a compatible Forge experiment.json.', {
+      cause: error,
+    });
   }
 }
 
-async function writeExperimentRunCheckpoint(checkpoint: string, experimentRun: ExperimentRunCheckpoint): Promise<void> {
-  const body = serializeCanonicalJson(parseExperimentRunCheckpoint({...experimentRun, forge: FORGE_BUILD_IDENTITY}));
-  if (Buffer.byteLength(body) > MAX_EXPERIMENT_RUN_BYTES) throw new Error('Experiment run checkpoint exceeds its byte limit.');
+async function writeExperimentRunCheckpoint(
+  checkpoint: string,
+  experimentRun: ExperimentRunCheckpoint,
+): Promise<void> {
+  const body = serializeCanonicalJson(
+    parseExperimentRunCheckpoint({
+      ...experimentRun,
+      forge: FORGE_BUILD_IDENTITY,
+    }),
+  );
+  if (Buffer.byteLength(body) > MAX_EXPERIMENT_RUN_BYTES)
+    throw new Error('Experiment run checkpoint exceeds its byte limit.');
   await writeAtomicDocument(checkpoint, body);
 }
 
-async function writeAtomicDocument(checkpoint: string, body: string): Promise<void> {
+async function writeAtomicDocument(
+  checkpoint: string,
+  body: string,
+): Promise<void> {
   const temporary = `${checkpoint}.${randomUUID()}.tmp`;
   try {
     const handle = await fs.open(temporary, 'wx', 0o600);
@@ -513,20 +701,27 @@ async function writeAtomicDocument(checkpoint: string, body: string): Promise<vo
       await directory.close();
     }
   } finally {
-    await fs.rm(temporary, {force: true});
+    await fs.rm(temporary, { force: true });
   }
 }
 
 /** One writer per local output directory, with recovery after process death. */
-async function acquireExperimentRunLock(root: string): Promise<() => Promise<void>> {
+async function acquireExperimentRunLock(
+  root: string,
+): Promise<() => Promise<void>> {
   const lock = path.join(root, '.experiment.lock');
   const temporary = `${lock}.${randomUUID()}`;
   const ownerName = `owner-${randomUUID()}.json`;
-  await fs.mkdir(temporary, {mode: 0o700});
+  await fs.mkdir(temporary, { mode: 0o700 });
   try {
-    await fs.writeFile(path.join(temporary, ownerName), serializeCanonicalJson({pid: process.pid}), {
-      flag: 'wx', mode: 0o600,
-    });
+    await fs.writeFile(
+      path.join(temporary, ownerName),
+      serializeCanonicalJson({ pid: process.pid }),
+      {
+        flag: 'wx',
+        mode: 0o600,
+      },
+    );
     while (true) {
       try {
         // Publish a nonempty directory atomically. A competing rename or rmdir
@@ -538,7 +733,8 @@ async function acquireExperimentRunLock(root: string): Promise<() => Promise<voi
           // Windows reports EPERM for a directory collision. Only treat it as
           // contention when the destination is an existing real directory.
           const destination = await fs.lstat(lock).catch(() => undefined);
-          if (!destination?.isDirectory() || destination.isSymbolicLink()) throw error;
+          if (!destination?.isDirectory() || destination.isSymbolicLink())
+            throw error;
         } else if (!hasCode(error, 'EEXIST') && !hasCode(error, 'ENOTEMPTY')) {
           throw error;
         }
@@ -555,13 +751,14 @@ async function acquireExperimentRunLock(root: string): Promise<() => Promise<voi
       await removeEmptyLockDirectory(lock);
     };
   } finally {
-    await fs.rm(temporary, {recursive: true, force: true});
+    await fs.rm(temporary, { recursive: true, force: true });
   }
 }
 
 async function reclaimExperimentRunLock(lock: string): Promise<void> {
   const stat = await fs.lstat(lock);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid experiment run lock.');
+  if (!stat.isDirectory() || stat.isSymbolicLink())
+    throw new Error('Invalid experiment run lock.');
   const entries = await fs.readdir(lock);
   if (entries.length === 0) {
     // Recovery or release may have removed the marker before a process exit.
@@ -574,10 +771,16 @@ async function reclaimExperimentRunLock(lock: string): Promise<void> {
   }
   const ownerFile = path.join(lock, ownerName);
   const ownerStat = await fs.lstat(ownerFile);
-  if (!ownerStat.isFile() || ownerStat.isSymbolicLink() || ownerStat.size > 128) {
+  if (
+    !ownerStat.isFile() ||
+    ownerStat.isSymbolicLink() ||
+    ownerStat.size > 128
+  ) {
     throw new Error('Invalid experiment run lock owner.');
   }
-  const owner = z.object({pid: z.number().int().positive()}).strict()
+  const owner = z
+    .object({ pid: z.number().int().positive() })
+    .strict()
     .parse(JSON.parse(await fs.readFile(ownerFile, 'utf8')));
   try {
     process.kill(owner.pid, 0);
@@ -589,7 +792,9 @@ async function reclaimExperimentRunLock(lock: string): Promise<void> {
     await removeEmptyLockDirectory(lock);
     return;
   }
-  throw new Error('Another experiment run process is using this output directory.');
+  throw new Error(
+    'Another experiment run process is using this output directory.',
+  );
 }
 
 async function removeEmptyLockDirectory(lock: string): Promise<void> {
@@ -598,7 +803,12 @@ async function removeEmptyLockDirectory(lock: string): Promise<void> {
   } catch (error) {
     // A contender may already have published its nonempty lock or removed the
     // empty directory. Neither outcome permits deleting a current owner.
-    if (!hasCode(error, 'ENOENT') && !hasCode(error, 'ENOTEMPTY') && !hasCode(error, 'EEXIST')) throw error;
+    if (
+      !hasCode(error, 'ENOENT') &&
+      !hasCode(error, 'ENOTEMPTY') &&
+      !hasCode(error, 'EEXIST')
+    )
+      throw error;
   }
 }
 

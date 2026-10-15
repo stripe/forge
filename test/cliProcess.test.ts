@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, it} from 'node:test';
-import {fileURLToPath, pathToFileURL} from 'node:url';
-import {FORGE_VERSION} from '../src/version.js';
+import { describe, it } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { FORGE_VERSION } from '../src/version.js';
 
 const cliFile = fileURLToPath(new URL('../src/cli.js', import.meta.url));
 
 function invoke(entry: string, args: string[]) {
   return spawnSync(process.execPath, [entry, ...args], {
-    cwd: process.cwd(), encoding: 'utf8', timeout: 10_000,
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    timeout: 10_000,
   });
 }
 
@@ -33,15 +35,21 @@ describe('CLI executable', () => {
       assert.equal(result.stdout, `${FORGE_VERSION}\n`);
       assert.equal(result.stderr, '');
     } finally {
-      await fs.rm(root, {recursive: true, force: true});
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 
   it('keeps importing the CLI module free of executable side effects', () => {
-    const result = spawnSync(process.execPath, [
-      '--input-type=module', '-e',
-      'await import(process.argv[1]);', pathToFileURL(cliFile).href,
-    ], {encoding: 'utf8', timeout: 10_000});
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        'await import(process.argv[1]);',
+        pathToFileURL(cliFile).href,
+      ],
+      { encoding: 'utf8', timeout: 10_000 },
+    );
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, '');
     assert.equal(result.stderr, '');
@@ -63,7 +71,11 @@ describe('CLI executable', () => {
   });
 
   it('validates an experiment through the real process without runtime allocation', () => {
-    const result = invoke(cliFile, ['validate', '--experiment', 'test/fixtures/one-shot/experiment.yaml']);
+    const result = invoke(cliFile, [
+      'validate',
+      '--experiment',
+      'test/fixtures/one-shot/experiment.yaml',
+    ]);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /valid/i);
     assert.equal(result.stderr, '');

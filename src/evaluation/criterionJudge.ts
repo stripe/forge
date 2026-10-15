@@ -1,15 +1,13 @@
-import {z} from 'zod';
-
-import type {JudgingCriterionV1} from '../model/types.js';
-
+import { z } from 'zod';
 import type {
   CompletionMessage,
   StrictCompletionResponseSchema,
 } from '../contracts/completion.js';
-import type {CriterionResultV1} from '../results/types.js';
+import type { JudgingCriterionV1 } from '../model/types.js';
+import type { CriterionResultV1 } from '../results/types.js';
 import {
-  parseJudgeTranscriptProjection,
   type JudgeTranscriptProjectionV1,
+  parseJudgeTranscriptProjection,
 } from './judgeTranscript.js';
 
 export const MAX_CONCURRENT_CRITERION_JUDGMENTS = 4;
@@ -33,8 +31,8 @@ export const CRITERION_JUDGMENT_RESPONSE_SCHEMA: StrictCompletionResponseSchema 
           items: {
             type: 'object',
             properties: {
-              index: {type: 'integer', const: 0},
-              passed: {type: 'boolean'},
+              index: { type: 'integer', const: 0 },
+              passed: { type: 'boolean' },
               explanation: {
                 // Validate non-whitespace locally in StructuredJudgeEntry. Native
                 // regex-constrained strings can contain invalid JSON escapes.
@@ -98,12 +96,12 @@ const StructuredJudgeEntry = z
   .strict();
 
 const StructuredJudgeResponse = z
-  .object({results: z.array(StructuredJudgeEntry).length(1)})
+  .object({ results: z.array(StructuredJudgeEntry).length(1) })
   .strict();
 
 type JudgeParseOutcome =
-  | {readonly valid: true; readonly result: CriterionResultV1}
-  | {readonly valid: false; readonly explanation: string};
+  | { readonly valid: true; readonly result: CriterionResultV1 }
+  | { readonly valid: false; readonly explanation: string };
 
 /** Build the complete, transport-neutral prompt for one authored criterion. */
 export function buildCriterionJudgePrompt(
@@ -114,7 +112,7 @@ export function buildCriterionJudgePrompt(
   criterion: string,
 ): string {
   return renderCriterionJudgePrompt(
-    {...input, transcript: parseJudgeTranscriptProjection(input.transcript)},
+    { ...input, transcript: parseJudgeTranscriptProjection(input.transcript) },
     criterion,
   );
 }
@@ -179,13 +177,15 @@ export async function judgeCriteria(
   if (input.criteria.length === 0) return [];
 
   const criteria = validatedInput.criteria.map((criterion) =>
-    typeof criterion === 'string' ? criterion : {...criterion});
+    typeof criterion === 'string' ? criterion : { ...criterion },
+  );
   const results = new Array<CriterionResultV1>(criteria.length);
   const peerCancellation = new AbortController();
-  const signal = validatedInput.signal === undefined
-    ? peerCancellation.signal
-    : AbortSignal.any([validatedInput.signal, peerCancellation.signal]);
-  const workerInput: CriterionJudgeInput = {...validatedInput, signal};
+  const signal =
+    validatedInput.signal === undefined
+      ? peerCancellation.signal
+      : AbortSignal.any([validatedInput.signal, peerCancellation.signal]);
+  const workerInput: CriterionJudgeInput = { ...validatedInput, signal };
   let nextCriterionIndex = 0;
   let firstError: unknown;
   let failed = false;
@@ -204,11 +204,16 @@ export async function judgeCriteria(
           invoke,
           options,
         );
-        results[criterionIndex] = typeof criterion === 'string' ? result : {
-          ...result,
-          ...(criterion.label === undefined ? {} : {label: criterion.label}),
-          include_in_score: criterion.include_in_score !== false,
-        };
+        results[criterionIndex] =
+          typeof criterion === 'string'
+            ? result
+            : {
+                ...result,
+                ...(criterion.label === undefined
+                  ? {}
+                  : { label: criterion.label }),
+                include_in_score: criterion.include_in_score !== false,
+              };
       } catch (error) {
         if (!failed) {
           failed = true;
@@ -226,7 +231,7 @@ export async function judgeCriteria(
     MAX_CONCURRENT_CRITERION_JUDGMENTS,
     criteria.length,
   );
-  await Promise.all(Array.from({length: workerCount}, judgeNext));
+  await Promise.all(Array.from({ length: workerCount }, judgeNext));
   if (failed) throw firstError;
   return results;
 }
@@ -277,15 +282,18 @@ async function judgeOneCriterion(
   };
 }
 
-function parseJudgeResponse(raw: unknown, criterion: string): JudgeParseOutcome {
+function parseJudgeResponse(
+  raw: unknown,
+  criterion: string,
+): JudgeParseOutcome {
   if (typeof raw !== 'string') {
-    return {valid: false, explanation: 'Judge response was not valid JSON.'};
+    return { valid: false, explanation: 'Judge response was not valid JSON.' };
   }
   let decoded: unknown;
   try {
     decoded = JSON.parse(raw);
   } catch {
-    return {valid: false, explanation: 'Judge response was not valid JSON.'};
+    return { valid: false, explanation: 'Judge response was not valid JSON.' };
   }
 
   const parsed = StructuredJudgeResponse.safeParse(decoded);
@@ -335,11 +343,14 @@ function waitBeforeJudgeRetry(
       signal?.removeEventListener('abort', onAbort);
       reject(abortReason(signal));
     };
-    signal?.addEventListener('abort', onAbort, {once: true});
+    signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });
 }
 
 function abortReason(signal: AbortSignal | undefined): unknown {
-  return signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+  return (
+    signal?.reason ??
+    new DOMException('The operation was aborted.', 'AbortError')
+  );
 }

@@ -1,18 +1,16 @@
 import * as path from 'node:path';
-
-import {agentAdapterMetadataSchema, type AgentAdapterMetadata} from '../contracts/metadata.js';
 import {
   ATIF_SCHEMA_VERSION,
+  type AtifNormalizationProvenance,
   createNormalizedTrajectory,
+  type NormalizedTrajectory,
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
-  type AtifNormalizationProvenance,
-  type NormalizedTrajectory,
 } from '../atif/index.js';
 import type {
   AgentAdapter,
-  AgentEvidenceRuntime,
   AgentEvidenceIdentity,
+  AgentEvidenceRuntime,
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentPrepareRuntime,
@@ -21,20 +19,28 @@ import type {
   AgentSessionRuntime,
   AgentTurn,
 } from '../contracts/agent.js';
-import type {RunArtifact, RunArtifactTransaction} from '../contracts/artifacts.js';
-import type {CommandOptions, CommandRunner} from '../contracts/command.js';
-import type {ForgeComposition} from '../contracts/composition.js';
+import type {
+  RunArtifact,
+  RunArtifactTransaction,
+} from '../contracts/artifacts.js';
+import type { CommandOptions, CommandRunner } from '../contracts/command.js';
+import type { ForgeComposition } from '../contracts/composition.js';
 import {
-  createEnvironmentResolver,
-  credentialReference,
-  normalizeEnvironmentSpecification,
-  normalizeScopedEnvironmentSpecification,
   type CredentialEnvironmentBinding,
   type CredentialScope,
+  createEnvironmentResolver,
+  credentialReference,
   type EnvironmentSpecification,
+  normalizeEnvironmentSpecification,
+  normalizeScopedEnvironmentSpecification,
   type ResolvedEnvironment,
   type ScopedEnvironmentSpecification,
 } from '../contracts/credentials.js';
+import {
+  type AgentAdapterMetadata,
+  agentAdapterMetadataSchema,
+} from '../contracts/metadata.js';
+import type { RunPhase } from '../contracts/observability.js';
 import type {
   MutableWorkspace,
   PreparedRuntime,
@@ -46,45 +52,49 @@ import type {
   WorkspaceWriteOptions,
 } from '../contracts/runtime.js';
 import {
+  type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
   evaluateRunEvidence,
+  type JudgeWorkspaceEvidenceV1,
   judgeCriteria,
   renderJudgeWorkspaceEvidence,
-  type CriterionCompletionRequest,
-  type JudgeWorkspaceEvidenceV1,
 } from '../evaluation/index.js';
-import {boundJudgeWorkspaceEvidence} from '../evaluation/judgeWorkspace.js';
-import {createJudgeTranscriptProjection} from '../evaluation/judgeTranscript.js';
+import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.js';
+import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.js';
 import {
-  AvaRolePlayer,
-  runConversation,
+  parseAgentEvidenceIdentity,
+  selectAgentEvidence,
+} from '../evidence/selection.js';
+import { snapshotAgentToolCalls } from '../interaction/conversation.js';
+import {
   type AvaConversationAudit,
+  AvaRolePlayer,
   type ConversationTurn,
+  runConversation,
 } from '../interaction/index.js';
-import {snapshotAgentToolCalls} from '../interaction/conversation.js';
+import { hasDeterministicWorkspaceChecks } from '../model/checks.js';
+import { sha256Digest } from '../model/hashes.js';
 import {
   isSafeSimpleIdentifier,
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.js';
-import {parseResolvedRunPlanWithSetupActions} from '../model/parse.js';
-import {hasDeterministicWorkspaceChecks} from '../model/checks.js';
-import {sha256Digest} from '../model/hashes.js';
-import {serializeResolvedRunPlan} from '../planning/index.js';
+import { parseResolvedRunPlanWithSetupActions } from '../model/parse.js';
+import { serializeResolvedRunPlan } from '../planning/index.js';
 import {
-  MAX_SETUP_ARTIFACT_BYTES,
-  parseInteractionArtifact,
-  parseJudgeEvidence,
-  parseRunResult,
-  parseSetupArtifact,
-  type AtifEvidenceProvenanceV1,
   type ArtifactDescriptorV1,
+  type AtifEvidenceProvenanceV1,
   type AvaDecisionV1,
   type CompletedRunV1,
   type CompletionCallSummaryV1,
   type EvaluationResultV1,
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
+  MAX_SETUP_ARTIFACT_BYTES,
+  parseInteractionArtifact,
+  parseJudgeEvidence,
+  parseRunResult,
+  parseSetupArtifact,
   type RolePlayerErrorV1,
   type RunResultV1,
   type RunStopReasonV1,
@@ -92,36 +102,39 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.js';
-import {assertCompatibleForgeVersion, FORGE_BUILD_IDENTITY, FORGE_VERSION} from '../version.js';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
   redactSecrets,
 } from '../security/redaction.js';
-import {serializeCanonicalJson} from '../serialization.js';
-import {
-  type AppliedSetup,
-  type PreparedSetup,
-  type SetupExecutor,
+import { serializeCanonicalJson } from '../serialization.js';
+import { createSetupExecutorForRegistry } from '../setup/executor.js';
+import type {
+  AppliedSetup,
+  PreparedSetup,
+  SetupExecutor,
 } from '../setup/index.js';
-import {createSetupExecutorForRegistry} from '../setup/executor.js';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from '../setup/registry.js';
-import {executionError, ForgeExecutionError, throwIfAborted} from './errors.js';
-import {createRunEventEmitter} from './events.js';
-import type {RunPhase} from '../contracts/observability.js';
 import {
-  parseAgentEvidenceIdentity,
-  selectAgentEvidence,
-} from '../evidence/selection.js';
+  assertCompatibleForgeVersion,
+  FORGE_BUILD_IDENTITY,
+  FORGE_VERSION,
+} from '../version.js';
 import {
-  completionBindingsForPlan,
-  prepareCompletionRuntime,
   type CompletionBinding,
+  completionBindingsForPlan,
   type PreparedCompletionRuntime,
+  prepareCompletionRuntime,
 } from './completionRuntime.js';
+import {
+  executionError,
+  ForgeExecutionError,
+  throwIfAborted,
+} from './errors.js';
+import { createRunEventEmitter } from './events.js';
 
 const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;
@@ -169,7 +182,7 @@ interface EvalPreflight {
  * operation. CLI validation and execution share this exact boundary.
  */
 export function preflightEval(request: PreflightEvalInput): void {
-  return preflightEvalWithSetupActions(request, defaultSetupActionRegistry);
+  preflightEvalWithSetupActions(request, defaultSetupActionRegistry);
 }
 
 /** @internal Engine-bound variant using one already-frozen action registry. */
@@ -178,7 +191,10 @@ export function preflightEvalWithSetupActions(
   setupActions: SetupActionRegistry,
 ): void {
   try {
-    const plan = parseResolvedRunPlanWithSetupActions(request.plan, setupActions);
+    const plan = parseResolvedRunPlanWithSetupActions(
+      request.plan,
+      setupActions,
+    );
     buildEvalPreflight(
       plan,
       request.composition,
@@ -195,7 +211,9 @@ export function preflightEvalWithSetupActions(
 }
 
 /** Execute one already-resolved run and return only after atomic commit. */
-export async function executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1> {
+export async function executeEval(
+  request: ExecuteEvalInput,
+): Promise<CompletedRunV1> {
   return executeEvalWithSetupActions(request, defaultSetupActionRegistry);
 }
 
@@ -324,11 +342,7 @@ export async function executeEvalWithTestHooks(
       });
       const artifact = buildSetupArtifact(input.plan, applied);
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
-      assertNoSecrets(
-        serializeCanonicalJson(artifact),
-        secrets,
-        'setup.json',
-      );
+      assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
       throwIfAborted(signal, phase);
       await prepared!.finalizeSetup();
       return artifact;
@@ -373,7 +387,9 @@ export async function executeEvalWithTestHooks(
         };
       }
       if (interaction.sessionId === null) {
-        throw new TypeError('A completed agent turn requires a session identity.');
+        throw new TypeError(
+          'A completed agent turn requires a session identity.',
+        );
       }
       const evidenceContext = {
         runId: input.runId,
@@ -383,9 +399,8 @@ export async function executeEvalWithTestHooks(
         sessionId: interaction.sessionId,
         signal,
       };
-      const captured = await preflight.agent.collectNativeArtifact?.(
-        evidenceContext,
-      );
+      const captured =
+        await preflight.agent.collectNativeArtifact?.(evidenceContext);
       const collected = await preflight.agent.collectEvidence(evidenceContext);
       const nativeArtifact = buildNativeArtifact(
         captured,
@@ -406,21 +421,28 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return {evidence, nativeArtifact};
+      return { evidence, nativeArtifact };
     });
-    const redacted = redactNormalizedTrajectory(selectedEvidence.evidence, secrets);
-    const trajectoryJson = serializeAtifTrajectory(redacted.evidence.trajectory);
+    const redacted = redactNormalizedTrajectory(
+      selectedEvidence.evidence,
+      secrets,
+    );
+    const trajectoryJson = serializeAtifTrajectory(
+      redacted.evidence.trajectory,
+    );
 
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
-      let criterionResults = undefined;
+      let criterionResults:
+        | Awaited<ReturnType<typeof judgeCriteria>>
+        | undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
       if (criteria.length > 0) {
         const collected = await collectJudgeWorkspaceEvidence(
           sealed!.workspace,
-          {signal},
+          { signal },
         );
         const safeWorkspace = redactJudgeWorkspaceEvidence(
           collected.evidence,
@@ -436,21 +458,16 @@ export async function executeEvalWithTestHooks(
             criteria,
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
-              : {exampleAnswer: input.plan.evaluation.example_answer}),
+              : { exampleAnswer: input.plan.evaluation.example_answer }),
             ...(safeWorkspaceText.length === 0
               ? {}
-              : {workspaceText: safeWorkspaceText}),
+              : { workspaceText: safeWorkspaceText }),
             signal,
           },
           async (request) => {
             assertJudgePromptWillRemainUnchanged(request, secrets);
-            return (
-              await completions.invoke(
-                'judge',
-                request,
-                request.signal,
-              )
-            ).content;
+            return (await completions.invoke('judge', request, request.signal))
+              .content;
           },
           hooks.waitBeforeCompletionRetry === undefined
             ? {}
@@ -463,35 +480,40 @@ export async function executeEvalWithTestHooks(
                   ),
               },
         );
-        judgeEvidence = parseJudgeEvidence({
-          transcript: {
-            source: judgeTranscript.source,
-            projection_id: judgeTranscript.projectionId,
-            trajectory_scope: judgeTranscript.trajectoryScope,
-            included_step_sources: [...judgeTranscript.includedStepSources],
-            copied_context: judgeTranscript.copiedContext,
-            included_fields: [...judgeTranscript.includedFields],
-            steps: JSON.parse(judgeTranscript.transcriptJson),
+        judgeEvidence = parseJudgeEvidence(
+          {
+            transcript: {
+              source: judgeTranscript.source,
+              projection_id: judgeTranscript.projectionId,
+              trajectory_scope: judgeTranscript.trajectoryScope,
+              included_step_sources: [...judgeTranscript.includedStepSources],
+              copied_context: judgeTranscript.copiedContext,
+              included_fields: [...judgeTranscript.includedFields],
+              steps: JSON.parse(judgeTranscript.transcriptJson),
+            },
+            workspace: {
+              entries: safeWorkspace.entries.map((entry) => ({
+                path: entry.path,
+                content: entry.content,
+                truncated: entry.truncated,
+              })),
+              complete: safeWorkspace.complete,
+              warnings: safeWorkspace.warnings.map((warning) => ({
+                ...warning,
+              })),
+            },
           },
-          workspace: {
-            entries: safeWorkspace.entries.map((entry) => ({
-              path: entry.path,
-              content: entry.content,
-              truncated: entry.truncated,
-            })),
-            complete: safeWorkspace.complete,
-            warnings: safeWorkspace.warnings.map((warning) => ({...warning})),
-          },
-        }, {forgeVersion: FORGE_VERSION});
+          { forgeVersion: FORGE_VERSION },
+        );
       }
       const result = await evaluateRunEvidence({
         plan: input.plan,
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
-        ...(criterionResults === undefined ? {} : {criterionResults}),
+        ...(criterionResults === undefined ? {} : { criterionResults }),
         signal,
       });
-      return {...result, judgeEvidence};
+      return { ...result, judgeEvidence };
     });
 
     const interactionArtifact = redactInteractionArtifact(
@@ -511,9 +533,10 @@ export async function executeEvalWithTestHooks(
       assertNoSecrets(artifact.body, secrets, artifact.path);
     }
     const coreDescriptors = coreArtifacts.map(describeArtifact);
-    const nativeArtifacts = selectedEvidence.nativeArtifact === undefined
-      ? []
-      : [selectedEvidence.nativeArtifact];
+    const nativeArtifacts =
+      selectedEvidence.nativeArtifact === undefined
+        ? []
+        : [selectedEvidence.nativeArtifact];
     const nativeDescriptors = nativeArtifacts.map(describeArtifact);
     let contributedArtifacts: RunArtifact[] = [];
     if ((input.composition.contributors?.length ?? 0) > 0) {
@@ -562,7 +585,8 @@ export async function executeEvalWithTestHooks(
       } catch {
         const cleanupWarning: RunWarningV1 = {
           code: 'runtime_cleanup_failed',
-          message: 'Runtime cleanup failed after canonical artifacts were staged.',
+          message:
+            'Runtime cleanup failed after canonical artifacts were staged.',
         };
         warnings.push(cleanupWarning);
         await events.warning('runtime_dispose', cleanupWarning.message);
@@ -608,9 +632,14 @@ export async function executeEvalWithTestHooks(
       await prepared.dispose().catch(() => undefined);
     }
     if (signal.aborted) {
-      throw new ForgeExecutionError('aborted', phase, 'The Forge run was aborted.', {
-        cause: signal.reason,
-      });
+      throw new ForgeExecutionError(
+        'aborted',
+        phase,
+        'The Forge run was aborted.',
+        {
+          cause: signal.reason,
+        },
+      );
     }
     throw mapExecutionError(error, phase);
   }
@@ -637,7 +666,7 @@ async function executeInteraction(
     sessionId: () => session.sessionId(),
     async send(
       message: string,
-      options: {signal: AbortSignal},
+      options: { signal: AbortSignal },
     ): Promise<AgentTurn> {
       const declaredBeforeTurn = session.sessionId();
       if (
@@ -676,9 +705,9 @@ async function executeInteraction(
   if (plan.interaction.mode === 'one_shot') {
     const response = await trackedSession.send(
       plan.interaction.effective_prompt,
-      {signal},
+      { signal },
     );
-    const toolCalls = response.toolCalls.map((call) => ({...call}));
+    const toolCalls = response.toolCalls.map((call) => ({ ...call }));
     const turns: readonly ConversationTurn[] = Object.freeze([
       Object.freeze({
         turn: 1,
@@ -697,17 +726,19 @@ async function executeInteraction(
   }
 
   if (plan.role_player === undefined || plan.interaction.task === undefined) {
-    throw new TypeError('A multi-turn plan requires a role-player model and task.');
+    throw new TypeError(
+      'A multi-turn plan requires a role-player model and task.',
+    );
   }
   const ava = new AvaRolePlayer(
     {
       task: plan.interaction.task,
       ...(plan.interaction.context === undefined
         ? {}
-        : {context: plan.interaction.context}),
+        : { context: plan.interaction.context }),
       ...(plan.interaction.initial_prompt === undefined
         ? {}
-        : {initialPrompt: plan.interaction.initial_prompt}),
+        : { initialPrompt: plan.interaction.initial_prompt }),
       signal,
     },
     (request) => completions.invoke('role_player', request, signal),
@@ -715,11 +746,7 @@ async function executeInteraction(
       ? {}
       : {
           waitBeforeRetry: (attempt, retrySignal) =>
-            waitBeforeCompletionRetry(
-              'role_player',
-              attempt,
-              retrySignal,
-            ),
+            waitBeforeCompletionRetry('role_player', attempt, retrySignal),
         },
   );
   const conversation = await runConversation({
@@ -728,9 +755,10 @@ async function executeInteraction(
     maxTurns: plan.interaction.max_turns,
     signal,
   });
-  const failure = conversation.failure === null
-    ? null
-    : rolePlayerErrorRecord(conversation.failure);
+  const failure =
+    conversation.failure === null
+      ? null
+      : rolePlayerErrorRecord(conversation.failure);
   return Object.freeze({
     turns: conversation.turns,
     stopReason: conversation.stopReason,
@@ -771,7 +799,7 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
     text: turn.text,
     sessionId: turn.sessionId,
     toolCalls: snapshotAgentToolCalls(turn.toolCalls),
-    ...(turn.costUsd === undefined ? {} : {costUsd: turn.costUsd}),
+    ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
   });
 }
 
@@ -844,7 +872,9 @@ function buildEvalPreflight(
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
-  const agentMetadata = agentAdapterMetadataSchema.optional().parse(agent.metadata);
+  const agentMetadata = agentAdapterMetadataSchema
+    .optional()
+    .parse(agent.metadata);
   const agentEvidenceIdentity = parseAgentEvidenceIdentity(
     agent.evidenceIdentity(plan.agent),
   );
@@ -853,7 +883,7 @@ function buildEvalPreflight(
     runtime: plan.runtime,
     ...(agent.pluginInstaller === undefined
       ? {}
-      : {pluginInstaller: agent.pluginInstaller}),
+      : { pluginInstaller: agent.pluginInstaller }),
   });
   const agentRequirements = normalizeAgentRequirements(
     agent.requirements(plan.agent),
@@ -869,16 +899,16 @@ function buildEvalPreflight(
     },
   );
   const environmentSpecification = mergeEnvironmentSpecifications([
-    {scope: 'agent', specification: agentRequirements.environment},
+    { scope: 'agent', specification: agentRequirements.environment },
     {
       scope: 'setup',
       specification: {
         ...(setup.requirements.variables === undefined
           ? {}
-          : {variables: setup.requirements.variables}),
+          : { variables: setup.requirements.variables }),
         ...(setup.requirements.credentials?.setup === undefined
           ? {}
-          : {credentials: setup.requirements.credentials.setup}),
+          : { credentials: setup.requirements.credentials.setup }),
       },
     },
     {
@@ -886,7 +916,7 @@ function buildEvalPreflight(
       specification: {
         ...(setup.requirements.credentials?.agent === undefined
           ? {}
-          : {credentials: setup.requirements.credentials.agent}),
+          : { credentials: setup.requirements.credentials.agent }),
       },
     },
   ]);
@@ -910,8 +940,10 @@ function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
     throw new ForgeExecutionError(
       'invalid_plan',
       'preflight',
-      error instanceof Error ? error.message : 'Unsupported Forge producer version.',
-      {cause: error},
+      error instanceof Error
+        ? error.message
+        : 'Unsupported Forge producer version.',
+      { cause: error },
     );
   }
   // Defensive JSON/canonicalization check before any credential or runtime use.
@@ -939,12 +971,16 @@ function preflightRuntime(
         : 'The supplied runtime must match the built-in Docker identity and provide pure preflight.',
     );
   }
-  const result: unknown = runtime.preflight(Object.freeze({plan, requirements, environment}));
+  const result: unknown = runtime.preflight(
+    Object.freeze({ plan, requirements, environment }),
+  );
   if (result !== undefined) {
     // A mistakenly async validator must fail before authority is resolved,
     // without leaving its rejected promise unhandled in the host process.
     if (result instanceof Promise) void result.catch(() => undefined);
-    throw new TypeError('Runtime preflight must synchronously validate without returning a value.');
+    throw new TypeError(
+      'Runtime preflight must synchronously validate without returning a value.',
+    );
   }
 }
 
@@ -969,10 +1005,13 @@ async function resolveEnvironment(
   signal: AbortSignal,
 ): Promise<ResolvedEnvironment> {
   try {
-    return await createEnvironmentResolver(input.composition.credentialResolver).resolve(
-      specification,
-      {runId: input.runId, purpose: 'forge-eval', signal},
-    );
+    return await createEnvironmentResolver(
+      input.composition.credentialResolver,
+    ).resolve(specification, {
+      runId: input.runId,
+      purpose: 'forge-eval',
+      signal,
+    });
   } catch (error) {
     throw executionError(
       'credential_failed',
@@ -993,11 +1032,13 @@ function mergeEnvironmentSpecifications(
 ): ScopedEnvironmentSpecification {
   const variables: Record<string, string> = {};
   const credentials: Record<string, CredentialEnvironmentBinding> = {};
-  for (const {scope, specification} of declarations) {
+  for (const { scope, specification } of declarations) {
     const normalized = normalizeEnvironmentSpecification(specification);
     for (const [name, value] of Object.entries(normalized.variables)) {
       if (Object.hasOwn(credentials, name)) {
-        throw new TypeError(`Environment ${name} has conflicting plain and secret bindings.`);
+        throw new TypeError(
+          `Environment ${name} has conflicting plain and secret bindings.`,
+        );
       }
       if (Object.hasOwn(variables, name) && variables[name] !== value) {
         throw new TypeError(`Environment ${name} has conflicting values.`);
@@ -1006,10 +1047,14 @@ function mergeEnvironmentSpecifications(
     }
     for (const [name, binding] of Object.entries(normalized.credentials)) {
       if (Object.hasOwn(variables, name)) {
-        throw new TypeError(`Environment ${name} has conflicting plain and secret bindings.`);
+        throw new TypeError(
+          `Environment ${name} has conflicting plain and secret bindings.`,
+        );
       }
       if (!binding || typeof binding.reference !== 'string') {
-        throw new TypeError(`Environment ${name} has an invalid credential reference.`);
+        throw new TypeError(
+          `Environment ${name} has an invalid credential reference.`,
+        );
       }
       if ('scopes' in binding) {
         throw new TypeError(
@@ -1020,7 +1065,9 @@ function mergeEnvironmentSpecifications(
         ? credentials[name]
         : undefined;
       if (previous && previous.reference !== binding.reference) {
-        throw new TypeError(`Environment ${name} has conflicting credential references.`);
+        throw new TypeError(
+          `Environment ${name} has conflicting credential references.`,
+        );
       }
       defineRecordValue(
         credentials,
@@ -1032,7 +1079,7 @@ function mergeEnvironmentSpecifications(
       );
     }
   }
-  return normalizeScopedEnvironmentSpecification({variables, credentials});
+  return normalizeScopedEnvironmentSpecification({ variables, credentials });
 }
 
 function normalizeAgentRequirements(
@@ -1040,7 +1087,11 @@ function normalizeAgentRequirements(
 ): AgentRuntimeRequirements {
   if (
     !isPlainRecord(requirements) ||
-    !hasExactKeys(requirements, ['executables', 'environment', 'stateDirectories']) ||
+    !hasExactKeys(requirements, [
+      'executables',
+      'environment',
+      'stateDirectories',
+    ]) ||
     !Array.isArray(requirements.executables)
   ) {
     throw new TypeError('Agent executable requirements must be an array.');
@@ -1056,10 +1107,14 @@ function normalizeAgentRequirements(
       executable.length > 1_024 ||
       executable.includes('\0')
     ) {
-      throw new TypeError('Agent executable requirements must be bounded non-empty strings.');
+      throw new TypeError(
+        'Agent executable requirements must be bounded non-empty strings.',
+      );
     }
     if (seenExecutables.has(executable)) {
-      throw new TypeError(`Duplicate agent executable requirement: ${executable}`);
+      throw new TypeError(
+        `Duplicate agent executable requirement: ${executable}`,
+      );
     }
     seenExecutables.add(executable);
     return executable;
@@ -1081,7 +1136,8 @@ function mergeRuntimeRequirements(
   const stateDirectories = new Map<string, RuntimeStateDirectoryRequirement>();
   const statePaths = new Map<string, string>();
   for (const requirement of requirements) {
-    for (const executable of requirement.executables) executables.add(executable);
+    for (const executable of requirement.executables)
+      executables.add(executable);
     for (const state of normalizeRuntimeStateDirectories(
       requirement.stateDirectories,
       'Runtime',
@@ -1090,7 +1146,8 @@ function mergeRuntimeRequirements(
       if (
         previous !== undefined &&
         (previous.containerPath !== state.containerPath ||
-          (previous.sealAfterSetup ?? false) !== (state.sealAfterSetup ?? false))
+          (previous.sealAfterSetup ?? false) !==
+            (state.sealAfterSetup ?? false))
       ) {
         throw new TypeError(
           `Runtime state directory ${state.id} has conflicting requirements.`,
@@ -1101,7 +1158,9 @@ function mergeRuntimeRequirements(
           existingId !== state.id &&
           pathsOverlap(existingPath, state.containerPath)
         ) {
-          throw new TypeError('Runtime state directory requirements may not overlap.');
+          throw new TypeError(
+            'Runtime state directory requirements may not overlap.',
+          );
         }
       }
       if (previous === undefined) {
@@ -1125,7 +1184,9 @@ function normalizeRuntimeStateDirectories(
   owner: string,
 ): readonly RuntimeStateDirectoryRequirement[] {
   if (!Array.isArray(input)) {
-    throw new TypeError(`${owner} state-directory requirements must be an array.`);
+    throw new TypeError(
+      `${owner} state-directory requirements must be an array.`,
+    );
   }
   const ids = new Set<string>();
   const paths: string[] = [];
@@ -1140,7 +1201,8 @@ function normalizeRuntimeStateDirectories(
       typeof requirement.containerPath !== 'string' ||
       !requirement.containerPath.startsWith('/') ||
       requirement.containerPath.includes('\0') ||
-      path.posix.normalize(requirement.containerPath) !== requirement.containerPath ||
+      path.posix.normalize(requirement.containerPath) !==
+        requirement.containerPath ||
       (Object.hasOwn(requirement, 'sealAfterSetup') &&
         typeof requirement.sealAfterSetup !== 'boolean') ||
       ids.has(requirement.id) ||
@@ -1148,7 +1210,9 @@ function normalizeRuntimeStateDirectories(
         pathsOverlap(existing, requirement.containerPath as string),
       )
     ) {
-      throw new TypeError(`${owner} returned an invalid state-directory requirement.`);
+      throw new TypeError(
+        `${owner} returned an invalid state-directory requirement.`,
+      );
     }
     const id = requirement.id as string;
     const containerPath = requirement.containerPath as string;
@@ -1158,9 +1222,7 @@ function normalizeRuntimeStateDirectories(
     return Object.freeze({
       id,
       containerPath,
-      ...(sealAfterSetup === undefined
-        ? {}
-        : {sealAfterSetup}),
+      ...(sealAfterSetup === undefined ? {} : { sealAfterSetup }),
     });
   });
   return Object.freeze(normalized);
@@ -1168,7 +1230,9 @@ function normalizeRuntimeStateDirectories(
 
 function pathsOverlap(left: string, right: string): boolean {
   return (
-    left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+    left === right ||
+    left.startsWith(`${right}/`) ||
+    right.startsWith(`${left}/`)
   );
 }
 
@@ -1229,11 +1293,13 @@ function defineRecordValue<T>(
   });
 }
 
-function projectAgentPrepareRuntime(runtime: PreparedRuntime): AgentPrepareRuntime {
+function projectAgentPrepareRuntime(
+  runtime: PreparedRuntime,
+): AgentPrepareRuntime {
   return Object.freeze({
     runtimeId: runtime.runtimeId,
     workspace: projectMutableWorkspace(runtime.workspace),
-    paths: Object.freeze({...runtime.paths}),
+    paths: Object.freeze({ ...runtime.paths }),
     stateDirectories: projectWorkspaceMap(
       runtime.stateDirectories,
       projectMutableWorkspace,
@@ -1244,11 +1310,13 @@ function projectAgentPrepareRuntime(runtime: PreparedRuntime): AgentPrepareRunti
   });
 }
 
-function projectAgentSessionRuntime(runtime: PreparedRuntime): AgentSessionRuntime {
+function projectAgentSessionRuntime(
+  runtime: PreparedRuntime,
+): AgentSessionRuntime {
   return Object.freeze({
     runtimeId: runtime.runtimeId,
     workspace: projectMutableWorkspace(runtime.workspace),
-    paths: Object.freeze({...runtime.paths}),
+    paths: Object.freeze({ ...runtime.paths }),
     stateDirectories: projectWorkspaceMap(
       runtime.stateDirectories,
       projectMutableWorkspace,
@@ -1259,16 +1327,18 @@ function projectAgentSessionRuntime(runtime: PreparedRuntime): AgentSessionRunti
   });
 }
 
-function projectAgentEvidenceRuntime(runtime: SealedRuntime): AgentEvidenceRuntime {
+function projectAgentEvidenceRuntime(
+  runtime: SealedRuntime,
+): AgentEvidenceRuntime {
   return Object.freeze({
     runtimeId: runtime.runtimeId,
     workspace: projectReadonlyWorkspace(runtime.workspace),
-    paths: Object.freeze({...runtime.paths}),
+    paths: Object.freeze({ ...runtime.paths }),
     stateDirectories: projectWorkspaceMap(
       runtime.stateDirectories,
       projectReadonlyWorkspace,
     ),
-    metadata: Object.freeze({...runtime.metadata}),
+    metadata: Object.freeze({ ...runtime.metadata }),
   });
 }
 
@@ -1279,16 +1349,20 @@ function projectCommandRunner(runner: CommandRunner): CommandRunner {
   });
 }
 
-function projectReadonlyWorkspace(workspace: ReadonlyWorkspace): ReadonlyWorkspace {
+function projectReadonlyWorkspace(
+  workspace: ReadonlyWorkspace,
+): ReadonlyWorkspace {
   return Object.freeze({
     inspect: (relativePath: string) => workspace.inspect(relativePath),
-    readFile: (relativePath: string, options?: {maxBytes?: number}) =>
+    readFile: (relativePath: string, options?: { maxBytes?: number }) =>
       workspace.readFile(relativePath, options),
     listFiles: (options?: WorkspaceListOptions) => workspace.listFiles(options),
   });
 }
 
-function projectMutableWorkspace(workspace: MutableWorkspace): MutableWorkspace {
+function projectMutableWorkspace(
+  workspace: MutableWorkspace,
+): MutableWorkspace {
   const readonly = projectReadonlyWorkspace(workspace);
   return Object.freeze({
     inspect: readonly.inspect,
@@ -1308,7 +1382,9 @@ function projectWorkspaceMap<InputWorkspace, OutputWorkspace>(
 ): ReadonlyMap<string, OutputWorkspace> {
   return Object.freeze(
     new ReadonlyMapSnapshot(
-      [...workspaces].map(([id, workspace]) => [id, project(workspace)] as const),
+      [...workspaces].map(
+        ([id, workspace]) => [id, project(workspace)] as const,
+      ),
     ),
   );
 }
@@ -1361,7 +1437,7 @@ class ReadonlyMapSnapshot<Key, Value> implements ReadonlyMap<Key, Value> {
 function redactNormalizedTrajectory(
   evidence: NormalizedTrajectory,
   secrets: readonly string[],
-): {evidence: NormalizedTrajectory; replacements: number} {
+): { evidence: NormalizedTrajectory; replacements: number } {
   const redacted = redactSecrets(evidence, secrets);
   return {
     replacements: redacted.replacements,
@@ -1396,7 +1472,7 @@ function rolePlayerErrorEvidence(
         kind: 'role_player_error',
         format: 'forge-system-event',
       },
-      adapter: {id: agent.id, version: agent.version},
+      adapter: { id: agent.id, version: agent.version },
     },
     completeness: 'fallback',
     warnings: [
@@ -1413,9 +1489,7 @@ function redactJudgeWorkspaceEvidence(
   evidence: JudgeWorkspaceEvidenceV1,
   secrets: readonly string[],
 ): JudgeWorkspaceEvidenceV1 {
-  return boundJudgeWorkspaceEvidence(
-    redactSecrets(evidence, secrets).value,
-  );
+  return boundJudgeWorkspaceEvidence(redactSecrets(evidence, secrets).value);
 }
 
 function buildInteractionArtifact(
@@ -1427,20 +1501,22 @@ function buildInteractionArtifact(
     user: turn.user,
     assistant: turn.assistant,
     tool_calls: turn.toolCalls.map((call) => ({
-      ...(call.id === undefined ? {} : {id: call.id}),
+      ...(call.id === undefined ? {} : { id: call.id }),
       name: call.name,
-      ...(call.input === undefined ? {} : {input: jsonValue(call.input)}),
+      ...(call.input === undefined ? {} : { input: jsonValue(call.input) }),
     })),
   }));
-  const rolePlayer = interaction.avaAudit === undefined || plan.role_player === undefined
-    ? {}
-    : {
-        role_player: {
-          model: {...plan.role_player},
-          needs: interaction.avaAudit.needs?.map((need) => ({...need})) ?? null,
-          decisions: interaction.avaAudit.decisions.map(avaDecisionRecord),
-        },
-      };
+  const rolePlayer =
+    interaction.avaAudit === undefined || plan.role_player === undefined
+      ? {}
+      : {
+          role_player: {
+            model: { ...plan.role_player },
+            needs:
+              interaction.avaAudit.needs?.map((need) => ({ ...need })) ?? null,
+            decisions: interaction.avaAudit.decisions.map(avaDecisionRecord),
+          },
+        };
   return {
     mode: plan.interaction.mode,
     stop_reason: interaction.stopReason,
@@ -1464,7 +1540,7 @@ function avaDecisionRecord(
     source: decision.source,
     ...(decision.error === undefined
       ? {}
-      : {error: rolePlayerErrorRecord(decision.error)}),
+      : { error: rolePlayerErrorRecord(decision.error) }),
   };
 }
 
@@ -1488,12 +1564,10 @@ function jsonValue(value: unknown): JsonValue {
   }
 }
 
-function rolePlayerWarnings(
-  failure: RolePlayerErrorV1 | null,
-): RunWarningV1[] {
+function rolePlayerWarnings(failure: RolePlayerErrorV1 | null): RunWarningV1[] {
   return failure === null
     ? []
-    : [{code: 'role_player_error', message: failure.explanation}];
+    : [{ code: 'role_player_error', message: failure.explanation }];
 }
 
 function assertEvidenceMatchesRun(
@@ -1505,7 +1579,9 @@ function assertEvidenceMatchesRun(
     evidence.provenance.adapter.id !== agent.id ||
     evidence.provenance.adapter.version !== agent.version
   ) {
-    throw new TypeError('Evidence provenance does not match the selected agent adapter.');
+    throw new TypeError(
+      'Evidence provenance does not match the selected agent adapter.',
+    );
   }
   const sourceSessionId =
     'sessionId' in evidence.provenance.source
@@ -1517,7 +1593,9 @@ function assertEvidenceMatchesRun(
     );
   }
   if (sourceSessionId !== undefined && sourceSessionId !== sessionId) {
-    throw new TypeError('Evidence provenance does not match the selected session.');
+    throw new TypeError(
+      'Evidence provenance does not match the selected session.',
+    );
   }
   if (
     evidence.trajectory.session_id != null &&
@@ -1588,7 +1666,12 @@ function buildCoreArtifacts(
       : []),
     ...(judgeEvidence === undefined
       ? []
-      : [jsonArtifact('judge-evidence.json', serializeCanonicalJson(judgeEvidence))]),
+      : [
+          jsonArtifact(
+            'judge-evidence.json',
+            serializeCanonicalJson(judgeEvidence),
+          ),
+        ]),
   ];
 }
 
@@ -1599,18 +1682,24 @@ function buildSetupArtifact(
   if (
     applied.steps.length !== plan.setup.length ||
     applied.steps.some(
-      (step, index) => step.index !== index || step.uses !== plan.setup[index]?.uses,
+      (step, index) =>
+        step.index !== index || step.uses !== plan.setup[index]?.uses,
     )
   ) {
     throw new TypeError('Applied setup does not match the resolved run plan.');
   }
-  const artifact = parseSetupArtifact({
-    steps: applied.steps.map((step) => ({
-      index: step.index,
-      uses: step.uses,
-      ...(step.resolution === undefined ? {} : {resolution: step.resolution}),
-    })),
-  }, {forgeVersion: FORGE_VERSION});
+  const artifact = parseSetupArtifact(
+    {
+      steps: applied.steps.map((step) => ({
+        index: step.index,
+        uses: step.uses,
+        ...(step.resolution === undefined
+          ? {}
+          : { resolution: step.resolution }),
+      })),
+    },
+    { forgeVersion: FORGE_VERSION },
+  );
   if (
     Buffer.byteLength(serializeCanonicalJson(artifact), 'utf8') >
     MAX_SETUP_ARTIFACT_BYTES
@@ -1638,7 +1727,7 @@ async function buildSupplementalArtifacts(
       signal,
     });
     for (const artifact of contributed) {
-      const {path: artifactPath, body, mediaType, sensitivity} = artifact;
+      const { path: artifactPath, body, mediaType, sensitivity } = artifact;
       if (!(body instanceof Uint8Array)) {
         throw new TypeError('Contributed artifacts require bytes.');
       }
@@ -1646,10 +1735,12 @@ async function buildSupplementalArtifacts(
         path: artifactPath,
         body: Uint8Array.from(body),
         mediaType,
-        ...(sensitivity === undefined ? {} : {sensitivity}),
+        ...(sensitivity === undefined ? {} : { sensitivity }),
       };
       if (!snapshot.path.startsWith(`extensions/${contributor.id}/`)) {
-        throw new TypeError(`Contributor ${contributor.id} wrote outside its namespace.`);
+        throw new TypeError(
+          `Contributor ${contributor.id} wrote outside its namespace.`,
+        );
       }
       assertNoSecrets(snapshot.body, secrets, snapshot.path);
       artifacts.push(snapshot);
@@ -1657,7 +1748,8 @@ async function buildSupplementalArtifacts(
   }
   const paths = new Set<string>();
   for (const artifact of artifacts) {
-    if (paths.has(artifact.path)) throw new TypeError(`Duplicate supplemental artifact: ${artifact.path}`);
+    if (paths.has(artifact.path))
+      throw new TypeError(`Duplicate supplemental artifact: ${artifact.path}`);
     paths.add(artifact.path);
   }
   return artifacts;
@@ -1689,7 +1781,7 @@ function buildResult(input: {
         : {
             action_bundles:
               input.input.plan.provenance.forge.action_bundles.map(
-                (bundle) => ({...bundle}),
+                (bundle) => ({ ...bundle }),
               ),
           }),
     },
@@ -1702,13 +1794,15 @@ function buildResult(input: {
     agent: {
       adapter: input.agent.id,
       adapter_version: input.agent.version,
-      ...(input.agentMetadata === undefined ? {} : {metadata: input.agentMetadata}),
+      ...(input.agentMetadata === undefined
+        ? {}
+        : { metadata: input.agentMetadata }),
       provider: input.input.plan.agent.provider,
       model: input.input.plan.agent.model,
       session_id: input.interaction.sessionId,
       cost_usd: input.interaction.totalCostUsd,
     },
-    completion_calls: input.completionCalls.map((call) => ({...call})),
+    completion_calls: input.completionCalls.map((call) => ({ ...call })),
     interaction: {
       mode: input.input.plan.interaction.mode,
       turn_count: input.interaction.turns.length,
@@ -1725,7 +1819,10 @@ function buildResult(input: {
     evaluation: input.evaluation,
     started_at: input.startedAt.toISOString(),
     completed_at: input.completedAt.toISOString(),
-    duration_ms: Math.max(0, input.completedAt.getTime() - input.startedAt.getTime()),
+    duration_ms: Math.max(
+      0,
+      input.completedAt.getTime() - input.startedAt.getTime(),
+    ),
     stop_reason: input.interaction.stopReason,
     artifacts: input.coreDescriptors,
     supplemental_artifacts: input.supplementalDescriptors,
@@ -1737,40 +1834,46 @@ function resultEvidenceProvenance(
   provenance: AtifNormalizationProvenance,
 ): AtifEvidenceProvenanceV1 {
   const session =
-    'sessionId' in provenance.source && provenance.source.sessionId !== undefined
-      ? {session_id: provenance.source.sessionId}
+    'sessionId' in provenance.source &&
+    provenance.source.sessionId !== undefined
+      ? { session_id: provenance.source.sessionId }
       : {};
-  const source = provenance.source.kind === 'native_log'
-    ? {
-        kind: provenance.source.kind,
-        format: provenance.source.format,
-        ...session,
-      }
-    : provenance.source.kind === 'atif'
+  const source =
+    provenance.source.kind === 'native_log'
       ? {
           kind: provenance.source.kind,
           format: provenance.source.format,
-          schema_version: provenance.source.schemaVersion,
           ...session,
         }
-      : provenance.source.kind === 'driver_fallback'
+      : provenance.source.kind === 'atif'
         ? {
             kind: provenance.source.kind,
             format: provenance.source.format,
+            schema_version: provenance.source.schemaVersion,
             ...session,
           }
-        : {
-          kind: provenance.source.kind,
-          format: provenance.source.format,
-        };
+        : provenance.source.kind === 'driver_fallback'
+          ? {
+              kind: provenance.source.kind,
+              format: provenance.source.format,
+              ...session,
+            }
+          : {
+              kind: provenance.source.kind,
+              format: provenance.source.format,
+            };
   return {
     source,
-    adapter: {...provenance.adapter},
+    adapter: { ...provenance.adapter },
   };
 }
 
 function jsonArtifact(path: string, body: string): RunArtifact {
-  return {path, body: Buffer.from(body, 'utf8'), mediaType: 'application/json'};
+  return {
+    path,
+    body: Buffer.from(body, 'utf8'),
+    mediaType: 'application/json',
+  };
 }
 
 function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
@@ -1781,7 +1884,7 @@ function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
     sha256: sha256Digest(artifact.body),
     ...(artifact.sensitivity === undefined
       ? {}
-      : {sensitivity: artifact.sensitivity}),
+      : { sensitivity: artifact.sensitivity }),
   };
 }
 
@@ -1798,7 +1901,7 @@ function assertJudgePromptWillRemainUnchanged(
   secrets: readonly string[],
 ): void {
   const projected = redactSecrets(
-    {systemPrompt: request.systemPrompt, messages: request.messages},
+    { systemPrompt: request.systemPrompt, messages: request.messages },
     secrets,
   );
   if (projected.replacements !== 0) {
@@ -1809,7 +1912,7 @@ function assertJudgePromptWillRemainUnchanged(
 }
 
 function credentialValues(environment: ResolvedEnvironment): string[] {
-  return Object.values(environment.credentials).map(({value}) => value);
+  return Object.values(environment.credentials).map(({ value }) => value);
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -1818,24 +1921,34 @@ function uniqueStrings(values: readonly string[]): string[] {
 
 function assertRunId(runId: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) {
-    throw new ForgeExecutionError('invalid_plan', 'preflight', 'runId is not a safe identifier.');
+    throw new ForgeExecutionError(
+      'invalid_plan',
+      'preflight',
+      'runId is not a safe identifier.',
+    );
   }
 }
 
-function mapExecutionError(error: unknown, phase: RunPhase): ForgeExecutionError {
+function mapExecutionError(
+  error: unknown,
+  phase: RunPhase,
+): ForgeExecutionError {
   if (error instanceof ForgeExecutionError) return error;
-  const code = phase === 'preflight'
-    ? 'invalid_plan'
-    : phase === 'runtime_prepare' || phase === 'quiesce' || phase === 'runtime_dispose'
-      ? 'runtime_failed'
-      : phase === 'setup'
-        ? 'setup_failed'
-        : phase === 'interaction'
-          ? 'agent_failed'
-          : phase === 'evidence'
-            ? 'evidence_failed'
-            : phase === 'evaluation'
-              ? 'evaluation_failed'
-              : 'artifact_failed';
+  const code =
+    phase === 'preflight'
+      ? 'invalid_plan'
+      : phase === 'runtime_prepare' ||
+          phase === 'quiesce' ||
+          phase === 'runtime_dispose'
+        ? 'runtime_failed'
+        : phase === 'setup'
+          ? 'setup_failed'
+          : phase === 'interaction'
+            ? 'agent_failed'
+            : phase === 'evidence'
+              ? 'evidence_failed'
+              : phase === 'evaluation'
+                ? 'evaluation_failed'
+                : 'artifact_failed';
   return executionError(code, phase, `Forge failed during ${phase}.`, error);
 }

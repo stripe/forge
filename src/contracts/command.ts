@@ -27,7 +27,10 @@ export interface CommandOptions {
  * which starts and exits unsuccessfully resolves with a non-zero exit code.
  */
 export interface CommandRunner {
-  run(argv: readonly string[], options?: CommandOptions): Promise<CommandResult>;
+  run(
+    argv: readonly string[],
+    options?: CommandOptions,
+  ): Promise<CommandResult>;
 }
 
 export class CommandExecutionError extends Error {

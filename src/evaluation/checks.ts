@@ -1,16 +1,16 @@
-import {runInNewContext} from 'node:vm';
+import { runInNewContext } from 'node:vm';
 
-import type {AtifTrajectoryV1_8} from '../atif/index.js';
-import type {ReadonlyWorkspace} from '../contracts/runtime.js';
-import type {ChecksV1, ResolvedRunPlanV1} from '../model/types.js';
-import {
-  type CheckResultV1,
-  type EvaluationResultV1,
-  type CriterionResultV1,
-  type WorkspaceEvidenceEntryV1,
-  type WorkspaceEvidenceV1,
+import type { AtifTrajectoryV1_8 } from '../atif/index.js';
+import type { ReadonlyWorkspace } from '../contracts/runtime.js';
+import type { ChecksV1, ResolvedRunPlanV1 } from '../model/types.js';
+import type {
+  CheckResultV1,
+  CriterionResultV1,
+  EvaluationResultV1,
+  WorkspaceEvidenceEntryV1,
+  WorkspaceEvidenceV1,
 } from '../results/index.js';
-import {scoreEvaluation, criterionResultMatchesDefinition} from './score.js';
+import { criterionResultMatchesDefinition, scoreEvaluation } from './score.js';
 
 const MAX_CHECK_FILE_BYTES = 256_000;
 const MAX_REGEX_BYTES = 1_024;
@@ -45,7 +45,8 @@ export async function evaluateRunEvidence(
   if (
     criterionResults.length !== expectedCriteria.length ||
     criterionResults.some(
-      (result, index) => !criterionResultMatchesDefinition(result, expectedCriteria[index]!),
+      (result, index) =>
+        !criterionResultMatchesDefinition(result, expectedCriteria[index]!),
     )
   ) {
     throw new TypeError(
@@ -80,15 +81,17 @@ export async function collectWorkspaceEvidence(
   signal?.throwIfAborted();
   const requestedPaths = new Set<string>([
     ...(checks?.files_created ?? []),
-    ...(checks?.file_checks ?? []).map(({file}) => file),
+    ...(checks?.file_checks ?? []).map(({ file }) => file),
   ]);
   const entries: WorkspaceEvidenceEntryV1[] = [];
-  const warnings: Array<{code: string; message: string; path?: string}> = [];
+  const warnings: Array<{ code: string; message: string; path?: string }> = [];
   let complete = true;
 
   for (const requestedPath of [...requestedPaths].sort(compareStrings)) {
     signal?.throwIfAborted();
-    let inspected: Awaited<ReturnType<ReadonlyWorkspace['inspect']>> | undefined;
+    let inspected:
+      | Awaited<ReturnType<ReadonlyWorkspace['inspect']>>
+      | undefined;
     try {
       inspected = await workspace.inspect(requestedPath);
       signal?.throwIfAborted();
@@ -102,9 +105,11 @@ export async function collectWorkspaceEvidence(
               : inspected.kind === 'directory'
                 ? 'directory'
                 : 'other',
-          ...(inspected.size === undefined ? {} : {size_bytes: inspected.size}),
+          ...(inspected.size === undefined
+            ? {}
+            : { size_bytes: inspected.size }),
           ...(inspected.kind === 'symlink'
-            ? {issue: 'Symbolic links are not valid grading evidence.'}
+            ? { issue: 'Symbolic links are not valid grading evidence.' }
             : {}),
         });
         continue;
@@ -128,10 +133,16 @@ export async function collectWorkspaceEvidence(
         path: requestedPath,
         exists: inspected?.kind === 'file',
         kind: inspected?.kind === 'file' ? 'file' : 'missing',
-        ...(inspected?.size === undefined ? {} : {size_bytes: inspected.size}),
+        ...(inspected?.size === undefined
+          ? {}
+          : { size_bytes: inspected.size }),
         issue: message,
       });
-      warnings.push({code: 'workspace_evidence_unavailable', message, path: requestedPath});
+      warnings.push({
+        code: 'workspace_evidence_unavailable',
+        message,
+        path: requestedPath,
+      });
     }
   }
 
@@ -156,7 +167,7 @@ export function runWorkspaceChecks(
     results.push({
       name: `file_created: ${file}`,
       passed,
-      ...(passed ? {} : {detail: entry?.issue ?? `Not found: ${file}`}),
+      ...(passed ? {} : { detail: entry?.issue ?? `Not found: ${file}` }),
     });
   }
 
@@ -165,9 +176,9 @@ export function runWorkspaceChecks(
     const expectedExists = check.exists;
     const exists = entry?.exists === true;
     const label = check.description ?? check.file;
-    const existencePasses = entry !== undefined && (expectedExists
-      ? exists
-      : !exists && entry.issue === undefined);
+    const existencePasses =
+      entry !== undefined &&
+      (expectedExists ? exists : !exists && entry.issue === undefined);
     results.push({
       name: expectedExists ? `file_exists: ${label}` : `file_absent: ${label}`,
       passed: existencePasses,
@@ -185,7 +196,9 @@ export function runWorkspaceChecks(
       results.push({
         name: `file_contains: ${label} /${check.contains}/`,
         passed: contentResult.passed,
-        ...(contentResult.detail === undefined ? {} : {detail: contentResult.detail}),
+        ...(contentResult.detail === undefined
+          ? {}
+          : { detail: contentResult.detail }),
       });
     }
   }
@@ -203,33 +216,42 @@ export class UnsupportedEvaluationCapabilityError extends Error {
 function evaluateContains(
   entry: WorkspaceEvidenceEntryV1 | undefined,
   pattern: string,
-): {passed: boolean; detail?: string} {
-  if (!entry || entry.kind !== 'file' || entry.content_base64 === undefined) {
-    return {passed: false, detail: entry?.issue ?? 'File content was not captured.'};
+): { passed: boolean; detail?: string } {
+  if (entry?.kind !== 'file' || entry.content_base64 === undefined) {
+    return {
+      passed: false,
+      detail: entry?.issue ?? 'File content was not captured.',
+    };
   }
   if (Buffer.byteLength(pattern, 'utf8') > MAX_REGEX_BYTES) {
-    return {passed: false, detail: `Pattern exceeds ${MAX_REGEX_BYTES} bytes.`};
+    return {
+      passed: false,
+      detail: `Pattern exceeds ${MAX_REGEX_BYTES} bytes.`,
+    };
   }
   try {
     RegExp(pattern);
   } catch {
-    return {passed: false, detail: 'Invalid regular expression syntax.'};
+    return { passed: false, detail: 'Invalid regular expression syntax.' };
   }
   const content = Buffer.from(entry.content_base64, 'base64').toString('utf8');
   try {
     const passed = runInNewContext(
       'new RegExp(pattern).test(content)',
-      {pattern, content},
+      { pattern, content },
       {
         timeout: MAX_REGEX_EXECUTION_MS,
-        contextCodeGeneration: {strings: false, wasm: false},
+        contextCodeGeneration: { strings: false, wasm: false },
       },
     );
     return passed === true
-      ? {passed: true}
-      : {passed: false, detail: `Pattern not found in ${entry.path}.`};
+      ? { passed: true }
+      : { passed: false, detail: `Pattern not found in ${entry.path}.` };
   } catch {
-    return {passed: false, detail: 'Regular expression evaluation failed or timed out.'};
+    return {
+      passed: false,
+      detail: 'Regular expression evaluation failed or timed out.',
+    };
   }
 }
 

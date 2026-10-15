@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import {describe, it} from 'node:test';
+import { describe, it } from 'node:test';
 
-import type {AgentSession, AgentTurn} from '../contracts/agent.js';
-import {AvaRolePlayer} from './ava.js';
+import type { AgentSession, AgentTurn } from '../contracts/agent.js';
+import { AvaRolePlayer } from './ava.js';
 import type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
 } from './completion.js';
-import {runConversation, type ConversationTurn} from './conversation.js';
-import {AVA_STOP_SENTINEL} from './prompt.js';
+import { type ConversationTurn, runConversation } from './conversation.js';
+import { AVA_STOP_SENTINEL } from './prompt.js';
 
 function initialResponse(
   descriptions: readonly string[],
@@ -27,7 +27,7 @@ function continuationResponse(
   remainingNeedIds: readonly string[],
   message: string,
 ): string {
-  return JSON.stringify({remaining_need_ids: remainingNeedIds, message});
+  return JSON.stringify({ remaining_need_ids: remainingNeedIds, message });
 }
 
 function completions(...steps: Array<string | Error>): {
@@ -47,23 +47,23 @@ function completions(...steps: Array<string | Error>): {
       return {
         content: step,
         stopReason: 'end_turn',
-        usage: {inputTokens: 0, outputTokens: 0, cachedInputTokens: 0},
+        usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
       };
     },
   };
 }
 
 function session(turns: readonly AgentTurn[]): {
-  readonly sent: Array<{message: string; signal: AbortSignal}>;
+  readonly sent: Array<{ message: string; signal: AbortSignal }>;
   readonly value: AgentSession;
 } {
   const pending = [...turns];
-  const sent: Array<{message: string; signal: AbortSignal}> = [];
+  const sent: Array<{ message: string; signal: AbortSignal }> = [];
   return {
     sent,
     value: {
       async send(message, options) {
-        sent.push({message, signal: options.signal});
+        sent.push({ message, signal: options.signal });
         const turn = pending.shift();
         if (!turn) throw new Error('No agent turn was scripted.');
         return turn;
@@ -89,12 +89,12 @@ describe('runConversation', () => {
       continuationResponse([], 'Closing prose is discarded.'),
     );
     const controller = new AbortController();
-    const toolInput = {path: 'answer.txt', details: {labels: ['original']}};
+    const toolInput = { path: 'answer.txt', details: { labels: ['original'] } };
     const agent = session([
       {
         text: 'I implemented Checkout.',
         sessionId: 'persistent-session',
-        toolCalls: [{id: 'call-1', name: 'Write', input: toolInput}],
+        toolCalls: [{ id: 'call-1', name: 'Write', input: toolInput }],
         costUsd: 1,
       },
       {
@@ -105,7 +105,7 @@ describe('runConversation', () => {
       },
     ]);
     const ava = new AvaRolePlayer(
-      {task: 'Add Checkout', signal: controller.signal},
+      { task: 'Add Checkout', signal: controller.signal },
       completion.invoke,
     );
     const events: string[] = [];
@@ -128,10 +128,10 @@ describe('runConversation', () => {
     assert.equal(result.failure, null);
     assert.equal(agent.sent.length, 2);
     assert.deepEqual(
-      agent.sent.map(({message}) => message),
+      agent.sent.map(({ message }) => message),
       ['How should checkout work?', 'How did you verify it?'],
     );
-    assert.ok(agent.sent.every(({signal}) => signal === controller.signal));
+    assert.ok(agent.sent.every(({ signal }) => signal === controller.signal));
     assert.deepEqual(events, [
       'ava-start:1',
       'ava-response:1',
@@ -146,8 +146,8 @@ describe('runConversation', () => {
     ]);
     assert.deepEqual(result.avaAudit, {
       needs: [
-        {id: 'need_1', description: needs[0]},
-        {id: 'need_2', description: needs[1]},
+        { id: 'need_1', description: needs[0] },
+        { id: 'need_2', description: needs[1] },
       ],
       decisions: [
         {
@@ -191,7 +191,7 @@ describe('runConversation', () => {
           {
             id: 'call-1',
             name: 'Write',
-            input: {path: 'answer.txt', details: {labels: ['original']}},
+            input: { path: 'answer.txt', details: { labels: ['original'] } },
           },
         ],
       },
@@ -206,9 +206,12 @@ describe('runConversation', () => {
     toolInput.details.labels.push('adapter mutation');
     assert.deepEqual(result.turns[0]!.toolCalls[0]!.input, {
       path: 'answer.txt',
-      details: {labels: ['original']},
+      details: { labels: ['original'] },
     });
-    assert.deepEqual(validatedSnapshots.map((turns) => turns.length), [1, 2]);
+    assert.deepEqual(
+      validatedSnapshots.map((turns) => turns.length),
+      [1, 2],
+    );
     assert.deepEqual(validatedSnapshots[0], [result.turns[0]]);
     assert.ok(validatedSnapshots.every((turns) => Object.isFrozen(turns)));
     assert.equal(Object.isFrozen(result), true);
@@ -222,7 +225,10 @@ describe('runConversation', () => {
     assert.equal(Object.isFrozen(result.avaAudit.needs![0]), true);
     assert.equal(Object.isFrozen(result.avaAudit.decisions), true);
     assert.equal(Object.isFrozen(result.avaAudit.decisions[0]), true);
-    assert.equal(Object.isFrozen(result.avaAudit.decisions[0]!.remainingNeedIds), true);
+    assert.equal(
+      Object.isFrozen(result.avaAudit.decisions[0]!.remainingNeedIds),
+      true,
+    );
   });
 
   it('rejects an invalid turn budget before invoking either participant', async () => {
@@ -234,12 +240,17 @@ describe('runConversation', () => {
     await assert.rejects(
       runConversation({
         session: agent.value,
-        ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+        ava: new AvaRolePlayer(
+          { task: 'Do the work', signal },
+          completion.invoke,
+        ),
         maxTurns: 0,
         signal,
-        onAvaStart: () => { callbacks += 1; },
+        onAvaStart: () => {
+          callbacks += 1;
+        },
       }),
-      {name: 'TypeError', message: 'maxTurns must be a positive integer.'},
+      { name: 'TypeError', message: 'maxTurns must be a positive integer.' },
     );
     assert.equal(completion.calls.length, 0);
     assert.equal(agent.sent.length, 0);
@@ -252,7 +263,9 @@ describe('runConversation', () => {
     const completion = completions(
       initialResponse(['Complete the requested work'], 'Please do the work.'),
     );
-    const cancelAfterResponse: InteractionCompletionInvoker = async (request) => {
+    const cancelAfterResponse: InteractionCompletionInvoker = async (
+      request,
+    ) => {
       const response = await completion.invoke(request);
       controller.abort(reason);
       return response;
@@ -264,7 +277,7 @@ describe('runConversation', () => {
       runConversation({
         session: agent.value,
         ava: new AvaRolePlayer(
-          {task: 'Do the work', signal: controller.signal},
+          { task: 'Do the work', signal: controller.signal },
           cancelAfterResponse,
         ),
         maxTurns: 2,
@@ -283,13 +296,20 @@ describe('runConversation', () => {
 
   it('rejects a successful agent response returned after cancellation before recording it', async () => {
     const controller = new AbortController();
-    const reason = new DOMException('cancelled during agent send', 'AbortError');
+    const reason = new DOMException(
+      'cancelled during agent send',
+      'AbortError',
+    );
     const completion = completions(
       initialResponse(['Complete the requested work'], 'Please do the work.'),
       continuationResponse([], 'Never assessed.'),
     );
     const agent = session([
-      {text: 'Returned after cancellation.', sessionId: 'persistent-session', toolCalls: []},
+      {
+        text: 'Returned after cancellation.',
+        sessionId: 'persistent-session',
+        toolCalls: [],
+      },
     ]);
     const cancelAfterSend: AgentSession = {
       sessionId: agent.value.sessionId,
@@ -305,7 +325,7 @@ describe('runConversation', () => {
       runConversation({
         session: cancelAfterSend,
         ava: new AvaRolePlayer(
-          {task: 'Do the work', signal: controller.signal},
+          { task: 'Do the work', signal: controller.signal },
           completion.invoke,
         ),
         maxTurns: 2,
@@ -341,7 +361,10 @@ describe('runConversation', () => {
 
     const result = await runConversation({
       session: agent.value,
-      ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+      ava: new AvaRolePlayer(
+        { task: 'Do the work', signal },
+        completion.invoke,
+      ),
       maxTurns: 1,
       signal,
     });
@@ -385,7 +408,10 @@ describe('runConversation', () => {
     await assert.rejects(
       runConversation({
         session: agent.value,
-        ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+        ava: new AvaRolePlayer(
+          { task: 'Do the work', signal },
+          completion.invoke,
+        ),
         maxTurns: 2,
         signal,
       }),
@@ -401,12 +427,15 @@ describe('runConversation', () => {
     );
     const signal = new AbortController().signal;
     const agent = session([
-      {text: 'Complete.', sessionId: 'persistent-session', toolCalls: []},
+      { text: 'Complete.', sessionId: 'persistent-session', toolCalls: [] },
     ]);
 
     const result = await runConversation({
       session: agent.value,
-      ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+      ava: new AvaRolePlayer(
+        { task: 'Do the work', signal },
+        completion.invoke,
+      ),
       maxTurns: 1,
       signal,
     });
@@ -426,13 +455,21 @@ describe('runConversation', () => {
     );
     const signal = new AbortController().signal;
     const agent = session([
-      {text: 'Partial work.', sessionId: 'persistent-session', toolCalls: []},
-      {text: 'Complete.', sessionId: 'persistent-session', toolCalls: [], costUsd: 0.25},
+      { text: 'Partial work.', sessionId: 'persistent-session', toolCalls: [] },
+      {
+        text: 'Complete.',
+        sessionId: 'persistent-session',
+        toolCalls: [],
+        costUsd: 0.25,
+      },
     ]);
 
     const result = await runConversation({
       session: agent.value,
-      ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+      ava: new AvaRolePlayer(
+        { task: 'Do the work', signal },
+        completion.invoke,
+      ),
       maxTurns: 2,
       signal,
     });
@@ -449,13 +486,13 @@ describe('runConversation', () => {
     );
     const signal = new AbortController().signal;
     const agent = session([
-      {text: 'Partial work.', sessionId: 'persistent-session', toolCalls: []},
+      { text: 'Partial work.', sessionId: 'persistent-session', toolCalls: [] },
     ]);
 
     const result = await runConversation({
       session: agent.value,
       ava: new AvaRolePlayer(
-        {task: 'Do the work', signal},
+        { task: 'Do the work', signal },
         completion.invoke,
         noRetryWait,
       ),
@@ -471,10 +508,7 @@ describe('runConversation', () => {
       attempts: 3,
       explanation: 'Ava request failed after 3 attempts.',
     });
-    assert.equal(
-      result.avaAudit.decisions.at(-1)!.codingAgentInvoked,
-      false,
-    );
+    assert.equal(result.avaAudit.decisions.at(-1)!.codingAgentInvoked, false);
     assert.deepEqual(result.avaAudit.decisions.at(-1)!.error, result.failure);
     assert.doesNotMatch(JSON.stringify(result), /provider detail/);
   });
@@ -483,7 +517,7 @@ describe('runConversation', () => {
     const completion = completions(new Error('must not be called'));
     const signal = new AbortController().signal;
     const agent = session([
-      {text: 'Done.', sessionId: 'persistent-session', toolCalls: []},
+      { text: 'Done.', sessionId: 'persistent-session', toolCalls: [] },
     ]);
     const validatedLengths: number[] = [];
     const result = await runConversation({
@@ -515,13 +549,16 @@ describe('runConversation', () => {
     );
     const signal = new AbortController().signal;
     const agent = session([
-      {text: 'Response.', sessionId: 'persistent-session', toolCalls: []},
+      { text: 'Response.', sessionId: 'persistent-session', toolCalls: [] },
     ]);
 
     await assert.rejects(
       runConversation({
         session: agent.value,
-        ava: new AvaRolePlayer({task: 'Do the work', signal}, completion.invoke),
+        ava: new AvaRolePlayer(
+          { task: 'Do the work', signal },
+          completion.invoke,
+        ),
         maxTurns: 3,
         signal,
         validateCompletedTurns: () => {

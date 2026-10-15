@@ -1,18 +1,18 @@
+import type { CommandRunner } from '../contracts/command.js';
+import type { CredentialRequirement } from '../contracts/credentials.js';
+import type { RunInputProvider } from '../contracts/inputs.js';
+import type { AgentPluginInstaller } from '../contracts/plugin.js';
+import type {
+  MutableWorkspace,
+  RuntimeLogicalPaths,
+  RuntimeStateDirectoryRequirement,
+} from '../contracts/runtime.js';
 import type {
   AgentSelectionV1,
   JsonObject,
   ResolvedRunPlanV1,
   SetupStepV1,
 } from '../model/types.js';
-import type {CommandRunner} from '../contracts/command.js';
-import type {CredentialRequirement} from '../contracts/credentials.js';
-import type {RunInputProvider} from '../contracts/inputs.js';
-import type {AgentPluginInstaller} from '../contracts/plugin.js';
-import type {
-  MutableWorkspace,
-  RuntimeLogicalPaths,
-  RuntimeStateDirectoryRequirement,
-} from '../contracts/runtime.js';
 
 export type SetupCredentialRequirements = Readonly<
   Record<string, CredentialRequirement>
@@ -78,6 +78,7 @@ export interface SetupExecutionContext
 export interface PreparedSetupStep {
   readonly requirements: SetupStepRequirements;
   /** Optional bounded, non-sensitive resolution retained in the completed run. */
+  // biome-ignore lint/suspicious/noConfusingVoidType: Implementations may omit a return value when there is no resolution.
   apply(context: SetupExecutionContext): Promise<JsonObject | void>;
 }
 
@@ -123,8 +124,13 @@ export interface SetupExecutor {
 export class UnsupportedSetupActionError extends Error {
   readonly code = 'unsupported_setup_action' as const;
 
-  constructor(readonly uses: string, readonly stepIndex: number) {
-    super(`No setup handler is registered for ${JSON.stringify(uses)} at index ${stepIndex}.`);
+  constructor(
+    readonly uses: string,
+    readonly stepIndex: number,
+  ) {
+    super(
+      `No setup handler is registered for ${JSON.stringify(uses)} at index ${stepIndex}.`,
+    );
     this.name = 'UnsupportedSetupActionError';
   }
 }
@@ -137,7 +143,10 @@ export class SetupActionError extends Error {
     readonly stepIndex: number,
     options?: ErrorOptions,
   ) {
-    super(`Setup action ${JSON.stringify(uses)} failed at index ${stepIndex}.`, options);
+    super(
+      `Setup action ${JSON.stringify(uses)} failed at index ${stepIndex}.`,
+      options,
+    );
     this.name = 'SetupActionError';
   }
 }
