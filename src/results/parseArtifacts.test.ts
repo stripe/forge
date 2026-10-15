@@ -197,6 +197,25 @@ describe('canonical interaction and judge evidence parsing', () => {
       () => parseEvaluationResult({ ...evaluation, judging_criteria_total: 2 }),
       /Criterion totals/,
     );
+    const observationalError = {
+      ...evaluation,
+      judging_criteria: [
+        evaluation.judging_criteria[0],
+        {
+          ...evaluation.judging_criteria[1],
+          passed: null,
+          error: {
+            type: 'request_error',
+            attempts: 3,
+            message: 'Service unavailable.',
+          },
+        },
+      ],
+    };
+    assert.deepEqual(
+      parseEvaluationResult(observationalError),
+      observationalError,
+    );
     for (const changed of [
       { label: 'bad-label' },
       { requirement_level: 'INVALID' },
@@ -235,11 +254,17 @@ describe('canonical interaction and judge evidence parsing', () => {
       judging_criteria_total: 2,
       judging_criteria_errored: 1,
       judging_criteria: [
-        { criterion: 'valid', passed: true, explanation: 'Done.' },
+        {
+          criterion: 'valid',
+          requirement_level: 'SHOULD',
+          passed: true,
+          explanation: 'Done.',
+        },
         {
           criterion: 'unavailable',
+          requirement_level: 'SHOULD',
           passed: null,
-          error: { type: 'parse_error', attempts: 3 },
+          error: { type: 'parse_error', attempts: 3, message: 'Invalid JSON.' },
           explanation: 'Invalid output.',
         },
       ],
@@ -273,6 +298,16 @@ describe('canonical interaction and judge evidence parsing', () => {
           },
         ],
       },
+      ...[undefined, '', ' ', 'x'.repeat(4097)].map((message) => ({
+        ...evaluation,
+        judging_criteria: [
+          evaluation.judging_criteria[0],
+          {
+            ...evaluation.judging_criteria[1],
+            error: { type: 'parse_error', attempts: 3, message },
+          },
+        ],
+      })),
     ])
       assert.throws(() => parseEvaluationResult(changed));
     const onlyErrors = {

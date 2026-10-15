@@ -54,12 +54,14 @@ export type CriterionResultV1 = {
       readonly error: {
         readonly type: 'parse_error' | 'request_error';
         readonly attempts: number;
+        /** Bounded diagnostic; request messages redact resolved credentials. */
+        readonly message: string;
       };
     }
 );
 
 export interface EvaluationResultV1 {
-  /** Null when authored criteria exist but none received a valid judgment. */
+  /** Null when included criteria exist but none received a valid judgment. */
   readonly score: number | null;
   readonly status: EvalStatus;
   readonly judging_criteria_passed: number;

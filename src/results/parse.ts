@@ -25,6 +25,7 @@ import {
   DEFAULT_REQUIREMENT_LEVEL,
   REQUIREMENT_LEVELS,
 } from '../model/types.ts';
+import { MAX_ERROR_MESSAGE_CHARACTERS } from '../security/errorMessage.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import {
   assertCompatibleForgeVersion,
@@ -196,6 +197,7 @@ const criterionResult = z
           .object({
             type: z.enum(['parse_error', 'request_error']),
             attempts: z.number().int().min(1).max(3),
+            message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
           })
           .strict(),
       })

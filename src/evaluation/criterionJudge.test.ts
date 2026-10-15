@@ -78,7 +78,9 @@ describe('judgeCriteria', () => {
         results.map((result) => result.requirement_level),
         REQUIREMENT_LEVELS,
       );
-      assert.ok(results.every((result) => result.passed === available));
+      assert.ok(
+        results.every((result) => result.passed === (available ? true : null)),
+      );
     }
   });
 
@@ -385,11 +387,14 @@ describe('judgeCriteria', () => {
     ]);
   });
 
-  it('records an exhausted transport error without retaining provider details', async () => {
+  it('records the final request error message without its stack or other properties', async () => {
     let calls = 0;
     const invoke: CriterionCompletionInvoker = async () => {
       calls += 1;
-      throw new Error('transport failed');
+      throw Object.assign(new Error(`transport failed on attempt ${calls}`), {
+        cause: 'private cause',
+        response: 'private response',
+      });
     };
 
     const results = await judgeCriteria(
@@ -400,8 +405,13 @@ describe('judgeCriteria', () => {
     assert.deepEqual(results, [
       {
         criterion: 'criterion',
+        requirement_level: 'SHOULD',
         passed: null,
-        error: { type: 'request_error', attempts: 3 },
+        error: {
+          type: 'request_error',
+          attempts: 3,
+          message: 'transport failed on attempt 3',
+        },
         explanation: 'Judge request failed after 3 attempts.',
       },
     ]);
@@ -432,6 +442,7 @@ describe('judgeCriteria', () => {
     assert.equal(results[0]!.passed, null);
     assert.deepEqual(results[1], {
       criterion: 'peer',
+      requirement_level: 'SHOULD',
       passed: true,
       explanation: 'Peer passed.',
     });
@@ -459,7 +470,11 @@ describe('judgeCriteria', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: null,
-        error: { type: 'parse_error', attempts: 3 },
+        error: {
+          type: 'parse_error',
+          attempts: 3,
+          message: 'Judge response was not valid JSON.',
+        },
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
       },
@@ -491,7 +506,11 @@ describe('judgeCriteria', () => {
         criterion: 'unavailable',
         requirement_level: 'SHOULD' as const,
         passed: null,
-        error: { type: 'parse_error', attempts: 3 },
+        error: {
+          type: 'parse_error',
+          attempts: 3,
+          message: 'Judge response was not valid JSON.',
+        },
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
       },
@@ -525,7 +544,11 @@ describe('judgeCriteria', () => {
       },
       noRetryWait,
     );
-    assert.deepEqual(results[0]!.error, { type: 'request_error', attempts: 3 });
+    assert.deepEqual(results[0]!.error, {
+      type: 'request_error',
+      attempts: 3,
+      message: 'final transport failure',
+    });
     assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
   });
 
@@ -550,7 +573,12 @@ describe('judgeCriteria', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: null,
-        error: { type: 'parse_error', attempts: 3 },
+        error: {
+          type: 'parse_error',
+          attempts: 3,
+          message:
+            'Judge response did not match the required schema at response.results[0].explanation (too_big).',
+        },
         explanation:
           'Judge response did not match the required schema. (unavailable after 3 attempts)',
       },
@@ -588,6 +616,17 @@ describe('judgeCriteria', () => {
     );
     assert.equal(invocations, 1);
     assert.equal(retries, 0);
+  });
+
+  it('redacts request diagnostics for a custom invoker', async () => {
+    const [result] = await judgeCriteria(
+      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      async () => {
+        throw new Error('Denied for custom-secret.');
+      },
+      { ...noRetryWait, redactionSecrets: ['custom-secret'] },
+    );
+    assert.equal(result!.error!.message, 'Denied for [REDACTED].');
   });
 
   it('propagates cancellation even if the invocation returns a valid judgment', async () => {
@@ -744,7 +783,11 @@ describe('parseCriterionJudgment', () => {
       criterion: 'criterion',
       requirement_level: 'SHOULD' as const,
       passed: null,
-      error: { type: 'parse_error', attempts: 1 },
+      error: {
+        type: 'parse_error',
+        attempts: 1,
+        message: 'Judge response was not valid JSON.',
+      },
       explanation: 'Judge response was not valid JSON.',
     });
   });
@@ -758,7 +801,11 @@ describe('parseCriterionJudgment', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: null,
-        error: { type: 'parse_error', attempts: 1 },
+        error: {
+          type: 'parse_error',
+          attempts: 1,
+          message: 'Judge response was not valid JSON.',
+        },
         explanation: 'Judge response was not valid JSON.',
       });
     }
@@ -766,23 +813,64 @@ describe('parseCriterionJudgment', () => {
 
   it('reports parse errors for extra fields, the wrong index, blank explanations, and wrong result counts', () => {
     const entry = { index: 0, passed: true, explanation: 'ok' };
-    for (const response of [
-      { results: [{ ...entry, extra: true }] },
-      { results: [{ ...entry, index: 1 }] },
-      { results: [{ ...entry, explanation: '' }] },
-      { results: [{ ...entry, explanation: '   ' }] },
-      { results: [{ ...entry, explanation: '\t\r\n' }] },
-      { results: [entry], extra: true },
-      { results: [] },
-      { results: [entry, entry] },
-    ]) {
+    for (const [response, diagnostic] of [
+      [
+        { results: [{ ...entry, extra: true }] },
+        'response.results[0] (unrecognized_keys)',
+      ],
+      [
+        { results: [{ ...entry, index: 1 }] },
+        'response.results[0].index (invalid_literal)',
+      ],
+      [
+        { results: [{ ...entry, explanation: '' }] },
+        'response.results[0].explanation (too_small)',
+      ],
+      [
+        { results: [{ ...entry, explanation: '   ' }] },
+        'response.results[0].explanation (too_small)',
+      ],
+      [
+        { results: [{ ...entry, explanation: '\t\r\n' }] },
+        'response.results[0].explanation (too_small)',
+      ],
+      [{ results: [entry], extra: true }, 'response (unrecognized_keys)'],
+      [{ results: [] }, 'response.results (too_small)'],
+      [{ results: [entry, entry] }, 'response.results (too_big)'],
+    ] as const) {
       assert.deepEqual(parseCriterionJudgment(JSON.stringify(response), 'g'), {
         criterion: 'g',
         requirement_level: 'SHOULD' as const,
         passed: null,
-        error: { type: 'parse_error', attempts: 1 },
+        error: {
+          type: 'parse_error',
+          attempts: 1,
+          message: `Judge response did not match the required schema at ${diagnostic}.`,
+        },
         explanation: 'Judge response did not match the required schema.',
       });
+    }
+  });
+
+  it('keeps unknown keys and received values out of schema diagnostics', () => {
+    for (const response of [
+      { results: [{ index: 'secret-index', passed: true, explanation: 'ok' }] },
+      { results: [{ index: 0, passed: 'secret-pass', explanation: 'ok' }] },
+      {
+        results: [
+          { index: 0, passed: true, explanation: 'ok', 'secret-key': true },
+        ],
+      },
+    ]) {
+      const result = parseCriterionJudgment(
+        JSON.stringify(response),
+        'criterion',
+      );
+      assert.match(
+        result.error!.message,
+        /required schema at response.results\[0\]/,
+      );
+      assert.doesNotMatch(JSON.stringify(result), /secret/);
     }
   });
 });

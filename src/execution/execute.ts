@@ -469,6 +469,7 @@ export async function executeEvalWithTestHooks(
               .content;
           },
           {
+            redactionSecrets: secrets,
             validateRequest: (request) =>
               assertJudgePromptWillRemainUnchanged(request, secrets),
             ...(hooks.waitBeforeCompletionRetry === undefined

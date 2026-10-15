@@ -1060,12 +1060,20 @@ At most four criteria run concurrently, with temperature 0, a 1,024-token
 response limit, and a strict one-criterion JSON schema. Each gets up to three
 attempts with fixed one- and five-second retry waits. Exhaustion records that
 criterion with `passed: null`, a bounded explanation, and an `error` containing
-`type` (`parse_error` or `request_error`) and `attempts`. The final unsuccessful
-attempt determines the error type. Other criteria continue, and the run commits
-its evidence, valid judgments, checks, and safe completion-call summaries.
-Raw provider errors and malformed responses are not retained as judgment
-details. `parseCriterionJudgment` reports malformed input as a one-attempt
-parse error.
+`type` (`parse_error` or `request_error`), `attempts`, and `message`. The final
+unsuccessful attempt determines the error type. Other criteria continue, and
+the run commits its evidence, valid judgments, checks, and safe completion-call
+summaries.
+Request diagnostics retain only the final error's message, redacting all
+resolved credentials before truncating to 4,096 characters. They omit stacks,
+causes, and other error properties; non-Error throws use a generic message.
+Custom completion providers must keep messages free of sensitive
+non-credential data such as request/response bodies. Role-player request
+errors remain generic. Standalone `judgeCriteria` callers can supply
+`redactionSecrets` in execution options for their custom invoker's diagnostics.
+Parse diagnostics identify invalid JSON or the first schema violation's path
+and category, never raw responses, unknown keys, or received values.
+`parseCriterionJudgment` reports malformed input as a one-attempt parse error.
 
 Cancellation, oversized prompts, and dispatch invariant failures remain fatal.
 The execution controller supplies `validateRequest` to the judge's execution
@@ -1084,8 +1092,9 @@ judge error takes precedence over normal evaluation statuses, without discarding
 valid judgments or check outcomes. Only `requirement_level` determines scoring
 inclusion.
 
-Reports preserve per-run counts for all three classifications and verify that
-MUST plus SHOULD match the scored counts and ratio. Overall and per-case
+Reports preserve per-run passed, total, and errored counts for all three
+classifications and verify that MUST plus SHOULD match the scored counts and
+ratio, while OPTIONAL errors match the excluded error count. Overall and per-case
 aggregates separate required failures from recommended failures and OPTIONAL
 telemetry. The README defines group [denominators](../README.md#understand-scores).
 
@@ -1104,12 +1113,14 @@ Interaction stop reason and evaluation status are separate. For example, a
 
 Experiment reports keep execution `errored` counts separate from
 `judge_errors: {evaluations, criteria}` in the overall and case/configuration
-statistics. Rows retain `judging_criteria_errored`; per-criterion error details
-remain in the referenced result. `completed` and execution coverage include
-committed judge-error evaluations. Pass rate excludes those evaluations from
-its denominator. The judging mean averages per-evaluation scores with at least
-one valid judgment, including incomplete evaluations; all-error and checks-only
-scores are excluded. Ratios are `null` when their denominator is zero.
+statistics, including OPTIONAL errors excluded from scoring. Rows retain
+`judging_criteria_errored` and `judging_criteria_excluded_errored`; per-criterion
+error details remain in the referenced result. `completed` and execution
+coverage include committed judge-error evaluations. Pass rate excludes only
+evaluations with scored judge errors from its denominator. The judging mean
+averages per-evaluation scores with at least one valid scored judgment,
+including incomplete evaluations; all-error and checks-only scores are
+excluded. Ratios are `null` when their denominator is zero.
 Resume retains committed judge-error evaluations, preserving the coding-agent
 execution and evidence. A CLI run can exit successfully with judge errors;
 consumers must inspect the report to establish grading completeness.
@@ -1239,8 +1250,9 @@ Other important safeguards include:
 - credentials are opaque references in authored data, plans, events, and
   results;
 - command contracts are argv arrays, so shell parsing is opt-in and visible;
-- provider/setup error details and setup-command output are not persisted as
-  ordinary metadata;
+- only bounded, credential-redacted judge request messages are retained as
+  diagnostics; other provider/setup error details and setup-command output are
+  not persisted as ordinary metadata;
 - judge inputs are derived by allowlist after credential redaction;
 - native source is explicitly marked restricted, excluded from judging and
   scoring, and selected by exact session identity rather than “newest session”;

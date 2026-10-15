@@ -101,6 +101,7 @@ try {
       assert.equal(evaluation.judging_criteria_total, 1);
       assert.deepEqual(evaluation.judging_criteria, [criterion]);
       const judgeError = forge.parseCriterionJudgment('{}', 'Unavailable criterion.');
+      assert.equal(typeof judgeError.error.message, 'string');
       const incomplete = forge.parseEvaluationResult(forge.scoreEvaluation([judgeError], []));
       assert.equal(incomplete.status, 'judge_error');
       assert.equal(incomplete.score, null);

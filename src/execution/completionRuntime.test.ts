@@ -318,7 +318,7 @@ describe('completion runtime', () => {
 
     await assert.rejects(
       prepared.invoke('judge', prompt('invalid'), new AbortController().signal),
-      /Completion provider call failed/,
+      /Completion provider returned an invalid response/,
     );
     assert.deepEqual(
       prepared.calls.map(({ status, error_code }) => ({ status, error_code })),
@@ -326,7 +326,7 @@ describe('completion runtime', () => {
     );
   });
 
-  it('does not expose provider error details outside the completion boundary', async () => {
+  it('exposes only credential-redacted judge error messages outside the completion boundary', async () => {
     const secret = 'provider-error-secret';
     const providerError = Object.assign(
       new Error(`upstream response contained ${secret}`),
@@ -362,6 +362,7 @@ describe('completion runtime', () => {
     }
 
     assert.ok(captured instanceof Error);
+    assert.equal(captured.message, 'upstream response contained [REDACTED]');
     assert.doesNotMatch(captured.message, new RegExp(secret));
     assert.equal(
       (captured as Error & { code?: string }).code,
@@ -384,6 +385,30 @@ describe('completion runtime', () => {
         error_code: 'completion_failed',
       },
     ]);
+  });
+
+  it('keeps role-player request errors generic', async () => {
+    const provider = createScriptedCompletionProvider({
+      id: MODEL.provider,
+      responses: [new Error('private provider detail')],
+    });
+    const signal = new AbortController().signal;
+    const prepared = await prepareCompletionRuntime({
+      runId: 'role-player-error-message',
+      bindings: completionBindingsForPlan(
+        createTestResolvedRunPlan({
+          mode: 'multi_turn',
+          rolePlayer: MODEL,
+        }),
+        composition(provider.provider),
+      ),
+      credentialResolver: createStaticCredentialResolver(),
+      signal,
+    });
+    await assert.rejects(
+      prepared.invoke('role_player', prompt('failure'), signal),
+      { message: 'Completion provider call failed.' },
+    );
   });
 });
 

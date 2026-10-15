@@ -104,7 +104,11 @@ describe('scoreEvaluation', () => {
       requirement_level: 'SHOULD' as const,
       criterion: 'unavailable',
       passed: null,
-      error: { type: 'request_error', attempts: 3 },
+      error: {
+        type: 'request_error',
+        attempts: 3,
+        message: 'Service unavailable.',
+      },
       explanation: 'Request failed.',
     };
     const scored = scoreEvaluation(
@@ -134,12 +138,47 @@ describe('scoreEvaluation', () => {
     assert.notEqual(scored.judging_criteria[2]!.error, error.error);
   });
 
+  it('retains observational errors without changing scoring totals or evaluation status', () => {
+    const observational: CriterionResultV1 = {
+      criterion: 'Read docs',
+      label: 'source',
+      requirement_level: 'OPTIONAL',
+      passed: null,
+      error: {
+        type: 'request_error',
+        attempts: 3,
+        message: 'Service unavailable.',
+      },
+      explanation: '',
+    };
+    for (const passed of [true, false]) {
+      const result = scoreEvaluation(
+        [
+          {
+            requirement_level: 'SHOULD',
+            criterion: 'Correct answer',
+            label: 'correctness',
+            passed,
+            explanation: '',
+          },
+          observational,
+        ],
+        [],
+      );
+      assert.equal(result.status, passed ? 'passed' : 'failed');
+      assert.equal(result.score, passed ? 1 : 0);
+      assert.equal(result.judging_criteria_total, 1);
+      assert.equal(result.judging_criteria_errored, 0);
+      assert.deepEqual(result.judging_criteria[1], observational);
+    }
+  });
+
   it('does not fabricate a score or an agent pass/fail when all judgments error', () => {
     const error: CriterionResultV1 = {
       requirement_level: 'SHOULD' as const,
       criterion: 'unavailable',
       passed: null,
-      error: { type: 'parse_error', attempts: 3 },
+      error: { type: 'parse_error', attempts: 3, message: 'Invalid JSON.' },
       explanation: 'Malformed response.',
     };
     for (const checks of [

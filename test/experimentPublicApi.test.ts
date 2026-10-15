@@ -73,6 +73,7 @@ describe('experiment public entry points', () => {
       '{}',
       'Unavailable criterion.',
     );
+    assert.equal(typeof error.error!.message, 'string');
     const incomplete = root.parseEvaluationResult(
       root.scoreEvaluation([criterion, error], []),
     );

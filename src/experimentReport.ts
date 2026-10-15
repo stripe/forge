@@ -21,11 +21,11 @@ const ratio = z.number().finite().min(0).max(1);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const selectionSchema = z.unknown().transform(parseRunSelection);
 const criterionCountsSchema = z
-  .object({ passed: count, total: count })
+  .object({ passed: count, total: count, errored: count })
   .strict()
   .refine(
-    (value) => value.passed <= value.total,
-    'Passed counts exceed totals.',
+    (value) => value.passed + value.errored <= value.total,
+    'Passed and error counts exceed totals.',
   );
 const criteriaByRequirementSchema = z
   .object({
@@ -39,6 +39,9 @@ const criterionStatisticsSchema = z
     passed: count,
     total: count,
     evaluations: count,
+    judged_evaluations: count,
+    fully_judged_evaluations: count,
+    errored: count,
     strict_pass_rate: ratio.nullable(),
     average_pass_rate: ratio.nullable(),
   })
@@ -51,11 +54,25 @@ const evaluationSchema = z
     judging_criteria_total: count,
     criteria_by_requirement: criteriaByRequirementSchema,
     judging_criteria_errored: count,
+    judging_criteria_excluded_errored: count,
     checks_passed: count,
     checks_total: count,
   })
   .strict()
   .superRefine((value, context) => {
+    const { MUST, SHOULD, OPTIONAL } = value.criteria_by_requirement;
+    if (
+      value.judging_criteria_passed !== MUST.passed + SHOULD.passed ||
+      value.judging_criteria_total !== MUST.total + SHOULD.total ||
+      value.judging_criteria_errored !== MUST.errored + SHOULD.errored ||
+      value.judging_criteria_excluded_errored !== OPTIONAL.errored
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Scored counts must match MUST and SHOULD results; excluded errors must match OPTIONAL results.',
+      });
+    }
     const judged =
       value.judging_criteria_total - value.judging_criteria_errored;
     if (
@@ -191,14 +208,15 @@ export function summarizeReportEvaluation(
   evaluation: EvaluationResultV1,
 ): ExperimentRunReportEvaluationV1 {
   const criteriaByRequirement: z.infer<typeof criteriaByRequirementSchema> = {
-    MUST: { passed: 0, total: 0 },
-    SHOULD: { passed: 0, total: 0 },
-    OPTIONAL: { passed: 0, total: 0 },
+    MUST: { passed: 0, total: 0, errored: 0 },
+    SHOULD: { passed: 0, total: 0, errored: 0 },
+    OPTIONAL: { passed: 0, total: 0, errored: 0 },
   };
   for (const criterion of evaluation.judging_criteria) {
     const group = criteriaByRequirement[criterion.requirement_level];
     group.total += 1;
-    if (criterion.passed) group.passed += 1;
+    if (criterion.passed === true) group.passed += 1;
+    if (criterion.passed === null) group.errored += 1;
   }
   return {
     status: evaluation.status,
@@ -206,6 +224,7 @@ export function summarizeReportEvaluation(
     judging_criteria_passed: evaluation.judging_criteria_passed,
     judging_criteria_total: evaluation.judging_criteria_total,
     judging_criteria_errored: evaluation.judging_criteria_errored,
+    judging_criteria_excluded_errored: criteriaByRequirement.OPTIONAL.errored,
     criteria_by_requirement: criteriaByRequirement,
     checks_passed: evaluation.checks.filter((check) => check.passed).length,
     checks_total: evaluation.checks.length,
@@ -316,6 +335,7 @@ function statistics(
   let failed = 0;
   let judgeErrorEvaluations = 0;
   let judgeErrorCriteria = 0;
+  let incompleteScoringEvaluations = 0;
   let attempts = 0;
   let retries = 0;
   let criterionSum = 0;
@@ -331,8 +351,12 @@ function statistics(
       if (evaluation.status === 'passed') passed += 1;
       else if (evaluation.status === 'partial') partial += 1;
       else if (evaluation.status === 'failed') failed += 1;
-      else judgeErrorEvaluations += 1;
-      judgeErrorCriteria += evaluation.judging_criteria_errored;
+      else incompleteScoringEvaluations += 1;
+      const criterionErrors =
+        evaluation.judging_criteria_errored +
+        evaluation.judging_criteria_excluded_errored;
+      if (criterionErrors > 0) judgeErrorEvaluations += 1;
+      judgeErrorCriteria += criterionErrors;
       if (evaluation.judging_criteria_total > 0 && evaluation.score !== null) {
         criterionSum += evaluation.score;
         criterionEvaluations += 1;
@@ -355,9 +379,9 @@ function statistics(
     retry_attempts: retries,
     coverage: runs.length === 0 ? null : completed / runs.length,
     pass_rate:
-      completed === judgeErrorEvaluations
+      completed === incompleteScoringEvaluations
         ? null
-        : passed / (completed - judgeErrorEvaluations),
+        : passed / (completed - incompleteScoringEvaluations),
     criteria_by_requirement: {
       MUST: criterionStatistics(runs, 'MUST'),
       SHOULD: criterionStatistics(runs, 'SHOULD'),
@@ -379,6 +403,9 @@ function criterionStatistics(
   let passed = 0;
   let total = 0;
   let evaluations = 0;
+  let errored = 0;
+  let judgedEvaluations = 0;
+  let fullyJudgedEvaluations = 0;
   let strictPasses = 0;
   let fractionSum = 0;
   for (const run of runs) {
@@ -388,14 +415,29 @@ function criterionStatistics(
     passed += group.passed;
     total += group.total;
     evaluations += 1;
-    if (group.passed === group.total) strictPasses += 1;
-    fractionSum += group.passed / group.total;
+    errored += group.errored;
+    if (group.errored === 0) {
+      fullyJudgedEvaluations += 1;
+      if (group.passed === group.total) strictPasses += 1;
+    }
+    const judged = group.total - group.errored;
+    if (judged > 0) {
+      judgedEvaluations += 1;
+      fractionSum += group.passed / judged;
+    }
   }
   return {
     passed,
     total,
     evaluations,
-    strict_pass_rate: evaluations === 0 ? null : strictPasses / evaluations,
-    average_pass_rate: evaluations === 0 ? null : fractionSum / evaluations,
+    errored,
+    judged_evaluations: judgedEvaluations,
+    fully_judged_evaluations: fullyJudgedEvaluations,
+    strict_pass_rate:
+      fullyJudgedEvaluations === 0
+        ? null
+        : strictPasses / fullyJudgedEvaluations,
+    average_pass_rate:
+      judgedEvaluations === 0 ? null : fractionSum / judgedEvaluations,
   };
 }
