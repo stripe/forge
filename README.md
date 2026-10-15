@@ -269,6 +269,11 @@ JS
 ### Understand scores
 
 Numeric `score` is the fraction of included judging criteria that passed.
+Each criterion declares an RFC 2119 `requirement_level`; uppercase keywords in
+its text must match that declaration. See
+[criterion authoring](docs/architecture.md#criterion-judging) for the format and
+examples. Requirement levels describe the guideline; `include_in_score`
+controls scoring independently.
 Every criterion is judged and retained in results; criteria with
 `include_in_score: false` affect neither this fraction nor evaluation status.
 File checks are additional pass/fail constraints and do not change the fraction.

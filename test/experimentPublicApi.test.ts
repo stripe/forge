@@ -56,7 +56,7 @@ describe('experiment public entry points', () => {
       JSON.stringify({
         results: [{ index: 0, passed: true, explanation: 'Done.' }],
       }),
-      'The task is complete.',
+      { value: 'The task is complete.', requirement_level: 'MUST' },
     );
     const evaluation: root.EvaluationResultV1 = root.scoreEvaluation(
       [criterion],

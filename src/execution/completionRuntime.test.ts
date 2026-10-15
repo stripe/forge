@@ -34,7 +34,9 @@ describe('completion runtime', () => {
     const provider = { ...scripted.provider, metadata };
     const bindings = completionBindingsForPlan(
       createTestResolvedRunPlan({
-        judgingCriteria: ['One criterion'],
+        judgingCriteria: [
+          { value: 'One criterion', requirement_level: 'MUST' as const },
+        ],
         judge: MODEL,
       }),
       composition(provider),
@@ -67,7 +69,9 @@ describe('completion runtime', () => {
       assert.throws(() =>
         completionBindingsForPlan(
           createTestResolvedRunPlan({
-            judgingCriteria: ['One criterion'],
+            judgingCriteria: [
+              { value: 'One criterion', requirement_level: 'MUST' as const },
+            ],
             judge: MODEL,
           }),
           composition(provider),
@@ -121,7 +125,9 @@ describe('completion runtime', () => {
       createTestResolvedRunPlan({
         mode: 'multi_turn',
         rolePlayer: MODEL,
-        judgingCriteria: ['One criterion'],
+        judgingCriteria: [
+          { value: 'One criterion', requirement_level: 'MUST' as const },
+        ],
         judge: MODEL,
       }),
       composition(provider),
@@ -200,7 +206,9 @@ describe('completion runtime', () => {
       runId: 'cancelled-completion-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          judgingCriteria: ['One criterion'],
+          judgingCriteria: [
+            { value: 'One criterion', requirement_level: 'MUST' as const },
+          ],
           judge: MODEL,
         }),
         composition(provider),
@@ -260,7 +268,9 @@ describe('completion runtime', () => {
       runId: 'completion-order-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          judgingCriteria: ['One criterion'],
+          judgingCriteria: [
+            { value: 'One criterion', requirement_level: 'MUST' as const },
+          ],
           judge: MODEL,
         }),
         composition(provider.provider),
@@ -307,7 +317,9 @@ describe('completion runtime', () => {
       runId: 'completion-validation-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          judgingCriteria: ['One criterion'],
+          judgingCriteria: [
+            { value: 'One criterion', requirement_level: 'MUST' as const },
+          ],
           judge: MODEL,
         }),
         composition(provider.provider),
@@ -340,7 +352,9 @@ describe('completion runtime', () => {
       runId: 'completion-error-redaction-1',
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
-          judgingCriteria: ['One criterion'],
+          judgingCriteria: [
+            { value: 'One criterion', requirement_level: 'MUST' as const },
+          ],
           judge: MODEL,
         }),
         composition(provider.provider),

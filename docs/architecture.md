@@ -1002,25 +1002,51 @@ through evidence collection.
 
 ### Criterion judging
 
-`judging_criteria` accepts nonblank strings or strict objects with `value`,
-optional `label`, and optional `include_in_score`. Labels are repeatable
-categories matching `[a-z][a-z0-9_]*`; they are not individual identities.
-`include_in_score` defaults to true. A case with criteria must keep at least
-one included criterion. Existing string criteria are unlabeled and included.
+`judging_criteria` contains strict objects with nonblank `value`, required
+`requirement_level`, optional `label`, and optional `include_in_score`.
+Every criterion declares one of these [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)
+requirement levels:
+
+| Level | Meaning |
+| --- | --- |
+| `MUST` | Required behavior |
+| `MUST NOT` | Prohibited behavior |
+| `SHOULD` | Recommended behavior; a justified exception may be appropriate |
+| `SHOULD NOT` | Discouraged behavior; a justified exception may be appropriate |
+| `MAY` | Optional behavior |
+
+Uppercase `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` in `value`
+must agree with `requirement_level`. Matching uses whole words and treats
+negations, including line-wrapped ones, as single terms. Repeated terms of the
+same level are allowed; conflicting levels are rejected. Split such requirements
+into separate criteria. Lowercase words do not determine the level; criteria
+without an uppercase keyword still require an explicit classification.
+
+Write each value as a complete, concrete expectation that can pass or fail.
+For example, use “Sets `billing_mode` to `flexible`” instead of “Uses the proper
+billing mode.” State prohibited behavior as an expectation of absence, such as
+“Does not create a second subscription.” Prefer deterministic checks for
+conditions they can establish through programmatic inspection.
+
+Labels remain repeatable categories matching `[a-z][a-z0-9_]*`, independent of
+requirement levels. `include_in_score` defaults to true. A case with criteria
+must keep at least one included criterion.
 
 ```yaml
 judging_criteria:
   - label: correctness
-    value: The answer correctly explains cancellation.
+    requirement_level: MUST
+    value: The integration MUST set billing_mode to flexible.
   - label: source
+    requirement_level: SHOULD
     include_in_score: false
-    value: The agent consulted the cancellation documentation.
+    value: The agent consulted the subscription documentation.
 ```
 
 Every criterion is judged, including excluded criteria. Only its text is sent
 to the judge; authored metadata is attached to the ordered result afterward.
 `result.json.evaluation.judging_criteria` retains every text, outcome,
-explanation, optional label, and scoring inclusion. Source-consultation criteria
+explanation, requirement level, optional label, and scoring inclusion. Source-consultation criteria
 are model judgments about the available evidence, not verified network telemetry.
 
 Each judging criterion is judged independently against:
@@ -1050,7 +1076,8 @@ The numeric score is the fraction of included judging criteria that pass.
 `judging_criteria_passed` and `judging_criteria_total` count only results whose
 `include_in_score` is not false. Excluded criteria affect neither score nor
 status. File checks are independent pass constraints and do not change that
-ratio. Labels do not determine inclusion; authors select it explicitly.
+ratio. Labels and requirement levels do not determine inclusion; authors select
+it explicitly. A `MAY` criterion is still scored unless `include_in_score` is false.
 
 | Situation | Status | Score |
 | --- | --- | --- |
@@ -1144,7 +1171,7 @@ hashes. It also requires:
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
 - canonical plan bytes to match their artifact descriptor and result summary;
-- recorded criterion text, labels, and effective inclusion to match the plan;
+- recorded criterion text, requirement levels, labels, and effective inclusion to match the plan;
 - workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
@@ -1155,9 +1182,9 @@ hashes. It also requires:
 - judge evidence to match the projection of the stored trajectory.
 
 `criterionResultMatchesDefinition` from `@stripe/forge` compares a recorded
-judgment's text, label, and effective scoring inclusion with its authored
+judgment's text, requirement level, label, and effective scoring inclusion with its authored
 criterion. Embedding hosts with their own result envelopes use the same check.
-Omitted inclusion on historical result rows means true.
+Omitted inclusion means true.
 
 Publication is deliberately outside `executeEval`. A caller should verify the
 committed local run before passing it to a host-owned publisher.

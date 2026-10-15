@@ -154,7 +154,12 @@ context: Existing integration
     const definition = {
       id: 'sample/criteria',
       task: 'Complete the task.',
-      judging_criteria: ['Handle invalid input gracefully.'],
+      judging_criteria: [
+        {
+          value: 'Returns HTTP 400 for invalid input.',
+          requirement_level: 'MUST',
+        },
+      ],
       checks: { files_created: ['answer.txt'] },
     };
     const parsed = parseEvalCase(definition);
@@ -203,13 +208,26 @@ initial_prompt: Two
     );
   });
 
-  it('accepts mixed criteria and repeatable labels while rejecting invalid scoring definitions', () => {
+  it('accepts classified criteria and repeatable labels while rejecting invalid scoring definitions', () => {
     const criteria = [
-      'Legacy criterion',
-      { value: 'Correct answer', label: 'correctness' },
-      { value: 'Read page A', label: 'source', include_in_score: false },
-      { value: 'Read page B', label: 'source', include_in_score: false },
-      { value: 'Unlabeled criterion' },
+      {
+        value: 'Correct answer',
+        requirement_level: 'MUST',
+        label: 'correctness',
+      },
+      {
+        value: 'Read page A',
+        requirement_level: 'SHOULD',
+        label: 'source',
+        include_in_score: false,
+      },
+      {
+        value: 'Read page B',
+        requirement_level: 'SHOULD',
+        label: 'source',
+        include_in_score: false,
+      },
+      { value: 'Unlabeled criterion', requirement_level: 'MAY' },
     ];
     assert.deepEqual(
       parseEvalCase({
@@ -235,7 +253,7 @@ initial_prompt: Two
           parseEvalCase({
             id: 'sample/task',
             task: 'Answer',
-            judging_criteria: [invalid],
+            judging_criteria: [{ requirement_level: 'MUST', ...invalid }],
           }),
         BenchmarkModelError,
       );
@@ -245,7 +263,13 @@ initial_prompt: Two
         parseEvalCase({
           id: 'sample/task',
           task: 'Answer',
-          judging_criteria: [{ value: 'Read docs', include_in_score: false }],
+          judging_criteria: [
+            {
+              value: 'Read docs',
+              requirement_level: 'SHOULD',
+              include_in_score: false,
+            },
+          ],
         }),
       /at least one judging criterion must be included in scoring/,
     );
@@ -259,7 +283,9 @@ initial_prompt: Two
           task: 'Evaluate a bounded criterion.',
           execution_mode: 'multi_turn',
           setup: [],
-          judging_criteria: ['x'.repeat(64 * 1024 + 1)],
+          judging_criteria: [
+            { value: 'x'.repeat(64 * 1024 + 1), requirement_level: 'MUST' },
+          ],
         }),
       BenchmarkModelError,
     );

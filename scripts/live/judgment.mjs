@@ -47,10 +47,10 @@ export async function runCriterionJudgmentRegression(
     },
     { credentials },
   );
-  const judgment = forge.parseCriterionJudgment(
-    response.content,
-    'Synthetic JSON escape check.',
-  );
+  const judgment = forge.parseCriterionJudgment(response.content, {
+    value: 'Synthetic JSON escape check.',
+    requirement_level: 'MUST',
+  });
   if (response.stopReason !== 'end_turn' || judgment.passed !== true) {
     throw new Error(
       'The live JSON escape check did not return a valid completed judgment.',

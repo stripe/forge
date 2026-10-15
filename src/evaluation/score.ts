@@ -48,13 +48,11 @@ export function criterionResultMatchesDefinition(
   result: CriterionResultV1,
   definition: JudgingCriterionV1,
 ): boolean {
-  const text = typeof definition === 'string' ? definition : definition.value;
-  const label = typeof definition === 'string' ? undefined : definition.label;
-  const included =
-    typeof definition === 'string' || definition.include_in_score !== false;
   return (
-    result.criterion === text &&
-    result.label === label &&
-    (result.include_in_score !== false) === included
+    result.criterion === definition.value &&
+    result.requirement_level === definition.requirement_level &&
+    result.label === definition.label &&
+    (result.include_in_score !== false) ===
+      (definition.include_in_score !== false)
   );
 }

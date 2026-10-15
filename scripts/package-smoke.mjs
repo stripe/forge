@@ -93,8 +93,9 @@ try {
       }
       const criterion = forge.parseCriterionJudgment(
         JSON.stringify({results: [{index: 0, passed: true, explanation: 'Done.'}]}),
-        'The task is complete.',
+        {value: 'The task is complete.', requirement_level: 'MUST'},
       );
+      assert.equal(criterion.requirement_level, 'MUST');
       const evaluation = forge.parseEvaluationResult(forge.scoreEvaluation([criterion], []));
       assert.equal(evaluation.judging_criteria_passed, 1);
       assert.equal(evaluation.judging_criteria_total, 1);

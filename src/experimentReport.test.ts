@@ -386,8 +386,17 @@ describe('experiment run scorecards', () => {
     const plan = createTestResolvedRunPlan({
       caseId: 'testing/criteria',
       judgingCriteria: [
-        { value: 'The answer is complete.', label: 'correctness' },
-        { value: 'Read docs', label: 'source', include_in_score: false },
+        {
+          value: 'The answer is complete.',
+          requirement_level: 'MUST' as const,
+          label: 'correctness',
+        },
+        {
+          value: 'Read docs',
+          requirement_level: 'MUST' as const,
+          label: 'source',
+          include_in_score: false,
+        },
       ],
       judge: { provider: 'scripted', model: 'judge' },
       checks: { file_checks: [{ file: 'missing.txt', exists: true }] },

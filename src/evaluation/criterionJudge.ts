@@ -3,6 +3,7 @@ import type {
   CompletionMessage,
   StrictCompletionResponseSchema,
 } from '../contracts/completion.ts';
+import { JudgingCriterionSchema } from '../model/criteria.ts';
 import type { JudgingCriterionV1 } from '../model/types.ts';
 import type { CriterionResultV1 } from '../results/types.ts';
 import {
@@ -152,16 +153,13 @@ Give a concise, one- or two-sentence explanation for your decision.`;
 /** Parse only the strict one-criterion contract; prose and code fences are invalid. */
 export function parseCriterionJudgment(
   raw: string,
-  criterion: string,
+  criterion: JudgingCriterionV1,
 ): CriterionResultV1 {
-  const outcome = parseJudgeResponse(raw, criterion);
+  const parsedCriterion = JudgingCriterionSchema.parse(criterion);
+  const outcome = parseJudgeResponse(raw, parsedCriterion);
   return outcome.valid
     ? outcome.result
-    : {
-        criterion,
-        passed: false,
-        explanation: outcome.explanation,
-      };
+    : criterionResult(parsedCriterion, false, outcome.explanation);
 }
 
 /** Grade each criterion independently with stable output order. */
@@ -177,7 +175,7 @@ export async function judgeCriteria(
   if (input.criteria.length === 0) return [];
 
   const criteria = validatedInput.criteria.map((criterion) =>
-    typeof criterion === 'string' ? criterion : { ...criterion },
+    JudgingCriterionSchema.parse(criterion),
   );
   const results = new Array<CriterionResultV1>(criteria.length);
   const peerCancellation = new AbortController();
@@ -198,22 +196,12 @@ export async function judgeCriteria(
 
       try {
         const criterion = criteria[criterionIndex]!;
-        const result = await judgeOneCriterion(
+        results[criterionIndex] = await judgeOneCriterion(
           workerInput,
-          typeof criterion === 'string' ? criterion : criterion.value,
+          criterion,
           invoke,
           options,
         );
-        results[criterionIndex] =
-          typeof criterion === 'string'
-            ? result
-            : {
-                ...result,
-                ...(criterion.label === undefined
-                  ? {}
-                  : { label: criterion.label }),
-                include_in_score: criterion.include_in_score !== false,
-              };
       } catch (error) {
         if (!failed) {
           failed = true;
@@ -238,12 +226,12 @@ export async function judgeCriteria(
 
 async function judgeOneCriterion(
   input: CriterionJudgeInput,
-  criterion: string,
+  criterion: JudgingCriterionV1,
   invoke: CriterionCompletionInvoker,
   options: CriterionJudgeExecutionOptions,
 ): Promise<CriterionResultV1> {
   const waitBeforeRetry = options.waitBeforeRetry ?? waitBeforeJudgeRetry;
-  const systemPrompt = renderCriterionJudgePrompt(input, criterion);
+  const systemPrompt = renderCriterionJudgePrompt(input, criterion.value);
   let finalParseExplanation = 'Judge response was unavailable.';
 
   for (let attempt = 1; attempt <= MAX_CRITERION_JUDGE_ATTEMPTS; attempt += 1) {
@@ -275,16 +263,16 @@ async function judgeOneCriterion(
     }
   }
 
-  return {
+  return criterionResult(
     criterion,
-    passed: false,
-    explanation: `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
-  };
+    false,
+    `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
+  );
 }
 
 function parseJudgeResponse(
   raw: unknown,
-  criterion: string,
+  criterion: JudgingCriterionV1,
 ): JudgeParseOutcome {
   if (typeof raw !== 'string') {
     return { valid: false, explanation: 'Judge response was not valid JSON.' };
@@ -306,11 +294,22 @@ function parseJudgeResponse(
   const entry = parsed.data.results[0]!;
   return {
     valid: true,
-    result: {
-      criterion,
-      passed: entry.passed,
-      explanation: entry.explanation,
-    },
+    result: criterionResult(criterion, entry.passed, entry.explanation),
+  };
+}
+
+function criterionResult(
+  criterion: JudgingCriterionV1,
+  passed: boolean,
+  explanation: string,
+): CriterionResultV1 {
+  return {
+    criterion: criterion.value,
+    requirement_level: criterion.requirement_level,
+    ...(criterion.label === undefined ? {} : { label: criterion.label }),
+    include_in_score: criterion.include_in_score !== false,
+    passed,
+    explanation,
   };
 }
 

@@ -604,7 +604,12 @@ describe('Codex engine integration', () => {
       maxTurns: 3,
       rolePlayer: ROLE_MODEL,
       judge: JUDGE_MODEL,
-      judgingCriteria: ['Both parts are complete.'],
+      judgingCriteria: [
+        {
+          value: 'Both parts are complete.',
+          requirement_level: 'MUST' as const,
+        },
+      ],
     });
     const test = await fixture(plan, {
       responses: ['Part one complete.', 'Part two complete.'],
@@ -766,7 +771,12 @@ describe('Codex engine integration', () => {
           agent: selection,
           prompt: 'Complete the requested answer.',
           judge: JUDGE_MODEL,
-          judgingCriteria: ['The answer is complete.'],
+          judgingCriteria: [
+            {
+              value: 'The answer is complete.',
+              requirement_level: 'MUST' as const,
+            },
+          ],
         });
         const test = await fixture(plan, {
           native: withoutNativeTools,
@@ -922,7 +932,12 @@ describe('Codex engine integration', () => {
         agent: selection,
         prompt: 'Look up the fixture.',
         judge: JUDGE_MODEL,
-        judgingCriteria: ['The assistant inspects the fixture.'],
+        judgingCriteria: [
+          {
+            value: 'The assistant inspects the fixture.',
+            requirement_level: 'MUST' as const,
+          },
+        ],
       });
       const test = await fixture(plan, {
         native: (turns) => mcpRollout(turns, output, result),
@@ -1063,7 +1078,12 @@ describe('Codex engine integration', () => {
       agent: selection,
       prompt: 'Look up the fixture.',
       judge: JUDGE_MODEL,
-      judgingCriteria: ['The assistant reports the fixture failure.'],
+      judgingCriteria: [
+        {
+          value: 'The assistant reports the fixture failure.',
+          requirement_level: 'MUST' as const,
+        },
+      ],
     });
     const test = await fixture(plan, {
       responses: ['The fixture tool reported a failure.'],
@@ -1198,7 +1218,12 @@ describe('Codex engine integration', () => {
       agent: selection,
       prompt: 'Look up the fixture.',
       judge: JUDGE_MODEL,
-      judgingCriteria: ['The assistant inspects the fixture.'],
+      judgingCriteria: [
+        {
+          value: 'The assistant inspects the fixture.',
+          requirement_level: 'MUST' as const,
+        },
+      ],
     });
     const test = await fixture(plan, {
       native: (turns) => mcpRollout(turns, output, result),
@@ -1268,7 +1293,12 @@ describe('Codex engine integration', () => {
         agent: selection,
         prompt: 'Look up the large fixture.',
         judge: JUDGE_MODEL,
-        judgingCriteria: ['The assistant inspects the large fixture.'],
+        judgingCriteria: [
+          {
+            value: 'The assistant inspects the large fixture.',
+            requirement_level: 'MUST' as const,
+          },
+        ],
       });
       const test = await fixture(plan, {
         native: (turns) => mcpRollout(turns, captured.output, captured.result),
@@ -1386,7 +1416,12 @@ describe('Codex engine integration', () => {
       agent: selection,
       prompt: 'Look up the large fixture.',
       judge: JUDGE_MODEL,
-      judgingCriteria: ['The assistant inspects the large fixture.'],
+      judgingCriteria: [
+        {
+          value: 'The assistant inspects the large fixture.',
+          requirement_level: 'MUST' as const,
+        },
+      ],
     });
     const test = await fixture(plan, {
       native: (turns) => mcpRollout(turns, output, captured.result),

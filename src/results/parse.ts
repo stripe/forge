@@ -13,12 +13,14 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
+import { criterionRequirementLevelIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
   isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
+import { REQUIREMENT_LEVELS } from '../model/types.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import {
   assertCompatibleForgeVersion,
@@ -129,6 +131,7 @@ const checkResult = z
 
 const criterionResult = z
   .object({
+    requirement_level: z.enum(REQUIREMENT_LEVELS),
     label: z
       .string()
       .regex(/^[a-z][a-z0-9_]*$/)
@@ -141,7 +144,20 @@ const criterionResult = z
     passed: z.boolean(),
     explanation: z.string().max(64 * 1024),
   })
-  .strict();
+  .strict()
+  .superRefine((criterion, context) => {
+    const issue = criterionRequirementLevelIssue(
+      criterion.criterion,
+      criterion.requirement_level,
+    );
+    if (issue !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['requirement_level'],
+        message: issue,
+      });
+    }
+  });
 
 export const evaluationResultSchema = z
   .object({

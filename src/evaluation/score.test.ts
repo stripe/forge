@@ -1,20 +1,47 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import { REQUIREMENT_LEVELS } from '../model/types.js';
 
 import { scoreEvaluation } from './score.ts';
 
 describe('scoreEvaluation', () => {
+  it('keeps requirement levels independent of scoring inclusion', () => {
+    for (const requirement_level of REQUIREMENT_LEVELS) {
+      for (const include_in_score of [true, false]) {
+        const result = scoreEvaluation(
+          [
+            {
+              criterion: 'Creates one subscription.',
+              requirement_level,
+              include_in_score,
+              passed: false,
+              explanation: 'Missing.',
+            },
+          ],
+          [],
+        );
+        assert.equal(result.judging_criteria_total, include_in_score ? 1 : 0);
+        assert.equal(result.status, include_in_score ? 'failed' : 'passed');
+        assert.equal(
+          result.judging_criteria[0]?.requirement_level,
+          requirement_level,
+        );
+      }
+    }
+  });
   it('retains excluded judgments without counting them or allowing them to mask an incorrect answer', () => {
     for (const passed of [true, false]) {
       const criteria = [
         {
           criterion: 'Correct answer',
+          requirement_level: 'MUST' as const,
           label: 'correctness',
           passed,
           explanation: '',
         },
         {
           criterion: 'Read docs',
+          requirement_level: 'MUST' as const,
           label: 'source',
           include_in_score: false,
           passed: !passed,
@@ -49,8 +76,18 @@ describe('scoreEvaluation', () => {
     {
       const actual = scoreEvaluation(
         [
-          { criterion: 'one', passed: true, explanation: 'yes' },
-          { criterion: 'two', passed: true, explanation: 'yes' },
+          {
+            criterion: 'one',
+            requirement_level: 'MUST' as const,
+            passed: true,
+            explanation: 'yes',
+          },
+          {
+            criterion: 'two',
+            requirement_level: 'MUST' as const,
+            passed: true,
+            explanation: 'yes',
+          },
         ],
         [{ name: 'file', passed: false }],
       );
@@ -64,8 +101,18 @@ describe('scoreEvaluation', () => {
 
   it('does not include deterministic checks in the criterion denominator', () => {
     const criteria = [
-      { criterion: 'one', passed: true, explanation: 'yes' },
-      { criterion: 'two', passed: false, explanation: 'no' },
+      {
+        criterion: 'one',
+        requirement_level: 'MUST' as const,
+        passed: true,
+        explanation: 'yes',
+      },
+      {
+        criterion: 'two',
+        requirement_level: 'MUST' as const,
+        passed: false,
+        explanation: 'no',
+      },
     ];
     for (const checks of [
       [],
@@ -84,7 +131,14 @@ describe('scoreEvaluation', () => {
   });
 
   it('requires actual successful checks to establish partial success when no criterion passes', () => {
-    const criteria = [{ criterion: 'one', passed: false, explanation: 'no' }];
+    const criteria = [
+      {
+        criterion: 'one',
+        requirement_level: 'MUST' as const,
+        passed: false,
+        explanation: 'no',
+      },
+    ];
     {
       const actual = scoreEvaluation(criteria, []);
       assert.ok(actual);

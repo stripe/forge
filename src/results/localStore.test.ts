@@ -518,8 +518,17 @@ describe('local artifact store', () => {
 
   it('binds recorded labels and score inclusion to the plan even when altered totals are consistent', async () => {
     const criteria = [
-      { value: 'The task is complete.', label: 'correctness' },
-      { value: 'Read docs', label: 'source', include_in_score: false },
+      {
+        value: 'The task is complete.',
+        requirement_level: 'MUST' as const,
+        label: 'correctness',
+      },
+      {
+        value: 'Read docs',
+        requirement_level: 'MUST' as const,
+        label: 'source',
+        include_in_score: false,
+      },
     ];
     const basePlan = testPlanForResult(withPassingCriterion(resultFor([])));
     const plan = {
@@ -539,6 +548,7 @@ describe('local artifact store', () => {
           [
             {
               criterion: 'The task is complete.',
+              requirement_level: 'MUST' as const,
               label: 'correctness',
               passed: true,
               explanation: '',
@@ -546,6 +556,7 @@ describe('local artifact store', () => {
             },
             {
               criterion: 'Read docs',
+              requirement_level: 'MUST' as const,
               label: 'source',
               passed: false,
               explanation: '',
@@ -562,6 +573,7 @@ describe('local artifact store', () => {
     for (const change of [
       { label: 'correctness' },
       { include_in_score: true },
+      { requirement_level: 'MAY' as const },
     ]) {
       const result = structuredClone(verified.result);
       const changed = {
@@ -1939,7 +1951,9 @@ async function commitCodexEvidence(
     caseId: 'sample/case',
     prompt: 'do it',
     agent: { adapter: 'codex', provider: 'openai', model: 'test' },
-    judgingCriteria: ['The task is complete.'],
+    judgingCriteria: [
+      { value: 'The task is complete.', requirement_level: 'MUST' as const },
+    ],
     judge: { provider: 'test-provider', model: 'judge-model' },
   });
   return commitArtifacts(
@@ -2051,7 +2065,10 @@ async function commitArtifacts(
 function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
   const multiTurn = result.interaction.mode === 'multi_turn';
   const criteria = result.evaluation.judging_criteria.map(
-    ({ criterion }) => criterion,
+    ({ criterion, requirement_level }) => ({
+      value: criterion,
+      requirement_level,
+    }),
   );
   const hasChecks = result.evaluation.checks.length > 0;
   return createTestResolvedRunPlan({
@@ -2155,6 +2172,7 @@ function withPassingCriterion(result: RunResultV1): RunResultV1 {
       judging_criteria: [
         {
           criterion: 'The task is complete.',
+          requirement_level: 'MUST' as const,
           passed: true,
           explanation: 'Met.',
         },
