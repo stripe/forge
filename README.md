@@ -85,7 +85,11 @@ API root such as `https://gateway.example.com/v1`. The CLI reads
 `CODEX_API_KEY`, without falling back to `OPENAI_API_KEY`. Remote endpoints
 must use HTTPS and be reachable from the container; host-side completions
 must also reach their endpoint. A host loopback address points at the
-container when used by the agent.
+container when used by the agent, including names ending in `.localhost`.
+A successful host-side request does not prove coding-agent connectivity.
+The public CLI creates no host bridge; supply an endpoint reachable from
+the container. The development live suite has separate
+[gateway bridge support](docs/codebase-guide.md#opt-in-live-tests).
 
 The runtime installs pinned Claude Code and Codex CLI releases from npm.
 Their use remains subject to their providers' terms.
