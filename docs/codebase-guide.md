@@ -29,6 +29,10 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
+The build uses tsup for ESM JavaScript and source maps with embedded source,
+then TypeScript for declarations. It cleans `dist` while preserving the
+module layout so runtime assets and build metadata resolve beside their modules.
+
 Use `node dist/cli.js` to run the built CLI with the README's
 [sample walkthrough](../README.md#run-your-first-experiment). `pnpm test` runs
 Vitest directly against TypeScript sources; it does not build the package or
@@ -781,7 +785,8 @@ gateway behavior, and suite configuration.
 | [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs) | Opt-in real Docker/agent/provider suite. |
 | [`package.json`](../package.json) | Public exports, binary, Node/package-manager pins, scripts, and package file inventory. |
 | [`tsconfig.json`](https://github.com/stripe/forge/blob/main/tsconfig.json) | Strict NodeNext development/test typechecking. |
-| [`tsconfig.build.json`](https://github.com/stripe/forge/blob/main/tsconfig.build.json) | Production declaration/JavaScript build. |
+| [`tsup.config.ts`](https://github.com/stripe/forge/blob/main/tsup.config.ts) | ESM JavaScript build, source maps, and output cleanup. |
+| [`tsconfig.build.json`](https://github.com/stripe/forge/blob/main/tsconfig.build.json) | Production declarations and declaration maps. |
 
 ## Public versus internal imports
 

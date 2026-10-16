@@ -81,7 +81,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && node scripts/build-info.mjs",
+    "build": "tsup && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && node scripts/build-info.mjs",
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write --error-on-warnings .",
     "format": "biome format --write .",
@@ -110,6 +110,7 @@
     "@biomejs/biome": "2.5.15",
     "@types/node": "^22.15.30",
     "publint": "^0.3.12",
+    "tsup": "^8.5.1",
     "tsx": "4.23.15",
     "typescript": "^5.9.3",
     "vitest": "5.0.3"

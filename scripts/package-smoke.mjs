@@ -19,6 +19,11 @@ if (typeof packageVersion !== 'string' || packageVersion.length === 0) {
 const temporaryRoot = await fs.mkdtemp(
   path.join(os.tmpdir(), 'stripe-forge-package-smoke-'),
 );
+const staleBuildRoot = path.join(
+  projectRoot,
+  'dist',
+  path.basename(temporaryRoot),
+);
 
 try {
   const packRoot = path.join(temporaryRoot, 'pack');
@@ -26,7 +31,12 @@ try {
   await fs.mkdir(packRoot);
   await fs.mkdir(consumerRoot);
 
+  await fs.mkdir(staleBuildRoot, { recursive: true });
+  await fs.writeFile(path.join(staleBuildRoot, 'removed.js'), 'export {};\n');
   run('pnpm', ['pack', '--pack-destination', packRoot], projectRoot);
+  await assert.rejects(fs.access(path.join(staleBuildRoot, 'removed.js')), {
+    code: 'ENOENT',
+  });
   const packagedBuildIdentity = JSON.parse(
     await fs.readFile(
       path.join(projectRoot, 'dist', 'build-info.json'),
@@ -55,6 +65,23 @@ try {
     )}\n`,
   );
   run('pnpm', ['add', '--offline', '--ignore-scripts', archive], consumerRoot);
+
+  const installedRoot = path.join(
+    consumerRoot,
+    'node_modules',
+    '@stripe',
+    'forge',
+  );
+  const sourceMap = JSON.parse(
+    await fs.readFile(path.join(installedRoot, 'dist', 'index.js.map'), 'utf8'),
+  );
+  assert.ok(sourceMap.sources.length > 0);
+  assert.equal(sourceMap.sourcesContent.length, sourceMap.sources.length);
+  assert.ok(
+    sourceMap.sourcesContent.every(
+      (source) => typeof source === 'string' && source.length > 0,
+    ),
+  );
 
   await fs.writeFile(
     path.join(consumerRoot, 'esm.mjs'),
@@ -101,6 +128,20 @@ try {
       assert.deepEqual(evaluation.judging_criteria, [criterion]);
       assert.equal(typeof docker.detectDockerRuntimePlatform, 'function');
       assert.equal(typeof docker.validateDockerRuntimeHost, 'function');
+      // Exercise asset discovery and digest verification from the installed
+      // package with a fake Docker command runner, without Docker or network.
+      const imageId = 'sha256:' + 'a'.repeat(64);
+      const validatedHost = await docker.validateDockerRuntimeHost({
+        platform: 'linux/amd64',
+        temporaryRoot: process.cwd(),
+        hostCommands: {
+          async run(argv) {
+            return {stdout: argv[1] === 'image' ? imageId : '', stderr: '', exitCode: 0, durationMs: 0};
+          },
+        },
+      });
+      assert.deepEqual(validatedHost, {platform: 'linux/amd64', imageId});
+      assert.equal(forge.defineSetupActionBundle, setup.defineSetupActionBundle);
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
       assert.equal(typeof forge.parseJudgeTranscriptProjection, 'function');
       assert.equal(atif.ATIF_SCHEMA_VERSION, 'ATIF-v1.8');
@@ -376,6 +417,7 @@ try {
   );
   run(process.execPath, ['commonjs.cjs'], consumerRoot);
 } finally {
+  await fs.rm(staleBuildRoot, { recursive: true, force: true });
   await fs.rm(temporaryRoot, { recursive: true, force: true });
 }
 
