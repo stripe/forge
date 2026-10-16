@@ -12,7 +12,7 @@ export function scoreEvaluation(
   checks: readonly CheckResultV1[],
 ): EvaluationResultV1 {
   const included = criteria.filter(
-    (criterion) => criterion.include_in_score !== false,
+    (criterion) => criterion.criteria_requirement !== 'OPTIONAL',
   );
   const criteriaTotal = included.length;
   const criteriaPassed = included.filter(
@@ -52,7 +52,6 @@ export function criterionResultMatchesDefinition(
     result.criterion === definition.value &&
     result.requirement_level === definition.requirement_level &&
     result.label === definition.label &&
-    (result.include_in_score !== false) ===
-      (definition.include_in_score !== false)
+    result.criteria_requirement === definition.criteria_requirement
   );
 }

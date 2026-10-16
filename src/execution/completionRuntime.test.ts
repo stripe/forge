@@ -35,7 +35,11 @@ describe('completion runtime', () => {
     const bindings = completionBindingsForPlan(
       createTestResolvedRunPlan({
         judgingCriteria: [
-          { value: 'One criterion', requirement_level: 'MUST' as const },
+          {
+            criteria_requirement: 'SHOULD' as const,
+            value: 'One criterion',
+            requirement_level: 'MUST' as const,
+          },
         ],
         judge: MODEL,
       }),
@@ -70,7 +74,11 @@ describe('completion runtime', () => {
         completionBindingsForPlan(
           createTestResolvedRunPlan({
             judgingCriteria: [
-              { value: 'One criterion', requirement_level: 'MUST' as const },
+              {
+                criteria_requirement: 'SHOULD' as const,
+                value: 'One criterion',
+                requirement_level: 'MUST' as const,
+              },
             ],
             judge: MODEL,
           }),
@@ -126,7 +134,11 @@ describe('completion runtime', () => {
         mode: 'multi_turn',
         rolePlayer: MODEL,
         judgingCriteria: [
-          { value: 'One criterion', requirement_level: 'MUST' as const },
+          {
+            criteria_requirement: 'SHOULD' as const,
+            value: 'One criterion',
+            requirement_level: 'MUST' as const,
+          },
         ],
         judge: MODEL,
       }),
@@ -207,7 +219,11 @@ describe('completion runtime', () => {
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
           judgingCriteria: [
-            { value: 'One criterion', requirement_level: 'MUST' as const },
+            {
+              criteria_requirement: 'SHOULD' as const,
+              value: 'One criterion',
+              requirement_level: 'MUST' as const,
+            },
           ],
           judge: MODEL,
         }),
@@ -269,7 +285,11 @@ describe('completion runtime', () => {
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
           judgingCriteria: [
-            { value: 'One criterion', requirement_level: 'MUST' as const },
+            {
+              criteria_requirement: 'SHOULD' as const,
+              value: 'One criterion',
+              requirement_level: 'MUST' as const,
+            },
           ],
           judge: MODEL,
         }),
@@ -318,7 +338,11 @@ describe('completion runtime', () => {
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
           judgingCriteria: [
-            { value: 'One criterion', requirement_level: 'MUST' as const },
+            {
+              criteria_requirement: 'SHOULD' as const,
+              value: 'One criterion',
+              requirement_level: 'MUST' as const,
+            },
           ],
           judge: MODEL,
         }),
@@ -353,7 +377,11 @@ describe('completion runtime', () => {
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
           judgingCriteria: [
-            { value: 'One criterion', requirement_level: 'MUST' as const },
+            {
+              criteria_requirement: 'SHOULD' as const,
+              value: 'One criterion',
+              requirement_level: 'MUST' as const,
+            },
           ],
           judge: MODEL,
         }),

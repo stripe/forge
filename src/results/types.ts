@@ -16,6 +16,7 @@ import type {
   JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.ts';
 import type {
+  CriteriaRequirementV1,
   JsonObject,
   JsonValue,
   ModelRefV1,
@@ -44,8 +45,8 @@ export interface CheckResultV1 {
 export interface CriterionResultV1 {
   readonly requirement_level: RequirementLevelV1;
   readonly label?: string;
-  /** Defaults to true when omitted. */
-  readonly include_in_score?: boolean;
+  /** Always present after parsing; omitted input defaults to SHOULD. */
+  readonly criteria_requirement: CriteriaRequirementV1;
   readonly criterion: string;
   readonly passed: boolean;
   readonly explanation: string;

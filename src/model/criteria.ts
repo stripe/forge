@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import {
+  CRITERIA_REQUIREMENTS,
+  type CriteriaRequirementV1,
+  DEFAULT_CRITERIA_REQUIREMENT,
   type JudgingCriterionV1,
   REQUIREMENT_LEVELS,
   type RequirementLevelV1,
@@ -18,10 +21,23 @@ export const JudgingCriterionSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_]*$/)
       .optional(),
-    include_in_score: z.boolean().optional(),
+    criteria_requirement: z
+      .enum(CRITERIA_REQUIREMENTS)
+      .default(DEFAULT_CRITERIA_REQUIREMENT),
   })
   .strict()
   .superRefine((criterion, context) => {
+    const wordingIssue = criterionRequirementWordingIssue(
+      criterion.value,
+      criterion.criteria_requirement,
+    );
+    if (wordingIssue !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['value'],
+        message: wordingIssue,
+      });
+    }
     const issue = criterionRequirementLevelIssue(
       criterion.value,
       criterion.requirement_level,
@@ -39,9 +55,7 @@ export const JudgingCriterionSchema = z
       value: criterion.value,
       requirement_level: criterion.requirement_level,
       ...(criterion.label === undefined ? {} : { label: criterion.label }),
-      ...(criterion.include_in_score === undefined
-        ? {}
-        : { include_in_score: criterion.include_in_score }),
+      criteria_requirement: criterion.criteria_requirement,
     }),
   );
 
@@ -62,6 +76,17 @@ export function criterionRequirementLevelIssue(
   const [textLevel] = levels;
   if (textLevel !== undefined && textLevel !== requirementLevel) {
     return `requirement_level must be ${textLevel} to match the uppercase keyword in the criterion`;
+  }
+  return undefined;
+}
+
+/** A writing guardrail; scoring uses only the declared classification. */
+export function criterionRequirementWordingIssue(
+  text: string,
+  requirement: CriteriaRequirementV1,
+): string | undefined {
+  if (requirement === 'MUST' && !/\bMUST\b/.test(text)) {
+    return 'MUST criteria must use the uppercase RFC keyword MUST (or MUST NOT) in their text';
   }
   return undefined;
 }

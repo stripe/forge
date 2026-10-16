@@ -268,22 +268,22 @@ JS
 
 ### Understand scores
 
-Numeric `score` is the fraction of included judging criteria that passed.
-Each criterion declares an RFC 2119 `requirement_level`; uppercase keywords in
-its text must match that declaration. See
-[criterion authoring](docs/architecture.md#criterion-judging) for the format and
-examples. Requirement levels describe the guideline; `include_in_score`
-controls scoring independently.
-Every criterion is judged and retained in results; criteria with
-`include_in_score: false` affect neither this fraction nor evaluation status.
+Numeric `score` is the fraction of scored judging criteria that passed.
+`criteria_requirement` classifies each criterion as `MUST` (required),
+`SHOULD` (recommended), or `OPTIONAL` (non-scoring telemetry). Omitted values
+default to `SHOULD`. Both MUST and SHOULD contribute equally to the score;
+OPTIONAL judgments are retained but affect neither score nor evaluation status.
 File checks are additional pass/fail constraints and do not change the fraction.
-See [criterion authoring](docs/architecture.md#criterion-judging) for labels and
-scoring inclusion.
+
+Each criterion also declares an RFC 2119 `requirement_level` for its wording.
+MUST criteria must use uppercase `MUST` or `MUST NOT` in their text. Wording
+validation does not infer scoring classification. See
+[criterion authoring](docs/architecture.md#criterion-judging) for the format.
 
 | Outcome | Meaning |
 | --- | --- |
-| `passed` | All required checks and included criteria passed. A checks-only pass has score `0`. |
-| `partial` | Some included criteria passed, or checks passed while included criteria did not all pass. |
+| `passed` | All checks and scored criteria passed. A checks-only pass has score `0`. |
+| `partial` | Some scored criteria passed, or checks passed while scored criteria did not all pass. |
 | `failed` | The completed evaluation did not establish a pass or partial success. |
 | Execution error | The selection did not complete successfully and can be retried. |
 
@@ -295,7 +295,7 @@ Interaction stop reasons are separate from evaluation status: reaching
 and one `runs` row per saved selection. With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, judging_score}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, judging_score, criteria_by_requirement}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
@@ -306,6 +306,16 @@ with judging criteria; checks-only runs contribute to pass rate. Ratios range
 from 0 to 1. Only the latest verified effective outcome contributes for each
 selection, so retries do not add scores. Compare treatments on matched cases
 and agent configurations. See [scoring semantics](docs/architecture.md#evaluation-and-scoring).
+
+`criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
+case groups, and run rows. Each aggregate includes passed/total criterion counts
+and the number of completed evaluations containing that classification.
+`strict_pass_rate` is the fraction of those evaluations where every criterion
+in that group passed. `average_pass_rate` is the mean of each evaluation's
+fraction passed in that group; it gives each evaluation equal weight. Empty
+groups have `null` rates. These group rates ignore file checks. MUST failures
+identify unmet requirements; SHOULD failures identify unmet recommendations.
+OPTIONAL statistics are telemetry and do not enter either scored group.
 
 ### Inspect evidence
 

@@ -13,14 +13,21 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
-import { criterionRequirementLevelIssue } from '../model/criteria.ts';
+import {
+  criterionRequirementLevelIssue,
+  criterionRequirementWordingIssue,
+} from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
   isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
-import { REQUIREMENT_LEVELS } from '../model/types.ts';
+import {
+  CRITERIA_REQUIREMENTS,
+  DEFAULT_CRITERIA_REQUIREMENT,
+  REQUIREMENT_LEVELS,
+} from '../model/types.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import {
   assertCompatibleForgeVersion,
@@ -136,7 +143,9 @@ const criterionResult = z
       .string()
       .regex(/^[a-z][a-z0-9_]*$/)
       .optional(),
-    include_in_score: z.boolean().optional(),
+    criteria_requirement: z
+      .enum(CRITERIA_REQUIREMENTS)
+      .default(DEFAULT_CRITERIA_REQUIREMENT),
     criterion: z
       .string()
       .min(1)
@@ -146,6 +155,17 @@ const criterionResult = z
   })
   .strict()
   .superRefine((criterion, context) => {
+    const wordingIssue = criterionRequirementWordingIssue(
+      criterion.criterion,
+      criterion.criteria_requirement,
+    );
+    if (wordingIssue !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['criterion'],
+        message: wordingIssue,
+      });
+    }
     const issue = criterionRequirementLevelIssue(
       criterion.criterion,
       criterion.requirement_level,
@@ -171,7 +191,7 @@ export const evaluationResultSchema = z
   .strict()
   .superRefine((value, context) => {
     const included = value.judging_criteria.filter(
-      (criterion) => criterion.include_in_score !== false,
+      (criterion) => criterion.criteria_requirement !== 'OPTIONAL',
     );
     const passed = included.filter((criterion) => criterion.passed).length;
     if (

@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
 import { defaultForgeEngine } from './engine.ts';
+import { scoreEvaluation } from './evaluation/score.ts';
 import {
   type ExperimentRunOptions,
   ExperimentRunReportError,
@@ -14,6 +15,7 @@ import {
 import {
   buildExperimentRunReport,
   type ExperimentRunReportRunV1,
+  summarizeReportEvaluation,
 } from './experimentReport.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { createArtifactStore } from './results/index.ts';
@@ -188,6 +190,29 @@ describe('experiment run scorecards', () => {
       coverage: 4 / 6,
       pass_rate: 0.5,
       judging_score: { mean: 0.5, evaluations: 3 },
+      criteria_by_requirement: {
+        MUST: {
+          passed: 0,
+          total: 0,
+          evaluations: 0,
+          strict_pass_rate: null,
+          average_pass_rate: null,
+        },
+        SHOULD: {
+          passed: 3,
+          total: 6,
+          evaluations: 3,
+          strict_pass_rate: 1 / 3,
+          average_pass_rate: 0.5,
+        },
+        OPTIONAL: {
+          passed: 0,
+          total: 0,
+          evaluations: 0,
+          strict_pass_rate: null,
+          average_pass_rate: null,
+        },
+      },
     });
     assert.equal(report.cases.length, 4);
     assert.equal(report.cases[0]!.selections, 3);
@@ -196,6 +221,124 @@ describe('experiment run scorecards', () => {
     assert.equal(report.cases[2]!.pass_rate, null);
     assert.equal(report.cases[3]!.coverage, 0);
     assert.equal(report.checkpoint_sha256, sha256Digest('{}\n'));
+  });
+
+  it('separates required failures, recommended failures, and non-scoring telemetry', () => {
+    const runs = [row(0), row(1), row(2), row(3)];
+    function judgment(
+      criteria_requirement: 'MUST' | 'SHOULD' | 'OPTIONAL' = 'SHOULD',
+      passed: boolean,
+    ) {
+      return {
+        criterion: 'The answer MUST be complete.',
+        requirement_level: 'MUST' as const,
+        criteria_requirement,
+        passed,
+        explanation: '',
+      };
+    }
+    runs[0]!.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          judgment('MUST', false),
+          judgment('MUST', true),
+          judgment('SHOULD', true),
+          judgment('OPTIONAL', true),
+        ],
+        [],
+      ),
+    );
+    runs[1]!.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          judgment('MUST', true),
+          judgment(undefined, false),
+          judgment('OPTIONAL', false),
+        ],
+        [],
+      ),
+    );
+    // Checks-only and pending runs do not enter any criterion-group denominator.
+    Object.assign(runs[3]!, {
+      state: 'pending',
+      run_id: null,
+      attempt_count: 0,
+      result_path: null,
+      evaluation: null,
+    });
+    const report = build(runs);
+    assert.deepEqual(report.summary.criteria_by_requirement, {
+      MUST: {
+        passed: 2,
+        total: 3,
+        evaluations: 2,
+        strict_pass_rate: 0.5,
+        average_pass_rate: 0.75,
+      },
+      SHOULD: {
+        passed: 1,
+        total: 2,
+        evaluations: 2,
+        strict_pass_rate: 0.5,
+        average_pass_rate: 0.5,
+      },
+      OPTIONAL: {
+        passed: 1,
+        total: 2,
+        evaluations: 2,
+        strict_pass_rate: 0.5,
+        average_pass_rate: 0.5,
+      },
+    });
+    assert.deepEqual(
+      report.cases[0]!.criteria_by_requirement,
+      report.summary.criteria_by_requirement,
+    );
+    assert.equal(report.summary.judging_score.mean, (2 / 3 + 1 / 2) / 2);
+    assert.equal(
+      report.runs[0]!.evaluation!.criteria_by_requirement.MUST.passed,
+      1,
+    );
+    assert.equal(
+      report.runs[1]!.evaluation!.criteria_by_requirement.SHOULD.passed,
+      0,
+    );
+    assert.deepEqual(
+      parseExperimentRunReport(JSON.parse(JSON.stringify(report))),
+      report,
+    );
+  });
+
+  it('rejects false classifications, scores, and requirement-group aggregates', () => {
+    const run = row(0);
+    run.evaluation = evaluation(1, 2, 'partial');
+    const report = build([run]);
+    for (const change of [
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.criteria_by_requirement.SHOULD.total = 1;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.criteria_by_requirement.MUST.passed = 1;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.score = 1;
+      },
+      (value: typeof report) => {
+        value.summary.criteria_by_requirement.SHOULD.strict_pass_rate = 1;
+      },
+      (value: typeof report) => {
+        value.cases[0]!.criteria_by_requirement.OPTIONAL.total = 1;
+      },
+      (value: typeof report) => {
+        Object.assign(value.runs[0]!.evaluation!.criteria_by_requirement, {
+          EXCLUDE: { passed: 0, total: 0 },
+        });
+      },
+    ]) {
+      const changed = structuredClone(report);
+      change(changed);
+      assert.throws(() => parseExperimentRunReport(changed));
+    }
   });
 
   it('distinguishes adapter, provider and model while preserving the original selection order', () => {
@@ -387,15 +530,16 @@ describe('experiment run scorecards', () => {
       caseId: 'testing/criteria',
       judgingCriteria: [
         {
-          value: 'The answer is complete.',
+          value: 'The answer MUST be complete.',
           requirement_level: 'MUST' as const,
+          criteria_requirement: 'MUST' as const,
           label: 'correctness',
         },
         {
           value: 'Read docs',
           requirement_level: 'MUST' as const,
           label: 'source',
-          include_in_score: false,
+          criteria_requirement: 'OPTIONAL' as const,
         },
       ],
       judge: { provider: 'scripted', model: 'judge' },
@@ -455,6 +599,11 @@ describe('experiment run scorecards', () => {
           score: 1,
           judging_criteria_passed: 1,
           judging_criteria_total: 1,
+          criteria_by_requirement: {
+            MUST: { passed: 1, total: 1 },
+            SHOULD: { passed: 0, total: 0 },
+            OPTIONAL: { passed: 0, total: 1 },
+          },
           checks_passed: 0,
           checks_total: 1,
         },
@@ -463,6 +612,11 @@ describe('experiment run scorecards', () => {
           score: 0,
           judging_criteria_passed: 0,
           judging_criteria_total: 1,
+          criteria_by_requirement: {
+            MUST: { passed: 0, total: 1 },
+            SHOULD: { passed: 0, total: 0 },
+            OPTIONAL: { passed: 1, total: 1 },
+          },
           checks_passed: 0,
           checks_total: 1,
         },
@@ -625,6 +779,11 @@ function evaluation(
     score: total === 0 ? 0 : passed / total,
     judging_criteria_passed: passed,
     judging_criteria_total: total,
+    criteria_by_requirement: {
+      MUST: { passed: 0, total: 0 },
+      SHOULD: { passed, total },
+      OPTIONAL: { passed: 0, total: 0 },
+    },
     checks_passed: 1,
     checks_total: 1,
   };

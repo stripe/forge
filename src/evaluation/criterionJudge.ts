@@ -307,7 +307,7 @@ function criterionResult(
     criterion: criterion.value,
     requirement_level: criterion.requirement_level,
     ...(criterion.label === undefined ? {} : { label: criterion.label }),
-    include_in_score: criterion.include_in_score !== false,
+    criteria_requirement: criterion.criteria_requirement,
     passed,
     explanation,
   };

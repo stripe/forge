@@ -606,6 +606,7 @@ describe('Codex engine integration', () => {
       judge: JUDGE_MODEL,
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'Both parts are complete.',
           requirement_level: 'MUST' as const,
         },
@@ -773,6 +774,7 @@ describe('Codex engine integration', () => {
           judge: JUDGE_MODEL,
           judgingCriteria: [
             {
+              criteria_requirement: 'SHOULD' as const,
               value: 'The answer is complete.',
               requirement_level: 'MUST' as const,
             },
@@ -934,6 +936,7 @@ describe('Codex engine integration', () => {
         judge: JUDGE_MODEL,
         judgingCriteria: [
           {
+            criteria_requirement: 'SHOULD' as const,
             value: 'The assistant inspects the fixture.',
             requirement_level: 'MUST' as const,
           },
@@ -1080,6 +1083,7 @@ describe('Codex engine integration', () => {
       judge: JUDGE_MODEL,
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'The assistant reports the fixture failure.',
           requirement_level: 'MUST' as const,
         },
@@ -1220,6 +1224,7 @@ describe('Codex engine integration', () => {
       judge: JUDGE_MODEL,
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'The assistant inspects the fixture.',
           requirement_level: 'MUST' as const,
         },
@@ -1295,6 +1300,7 @@ describe('Codex engine integration', () => {
         judge: JUDGE_MODEL,
         judgingCriteria: [
           {
+            criteria_requirement: 'SHOULD' as const,
             value: 'The assistant inspects the large fixture.',
             requirement_level: 'MUST' as const,
           },
@@ -1418,6 +1424,7 @@ describe('Codex engine integration', () => {
       judge: JUDGE_MODEL,
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'The assistant inspects the large fixture.',
           requirement_level: 'MUST' as const,
         },

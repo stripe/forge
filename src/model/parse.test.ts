@@ -163,7 +163,13 @@ context: Existing integration
       checks: { files_created: ['answer.txt'] },
     };
     const parsed = parseEvalCase(definition);
-    assert.deepEqual(parsed.judging_criteria, definition.judging_criteria);
+    assert.deepEqual(
+      parsed.judging_criteria,
+      definition.judging_criteria.map((criterion) => ({
+        ...criterion,
+        criteria_requirement: 'SHOULD',
+      })),
+    );
     assert.deepEqual(parsed.checks, definition.checks);
     assert.throws(
       () => parseEvalCase({ ...definition, success_guidelines: [] }),
@@ -219,13 +225,13 @@ initial_prompt: Two
         value: 'Read page A',
         requirement_level: 'SHOULD',
         label: 'source',
-        include_in_score: false,
+        criteria_requirement: 'OPTIONAL' as const,
       },
       {
         value: 'Read page B',
         requirement_level: 'SHOULD',
         label: 'source',
-        include_in_score: false,
+        criteria_requirement: 'OPTIONAL' as const,
       },
       { value: 'Unlabeled criterion', requirement_level: 'MAY' },
     ];
@@ -235,7 +241,10 @@ initial_prompt: Two
         task: 'Answer',
         judging_criteria: criteria,
       }).judging_criteria,
-      criteria,
+      criteria.map((criterion) => ({
+        ...criterion,
+        criteria_requirement: criterion.criteria_requirement ?? 'SHOULD',
+      })),
     );
     for (const invalid of [
       { value: '' },
@@ -245,7 +254,7 @@ initial_prompt: Two
       { value: 'a', label: 'Uppercase' },
       { value: 'a', label: 'two-words' },
       { value: 'a', label: '1' },
-      { value: 'a', include_in_score: 'false' },
+      { value: 'a', criteria_requirement: 'INVALID' },
       { value: 'a', id: 'correctness' },
     ]) {
       assert.throws(
@@ -267,7 +276,7 @@ initial_prompt: Two
             {
               value: 'Read docs',
               requirement_level: 'SHOULD',
-              include_in_score: false,
+              criteria_requirement: 'OPTIONAL' as const,
             },
           ],
         }),

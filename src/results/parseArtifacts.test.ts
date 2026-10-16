@@ -109,7 +109,17 @@ describe('canonical interaction and judge evidence parsing', () => {
       checks: [{ name: 'file_exists: answer.txt', passed: true }],
     };
     const parsed = parseEvaluationResult(evaluation);
-    assert.deepEqual(parsed, evaluation);
+    assert.deepEqual(parsed, {
+      ...evaluation,
+      judging_criteria: evaluation.judging_criteria.map((criterion) => ({
+        ...criterion,
+        criteria_requirement: 'SHOULD',
+      })),
+    });
+    assert.equal(
+      Object.hasOwn(evaluation.judging_criteria[0]!, 'criteria_requirement'),
+      false,
+    );
     for (const [former, current] of [
       ['guidelines', 'judging_criteria'],
       ['guidelines_passed', 'judging_criteria_passed'],
@@ -172,7 +182,7 @@ describe('canonical interaction and judge evidence parsing', () => {
           label: 'correctness',
           passed: true,
           explanation: '',
-          include_in_score: true,
+          criteria_requirement: 'SHOULD' as const,
         },
         {
           criterion: 'Read docs',
@@ -180,7 +190,7 @@ describe('canonical interaction and judge evidence parsing', () => {
           label: 'source',
           passed: false,
           explanation: '',
-          include_in_score: false,
+          criteria_requirement: 'OPTIONAL' as const,
         },
       ],
       checks: [],
@@ -192,7 +202,8 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
     for (const changed of [
       { label: 'bad-label' },
-      { include_in_score: 'false' },
+      { criteria_requirement: 'INVALID' },
+      { include_in_score: false },
       { requirement_level: undefined },
       { requirement_level: 'must' },
       { criterion: 'The agent MUST NOT read docs.', requirement_level: 'MUST' },
@@ -207,6 +218,17 @@ describe('canonical interaction and judge evidence parsing', () => {
         }),
       );
     }
+    assert.throws(
+      () =>
+        parseEvaluationResult({
+          ...evaluation,
+          judging_criteria: [
+            { ...evaluation.judging_criteria[0], criteria_requirement: 'MUST' },
+            evaluation.judging_criteria[1],
+          ],
+        }),
+      /MUST criteria must use the uppercase RFC keyword MUST/,
+    );
   });
 
   it('strictly parses one-shot and multi-turn interaction audits', () => {

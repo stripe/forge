@@ -261,6 +261,7 @@ describe('executeEval multi-turn and judging integration', () => {
       maxTurns: 3,
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'The requested answer file is complete.',
           requirement_level: 'MUST' as const,
         },
@@ -477,6 +478,7 @@ describe('executeEval multi-turn and judging integration', () => {
         maxTurns: 3,
         judgingCriteria: [
           {
+            criteria_requirement: 'SHOULD' as const,
             value: 'Both requested parts are complete.',
             requirement_level: 'MUST' as const,
           },
@@ -707,10 +709,12 @@ describe('executeEval multi-turn and judging integration', () => {
       prompt: 'Produce visible evidence.',
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'The assistant produced a visible response.',
           requirement_level: 'MUST' as const,
         },
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'The assistant invoked the visible tool.',
           requirement_level: 'MUST' as const,
         },
@@ -849,6 +853,7 @@ describe('executeEval multi-turn and judging integration', () => {
             prompt: 'Produce an answer.',
             judgingCriteria: [
               {
+                criteria_requirement: 'SHOULD' as const,
                 value: 'The assistant produced an answer.',
                 requirement_level: 'MUST' as const,
               },

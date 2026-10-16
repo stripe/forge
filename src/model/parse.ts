@@ -62,7 +62,9 @@ const JudgingCriteriaSchema = z
   .superRefine((criteria, context) => {
     if (
       criteria.length > 0 &&
-      criteria.every((criterion) => criterion.include_in_score === false)
+      criteria.every(
+        (criterion) => criterion.criteria_requirement === 'OPTIONAL',
+      )
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

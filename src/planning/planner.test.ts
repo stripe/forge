@@ -609,6 +609,7 @@ describe('experiment expansion and run planning', () => {
         example_answer: 'A complete answer',
         judging_criteria: [
           {
+            criteria_requirement: 'SHOULD' as const,
             value: 'Correct answer',
             requirement_level: 'MUST' as const,
             label: 'correctness',
@@ -642,8 +643,9 @@ describe('experiment expansion and run planning', () => {
     assert.equal(Object.isFrozen(criterion), false);
     criterion.value = 'Changed criterion';
     criterion.requirement_level = 'MAY';
-    criterion.include_in_score = false;
+    criterion.criteria_requirement = 'OPTIONAL';
     definition.judging_criteria.push({
+      criteria_requirement: 'SHOULD' as const,
       value: 'Changed criterion',
       requirement_level: 'MAY',
     });
@@ -1006,7 +1008,11 @@ function evalCase(): EvalCaseV1 {
     max_turns: 7,
     setup: [{ uses: 'forge/command', with: { argv: ['git', 'init'] } }],
     judging_criteria: [
-      { value: 'The task is complete', requirement_level: 'MUST' as const },
+      {
+        criteria_requirement: 'SHOULD' as const,
+        value: 'The task is complete',
+        requirement_level: 'MUST' as const,
+      },
     ],
   };
 }

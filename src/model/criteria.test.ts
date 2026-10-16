@@ -18,7 +18,7 @@ describe('criterion requirement levels', () => {
       assert.deepEqual(
         parseEvalCase({ ...CASE, judging_criteria: [criterion] })
           .judging_criteria,
-        [criterion],
+        [{ ...criterion, criteria_requirement: 'SHOULD' }],
       );
     }
     for (const criterion of [
@@ -109,6 +109,98 @@ describe('criterion requirement levels', () => {
           judging_criteria: [{ value, requirement_level: 'MAY' }],
         }).judging_criteria[0]?.requirement_level,
         'MAY',
+      );
+    }
+  });
+});
+
+describe('criterion scoring classifications', () => {
+  it('materializes omitted classifications as SHOULD independently of RFC wording', () => {
+    for (const criteria_requirement of [
+      undefined,
+      'SHOULD',
+      'OPTIONAL',
+    ] as const) {
+      const criteria = [
+        {
+          value: 'MUST create one subscription.',
+          requirement_level: 'MUST',
+          ...(criteria_requirement === undefined
+            ? {}
+            : { criteria_requirement }),
+        },
+        { value: 'Returns a response.', requirement_level: 'SHOULD' },
+      ];
+      assert.deepEqual(
+        parseEvalCase({ ...CASE, judging_criteria: criteria }).judging_criteria,
+        criteria.map((criterion) => ({
+          ...criterion,
+          criteria_requirement: criterion.criteria_requirement ?? 'SHOULD',
+        })),
+      );
+      assert.equal(Object.hasOwn(criteria[1]!, 'criteria_requirement'), false);
+    }
+  });
+
+  it('requires uppercase MUST wording only for MUST classifications', () => {
+    for (const value of [
+      'MUST create one subscription.',
+      '**MUST NOT** duplicate a subscription.',
+      'MUST\nNOT duplicate a subscription.',
+    ]) {
+      const criterion = {
+        value,
+        requirement_level: value.includes('NOT') ? 'MUST NOT' : 'MUST',
+        criteria_requirement: 'MUST',
+      };
+      assert.equal(
+        parseEvalCase({ ...CASE, judging_criteria: [criterion] })
+          .judging_criteria[0]?.criteria_requirement,
+        'MUST',
+      );
+    }
+    for (const value of [
+      'Creates one subscription.',
+      'must create one subscription.',
+      'Must create one subscription.',
+      'Checks MUSTARD and MUST_NOT identifiers.',
+    ]) {
+      assert.throws(
+        () =>
+          parseEvalCase({
+            ...CASE,
+            judging_criteria: [
+              {
+                value,
+                requirement_level: 'MUST',
+                criteria_requirement: 'MUST',
+              },
+            ],
+          }),
+        /MUST criteria must use the uppercase RFC keyword MUST/,
+      );
+    }
+  });
+
+  it('rejects invalid classifications and the removed scoring flag', () => {
+    for (const metadata of [
+      { criteria_requirement: 'must' },
+      { criteria_requirement: 'EXCLUDE' },
+      { criteria_requirement: false },
+      { include_in_score: false },
+      { include_in_score: true, criteria_requirement: 'SHOULD' },
+    ]) {
+      assert.throws(() =>
+        parseEvalCase({
+          ...CASE,
+          judging_criteria: [
+            {
+              value: 'Creates one subscription.',
+              requirement_level: 'MUST',
+              ...metadata,
+            },
+          ],
+        }),
       );
     }
   });

@@ -516,10 +516,11 @@ describe('local artifact store', () => {
     );
   });
 
-  it('binds recorded labels and score inclusion to the plan even when altered totals are consistent', async () => {
+  it('binds recorded labels and scoring classifications to the plan even when altered totals are consistent', async () => {
     const criteria = [
       {
-        value: 'The task is complete.',
+        criteria_requirement: 'SHOULD' as const,
+        value: 'The task MUST be complete.',
         requirement_level: 'MUST' as const,
         label: 'correctness',
       },
@@ -527,7 +528,7 @@ describe('local artifact store', () => {
         value: 'Read docs',
         requirement_level: 'MUST' as const,
         label: 'source',
-        include_in_score: false,
+        criteria_requirement: 'OPTIONAL' as const,
       },
     ];
     const basePlan = testPlanForResult(withPassingCriterion(resultFor([])));
@@ -547,12 +548,12 @@ describe('local artifact store', () => {
         evaluation: scoreEvaluation(
           [
             {
-              criterion: 'The task is complete.',
+              criterion: 'The task MUST be complete.',
               requirement_level: 'MUST' as const,
               label: 'correctness',
               passed: true,
               explanation: '',
-              include_in_score: true,
+              criteria_requirement: 'SHOULD' as const,
             },
             {
               criterion: 'Read docs',
@@ -560,7 +561,7 @@ describe('local artifact store', () => {
               label: 'source',
               passed: false,
               explanation: '',
-              include_in_score: false,
+              criteria_requirement: 'OPTIONAL' as const,
             },
           ],
           [],
@@ -570,17 +571,21 @@ describe('local artifact store', () => {
     );
     const verified = await verifyCompletedRun(location);
     assert.equal(verified.result.evaluation.score, 1);
-    for (const change of [
-      { label: 'correctness' },
-      { include_in_score: true },
-      { requirement_level: 'MAY' as const },
+    for (const { criterionIndex, change } of [
+      { criterionIndex: 1, change: { label: 'correctness' } },
+      {
+        criterionIndex: 1,
+        change: { criteria_requirement: 'SHOULD' as const },
+      },
+      { criterionIndex: 1, change: { requirement_level: 'MAY' as const } },
+      { criterionIndex: 0, change: { criteria_requirement: 'MUST' as const } },
     ]) {
       const result = structuredClone(verified.result);
       const changed = {
         ...result,
         evaluation: scoreEvaluation(
           result.evaluation.judging_criteria.map((entry, index) =>
-            index === 1 ? { ...entry, ...change } : entry,
+            index === criterionIndex ? { ...entry, ...change } : entry,
           ),
           [],
         ),
@@ -1952,7 +1957,11 @@ async function commitCodexEvidence(
     prompt: 'do it',
     agent: { adapter: 'codex', provider: 'openai', model: 'test' },
     judgingCriteria: [
-      { value: 'The task is complete.', requirement_level: 'MUST' as const },
+      {
+        criteria_requirement: 'SHOULD' as const,
+        value: 'The task is complete.',
+        requirement_level: 'MUST' as const,
+      },
     ],
     judge: { provider: 'test-provider', model: 'judge-model' },
   });
@@ -2066,6 +2075,7 @@ function testPlanForResult(result: RunResultV1): ResolvedRunPlanV1 {
   const multiTurn = result.interaction.mode === 'multi_turn';
   const criteria = result.evaluation.judging_criteria.map(
     ({ criterion, requirement_level }) => ({
+      criteria_requirement: 'SHOULD' as const,
       value: criterion,
       requirement_level,
     }),
@@ -2171,6 +2181,7 @@ function withPassingCriterion(result: RunResultV1): RunResultV1 {
       judging_criteria_total: 1,
       judging_criteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           criterion: 'The task is complete.',
           requirement_level: 'MUST' as const,
           passed: true,

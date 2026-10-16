@@ -333,19 +333,29 @@ describe('evaluateRunEvidence', () => {
   it('requires results for every exact authored criterion before reading workspace evidence', async () => {
     const plan = createTestResolvedRunPlan({
       judgingCriteria: [
-        { value: 'first', requirement_level: 'MUST' as const },
-        { value: 'second', requirement_level: 'MUST' as const },
+        {
+          criteria_requirement: 'SHOULD' as const,
+          value: 'first',
+          requirement_level: 'MUST' as const,
+        },
+        {
+          criteria_requirement: 'SHOULD' as const,
+          value: 'second',
+          requirement_level: 'MUST' as const,
+        },
       ],
       judge: { provider: 'test-judge', model: 'test-model' },
       checks: { files_created: ['answer.txt'] },
     });
     const first = {
+      criteria_requirement: 'SHOULD' as const,
       criterion: 'first',
       requirement_level: 'MUST' as const,
       passed: true,
       explanation: 'yes',
     };
     const second = {
+      criteria_requirement: 'SHOULD' as const,
       criterion: 'second',
       requirement_level: 'MUST' as const,
       passed: false,
@@ -393,6 +403,7 @@ describe('evaluateRunEvidence', () => {
     const plan = createTestResolvedRunPlan({
       judgingCriteria: [
         {
+          criteria_requirement: 'SHOULD' as const,
           value: 'Correct answer',
           requirement_level: 'MUST' as const,
           label: 'correctness',
@@ -401,7 +412,7 @@ describe('evaluateRunEvidence', () => {
           value: 'Read docs',
           requirement_level: 'MUST' as const,
           label: 'source',
-          include_in_score: false,
+          criteria_requirement: 'OPTIONAL' as const,
         },
       ],
       judge: { provider: 'test-judge', model: 'test-model' },
@@ -411,7 +422,7 @@ describe('evaluateRunEvidence', () => {
         criterion: 'Correct answer',
         requirement_level: 'MUST' as const,
         label: 'correctness',
-        include_in_score: true,
+        criteria_requirement: 'SHOULD' as const,
         passed: true,
         explanation: '',
       },
@@ -419,7 +430,7 @@ describe('evaluateRunEvidence', () => {
         criterion: 'Read docs',
         requirement_level: 'MUST' as const,
         label: 'source',
-        include_in_score: false,
+        criteria_requirement: 'OPTIONAL' as const,
         passed: false,
         explanation: '',
       },
@@ -433,7 +444,7 @@ describe('evaluateRunEvidence', () => {
     assert.equal(actual.evaluation.score, 1);
     for (const changed of [
       { ...rows[1]!, label: 'correctness' },
-      { ...rows[1]!, include_in_score: true },
+      { ...rows[1]!, criteria_requirement: 'SHOULD' as const },
       { ...rows[1]!, requirement_level: 'MAY' as const },
     ]) {
       await assert.rejects(

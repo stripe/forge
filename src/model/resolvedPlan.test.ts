@@ -260,11 +260,40 @@ describe('parseResolvedRunPlan', () => {
   it('binds judging criteria to the selected case and rejects former plan fields', () => {
     const input = validPlan();
     input.case.judging_criteria = [
-      { value: 'The task is complete.', requirement_level: 'MUST' },
+      {
+        criteria_requirement: 'SHOULD' as const,
+        value: 'The task is complete.',
+        requirement_level: 'MUST',
+      },
     ];
     input.evaluation.judging_criteria = [...input.case.judging_criteria];
     input.evaluation.judge = { provider: 'anthropic', model: 'claude-judge' };
     assert.deepEqual(parseResolvedRunPlan(input), input);
+    const authoredCriterion = {
+      value: 'The task is complete.',
+      requirement_level: 'MUST',
+    };
+    const omittedRequirement = {
+      ...input,
+      case: { ...input.case, judging_criteria: [authoredCriterion] },
+      evaluation: {
+        ...input.evaluation,
+        judging_criteria: [authoredCriterion],
+      },
+    };
+    assert.deepEqual(parseResolvedRunPlan(omittedRequirement), input);
+    assert.deepEqual(
+      parseResolvedRunPlan({
+        ...omittedRequirement,
+        evaluation: input.evaluation,
+      }),
+      input,
+    );
+    assert.equal(
+      Object.hasOwn(authoredCriterion, 'criteria_requirement'),
+      false,
+    );
+
     assert.throws(
       () =>
         parseResolvedRunPlan({
@@ -295,7 +324,11 @@ describe('parseResolvedRunPlan', () => {
       );
     }
     input.evaluation.judging_criteria = [
-      { value: 'A different requirement.', requirement_level: 'MUST' },
+      {
+        criteria_requirement: 'SHOULD' as const,
+        value: 'A different requirement.',
+        requirement_level: 'MUST',
+      },
     ];
     assert.throws(() => parseResolvedRunPlan(input), {
       code: 'invalid_plan',
