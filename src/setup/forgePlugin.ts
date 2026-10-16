@@ -1,12 +1,12 @@
-import type { PreparedAgentPluginInstallation } from '../contracts/plugin.js';
-import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.js';
-import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.js';
+import type { PreparedAgentPluginInstallation } from '../contracts/plugin.ts';
+import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.ts';
 import type {
   PreparedSetupStep,
   SetupExecutionContext,
   SetupPreflightContext,
   SetupStepHandler,
-} from './types.js';
+} from './types.ts';
 
 export const pluginSetupHandler: SetupStepHandler = Object.freeze({
   uses: 'forge/plugin',

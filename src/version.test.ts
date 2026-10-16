@@ -13,7 +13,7 @@ import {
   FORGE_VERSION,
   type ForgeBuildIdentity,
   parseForgeBuildIdentity,
-} from './version.js';
+} from './version.ts';
 
 describe('Forge package version', () => {
   it('uses the version of the current package', () => {
@@ -76,7 +76,7 @@ describe('Forge package version', () => {
       const version = (await tsImport(
         fixture.module.href,
         import.meta.url,
-      )) as typeof import('./version.js');
+      )) as typeof import('./version.ts');
       assert.doesNotThrow(() => version.assertCompatibleForgeVersion('1.2.3'));
       for (const producer of ['1.2.4', '1.2.3-dev.1', '1.2.3-rc.1']) {
         assert.throws(
@@ -95,7 +95,7 @@ describe('Forge package version', () => {
       const version = (await tsImport(
         fixture.module.href,
         import.meta.url,
-      )) as typeof import('./version.js');
+      )) as typeof import('./version.ts');
       assert.doesNotThrow(() =>
         version.assertCompatibleForgeVersion('9.8.7-dev.42'),
       );
@@ -134,7 +134,7 @@ describe('Forge package version', () => {
       const version = (await tsImport(
         fixture.module.href,
         import.meta.url,
-      )) as typeof import('./version.js');
+      )) as typeof import('./version.ts');
       assert.deepEqual(version.FORGE_BUILD_IDENTITY, identity);
     } finally {
       await rm(fixture.root, { recursive: true, force: true });

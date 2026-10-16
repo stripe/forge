@@ -4,21 +4,21 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
-import { runCli } from '../src/cli.js';
-import type { AgentAdapter } from '../src/contracts/agent.js';
-import { createDirectoryRunInputProvider } from '../src/contracts/inputs.js';
+import { runCli } from '../src/cli.ts';
+import type { AgentAdapter } from '../src/contracts/agent.ts';
+import { createDirectoryRunInputProvider } from '../src/contracts/inputs.ts';
 import {
   createArtifactStore,
   parseInteractionArtifact,
   parseJudgeEvidence,
   verifyCompletedRun,
-} from '../src/results/index.js';
+} from '../src/results/index.ts';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
-} from '../src/testing/index.js';
+} from '../src/testing/index.ts';
 
 const temporaryDirectories: string[] = [];
 

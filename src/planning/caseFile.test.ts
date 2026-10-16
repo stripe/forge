@@ -4,13 +4,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
-import { sha256Hex } from '../model/hashes.js';
-import { loadDataset } from '../model/loaders.js';
-import type { LoadedDatasetV1 } from '../model/types.js';
+import { sha256Hex } from '../model/hashes.ts';
+import { loadDataset } from '../model/loaders.ts';
+import type { LoadedDatasetV1 } from '../model/types.ts';
 import {
   ManifestCaseFileError,
   resolveManifestCaseIdFromFile,
-} from './caseFile.js';
+} from './caseFile.ts';
 
 const cleanupPaths: string[] = [];
 

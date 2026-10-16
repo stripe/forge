@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { createMemoryRunInputProvider } from './memoryInputs.js';
+import { createMemoryRunInputProvider } from './memoryInputs.ts';
 
 describe('createMemoryRunInputProvider', () => {
   it('snapshots initial bytes and returns isolated reads and sorted subtree files', async () => {

@@ -1,5 +1,5 @@
-import type { JsonObject } from '../model/types.js';
-import { serializeCanonicalJson } from '../serialization.js';
+import type { JsonObject } from '../model/types.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 
 const MAX_SETUP_RESOLUTION_BYTES = 1024 * 1024;
 const MAX_SETUP_RESOLUTION_DEPTH = 64;

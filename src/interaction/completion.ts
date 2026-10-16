@@ -2,7 +2,7 @@ import type {
   CompletionMessage,
   CompletionResponse,
   StrictCompletionResponseSchema,
-} from '../contracts/completion.js';
+} from '../contracts/completion.ts';
 
 export type InteractionHistoryMessage = CompletionMessage & {
   readonly role: 'user' | 'assistant';

@@ -5,7 +5,7 @@ import {
   isAuthoredCaseId,
   isCaseDefinitionPath,
   isSafeCaseId,
-} from './paths.js';
+} from './paths.ts';
 
 describe('authored case names', () => {
   it('accepts one or more lowercase kebab-case identity segments', () => {

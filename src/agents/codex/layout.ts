@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { RuntimeLogicalPaths } from '../../contracts/runtime.js';
+import type { RuntimeLogicalPaths } from '../../contracts/runtime.ts';
 
 export const CODEX_HOME_STATE_ID = 'codex-home' as const;
 

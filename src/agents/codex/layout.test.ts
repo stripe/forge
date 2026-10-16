@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { FORGE_VERSION } from '../../version.js';
-import { type CodexLayout, createCodexAdapter } from './index.js';
+import { FORGE_VERSION } from '../../version.ts';
+import { type CodexLayout, createCodexAdapter } from './index.ts';
 import {
   assertCodexRuntimeLayout,
   resolveCodexLayout,
   usesDefaultCodexLayout,
-} from './layout.js';
+} from './layout.ts';
 
 const layout: CodexLayout = {
   workspace: '/tmp/run/workspace',

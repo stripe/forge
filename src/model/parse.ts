@@ -4,14 +4,14 @@ import {
   defaultSetupActionRegistry,
   type SetupActionDefinition,
   type SetupActionRegistry,
-} from '../setup/registry.js';
+} from '../setup/registry.ts';
 import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
-} from '../version.js';
-import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.js';
-import { isSha256Digest, isSha256Hex } from './hashes.js';
-import { agentSelectionKey } from './matrix.js';
+} from '../version.ts';
+import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
+import { isSha256Digest, isSha256Hex } from './hashes.ts';
+import { agentSelectionKey } from './matrix.ts';
 import {
   isAuthoredCaseId,
   isCaseDefinitionPath,
@@ -22,7 +22,7 @@ import {
   isSafeSimpleIdentifier,
   isSafeVersion,
   isSafeWorkspaceRelativePath,
-} from './paths.js';
+} from './paths.ts';
 import {
   type DatasetManifestV1,
   DEFAULT_DOCKER_CPU_COUNT,
@@ -37,7 +37,7 @@ import {
   type ResolvedRunPlanV1,
   type RunSelection,
   type SetupStepV1,
-} from './types.js';
+} from './types.ts';
 
 export const MAX_BENCHMARK_YAML_BYTES = 1024 * 1024;
 export const MAX_DATASET_MANIFEST_BYTES = 4 * 1024 * 1024;

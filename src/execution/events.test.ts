@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { RunEvent } from '../contracts/observability.js';
+import type { RunEvent } from '../contracts/observability.ts';
 
-import { createRunEventEmitter } from './events.js';
+import { createRunEventEmitter } from './events.ts';
 
 describe('run events', () => {
   it('orders lifecycle events and isolates synchronous and asynchronous observer failures', async () => {

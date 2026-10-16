@@ -7,25 +7,25 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
 
-import { type RunCliOptions, runCli } from '../src/cli.js';
-import { defaultForgeEngine } from '../src/engine.js';
-import { ForgeExecutionError } from '../src/execution/errors.js';
-import { executeEvalWithTestHooks } from '../src/execution/execute.js';
-import { parseExperimentRunReport } from '../src/experiment.js';
-import { sha256Digest, sha256Hex } from '../src/model/hashes.js';
-import { parseExperimentConfigYaml } from '../src/model/parse.js';
-import type { DatasetManifestV1, RunSelection } from '../src/model/types.js';
+import { type RunCliOptions, runCli } from '../src/cli.ts';
+import { defaultForgeEngine } from '../src/engine.ts';
+import { ForgeExecutionError } from '../src/execution/errors.ts';
+import { executeEvalWithTestHooks } from '../src/execution/execute.ts';
+import { parseExperimentRunReport } from '../src/experiment.ts';
+import { sha256Digest, sha256Hex } from '../src/model/hashes.ts';
+import { parseExperimentConfigYaml } from '../src/model/parse.ts';
+import type { DatasetManifestV1, RunSelection } from '../src/model/types.ts';
 import {
   createArtifactStore,
   verifyCompletedRun,
-} from '../src/results/index.js';
+} from '../src/results/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
-} from '../src/testing/index.js';
+} from '../src/testing/index.ts';
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {

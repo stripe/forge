@@ -6,9 +6,9 @@ import { afterEach, describe, it } from 'vitest';
 import {
   CODEX_HOME_STATE_ID,
   createCodexAdapter,
-} from '../src/agents/codex/index.js';
-import { parseAtifTrajectory } from '../src/atif/index.js';
-import type { CommandResult } from '../src/contracts/command.js';
+} from '../src/agents/codex/index.ts';
+import { parseAtifTrajectory } from '../src/atif/index.ts';
+import type { CommandResult } from '../src/contracts/command.ts';
 import {
   type CompletedRunV1,
   createArtifactStore,
@@ -22,8 +22,8 @@ import {
   preflightEval,
   type ResolvedRunPlanV1,
   verifyCompletedRun,
-} from '../src/index.js';
-import { FORGE_CODEX_VERSION } from '../src/runtime/docker/index.js';
+} from '../src/index.ts';
+import { FORGE_CODEX_VERSION } from '../src/runtime/docker/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -31,7 +31,7 @@ import {
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
   type RecordedTestCommand,
-} from '../src/testing/index.js';
+} from '../src/testing/index.ts';
 
 const roots: string[] = [];
 const SESSION_ID = '0199a213-81c0-7800-8aa1-bbab2a035a53';

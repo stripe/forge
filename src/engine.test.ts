@@ -4,31 +4,31 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 import { stringify } from 'yaml';
-import type { ForgeComposition } from './contracts/composition.js';
-import { credentialReference } from './contracts/credentials.js';
-import { createForgeEngine, defaultForgeEngine } from './engine.js';
-import { sha256Digest } from './model/hashes.js';
+import type { ForgeComposition } from './contracts/composition.ts';
+import { credentialReference } from './contracts/credentials.ts';
+import { createForgeEngine, defaultForgeEngine } from './engine.ts';
+import { sha256Digest } from './model/hashes.ts';
 import type {
   JsonObject,
   LoadedDatasetV1,
   LoadedExperimentConfigV1,
   RunSelection,
   SetupActionBundleReferenceV1,
-} from './model/types.js';
-import { serializeResolvedRunPlan } from './planning/index.js';
-import { createArtifactStore, verifyCompletedRun } from './results/index.js';
+} from './model/types.ts';
+import { serializeResolvedRunPlan } from './planning/index.ts';
+import { createArtifactStore, verifyCompletedRun } from './results/index.ts';
 import {
   defineSetupActionBundle,
   type SetupActionBundle,
   type SetupActionDefinition,
-} from './setup/registry.js';
+} from './setup/registry.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
-} from './testing/index.js';
+} from './testing/index.ts';
 
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const SECOND_DIGEST = `sha256:${'d'.repeat(64)}` as const;

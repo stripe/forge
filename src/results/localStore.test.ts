@@ -4,27 +4,27 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
-import { type AtifStep, parseAtifTrajectory } from '../atif/index.js';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.js';
-import { scoreEvaluation } from '../evaluation/score.js';
-import { sha256Digest } from '../model/hashes.js';
-import type { ResolvedRunPlanV1 } from '../model/types.js';
-import { serializeResolvedRunPlan } from '../planning/index.js';
-import { serializeCanonicalJson } from '../serialization.js';
-import { createTestResolvedRunPlan } from '../testing/plans.js';
-import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.js';
+import { type AtifStep, parseAtifTrajectory } from '../atif/index.ts';
+import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { scoreEvaluation } from '../evaluation/score.ts';
+import { sha256Digest } from '../model/hashes.ts';
+import type { ResolvedRunPlanV1 } from '../model/types.ts';
+import { serializeResolvedRunPlan } from '../planning/index.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
+import { createTestResolvedRunPlan } from '../testing/plans.ts';
+import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.ts';
 import {
   createArtifactStore,
   RunIdConflictError,
   verifyCompletedRun,
-} from './localStore.js';
-import { parseRunResult } from './parse.js';
+} from './localStore.ts';
+import { parseRunResult } from './parse.ts';
 import type {
   ArtifactDescriptorV1,
   InteractionArtifactV1,
   JudgeEvidenceV1,
   RunResultV1,
-} from './types.js';
+} from './types.ts';
 
 const roots: string[] = [];
 const testPlan = createTestResolvedRunPlan({

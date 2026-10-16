@@ -12,8 +12,8 @@ import type {
   ExperimentRunReportStatisticsV1,
   ExperimentRunReportV1,
   ExperimentRunSummary,
-} from '../src/experiment.js';
-import * as experiment from '../src/experiment.js';
+} from '../src/experiment.ts';
+import * as experiment from '../src/experiment.ts';
 import type {
   ExperimentArgumentOptions,
   ExperimentArguments,
@@ -23,9 +23,9 @@ import type {
   ExperimentLoadContext,
   ExperimentValues,
   LoadedExperimentRun,
-} from '../src/experimentCli.js';
-import * as experimentCli from '../src/experimentCli.js';
-import * as root from '../src/index.js';
+} from '../src/experimentCli.ts';
+import * as experimentCli from '../src/experimentCli.ts';
+import * as root from '../src/index.ts';
 
 describe('experiment public entry points', () => {
   it('exports dataset case entries as file paths', () => {

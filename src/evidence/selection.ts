@@ -9,13 +9,13 @@ import {
   type JsonObject,
   type JsonValue,
   type NormalizedTrajectory,
-} from '../atif/index.js';
+} from '../atif/index.ts';
 import type {
   AgentAdapter,
   AgentEvidenceIdentity,
   AgentNativeEvidenceResult,
   AgentToolCall,
-} from '../contracts/agent.js';
+} from '../contracts/agent.ts';
 
 // Keep deterministic fallback comfortably below the stricter whole-ATIF graph
 // budgets. Authored prompts are independently capped at 1 MiB and generated

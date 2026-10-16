@@ -4,36 +4,36 @@ import type {
   AgentNativeEvidenceResult,
   AgentRuntimeRequirements,
   AgentTurn,
-} from '../contracts/agent.js';
+} from '../contracts/agent.ts';
 import type {
   CommittedRun,
   RunArtifact,
   RunArtifactStore,
   RunArtifactTransaction,
-} from '../contracts/artifacts.js';
+} from '../contracts/artifacts.ts';
 import {
   CommandExecutionError,
   type CommandOptions,
   type CommandResult,
   type CommandRunner,
-} from '../contracts/command.js';
+} from '../contracts/command.ts';
 import type {
   CredentialReference,
   CredentialResolver,
   CredentialScope,
   ResolvedEnvironment,
-} from '../contracts/credentials.js';
+} from '../contracts/credentials.ts';
 import type {
   PreparedRuntime,
   RuntimeAdapter,
   RuntimePreparation,
   SealedRuntime,
-} from '../contracts/runtime.js';
-import type { TestFileContents } from './memoryWorkspace.js';
+} from '../contracts/runtime.ts';
+import type { TestFileContents } from './memoryWorkspace.ts';
 import {
   createMemoryWorkspace,
   type MemoryWorkspaceFixture,
-} from './memoryWorkspace.js';
+} from './memoryWorkspace.ts';
 
 export interface StaticCredentialResolverOptions {
   readonly onResolve?: (

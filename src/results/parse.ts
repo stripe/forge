@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { assertBoundedJsonValue } from '../atif/parser.js';
+import { assertBoundedJsonValue } from '../atif/parser.ts';
 import {
   agentAdapterMetadataSchema,
   completionProviderMetadataSchema,
-} from '../contracts/metadata.js';
+} from '../contracts/metadata.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -12,18 +12,18 @@ import {
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
-} from '../evaluation/judgeTranscript.js';
-import { parseRunSelection } from '../model/index.js';
+} from '../evaluation/judgeTranscript.ts';
+import { parseRunSelection } from '../model/index.ts';
 import {
   isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
-} from '../model/paths.js';
-import { serializeCanonicalJson } from '../serialization.js';
+} from '../model/paths.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
-} from '../version.js';
+} from '../version.ts';
 import type {
   ForgeArtifactParseContext,
   InteractionArtifactV1,
@@ -31,7 +31,7 @@ import type {
   RunResult,
   SetupArtifactV1,
   WorkspaceEvidenceV1,
-} from './types.js';
+} from './types.ts';
 
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const safeText = z

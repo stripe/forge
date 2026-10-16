@@ -1,15 +1,15 @@
 /** Stable package-root surface for the portable Forge engine and contracts. */
 
-export * from './contracts/index.js';
+export * from './contracts/index.ts';
 export {
   createForgeEngine,
   defaultForgeEngine,
   type ForgeEngine,
   type ForgeEngineOptions,
-} from './engine.js';
-export * from './evaluation/index.js';
-export * from './execution/index.js';
-export * from './model/index.js';
-export * from './planning/index.js';
-export * from './results/index.js';
-export * from './setup/index.js';
+} from './engine.ts';
+export * from './evaluation/index.ts';
+export * from './execution/index.ts';
+export * from './model/index.ts';
+export * from './planning/index.ts';
+export * from './results/index.ts';
+export * from './setup/index.ts';

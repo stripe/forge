@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import type { AgentPluginInstallationReceipt } from '../contracts/plugin.js';
-import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.js';
-import { sha256Digest } from '../model/hashes.js';
-import { serializeCanonicalJson } from '../serialization.js';
+import type { AgentPluginInstallationReceipt } from '../contracts/plugin.ts';
+import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.ts';
+import { sha256Digest } from '../model/hashes.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 
 const MAX_PLUGIN_FILES = 100_000;
 const MAX_PLUGIN_FILE_BYTES = 64 * 1024 * 1024;

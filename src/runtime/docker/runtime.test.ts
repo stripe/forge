@@ -5,22 +5,22 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import type { CommandResult } from '../../contracts/command.js';
-import type { RuntimePreparation } from '../../contracts/runtime.js';
-import type { ResolvedRunPlanV1 } from '../../model/types.js';
+import type { CommandResult } from '../../contracts/command.ts';
+import type { RuntimePreparation } from '../../contracts/runtime.ts';
+import type { ResolvedRunPlanV1 } from '../../model/types.ts';
 import type {
   HostCommandOptions,
   HostCommandRunner,
-} from '../processCommandRunner.js';
+} from '../processCommandRunner.ts';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
-} from './assets.js';
+} from './assets.ts';
 import {
   createDockerRuntimeAdapter,
   validateDockerRuntimeHost,
-} from './runtime.js';
+} from './runtime.ts';
 
 const roots: string[] = [];
 const IMAGE_ID = `sha256:${'a'.repeat(64)}`;

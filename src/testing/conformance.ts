@@ -1,8 +1,8 @@
-import type { CommandRunner } from '../contracts/command.js';
+import type { CommandRunner } from '../contracts/command.ts';
 import type {
   RuntimeAdapter,
   RuntimePreparation,
-} from '../contracts/runtime.js';
+} from '../contracts/runtime.ts';
 
 export interface RuntimeAdapterConformanceOptions {
   readonly probePath?: string;

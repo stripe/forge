@@ -1,16 +1,16 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { indexLoadedDatasetCases } from '../model/loaders.js';
+import { indexLoadedDatasetCases } from '../model/loaders.ts';
 import {
   isCaseDefinitionPath,
   isSafeDatasetRelativePath,
-} from '../model/paths.js';
+} from '../model/paths.ts';
 import type {
   CaseId,
   DatasetRelativePath,
   LoadedDatasetV1,
   LoadedEvalCaseV1,
-} from '../model/types.js';
+} from '../model/types.ts';
 
 export type ManifestCaseFileErrorCode =
   | 'invalid_case_file'

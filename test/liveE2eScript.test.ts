@@ -8,14 +8,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, it } from 'vitest';
-import { parseAtifTrajectory } from '../src/atif/index.js';
-import * as forge from '../src/index.js';
-import { createAnthropicCompletionProvider } from '../src/providers/anthropic/index.js';
+import { parseAtifTrajectory } from '../src/atif/index.ts';
+import * as forge from '../src/index.ts';
+import { createAnthropicCompletionProvider } from '../src/providers/anthropic/index.ts';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
-} from '../src/runtime/docker/assets.js';
-import { FORGE_VERSION } from '../src/version.js';
+} from '../src/runtime/docker/assets.ts';
+import { FORGE_VERSION } from '../src/version.ts';
 
 const repositoryRoot = process.cwd();
 const liveScript = path.join(repositoryRoot, 'scripts', 'live-e2e.mjs');

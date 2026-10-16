@@ -10,14 +10,14 @@ import {
   type JsonObject,
   type JsonValue,
   parseAtifTrajectory,
-} from '../../atif/index.js';
+} from '../../atif/index.ts';
 import type {
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
-} from '../../contracts/agent.js';
-import type { ReadonlyWorkspace } from '../../contracts/runtime.js';
-import { isSafeSessionId } from './stream.js';
+} from '../../contracts/agent.ts';
+import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import { isSafeSessionId } from './stream.ts';
 
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
 const MAX_SESSION_LINES = 100_000;

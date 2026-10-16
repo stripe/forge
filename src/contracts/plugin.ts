@@ -4,13 +4,13 @@ import type {
   PluginSelectionV1,
   ResolvedRunPlanV1,
   Sha256Digest,
-} from '../model/types.js';
-import type { CommandRunner } from './command.js';
+} from '../model/types.ts';
+import type { CommandRunner } from './command.ts';
 import type {
   MutableWorkspace,
   RuntimeLogicalPaths,
   RuntimeRequirements,
-} from './runtime.js';
+} from './runtime.ts';
 
 export type AgentPluginSourceKind =
   | 'marketplace-path'

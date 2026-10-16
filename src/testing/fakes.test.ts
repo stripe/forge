@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { credentialReference } from '../contracts/credentials.js';
+import { credentialReference } from '../contracts/credentials.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
-} from './fakes.js';
-import { createMemoryRunInputProvider } from './memoryInputs.js';
-import { createTestResolvedRunPlan } from './plans.js';
+} from './fakes.ts';
+import { createMemoryRunInputProvider } from './memoryInputs.ts';
+import { createTestResolvedRunPlan } from './plans.ts';
 
 describe('createMemoryArtifactStore', () => {
   it('keeps staged bytes private and snapshots artifacts and committed results', async () => {

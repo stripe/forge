@@ -1,13 +1,13 @@
-import type { AgentAdapter } from './agent.js';
-import type { RunArtifactContributor, RunArtifactStore } from './artifacts.js';
+import type { AgentAdapter } from './agent.ts';
+import type { RunArtifactContributor, RunArtifactStore } from './artifacts.ts';
 import type {
   CompletionProvider,
   CompletionProviderResolver,
-} from './completion.js';
-import type { CredentialResolver } from './credentials.js';
-import type { RunInputProvider } from './inputs.js';
-import type { RunObserver } from './observability.js';
-import type { RuntimeAdapter } from './runtime.js';
+} from './completion.ts';
+import type { CredentialResolver } from './credentials.ts';
+import type { RunInputProvider } from './inputs.ts';
+import type { RunObserver } from './observability.ts';
+import type { RuntimeAdapter } from './runtime.ts';
 
 export type CompletionProviderCollection =
   | ReadonlyMap<string, CompletionProvider>

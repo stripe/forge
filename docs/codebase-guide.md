@@ -786,7 +786,9 @@ gateway behavior, and suite configuration.
 ## Public versus internal imports
 
 Inside the package, source files often import a concrete sibling file to avoid
-barrel cycles. External consumers must use only exports declared in
+barrel cycles. Relative TypeScript imports use `.ts` extensions;
+`rewriteRelativeImportExtensions` rewrites them to `.js` in emitted JavaScript.
+External consumers must use only exports declared in
 [`package.json`](../package.json), documented in the architecture guide's
 [public entry points](architecture.md#public-entry-points).
 

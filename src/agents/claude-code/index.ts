@@ -4,23 +4,23 @@ import type {
   AgentRuntimeRequirements,
   AgentSession,
   AgentTurn,
-} from '../../contracts/agent.js';
+} from '../../contracts/agent.ts';
 import {
   type CredentialReference,
   credentialReference,
-} from '../../contracts/credentials.js';
-import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.js';
-import { FORGE_VERSION } from '../../version.js';
-import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.js';
+} from '../../contracts/credentials.ts';
+import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.ts';
+import { FORGE_VERSION } from '../../version.ts';
+import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 import {
   assertClaudeRuntimeLayout,
   type ClaudeCodeLayout,
   claudeProjectDirectory,
   resolveClaudeCodeLayout,
   usesDefaultClaudeCodeLayout,
-} from './layout.js';
-import { createClaudePluginInstaller } from './plugins.js';
-import { isSafeSessionId, parseClaudeStream } from './stream.js';
+} from './layout.ts';
+import { createClaudePluginInstaller } from './plugins.ts';
+import { isSafeSessionId, parseClaudeStream } from './stream.ts';
 
 export const CLAUDE_PROJECTS_STATE_ID = 'claude-projects' as const;
 
@@ -261,10 +261,10 @@ function validateBaseUrl(value: string): string {
   return value;
 }
 
-export { loadClaudeEvidence } from './evidence.js';
-export type { ClaudeCodeLayout } from './layout.js';
+export { loadClaudeEvidence } from './evidence.ts';
+export type { ClaudeCodeLayout } from './layout.ts';
 export {
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
-} from './plugins.js';
-export { ClaudeStreamError, parseClaudeStream } from './stream.js';
+} from './plugins.ts';
+export { ClaudeStreamError, parseClaudeStream } from './stream.ts';

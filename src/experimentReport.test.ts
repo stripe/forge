@@ -4,19 +4,19 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
-import { defaultForgeEngine } from './engine.js';
+import { defaultForgeEngine } from './engine.ts';
 import {
   type ExperimentRunOptions,
   ExperimentRunReportError,
   parseExperimentRunReport,
   runExperiment,
-} from './experiment.js';
+} from './experiment.ts';
 import {
   buildExperimentRunReport,
   type ExperimentRunReportRunV1,
-} from './experimentReport.js';
-import { sha256Digest } from './model/hashes.js';
-import { createArtifactStore } from './results/index.js';
+} from './experimentReport.ts';
+import { sha256Digest } from './model/hashes.ts';
+import { createArtifactStore } from './results/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -24,8 +24,8 @@ import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from './testing/index.js';
-import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from './version.js';
+} from './testing/index.ts';
+import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from './version.ts';
 
 const temporaryDirectories: string[] = [];
 type MutableExperimentRunOptions = {

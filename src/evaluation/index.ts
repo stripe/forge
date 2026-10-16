@@ -5,7 +5,7 @@ export {
   evaluateRunEvidence,
   runWorkspaceChecks,
   UnsupportedEvaluationCapabilityError,
-} from './checks.js';
+} from './checks.ts';
 export {
   buildCriterionJudgePrompt,
   CRITERION_JUDGE_RETRY_DELAYS_MS,
@@ -20,7 +20,7 @@ export {
   MAX_CRITERION_JUDGE_ATTEMPTS,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   parseCriterionJudgment,
-} from './criterionJudge.js';
+} from './criterionJudge.ts';
 export {
   createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -39,7 +39,7 @@ export {
   type JudgeVisibleUserStepV1,
   MAX_JUDGE_TRANSCRIPT_BYTES,
   parseJudgeTranscriptProjection,
-} from './judgeTranscript.js';
+} from './judgeTranscript.ts';
 export {
   type CollectedJudgeWorkspaceEvidence,
   collectJudgeWorkspaceEvidence,
@@ -55,5 +55,5 @@ export {
   MAX_JUDGE_WORKSPACE_READ_BYTES,
   MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
   renderJudgeWorkspaceEvidence,
-} from './judgeWorkspace.js';
-export { criterionResultMatchesDefinition, scoreEvaluation } from './score.js';
+} from './judgeWorkspace.ts';
+export { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';

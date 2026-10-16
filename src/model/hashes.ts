@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { Sha256Digest, Sha256Hex } from './types.js';
+import type { Sha256Digest, Sha256Hex } from './types.ts';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;

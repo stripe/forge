@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import type { CommandResult } from '../../contracts/command.js';
-import type { HostCommandRunner } from '../processCommandRunner.js';
-import { detectDockerRuntimePlatform } from './platform.js';
+import type { CommandResult } from '../../contracts/command.ts';
+import type { HostCommandRunner } from '../processCommandRunner.ts';
+import { detectDockerRuntimePlatform } from './platform.ts';
 
 describe('detectDockerRuntimePlatform', () => {
   for (const [architecture, expected] of [

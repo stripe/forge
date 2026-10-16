@@ -1,15 +1,15 @@
-import type { AgentSelectionV1, ResolvedRunPlanV1 } from '../model/types.js';
-import type { CommandRunner } from './command.js';
-import type { EnvironmentSpecification } from './credentials.js';
-import type { RunInputProvider } from './inputs.js';
-import type { AgentAdapterMetadata } from './metadata.js';
-import type { AgentPluginInstaller } from './plugin.js';
+import type { AgentSelectionV1, ResolvedRunPlanV1 } from '../model/types.ts';
+import type { CommandRunner } from './command.ts';
+import type { EnvironmentSpecification } from './credentials.ts';
+import type { RunInputProvider } from './inputs.ts';
+import type { AgentAdapterMetadata } from './metadata.ts';
+import type { AgentPluginInstaller } from './plugin.ts';
 import type {
   MutableWorkspace,
   ReadonlyWorkspace,
   RuntimeLogicalPaths,
   RuntimeStateDirectoryRequirement,
-} from './runtime.js';
+} from './runtime.ts';
 
 export interface AgentToolCall {
   readonly id?: string;

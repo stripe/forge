@@ -7,8 +7,8 @@ import type {
   WorkspaceEntryKind,
   WorkspaceListOptions,
   WorkspaceWriteOptions,
-} from '../contracts/runtime.js';
-import { isSafeWorkspaceRelativePath } from '../model/paths.js';
+} from '../contracts/runtime.ts';
+import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 
 const DEFAULT_READ_LIMIT = 64 * 1024 * 1024;
 const DEFAULT_ENTRY_LIMIT = 100_000;

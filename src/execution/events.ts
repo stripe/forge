@@ -2,7 +2,7 @@ import type {
   RunEvent,
   RunObserver,
   RunPhase,
-} from '../contracts/observability.js';
+} from '../contracts/observability.ts';
 
 export interface RunEventEmitter {
   phase<T>(phase: RunPhase, operation: () => Promise<T>): Promise<T>;

@@ -4,14 +4,14 @@ export {
   createArtifactStore,
   RunIdConflictError,
   verifyCompletedRun,
-} from './localStore.js';
+} from './localStore.ts';
 export {
   parseEvaluationResult,
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
   parseSetupArtifact,
-} from './parse.js';
+} from './parse.ts';
 export {
   type ArtifactDescriptorV1,
   type AtifEvidenceProvenanceV1,
@@ -44,4 +44,4 @@ export {
   type SetupArtifactV1,
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
-} from './types.js';
+} from './types.ts';

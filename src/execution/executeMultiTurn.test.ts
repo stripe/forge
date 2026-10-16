@@ -4,8 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
 
-import { parseAtifTrajectory } from '../atif/index.js';
-import { credentialReference } from '../contracts/credentials.js';
+import { parseAtifTrajectory } from '../atif/index.ts';
+import { credentialReference } from '../contracts/credentials.ts';
 import {
   createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -19,13 +19,13 @@ import {
   MAX_JUDGE_WORKSPACE_FILE_CHARACTERS,
   MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
   renderJudgeWorkspaceEvidence,
-} from '../evaluation/index.js';
+} from '../evaluation/index.ts';
 import {
   createArtifactStore,
   type InteractionArtifactV1,
   verifyCompletedRun,
-} from '../results/index.js';
-import { serializeCanonicalJson } from '../serialization.js';
+} from '../results/index.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
@@ -34,8 +34,8 @@ import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from '../testing/index.js';
-import { executeEval, executeEvalWithTestHooks } from './execute.js';
+} from '../testing/index.ts';
+import { executeEval, executeEvalWithTestHooks } from './execute.ts';
 
 const SECRET = 'completion-secret-for-redaction';
 const AGENT_SECRET = 'agent-secret-for-redaction';

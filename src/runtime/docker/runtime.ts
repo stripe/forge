@@ -3,12 +3,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CommandRunner } from '../../contracts/command.js';
+import type { CommandRunner } from '../../contracts/command.ts';
 import {
   assertEnvironmentName,
   type CredentialScope,
   type ResolvedEnvironment,
-} from '../../contracts/credentials.js';
+} from '../../contracts/credentials.ts';
 import type {
   HostFileImport,
   MutableWorkspace,
@@ -20,23 +20,23 @@ import type {
   RuntimePreparation,
   SealedRuntime,
   WorkspaceWriteOptions,
-} from '../../contracts/runtime.js';
+} from '../../contracts/runtime.ts';
 import type {
   ForgeDockerRuntimeV1,
   ForgeRuntimeV1,
-} from '../../model/types.js';
-import { hashStateFile, importHostFileIntoState } from '../hostFileImport.js';
+} from '../../model/types.ts';
+import { hashStateFile, importHostFileIntoState } from '../hostFileImport.ts';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
-} from '../processCommandRunner.js';
-import { createOwnedWorkspace } from '../workspace.js';
+} from '../processCommandRunner.ts';
+import { createOwnedWorkspace } from '../workspace.ts';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
-} from './assets.js';
-import { DockerCommandController } from './commandRunner.js';
+} from './assets.ts';
+import { DockerCommandController } from './commandRunner.ts';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;

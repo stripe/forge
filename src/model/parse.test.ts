@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { BenchmarkModelError } from './errors.js';
-import { getMatrixGroups } from './matrix.js';
+import { BenchmarkModelError } from './errors.ts';
+import { getMatrixGroups } from './matrix.ts';
 import {
   parseDatasetManifestJson,
   parseEvalCase,
@@ -10,7 +10,7 @@ import {
   parseExperimentConfig,
   parseExperimentConfigYaml,
   parseSetupStep,
-} from './parse.js';
+} from './parse.ts';
 
 const HASH = 'a'.repeat(64);
 

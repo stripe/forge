@@ -8,8 +8,8 @@ import { describe, it } from 'vitest';
 import {
   type ExperimentRunSummary,
   parseExperimentRunReport,
-} from '../src/experiment.js';
-import { verifyCompletedRun } from '../src/results/index.js';
+} from '../src/experiment.ts';
+import { verifyCompletedRun } from '../src/results/index.ts';
 
 const childFile = fileURLToPath(
   new URL('./support/experimentProcess.ts', import.meta.url),

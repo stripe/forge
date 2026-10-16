@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { AtifValidationError } from '../atif/parser.js';
+import { AtifValidationError } from '../atif/parser.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -9,15 +9,15 @@ import {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   MAX_JUDGE_TRANSCRIPT_BYTES,
-} from '../evaluation/judgeTranscript.js';
-import { FORGE_VERSION } from '../version.js';
+} from '../evaluation/judgeTranscript.ts';
+import { FORGE_VERSION } from '../version.ts';
 import {
   parseEvaluationResult,
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseSetupArtifact,
   parseWorkspaceEvidence,
-} from './parse.js';
+} from './parse.ts';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const CONTEXT = { forgeVersion: FORGE_VERSION };

@@ -1,7 +1,7 @@
 import type {
   ReadonlyWorkspace,
   WorkspaceEntry,
-} from '../contracts/runtime.js';
+} from '../contracts/runtime.ts';
 export const MAX_JUDGE_WORKSPACE_ENTRIES = 10_000;
 export const MAX_JUDGE_WORKSPACE_DEPTH = 32;
 export const MAX_JUDGE_WORKSPACE_COLLECTION_MS = 2_000;

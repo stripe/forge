@@ -3,15 +3,15 @@ import { z } from 'zod';
 import {
   experimentRunErrorCodeSchema,
   experimentRunIdSchema,
-} from './experimentModel.js';
-import { sha256Digest } from './model/hashes.js';
-import { parseRunSelection } from './model/parse.js';
-import { serializeCanonicalJson } from './serialization.js';
+} from './experimentModel.ts';
+import { sha256Digest } from './model/hashes.ts';
+import { parseRunSelection } from './model/parse.ts';
+import { serializeCanonicalJson } from './serialization.ts';
 import {
   assertCompatibleForgeVersion,
   FORGE_BUILD_IDENTITY,
   parseForgeBuildIdentity,
-} from './version.js';
+} from './version.ts';
 
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const count = z.number().int().nonnegative().safe();

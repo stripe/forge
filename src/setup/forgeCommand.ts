@@ -1,10 +1,10 @@
-import { isSafeWorkspaceRelativePath } from '../model/paths.js';
-import type { CommandSetupStepV1, SetupStepV1 } from '../model/types.js';
+import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
+import type { CommandSetupStepV1, SetupStepV1 } from '../model/types.ts';
 import type {
   PreparedSetupStep,
   SetupExecutionContext,
   SetupStepHandler,
-} from './types.js';
+} from './types.ts';
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const NO_REQUIREMENTS = Object.freeze({});

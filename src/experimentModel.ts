@@ -1,11 +1,11 @@
 import { z } from 'zod';
 
-import { isSha256Digest } from './model/hashes.js';
-import { parseRunSelection } from './model/parse.js';
+import { isSha256Digest } from './model/hashes.ts';
+import { parseRunSelection } from './model/parse.ts';
 import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
-} from './version.js';
+} from './version.ts';
 
 export const experimentRunIdSchema = z
   .string()

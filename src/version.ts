@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-import { isSafeVersion } from './model/paths.js';
+import { isSafeVersion } from './model/paths.ts';
 
 const packageMetadata = createRequire(import.meta.url)(
   '@stripe/forge/package.json',

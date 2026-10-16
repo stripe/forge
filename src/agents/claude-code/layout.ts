@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { RuntimeLogicalPaths } from '../../contracts/runtime.js';
+import type { RuntimeLogicalPaths } from '../../contracts/runtime.ts';
 
 /** Runtime-visible, run-owned Linux paths, fixed before capability preflight. */
 export interface ClaudeCodeLayout {

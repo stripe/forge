@@ -9,7 +9,7 @@ import {
   expandExperiment,
   loadDataset,
   parseExperimentConfigYaml,
-} from '../src/index.js';
+} from '../src/index.ts';
 
 it('expands the architecture guide grouped matrix into its documented selections', async (context) => {
   const architectureGuide = await readFile('docs/architecture.md', 'utf8');

@@ -8,13 +8,13 @@ export {
   type ScriptedCompletionRequirementsHandler,
   type ScriptedCompletionStep,
   type ScriptedCompletionValue,
-} from './completionProvider.js';
+} from './completionProvider.ts';
 export {
   assertRuntimeAdapterConforms,
   type RuntimeAdapterConformanceOptions,
   type RuntimeAdapterConformanceReport,
   TestingConformanceError,
-} from './conformance.js';
+} from './conformance.ts';
 export {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
@@ -31,17 +31,17 @@ export {
   type StaticCredentialResolverOptions,
   type TestCommandHandler,
   type TestCommandScope,
-} from './fakes.js';
+} from './fakes.ts';
 export {
   createMemoryRunInputProvider,
   type MemoryRunInputProviderOptions,
-} from './memoryInputs.js';
+} from './memoryInputs.ts';
 export {
   createMemoryWorkspace,
   type MemoryWorkspaceFixture,
   type TestFileContents,
-} from './memoryWorkspace.js';
+} from './memoryWorkspace.ts';
 export {
   createTestResolvedRunPlan,
   type TestResolvedRunPlanOptions,
-} from './plans.js';
+} from './plans.ts';

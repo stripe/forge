@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { HostFileImport } from '../contracts/runtime.js';
-import { isSafeWorkspaceRelativePath } from '../model/paths.js';
+import type { HostFileImport } from '../contracts/runtime.ts';
+import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 
 /** Copy through bounded chunks, then hash the staged bytes before publishing. */
 export async function importHostFileIntoState(

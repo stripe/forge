@@ -1,15 +1,15 @@
 import { z } from 'zod';
-import type { StrictCompletionResponseSchema } from '../contracts/completion.js';
+import type { StrictCompletionResponseSchema } from '../contracts/completion.ts';
 import type {
   InteractionCompletionInvoker,
   InteractionHistoryMessage,
-} from './completion.js';
+} from './completion.ts';
 import {
   AVA_STOP_SENTINEL,
   type AvaPromptInputs,
   buildAvaContinuationPrompt,
   buildAvaInitializationPrompt,
-} from './prompt.js';
+} from './prompt.ts';
 
 export const MAX_AVA_ATTEMPTS = 3;
 export const MAX_AVA_NEEDS = 6;

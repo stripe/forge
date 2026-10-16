@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.js';
+import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;

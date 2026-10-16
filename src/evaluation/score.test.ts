@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { scoreEvaluation } from './score.js';
+import { scoreEvaluation } from './score.ts';
 
 describe('scoreEvaluation', () => {
   it('retains excluded judgments without counting them or allowing them to mask an incorrect answer', () => {

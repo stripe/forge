@@ -1,10 +1,10 @@
-import { isSha256Digest } from '../model/hashes.js';
+import { isSha256Digest } from '../model/hashes.ts';
 import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeVersion,
-} from '../model/paths.js';
-import type { AgentPluginInstallationReceipt } from './plugin.js';
+} from '../model/paths.ts';
+import type { AgentPluginInstallationReceipt } from './plugin.ts';
 
 /** Validate and snapshot an adapter-produced plugin receipt at a trust boundary. */
 export function parseAgentPluginInstallationReceipt(

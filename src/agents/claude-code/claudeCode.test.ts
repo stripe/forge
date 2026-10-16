@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { parseAtifTrajectory } from '../../atif/index.js';
-import { createMemoryRunInputProvider } from '../../testing/memoryInputs.js';
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { createTestResolvedRunPlan } from '../../testing/plans.js';
-import { FORGE_VERSION } from '../../version.js';
+import { parseAtifTrajectory } from '../../atif/index.ts';
+import { createMemoryRunInputProvider } from '../../testing/memoryInputs.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { createTestResolvedRunPlan } from '../../testing/plans.ts';
+import { FORGE_VERSION } from '../../version.ts';
 
 import {
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PROJECTS_STATE_ID,
   type ClaudeCodeLayout,
   createClaudeCodeAdapter,
-} from './index.js';
+} from './index.ts';
 
 describe('Claude Code adapter', () => {
   it('rejects Codex hook policy even when registered with a custom adapter ID', () => {

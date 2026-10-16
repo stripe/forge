@@ -4,12 +4,12 @@ import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeWorkspaceRelativePath,
-} from '../model/paths.js';
-import type { JsonObject } from '../model/types.js';
-import { commandSetupHandler } from './forgeCommand.js';
-import { pluginSetupHandler } from './forgePlugin.js';
-import { writeSetupHandler } from './forgeWrite.js';
-import type { SetupActionDefinition } from './registry.js';
+} from '../model/paths.ts';
+import type { JsonObject } from '../model/types.ts';
+import { commandSetupHandler } from './forgeCommand.ts';
+import { pluginSetupHandler } from './forgePlugin.ts';
+import { writeSetupHandler } from './forgeWrite.ts';
+import type { SetupActionDefinition } from './registry.ts';
 
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_COMMAND_ARGUMENTS = 256;

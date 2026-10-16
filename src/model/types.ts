@@ -1,4 +1,4 @@
-import type { ForgeBuildIdentity } from '../version.js';
+import type { ForgeBuildIdentity } from '../version.ts';
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;

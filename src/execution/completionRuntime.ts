@@ -7,22 +7,22 @@ import type {
   CompletionResponse,
   CompletionStopReason,
   StrictCompletionResponseSchema,
-} from '../contracts/completion.js';
+} from '../contracts/completion.ts';
 import type {
   CompletionProviderCollection,
   ForgeComposition,
-} from '../contracts/composition.js';
+} from '../contracts/composition.ts';
 import type {
   CredentialReference,
   CredentialResolver,
-} from '../contracts/credentials.js';
+} from '../contracts/credentials.ts';
 import {
   type CompletionProviderMetadata,
   completionProviderMetadataSchema,
-} from '../contracts/metadata.js';
-import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.js';
-import type { CompletionCallSummaryV1 } from '../results/types.js';
-import { redactSecrets } from '../security/redaction.js';
+} from '../contracts/metadata.ts';
+import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
+import type { CompletionCallSummaryV1 } from '../results/types.ts';
+import { redactSecrets } from '../security/redaction.ts';
 
 const SAFE_PROVIDER_METADATA = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,255}$/;
 const SAFE_CREDENTIAL_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/;

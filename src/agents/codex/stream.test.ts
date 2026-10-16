@@ -5,7 +5,7 @@ import {
   CodexStreamError,
   isSafeCodexSessionId,
   parseCodexStream,
-} from './stream.js';
+} from './stream.ts';
 
 const SESSION_ID = '0199a213-81c0-7800-8aa1-bbab2a035a53';
 const OTHER_SESSION_ID = '0199a213-81c0-7800-8aa1-bbab2a035a54';

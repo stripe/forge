@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { AgentSession, AgentTurn } from '../contracts/agent.js';
-import { AvaRolePlayer } from './ava.js';
+import type { AgentSession, AgentTurn } from '../contracts/agent.ts';
+import { AvaRolePlayer } from './ava.ts';
 import type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
-} from './completion.js';
-import { type ConversationTurn, runConversation } from './conversation.js';
-import { AVA_STOP_SENTINEL } from './prompt.js';
+} from './completion.ts';
+import { type ConversationTurn, runConversation } from './conversation.ts';
+import { AVA_STOP_SENTINEL } from './prompt.ts';
 
 function initialResponse(
   descriptions: readonly string[],

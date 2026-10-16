@@ -2,28 +2,28 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import type { ForgeComposition } from './contracts/composition.js';
-import type { ForgeEngine } from './engine.js';
-import { ForgeExecutionError } from './execution/errors.js';
-import type { ExecuteEvalInput } from './execution/execute.js';
+import type { ForgeComposition } from './contracts/composition.ts';
+import type { ForgeEngine } from './engine.ts';
+import { ForgeExecutionError } from './execution/errors.ts';
+import type { ExecuteEvalInput } from './execution/execute.ts';
 import {
   type ExperimentRunAttempt as Attempt,
   type ExperimentRunCheckpoint,
   parseExperimentRunCheckpoint,
   experimentRunIdSchema as runIdSchema,
   type SettledExperimentRunAttempt as SettledAttempt,
-} from './experimentModel.js';
+} from './experimentModel.ts';
 import {
   buildExperimentRunReport,
   type ExperimentRunReportEvaluationV1,
   type ExperimentRunReportRunV1,
   serializeExperimentRunReport,
-} from './experimentReport.js';
-import type { ResolvedRunPlanV1, RunSelection } from './model/types.js';
-import { resolvedRunPlanSha256 } from './planning/planner.js';
-import type { CompletedRunV1, EvalStatus } from './results/types.js';
-import { serializeCanonicalJson } from './serialization.js';
-import { FORGE_BUILD_IDENTITY } from './version.js';
+} from './experimentReport.ts';
+import type { ResolvedRunPlanV1, RunSelection } from './model/types.ts';
+import { resolvedRunPlanSha256 } from './planning/planner.ts';
+import type { CompletedRunV1, EvalStatus } from './results/types.ts';
+import { serializeCanonicalJson } from './serialization.ts';
+import { FORGE_BUILD_IDENTITY } from './version.ts';
 
 export {
   type ExperimentRunReportCaseV1,
@@ -32,7 +32,7 @@ export {
   type ExperimentRunReportStatisticsV1,
   type ExperimentRunReportV1,
   parseExperimentRunReport,
-} from './experimentReport.js';
+} from './experimentReport.ts';
 
 const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
 

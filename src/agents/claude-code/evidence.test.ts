@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { parseAtifTrajectory } from '../../atif/index.js';
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.js';
+import { parseAtifTrajectory } from '../../atif/index.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 
 function hookSuccessRecord(context: string) {
   return {

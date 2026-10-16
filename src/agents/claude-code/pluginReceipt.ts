@@ -1,6 +1,6 @@
-import type { AgentPluginInstallationReceipt } from '../../contracts/plugin.js';
+import type { AgentPluginInstallationReceipt } from '../../contracts/plugin.ts';
 
-export { inspectInstalledPluginTree } from '../pluginTree.js';
+export { inspectInstalledPluginTree } from '../pluginTree.ts';
 
 export function pluginSourceReceipt(
   source: unknown,

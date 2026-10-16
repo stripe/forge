@@ -4,23 +4,23 @@ import {
   assertEnvironmentName,
   type CredentialRequirement,
   credentialReference,
-} from '../contracts/credentials.js';
-import type { AgentPluginInstaller } from '../contracts/plugin.js';
+} from '../contracts/credentials.ts';
+import type { AgentPluginInstaller } from '../contracts/plugin.ts';
 import type {
   MutableWorkspace,
   RuntimeStateDirectoryRequirement,
-} from '../contracts/runtime.js';
-import { isSafeActionIdentifier } from '../model/paths.js';
+} from '../contracts/runtime.ts';
+import { isSafeActionIdentifier } from '../model/paths.ts';
 import type {
   AgentSelectionV1,
   ResolvedRunPlanV1,
   SetupStepV1,
-} from '../model/types.js';
+} from '../model/types.ts';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
-} from './registry.js';
-import { normalizeSetupStepResolution } from './resolution.js';
+} from './registry.ts';
+import { normalizeSetupStepResolution } from './resolution.ts';
 import {
   type AppliedSetupStep,
   type PreparedSetup,
@@ -32,7 +32,7 @@ import {
   type SetupStepHandler,
   type SetupStepRequirements,
   UnsupportedSetupActionError,
-} from './types.js';
+} from './types.ts';
 
 /** Actions implemented and shipped by the exact installed Forge version. */
 export const firstPartySetupHandlers: ReadonlyMap<string, SetupStepHandler> =

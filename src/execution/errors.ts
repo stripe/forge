@@ -1,4 +1,4 @@
-import type { RunPhase } from '../contracts/observability.js';
+import type { RunPhase } from '../contracts/observability.ts';
 
 export type ForgeExecutionErrorCode =
   | 'aborted'

@@ -1,11 +1,11 @@
 import * as path from 'node:path';
-import { isSafeWorkspaceRelativePath } from '../model/paths.js';
-import type { SetupStepV1, WriteSetupStepV1 } from '../model/types.js';
+import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
+import type { SetupStepV1, WriteSetupStepV1 } from '../model/types.ts';
 import type {
   PreparedSetupStep,
   SetupExecutionContext,
   SetupStepHandler,
-} from './types.js';
+} from './types.ts';
 
 const MAX_WRITE_BYTES = 64 * 1024 * 1024;
 const NO_REQUIREMENTS = Object.freeze({});

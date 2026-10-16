@@ -1,18 +1,18 @@
-import type { CommandRunner } from '../contracts/command.js';
-import type { CredentialRequirement } from '../contracts/credentials.js';
-import type { RunInputProvider } from '../contracts/inputs.js';
-import type { AgentPluginInstaller } from '../contracts/plugin.js';
+import type { CommandRunner } from '../contracts/command.ts';
+import type { CredentialRequirement } from '../contracts/credentials.ts';
+import type { RunInputProvider } from '../contracts/inputs.ts';
+import type { AgentPluginInstaller } from '../contracts/plugin.ts';
 import type {
   MutableWorkspace,
   RuntimeLogicalPaths,
   RuntimeStateDirectoryRequirement,
-} from '../contracts/runtime.js';
+} from '../contracts/runtime.ts';
 import type {
   AgentSelectionV1,
   JsonObject,
   ResolvedRunPlanV1,
   SetupStepV1,
-} from '../model/types.js';
+} from '../model/types.ts';
 
 export type SetupCredentialRequirements = Readonly<
   Record<string, CredentialRequirement>

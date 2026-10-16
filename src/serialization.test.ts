@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { serializeCanonicalJson } from './serialization.js';
+import { serializeCanonicalJson } from './serialization.ts';
 
 describe('serializeCanonicalJson', () => {
   it('sorts keys recursively while retaining array order', () => {

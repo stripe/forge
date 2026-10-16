@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import ts from 'typescript';
+import { transformSync } from 'esbuild';
 import { parseDocument } from 'yaml';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -157,22 +157,23 @@ function validateSnippet(relativePath, fence, endLine) {
   if (!['js', 'javascript', 'ts', 'typescript'].includes(language)) return;
   checkedSnippets += 1;
   const isTypeScript = language === 'ts' || language === 'typescript';
-  const result = ts.transpileModule(source, {
-    fileName: `snippet.${isTypeScript ? 'ts' : 'js'}`,
-    reportDiagnostics: true,
-    compilerOptions: {
-      allowJs: !isTypeScript,
-      module: ts.ModuleKind.NodeNext,
-      target: ts.ScriptTarget.ES2022,
-    },
-  });
-  for (const diagnostic of result.diagnostics ?? []) {
-    if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
-    addError(
-      relativePath,
-      fence.startLine,
-      `invalid ${language} snippet: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`,
-    );
+  try {
+    transformSync(source, {
+      loader: isTypeScript ? 'ts' : 'js',
+      format: 'esm',
+      target: 'es2022',
+      logLevel: 'silent',
+    });
+  } catch (error) {
+    if (!Array.isArray(error.errors)) throw error;
+    for (const diagnostic of error.errors) {
+      addError(
+        relativePath,
+        fence.startLine,
+        `invalid ${language} snippet: ${diagnostic.text}`,
+      );
+    }
+    return;
   }
 
   if (fence.flags.has('check')) {

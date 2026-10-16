@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { parseAgentPluginInstallationReceipt } from './pluginReceipt.js';
+import { parseAgentPluginInstallationReceipt } from './pluginReceipt.ts';
 
 const RECEIPT = {
   adapter: 'claude-code',

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { parse } from 'toml';
 import { describe, it } from 'vitest';
 
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { prepareCodexPluginConfiguration } from './pluginConfig.js';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { prepareCodexPluginConfiguration } from './pluginConfig.ts';
 
 describe('Codex run-owned plugin configuration', () => {
   it('retains native plugin and project/hook state while removing provider settings', async () => {

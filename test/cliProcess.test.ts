@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it } from 'vitest';
-import { FORGE_VERSION } from '../src/version.js';
+import { FORGE_VERSION } from '../src/version.ts';
 
 const cliFile = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const loader = import.meta.resolve('tsx');

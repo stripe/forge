@@ -1,6 +1,6 @@
-import { sha256Digest } from '../model/hashes.js';
-import { indexLoadedDatasetCases } from '../model/loaders.js';
-import { agentSelectionKey, getMatrixGroups } from '../model/matrix.js';
+import { sha256Digest } from '../model/hashes.ts';
+import { indexLoadedDatasetCases } from '../model/loaders.ts';
+import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
 import {
   type AgentSelectionV1,
   type CaseId,
@@ -14,12 +14,12 @@ import {
   type RunSelection,
   type SetupStepV1,
   type WriteSetupStepV1,
-} from '../model/types.js';
+} from '../model/types.ts';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
-} from '../setup/registry.js';
-import { FORGE_BUILD_IDENTITY } from '../version.js';
+} from '../setup/registry.ts';
+import { FORGE_BUILD_IDENTITY } from '../version.ts';
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'

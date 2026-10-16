@@ -1,13 +1,13 @@
-export { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.js';
+export { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
 export {
   isSha256Digest,
   isSha256Hex,
   prefixedSha256,
   sha256Digest,
   sha256Hex,
-} from './hashes.js';
-export { loadDataset, loadExperimentConfig } from './loaders.js';
-export { getMatrixGroups } from './matrix.js';
+} from './hashes.ts';
+export { loadDataset, loadExperimentConfig } from './loaders.ts';
+export { getMatrixGroups } from './matrix.ts';
 export {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
@@ -20,7 +20,7 @@ export {
   parseResolvedRunPlan,
   parseRunSelection,
   parseSetupStep,
-} from './parse.js';
+} from './parse.ts';
 export {
   isAuthoredCaseId,
   isCaseDefinitionPath,
@@ -31,5 +31,5 @@ export {
   isSafeSimpleIdentifier,
   isSafeVersion,
   isSafeWorkspaceRelativePath,
-} from './paths.js';
-export * from './types.js';
+} from './paths.ts';
+export * from './types.ts';

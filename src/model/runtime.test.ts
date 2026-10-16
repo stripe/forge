@@ -3,11 +3,11 @@ import { describe, it } from 'vitest';
 import {
   resolvedRunPlanSha256,
   serializeResolvedRunPlan,
-} from '../planning/planner.js';
-import { createTestResolvedRunPlan } from '../testing/plans.js';
-import { BenchmarkModelError } from './errors.js';
-import { parseExperimentConfig, parseResolvedRunPlan } from './parse.js';
-import type { ForgeExternalRuntimeV1 } from './types.js';
+} from '../planning/planner.ts';
+import { createTestResolvedRunPlan } from '../testing/plans.ts';
+import { BenchmarkModelError } from './errors.ts';
+import { parseExperimentConfig, parseResolvedRunPlan } from './parse.ts';
+import type { ForgeExternalRuntimeV1 } from './types.ts';
 
 const runtime: ForgeExternalRuntimeV1 = {
   adapter: 'acme/process',

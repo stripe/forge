@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { FORGE_VERSION } from '../../version.js';
-import { type ClaudeCodeLayout, createClaudeCodeAdapter } from './index.js';
+import { FORGE_VERSION } from '../../version.ts';
+import { type ClaudeCodeLayout, createClaudeCodeAdapter } from './index.ts';
 
 const layout: ClaudeCodeLayout = {
   workspace: '/tmp/run/workspace',

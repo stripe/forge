@@ -5,8 +5,8 @@ import { describe, it } from 'vitest';
 import type {
   CompletionRequest,
   StrictCompletionResponseSchema,
-} from '../../contracts/completion.js';
-import { FORGE_VERSION } from '../../version.js';
+} from '../../contracts/completion.ts';
+import { FORGE_VERSION } from '../../version.ts';
 import {
   ANTHROPIC_API_KEY_CREDENTIAL,
   ANTHROPIC_AUTH_TOKEN_CREDENTIAL,
@@ -21,7 +21,7 @@ import {
   AnthropicCompletionError,
   createAnthropicCompletionProvider,
   supportsAnthropicStructuredOutputModel,
-} from './index.js';
+} from './index.ts';
 
 const schema: StrictCompletionResponseSchema = {
   name: 'ava_turn',

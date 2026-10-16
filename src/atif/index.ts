@@ -11,7 +11,7 @@ export {
   type NormalizedTrajectoryValidationIssue,
   type NormalizedTrajectoryValidationPath,
   parseNormalizedTrajectory,
-} from './normalization.js';
+} from './normalization.ts';
 
 export {
   AtifValidationError,
@@ -19,10 +19,10 @@ export {
   type AtifValidationIssueCode,
   type AtifValidationPath,
   parseAtifTrajectory,
-} from './parser.js';
+} from './parser.ts';
 
-export { serializeAtifTrajectory } from './serializer.js';
-export { isAtifTimestamp } from './timestamp.js';
+export { serializeAtifTrajectory } from './serializer.ts';
+export { isAtifTimestamp } from './timestamp.ts';
 export {
   ATIF_SCHEMA_VERSION,
   type AtifAgent,
@@ -51,6 +51,6 @@ export {
   type JsonObject,
   type JsonPrimitive,
   type JsonValue,
-} from './types.js';
+} from './types.ts';
 
-export { ATIF_UPSTREAM_SOURCE } from './upstream.js';
+export { ATIF_UPSTREAM_SOURCE } from './upstream.ts';

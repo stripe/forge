@@ -5,21 +5,21 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { createClaudeCodeAdapter } from './agents/claude-code/index.js';
-import { createCodexAdapter } from './agents/codex/index.js';
-import type { ForgeComposition } from './contracts/composition.js';
-import { createEnvironmentCredentialResolver } from './contracts/credentials.js';
-import { createDirectoryRunInputProvider } from './contracts/inputs.js';
-import type { RuntimePlatform } from './contracts/runtime.js';
-import { defaultForgeEngine, type ForgeEngine } from './engine.js';
-import { type executeEval, FORGE_VERSION } from './execution/index.js';
+import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
+import { createCodexAdapter } from './agents/codex/index.ts';
+import type { ForgeComposition } from './contracts/composition.ts';
+import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
+import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
+import type { RuntimePlatform } from './contracts/runtime.ts';
+import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
+import { type executeEval, FORGE_VERSION } from './execution/index.ts';
 import {
   createExperimentCliOptions,
   EXPERIMENT_CLI_OPTIONS,
   ExperimentCommandError,
   ExperimentUsageError,
   runExperimentCommand,
-} from './experimentCli.js';
+} from './experimentCli.ts';
 import {
   type DatasetManifestV1,
   type ExperimentConfigV1,
@@ -27,22 +27,22 @@ import {
   type LoadedDatasetV1,
   parseRunSelection,
   type RunSelection,
-} from './model/index.js';
+} from './model/index.ts';
 import {
   expandExperiment,
   ManifestCaseFileError,
   resolveManifestCaseIdFromFile,
   serializeResolvedRunPlan,
-} from './planning/index.js';
-import { validateExperimentDataset } from './planning/planner.js';
-import { createAnthropicCompletionProvider } from './providers/anthropic/index.js';
-import { createArtifactStore } from './results/index.js';
+} from './planning/index.ts';
+import { validateExperimentDataset } from './planning/planner.ts';
+import { createAnthropicCompletionProvider } from './providers/anthropic/index.ts';
+import { createArtifactStore } from './results/index.ts';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
   validateDockerRuntimeHost,
-} from './runtime/docker/index.js';
-import { serializeCanonicalJson } from './serialization.js';
+} from './runtime/docker/index.ts';
+import { serializeCanonicalJson } from './serialization.ts';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';

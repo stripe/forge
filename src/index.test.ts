@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import * as rootExports from './index.js';
+import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
@@ -40,7 +40,7 @@ import {
   type RuntimePreflight,
   resolveManifestCaseIdFromFile,
   resolveRunPlan,
-} from './index.js';
+} from './index.ts';
 
 describe('@stripe/forge package root', () => {
   it('keeps experiment run orchestration on its documented subpath', () => {

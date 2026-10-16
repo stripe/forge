@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import type { ForgeComposition } from '../contracts/composition.js';
-import { credentialReference } from '../contracts/credentials.js';
-import type { RuntimeAdapter } from '../contracts/runtime.js';
-import type { ForgeExternalRuntimeV1 } from '../model/types.js';
+import type { ForgeComposition } from '../contracts/composition.ts';
+import { credentialReference } from '../contracts/credentials.ts';
+import type { RuntimeAdapter } from '../contracts/runtime.ts';
+import type { ForgeExternalRuntimeV1 } from '../model/types.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
-} from '../testing/fakes.js';
-import { createMemoryRunInputProvider } from '../testing/memoryInputs.js';
-import { createTestResolvedRunPlan } from '../testing/plans.js';
-import { executeEval, preflightEval } from './execute.js';
+} from '../testing/fakes.ts';
+import { createMemoryRunInputProvider } from '../testing/memoryInputs.ts';
+import { createTestResolvedRunPlan } from '../testing/plans.ts';
+import { executeEval, preflightEval } from './execute.ts';
 
 const selected: ForgeExternalRuntimeV1 = {
   adapter: 'acme/process',

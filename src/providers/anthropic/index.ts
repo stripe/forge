@@ -7,14 +7,14 @@ import type {
   CompletionResponse,
   CompletionStopReason,
   StrictCompletionResponseSchema,
-} from '../../contracts/completion.js';
+} from '../../contracts/completion.ts';
 import {
   type CredentialReference,
   credentialReference,
-} from '../../contracts/credentials.js';
-import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.js';
-import type { ModelRefV1 } from '../../model/types.js';
-import { FORGE_VERSION } from '../../version.js';
+} from '../../contracts/credentials.ts';
+import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.ts';
+import type { ModelRefV1 } from '../../model/types.ts';
+import { FORGE_VERSION } from '../../version.ts';
 
 export const ANTHROPIC_MESSAGES_API_VERSION = '2023-06-01' as const;
 export const ANTHROPIC_STRUCTURED_OUTPUT_FORMAT = 'json_schema' as const;

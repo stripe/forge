@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
 
-import { runCli } from '../src/cli.js';
-import { loadDataset, loadExperimentConfig } from '../src/model/index.js';
-import { expandExperiment, resolveRunPlan } from '../src/planning/index.js';
+import { runCli } from '../src/cli.ts';
+import { loadDataset, loadExperimentConfig } from '../src/model/index.ts';
+import { expandExperiment, resolveRunPlan } from '../src/planning/index.ts';
 
 const fixtureRoot = path.join(process.cwd(), 'test', 'fixtures', 'multi-turn');
 const datasetRoot = path.join(fixtureRoot, 'dataset');
