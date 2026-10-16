@@ -10,7 +10,7 @@ import {
   parseAtifTrajectory,
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
-} from './index.js';
+} from './index.ts';
 
 function minimalTrajectory(): AtifTrajectoryV1_8 {
   return {

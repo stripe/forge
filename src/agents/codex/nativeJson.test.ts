@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { nativeJsonValue } from './nativeJson.js';
+import { nativeJsonValue } from './nativeJson.ts';
 
 function extract(source: string, path: readonly string[]): string | undefined {
   // The production caller must establish this precondition before scanning.

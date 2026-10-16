@@ -1,13 +1,13 @@
-import { defaultForgeEngine } from '../../src/engine.js';
-import { runExperiment } from '../../src/experiment.js';
-import { createArtifactStore } from '../../src/results/index.js';
+import { defaultForgeEngine } from '../../src/engine.ts';
+import { runExperiment } from '../../src/experiment.ts';
+import { createArtifactStore } from '../../src/results/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from '../../src/testing/index.js';
+} from '../../src/testing/index.ts';
 
 const root = process.argv[2]!;
 const resume = process.argv[3] === 'resume';

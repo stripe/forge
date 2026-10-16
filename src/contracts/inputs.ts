@@ -1,9 +1,9 @@
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { sha256Hex } from '../model/hashes.js';
-import { parseDatasetManifest } from '../model/parse.js';
-import type { DatasetManifestV1 } from '../model/types.js';
+import { sha256Hex } from '../model/hashes.ts';
+import { parseDatasetManifest } from '../model/parse.ts';
+import type { DatasetManifestV1 } from '../model/types.ts';
 
 export interface RunInputReadOptions {
   readonly signal?: AbortSignal;

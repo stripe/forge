@@ -1,7 +1,7 @@
-import type { ModelRefV1 } from '../model/types.js';
+import type { ModelRefV1 } from '../model/types.ts';
 
-import type { CredentialRequirement } from './credentials.js';
-import type { CompletionProviderMetadata } from './metadata.js';
+import type { CredentialRequirement } from './credentials.ts';
+import type { CompletionProviderMetadata } from './metadata.ts';
 
 /** Score-affecting reason a host completion is requested. */
 export type CompletionPurpose = 'role_player' | 'judge';

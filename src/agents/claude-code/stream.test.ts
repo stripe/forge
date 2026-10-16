@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'vitest';
-import { ClaudeStreamError, parseClaudeStream } from './stream.js';
+import { ClaudeStreamError, parseClaudeStream } from './stream.ts';
 
 it('ignores bounded banner and primitive noise while retaining terminal text, calls, and valid cost', () => {
   const stream = [

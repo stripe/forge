@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { FORGE_VERSION } from '../version.js';
-import { BenchmarkModelError } from './errors.js';
-import { parseResolvedRunPlan } from './parse.js';
-import type { ResolvedRunPlanV1 } from './types.js';
+import { FORGE_VERSION } from '../version.ts';
+import { BenchmarkModelError } from './errors.ts';
+import { parseResolvedRunPlan } from './parse.ts';
+import type { ResolvedRunPlanV1 } from './types.ts';
 
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 

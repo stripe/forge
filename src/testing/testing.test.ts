@@ -4,9 +4,9 @@ import { describe, it } from 'vitest';
 import {
   CommandExecutionError,
   type CommandResult,
-} from '../contracts/command.js';
-import type { RuntimePreparation } from '../contracts/runtime.js';
-import { executeEval } from '../execution/index.js';
+} from '../contracts/command.ts';
+import type { RuntimePreparation } from '../contracts/runtime.ts';
+import { executeEval } from '../execution/index.ts';
 import {
   assertRuntimeAdapterConforms,
   createFakeRuntimeAdapter,
@@ -15,7 +15,7 @@ import {
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from './index.js';
+} from './index.ts';
 
 describe('@stripe/forge/testing', () => {
   it('runs the runtime lifecycle conformance probe against the fake adapter', async () => {

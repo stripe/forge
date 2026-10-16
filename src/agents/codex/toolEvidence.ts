@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { AtifContent, JsonObject } from '../../atif/index.js';
-import { assertBoundedJsonValue } from '../../atif/parser.js';
-import type { AgentNativeEvidenceWarning } from '../../contracts/agent.js';
-import { isSafeSimpleIdentifier } from '../../model/paths.js';
-import { nativeJsonValue } from './nativeJson.js';
-import { codexTruncationBudget } from './truncation.js';
+import type { AtifContent, JsonObject } from '../../atif/index.ts';
+import { assertBoundedJsonValue } from '../../atif/parser.ts';
+import type { AgentNativeEvidenceWarning } from '../../contracts/agent.ts';
+import { isSafeSimpleIdentifier } from '../../model/paths.ts';
+import { nativeJsonValue } from './nativeJson.ts';
+import { codexTruncationBudget } from './truncation.ts';
 
 type NativeObject = Record<string, unknown>;
 type NativeOutputBlock =

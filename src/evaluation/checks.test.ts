@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { AtifTrajectoryV1_8 } from '../atif/index.js';
+import type { AtifTrajectoryV1_8 } from '../atif/index.ts';
 import type {
   ReadonlyWorkspace,
   WorkspaceEntry,
-} from '../contracts/runtime.js';
-import type { CriterionResultV1 } from '../results/types.js';
-import { createTestResolvedRunPlan } from '../testing/plans.js';
+} from '../contracts/runtime.ts';
+import type { CriterionResultV1 } from '../results/types.ts';
+import { createTestResolvedRunPlan } from '../testing/plans.ts';
 import {
   collectWorkspaceEvidence,
   evaluateRunEvidence,
   runWorkspaceChecks,
   UnsupportedEvaluationCapabilityError,
-} from './checks.js';
+} from './checks.ts';
 
 function workspace(
   files: Record<string, string | Uint8Array>,

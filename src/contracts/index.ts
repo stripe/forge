@@ -1,15 +1,15 @@
-export * from './agent.js';
-export * from './artifacts.js';
-export * from './command.js';
-export * from './completion.js';
-export * from './composition.js';
-export * from './credentials.js';
-export * from './inputs.js';
+export * from './agent.ts';
+export * from './artifacts.ts';
+export * from './command.ts';
+export * from './completion.ts';
+export * from './composition.ts';
+export * from './credentials.ts';
+export * from './inputs.ts';
 export type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
-} from './metadata.js';
-export * from './observability.js';
-export * from './plugin.js';
-export * from './pluginReceipt.js';
-export * from './runtime.js';
+} from './metadata.ts';
+export * from './observability.ts';
+export * from './plugin.ts';
+export * from './pluginReceipt.ts';
+export * from './runtime.ts';

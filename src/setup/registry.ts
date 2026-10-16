@@ -1,16 +1,16 @@
-import { isSha256Digest } from '../model/hashes.js';
+import { isSha256Digest } from '../model/hashes.ts';
 import {
   isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
-} from '../model/paths.js';
+} from '../model/paths.ts';
 import type {
   JsonObject,
   SetupActionBundleReferenceV1,
   SetupStepV1,
-} from '../model/types.js';
-import { builtInSetupActions } from './builtins.js';
-import type { PreparedSetupStep, SetupPreflightContext } from './types.js';
+} from '../model/types.ts';
+import { builtInSetupActions } from './builtins.ts';
+import type { PreparedSetupStep, SetupPreflightContext } from './types.ts';
 
 const RESERVED_NAMESPACES = new Set(['forge', 'stripe']);
 const MAX_ACTION_BUNDLES = 100;

@@ -7,7 +7,7 @@ import {
   REDACTED_SECRET,
   redactSecrets,
   SecretLeakError,
-} from './redaction.js';
+} from './redaction.ts';
 
 describe('credential redaction', () => {
   it('redacts nested values and keys without mutating the input', () => {

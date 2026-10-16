@@ -4,8 +4,8 @@ import { describe, it } from 'vitest';
 import type {
   CompletionProvider,
   CompletionResponse,
-} from '../contracts/completion.js';
-import { credentialReference } from '../contracts/credentials.js';
+} from '../contracts/completion.ts';
+import { credentialReference } from '../contracts/credentials.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryArtifactStore,
@@ -14,12 +14,12 @@ import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from '../testing/index.js';
-import { FORGE_VERSION } from '../version.js';
+} from '../testing/index.ts';
+import { FORGE_VERSION } from '../version.ts';
 import {
   completionBindingsForPlan,
   prepareCompletionRuntime,
-} from './completionRuntime.js';
+} from './completionRuntime.ts';
 
 const MODEL = { provider: 'test-provider', model: 'judge-model' } as const;
 

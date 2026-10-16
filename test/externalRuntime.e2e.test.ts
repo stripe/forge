@@ -18,12 +18,12 @@ import {
   type RuntimeAdapter,
   resolveRunPlan,
   verifyCompletedRun,
-} from '../src/index.js';
+} from '../src/index.ts';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
-} from '../src/testing/index.js';
+} from '../src/testing/index.ts';
 
 const fixtureRoot = path.join(process.cwd(), 'test', 'fixtures', 'one-shot');
 const temporaryDirectories: string[] = [];

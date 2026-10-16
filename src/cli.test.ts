@@ -8,25 +8,25 @@ import {
   createDefaultCliComposition,
   runCli as invokeCli,
   type RunCliOptions,
-} from './cli.js';
-import { credentialReference } from './contracts/credentials.js';
-import { createForgeEngine, defaultForgeEngine } from './engine.js';
-import type { ExecuteEvalInput } from './execution/execute.js';
-import { FORGE_VERSION } from './execution/index.js';
+} from './cli.ts';
+import { credentialReference } from './contracts/credentials.ts';
+import { createForgeEngine, defaultForgeEngine } from './engine.ts';
+import type { ExecuteEvalInput } from './execution/execute.ts';
+import { FORGE_VERSION } from './execution/index.ts';
 import {
   parseExperimentConfigYaml,
   sha256Digest,
   sha256Hex,
-} from './model/index.js';
-import { serializeResolvedRunPlan } from './planning/index.js';
-import { createArtifactStore } from './results/index.js';
-import { defineSetupActionBundle } from './setup/index.js';
+} from './model/index.ts';
+import { serializeResolvedRunPlan } from './planning/index.ts';
+import { createArtifactStore } from './results/index.ts';
+import { defineSetupActionBundle } from './setup/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
-} from './testing/index.js';
+} from './testing/index.ts';
 
 const temporaryDirectories: string[] = [];
 

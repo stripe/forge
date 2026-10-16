@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { type AtifTrajectoryV1_8, AtifValidationError } from '../atif/index.js';
-import { serializeCanonicalJson } from '../serialization.js';
+import { type AtifTrajectoryV1_8, AtifValidationError } from '../atif/index.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 import {
   createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -15,7 +15,7 @@ import {
   type JudgeVisibleStepV1,
   MAX_JUDGE_TRANSCRIPT_BYTES,
   parseJudgeTranscriptProjection,
-} from './judgeTranscript.js';
+} from './judgeTranscript.ts';
 
 describe('createJudgeTranscriptProjection', () => {
   it('constructs only judge-visible root steps and fields', () => {

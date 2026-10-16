@@ -1,4 +1,4 @@
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.js';
+import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
 
 const MAX_STREAM_LINES = 100_000;
 const MAX_STREAM_LINE_BYTES = 1024 * 1024;

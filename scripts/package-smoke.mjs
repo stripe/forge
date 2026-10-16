@@ -314,7 +314,7 @@ try {
     // The isolated consumer needs no Vitest dependency to typecheck this contract.
     publicApiTest
       .replace("from 'vitest'", "from 'node:test'")
-      .replace(/'\.\.\/src\/([A-Za-z]+)\.js'/g, (specifier, module) => {
+      .replace(/'\.\.\/src\/([A-Za-z]+)\.ts'/g, (specifier, module) => {
         const target = consumerImports.get(module);
         if (target === undefined)
           throw new Error(`Unknown public API test import: ${specifier}`);

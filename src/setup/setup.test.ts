@@ -1,24 +1,24 @@
 import assert from 'node:assert/strict';
 import { inspect } from 'node:util';
 import { describe, it } from 'vitest';
-import type { CommandResult } from '../contracts/command.js';
-import { credentialReference } from '../contracts/credentials.js';
-import type { AgentPluginInstaller } from '../contracts/plugin.js';
-import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.js';
-import { parseSetupStep } from '../model/parse.js';
-import type { SetupStepV1 } from '../model/types.js';
+import type { CommandResult } from '../contracts/command.ts';
+import { credentialReference } from '../contracts/credentials.ts';
+import type { AgentPluginInstaller } from '../contracts/plugin.ts';
+import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.ts';
+import { parseSetupStep } from '../model/parse.ts';
+import type { SetupStepV1 } from '../model/types.ts';
 import {
   createSetupExecutor,
   createSetupExecutorWithHandlers,
   firstPartySetupHandlers,
-} from './executor.js';
+} from './executor.ts';
 import type {
   PreparedSetupStep,
   SetupApplyContext,
   SetupStepHandler,
   SetupStepRequirements,
-} from './types.js';
-import { SetupActionError } from './types.js';
+} from './types.ts';
+import { SetupActionError } from './types.ts';
 
 const setupTarget = Object.freeze({
   selection: Object.freeze({

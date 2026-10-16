@@ -5,14 +5,14 @@ import type {
   CommandOptions,
   CommandResult,
   CommandRunner,
-} from '../../contracts/command.js';
-import { CommandExecutionError } from '../../contracts/command.js';
+} from '../../contracts/command.ts';
+import { CommandExecutionError } from '../../contracts/command.ts';
 import type {
   CredentialScope,
   ResolvedEnvironment,
-} from '../../contracts/credentials.js';
-import { isSafeWorkspaceRelativePath } from '../../model/paths.js';
-import type { HostCommandRunner } from '../processCommandRunner.js';
+} from '../../contracts/credentials.ts';
+import { isSafeWorkspaceRelativePath } from '../../model/paths.ts';
+import type { HostCommandRunner } from '../processCommandRunner.ts';
 
 interface DockerCommandControllerOptions {
   readonly dockerExecutable: string;

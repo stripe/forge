@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { CommandRunner } from '../../contracts/command.js';
-import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.js';
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { createTestResolvedRunPlan } from '../../testing/plans.js';
-import { CODEX_HOME_STATE_ID } from './layout.js';
-import { createCodexPluginInstaller } from './plugins.js';
+import type { CommandRunner } from '../../contracts/command.ts';
+import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { createTestResolvedRunPlan } from '../../testing/plans.ts';
+import { CODEX_HOME_STATE_ID } from './layout.ts';
+import { createCodexPluginInstaller } from './plugins.ts';
 
 const commit = 'a'.repeat(40);
 const catalogRelative = '.tmp/marketplaces/test';

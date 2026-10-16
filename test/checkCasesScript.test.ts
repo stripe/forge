@@ -6,8 +6,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it } from 'vitest';
-import type { DatasetManifestV1 } from '../src/index.js';
-import { loadDataset } from '../src/index.js';
+import type { DatasetManifestV1 } from '../src/index.ts';
+import { loadDataset } from '../src/index.ts';
 
 const repositoryRoot = process.cwd();
 const scriptPath = path.join(repositoryRoot, 'scripts', 'check-cases.mjs');

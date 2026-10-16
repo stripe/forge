@@ -2,27 +2,27 @@ import type {
   AgentAdapter,
   AgentRuntimeRequirements,
   AgentSession,
-} from '../../contracts/agent.js';
+} from '../../contracts/agent.ts';
 import {
   assertEnvironmentName,
   type CredentialReference,
   credentialReference,
-} from '../../contracts/credentials.js';
-import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.js';
-import { FORGE_VERSION } from '../../version.js';
-import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.js';
+} from '../../contracts/credentials.ts';
+import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
+import { FORGE_VERSION } from '../../version.ts';
+import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
 import {
   assertCodexRuntimeLayout,
   CODEX_HOME_STATE_ID,
   type CodexLayout,
   resolveCodexLayout,
   usesDefaultCodexLayout,
-} from './layout.js';
-import { prepareCodexPluginConfiguration } from './pluginConfig.js';
-import { createCodexPluginInstaller } from './plugins.js';
-import { parseCodexStream } from './stream.js';
+} from './layout.ts';
+import { prepareCodexPluginConfiguration } from './pluginConfig.ts';
+import { createCodexPluginInstaller } from './plugins.ts';
+import { parseCodexStream } from './stream.ts';
 
-export { CODEX_HOME_STATE_ID } from './layout.js';
+export { CODEX_HOME_STATE_ID } from './layout.ts';
 
 export interface CodexAdapterOptions {
   readonly id?: string;
@@ -275,6 +275,6 @@ function validateBaseUrl(value: string): string {
   return value;
 }
 
-export { loadCodexEvidence } from './evidence.js';
-export type { CodexLayout } from './layout.js';
-export { CodexStreamError, parseCodexStream } from './stream.js';
+export { loadCodexEvidence } from './evidence.ts';
+export type { CodexLayout } from './layout.ts';
+export { CodexStreamError, parseCodexStream } from './stream.ts';

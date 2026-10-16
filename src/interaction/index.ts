@@ -9,12 +9,12 @@ export {
   MAX_AVA_MESSAGE_CHARACTERS,
   MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
   MAX_AVA_NEEDS,
-} from './ava.js';
+} from './ava.ts';
 export type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
   InteractionHistoryMessage,
-} from './completion.js';
+} from './completion.ts';
 export {
   type AvaConversationAudit,
   type AvaDecisionAudit,
@@ -23,4 +23,4 @@ export {
   type ConversationTurn,
   type RunConversationOptions,
   runConversation,
-} from './conversation.js';
+} from './conversation.ts';

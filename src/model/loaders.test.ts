@@ -7,13 +7,13 @@ import {
   expandExperiment,
   resolveRunPlan,
   serializeResolvedRunPlan,
-} from '../planning/planner.js';
-import { sha256Digest, sha256Hex } from './hashes.js';
-import { loadDataset, loadExperimentConfig } from './loaders.js';
+} from '../planning/planner.ts';
+import { sha256Digest, sha256Hex } from './hashes.ts';
+import { loadDataset, loadExperimentConfig } from './loaders.ts';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
-} from './parse.js';
+} from './parse.ts';
 
 const temporaryRoots: string[] = [];
 

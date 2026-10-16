@@ -4,8 +4,8 @@ import {
   type RunInputListOptions,
   type RunInputProvider,
   type RunInputReadOptions,
-} from '../contracts/inputs.js';
-import type { TestFileContents } from './memoryWorkspace.js';
+} from '../contracts/inputs.ts';
+import type { TestFileContents } from './memoryWorkspace.ts';
 
 export interface MemoryRunInputProviderOptions {
   readonly maxBytes?: number;

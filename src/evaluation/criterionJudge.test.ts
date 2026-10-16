@@ -10,9 +10,9 @@ import {
   MAX_CRITERION_JUDGE_ATTEMPTS,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   parseCriterionJudgment,
-} from './criterionJudge.js';
-import { createJudgeTranscriptProjection } from './judgeTranscript.js';
-import { scoreEvaluation } from './score.js';
+} from './criterionJudge.ts';
+import { createJudgeTranscriptProjection } from './judgeTranscript.ts';
+import { scoreEvaluation } from './score.ts';
 
 const noRetryWait = {
   waitBeforeRetry: async (): Promise<void> => undefined,

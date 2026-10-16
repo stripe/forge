@@ -7,36 +7,36 @@ import { afterEach, describe, it } from 'vitest';
 import type {
   AgentAdapter,
   AgentNativeEvidenceResult,
-} from '../contracts/agent.js';
+} from '../contracts/agent.ts';
 import type {
   RunArtifact,
   RunArtifactStore,
   RunArtifactTransaction,
-} from '../contracts/artifacts.js';
-import type { ForgeComposition } from '../contracts/composition.js';
-import { credentialReference } from '../contracts/credentials.js';
-import type { RunInputProvider } from '../contracts/inputs.js';
-import type { RunEvent } from '../contracts/observability.js';
+} from '../contracts/artifacts.ts';
+import type { ForgeComposition } from '../contracts/composition.ts';
+import { credentialReference } from '../contracts/credentials.ts';
+import type { RunInputProvider } from '../contracts/inputs.ts';
+import type { RunEvent } from '../contracts/observability.ts';
 import type {
   PreparedRuntime,
   RuntimeAdapter,
   SealedRuntime,
-} from '../contracts/runtime.js';
-import type { ResolvedRunPlanV1 } from '../model/types.js';
-import { createArtifactStore, verifyCompletedRun } from '../results/index.js';
-import { createOwnedWorkspace } from '../runtime/workspace.js';
-import { createSetupExecutorWithHandlers } from '../setup/executor.js';
+} from '../contracts/runtime.ts';
+import type { ResolvedRunPlanV1 } from '../model/types.ts';
+import { createArtifactStore, verifyCompletedRun } from '../results/index.ts';
+import { createOwnedWorkspace } from '../runtime/workspace.ts';
+import { createSetupExecutorWithHandlers } from '../setup/executor.ts';
 import type {
   SetupExecutionContext,
   SetupStepHandler,
-} from '../setup/types.js';
-import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.js';
-import { ForgeExecutionError } from './errors.js';
+} from '../setup/types.ts';
+import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.ts';
+import { ForgeExecutionError } from './errors.ts';
 import {
   executeEval,
   executeEvalWithTestHooks,
   preflightEval,
-} from './execute.js';
+} from './execute.ts';
 
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';

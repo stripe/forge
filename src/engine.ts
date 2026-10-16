@@ -1,15 +1,15 @@
 import type {
   ExecuteEvalInput,
   PreflightEvalInput,
-} from './execution/execute.js';
+} from './execution/execute.ts';
 import {
   executeEvalWithSetupActions,
   preflightEvalWithSetupActions,
-} from './execution/execute.js';
+} from './execution/execute.ts';
 import {
   loadDatasetWithSetupActions,
   loadExperimentConfigWithSetupActions,
-} from './model/loaders.js';
+} from './model/loaders.ts';
 import {
   parseEvalCaseWithSetupActions,
   parseEvalCaseYamlWithSetupActions,
@@ -17,7 +17,7 @@ import {
   parseExperimentConfigYamlWithSetupActions,
   parseResolvedRunPlanWithSetupActions,
   parseSetupStepWithSetupActions,
-} from './model/parse.js';
+} from './model/parse.ts';
 import type {
   EvalCaseV1,
   ExperimentConfigV1,
@@ -28,14 +28,14 @@ import type {
   RunSelection,
   SetupActionBundleReferenceV1,
   SetupStepV1,
-} from './model/types.js';
-import { resolveRunPlanWithSetupActions } from './planning/planner.js';
-import { verifyCompletedRunWithPlanParser } from './results/localStore.js';
-import type { CompletedRun, CompletedRunV1 } from './results/types.js';
+} from './model/types.ts';
+import { resolveRunPlanWithSetupActions } from './planning/planner.ts';
+import { verifyCompletedRunWithPlanParser } from './results/localStore.ts';
+import type { CompletedRun, CompletedRunV1 } from './results/types.ts';
 import {
   createSetupActionRegistry,
   type SetupActionBundle,
-} from './setup/registry.js';
+} from './setup/registry.ts';
 
 export interface ForgeEngineOptions {
   /** Trusted, build-time action implementations imported by the embedding host. */

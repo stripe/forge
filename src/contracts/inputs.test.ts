@@ -5,15 +5,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, describe, it, vi } from 'vitest';
-import { sha256Hex } from '../model/hashes.js';
-import { loadDataset } from '../model/loaders.js';
-import { writeSetupHandler } from '../setup/forgeWrite.js';
-import { createMemoryWorkspace } from '../testing/memoryWorkspace.js';
-import { createTestResolvedRunPlan } from '../testing/plans.js';
+import { sha256Hex } from '../model/hashes.ts';
+import { loadDataset } from '../model/loaders.ts';
+import { writeSetupHandler } from '../setup/forgeWrite.ts';
+import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
+import { createTestResolvedRunPlan } from '../testing/plans.ts';
 import {
   assertDatasetPath,
   createDirectoryRunInputProvider,
-} from './inputs.js';
+} from './inputs.ts';
 
 const temporaryRoots: string[] = [];
 

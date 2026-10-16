@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import type { CommandResult } from '../contracts/command.js';
-import { CommandExecutionError } from '../contracts/command.js';
+import type { CommandResult } from '../contracts/command.ts';
+import { CommandExecutionError } from '../contracts/command.ts';
 
 export interface HostCommandOptions {
   readonly cwd?: string;

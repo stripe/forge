@@ -5,30 +5,30 @@ import path from 'node:path';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
-} from '../setup/registry.js';
-import { BenchmarkModelError } from './errors.js';
-import { sha256Digest, sha256Hex } from './hashes.js';
+} from '../setup/registry.ts';
+import { BenchmarkModelError } from './errors.ts';
+import { sha256Digest, sha256Hex } from './hashes.ts';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
   parseDatasetManifestJson,
   parseEvalCaseYamlWithSetupActions,
   parseExperimentConfigYamlWithSetupActions,
-} from './parse.js';
+} from './parse.ts';
 import {
   isAuthoredCaseId,
   isCaseDefinitionPath,
   isSafeDatasetRelativePath,
   isSafeSimpleIdentifier,
   isSafeVersion,
-} from './paths.js';
+} from './paths.ts';
 import type {
   DatasetRelativePath,
   LoadedDatasetV1,
   LoadedEvalCaseV1,
   LoadedExperimentConfigV1,
   Sha256Hex,
-} from './types.js';
+} from './types.ts';
 
 const MAX_DATASET_ENTRIES = 50_001; // payload files plus manifest.json
 const MAX_DATASET_DEPTH = 64;

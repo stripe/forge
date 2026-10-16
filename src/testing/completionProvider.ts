@@ -6,8 +6,8 @@ import type {
   CompletionProviderRequirements,
   CompletionRequest,
   CompletionResponse,
-} from '../contracts/completion.js';
-import { FORGE_VERSION } from '../version.js';
+} from '../contracts/completion.ts';
+import { FORGE_VERSION } from '../version.ts';
 
 /** A concise response value accepted by the scripted provider. */
 export type ScriptedCompletionValue = string | CompletionResponse;

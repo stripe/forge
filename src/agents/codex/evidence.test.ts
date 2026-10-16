@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { parseAtifTrajectory } from '../../atif/index.js';
-import type { ReadonlyWorkspace } from '../../contracts/runtime.js';
-import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.js';
-import { trajectoryCoversCompletedTurns } from '../../evidence/selection.js';
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.js';
+import { parseAtifTrajectory } from '../../atif/index.ts';
+import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
+import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
 
 const SESSION = '01999999-1111-7111-8111-111111111111';
 const OTHER_SESSION = '01999999-2222-7222-8222-222222222222';

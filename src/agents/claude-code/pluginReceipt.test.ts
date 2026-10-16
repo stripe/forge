@@ -4,9 +4,9 @@ import { describe, it } from 'vitest';
 import type {
   MutableWorkspace,
   WorkspaceEntry,
-} from '../../contracts/runtime.js';
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { inspectInstalledPluginTree } from './pluginReceipt.js';
+} from '../../contracts/runtime.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { inspectInstalledPluginTree } from './pluginReceipt.ts';
 
 describe('Claude installed plugin snapshots', () => {
   const signal = new AbortController().signal;

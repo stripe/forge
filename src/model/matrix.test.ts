@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { getMatrixGroups } from './matrix.js';
-import type { ExperimentMatrixGroupV1, ExperimentMatrixV1 } from './types.js';
+import { getMatrixGroups } from './matrix.ts';
+import type { ExperimentMatrixGroupV1, ExperimentMatrixV1 } from './types.ts';
 
 describe('matrix group views', () => {
   const group: ExperimentMatrixGroupV1 = {

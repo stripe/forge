@@ -5,9 +5,9 @@ import { describe, it } from 'vitest';
 import type {
   CompletionProviderCallContext,
   CompletionRequest,
-} from '../contracts/completion.js';
-import { credentialReference } from '../contracts/credentials.js';
-import { createScriptedCompletionProvider } from './completionProvider.js';
+} from '../contracts/completion.ts';
+import { credentialReference } from '../contracts/credentials.ts';
+import { createScriptedCompletionProvider } from './completionProvider.ts';
 
 describe('createScriptedCompletionProvider', () => {
   it('uses the installed package version by default and preserves an explicit version', () => {

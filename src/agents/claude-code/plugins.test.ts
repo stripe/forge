@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { CommandResult, CommandRunner } from '../../contracts/command.js';
-import type { PluginSelectionV1 } from '../../model/types.js';
+import type { CommandResult, CommandRunner } from '../../contracts/command.ts';
+import type { PluginSelectionV1 } from '../../model/types.ts';
 import {
   createMemoryWorkspace,
   type MemoryWorkspaceFixture,
-} from '../../testing/memoryWorkspace.js';
-import type { ClaudeCodeLayout } from './layout.js';
+} from '../../testing/memoryWorkspace.ts';
+import type { ClaudeCodeLayout } from './layout.ts';
 import {
   CLAUDE_PLUGIN_STATE_ID,
   CLAUDE_PLUGIN_STATE_PATH,
   createClaudePluginInstaller,
-} from './plugins.js';
+} from './plugins.ts';
 
 const CATALOG_COMMIT = 'a'.repeat(40);
 const PLUGIN_COMMIT = 'b'.repeat(40);

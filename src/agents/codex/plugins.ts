@@ -1,33 +1,33 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-import type { CommandRunner } from '../../contracts/command.js';
+import type { CommandRunner } from '../../contracts/command.ts';
 import type {
   AgentPluginInstallationReceipt,
   AgentPluginInstallContext,
   AgentPluginInstaller,
   AgentPluginPreflightContext,
-} from '../../contracts/plugin.js';
-import type { MutableWorkspace } from '../../contracts/runtime.js';
+} from '../../contracts/plugin.ts';
+import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import {
   isSafeGitHubRepository,
   isSafeVersion,
   isSafeWorkspaceRelativePath,
-} from '../../model/paths.js';
-import type { PluginSelectionV1 } from '../../model/types.js';
-import { inspectInstalledPluginTree } from '../pluginTree.js';
+} from '../../model/paths.ts';
+import type { PluginSelectionV1 } from '../../model/types.ts';
+import { inspectInstalledPluginTree } from '../pluginTree.ts';
 import {
   assertCodexRuntimeLayout,
   CODEX_HOME_STATE_ID,
   type CodexLayout,
   resolveCodexLayout,
-} from './layout.js';
+} from './layout.ts';
 import {
   prepareCodexPluginConfiguration,
   qualifiedPluginId,
   record,
   safeGitUrl,
-} from './pluginConfig.js';
+} from './pluginConfig.ts';
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const CATALOG_PATHS = [

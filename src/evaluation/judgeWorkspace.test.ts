@@ -5,7 +5,7 @@ import type {
   ReadonlyWorkspace,
   WorkspaceEntry,
   WorkspaceListOptions,
-} from '../contracts/runtime.js';
+} from '../contracts/runtime.ts';
 import {
   boundJudgeWorkspaceEvidence,
   collectJudgeWorkspaceEvidence,
@@ -14,7 +14,7 @@ import {
   MAX_JUDGE_WORKSPACE_READ_BYTES,
   MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
   renderJudgeWorkspaceEvidence,
-} from './judgeWorkspace.js';
+} from './judgeWorkspace.ts';
 
 interface WorkspaceFixture {
   readonly workspace: ReadonlyWorkspace;

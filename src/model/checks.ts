@@ -1,4 +1,4 @@
-import type { ChecksV1 } from './types.js';
+import type { ChecksV1 } from './types.ts';
 
 export function hasDeterministicWorkspaceChecks(
   checks: ChecksV1 | undefined,

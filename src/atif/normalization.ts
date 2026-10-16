@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { parseAtifTrajectory } from './parser.js';
-import type { AtifTrajectoryV1_8 } from './types.js';
+import { parseAtifTrajectory } from './parser.ts';
+import type { AtifTrajectoryV1_8 } from './types.ts';
 
 const MAX_METADATA_TEXT_LENGTH = 4_096;
 const MAX_WARNING_MESSAGE_LENGTH = 64 * 1_024;

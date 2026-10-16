@@ -7,9 +7,9 @@ import {
   type AtifTrajectoryV1_8,
   type JsonObject,
   parseAtifTrajectory,
-} from '../atif/index.js';
-import { AtifValidationError, assertBoundedJsonValue } from '../atif/parser.js';
-import { serializeCanonicalJson } from '../serialization.js';
+} from '../atif/index.ts';
+import { AtifValidationError, assertBoundedJsonValue } from '../atif/parser.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =

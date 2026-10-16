@@ -6,7 +6,7 @@ import {
   credentialReference,
   normalizeEnvironmentSpecification,
   normalizeScopedEnvironmentSpecification,
-} from './credentials.js';
+} from './credentials.ts';
 
 describe('credential and environment resolution', () => {
   it('resolves only explicit references and preserves secret scopes', async () => {

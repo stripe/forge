@@ -5,13 +5,13 @@ import type {
   AgentAdapter,
   AgentNativeEvidenceResult,
   AgentToolCall,
-} from '../contracts/agent.js';
+} from '../contracts/agent.ts';
 import {
   type CompletedEvidenceTurn,
   parseAgentEvidenceIdentity,
   selectAgentEvidence,
   trajectoryCoversCompletedTurns,
-} from './selection.js';
+} from './selection.ts';
 
 const SESSION_ID = 'session-1';
 const agent = {

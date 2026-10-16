@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, it } from 'vitest';
 
-import type { ForgeBuildIdentity } from '../src/version.js';
+import type { ForgeBuildIdentity } from '../src/version.ts';
 
 interface BuildInfoModule {
   captureBuildIdentity(

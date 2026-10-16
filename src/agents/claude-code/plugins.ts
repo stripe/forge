@@ -1,26 +1,26 @@
-import type { CommandResult, CommandRunner } from '../../contracts/command.js';
+import type { CommandResult, CommandRunner } from '../../contracts/command.ts';
 import type {
   AgentPluginInstallationReceipt,
   AgentPluginInstallContext,
   AgentPluginInstaller,
   AgentPluginPreflightContext,
-} from '../../contracts/plugin.js';
-import type { MutableWorkspace } from '../../contracts/runtime.js';
+} from '../../contracts/plugin.ts';
+import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeVersion,
-} from '../../model/paths.js';
-import type { PluginSelectionV1 } from '../../model/types.js';
+} from '../../model/paths.ts';
+import type { PluginSelectionV1 } from '../../model/types.ts';
 import {
   assertClaudeRuntimeLayout,
   type ClaudeCodeLayout,
   resolveClaudeCodeLayout,
-} from './layout.js';
+} from './layout.ts';
 import {
   inspectInstalledPluginTree,
   pluginSourceReceipt,
-} from './pluginReceipt.js';
+} from './pluginReceipt.ts';
 
 export const CLAUDE_PLUGIN_STATE_ID = 'claude-plugins' as const;
 export const CLAUDE_PLUGIN_STATE_PATH = '/home/forge/.claude/plugins' as const;

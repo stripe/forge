@@ -6,7 +6,7 @@ import {
   type NormalizedTrajectory,
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
-} from '../atif/index.js';
+} from '../atif/index.ts';
 import type {
   AgentAdapter,
   AgentEvidenceIdentity,
@@ -18,13 +18,13 @@ import type {
   AgentSession,
   AgentSessionRuntime,
   AgentTurn,
-} from '../contracts/agent.js';
+} from '../contracts/agent.ts';
 import type {
   RunArtifact,
   RunArtifactTransaction,
-} from '../contracts/artifacts.js';
-import type { CommandOptions, CommandRunner } from '../contracts/command.js';
-import type { ForgeComposition } from '../contracts/composition.js';
+} from '../contracts/artifacts.ts';
+import type { CommandOptions, CommandRunner } from '../contracts/command.ts';
+import type { ForgeComposition } from '../contracts/composition.ts';
 import {
   type CredentialEnvironmentBinding,
   type CredentialScope,
@@ -35,12 +35,12 @@ import {
   normalizeScopedEnvironmentSpecification,
   type ResolvedEnvironment,
   type ScopedEnvironmentSpecification,
-} from '../contracts/credentials.js';
+} from '../contracts/credentials.ts';
 import {
   type AgentAdapterMetadata,
   agentAdapterMetadataSchema,
-} from '../contracts/metadata.js';
-import type { RunPhase } from '../contracts/observability.js';
+} from '../contracts/metadata.ts';
+import type { RunPhase } from '../contracts/observability.ts';
 import type {
   MutableWorkspace,
   PreparedRuntime,
@@ -50,7 +50,7 @@ import type {
   SealedRuntime,
   WorkspaceListOptions,
   WorkspaceWriteOptions,
-} from '../contracts/runtime.js';
+} from '../contracts/runtime.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
@@ -58,29 +58,29 @@ import {
   type JudgeWorkspaceEvidenceV1,
   judgeCriteria,
   renderJudgeWorkspaceEvidence,
-} from '../evaluation/index.js';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.js';
-import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.js';
+} from '../evaluation/index.ts';
+import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import {
   parseAgentEvidenceIdentity,
   selectAgentEvidence,
-} from '../evidence/selection.js';
-import { snapshotAgentToolCalls } from '../interaction/conversation.js';
+} from '../evidence/selection.ts';
+import { snapshotAgentToolCalls } from '../interaction/conversation.ts';
 import {
   type AvaConversationAudit,
   AvaRolePlayer,
   type ConversationTurn,
   runConversation,
-} from '../interaction/index.js';
-import { hasDeterministicWorkspaceChecks } from '../model/checks.js';
-import { sha256Digest } from '../model/hashes.js';
+} from '../interaction/index.ts';
+import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
+import { sha256Digest } from '../model/hashes.ts';
 import {
   isSafeSimpleIdentifier,
   type JsonValue,
   type ResolvedRunPlanV1,
-} from '../model/index.js';
-import { parseResolvedRunPlanWithSetupActions } from '../model/parse.js';
-import { serializeResolvedRunPlan } from '../planning/index.js';
+} from '../model/index.ts';
+import { parseResolvedRunPlanWithSetupActions } from '../model/parse.ts';
+import { serializeResolvedRunPlan } from '../planning/index.ts';
 import {
   type ArtifactDescriptorV1,
   type AtifEvidenceProvenanceV1,
@@ -101,40 +101,40 @@ import {
   type RunWarningV1,
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
-} from '../results/index.js';
+} from '../results/index.ts';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
   redactSecrets,
-} from '../security/redaction.js';
-import { serializeCanonicalJson } from '../serialization.js';
-import { createSetupExecutorForRegistry } from '../setup/executor.js';
+} from '../security/redaction.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
+import { createSetupExecutorForRegistry } from '../setup/executor.ts';
 import type {
   AppliedSetup,
   PreparedSetup,
   SetupExecutor,
-} from '../setup/index.js';
+} from '../setup/index.ts';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
-} from '../setup/registry.js';
+} from '../setup/registry.ts';
 import {
   assertCompatibleForgeVersion,
   FORGE_BUILD_IDENTITY,
   FORGE_VERSION,
-} from '../version.js';
+} from '../version.ts';
 import {
   type CompletionBinding,
   completionBindingsForPlan,
   type PreparedCompletionRuntime,
   prepareCompletionRuntime,
-} from './completionRuntime.js';
+} from './completionRuntime.ts';
 import {
   executionError,
   ForgeExecutionError,
   throwIfAborted,
-} from './errors.js';
-import { createRunEventEmitter } from './events.js';
+} from './errors.ts';
+import { createRunEventEmitter } from './events.ts';
 
 const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;

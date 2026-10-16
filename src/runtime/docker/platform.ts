@@ -1,8 +1,8 @@
-import type { RuntimePlatform } from '../../contracts/runtime.js';
+import type { RuntimePlatform } from '../../contracts/runtime.ts';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
-} from '../processCommandRunner.js';
+} from '../processCommandRunner.ts';
 
 export interface DetectDockerRuntimePlatformOptions {
   readonly dockerExecutable?: string;

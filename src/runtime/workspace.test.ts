@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import { createOwnedWorkspace } from './workspace.js';
+import { createOwnedWorkspace } from './workspace.ts';
 
 const roots: string[] = [];
 

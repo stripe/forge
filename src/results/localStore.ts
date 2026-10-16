@@ -1,41 +1,41 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { type AtifTrajectoryV1_8, parseAtifTrajectory } from '../atif/index.js';
+import { type AtifTrajectoryV1_8, parseAtifTrajectory } from '../atif/index.ts';
 import type {
   CommittedRun,
   RunArtifact,
   RunArtifactStore,
   RunArtifactTransaction,
-} from '../contracts/artifacts.js';
-import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.js';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.js';
-import { criterionResultMatchesDefinition } from '../evaluation/score.js';
-import { trajectoryCoversCompletedTurns } from '../evidence/selection.js';
-import { hasDeterministicWorkspaceChecks } from '../model/checks.js';
-import { sha256Digest } from '../model/hashes.js';
+} from '../contracts/artifacts.ts';
+import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
+import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
+import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
+import { sha256Digest } from '../model/hashes.ts';
 import {
   type PluginSetupStepV1,
   parseResolvedRunPlan,
   type ResolvedRunPlanV1,
-} from '../model/index.js';
-import { isSafeDatasetRelativePath } from '../model/paths.js';
-import { serializeResolvedRunPlan } from '../planning/index.js';
-import { serializeCanonicalJson } from '../serialization.js';
-import { assertCompatibleForgeVersion } from '../version.js';
+} from '../model/index.ts';
+import { isSafeDatasetRelativePath } from '../model/paths.ts';
+import { serializeResolvedRunPlan } from '../planning/index.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
+import { assertCompatibleForgeVersion } from '../version.ts';
 import {
   parseInteractionArtifact,
   parseJudgeEvidence,
   parseRunResult,
   parseSetupArtifact,
   parseWorkspaceEvidence,
-} from './parse.js';
+} from './parse.ts';
 import {
   type ArtifactDescriptorV1,
   type CompletedRun,
   type InteractionArtifactV1,
   MAX_SETUP_ARTIFACT_BYTES,
   type RunResult,
-} from './types.js';
+} from './types.ts';
 
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;

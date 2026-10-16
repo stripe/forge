@@ -1,4 +1,4 @@
-import type { ExperimentMatrixGroupV1, ExperimentMatrixV1 } from './types.js';
+import type { ExperimentMatrixGroupV1, ExperimentMatrixV1 } from './types.ts';
 
 /** Read both authored matrix forms without flattening their group boundaries. */
 export function getMatrixGroups(

@@ -2,9 +2,9 @@ import path from 'node:path';
 import { stringify } from '@iarna/toml';
 import { parse } from 'toml';
 
-import type { MutableWorkspace } from '../../contracts/runtime.js';
-import { isSha256Digest } from '../../model/hashes.js';
-import { isSafeSimpleIdentifier } from '../../model/paths.js';
+import type { MutableWorkspace } from '../../contracts/runtime.ts';
+import { isSha256Digest } from '../../model/hashes.ts';
+import { isSafeSimpleIdentifier } from '../../model/paths.ts';
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const MAX_CONFIG_DEPTH = 64;

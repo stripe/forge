@@ -1,11 +1,11 @@
 import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
-} from '../atif/index.js';
+} from '../atif/index.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
-} from '../contracts/metadata.js';
+} from '../contracts/metadata.ts';
 import type {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -14,7 +14,7 @@ import type {
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   JudgeVisibleStepV1,
-} from '../evaluation/judgeTranscript.js';
+} from '../evaluation/judgeTranscript.ts';
 import type {
   JsonObject,
   JsonValue,
@@ -22,8 +22,8 @@ import type {
   RunSelection,
   SetupActionBundleReferenceV1,
   Sha256Digest,
-} from '../model/types.js';
-import type { ForgeBuildIdentity } from '../version.js';
+} from '../model/types.ts';
+import type { ForgeBuildIdentity } from '../version.ts';
 
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
 

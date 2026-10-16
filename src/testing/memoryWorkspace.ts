@@ -4,8 +4,8 @@ import type {
   WorkspaceEntry,
   WorkspaceListOptions,
   WorkspaceWriteOptions,
-} from '../contracts/runtime.js';
-import { isSafeWorkspaceRelativePath } from '../model/paths.js';
+} from '../contracts/runtime.ts';
+import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 
 export type TestFileContents = string | Uint8Array;
 

@@ -4,7 +4,7 @@ import { describe, it } from 'vitest';
 import {
   buildAvaContinuationPrompt,
   buildAvaInitializationPrompt,
-} from './prompt.js';
+} from './prompt.ts';
 
 describe('Ava prompts', () => {
   for (const [phase, buildPrompt] of [

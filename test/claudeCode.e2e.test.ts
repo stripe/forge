@@ -6,8 +6,8 @@ import { it } from 'vitest';
 import {
   CLAUDE_PROJECTS_STATE_ID,
   createClaudeCodeAdapter,
-} from '../src/agents/claude-code/index.js';
-import { parseAtifTrajectory } from '../src/atif/index.js';
+} from '../src/agents/claude-code/index.ts';
+import { parseAtifTrajectory } from '../src/atif/index.ts';
 import {
   createArtifactStore,
   executeEval,
@@ -16,15 +16,15 @@ import {
   preflightEval,
   type ResolvedRunPlanV1,
   verifyCompletedRun,
-} from '../src/index.js';
-import { FORGE_CLAUDE_CODE_VERSION } from '../src/runtime/docker/index.js';
+} from '../src/index.ts';
+import { FORGE_CLAUDE_CODE_VERSION } from '../src/runtime/docker/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from '../src/testing/index.js';
+} from '../src/testing/index.ts';
 
 const SESSION_ID = 'claude-integration-session';
 const SECRET = 'synthetic-claude-integration-secret';

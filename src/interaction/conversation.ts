@@ -1,5 +1,5 @@
-import type { AgentSession, AgentToolCall } from '../contracts/agent.js';
-import type { AvaError, AvaNeed, AvaRolePlayer, AvaTurn } from './ava.js';
+import type { AgentSession, AgentToolCall } from '../contracts/agent.ts';
+import type { AvaError, AvaNeed, AvaRolePlayer, AvaTurn } from './ava.ts';
 
 export interface ConversationTurn {
   readonly turn: number;

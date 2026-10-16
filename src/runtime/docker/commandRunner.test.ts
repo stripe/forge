@@ -6,13 +6,13 @@ import { afterEach, describe, it } from 'vitest';
 import {
   CommandExecutionError,
   type CommandResult,
-} from '../../contracts/command.js';
+} from '../../contracts/command.ts';
 import type {
   ResolvedCredentialEnvironmentBinding,
   ResolvedEnvironment,
-} from '../../contracts/credentials.js';
-import type { HostCommandOptions } from '../processCommandRunner.js';
-import { DockerCommandController } from './commandRunner.js';
+} from '../../contracts/credentials.ts';
+import type { HostCommandOptions } from '../processCommandRunner.ts';
+import { DockerCommandController } from './commandRunner.ts';
 
 const roots: string[] = [];
 const environment: ResolvedEnvironment = {

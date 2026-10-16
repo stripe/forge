@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
-import { createHostCommandRunner } from './processCommandRunner.js';
+import { createHostCommandRunner } from './processCommandRunner.ts';
 
 const roots: string[] = [];
 const runner = createHostCommandRunner();

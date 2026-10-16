@@ -109,9 +109,10 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@biomejs/biome": "2.5.15",
     "@types/node": "^22.15.30",
+    "esbuild": "0.28.2",
     "publint": "^0.3.12",
     "tsx": "4.23.15",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "5.0.3"
   }
 }

@@ -1,10 +1,10 @@
-import type { JudgingCriterionV1 } from '../model/types.js';
+import type { JudgingCriterionV1 } from '../model/types.ts';
 
 import type {
   CheckResultV1,
   CriterionResultV1,
   EvaluationResultV1,
-} from '../results/index.js';
+} from '../results/index.ts';
 
 /** Use a criterion-ratio score and gate a clean pass on invariant checks. */
 export function scoreEvaluation(

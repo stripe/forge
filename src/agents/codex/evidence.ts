@@ -6,20 +6,20 @@ import {
   isAtifTimestamp,
   type JsonObject,
   parseAtifTrajectory,
-} from '../../atif/index.js';
+} from '../../atif/index.ts';
 import type {
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
-} from '../../contracts/agent.js';
-import type { ReadonlyWorkspace } from '../../contracts/runtime.js';
+} from '../../contracts/agent.ts';
+import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
 import {
   CodexToolEvidenceError,
   codexToolSearchArguments,
   codexToolSearchOutput,
   normalizeCodexToolOutput,
   validateCodexMcpSnapshot,
-} from './toolEvidence.js';
+} from './toolEvidence.ts';
 
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
 const MAX_LINE_BYTES = 1024 * 1024;

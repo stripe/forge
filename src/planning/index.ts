@@ -2,7 +2,7 @@ export {
   ManifestCaseFileError,
   type ManifestCaseFileErrorCode,
   resolveManifestCaseIdFromFile,
-} from './caseFile.js';
+} from './caseFile.ts';
 export {
   expandExperiment,
   PlanningError,
@@ -10,4 +10,4 @@ export {
   resolvedRunPlanSha256,
   resolveRunPlan,
   serializeResolvedRunPlan,
-} from './planner.js';
+} from './planner.ts';

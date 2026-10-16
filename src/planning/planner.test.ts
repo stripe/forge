@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { sha256Digest } from '../model/hashes.js';
-import { getMatrixGroups } from '../model/matrix.js';
+import { sha256Digest } from '../model/hashes.ts';
+import { getMatrixGroups } from '../model/matrix.ts';
 import type {
   EvalCaseV1,
   ExperimentConfigV1,
   LoadedDatasetV1,
   LoadedExperimentConfigV1,
   RunSelection,
-} from '../model/types.js';
-import { FORGE_BUILD_IDENTITY } from '../version.js';
+} from '../model/types.ts';
+import { FORGE_BUILD_IDENTITY } from '../version.ts';
 import {
   expandExperiment,
   PlanningError,
   resolvedRunPlanSha256,
   resolveRunPlan,
   serializeResolvedRunPlan,
-} from './planner.js';
+} from './planner.ts';
 
 const CASE_A_PATH = 'cases/case/a/case.yaml';
 const CASE_B_PATH = 'cases/case-b.case.yaml';

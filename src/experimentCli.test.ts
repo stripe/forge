@@ -3,13 +3,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import type { ForgeComposition } from './contracts/composition.js';
-import { createForgeEngine, defaultForgeEngine } from './engine.js';
-import { executeEvalWithTestHooks } from './execution/execute.js';
+import type { ForgeComposition } from './contracts/composition.ts';
+import { createForgeEngine, defaultForgeEngine } from './engine.ts';
+import { executeEvalWithTestHooks } from './execution/execute.ts';
 import {
   inspectExperimentRun,
   parseExperimentRunReport,
-} from './experiment.js';
+} from './experiment.ts';
 import {
   createExperimentCliOptions,
   EXPERIMENT_CLI_OPTIONS,
@@ -19,9 +19,9 @@ import {
   ExperimentUsageError,
   parseExperimentArgs,
   runExperimentCommand,
-} from './experimentCli.js';
-import { createArtifactStore } from './results/index.js';
-import { defineSetupActionBundle } from './setup/index.js';
+} from './experimentCli.ts';
+import { createArtifactStore } from './results/index.ts';
+import { defineSetupActionBundle } from './setup/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -29,7 +29,7 @@ import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from './testing/index.js';
+} from './testing/index.ts';
 
 const hostOptions = {
   experiment: { type: 'string', short: 'e' },

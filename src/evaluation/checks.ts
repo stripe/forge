@@ -1,16 +1,16 @@
 import { runInNewContext } from 'node:vm';
 
-import type { AtifTrajectoryV1_8 } from '../atif/index.js';
-import type { ReadonlyWorkspace } from '../contracts/runtime.js';
-import type { ChecksV1, ResolvedRunPlanV1 } from '../model/types.js';
+import type { AtifTrajectoryV1_8 } from '../atif/index.ts';
+import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
+import type { ChecksV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import type {
   CheckResultV1,
   CriterionResultV1,
   EvaluationResultV1,
   WorkspaceEvidenceEntryV1,
   WorkspaceEvidenceV1,
-} from '../results/index.js';
-import { criterionResultMatchesDefinition, scoreEvaluation } from './score.js';
+} from '../results/index.ts';
+import { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
 
 const MAX_CHECK_FILE_BYTES = 256_000;
 const MAX_REGEX_BYTES = 1_024;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { createMemoryWorkspace } from './memoryWorkspace.js';
+import { createMemoryWorkspace } from './memoryWorkspace.ts';
 
 describe('createMemoryWorkspace', () => {
   it('isolates initial bytes, written bytes, and snapshots from the workspace', async () => {

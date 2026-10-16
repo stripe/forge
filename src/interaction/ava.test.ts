@@ -7,11 +7,11 @@ import {
   MAX_AVA_MESSAGE_CHARACTERS,
   MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
   MAX_AVA_NEEDS,
-} from './ava.js';
+} from './ava.ts';
 import type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
-} from './completion.js';
+} from './completion.ts';
 
 type CompletionStep =
   | string

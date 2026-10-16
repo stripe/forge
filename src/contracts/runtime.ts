@@ -1,9 +1,9 @@
-import type { ResolvedRunPlanV1 } from '../model/types.js';
-import type { CommandRunner } from './command.js';
+import type { ResolvedRunPlanV1 } from '../model/types.ts';
+import type { CommandRunner } from './command.ts';
 import type {
   ResolvedEnvironment,
   ScopedEnvironmentSpecification,
-} from './credentials.js';
+} from './credentials.ts';
 
 export type RuntimePlatform = 'linux/amd64' | 'linux/arm64';
 

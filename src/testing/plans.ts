@@ -1,4 +1,4 @@
-import { parseResolvedRunPlan } from '../model/parse.js';
+import { parseResolvedRunPlan } from '../model/parse.ts';
 import type {
   AgentSelectionV1,
   ChecksV1,
@@ -7,8 +7,8 @@ import type {
   ModelRefV1,
   ResolvedRunPlanV1,
   SetupStepV1,
-} from '../model/types.js';
-import { FORGE_BUILD_IDENTITY } from '../version.js';
+} from '../model/types.ts';
+import { FORGE_BUILD_IDENTITY } from '../version.ts';
 
 const DATASET_DIGEST = `sha256:${'1'.repeat(64)}` as const;
 

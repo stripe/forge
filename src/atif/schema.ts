@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { isAtifTimestamp } from './timestamp.js';
+import { isAtifTimestamp } from './timestamp.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifTrajectoryV1_8,
   type JsonValue,
-} from './types.js';
+} from './types.ts';
 
 const IMAGE_MEDIA_TYPES = [
   'image/jpeg',

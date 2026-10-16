@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { codexTruncationBudget } from './truncation.js';
+import { codexTruncationBudget } from './truncation.ts';
 
 describe('pinned Codex middle-out truncation', () => {
   it('validates the complete transform, including a marker already in the source', () => {

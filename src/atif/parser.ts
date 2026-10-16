@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { parseAtifSchema } from './schema.js';
-import type { AtifTrajectoryV1_8 } from './types.js';
+import { parseAtifSchema } from './schema.ts';
+import type { AtifTrajectoryV1_8 } from './types.ts';
 
 export type AtifValidationPath = readonly (string | number)[];
 

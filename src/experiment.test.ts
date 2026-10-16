@@ -3,9 +3,9 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import type { ForgeComposition } from './contracts/composition.js';
-import { createForgeEngine, defaultForgeEngine } from './engine.js';
-import * as experimentRunExports from './experiment.js';
+import type { ForgeComposition } from './contracts/composition.ts';
+import { createForgeEngine, defaultForgeEngine } from './engine.ts';
+import * as experimentRunExports from './experiment.ts';
 import {
   type ExperimentRunOptions,
   type ExperimentRunProgressEvent,
@@ -16,18 +16,18 @@ import {
   parseExperimentRunReport,
   readExperimentRunSelections,
   runExperiment,
-} from './experiment.js';
-import { parseExperimentRunCheckpoint } from './experimentModel.js';
-import { createArtifactStore } from './results/index.js';
-import { defineSetupActionBundle } from './setup/index.js';
+} from './experiment.ts';
+import { parseExperimentRunCheckpoint } from './experimentModel.ts';
+import { createArtifactStore } from './results/index.ts';
+import { defineSetupActionBundle } from './setup/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
-} from './testing/index.js';
-import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from './version.js';
+} from './testing/index.ts';
+import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from './version.ts';
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {

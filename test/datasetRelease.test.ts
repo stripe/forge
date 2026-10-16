@@ -3,13 +3,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
-import { runCli } from '../src/cli.js';
+import { runCli } from '../src/cli.ts';
 import {
   expandExperiment,
   loadDataset,
   loadExperimentConfig,
   resolveRunPlan,
-} from '../src/index.js';
+} from '../src/index.ts';
 
 const releaseRoot = path.resolve(
   'datasets/stripe-integration-public-evals/0.1.0',

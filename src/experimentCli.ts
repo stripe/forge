@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { type ParseArgsOptionsConfig, parseArgs } from 'node:util';
-import type { ForgeComposition } from './contracts/composition.js';
-import type { ForgeEngine } from './engine.js';
+import type { ForgeComposition } from './contracts/composition.ts';
+import type { ForgeEngine } from './engine.ts';
 import {
   type ExperimentRunOptions,
   type ExperimentRunOutcome,
@@ -10,8 +10,8 @@ import {
   type ExperimentRunSummary,
   readExperimentRunSelections,
   runExperiment,
-} from './experiment.js';
-import type { ResolvedRunPlanV1, RunSelection } from './model/types.js';
+} from './experiment.ts';
+import type { ResolvedRunPlanV1, RunSelection } from './model/types.ts';
 
 /** Operational flags shared by command hosts; input and selection flags are host-owned. */
 export const EXPERIMENT_CLI_OPTIONS = Object.freeze({

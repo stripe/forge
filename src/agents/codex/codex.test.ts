@@ -3,26 +3,26 @@ import { describe, it } from 'vitest';
 import type {
   AgentPrepareContext,
   AgentSessionContext,
-} from '../../contracts/agent.js';
+} from '../../contracts/agent.ts';
 import type {
   CommandOptions,
   CommandResult,
   CommandRunner,
-} from '../../contracts/command.js';
+} from '../../contracts/command.ts';
 import type {
   MutableWorkspace,
   RuntimeLogicalPaths,
-} from '../../contracts/runtime.js';
-import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.js';
-import { createMemoryRunInputProvider } from '../../testing/memoryInputs.js';
-import { createMemoryWorkspace } from '../../testing/memoryWorkspace.js';
-import { createTestResolvedRunPlan } from '../../testing/plans.js';
-import { FORGE_VERSION } from '../../version.js';
+} from '../../contracts/runtime.ts';
+import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
+import { createMemoryRunInputProvider } from '../../testing/memoryInputs.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { createTestResolvedRunPlan } from '../../testing/plans.ts';
+import { FORGE_VERSION } from '../../version.ts';
 import {
   CODEX_HOME_STATE_ID,
   type CodexAdapterOptions,
   createCodexAdapter,
-} from './index.js';
+} from './index.ts';
 
 const SESSION_ID = '0199a213-81c0-7800-8aa1-bbab2a035a53';
 const OTHER_SESSION_ID = '0199a213-81c0-7800-8aa1-bbab2a035a54';

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { JsonObject } from '../model/types.js';
-import { normalizeSetupStepResolution } from './resolution.js';
+import type { JsonObject } from '../model/types.ts';
+import { normalizeSetupStepResolution } from './resolution.ts';
 
 describe('setup resolution audit boundary', () => {
   it('snapshots shared acyclic data without accepting cyclic receipts', () => {

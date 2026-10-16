@@ -2,13 +2,13 @@ import { z } from 'zod';
 import type {
   CompletionMessage,
   StrictCompletionResponseSchema,
-} from '../contracts/completion.js';
-import type { JudgingCriterionV1 } from '../model/types.js';
-import type { CriterionResultV1 } from '../results/types.js';
+} from '../contracts/completion.ts';
+import type { JudgingCriterionV1 } from '../model/types.ts';
+import type { CriterionResultV1 } from '../results/types.ts';
 import {
   type JudgeTranscriptProjectionV1,
   parseJudgeTranscriptProjection,
-} from './judgeTranscript.js';
+} from './judgeTranscript.ts';
 
 export const MAX_CONCURRENT_CRITERION_JUDGMENTS = 4;
 export const MAX_CRITERION_JUDGE_ATTEMPTS = 3;
