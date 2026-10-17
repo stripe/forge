@@ -295,7 +295,7 @@ Interaction stop reasons are separate from evaluation status: reaching
 and one `runs` row per saved selection. With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, judging_score, criteria_by_requirement}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, criterion_scores}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
@@ -307,15 +307,32 @@ from 0 to 1. Only the latest verified effective outcome contributes for each
 selection, so retries do not add scores. Compare treatments on matched cases
 and agent configurations. See [scoring semantics](docs/architecture.md#evaluation-and-scoring).
 
-`criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
-case groups, and run rows. Each aggregate includes passed/total criterion counts
-and the number of completed evaluations containing that classification.
+`criterion_scores` reports four scores in each run's `evaluation`, the overall
+summary, and each case/configuration group:
+
+| Criteria set | `strict` | `avg` |
+| --- | --- | --- |
+| `required`: MUST | `1` if all MUST pass, else `0` | Passed MUST / total MUST |
+| `recommended`: MUST + SHOULD | `1` if all MUST and SHOULD pass, else `0` | Passed MUST and SHOULD / total MUST and SHOULD |
+
+For example, passing one MUST and failing one SHOULD gives Required Strict and
+Avg of `1`, Recommended Strict of `0`, and Recommended Avg of `0.5`. OPTIONAL
+and file checks do not affect these scores. An empty set has `null` scores.
+For summary and case groups, `strict` is the fraction of eligible evaluations
+where all relevant criteria passed. `avg` pools their passed/total counts, so
+each criterion result has equal weight across runs. Each set's `evaluations`
+counts completed evaluations with at least one relevant criterion; empty sets,
+pending runs, and execution errors do not enter either denominator.
+
+`criteria_by_requirement` separately breaks out MUST, SHOULD, and OPTIONAL counts
+in the summary, case groups, and run rows. Each aggregate includes passed/total
+criterion counts and the number of completed evaluations with that classification.
 `strict_pass_rate` is the fraction of those evaluations where every criterion
 in that group passed. `average_pass_rate` is the mean of each evaluation's
-fraction passed in that group; it gives each evaluation equal weight. Empty
-groups have `null` rates. These group rates ignore file checks. MUST failures
-identify unmet requirements; SHOULD failures identify unmet recommendations.
-OPTIONAL statistics are telemetry and do not enter either scored group.
+fraction passed in that group; like `judging_score.mean`, it gives each evaluation
+equal weight. Empty groups have `null` rates. These group rates ignore file checks.
+MUST failures identify unmet requirements; SHOULD failures identify unmet
+recommendations. OPTIONAL statistics are non-scoring telemetry.
 
 ### Inspect evidence
 

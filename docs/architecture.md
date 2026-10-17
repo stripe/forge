@@ -1073,11 +1073,15 @@ score nor status. File checks are independent pass constraints and do not change
 that ratio. Only `requirement_level` determines scoring inclusion.
 
 Reports preserve per-run passed/total counts for all three classifications and
-verify that MUST plus SHOULD match the scored counts and ratio. Overall and
-per-case/configuration aggregates separate required failures from recommended
-failures and OPTIONAL telemetry. Group strict and average pass rates use only
-completed evaluations containing that classification, independently of checks;
-the README defines their [denominators](../README.md#understand-scores).
+verify that MUST plus SHOULD match the scored counts and ratio. Each run's
+`criterion_scores` matrix reports Required (MUST) and Recommended (MUST + SHOULD),
+each with Strict and Avg scores, independently of checks. Parsing verifies those
+scores against the per-classification counts, then verifies summary and
+case/configuration scores against the run rows. These aggregates use only the
+latest effective outcome per selection, when completed, and leave empty sets unscored. Disjoint
+`criteria_by_requirement` groups preserve required failures, recommended failures,
+and OPTIONAL telemetry. The README defines the
+[score formulas and aggregate denominators](../README.md#understand-scores).
 
 | Situation | Status | Score |
 | --- | --- | --- |

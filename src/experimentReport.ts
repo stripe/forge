@@ -34,6 +34,18 @@ const criteriaByRequirementSchema = z
     OPTIONAL: criterionCountsSchema,
   })
   .strict();
+const criterionScoreSchema = z
+  .object({ strict: ratio.nullable(), avg: ratio.nullable() })
+  .strict();
+const criterionScoresSchema = z
+  .object({
+    required: criterionScoreSchema,
+    recommended: criterionScoreSchema,
+  })
+  .strict();
+const criterionScoreStatisticsSchema = criterionScoreSchema.extend({
+  evaluations: count,
+});
 const criterionStatisticsSchema = z
   .object({
     passed: count,
@@ -50,6 +62,7 @@ const evaluationSchema = z
     judging_criteria_passed: count,
     judging_criteria_total: count,
     criteria_by_requirement: criteriaByRequirementSchema,
+    criterion_scores: criterionScoresSchema,
     checks_passed: count,
     checks_total: count,
   })
@@ -70,7 +83,13 @@ const evaluationSchema = z
           ? 0
           : value.judging_criteria_passed / value.judging_criteria_total)
     );
-  }, 'Scored counts and score must match MUST and SHOULD results.');
+  }, 'Scored counts and score must match MUST and SHOULD results.')
+  .refine(
+    (value) =>
+      serializeCanonicalJson(value.criterion_scores) ===
+      serializeCanonicalJson(criterionScores(value.criteria_by_requirement)),
+    'Criterion scores must match their required and recommended counts.',
+  );
 const runSchema = z
   .object({
     selection_index: count,
@@ -115,6 +134,12 @@ const statisticsSchema = z
     retry_attempts: count,
     coverage: ratio.nullable(),
     pass_rate: ratio.nullable(),
+    criterion_scores: z
+      .object({
+        required: criterionScoreStatisticsSchema,
+        recommended: criterionScoreStatisticsSchema,
+      })
+      .strict(),
     criteria_by_requirement: z
       .object({
         MUST: criterionStatisticsSchema,
@@ -180,6 +205,7 @@ export function summarizeReportEvaluation(
     judging_criteria_passed: evaluation.judging_criteria_passed,
     judging_criteria_total: evaluation.judging_criteria_total,
     criteria_by_requirement: criteriaByRequirement,
+    criterion_scores: criterionScores(criteriaByRequirement),
     checks_passed: evaluation.checks.filter((check) => check.passed).length,
     checks_total: evaluation.checks.length,
   };
@@ -320,6 +346,10 @@ function statistics(
     retry_attempts: retries,
     coverage: runs.length === 0 ? null : completed / runs.length,
     pass_rate: completed === 0 ? null : passed / completed,
+    criterion_scores: {
+      required: criterionScoreStatistics(runs, 'required'),
+      recommended: criterionScoreStatistics(runs, 'recommended'),
+    },
     criteria_by_requirement: {
       MUST: criterionStatistics(runs, 'MUST'),
       SHOULD: criterionStatistics(runs, 'SHOULD'),
@@ -330,6 +360,58 @@ function statistics(
         criterionEvaluations === 0 ? null : criterionSum / criterionEvaluations,
       evaluations: criterionEvaluations,
     },
+  };
+}
+
+/** Required uses MUST; recommended includes both MUST and SHOULD. */
+function relevantCriterionCounts(
+  groups: z.infer<typeof criteriaByRequirementSchema>,
+  set: keyof z.infer<typeof criterionScoresSchema>,
+): z.infer<typeof criterionCountsSchema> {
+  const { MUST, SHOULD } = groups;
+  return set === 'required'
+    ? MUST
+    : { passed: MUST.passed + SHOULD.passed, total: MUST.total + SHOULD.total };
+}
+
+function criterionScores(
+  groups: z.infer<typeof criteriaByRequirementSchema>,
+): z.infer<typeof criterionScoresSchema> {
+  function score(set: keyof z.infer<typeof criterionScoresSchema>) {
+    const { passed, total } = relevantCriterionCounts(groups, set);
+    return {
+      strict: total === 0 ? null : passed === total ? 1 : 0,
+      avg: total === 0 ? null : passed / total,
+    };
+  }
+  return { required: score('required'), recommended: score('recommended') };
+}
+
+/** Pool criterion results for Avg; give each eligible evaluation one Strict vote. */
+function criterionScoreStatistics(
+  runs: readonly ExperimentRunReportRunV1[],
+  set: keyof z.infer<typeof criterionScoresSchema>,
+): z.infer<typeof criterionScoreStatisticsSchema> {
+  let passed = 0;
+  let total = 0;
+  let evaluations = 0;
+  let strictPasses = 0;
+  for (const run of runs) {
+    if (run.state !== 'completed') continue;
+    const group = relevantCriterionCounts(
+      run.evaluation!.criteria_by_requirement,
+      set,
+    );
+    if (group.total === 0) continue;
+    passed += group.passed;
+    total += group.total;
+    evaluations += 1;
+    if (group.passed === group.total) strictPasses += 1;
+  }
+  return {
+    strict: evaluations === 0 ? null : strictPasses / evaluations,
+    avg: total === 0 ? null : passed / total,
+    evaluations,
   };
 }
 

@@ -285,6 +285,14 @@ try {
       assert.equal(command.report, path.join(command.location, 'report.json'));
       const report = JSON.parse(await fs.readFile(command.report, 'utf8'));
       assert.equal(experiment.parseExperimentRunReport(report).summary.passed, 2);
+      assert.deepEqual(report.summary.criterion_scores, {
+        required: {strict: null, avg: null, evaluations: 0},
+        recommended: {strict: null, avg: null, evaluations: 0},
+      });
+      assert.deepEqual(report.runs[0].evaluation.criterion_scores, {
+        required: {strict: null, avg: null},
+        recommended: {strict: null, avg: null},
+      });
       assert.equal(command.arguments.values.upload, true);
       assert.ok(command.outcomes.every((outcome) => outcome.artifact.evaluation.status === 'passed'));
       const inspected = await experiment.inspectExperimentRun({root: command.location + '/.', engine});
