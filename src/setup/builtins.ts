@@ -74,7 +74,10 @@ const PluginDistributionSchema = z
     marketplace: GitHubRepositorySchema,
     ref: z
       .string()
-      .refine(isSafeMarketplaceRef, 'must be a branch or tag, not a commit SHA')
+      .refine(
+        isSafeMarketplaceRef,
+        'must be a Git branch or tag name (commit SHAs are rejected)',
+      )
       .optional(),
   })
   .strict();

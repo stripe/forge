@@ -78,7 +78,7 @@ export interface PluginSelectionV1 extends JsonObject {
   plugin: string;
   /** GitHub owner/repository containing the marketplace. */
   marketplace: string;
-  /** Claude Code only: current commit of this branch or tag. */
+  /** Claude Code only: branch or tag whose current commit is installed; never a commit SHA. */
   ref?: MarketplaceRef;
 }
 

@@ -26,8 +26,10 @@ import {
 
 import { assertNoCleanupWarnings, assertRuntimeCleanup } from './cleanup.mjs';
 
-const PLUGIN = 'stripe@stripe';
-const MARKETPLACE = 'stripe/ai';
+const PLUGIN = 'stripe@claude-plugins-official';
+const MARKETPLACE = 'anthropics/claude-plugins-official';
+const REF_PLUGIN = 'stripe@stripe';
+const REF_MARKETPLACE = 'stripe/ai';
 const literalArguments = [
   'a value with spaces',
   '$HOME',
@@ -111,6 +113,24 @@ const cases = [
     ],
     files: { 'plugin-verified.txt': 'native plugin verified\n' },
   },
+  {
+    id: 'plugin-ref',
+    setup: [
+      {
+        uses: 'forge/plugin',
+        with: {
+          agents: {
+            'claude-code': {
+              plugin: REF_PLUGIN,
+              marketplace: REF_MARKETPLACE,
+              ref: 'main',
+            },
+          },
+        },
+      },
+    ],
+    files: { 'plugin-verified.txt': 'native plugin verified\n' },
+  },
 ];
 
 /** Real setup/execution/artifacts; interaction is a deterministic local probe. */
@@ -123,29 +143,30 @@ export async function runSetupIntegrationSuite({
   liveAgent = 'claude-code',
 }) {
   const codex = liveAgent === 'codex';
-  const selectedPlugin = 'stripe@stripe';
-  const selectedMarketplace = 'stripe/ai';
-  const specs = cases.map((spec) =>
-    spec.id !== 'plugin'
-      ? spec
-      : {
-          ...spec,
-          setup: [
-            {
-              uses: 'forge/plugin',
-              with: {
-                agents: {
-                  [liveAgent]: {
-                    plugin: selectedPlugin,
-                    marketplace: selectedMarketplace,
-                    ...(codex ? {} : { ref: 'main' }),
+  const selectedPlugin = codex ? REF_PLUGIN : PLUGIN;
+  const selectedMarketplace = codex ? REF_MARKETPLACE : MARKETPLACE;
+  const specs = cases
+    .filter((spec) => !codex || spec.id !== 'plugin-ref')
+    .map((spec) =>
+      spec.id !== 'plugin' || !codex
+        ? spec
+        : {
+            ...spec,
+            setup: [
+              {
+                uses: 'forge/plugin',
+                with: {
+                  agents: {
+                    [liveAgent]: {
+                      plugin: selectedPlugin,
+                      marketplace: selectedMarketplace,
+                    },
                   },
                 },
               },
-            },
-          ],
-        },
-  );
+            ],
+          },
+    );
   const fixtureRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), 'forge-live-setup-'),
   );
@@ -226,7 +247,7 @@ export async function runSetupIntegrationSuite({
               spec && !spec.failure,
               'Failed setup must never open an agent session',
             );
-            if (spec.id === 'plugin') {
+            if (spec.id === 'plugin' || spec.id === 'plugin-ref') {
               observations.set(
                 spec.id,
                 codex
@@ -235,7 +256,7 @@ export async function runSetupIntegrationSuite({
                       signal,
                       selectedPlugin,
                     )
-                  : await verifyNativePlugin(context.runtime, signal),
+                  : await verifyNativePlugin(context.runtime, signal, spec),
               );
             }
             // Read via a real container command, proving host-written and
@@ -376,12 +397,16 @@ export async function runSetupIntegrationSuite({
             setup.steps.map(({ index, uses }) => ({ index, uses })),
             spec.setup.map(({ uses }, index) => ({ index, uses })),
           );
-          if (spec.id === 'plugin') {
+          if (spec.id === 'plugin' || spec.id === 'plugin-ref') {
             const receipt = setup.steps[0].resolution;
             const installed = observations.get(spec.id);
-            assert.equal(receipt.plugin, selectedPlugin);
-            assert.equal(receipt.marketplace, selectedMarketplace);
-            assert.equal(receipt.ref, codex ? undefined : 'main');
+            const distribution = spec.setup[0].with.agents[liveAgent];
+            assert.equal(receipt.plugin, distribution.plugin);
+            assert.equal(receipt.marketplace, distribution.marketplace);
+            assert.equal(
+              receipt.ref,
+              spec.id === 'plugin-ref' ? 'main' : undefined,
+            );
             assert.equal(receipt.native_plugin_id, installed.id);
             assert.equal(receipt.version, installed.version);
             assert.match(receipt.marketplace_commit, /^[a-f0-9]{40}$/);
@@ -414,7 +439,7 @@ export async function runSetupIntegrationSuite({
   }
 }
 
-async function verifyNativePlugin(runtime, signal) {
+async function verifyNativePlugin(runtime, signal, spec) {
   const listed = await runtime.commands.agent.run(
     ['claude', 'plugin', 'list', '--json'],
     { signal, timeoutMs: 60_000, maxOutputBytes: 1024 * 1024 },
@@ -423,13 +448,15 @@ async function verifyNativePlugin(runtime, signal) {
   const plugins = JSON.parse(listed.stdout);
   assert.equal(plugins.length, 1);
   const installed = plugins[0];
-  assert.equal(installed.id, PLUGIN);
+  const plugin = spec.id === 'plugin-ref' ? REF_PLUGIN : PLUGIN;
+  const marketplaceName = plugin.split('@')[1];
+  assert.equal(installed.id, plugin);
   assert.equal(installed.enabled, true);
   assert.equal(typeof installed.version, 'string');
   assert.ok(installed.version.length > 0);
   assert.equal(
     installed.installPath,
-    `${CLAUDE_PLUGIN_STATE_PATH}/cache/stripe/stripe/${installed.version}`,
+    `${CLAUDE_PLUGIN_STATE_PATH}/cache/${marketplaceName}/stripe/${installed.version}`,
   );
   const probe = await runtime.commands.agent.run(
     [

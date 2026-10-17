@@ -329,6 +329,9 @@ initial_prompt: Two
       assert.equal(claude.plugin, 'stripe@claude-plugins-official');
       assert.equal(claude.marketplace, 'anthropics/claude-plugins-official');
     }
+  });
+
+  it('accepts moving marketplace branch and tag refs but rejects pins and malformed names', () => {
     for (const ref of ['main', 'feature/plugin-fix', 'v1.0']) {
       const step = parseSetupStep({
         uses: 'forge/plugin',
@@ -381,7 +384,9 @@ initial_prompt: Two
         BenchmarkModelError,
       );
     }
+  });
 
+  it('rejects malformed forge/plugin selections', () => {
     for (const withValue of [
       { agents: {} },
       {

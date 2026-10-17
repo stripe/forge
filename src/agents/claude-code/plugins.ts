@@ -6,11 +6,12 @@ import type {
   AgentPluginPreflightContext,
 } from '../../contracts/plugin.ts';
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
+import type { MarketplaceRef } from '../../model/paths.ts';
 import {
   isSafeGitHubRepository,
-  isSafeMarketplaceRef,
   isSafeSimpleIdentifier,
   isSafeVersion,
+  isValidMarketplaceRefValue,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
 import {
@@ -214,9 +215,7 @@ async function ensureMarketplaceCheckout(input: {
         'plugin',
         'marketplace',
         'add',
-        input.distribution.ref === undefined
-          ? input.distribution.marketplace
-          : `${input.distribution.marketplace}#${input.distribution.ref}`,
+        marketplaceAddArgument(input.distribution),
         '--scope',
         'user',
       ]),
@@ -263,37 +262,13 @@ async function ensureMarketplaceCheckout(input: {
     );
   }
 
-  if (input.distribution.ref !== undefined) {
-    const branch = await runGit(
-      input.commands,
-      input.marketplacePath,
-      ['-C', input.marketplacePath, 'branch', '--show-current'],
-      input.signal,
-      'Forge could not verify the plugin marketplace branch.',
-    );
-    const ref = input.distribution.ref;
-    const target = await runGit(
-      input.commands,
-      input.marketplacePath,
-      [
-        '-C',
-        input.marketplacePath,
-        'rev-parse',
-        '--verify',
-        `${branch.stdout.trim() === ref ? 'refs/heads' : 'refs/tags'}/${ref}^{commit}`,
-      ],
-      input.signal,
-      'Forge could not verify the plugin marketplace ref.',
-    );
-    if (
-      target.stdout.trim() !== commit ||
-      (branch.stdout.trim() !== '' && branch.stdout.trim() !== ref)
-    ) {
-      throw new Error(
-        'Plugin marketplace checkout does not match the requested ref.',
-      );
-    }
-  }
+  await assertMarketplaceRefCheckout({
+    commands: input.commands,
+    marketplacePath: input.marketplacePath,
+    ref: input.distribution.ref,
+    commit,
+    signal: input.signal,
+  });
 
   const remote = await runGit(
     input.commands,
@@ -314,6 +289,62 @@ async function ensureMarketplaceCheckout(input: {
     );
   }
   return commit;
+}
+
+interface MarketplaceRefCheckoutInput {
+  readonly commands: CommandRunner;
+  readonly marketplacePath: string;
+  readonly ref: MarketplaceRef | undefined;
+  readonly commit: string;
+  readonly signal: AbortSignal;
+}
+
+async function assertMarketplaceRefCheckout(
+  input: MarketplaceRefCheckoutInput,
+): Promise<void> {
+  if (input.ref === undefined) return;
+  const branch = (
+    await runGit(
+      input.commands,
+      input.marketplacePath,
+      ['-C', input.marketplacePath, 'branch', '--show-current'],
+      input.signal,
+      'Forge could not verify the plugin marketplace branch.',
+    )
+  ).stdout.trim();
+  if (branch !== '') {
+    if (branch !== input.ref) {
+      throw new Error(
+        'Plugin marketplace checkout does not match the requested ref.',
+      );
+    }
+    return;
+  }
+  const tagCommit = (
+    await runGit(
+      input.commands,
+      input.marketplacePath,
+      [
+        '-C',
+        input.marketplacePath,
+        'rev-parse',
+        '--verify',
+        `refs/tags/${input.ref}^{commit}`,
+      ],
+      input.signal,
+      'Forge could not verify the plugin marketplace ref.',
+    )
+  ).stdout.trim();
+  if (tagCommit !== input.commit) {
+    throw new Error(
+      'Plugin marketplace checkout does not match the requested ref.',
+    );
+  }
+}
+
+function marketplaceAddArgument(distribution: PluginSelectionV1): string {
+  if (distribution.ref === undefined) return distribution.marketplace;
+  return `${distribution.marketplace}#${distribution.ref}`;
 }
 
 async function readSelectedMarketplaceEntry(input: {
@@ -709,8 +740,7 @@ function freezeDistribution(input: PluginSelectionV1): PluginSelectionV1 {
     typeof input.plugin !== 'string' ||
     typeof input.marketplace !== 'string' ||
     !isSafeGitHubRepository(input.marketplace) ||
-    (Object.hasOwn(input, 'ref') &&
-      (typeof input.ref !== 'string' || !isSafeMarketplaceRef(input.ref)))
+    (Object.hasOwn(input, 'ref') && !isValidMarketplaceRefValue(input.ref))
   ) {
     throw new TypeError('Claude plugin distribution is invalid.');
   }

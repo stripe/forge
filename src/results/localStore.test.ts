@@ -1089,7 +1089,6 @@ describe('local artifact store', () => {
               'claude-code': {
                 plugin: 'stripe@claude-plugins-official',
                 marketplace: 'anthropics/claude-plugins-official',
-                ref: 'main',
               },
             },
           },
@@ -1101,7 +1100,6 @@ describe('local artifact store', () => {
       adapter: 'claude-code',
       plugin: 'stripe@claude-plugins-official',
       marketplace: 'anthropics/claude-plugins-official',
-      ref: 'main',
       marketplace_commit: 'a'.repeat(40),
       native_plugin_id: 'stripe@forge-test',
       version: '0.9.2',
@@ -1134,16 +1132,43 @@ describe('local artifact store', () => {
       assert.equal(actual.runId, 'run-1');
     }
 
-    const mismatchedRef = await commitArtifacts(
+    const refPlan = createTestResolvedRunPlan({
+      caseId: 'sample/case',
+      prompt: 'do it',
+      treatment: 'stripe-plugin',
+      treatmentSetup: [
+        {
+          uses: 'forge/plugin',
+          with: {
+            agents: {
+              'claude-code': {
+                plugin: receipt.plugin,
+                marketplace: receipt.marketplace,
+                ref: 'main',
+              },
+            },
+          },
+        },
+      ],
+      agent: { adapter: 'claude-code', provider: 'anthropic', model: 'test' },
+    });
+    const withRef = await commitArtifacts(
       [
         ...core,
-        { path: 'setup.json', body: setup({ ...receipt, ref: 'other' }) },
+        { path: 'setup.json', body: setup({ ...receipt, ref: 'main' }) },
       ],
       (result) => result,
-      { plan: pluginPlan },
+      { plan: refPlan },
+    );
+    assert.ok(await verifyCompletedRun(withRef));
+
+    const missingRef = await commitArtifacts(
+      [...core, { path: 'setup.json', body: setup(receipt) }],
+      (result) => result,
+      { plan: refPlan },
     );
     await assert.rejects(
-      verifyCompletedRun(mismatchedRef),
+      verifyCompletedRun(missingRef),
       /does not match the completed run plan/,
     );
 

@@ -1,3 +1,4 @@
+import type { MarketplaceRef } from '../model/paths.ts';
 import type {
   AgentSelectionV1,
   JsonObject,
@@ -24,7 +25,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
   readonly adapter: string;
   readonly plugin: string;
   readonly marketplace: string;
-  readonly ref?: string;
+  readonly ref?: MarketplaceRef;
   readonly marketplace_commit: string;
   readonly native_plugin_id: string;
   readonly version: string;

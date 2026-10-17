@@ -221,8 +221,9 @@ describe('Claude plugin installer', () => {
     );
     assert.equal(receipt.ref, 'main');
     assert.equal(receipt.marketplace_commit, CATALOG_COMMIT);
-    assert.ok(
-      harness.calls.some((argv) => argv.includes('refs/heads/main^{commit}')),
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('--verify')),
+      false,
     );
   });
 
@@ -236,6 +237,21 @@ describe('Claude plugin installer', () => {
     assert.equal(receipt.ref, 'v1.0');
     assert.ok(
       harness.calls.some((argv) => argv.includes('refs/tags/v1.0^{commit}')),
+    );
+  });
+
+  it('rejects a checkout on a different branch than requested', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, { checkoutBranch: 'other' });
+    await assert.rejects(
+      installerPreflight({ ...distribution, ref: 'main' }).install(
+        installContext(state, harness.commands),
+      ),
+      /requested ref/,
+    );
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('--verify')),
+      false,
     );
   });
 
@@ -262,12 +278,32 @@ describe('Claude plugin installer', () => {
 
   it('rejects a checkout at a commit other than the requested ref', async () => {
     const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, { refCommit: 'c'.repeat(40) });
+    const harness = nativeCommandHarness(state, {
+      checkoutBranch: '',
+      refCommit: 'c'.repeat(40),
+    });
     await assert.rejects(
-      installerPreflight({ ...distribution, ref: 'main' }).install(
+      installerPreflight({ ...distribution, ref: 'v1.0' }).install(
         installContext(state, harness.commands),
       ),
       /requested ref/,
+    );
+  });
+
+  it('rejects requesting a ref after registering a marketplace without one', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    const context = installContext(state, harness.commands);
+    await installerPreflight().install(context);
+    await assert.rejects(
+      installerPreflight({ ...distribution, ref: 'main' }).install(context),
+      /requested ref/,
+    );
+    assert.equal(
+      harness.calls.filter(
+        (argv) => argv.includes('marketplace') && argv.includes('add'),
+      ).length,
+      1,
     );
   });
 
@@ -421,7 +457,7 @@ describe('Claude plugin installer', () => {
     for (const candidate of [
       {
         version: '1.0.0',
-        source: './plugins/formatter/',
+        source: './plugins/formatter',
       },
       {
         version: '2.0.0',
@@ -454,6 +490,17 @@ describe('Claude plugin installer', () => {
           : { kind: 'archive' },
       );
     }
+  });
+
+  it('accepts a marketplace-relative plugin path with one trailing slash', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, {
+      catalogSource: './plugins/formatter/',
+    });
+    const receipt = await installerPreflight().install(
+      installContext(state, harness.commands),
+    );
+    assert.deepEqual(receipt.source, { kind: 'marketplace-path' });
   });
 
   it('accepts a commit-pinned url source with an exact plugin subdirectory', async () => {

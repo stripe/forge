@@ -50,11 +50,9 @@ entry.
 
 The plugin action follows the marketplace's current default branch, or the
 current commit of an optional Claude Code `ref` naming a branch or tag. Codex
-does not accept a marketplace `ref`. Full commit SHAs are rejected as pins;
-a branch or tag can move between runs. This is distinct from refs inside
-marketplace catalog plugin sources described below.
-
-Each run:
+does not accept a marketplace `ref`. A branch or tag can move between runs.
+This is distinct from refs inside marketplace catalog plugin sources described
+below.
 
 1. Each run starts with fresh, run-owned agent state.
 2. Forge registers the authored marketplace through the agent's native CLI.
@@ -69,7 +67,7 @@ plans executed on different dates may install different plugin bytes.
 
 Use `forge/plugin` only when that rolling behavior is part of the treatment.
 A reproducibly pinned plugin would require a distinct lock contract and updates
-to affected experiment configs.
+to affected experiment configs, so full commit SHAs are rejected as pins.
 
 ## Installed behavior and external dependencies
 
@@ -83,7 +81,8 @@ runtime's network policy.
 
 Source support depends on the selected native installer. Claude Code accepts:
 
-- a canonical relative path within the fetched marketplace;
+- a canonical relative path within the fetched marketplace (one trailing `/`
+  is accepted for directory paths);
 - an HTTPS Git URL, GitHub `owner/repository`, or Git subdirectory, optionally
   accompanied by `ref` and full Git SHA metadata; or
 - an HTTPS archive, optionally accompanied by a 64-hex SHA-256 digest.

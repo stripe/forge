@@ -710,15 +710,14 @@ extension bundles own exactly one other namespace, cannot replace built-ins,
 and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
-`forge/plugin` intentionally resolves the current marketplace entry at
-execution time. Claude Code can select a moving marketplace branch or tag with
-`ref`; Codex follows the default branch. Its `setup.json` receipt records the
-selected IDs, optional ref, catalog commit, installed version, reported source
-commit when available, and an
-installation-time tree fingerprint. These identify the catalog snapshot and
-observed installed contents; plugin state remains writable during interaction.
-This is a documented mutable-treatment semantic, not general plan
-reproducibility; see
+`forge/plugin` resolves the current marketplace entry at execution time.
+Claude Code can select a moving marketplace branch or tag with `ref`; Codex
+follows the default branch. The `setup.json` receipt records the selected IDs,
+optional ref, catalog commit, installed version, reported source commit when
+available, and an installation-time tree fingerprint. These identify the
+catalog snapshot and observed installed contents; plugin state remains writable
+during interaction. This is a documented mutable-treatment semantic, not
+general plan reproducibility; see
 [Marketplace plugin treatments](plugin-action.md).
 
 ## Interaction architecture

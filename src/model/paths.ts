@@ -88,6 +88,12 @@ export function isSafeMarketplaceRef(value: string): value is MarketplaceRef {
   );
 }
 
+export function isValidMarketplaceRefValue(
+  value: unknown,
+): value is MarketplaceRef {
+  return typeof value === 'string' && isSafeMarketplaceRef(value);
+}
+
 export function isSafeGitHubRepository(value: string): boolean {
   if (value.length > 512 || CONTROL_CHARACTER.test(value)) return false;
   const match =
