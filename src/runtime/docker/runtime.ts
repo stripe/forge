@@ -787,7 +787,14 @@ async function buildForgeImage(
   const buildRoot = await fs.mkdtemp(
     path.join(input.temporaryRoot, 'stripe-forge-build-'),
   );
-  const image = imageTag(input.platform, input.userId);
+  const settingsSuffix =
+    input.buildNetwork === undefined && input.proxy === undefined
+      ? ''
+      : `-${createHash('sha256')
+          .update(JSON.stringify([input.buildNetwork, input.proxy]))
+          .digest('hex')
+          .slice(0, 16)}`;
+  const image = `${imageTag(input.platform, input.userId)}${settingsSuffix}`;
   try {
     const dockerfile = await fs.readFile(
       path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'),

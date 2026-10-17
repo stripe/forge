@@ -170,6 +170,29 @@ function preparation(
 }
 
 describe('explicit Docker networking', () => {
+  it('isolates image tags for concurrent builds with different settings', async () => {
+    const fake = fakeDocker();
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-build-tags-'));
+    roots.push(root);
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: fake.runner,
+      temporaryRoot: root,
+    });
+    const first = preparation({ runId: 'network-default' });
+    const second = preparation({ runId: 'network-host' });
+    if (!('image' in second.plan.runtime)) throw new Error('expected Docker');
+    second.plan.runtime = { ...second.plan.runtime, build_network: 'host' };
+    const runtimes = await Promise.all([
+      adapter.prepare(first),
+      adapter.prepare(second),
+    ]);
+    const tags = fake.calls
+      .filter(({ argv }) => argv[1] === 'build')
+      .map(({ argv }) => argv[argv.indexOf('--tag') + 1]);
+    assert.equal(new Set(tags).size, 2);
+    await Promise.all(runtimes.map((runtime) => runtime.dispose()));
+  });
+
   it('passes opt-in proxies as standard build args and command environment, not image assets', async () => {
     const fake = fakeDocker();
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-proxy-'));
