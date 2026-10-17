@@ -26,8 +26,8 @@ import {
 
 import { assertNoCleanupWarnings, assertRuntimeCleanup } from './cleanup.mjs';
 
-const PLUGIN = 'stripe@claude-plugins-official';
-const MARKETPLACE = 'anthropics/claude-plugins-official';
+const PLUGIN = 'stripe@stripe';
+const MARKETPLACE = 'stripe/ai';
 const literalArguments = [
   'a value with spaces',
   '$HOME',
@@ -123,8 +123,8 @@ export async function runSetupIntegrationSuite({
   liveAgent = 'claude-code',
 }) {
   const codex = liveAgent === 'codex';
-  const selectedPlugin = codex ? 'stripe@stripe' : PLUGIN;
-  const selectedMarketplace = codex ? 'stripe/ai' : MARKETPLACE;
+  const selectedPlugin = 'stripe@stripe';
+  const selectedMarketplace = 'stripe/ai';
   const specs = cases.map((spec) =>
     spec.id !== 'plugin'
       ? spec
@@ -138,6 +138,7 @@ export async function runSetupIntegrationSuite({
                   [liveAgent]: {
                     plugin: selectedPlugin,
                     marketplace: selectedMarketplace,
+                    ...(codex ? {} : { ref: 'main' }),
                   },
                 },
               },
@@ -380,6 +381,7 @@ export async function runSetupIntegrationSuite({
             const installed = observations.get(spec.id);
             assert.equal(receipt.plugin, selectedPlugin);
             assert.equal(receipt.marketplace, selectedMarketplace);
+            assert.equal(receipt.ref, codex ? undefined : 'main');
             assert.equal(receipt.native_plugin_id, installed.id);
             assert.equal(receipt.version, installed.version);
             assert.match(receipt.marketplace_commit, /^[a-f0-9]{40}$/);
@@ -427,7 +429,7 @@ async function verifyNativePlugin(runtime, signal) {
   assert.ok(installed.version.length > 0);
   assert.equal(
     installed.installPath,
-    `${CLAUDE_PLUGIN_STATE_PATH}/cache/claude-plugins-official/stripe/${installed.version}`,
+    `${CLAUDE_PLUGIN_STATE_PATH}/cache/stripe/stripe/${installed.version}`,
   );
   const probe = await runtime.commands.agent.run(
     [

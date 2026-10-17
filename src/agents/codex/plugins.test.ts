@@ -179,6 +179,22 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
+  it('rejects marketplace refs in pure preflight', () => {
+    const plan = createTestResolvedRunPlan({
+      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
+    });
+    assert.throws(
+      () =>
+        createCodexPluginInstaller({
+          adapterId: 'codex',
+          executable: 'codex',
+        }).preflight(
+          { ...distribution, ref: 'main' },
+          { selection: plan.agent, runtime: plan.runtime },
+        ),
+      /Claude Code only/,
+    );
+  });
   it('binds installation without commands and shares the adapter home mount', async () => {
     const test = fixture();
     assert.equal(test.calls.length, 0);

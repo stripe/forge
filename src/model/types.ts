@@ -1,4 +1,5 @@
 import type { ForgeBuildIdentity } from '../version.ts';
+import type { MarketplaceRef } from './paths.ts';
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -75,8 +76,10 @@ export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
 export interface PluginSelectionV1 extends JsonObject {
   /** Agent-native qualified identity, such as `stripe@claude-plugins-official`. */
   plugin: string;
-  /** GitHub owner/repository whose current default-branch entry is installed. */
+  /** GitHub owner/repository containing the marketplace. */
   marketplace: string;
+  /** Claude Code only: current commit of this branch or tag. */
+  ref?: MarketplaceRef;
 }
 
 export interface PluginSetupWithV1 extends JsonObject {

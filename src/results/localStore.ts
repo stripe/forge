@@ -512,6 +512,7 @@ function verifySetupArtifact(
         receipt.adapter !== plan.agent.adapter ||
         receipt.plugin !== distribution.plugin ||
         receipt.marketplace !== distribution.marketplace ||
+        receipt.ref !== distribution.ref ||
         nativeName !== requestedName
       ) {
         throw new ArtifactStoreError(

@@ -24,6 +24,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
   readonly adapter: string;
   readonly plugin: string;
   readonly marketplace: string;
+  readonly ref?: string;
   readonly marketplace_commit: string;
   readonly native_plugin_id: string;
   readonly version: string;

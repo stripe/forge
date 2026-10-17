@@ -1,6 +1,7 @@
 import { isSha256Digest } from '../model/hashes.ts';
 import {
   isSafeGitHubRepository,
+  isSafeMarketplaceRef,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
@@ -21,7 +22,10 @@ export function parseAgentPluginInstallationReceipt(
       'version',
       'source',
       'installed_tree',
+      ...(isPlainRecord(input) && Object.hasOwn(input, 'ref') ? ['ref'] : []),
     ]) ||
+    (Object.hasOwn(input, 'ref') &&
+      (typeof input.ref !== 'string' || !isSafeMarketplaceRef(input.ref))) ||
     typeof input.adapter !== 'string' ||
     !isSafeSimpleIdentifier(input.adapter) ||
     typeof input.plugin !== 'string' ||
@@ -41,6 +45,7 @@ export function parseAgentPluginInstallationReceipt(
     adapter: input.adapter,
     plugin: input.plugin,
     marketplace: input.marketplace,
+    ...(input.ref === undefined ? {} : { ref: input.ref as string }),
     marketplace_commit: input.marketplace_commit,
     native_plugin_id: input.native_plugin_id,
     version: input.version,

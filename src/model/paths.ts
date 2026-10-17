@@ -63,6 +63,31 @@ export function isSafeVersion(value: string): boolean {
   );
 }
 
+export type MarketplaceRef = string;
+
+/** A moving branch or tag, never a pinned commit or CLI option. */
+export function isSafeMarketplaceRef(value: string): value is MarketplaceRef {
+  return (
+    value.length > 0 &&
+    value.length <= 256 &&
+    !value.startsWith('-') &&
+    value !== '@' &&
+    !/[\s\u0000-\u001f\u007f#\\*?[\]^~:]/.test(value) &&
+    !value.includes('..') &&
+    !value.includes('@{') &&
+    value
+      .split('/')
+      .every(
+        (part) =>
+          part.length > 0 &&
+          !part.startsWith('.') &&
+          !part.endsWith('.') &&
+          !part.endsWith('.lock'),
+      ) &&
+    !/^[a-fA-F0-9]{40}$/.test(value)
+  );
+}
+
 export function isSafeGitHubRepository(value: string): boolean {
   if (value.length > 512 || CONTROL_CHARACTER.test(value)) return false;
   const match =

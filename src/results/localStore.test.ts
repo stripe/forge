@@ -1089,6 +1089,7 @@ describe('local artifact store', () => {
               'claude-code': {
                 plugin: 'stripe@claude-plugins-official',
                 marketplace: 'anthropics/claude-plugins-official',
+                ref: 'main',
               },
             },
           },
@@ -1100,6 +1101,7 @@ describe('local artifact store', () => {
       adapter: 'claude-code',
       plugin: 'stripe@claude-plugins-official',
       marketplace: 'anthropics/claude-plugins-official',
+      ref: 'main',
       marketplace_commit: 'a'.repeat(40),
       native_plugin_id: 'stripe@forge-test',
       version: '0.9.2',
@@ -1131,6 +1133,19 @@ describe('local artifact store', () => {
       assert.ok(actual);
       assert.equal(actual.runId, 'run-1');
     }
+
+    const mismatchedRef = await commitArtifacts(
+      [
+        ...core,
+        { path: 'setup.json', body: setup({ ...receipt, ref: 'other' }) },
+      ],
+      (result) => result,
+      { plan: pluginPlan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(mismatchedRef),
+      /does not match the completed run plan/,
+    );
 
     const missingResolution = await commitArtifacts(core, (result) => result, {
       plan: pluginPlan,

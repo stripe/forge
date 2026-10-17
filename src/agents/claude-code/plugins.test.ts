@@ -198,6 +198,79 @@ describe('Claude plugin installer', () => {
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
   });
 
+  it('rejects malformed refs before installing', () => {
+    assert.throws(
+      () => installerPreflight({ ...distribution, ref: 'feature//fix' }),
+      /invalid/,
+    );
+  });
+
+  it('installs a requested branch and records its resolved commit', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    const receipt = await installerPreflight({
+      ...distribution,
+      ref: 'main',
+    }).install(installContext(state, harness.commands));
+    const add = harness.calls.find(
+      (argv) => argv.includes('marketplace') && argv.includes('add'),
+    )!;
+    assert.equal(
+      add[add.indexOf('add') + 1],
+      `${distribution.marketplace}#main`,
+    );
+    assert.equal(receipt.ref, 'main');
+    assert.equal(receipt.marketplace_commit, CATALOG_COMMIT);
+    assert.ok(
+      harness.calls.some((argv) => argv.includes('refs/heads/main^{commit}')),
+    );
+  });
+
+  it('verifies a detached checkout against a requested tag', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, { checkoutBranch: '' });
+    const receipt = await installerPreflight({
+      ...distribution,
+      ref: 'v1.0',
+    }).install(installContext(state, harness.commands));
+    assert.equal(receipt.ref, 'v1.0');
+    assert.ok(
+      harness.calls.some((argv) => argv.includes('refs/tags/v1.0^{commit}')),
+    );
+  });
+
+  it('rejects reuse of a marketplace at a different ref', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    const context = installContext(state, harness.commands);
+    await installerPreflight({ ...distribution, ref: 'main' }).install(context);
+    await assert.rejects(
+      installerPreflight({ ...distribution, ref: 'other' }).install(context),
+      /requested ref/,
+    );
+    await assert.rejects(
+      installerPreflight().install(context),
+      /requested ref/,
+    );
+    assert.equal(
+      harness.calls.filter(
+        (argv) => argv.includes('marketplace') && argv.includes('add'),
+      ).length,
+      1,
+    );
+  });
+
+  it('rejects a checkout at a commit other than the requested ref', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, { refCommit: 'c'.repeat(40) });
+    await assert.rejects(
+      installerPreflight({ ...distribution, ref: 'main' }).install(
+        installContext(state, harness.commands),
+      ),
+      /requested ref/,
+    );
+  });
+
   it('reuses the registered marketplace across repeated plugin setup', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state);
@@ -348,7 +421,7 @@ describe('Claude plugin installer', () => {
     for (const candidate of [
       {
         version: '1.0.0',
-        source: './plugins/formatter',
+        source: './plugins/formatter/',
       },
       {
         version: '2.0.0',
@@ -553,6 +626,8 @@ function nativeCommandHarness(
     readonly catalogSource?: unknown;
     readonly installedVersion?: string;
     readonly marketplaceCommit?: string;
+    readonly refCommit?: string;
+    readonly checkoutBranch?: string;
     readonly installedCommit?: string | null;
     readonly extraPlugin?: boolean;
     readonly origin?: string;
@@ -603,8 +678,14 @@ function nativeCommandHarness(
             stderr: 'fatal: detected dubious ownership',
           };
         }
+        if (git.includes('branch'))
+          return result(options.checkoutBranch ?? 'main');
         if (git.includes('rev-parse'))
-          return result(options.marketplaceCommit ?? CATALOG_COMMIT);
+          return result(
+            git.includes('--verify')
+              ? (options.refCommit ?? CATALOG_COMMIT)
+              : (options.marketplaceCommit ?? CATALOG_COMMIT),
+          );
         if (git.includes('get-url'))
           return result(options.origin ?? MARKETPLACE_REPOSITORY);
         if (git.includes('show')) return result(catalog);
@@ -613,7 +694,8 @@ function nativeCommandHarness(
 
       const marketplaceIndex = command.indexOf('marketplace');
       if (marketplaceIndex >= 0 && command[marketplaceIndex + 1] === 'add') {
-        assert.equal(command[marketplaceIndex + 2], distribution.marketplace);
+        const [repository, ref] = command[marketplaceIndex + 2]!.split('#');
+        assert.equal(repository, distribution.marketplace);
         const relative = 'marketplaces/claude-plugins-official';
         await state.mutable.writeFile(
           `${relative}/.git/HEAD`,
@@ -628,7 +710,11 @@ function nativeCommandHarness(
           Buffer.from(
             JSON.stringify({
               'claude-plugins-official': {
-                source: { source: 'github', repo: distribution.marketplace },
+                source: {
+                  source: 'github',
+                  repo: distribution.marketplace,
+                  ...(ref === undefined ? {} : { ref }),
+                },
                 installLocation: `${pluginStatePath}/${relative}`,
               },
             }),

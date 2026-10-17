@@ -21,6 +21,15 @@ const RECEIPT = {
 } as const;
 
 describe('plugin installation receipts', () => {
+  it('accepts a moving marketplace ref but rejects a commit pin', () => {
+    const receipt = { ...RECEIPT, ref: 'feature/plugin-fix' };
+    assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
+    for (const ref of ['a'.repeat(40), 'feature//fix']) {
+      assert.throws(() =>
+        parseAgentPluginInstallationReceipt({ ...RECEIPT, ref }),
+      );
+    }
+  });
   it('strictly snapshots a complete public resolution', () => {
     const input = structuredClone(RECEIPT);
     const parsed = parseAgentPluginInstallationReceipt(input);

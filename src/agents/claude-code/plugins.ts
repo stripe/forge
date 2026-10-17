@@ -8,6 +8,7 @@ import type {
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import {
   isSafeGitHubRepository,
+  isSafeMarketplaceRef,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../../model/paths.ts';
@@ -182,6 +183,7 @@ export function createClaudePluginInstaller(
             adapter: adapterId,
             plugin: selected.plugin,
             marketplace: selected.marketplace,
+            ...(selected.ref === undefined ? {} : { ref: selected.ref }),
             marketplace_commit: marketplaceCommit,
             native_plugin_id: nativePluginId,
             version: installed.version,
@@ -212,7 +214,9 @@ async function ensureMarketplaceCheckout(input: {
         'plugin',
         'marketplace',
         'add',
-        input.distribution.marketplace,
+        input.distribution.ref === undefined
+          ? input.distribution.marketplace
+          : `${input.distribution.marketplace}#${input.distribution.ref}`,
         '--scope',
         'user',
       ]),
@@ -231,6 +235,11 @@ async function ensureMarketplaceCheckout(input: {
   ) {
     throw new Error(
       'Claude plugin marketplace state does not match its repository or path.',
+    );
+  }
+  if (registered.source.ref !== input.distribution.ref) {
+    throw new Error(
+      'Claude plugin marketplace state does not match the requested ref.',
     );
   }
   const head = await input.state.inspect(
@@ -252,6 +261,38 @@ async function ensureMarketplaceCheckout(input: {
     throw new Error(
       'Plugin marketplace checkout did not resolve to a Git commit.',
     );
+  }
+
+  if (input.distribution.ref !== undefined) {
+    const branch = await runGit(
+      input.commands,
+      input.marketplacePath,
+      ['-C', input.marketplacePath, 'branch', '--show-current'],
+      input.signal,
+      'Forge could not verify the plugin marketplace branch.',
+    );
+    const ref = input.distribution.ref;
+    const target = await runGit(
+      input.commands,
+      input.marketplacePath,
+      [
+        '-C',
+        input.marketplacePath,
+        'rev-parse',
+        '--verify',
+        `${branch.stdout.trim() === ref ? 'refs/heads' : 'refs/tags'}/${ref}^{commit}`,
+      ],
+      input.signal,
+      'Forge could not verify the plugin marketplace ref.',
+    );
+    if (
+      target.stdout.trim() !== commit ||
+      (branch.stdout.trim() !== '' && branch.stdout.trim() !== ref)
+    ) {
+      throw new Error(
+        'Plugin marketplace checkout does not match the requested ref.',
+      );
+    }
   }
 
   const remote = await runGit(
@@ -544,7 +585,10 @@ function installedPluginLocation(
 
 function assertSupportedMarketplaceSource(source: unknown): void {
   if (typeof source === 'string') {
-    if (!source.startsWith('./') || !isSafePluginPath(source.slice(2))) {
+    if (
+      !source.startsWith('./') ||
+      !isSafePluginPath(source.slice(2).replace(/\/$/, ''))
+    ) {
       throw new Error('Marketplace plugin path is invalid.');
     }
     return;
@@ -661,10 +705,12 @@ async function runChecked(
 function freezeDistribution(input: PluginSelectionV1): PluginSelectionV1 {
   if (
     !isPlainRecord(input) ||
-    !hasExactKeys(input, ['plugin', 'marketplace']) ||
+    !hasOnlyKeys(input, ['plugin', 'marketplace', 'ref']) ||
     typeof input.plugin !== 'string' ||
     typeof input.marketplace !== 'string' ||
-    !isSafeGitHubRepository(input.marketplace)
+    !isSafeGitHubRepository(input.marketplace) ||
+    (Object.hasOwn(input, 'ref') &&
+      (typeof input.ref !== 'string' || !isSafeMarketplaceRef(input.ref)))
   ) {
     throw new TypeError('Claude plugin distribution is invalid.');
   }
@@ -815,15 +861,6 @@ function setsEqual(
 ): boolean {
   return (
     left.size === right.size && [...left].every((value) => right.has(value))
-  );
-}
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-): boolean {
-  return (
-    Reflect.ownKeys(value).length === keys.length && hasOnlyKeys(value, keys)
   );
 }
 

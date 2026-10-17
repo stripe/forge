@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   isSafeDatasetRelativePath,
   isSafeGitHubRepository,
+  isSafeMarketplaceRef,
   isSafeSimpleIdentifier,
   isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
@@ -71,6 +72,10 @@ const PluginDistributionSchema = z
   .object({
     plugin: PluginIdSchema,
     marketplace: GitHubRepositorySchema,
+    ref: z
+      .string()
+      .refine(isSafeMarketplaceRef, 'must be a branch or tag, not a commit SHA')
+      .optional(),
   })
   .strict();
 

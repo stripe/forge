@@ -28,6 +28,7 @@ treatments:
             claude-code:
               plugin: example-plugin@example-marketplace
               marketplace: example-org/example-marketplace
+              ref: feature/plugin-fix # optional Claude Code branch or tag
             codex:
               plugin: example-plugin@example-marketplace
               marketplace: example-org/example-marketplace
@@ -47,7 +48,13 @@ entry.
 
 ## “Latest” and reproducibility
 
-The plugin action intentionally follows the marketplace's current default branch:
+The plugin action follows the marketplace's current default branch, or the
+current commit of an optional Claude Code `ref` naming a branch or tag. Codex
+does not accept a marketplace `ref`. Full commit SHAs are rejected as pins;
+a branch or tag can move between runs. This is distinct from refs inside
+marketplace catalog plugin sources described below.
+
+Each run:
 
 1. Each run starts with fresh, run-owned agent state.
 2. Forge registers the authored marketplace through the agent's native CLI.
@@ -155,7 +162,7 @@ setup, the prepared operation:
 
 The receipt includes:
 
-- the authored marketplace and plugin IDs;
+- the authored marketplace and plugin IDs, and Claude Code branch/tag `ref` when supplied;
 - the exact catalog commit used to read the marketplace entry;
 - the native plugin ID and installed version;
 - the selected source kind and installer-reported Git commit when available; and

@@ -307,7 +307,7 @@ initial_prompt: Two
     );
   });
 
-  it('parses only latest-marketplace forge/plugin selections', () => {
+  it('parses rolling forge/plugin selections', () => {
     {
       const actual = parseSetupStep({
         uses: 'forge/plugin',
@@ -328,6 +328,58 @@ initial_prompt: Two
       assert.ok(claude && typeof claude === 'object' && !Array.isArray(claude));
       assert.equal(claude.plugin, 'stripe@claude-plugins-official');
       assert.equal(claude.marketplace, 'anthropics/claude-plugins-official');
+    }
+    for (const ref of ['main', 'feature/plugin-fix', 'v1.0']) {
+      const step = parseSetupStep({
+        uses: 'forge/plugin',
+        with: {
+          agents: {
+            'claude-code': {
+              plugin: 'stripe@stripe',
+              marketplace: 'stripe/ai',
+              ref,
+            },
+          },
+        },
+      });
+      assert.equal(
+        (step.with.agents as Record<string, { ref: string }>)['claude-code']
+          ?.ref,
+        ref,
+      );
+    }
+    for (const ref of [
+      '',
+      '-bad',
+      'bad#ref',
+      'a..b',
+      'a@{b',
+      'a b',
+      'a\n',
+      'bad/',
+      'bad.lock',
+      'a'.repeat(40),
+      '.hidden',
+      'release.',
+      'feature//fix',
+      'feature.lock/fix',
+    ]) {
+      assert.throws(
+        () =>
+          parseSetupStep({
+            uses: 'forge/plugin',
+            with: {
+              agents: {
+                'claude-code': {
+                  plugin: 'stripe@stripe',
+                  marketplace: 'stripe/ai',
+                  ref,
+                },
+              },
+            },
+          }),
+        BenchmarkModelError,
+      );
     }
 
     for (const withValue of [

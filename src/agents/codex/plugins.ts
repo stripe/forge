@@ -54,6 +54,11 @@ export function createCodexPluginInstaller(options: {
           'Codex plugin installer does not match the selected adapter.',
         );
       }
+      if (record(distribution) && Object.hasOwn(distribution, 'ref')) {
+        throw new TypeError(
+          'Plugin marketplace ref is Claude Code only for now.',
+        );
+      }
       if (
         !record(distribution) ||
         Object.keys(distribution).length !== 2 ||
