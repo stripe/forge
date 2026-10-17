@@ -10,6 +10,7 @@ import {
   parseForgeBuildIdentity,
 } from '../version.ts';
 import { JudgingCriterionSchema } from './criteria.ts';
+import { DockerProxySchema } from './dockerNetwork.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
 import { isSha256Digest } from './hashes.ts';
 import { agentSelectionKey } from './matrix.ts';
@@ -348,6 +349,9 @@ const DockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
     image: z.object({ kind: z.literal('forge') }).strict(),
+    network: z.literal('host').optional(),
+    build_network: z.literal('host').optional(),
+    proxy: DockerProxySchema.optional(),
     platform: z.enum(['linux/amd64', 'linux/arm64', 'native']),
     resources: z
       .object({
@@ -629,6 +633,9 @@ const ResolvedDockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
     image: z.object({ kind: z.literal('forge') }).strict(),
+    network: z.literal('host').optional(),
+    build_network: z.literal('host').optional(),
+    proxy: DockerProxySchema.optional(),
     platform: z.enum(['linux/amd64', 'linux/arm64']),
     resources: z
       .object({

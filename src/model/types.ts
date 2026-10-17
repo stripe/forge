@@ -189,6 +189,15 @@ export interface DockerResourcesV1 {
 export interface ForgeDockerRuntimeV1 {
   adapter: 'docker';
   image: { kind: 'forge' };
+  /** Omit for Docker's normal network. Host networking is explicit. */
+  network?: 'host';
+  build_network?: 'host';
+  /** Nonsecret proxy addresses; URL credentials are not supported. */
+  proxy?: {
+    http?: string | undefined;
+    https?: string | undefined;
+    no_proxy?: string | undefined;
+  };
   platform: 'linux/amd64' | 'linux/arm64';
   resources: DockerResourcesV1;
 }
@@ -197,6 +206,15 @@ export interface ForgeDockerRuntimeV1 {
 export interface ForgeDockerRuntimeConfigV1 {
   adapter: 'docker';
   image: { kind: 'forge' };
+  /** Omit for Docker's normal network. Host networking is explicit. */
+  network?: 'host';
+  build_network?: 'host';
+  /** Nonsecret proxy addresses; URL credentials are not supported. */
+  proxy?: {
+    http?: string | undefined;
+    https?: string | undefined;
+    no_proxy?: string | undefined;
+  };
   platform: ForgeDockerRuntimeV1['platform'] | 'native';
   resources: DockerResourcesV1;
 }

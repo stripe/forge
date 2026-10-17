@@ -169,6 +169,78 @@ function preparation(
   };
 }
 
+describe('explicit Docker networking', () => {
+  it('passes opt-in proxies as standard build args and command environment, not image assets', async () => {
+    const fake = fakeDocker();
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-proxy-'));
+    roots.push(root);
+    const runtime = createDockerRuntimeAdapter({
+      hostCommands: fake.runner,
+      temporaryRoot: root,
+    });
+    const input = preparation();
+    if (!('image' in input.plan.runtime)) throw new Error('expected Docker');
+    input.plan.runtime = {
+      ...input.plan.runtime,
+      proxy: { http: 'http://proxy.example:8080', no_proxy: 'localhost' },
+    };
+    const prepared = await runtime.prepare(input);
+    await prepared.commands.uncredentialed.run(['node', '--version']);
+    const build = fake.calls.find(({ argv }) => argv[1] === 'build')!.argv;
+    assert.ok(build.includes('HTTP_PROXY=http://proxy.example:8080'));
+    assert.ok(build.includes('http_proxy=http://proxy.example:8080'));
+    const command = fake.calls.find(
+      ({ argv }) => argv[1] === 'exec' && argv.at(-1) === '--version',
+    )!;
+    assert.match(
+      command.environmentBody!,
+      /HTTP_PROXY=http:\/\/proxy.example:8080/,
+    );
+    assert.ok(!build.some((arg) => arg.includes('secret-value')));
+    await prepared.dispose();
+  });
+
+  it('keeps default networking and applies host networking to setup and its replacement', async () => {
+    for (const network of [undefined, 'host'] as const) {
+      const fake = fakeDocker();
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-network-'));
+      roots.push(root);
+      const runtime = createDockerRuntimeAdapter({
+        hostCommands: fake.runner,
+        temporaryRoot: root,
+      });
+      const input = preparation();
+      input.plan.runtime = {
+        ...input.plan.runtime,
+        ...(network ? { network, build_network: network } : {}),
+      };
+      const prepared = await runtime.prepare({
+        ...input,
+        requirements: {
+          executables: [],
+          stateDirectories: [
+            {
+              id: 'sealed',
+              containerPath: '/opt/sealed',
+              sealAfterSetup: true,
+            },
+          ],
+        },
+      });
+      await prepared.finalizeSetup();
+      await prepared.dispose();
+      const starts = fake.calls.filter(({ argv }) => argv[1] === 'run');
+      assert.equal(starts.length, 2);
+      for (const { argv } of starts) {
+        assert.equal(argv.includes('--network'), network === 'host');
+        if (network) assert.equal(argv[argv.indexOf('--network') + 1], 'host');
+      }
+      const build = fake.calls.find(({ argv }) => argv[1] === 'build')!.argv;
+      assert.equal(build.includes('--network'), network === 'host');
+    }
+  });
+});
+
 describe('Forge Docker runtime', () => {
   it('uses an unversioned built-in adapter identity', () => {
     const adapter = createDockerRuntimeAdapter();
