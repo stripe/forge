@@ -512,6 +512,8 @@ function verifySetupArtifact(
         receipt.adapter !== plan.agent.adapter ||
         receipt.plugin !== distribution.plugin ||
         receipt.marketplace !== distribution.marketplace ||
+        serializeCanonicalJson(receipt.mcp_servers ?? null) !==
+          serializeCanonicalJson(planned.with.mcp_servers ?? null) ||
         nativeName !== requestedName
       ) {
         throw new ArtifactStoreError(

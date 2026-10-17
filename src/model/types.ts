@@ -79,9 +79,15 @@ export interface PluginSelectionV1 extends JsonObject {
   marketplace: string;
 }
 
+/** Authentication for an existing bundled HTTP MCP server. */
+export interface PluginMcpServerV1 extends JsonObject {
+  bearer_token: JsonObject & { env: string };
+}
+
 export interface PluginSetupWithV1 extends JsonObject {
   /** Adapter ID to native selection. Only the selected branch is realized. */
   agents: Record<string, PluginSelectionV1>;
+  mcp_servers?: Record<string, PluginMcpServerV1>;
 }
 
 export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {

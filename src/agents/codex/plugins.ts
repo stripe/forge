@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-
 import type { CommandRunner } from '../../contracts/command.ts';
 import type {
   AgentPluginInstallationReceipt,
@@ -15,6 +14,7 @@ import {
   isSafeWorkspaceRelativePath,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
+import { configurePluginMcp } from '../pluginMcp.ts';
 import { inspectInstalledPluginTree } from '../pluginTree.ts';
 import {
   assertCodexRuntimeLayout,
@@ -45,6 +45,7 @@ export function createCodexPluginInstaller(options: {
 }): AgentPluginInstaller {
   const layout = resolveCodexLayout(options.layout);
   return Object.freeze({
+    supportsMcpBearerAuth: true as const,
     preflight(
       distribution: PluginSelectionV1,
       context: AgentPluginPreflightContext,
@@ -257,6 +258,9 @@ export function createCodexPluginInstaller(options: {
             identity.name,
             installed.version,
           );
+          const mcpServers = context.mcpServers;
+          if (mcpServers)
+            await configurePluginMcp(home, relative, 'codex', mcpServers);
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,
@@ -270,6 +274,7 @@ export function createCodexPluginInstaller(options: {
             native_plugin_id: selected.plugin,
             version: installed.version,
             source: Object.freeze({ kind: source.kind }),
+            ...(mcpServers ? { mcp_servers: structuredClone(mcpServers) } : {}),
             installed_tree: installedTree,
           });
         },

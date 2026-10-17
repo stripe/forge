@@ -1,3 +1,4 @@
+import { pluginMcpCredentials } from '../agents/pluginMcp.ts';
 import type { PreparedAgentPluginInstallation } from '../contracts/plugin.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
 import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.ts';
@@ -31,14 +32,32 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
         `Agent ${JSON.stringify(context.selection.adapter)} does not support forge/plugin.`,
       );
     }
+    if (
+      pluginStep.with.mcp_servers &&
+      !context.pluginInstaller.supportsMcpBearerAuth
+    ) {
+      throw new TypeError(
+        `Agent ${JSON.stringify(context.selection.adapter)} does not support plugin MCP bearer authentication.`,
+      );
+    }
     const prepared = context.pluginInstaller.preflight(distribution, {
       selection: context.selection,
       runtime: context.runtime,
+      ...(pluginStep.with.mcp_servers
+        ? { mcpServers: pluginStep.with.mcp_servers }
+        : {}),
     });
     assertPreparedInstallation(prepared);
 
     return Object.freeze({
       requirements: Object.freeze({
+        ...(pluginStep.with.mcp_servers
+          ? {
+              credentials: {
+                agent: pluginMcpCredentials(pluginStep.with.mcp_servers),
+              },
+            }
+          : {}),
         executables: prepared.requirements.executables,
         stateDirectories: prepared.requirements.stateDirectories,
       }),

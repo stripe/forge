@@ -1,6 +1,7 @@
 import type {
   AgentSelectionV1,
   JsonObject,
+  PluginMcpServerV1,
   PluginSelectionV1,
   ResolvedRunPlanV1,
   Sha256Digest,
@@ -32,6 +33,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
     /** Git revision reported by the native installer, when available. */
     readonly commit?: string;
   };
+  readonly mcp_servers?: Record<string, PluginMcpServerV1>;
   readonly installed_tree: JsonObject & {
     readonly format: 'forge-plugin-tree-v1';
     readonly sha256: Sha256Digest;
@@ -45,6 +47,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
 export interface AgentPluginPreflightContext {
   readonly selection: AgentSelectionV1;
   readonly runtime: ResolvedRunPlanV1['runtime'];
+  readonly mcpServers?: Readonly<Record<string, PluginMcpServerV1>>;
 }
 
 /** Narrow authority supplied to one already-preflighted native installation. */
@@ -68,6 +71,8 @@ export interface PreparedAgentPluginInstallation {
 
 /** Optional narrow capability implemented by an agent adapter. */
 export interface AgentPluginInstaller {
+  /** Accepts environment-backed bearer auth for bundled HTTP MCP servers. */
+  readonly supportsMcpBearerAuth?: true;
   /** Purely validate compatibility and bind the later native operation. */
   preflight(
     plugin: PluginSelectionV1,

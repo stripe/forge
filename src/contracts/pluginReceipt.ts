@@ -4,6 +4,7 @@ import {
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
+import { PluginMcpServersSchema } from '../model/pluginMcp.ts';
 import type { AgentPluginInstallationReceipt } from './plugin.ts';
 
 /** Validate and snapshot an adapter-produced plugin receipt at a trust boundary. */
@@ -21,6 +22,7 @@ export function parseAgentPluginInstallationReceipt(
       'version',
       'source',
       'installed_tree',
+      ...(Object.hasOwn(input, 'mcp_servers') ? ['mcp_servers'] : []),
     ]) ||
     typeof input.adapter !== 'string' ||
     !isSafeSimpleIdentifier(input.adapter) ||
@@ -45,6 +47,9 @@ export function parseAgentPluginInstallationReceipt(
     native_plugin_id: input.native_plugin_id,
     version: input.version,
     source: parsePluginSourceReceipt(input.source),
+    ...(Object.hasOwn(input, 'mcp_servers')
+      ? { mcp_servers: freezeMcpServers(input.mcp_servers) }
+      : {}),
     installed_tree: parseInstalledPluginTree(input.installed_tree),
   });
 }
@@ -155,4 +160,13 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   }
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function freezeMcpServers(input: unknown) {
+  const servers = PluginMcpServersSchema.parse(input);
+  for (const server of Object.values(servers)) {
+    Object.freeze(server.bearer_token);
+    Object.freeze(server);
+  }
+  return Object.freeze(servers);
 }

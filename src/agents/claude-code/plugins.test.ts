@@ -34,6 +34,42 @@ const distribution: PluginSelectionV1 = {
 };
 
 describe('Claude plugin installer', () => {
+  it('configures installed MCP auth before fingerprinting without sending secrets to installation', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state);
+    const root = `cache/claude-plugins-official/stripe/${LATEST_VERSION}`;
+    await state.mutable.writeFile(
+      `${root}/.mcp.json`,
+      Buffer.from(
+        JSON.stringify({
+          mcpServers: {
+            stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+          },
+        }),
+      ),
+    );
+    const servers = { stripe: { bearer_token: { env: 'STRIPE_API_KEY' } } };
+    const receipt = await installerPreflight(distribution, servers).install(
+      installContext(state, harness.commands),
+    );
+    assert.deepEqual(receipt.mcp_servers, servers);
+    const configured = JSON.parse(
+      Buffer.from(await state.mutable.readFile(`${root}/.mcp.json`)).toString(),
+    );
+    assert.equal(
+      configured.mcpServers.stripe.headers.Authorization,
+      `Bearer \${FORGE_MCP_BEARER_STRIPE_API_KEY}`,
+    );
+    const originalTree = await installerPreflight().install(
+      installContext(state, harness.commands),
+    );
+    assert.equal(
+      originalTree.installed_tree.sha256,
+      receipt.installed_tree.sha256,
+    );
+    assert.ok(!JSON.stringify(harness.calls).includes('STRIPE_API_KEY'));
+  });
+
   it('installs and verifies receipts against the explicit separate configuration root', async () => {
     const layout: ClaudeCodeLayout = {
       workspace: '/tmp/run-123/workspace',
@@ -507,7 +543,10 @@ describe('Claude plugin installer', () => {
   });
 });
 
-function installerPreflight(selected: PluginSelectionV1 = distribution) {
+function installerPreflight(
+  selected: PluginSelectionV1 = distribution,
+  mcpServers?: import('../../model/types.ts').PluginSetupWithV1['mcp_servers'],
+) {
   return createClaudePluginInstaller({
     adapterId: 'claude-code',
     executable: 'claude',
@@ -518,6 +557,7 @@ function installerPreflight(selected: PluginSelectionV1 = distribution) {
       model: 'claude-test',
     },
     runtime: runtimeSelection(),
+    ...(mcpServers ? { mcpServers } : {}),
   });
 }
 

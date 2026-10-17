@@ -180,8 +180,41 @@ quiesces all mutation before evidence selection.
 
 ## Credentials and limitations
 
-`forge/plugin` declares no credentials and receives an uncredentialed setup
-command runner. It never receives the coding agent's model credential. Fetches
+A plugin may declare bearer authentication for named HTTP MCP servers already
+bundled in its conventional `.mcp.json`:
+
+```yaml
+with:
+  agents:
+    claude-code:
+      plugin: stripe@claude-plugins-official
+      marketplace: anthropics/claude-plugins-official
+    codex:
+      plugin: stripe@stripe
+      marketplace: stripe/ai
+  mcp_servers:
+    stripe:
+      bearer_token:
+        env: STRIPE_API_KEY
+```
+
+The CLI binds each declared host variable automatically. Supply an Agent API key
+for Stripe MCP; account or merchant provisioning remains external to Forge.
+Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
+credential resolver. Missing values fail before runtime allocation. Ordinary
+validation and planning need no values.
+
+Forge keeps the bundled URL and unrelated plugin content. Claude uses an
+Authorization header template; Codex uses `bearer_token_env_var`. Both reference
+`FORGE_MCP_BEARER_<host-variable>` inside the runtime. Tokens reach only agent
+commands, never setup commands. Forge records the server names and environment
+references in the receipt and fingerprints the configured installation.
+
+A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
+source fails setup. Custom MCP config paths and Agent Plugins 1.0 `mcp.json` are
+unsupported. OAuth and host login passthrough are unsupported.
+
+Plugin installation receives an uncredentialed setup command runner. It never receives the coding agent's model credential. Fetches
 therefore work only for credential-free HTTPS sources accepted by the action.
 
 Current limitations are:

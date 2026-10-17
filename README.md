@@ -91,6 +91,12 @@ The public CLI creates no host bridge; supply an endpoint reachable from
 the container. The development live suite has separate
 [gateway bridge support](docs/codebase-guide.md#opt-in-live-tests).
 
+For plugins with HTTP MCP servers, declare bearer auth in
+[`forge/plugin` configuration](docs/plugin-action.md#credentials-and-limitations)
+and export the named key, such as `STRIPE_API_KEY`. Forge passes that token only
+to agent commands and retains the plugin's endpoint. Stripe MCP uses an Agent
+API key; prepare the account or merchant outside Forge.
+
 The runtime installs pinned Claude Code and Codex CLI releases from npm.
 Their use remains subject to their providers' terms.
 

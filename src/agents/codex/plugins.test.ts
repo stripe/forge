@@ -18,6 +18,7 @@ const distribution = { plugin: 'fixture@test', marketplace: 'example/plugins' };
 function fixture(
   options: {
     source?: unknown;
+    mcpServers?: import('../../model/types.ts').PluginSetupWithV1['mcp_servers'];
     catalogPath?: string;
     manifestPath?: string;
     mutate?: (argv: readonly string[], output: unknown) => unknown;
@@ -166,7 +167,11 @@ function fixture(
   const prepared = createCodexPluginInstaller({
     adapterId: 'codex',
     executable: 'codex',
-  }).preflight(distribution, { selection: plan.agent, runtime: plan.runtime });
+  }).preflight(distribution, {
+    selection: plan.agent,
+    runtime: plan.runtime,
+    ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+  });
   const install = (signal = new AbortController().signal) =>
     prepared.install({
       runId: 'test',
@@ -179,6 +184,33 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
+  it('sets the native bearer environment reference in the installed plugin', async () => {
+    const mcpServers = { stripe: { bearer_token: { env: 'STRIPE_API_KEY' } } };
+    const test = fixture({ mcpServers });
+    await test.state.mutable.writeFile(
+      `${cache}/.mcp.json`,
+      Buffer.from(
+        JSON.stringify({
+          mcpServers: {
+            stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+          },
+        }),
+      ),
+    );
+    const receipt = await test.install();
+    assert.deepEqual(receipt.mcp_servers, mcpServers);
+    const configured = JSON.parse(
+      Buffer.from(
+        await test.state.mutable.readFile(`${cache}/.mcp.json`),
+      ).toString(),
+    );
+    assert.equal(
+      configured.mcpServers.stripe.bearer_token_env_var,
+      'FORGE_MCP_BEARER_STRIPE_API_KEY',
+    );
+    assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
+  });
+
   it('binds installation without commands and shares the adapter home mount', async () => {
     const test = fixture();
     assert.equal(test.calls.length, 0);
