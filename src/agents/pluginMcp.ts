@@ -72,7 +72,7 @@ export async function configurePluginMcp(
       !record(value) ||
       value.mcpServers !== undefined ||
       value.mcp_servers !== undefined ||
-      (manifest === 'plugin.json' && value.mcp !== undefined)
+      manifest === 'plugin.json'
     ) {
       throw new Error(
         'Plugin MCP auth requires a conventional bundled .mcp.json; manifest MCP overrides are unsupported.',
@@ -109,10 +109,11 @@ export function configurePluginMcpDocument(
     if (!Object.hasOwn(connections, name) || !record(server))
       throw new Error(`Plugin MCP server ${name} is absent.`);
     if (
-      server.type !== 'http' &&
-      server.type !== 'streamable-http' &&
-      server.type !== 'streamable_http' &&
-      server.type !== undefined
+      (adapter === 'claude-code' && server.type !== 'http') ||
+      (server.type !== 'http' &&
+        server.type !== 'streamable-http' &&
+        server.type !== 'streamable_http' &&
+        server.type !== undefined)
     )
       throw new Error(`Plugin MCP server ${name} requires HTTP transport.`);
     if (typeof server.url !== 'string' || server.command !== undefined)
@@ -124,7 +125,11 @@ export function configurePluginMcpDocument(
       url.password
     )
       throw new Error(`Plugin MCP server ${name} has an unsupported URL.`);
-    if (server.oauth !== undefined || server.http_headers_helper !== undefined)
+    if (
+      server.oauth !== undefined ||
+      server.headersHelper !== undefined ||
+      server.http_headers_helper !== undefined
+    )
       throw new Error(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );

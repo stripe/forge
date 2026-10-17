@@ -76,6 +76,11 @@ describe('plugin MCP bearer authentication', () => {
       { type: 'stdio', command: 'x' },
       { type: 'sse', url: 'https://example.com' },
       { url: 'https://example.com', oauth: {} },
+      {
+        type: 'http',
+        url: 'https://example.com',
+        headersHelper: 'node auth.js',
+      },
     ]) {
       assert.throws(
         () =>
@@ -97,6 +102,18 @@ describe('plugin MCP bearer authentication', () => {
     );
     await assert.rejects(
       configurePluginMcp(state.mutable, 'plugin', 'claude-code', servers),
+      /manifest MCP overrides/,
+    );
+  });
+
+  it('rejects root manifests whose native format loads mcp.json instead', async () => {
+    const state = createMemoryWorkspace();
+    await state.mutable.writeFile(
+      'plugin/plugin.json',
+      Buffer.from('{"name":"fixture","version":"1.0.0"}'),
+    );
+    await assert.rejects(
+      configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
       /manifest MCP overrides/,
     );
   });
