@@ -48,8 +48,6 @@ bytes are not rewritten.
 `pnpm check` runs Biome, type checking, tests, build, dataset validation,
 documentation validation, and package checks. PRs targeting `main`, including drafts, run the
 same checks through the [PR workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
-The publishing workflow checks and publishes versioned development snapshots
-after pushes to `main`; stable release commits are skipped.
 
 `pnpm check:docs` checks documentation links, the public export inventory, and
 structured snippets. `pnpm check:cases` validates checked-in datasets and
@@ -62,6 +60,49 @@ history. Public inputs under [`release`](https://github.com/stripe/forge/tree/ma
 keep dataset payloads in `datasets/`, with `experiment.yaml` and release
 documentation at the release root; harness inputs live under
 [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+
+### Versioning and release notes
+
+Use [Changesets](https://changesets.dev/) to record user-facing changes:
+
+```sh
+pnpm changeset
+pnpm changeset status
+```
+
+Select `@stripe/forge`, choose a semver bump, and describe the effect on users.
+Commit the generated `.changeset/*.md` with the change. Documentation-only and
+internal tooling changes need no release note; use `pnpm changeset --empty`
+when recording that decision. The status command previews pending bumps without
+changing the package version. Changesets is a development dependency and adds
+no runtime dependency.
+
+After changesets reach `main`, the
+[release workflow](https://github.com/stripe/forge/blob/main/.github/workflows/release.yml)
+creates or updates a **Version Packages** PR with the version bump and
+`CHANGELOG.md`. Review its release notes and passing checks, then merge it to
+publish the new version to **GitHub Packages** under the `latest` dist-tag.
+Changesets creates a `vX.Y.Z` Git tag and GitHub Release. Pushes without a new
+version do not publish another package. Let the version PR own version changes;
+do not bump `package.json` manually.
+
+The workflow runs `pnpm check` before publication. Because PRs created with
+`GITHUB_TOKEN` do not trigger `pull_request` workflows, it explicitly dispatches
+the PR checks on `changeset-release/main` after creating or updating the PR.
+The repository must allow GitHub Actions to create pull requests under
+**Settings → Actions → General → Workflow permissions**. The workflow uses
+`GITHUB_TOKEN` for repository operations and GitHub Packages; no npm token is
+needed. Package access remains governed by GitHub Packages permissions.
+
+To retry an interrupted release, rerun the release workflow on `main`.
+Changesets skips versions already published; if publication succeeded but the
+Git tag or GitHub Release failed, finish those separately from the published
+commit. The registry remains `https://npm.pkg.github.com`; public npm publishing
+is not enabled.
+Stable releases use Forge's exact-version
+[artifact compatibility rules](architecture.md#1-parse-and-pure-preflight),
+even while the repository is private. Retain the producing Forge version when
+reading saved runs, including runs produced by development versions.
 
 ### Opt-in live tests
 
