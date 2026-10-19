@@ -8,7 +8,7 @@ import type {
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import {
   isSafeGitHubRepository,
-  isSafeMarketplaceRef,
+  isSafeMetadata,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../../model/paths.ts';
@@ -684,7 +684,7 @@ function freezeDistribution(input: PluginSelectionV1): PluginSelectionV1 {
     typeof input.marketplace !== 'string' ||
     !isSafeGitHubRepository(input.marketplace) ||
     (Object.hasOwn(input, 'ref') &&
-      (typeof input.ref !== 'string' || !isSafeMarketplaceRef(input.ref)))
+      (typeof input.ref !== 'string' || !isSafeMetadata(input.ref)))
   ) {
     throw new TypeError('Claude plugin distribution is invalid.');
   }
