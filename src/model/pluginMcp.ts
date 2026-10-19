@@ -1,26 +1,14 @@
 import { z } from 'zod';
-import { isSafeSimpleIdentifier } from './paths.ts';
+
+/** Registered bundled connections; authentication belongs to Forge, not YAML. */
+export const PluginMcpServerSchema = z.enum(['stripe']);
+export type PluginMcpServerId = z.infer<typeof PluginMcpServerSchema>;
 
 export const PluginMcpServersSchema = z
-  .record(
-    z
-      .string()
-      .refine(isSafeSimpleIdentifier, 'must be a safe server identifier'),
-    z
-      .object({
-        bearer_token: z
-          .object({
-            env: z
-              .string()
-              .max(128)
-              .regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
-          })
-          .strict(),
-      })
-      .strict(),
-  )
+  .array(PluginMcpServerSchema)
+  .min(1)
+  .max(100)
   .refine(
-    (servers) =>
-      Object.keys(servers).length > 0 && Object.keys(servers).length <= 100,
-    'must contain a bounded non-empty server map',
+    (servers) => new Set(servers).size === servers.length,
+    'must not repeat an MCP server',
   );

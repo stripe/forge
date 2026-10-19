@@ -180,8 +180,8 @@ quiesces all mutation before evidence selection.
 
 ## Credentials and limitations
 
-A plugin may declare bearer authentication for named HTTP MCP servers already
-bundled in its conventional `.mcp.json`:
+Select registered HTTP MCP servers already bundled in a plugin's conventional
+`.mcp.json`. Forge owns each server's credential mapping:
 
 ```yaml
 with:
@@ -192,14 +192,13 @@ with:
     codex:
       plugin: stripe@stripe
       marketplace: stripe/ai
-  mcp_servers:
-    stripe:
-      bearer_token:
-        env: STRIPE_API_KEY
+  mcp_servers: [stripe]
 ```
 
-The CLI binds each declared host variable automatically. Supply an Agent API key
-for Stripe MCP; account or merchant provisioning remains external to Forge.
+The initial registered server is `stripe`, which requires `STRIPE_API_KEY`. Export
+an Agent API key before starting the eval; account or merchant provisioning
+remains external to Forge. Experiments select server names, not auth methods,
+keys, or environment-variable names. Unknown or repeated server names are rejected.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
@@ -207,8 +206,8 @@ validation and planning need no values.
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference
 `FORGE_MCP_BEARER_<host-variable>` inside the runtime. Tokens reach only agent
-commands, never setup commands. Forge records the server names and environment
-references in the receipt and fingerprints the configured installation.
+commands, never setup commands. Forge records the selected server names in the receipt and fingerprints the
+configured installation. Credential mappings are part of the Forge version.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
 source fails setup. Custom MCP config paths and Agent Plugins 1.0 `mcp.json` are

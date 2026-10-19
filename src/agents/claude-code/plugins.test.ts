@@ -48,7 +48,7 @@ describe('Claude plugin installer', () => {
         }),
       ),
     );
-    const servers = { stripe: { bearer_token: { env: 'STRIPE_API_KEY' } } };
+    const servers = ['stripe'] as const;
     const receipt = await installerPreflight(distribution, servers).install(
       installContext(state, harness.commands),
     );
@@ -545,7 +545,7 @@ describe('Claude plugin installer', () => {
 
 function installerPreflight(
   selected: PluginSelectionV1 = distribution,
-  mcpServers?: import('../../model/types.ts').PluginSetupWithV1['mcp_servers'],
+  mcpServers?: readonly import('../../model/types.ts').PluginMcpServerId[],
 ) {
   return createClaudePluginInstaller({
     adapterId: 'claude-code',

@@ -1,7 +1,7 @@
 import type {
   AgentSelectionV1,
   JsonObject,
-  PluginMcpServerV1,
+  PluginMcpServerId,
   PluginSelectionV1,
   ResolvedRunPlanV1,
   Sha256Digest,
@@ -33,7 +33,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
     /** Git revision reported by the native installer, when available. */
     readonly commit?: string;
   };
-  readonly mcp_servers?: Record<string, PluginMcpServerV1>;
+  readonly mcp_servers?: PluginMcpServerId[];
   readonly installed_tree: JsonObject & {
     readonly format: 'forge-plugin-tree-v1';
     readonly sha256: Sha256Digest;
@@ -47,7 +47,7 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
 export interface AgentPluginPreflightContext {
   readonly selection: AgentSelectionV1;
   readonly runtime: ResolvedRunPlanV1['runtime'];
-  readonly mcpServers?: Readonly<Record<string, PluginMcpServerV1>>;
+  readonly mcpServers?: readonly PluginMcpServerId[];
 }
 
 /** Narrow authority supplied to one already-preflighted native installation. */

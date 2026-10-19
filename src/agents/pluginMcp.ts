@@ -1,28 +1,37 @@
 import { credentialReference } from '../contracts/credentials.ts';
 import type { MutableWorkspace } from '../contracts/runtime.ts';
 import type {
-  PluginMcpServerV1,
+  PluginMcpServerId,
   PluginSetupStepV1,
   ResolvedRunPlanV1,
 } from '../model/types.ts';
+
+/** Named server presets own auth details instead of experiment YAML. */
+const PLUGIN_MCP_SERVERS = Object.freeze({
+  stripe: Object.freeze({
+    credentialEnvironmentVariable: 'STRIPE_API_KEY',
+    credentialReference: credentialReference('env:STRIPE_API_KEY'),
+  }),
+});
 
 /** Host names are separate from runtime names so keys cannot replace PATH/HOME. */
 export function pluginMcpTokenEnvironment(name: string): string {
   return `FORGE_MCP_BEARER_${name}`;
 }
 
-export function pluginMcpCredentials(
-  servers: Readonly<Record<string, PluginMcpServerV1>>,
-) {
+export function pluginMcpCredentials(servers: readonly PluginMcpServerId[]) {
   return Object.fromEntries(
-    Object.values(servers).map(({ bearer_token: { env } }) => [
-      pluginMcpTokenEnvironment(env),
-      { reference: credentialReference(`env:${env}`) },
-    ]),
+    servers.map((name) => {
+      const server = PLUGIN_MCP_SERVERS[name];
+      return [
+        pluginMcpTokenEnvironment(server.credentialEnvironmentVariable),
+        { reference: server.credentialReference },
+      ];
+    }),
   );
 }
 
-/** Bind only references declared by selected plans; never infer host variables. */
+/** Bind only registered credentials selected by plans, without reading values. */
 export function pluginMcpEnvironmentBindings(
   plans: readonly ResolvedRunPlanV1[],
   explicit: Readonly<Record<string, string>> = {},
@@ -31,10 +40,10 @@ export function pluginMcpEnvironmentBindings(
   for (const plan of plans)
     for (const step of plan.setup) {
       if (step.uses !== 'forge/plugin') continue;
-      for (const {
-        bearer_token: { env },
-      } of Object.values((step as PluginSetupStepV1).with.mcp_servers ?? {})) {
-        const reference = `env:${env}`;
+      for (const name of (step as PluginSetupStepV1).with.mcp_servers ?? []) {
+        const server = PLUGIN_MCP_SERVERS[name];
+        const env = server.credentialEnvironmentVariable;
+        const reference = server.credentialReference;
         if (Object.hasOwn(bindings, reference) && bindings[reference] !== env) {
           throw new TypeError(
             `Plugin credential ${reference} must be bound to ${env}.`,
@@ -51,7 +60,7 @@ export async function configurePluginMcp(
   state: MutableWorkspace,
   root: string,
   adapter: 'claude-code' | 'codex',
-  servers: Readonly<Record<string, PluginMcpServerV1>>,
+  servers: readonly PluginMcpServerId[],
 ): Promise<void> {
   // Native manifests can redirect MCP loading. Only the conventional bundled
   // .mcp.json contract is supported until each alternate format is exercised.
@@ -98,13 +107,13 @@ export async function configurePluginMcp(
 export function configurePluginMcpDocument(
   input: unknown,
   adapter: 'claude-code' | 'codex',
-  servers: Readonly<Record<string, PluginMcpServerV1>>,
+  servers: readonly PluginMcpServerId[],
 ): Record<string, unknown> {
   if (!record(input) || !record(input.mcpServers))
     throw new Error('Plugin .mcp.json must contain mcpServers.');
   const output = structuredClone(input);
   const connections = output.mcpServers as Record<string, unknown>;
-  for (const [name, configuration] of Object.entries(servers)) {
+  for (const name of servers) {
     const server = connections[name];
     if (!Object.hasOwn(connections, name) || !record(server))
       throw new Error(`Plugin MCP server ${name} is absent.`);
@@ -134,7 +143,7 @@ export function configurePluginMcpDocument(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );
     const environmentName = pluginMcpTokenEnvironment(
-      configuration.bearer_token.env,
+      PLUGIN_MCP_SERVERS[name].credentialEnvironmentVariable,
     );
     if (adapter === 'claude-code') {
       if (server.headers !== undefined && !record(server.headers))

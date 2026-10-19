@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import {
+  createEnvironmentCredentialResolver,
+  credentialReference,
+} from '../contracts/credentials.ts';
 import { parseSetupStep } from '../model/parse.ts';
 import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
@@ -10,7 +14,7 @@ import {
   pluginMcpEnvironmentBindings,
 } from './pluginMcp.ts';
 
-const servers = { stripe: { bearer_token: { env: 'STRIPE_API_KEY' } } };
+const servers = ['stripe'] as const;
 const step = {
   uses: 'forge/plugin',
   with: {
@@ -119,6 +123,7 @@ describe('plugin MCP bearer authentication', () => {
   });
 
   it('declares opaque credentials under safe runtime names and binds only selected inputs', () => {
+    assert.deepEqual(pluginMcpEnvironmentBindings([]), {});
     assert.deepEqual(pluginMcpCredentials(servers), {
       FORGE_MCP_BEARER_STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
     });
@@ -135,11 +140,33 @@ describe('plugin MCP bearer authentication', () => {
     );
   });
 
-  it('keeps auth schema strict and accepts references without credential values', () => {
+  it('requires the registered host key without accepting an alternate auth variable', async () => {
+    const plan = createTestResolvedRunPlan({
+      treatmentSetup: [parseSetupStep(step)],
+    });
+    const resolver = createEnvironmentCredentialResolver({
+      bindings: pluginMcpEnvironmentBindings([plan]),
+      environment: { OTHER_KEY: 'synthetic-key' },
+    });
+    await assert.rejects(
+      resolver.resolve(credentialReference('env:STRIPE_API_KEY'), {
+        runId: 'test',
+        purpose: 'agent',
+        signal: new AbortController().signal,
+      }),
+      /Set STRIPE_API_KEY/,
+    );
+  });
+
+  it('accepts registered server names and rejects authored auth details', () => {
     assert.deepEqual(parseSetupStep(step), step);
     for (const mcp_servers of [
-      {},
-      { stripe: { bearer_token: { env: 'BAD-NAME' } } },
+      [],
+      ['unknown'],
+      ['stripe', 'stripe'],
+      [{ server: 'stripe', bearer_token: 'secret' }],
+      { stripe: {} },
+      { stripe: { bearer_token: { env: 'STRIPE_API_KEY' } } },
       { stripe: { bearer_token: { env: 'KEY', value: 'secret' } } },
       { stripe: { url: 'https://other.test', bearer_token: { env: 'KEY' } } },
     ]) {

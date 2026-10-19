@@ -1,3 +1,7 @@
+import type { PluginMcpServerId } from './pluginMcp.ts';
+
+export type { PluginMcpServerId } from './pluginMcp.ts';
+
 import type { ForgeBuildIdentity } from '../version.ts';
 
 export const DEFAULT_MAX_TURNS = 10;
@@ -79,15 +83,11 @@ export interface PluginSelectionV1 extends JsonObject {
   marketplace: string;
 }
 
-/** Authentication for an existing bundled HTTP MCP server. */
-export interface PluginMcpServerV1 extends JsonObject {
-  bearer_token: JsonObject & { env: string };
-}
-
 export interface PluginSetupWithV1 extends JsonObject {
   /** Adapter ID to native selection. Only the selected branch is realized. */
   agents: Record<string, PluginSelectionV1>;
-  mcp_servers?: Record<string, PluginMcpServerV1>;
+  /** Registered bundled MCP servers whose credentials Forge supplies. */
+  mcp_servers?: PluginMcpServerId[];
 }
 
 export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {

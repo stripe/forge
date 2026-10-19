@@ -18,7 +18,7 @@ const distribution = { plugin: 'fixture@test', marketplace: 'example/plugins' };
 function fixture(
   options: {
     source?: unknown;
-    mcpServers?: import('../../model/types.ts').PluginSetupWithV1['mcp_servers'];
+    mcpServers?: readonly import('../../model/types.ts').PluginMcpServerId[];
     catalogPath?: string;
     manifestPath?: string;
     mutate?: (argv: readonly string[], output: unknown) => unknown;
@@ -185,7 +185,7 @@ function fixture(
 
 describe('Codex native plugin installer', () => {
   it('sets the native bearer environment reference in the installed plugin', async () => {
-    const mcpServers = { stripe: { bearer_token: { env: 'STRIPE_API_KEY' } } };
+    const mcpServers = ['stripe'] as const;
     const test = fixture({ mcpServers });
     await test.state.mutable.writeFile(
       `${cache}/.mcp.json`,

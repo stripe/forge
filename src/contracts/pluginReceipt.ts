@@ -164,9 +164,6 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function freezeMcpServers(input: unknown) {
   const servers = PluginMcpServersSchema.parse(input);
-  for (const server of Object.values(servers)) {
-    Object.freeze(server.bearer_token);
-    Object.freeze(server);
-  }
-  return Object.freeze(servers);
+  Object.freeze(servers);
+  return servers;
 }
