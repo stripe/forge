@@ -266,7 +266,6 @@ async function ensureMarketplaceCheckout(input: {
     commands: input.commands,
     marketplacePath: input.marketplacePath,
     ref: input.distribution.ref,
-    commit,
     signal: input.signal,
   });
 
@@ -295,7 +294,6 @@ interface MarketplaceRefCheckoutInput {
   readonly commands: CommandRunner;
   readonly marketplacePath: string;
   readonly ref: MarketplaceRef | undefined;
-  readonly commit: string;
   readonly signal: AbortSignal;
 }
 
@@ -312,30 +310,10 @@ async function assertMarketplaceRefCheckout(
       'Forge could not verify the plugin marketplace branch.',
     )
   ).stdout.trim();
-  if (branch !== '') {
-    if (branch !== input.ref) {
-      throw new Error(
-        'Plugin marketplace checkout does not match the requested ref.',
-      );
-    }
-    return;
+  if (branch === '') {
+    throw new Error('Forge could not verify the plugin marketplace ref.');
   }
-  const tagCommit = (
-    await runGit(
-      input.commands,
-      input.marketplacePath,
-      [
-        '-C',
-        input.marketplacePath,
-        'rev-parse',
-        '--verify',
-        `refs/tags/${input.ref}^{commit}`,
-      ],
-      input.signal,
-      'Forge could not verify the plugin marketplace ref.',
-    )
-  ).stdout.trim();
-  if (tagCommit !== input.commit) {
+  if (branch !== input.ref) {
     throw new Error(
       'Plugin marketplace checkout does not match the requested ref.',
     );

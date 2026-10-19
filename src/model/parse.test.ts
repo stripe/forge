@@ -331,8 +331,8 @@ initial_prompt: Two
     }
   });
 
-  it('accepts moving marketplace branch and tag refs but rejects pins and malformed names', () => {
-    for (const ref of ['main', 'feature/plugin-fix', 'v1.0']) {
+  it('accepts moving marketplace branch refs but rejects pins and malformed names', () => {
+    for (const ref of ['main', 'feature/plugin-fix']) {
       const step = parseSetupStep({
         uses: 'forge/plugin',
         with: {

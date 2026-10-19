@@ -227,16 +227,18 @@ describe('Claude plugin installer', () => {
     );
   });
 
-  it('verifies a detached checkout against a requested tag', async () => {
+  it('rejects a detached checkout for a requested branch', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, { checkoutBranch: '' });
-    const receipt = await installerPreflight({
-      ...distribution,
-      ref: 'v1.0',
-    }).install(installContext(state, harness.commands));
-    assert.equal(receipt.ref, 'v1.0');
-    assert.ok(
-      harness.calls.some((argv) => argv.includes('refs/tags/v1.0^{commit}')),
+    await assert.rejects(
+      installerPreflight({ ...distribution, ref: 'main' }).install(
+        installContext(state, harness.commands),
+      ),
+      /could not verify the plugin marketplace ref/,
+    );
+    assert.equal(
+      harness.calls.some((argv) => argv.includes('--verify')),
+      false,
     );
   });
 
@@ -273,20 +275,6 @@ describe('Claude plugin installer', () => {
         (argv) => argv.includes('marketplace') && argv.includes('add'),
       ).length,
       1,
-    );
-  });
-
-  it('rejects a checkout at a commit other than the requested ref', async () => {
-    const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state, {
-      checkoutBranch: '',
-      refCommit: 'c'.repeat(40),
-    });
-    await assert.rejects(
-      installerPreflight({ ...distribution, ref: 'v1.0' }).install(
-        installContext(state, harness.commands),
-      ),
-      /requested ref/,
     );
   });
 
@@ -673,7 +661,6 @@ function nativeCommandHarness(
     readonly catalogSource?: unknown;
     readonly installedVersion?: string;
     readonly marketplaceCommit?: string;
-    readonly refCommit?: string;
     readonly checkoutBranch?: string;
     readonly installedCommit?: string | null;
     readonly extraPlugin?: boolean;
@@ -728,11 +715,7 @@ function nativeCommandHarness(
         if (git.includes('branch'))
           return result(options.checkoutBranch ?? 'main');
         if (git.includes('rev-parse'))
-          return result(
-            git.includes('--verify')
-              ? (options.refCommit ?? CATALOG_COMMIT)
-              : (options.marketplaceCommit ?? CATALOG_COMMIT),
-          );
+          return result(options.marketplaceCommit ?? CATALOG_COMMIT);
         if (git.includes('get-url'))
           return result(options.origin ?? MARKETPLACE_REPOSITORY);
         if (git.includes('show')) return result(catalog);

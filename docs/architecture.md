@@ -711,8 +711,8 @@ and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
 `forge/plugin` resolves the current marketplace entry at execution time.
-Claude Code can select a moving marketplace branch or tag with `ref`; Codex
-follows the default branch. The `setup.json` receipt records the selected IDs,
+Claude Code can select a moving marketplace branch with `ref`; Codex follows
+the default branch. The `setup.json` receipt records the selected IDs,
 optional ref, catalog commit, installed version, reported source commit when
 available, and an installation-time tree fingerprint. These identify the
 catalog snapshot and observed installed contents; plugin state remains writable
@@ -1313,8 +1313,8 @@ The public CLI and built-in composition currently have these limits:
   distributed scheduler, automatic experiment retry loop, remote publisher, or
   hosted execution service. `matrix.retries` does not schedule automatic attempts.
 - Marketplace plugins follow the current public catalog entry, optionally from
-  a Claude Code branch or tag. Exact authored pins, private repository
-  authentication, transitive dependencies, and
+  a Claude Code branch. Exact authored pins, private repository authentication,
+  transitive dependencies, and
   user-defined plugin options are unsupported; see the authoritative
   [plugin limitations](plugin-action.md#credentials-and-limitations).
 - Host-file imports verify transferred bytes without emitting a core setup

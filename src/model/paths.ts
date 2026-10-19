@@ -65,7 +65,7 @@ export function isSafeVersion(value: string): boolean {
 
 export type MarketplaceRef = string;
 
-/** A moving branch or tag, never a pinned commit or CLI option. */
+/** A moving branch, never a pinned commit or CLI option. */
 export function isSafeMarketplaceRef(value: string): value is MarketplaceRef {
   return (
     value.length > 0 &&
