@@ -223,9 +223,7 @@ async function ensureMarketplaceCheckout(input: {
         'plugin',
         'marketplace',
         'add',
-        input.distribution.ref === undefined
-          ? input.distribution.marketplace
-          : `${input.distribution.marketplace}#${input.distribution.ref}`,
+        marketplaceSource(input.distribution),
         '--scope',
         'user',
       ]),
@@ -286,6 +284,12 @@ async function ensureMarketplaceCheckout(input: {
     );
   }
   return commit;
+}
+
+function marketplaceSource(distribution: PluginSelectionV1): string {
+  return distribution.ref === undefined
+    ? distribution.marketplace
+    : `${distribution.marketplace}#${distribution.ref}`;
 }
 
 async function readSelectedMarketplaceEntry(input: {
@@ -678,8 +682,6 @@ function freezeDistribution(input: PluginSelectionV1): PluginSelectionV1 {
   if (
     !isPlainRecord(input) ||
     !hasOnlyKeys(input, ['plugin', 'marketplace', 'ref']) ||
-    !Object.hasOwn(input, 'plugin') ||
-    !Object.hasOwn(input, 'marketplace') ||
     typeof input.plugin !== 'string' ||
     typeof input.marketplace !== 'string' ||
     !isSafeGitHubRepository(input.marketplace) ||
