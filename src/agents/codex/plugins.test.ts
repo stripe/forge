@@ -237,6 +237,24 @@ describe('Codex native plugin installer', () => {
     );
   });
 
+  it('rejects a marketplace branch in a Codex distribution', () => {
+    const plan = createTestResolvedRunPlan({
+      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
+    });
+    const installer = createCodexPluginInstaller({
+      adapterId: 'codex',
+      executable: 'codex',
+    });
+    assert.throws(
+      () =>
+        installer.preflight(
+          { ...distribution, ref: 'my-hook-fix' },
+          { selection: plan.agent, runtime: plan.runtime },
+        ),
+      /Codex plugin distribution/,
+    );
+  });
+
   it('accepts native legacy catalogs, path strings and unpinned HTTPS Git subdirectories', async () => {
     for (const options of [
       {

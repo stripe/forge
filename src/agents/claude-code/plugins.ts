@@ -8,7 +8,7 @@ import type {
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import {
   isSafeGitHubRepository,
-  isSafeMetadata,
+  isSafeMarketplaceRef,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../../model/paths.ts';
@@ -677,19 +677,14 @@ async function runChecked(
 function freezeDistribution(input: PluginSelectionV1): PluginSelectionV1 {
   if (
     !isPlainRecord(input) ||
-    !hasExactKeys(
-      input,
-      Object.hasOwn(input, 'ref')
-        ? ['plugin', 'marketplace', 'ref']
-        : ['plugin', 'marketplace'],
-    ) ||
+    !hasOnlyKeys(input, ['plugin', 'marketplace', 'ref']) ||
+    !Object.hasOwn(input, 'plugin') ||
+    !Object.hasOwn(input, 'marketplace') ||
     typeof input.plugin !== 'string' ||
     typeof input.marketplace !== 'string' ||
     !isSafeGitHubRepository(input.marketplace) ||
     (Object.hasOwn(input, 'ref') &&
-      (typeof input.ref !== 'string' ||
-        !isSafeMetadata(input.ref) ||
-        /\s/.test(input.ref)))
+      (typeof input.ref !== 'string' || !isSafeMarketplaceRef(input.ref)))
   ) {
     throw new TypeError('Claude plugin distribution is invalid.');
   }
@@ -840,15 +835,6 @@ function setsEqual(
 ): boolean {
   return (
     left.size === right.size && [...left].every((value) => right.has(value))
-  );
-}
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-): boolean {
-  return (
-    Reflect.ownKeys(value).length === keys.length && hasOnlyKeys(value, keys)
   );
 }
 

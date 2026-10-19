@@ -80,6 +80,10 @@ export function isSafeMetadata(value: string, maxBytes = 1024): boolean {
   );
 }
 
+export function isSafeMarketplaceRef(value: string): boolean {
+  return isSafeMetadata(value) && !/\s/.test(value);
+}
+
 function isCanonicalRelativePosixPath(
   value: string,
   allowRoot: boolean,
