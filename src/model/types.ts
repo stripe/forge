@@ -88,8 +88,10 @@ export interface CredentialsSetupStepV1
 export interface PluginSelectionV1 extends JsonObject {
   /** Agent-native qualified identity, such as `stripe@claude-plugins-official`. */
   plugin: string;
-  /** GitHub owner/repository whose current default-branch entry is installed. */
+  /** GitHub owner/repository whose selected catalog entry is installed. */
   marketplace: string;
+  /** Optional Claude Code marketplace branch. */
+  ref?: string;
 }
 
 export interface PluginSetupWithV1 extends JsonObject {

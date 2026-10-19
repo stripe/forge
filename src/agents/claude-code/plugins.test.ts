@@ -234,6 +234,20 @@ describe('Claude plugin installer', () => {
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
   });
 
+  it('registers the selected marketplace branch', async () => {
+    const state = createMemoryWorkspace();
+    const harness = nativeCommandHarness(state, {
+      marketplaceArgument: 'stripe/ai#my-hook-fix',
+      marketplaceRepository: 'stripe/ai',
+      origin: PLUGIN_REPOSITORY,
+    });
+    await installerPreflight({
+      ...distribution,
+      marketplace: 'stripe/ai',
+      ref: 'my-hook-fix',
+    }).install(installContext(state, harness.commands));
+  });
+
   it('reuses the registered marketplace across repeated plugin setup', async () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state);
@@ -385,6 +399,10 @@ describe('Claude plugin installer', () => {
       {
         version: '1.0.0',
         source: './plugins/formatter',
+      },
+      {
+        version: '1.0.0',
+        source: './providers/claude/plugin/',
       },
       {
         version: '2.0.0',
@@ -591,6 +609,8 @@ function nativeCommandHarness(
   state: MemoryWorkspaceFixture,
   options: {
     readonly catalogSource?: unknown;
+    readonly marketplaceArgument?: string;
+    readonly marketplaceRepository?: string;
     readonly installedVersion?: string;
     readonly marketplaceCommit?: string;
     readonly installedCommit?: string | null;
@@ -653,7 +673,10 @@ function nativeCommandHarness(
 
       const marketplaceIndex = command.indexOf('marketplace');
       if (marketplaceIndex >= 0 && command[marketplaceIndex + 1] === 'add') {
-        assert.equal(command[marketplaceIndex + 2], distribution.marketplace);
+        assert.equal(
+          command[marketplaceIndex + 2],
+          options.marketplaceArgument ?? distribution.marketplace,
+        );
         const relative = 'marketplaces/claude-plugins-official';
         await state.mutable.writeFile(
           `${relative}/.git/HEAD`,
@@ -668,7 +691,11 @@ function nativeCommandHarness(
           Buffer.from(
             JSON.stringify({
               'claude-plugins-official': {
-                source: { source: 'github', repo: distribution.marketplace },
+                source: {
+                  source: 'github',
+                  repo:
+                    options.marketplaceRepository ?? distribution.marketplace,
+                },
                 installLocation: `${pluginStatePath}/${relative}`,
               },
             }),

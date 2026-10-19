@@ -8,6 +8,7 @@ import type {
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import {
   isSafeGitHubRepository,
+  isSafeMetadata,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../../model/paths.ts';
@@ -222,7 +223,9 @@ async function ensureMarketplaceCheckout(input: {
         'plugin',
         'marketplace',
         'add',
-        input.distribution.marketplace,
+        input.distribution.ref === undefined
+          ? input.distribution.marketplace
+          : `${input.distribution.marketplace}#${input.distribution.ref}`,
         '--scope',
         'user',
       ]),
@@ -554,7 +557,10 @@ function installedPluginLocation(
 
 function assertSupportedMarketplaceSource(source: unknown): void {
   if (typeof source === 'string') {
-    if (!source.startsWith('./') || !isSafePluginPath(source.slice(2))) {
+    if (
+      !source.startsWith('./') ||
+      !isSafePluginPath(source.slice(2).replace(/\/$/, ''))
+    ) {
       throw new Error('Marketplace plugin path is invalid.');
     }
     return;
@@ -671,10 +677,19 @@ async function runChecked(
 function freezeDistribution(input: PluginSelectionV1): PluginSelectionV1 {
   if (
     !isPlainRecord(input) ||
-    !hasExactKeys(input, ['plugin', 'marketplace']) ||
+    !hasExactKeys(
+      input,
+      Object.hasOwn(input, 'ref')
+        ? ['plugin', 'marketplace', 'ref']
+        : ['plugin', 'marketplace'],
+    ) ||
     typeof input.plugin !== 'string' ||
     typeof input.marketplace !== 'string' ||
-    !isSafeGitHubRepository(input.marketplace)
+    !isSafeGitHubRepository(input.marketplace) ||
+    (Object.hasOwn(input, 'ref') &&
+      (typeof input.ref !== 'string' ||
+        !isSafeMetadata(input.ref) ||
+        /\s/.test(input.ref)))
   ) {
     throw new TypeError('Claude plugin distribution is invalid.');
   }
