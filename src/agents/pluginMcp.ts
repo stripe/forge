@@ -84,6 +84,10 @@ export async function configurePluginMcp(
         await state.readFile(path, { maxBytes: 1024 * 1024 }),
       ).toString('utf8'),
     );
+    if (manifest === 'plugin.json' && adapter === 'codex')
+      throw new Error(
+        'Codex Agent Plugins mcp.json does not support environment-backed bearer auth. Select stripe@claude-plugins-official from anthropics/claude-plugins-official instead.',
+      );
     if (
       !record(value) ||
       value.mcpServers !== undefined ||

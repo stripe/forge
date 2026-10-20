@@ -276,6 +276,35 @@ describe('Codex native plugin installer', () => {
     assert.deepEqual(receipt.source, { kind: 'url' });
   });
 
+  it('passes catalog Git pins to the native installer and verifies its reported selector', async () => {
+    const source = {
+      source: 'git-subdir',
+      url: 'https://github.com/example/plugin.git',
+      path: 'plugin',
+      ref: 'main',
+      sha: commit,
+    };
+    const receipt = await fixture({ source }).install();
+    // Native source metadata reports the requested pin, not a resolved commit.
+    assert.deepEqual(receipt.source, { kind: 'git-subdir' });
+    for (const sha of [undefined, 'b'.repeat(40)]) {
+      await assert.rejects(
+        fixture({
+          source,
+          mutate(_argv, output) {
+            const inventory = output as {
+              installed?: Record<string, unknown>[];
+            };
+            if (inventory.installed?.[0])
+              inventory.installed[0].source = { ...source, sha };
+            return output;
+          },
+        }).install(),
+        /installed plugin state or source/,
+      );
+    }
+  });
+
   it('uses native catalog precedence and rejects an unsupported Codex catalog', async () => {
     const test = fixture({ catalogPath: '.claude-plugin/marketplace.json' });
     await test.state.mutable.writeFile(
@@ -371,7 +400,7 @@ describe('Codex native plugin installer', () => {
         source: 'git-subdir',
         url: 'https://example.test/plugin.git',
         path: 'plugin',
-        sha: commit,
+        sha: 'invalid',
       },
     ]) {
       const test = fixture({ source });

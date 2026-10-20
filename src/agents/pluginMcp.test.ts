@@ -117,7 +117,7 @@ describe('plugin MCP bearer authentication', () => {
     );
     await assert.rejects(
       configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
-      /manifest MCP overrides/,
+      /Agent Plugins.*bearer auth.*stripe@claude-plugins-official/,
     );
   });
 

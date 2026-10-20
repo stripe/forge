@@ -91,10 +91,12 @@ by this action.
 
 Codex accepts a string or `{source: local, path: ./...}` marketplace-relative
 path, or a credential-free HTTPS `url` or `git-subdir` source with optional
-`ref` and subdirectory. It rejects archives, npm, `github` source objects,
-dependencies, and SHA-pinned Git metadata. The pinned Codex CLI does not report
-installed source commits, so Codex receipts omit that optional field and use
-the installed-tree fingerprint to identify observed bytes.
+`ref`, full 40-hex Git `sha`, and subdirectory. Forge checks that native source
+metadata retains the catalog's selectors. Codex applies the pin during install;
+Forge does not independently verify the checkout commit. It rejects archives,
+npm, `github` source objects, and dependencies. Codex receipts omit the optional
+resolved source commit and use the installed-tree fingerprint to identify
+observed bytes.
 
 Codex selects the first native catalog present in this order:
 
@@ -190,8 +192,8 @@ with:
       plugin: stripe@claude-plugins-official
       marketplace: anthropics/claude-plugins-official
     codex:
-      plugin: stripe@stripe
-      marketplace: stripe/ai
+      plugin: stripe@claude-plugins-official
+      marketplace: anthropics/claude-plugins-official
 ```
 
 Export `STRIPE_API_KEY` with an Agent API key before starting the eval; account
@@ -210,8 +212,11 @@ commands, never setup commands. Forge records the configured server names in the
 configured installation. Credential mappings are part of the Forge version.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
-source fails setup. Custom MCP config paths and Agent Plugins 1.0 `mcp.json` are
-unsupported. OAuth and host login passthrough are unsupported.
+source fails setup. Codex can install the Claude-format distribution shown above.
+The newer `stripe@stripe` distribution from `stripe/ai` is recognized, but fails
+with a message to use that compatible choice: Codex's Agent Plugins 1.0
+`mcp.json` cannot read bearer tokens from environment variables. Custom MCP
+config paths, OAuth, and host login passthrough are unsupported.
 
 Plugin installation receives an uncredentialed setup command runner. It never receives the coding agent's model credential. Fetches
 therefore work only for credential-free HTTPS sources accepted by the action.

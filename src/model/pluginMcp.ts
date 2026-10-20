@@ -24,7 +24,7 @@ export function pluginMcpServersForDistribution(
   distribution: PluginSelectionV1 | undefined,
 ): readonly PluginMcpServerId[] | undefined {
   if (
-    (adapter === 'claude-code' &&
+    ((adapter === 'claude-code' || adapter === 'codex') &&
       distribution?.plugin === 'stripe@claude-plugins-official' &&
       distribution.marketplace === 'anthropics/claude-plugins-official') ||
     (adapter === 'codex' &&

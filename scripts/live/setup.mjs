@@ -123,8 +123,8 @@ export async function runSetupIntegrationSuite({
   liveAgent = 'claude-code',
 }) {
   const codex = liveAgent === 'codex';
-  const selectedPlugin = codex ? 'stripe@stripe' : PLUGIN;
-  const selectedMarketplace = codex ? 'stripe/ai' : MARKETPLACE;
+  const selectedPlugin = PLUGIN;
+  const selectedMarketplace = MARKETPLACE;
   const specs = cases.map((spec) =>
     spec.id !== 'plugin'
       ? spec
@@ -479,7 +479,7 @@ async function verifyCodexPlugin(runtime, signal, pluginId) {
   const manifest = JSON.parse(
     Buffer.from(
       await home.readFile(
-        `plugins/cache/stripe/stripe/${installed[0].version}/.claude-plugin/plugin.json`,
+        `plugins/cache/${installed[0].marketplaceName}/stripe/${installed[0].version}/.claude-plugin/plugin.json`,
       ),
     ).toString(),
   );

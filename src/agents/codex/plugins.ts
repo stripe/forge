@@ -315,10 +315,12 @@ function validatedSource(
     fail('unsupported plugin source');
   if (
     Object.keys(source).some(
-      (key) => !['source', 'url', 'path', 'ref'].includes(key),
+      (key) => !['source', 'url', 'path', 'ref', 'sha'].includes(key),
     ) ||
     typeof source.url !== 'string' ||
     !safeGitUrl(source.url) ||
+    (source.sha !== undefined &&
+      (typeof source.sha !== 'string' || !/^[a-f0-9]{40}$/.test(source.sha))) ||
     (source.ref !== undefined &&
       (typeof source.ref !== 'string' ||
         !source.ref.length ||
@@ -330,9 +332,7 @@ function validatedSource(
         path.posix.normalize(source.path) !== source.path)) ||
     (source.source === 'git-subdir' && source.path === undefined)
   ) {
-    fail(
-      'unsupported Git source; Codex does not report installed source commits',
-    );
+    fail('unsupported Git source');
   }
   return {
     kind: source.source,
@@ -341,6 +341,7 @@ function validatedSource(
       url: source.url,
       ...(source.path === undefined ? {} : { path: source.path }),
       ...(source.ref === undefined ? {} : { ref: source.ref }),
+      ...(source.sha === undefined ? {} : { sha: source.sha }),
     },
   };
 }

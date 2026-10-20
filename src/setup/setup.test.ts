@@ -269,6 +269,11 @@ describe('portable setup actions', () => {
       'anthropics/claude-plugins-official',
     ],
     ['codex', 'stripe@stripe', 'stripe/ai'],
+    [
+      'codex',
+      'stripe@claude-plugins-official',
+      'anthropics/claude-plugins-official',
+    ],
   ] as const) {
     it(`automatically requests agent-scoped Stripe authentication for ${adapter}`, () => {
       const step = parseSetupStep({
