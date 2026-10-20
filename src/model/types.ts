@@ -1,5 +1,3 @@
-import type { PluginMcpServerId } from './pluginMcp.ts';
-
 export type { PluginMcpServerId } from './pluginMcp.ts';
 
 import type { ForgeBuildIdentity } from '../version.ts';
@@ -86,8 +84,6 @@ export interface PluginSelectionV1 extends JsonObject {
 export interface PluginSetupWithV1 extends JsonObject {
   /** Adapter ID to native selection. Only the selected branch is realized. */
   agents: Record<string, PluginSelectionV1>;
-  /** Registered bundled MCP servers whose credentials Forge supplies. */
-  mcp_servers?: PluginMcpServerId[];
 }
 
 export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {

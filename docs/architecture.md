@@ -717,7 +717,10 @@ installation-time tree fingerprint. These identify the catalog snapshot and
 observed installed contents; plugin state remains writable during interaction.
 This is a documented mutable-treatment semantic, not general plan
 reproducibility; see
-[Marketplace plugin treatments](plugin-action.md).
+[Marketplace plugin treatments](plugin-action.md). Supported Stripe plugin
+selections also declare agent-scoped MCP credentials during pure preflight;
+Forge configures their existing connection and records that change in the receipt.
+Other plugin selections do not request Stripe credentials.
 
 ## Interaction architecture
 

@@ -295,8 +295,14 @@ export async function runSetupIntegrationSuite({
       inputProvider,
       artifactStore: createArtifactStore({ root: resultsRoot }),
       credentialResolver: {
-        async resolve() {
-          throw new Error('Setup integration must never resolve credentials');
+        async resolve(reference, context) {
+          assert.equal(reference, 'env:STRIPE_API_KEY');
+          assert.equal(
+            context.purpose,
+            'forge-eval:FORGE_MCP_BEARER_STRIPE_API_KEY',
+          );
+          // Installation is exercised without making authenticated MCP calls.
+          return 'forge-setup-synthetic-stripe-key';
         },
       },
     };

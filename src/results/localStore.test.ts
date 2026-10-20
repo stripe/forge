@@ -1116,6 +1116,7 @@ describe('local artifact store', () => {
       native_plugin_id: 'stripe@forge-test',
       version: '0.9.2',
       source: { kind: 'git-subdir', commit: 'b'.repeat(40) },
+      mcp_servers: ['stripe'],
       installed_tree: {
         format: 'forge-plugin-tree-v1',
         sha256: `sha256:${'c'.repeat(64)}`,
@@ -1143,6 +1144,18 @@ describe('local artifact store', () => {
       assert.ok(actual);
       assert.equal(actual.runId, 'run-1');
     }
+
+    const missingMcpAuth: Record<string, unknown> = { ...receipt };
+    delete missingMcpAuth.mcp_servers;
+    const unconfigured = await commitArtifacts(
+      [...core, { path: 'setup.json', body: setup(missingMcpAuth) }],
+      (result) => result,
+      { plan: pluginPlan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(unconfigured),
+      /does not match the completed run plan/,
+    );
 
     const missingResolution = await commitArtifacts(core, (result) => result, {
       plan: pluginPlan,

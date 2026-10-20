@@ -180,8 +180,8 @@ quiesces all mutation before evidence selection.
 
 ## Credentials and limitations
 
-Select registered HTTP MCP servers already bundled in a plugin's conventional
-`.mcp.json`. Forge owns each server's credential mapping:
+Selecting either supported Stripe plugin distribution below automatically
+configures bearer authentication for its bundled HTTP MCP connection:
 
 ```yaml
 with:
@@ -192,13 +192,13 @@ with:
     codex:
       plugin: stripe@stripe
       marketplace: stripe/ai
-  mcp_servers: [stripe]
 ```
 
-The initial registered server is `stripe`, which requires `STRIPE_API_KEY`. Export
-an Agent API key before starting the eval; account or merchant provisioning
-remains external to Forge. Experiments select server names, not auth methods,
-keys, or environment-variable names. Unknown or repeated server names are rejected.
+Export `STRIPE_API_KEY` with an Agent API key before starting the eval; account
+or merchant provisioning remains external to Forge. Forge recognizes the exact
+adapter, plugin ID, and marketplace pairs above. Other plugin selections are
+installed unchanged and do not require this key. Experiments declare no MCP
+server or authentication fields.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
@@ -206,7 +206,7 @@ validation and planning need no values.
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference
 `FORGE_MCP_BEARER_<host-variable>` inside the runtime. Tokens reach only agent
-commands, never setup commands. Forge records the selected server names in the receipt and fingerprints the
+commands, never setup commands. Forge records the configured server names in the receipt and fingerprints the
 configured installation. Credential mappings are part of the Forge version.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth

@@ -5,7 +5,6 @@ import {
   isSafeSimpleIdentifier,
   isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
-import { PluginMcpServersSchema } from '../model/pluginMcp.ts';
 import type { JsonObject } from '../model/types.ts';
 import { commandSetupHandler } from './forgeCommand.ts';
 import { pluginSetupHandler } from './forgePlugin.ts';
@@ -77,7 +76,6 @@ const PluginDistributionSchema = z
 
 const PluginSetupWithSchema = z
   .object({
-    mcp_servers: PluginMcpServersSchema.optional(),
     agents: z
       .record(z.string(), PluginDistributionSchema)
       .superRefine((agents, context) => {

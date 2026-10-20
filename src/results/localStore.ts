@@ -19,6 +19,7 @@ import {
   type ResolvedRunPlanV1,
 } from '../model/index.ts';
 import { isSafeDatasetRelativePath } from '../model/paths.ts';
+import { pluginMcpServersForDistribution } from '../model/pluginMcp.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import { assertCompatibleForgeVersion } from '../version.ts';
@@ -513,7 +514,10 @@ function verifySetupArtifact(
         receipt.plugin !== distribution.plugin ||
         receipt.marketplace !== distribution.marketplace ||
         serializeCanonicalJson(receipt.mcp_servers ?? null) !==
-          serializeCanonicalJson(planned.with.mcp_servers ?? null) ||
+          serializeCanonicalJson(
+            pluginMcpServersForDistribution(plan.agent.adapter, distribution) ??
+              null,
+          ) ||
         nativeName !== requestedName
       ) {
         throw new ArtifactStoreError(

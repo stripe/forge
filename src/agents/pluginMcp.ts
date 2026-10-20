@@ -1,5 +1,6 @@
 import { credentialReference } from '../contracts/credentials.ts';
 import type { MutableWorkspace } from '../contracts/runtime.ts';
+import { pluginMcpServersForDistribution } from '../model/pluginMcp.ts';
 import type {
   PluginMcpServerId,
   PluginSetupStepV1,
@@ -40,7 +41,13 @@ export function pluginMcpEnvironmentBindings(
   for (const plan of plans)
     for (const step of plan.setup) {
       if (step.uses !== 'forge/plugin') continue;
-      for (const name of (step as PluginSetupStepV1).with.mcp_servers ?? []) {
+      const distribution = (step as PluginSetupStepV1).with.agents[
+        plan.agent.adapter
+      ];
+      for (const name of pluginMcpServersForDistribution(
+        plan.agent.adapter,
+        distribution,
+      ) ?? []) {
         const server = PLUGIN_MCP_SERVERS[name];
         const env = server.credentialEnvironmentVariable;
         const reference = server.credentialReference;

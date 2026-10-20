@@ -19,7 +19,6 @@ const step = {
   uses: 'forge/plugin',
   with: {
     agents: { codex: { plugin: 'stripe@stripe', marketplace: 'stripe/ai' } },
-    mcp_servers: servers,
   },
 };
 
@@ -128,6 +127,7 @@ describe('plugin MCP bearer authentication', () => {
       FORGE_MCP_BEARER_STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
     });
     const plan = createTestResolvedRunPlan({
+      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
       treatmentSetup: [parseSetupStep(step)],
     });
     assert.deepEqual(pluginMcpEnvironmentBindings([plan]), {
@@ -140,8 +140,36 @@ describe('plugin MCP bearer authentication', () => {
     );
   });
 
+  it('binds only the selected adapter distribution, not other plugins or marketplaces', () => {
+    for (const selected of [
+      { plugin: 'formatter@example', marketplace: 'example/plugins' },
+      { plugin: 'stripe@stripe', marketplace: 'example/stripe-mirror' },
+      { plugin: 'other@stripe', marketplace: 'stripe/ai' },
+    ]) {
+      const plan = createTestResolvedRunPlan({
+        agent: { adapter: 'codex', provider: 'openai', model: 'test' },
+        treatmentSetup: [
+          parseSetupStep({
+            uses: 'forge/plugin',
+            with: {
+              agents: {
+                codex: selected,
+                'claude-code': {
+                  plugin: 'stripe@claude-plugins-official',
+                  marketplace: 'anthropics/claude-plugins-official',
+                },
+              },
+            },
+          }),
+        ],
+      });
+      assert.deepEqual(pluginMcpEnvironmentBindings([plan]), {});
+    }
+  });
+
   it('requires the registered host key without accepting an alternate auth variable', async () => {
     const plan = createTestResolvedRunPlan({
+      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
       treatmentSetup: [parseSetupStep(step)],
     });
     const resolver = createEnvironmentCredentialResolver({
@@ -158,9 +186,10 @@ describe('plugin MCP bearer authentication', () => {
     );
   });
 
-  it('accepts registered server names and rejects authored auth details', () => {
+  it('accepts plugin selection alone and rejects authored MCP configuration', () => {
     assert.deepEqual(parseSetupStep(step), step);
     for (const mcp_servers of [
+      ['stripe'],
       [],
       ['unknown'],
       ['stripe', 'stripe'],
