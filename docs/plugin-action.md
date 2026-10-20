@@ -170,10 +170,10 @@ independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
 Git commits identify the catalog snapshot and the source revision reported by
-the native installer. A source commit is optional for an unpinned Git source;
-when the catalog supplies an expected commit, the installer must report that
-same commit. The tree fingerprint identifies observed installation-time
-contents separately from those source identities.
+the native installer. Claude must report any source commit pinned by its
+catalog; Codex reports the requested selectors, as described above. The tree
+fingerprint identifies observed installation-time contents separately from
+those source identities.
 
 The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may
