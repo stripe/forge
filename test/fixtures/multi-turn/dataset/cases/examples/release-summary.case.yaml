@@ -7,8 +7,7 @@ execution_mode: multi_turn
 max_turns: 4
 setup: []
 judging_criteria:
-  - requirement_level: MUST
-    value: The agent used the conversation to obtain the missing status sentence before creating the accurate release-summary deliverable, and it left no unresolved work.
+  - The agent used the conversation to obtain the missing status sentence before creating the accurate release-summary deliverable, and it left no unresolved work.
 checks:
   files_created:
     - release-summary.txt

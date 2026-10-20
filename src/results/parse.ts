@@ -13,10 +13,7 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
-import {
-  criterionRequirementLevelIssue,
-  criterionRequirementWordingIssue,
-} from '../model/criteria.ts';
+import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
   isSafeActionIdentifier,
@@ -24,8 +21,7 @@ import {
   isSafeVersion,
 } from '../model/paths.ts';
 import {
-  CRITERIA_REQUIREMENTS,
-  DEFAULT_CRITERIA_REQUIREMENT,
+  DEFAULT_REQUIREMENT_LEVEL,
   REQUIREMENT_LEVELS,
 } from '../model/types.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
@@ -138,14 +134,13 @@ const checkResult = z
 
 const criterionResult = z
   .object({
-    requirement_level: z.enum(REQUIREMENT_LEVELS),
     label: z
       .string()
       .regex(/^[a-z][a-z0-9_]*$/)
       .optional(),
-    criteria_requirement: z
-      .enum(CRITERIA_REQUIREMENTS)
-      .default(DEFAULT_CRITERIA_REQUIREMENT),
+    requirement_level: z
+      .enum(REQUIREMENT_LEVELS)
+      .default(DEFAULT_REQUIREMENT_LEVEL),
     criterion: z
       .string()
       .min(1)
@@ -157,24 +152,13 @@ const criterionResult = z
   .superRefine((criterion, context) => {
     const wordingIssue = criterionRequirementWordingIssue(
       criterion.criterion,
-      criterion.criteria_requirement,
+      criterion.requirement_level,
     );
     if (wordingIssue !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['criterion'],
         message: wordingIssue,
-      });
-    }
-    const issue = criterionRequirementLevelIssue(
-      criterion.criterion,
-      criterion.requirement_level,
-    );
-    if (issue !== undefined) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['requirement_level'],
-        message: issue,
       });
     }
   });
@@ -191,7 +175,7 @@ export const evaluationResultSchema = z
   .strict()
   .superRefine((value, context) => {
     const included = value.judging_criteria.filter(
-      (criterion) => criterion.criteria_requirement !== 'OPTIONAL',
+      (criterion) => criterion.requirement_level !== 'OPTIONAL',
     );
     const passed = included.filter((criterion) => criterion.passed).length;
     if (

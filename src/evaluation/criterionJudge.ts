@@ -4,7 +4,10 @@ import type {
   StrictCompletionResponseSchema,
 } from '../contracts/completion.ts';
 import { JudgingCriterionSchema } from '../model/criteria.ts';
-import type { JudgingCriterionV1 } from '../model/types.ts';
+import type {
+  JudgingCriterionInputV1,
+  JudgingCriterionV1,
+} from '../model/types.ts';
 import type { CriterionResultV1 } from '../results/types.ts';
 import {
   type JudgeTranscriptProjectionV1,
@@ -69,7 +72,7 @@ export type CriterionCompletionInvoker = (
 export interface CriterionJudgeInput {
   /** Validated current-run evidence emitted by createJudgeTranscriptProjection(). */
   readonly transcript: JudgeTranscriptProjectionV1;
-  readonly criteria: readonly JudgingCriterionV1[];
+  readonly criteria: readonly JudgingCriterionInputV1[];
   readonly exampleAnswer?: string;
   /** Exact rendered text returned by collectJudgeWorkspaceEvidence(). */
   readonly workspaceText?: string;
@@ -153,7 +156,7 @@ Give a concise, one- or two-sentence explanation for your decision.`;
 /** Parse only the strict one-criterion contract; prose and code fences are invalid. */
 export function parseCriterionJudgment(
   raw: string,
-  criterion: JudgingCriterionV1,
+  criterion: JudgingCriterionInputV1,
 ): CriterionResultV1 {
   const parsedCriterion = JudgingCriterionSchema.parse(criterion);
   const outcome = parseJudgeResponse(raw, parsedCriterion);
@@ -305,9 +308,8 @@ function criterionResult(
 ): CriterionResultV1 {
   return {
     criterion: criterion.value,
-    requirement_level: criterion.requirement_level,
     ...(criterion.label === undefined ? {} : { label: criterion.label }),
-    criteria_requirement: criterion.criteria_requirement,
+    requirement_level: criterion.requirement_level,
     passed,
     explanation,
   };

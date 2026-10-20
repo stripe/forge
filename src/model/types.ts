@@ -109,30 +109,28 @@ export interface ChecksV1 {
 
 export const REQUIREMENT_LEVELS = Object.freeze([
   'MUST',
-  'MUST NOT',
-  'SHOULD',
-  'SHOULD NOT',
-  'MAY',
-] as const);
-
-export type RequirementLevelV1 = (typeof REQUIREMENT_LEVELS)[number];
-
-export const CRITERIA_REQUIREMENTS = Object.freeze([
-  'MUST',
   'SHOULD',
   'OPTIONAL',
 ] as const);
 
-export type CriteriaRequirementV1 = (typeof CRITERIA_REQUIREMENTS)[number];
-export const DEFAULT_CRITERIA_REQUIREMENT = 'SHOULD' as const;
+export type RequirementLevelV1 = (typeof REQUIREMENT_LEVELS)[number];
+export const DEFAULT_REQUIREMENT_LEVEL = 'SHOULD' as const;
 
-/** One assertable requirement, its RFC 2119 wording, and scoring classification. */
+/** Authored shorthand and objects; parsing materializes the requirement level. */
+export type JudgingCriterionInputV1 =
+  | string
+  | {
+      value: string;
+      label?: string;
+      requirement_level?: RequirementLevelV1;
+    };
+
+/** One assertable criterion with an explicit requirement and scoring policy. */
 export interface JudgingCriterionV1 {
   value: string;
-  requirement_level: RequirementLevelV1;
   label?: string;
   /** Parsing defaults omitted input to SHOULD; OPTIONAL does not affect scoring. */
-  criteria_requirement: CriteriaRequirementV1;
+  requirement_level: RequirementLevelV1;
 }
 
 /**

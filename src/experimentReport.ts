@@ -6,7 +6,7 @@ import {
 } from './experimentModel.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
-import type { CriteriaRequirementV1 } from './model/types.ts';
+import type { RequirementLevelV1 } from './model/types.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import {
@@ -170,7 +170,7 @@ export function summarizeReportEvaluation(
     OPTIONAL: { passed: 0, total: 0 },
   };
   for (const criterion of evaluation.judging_criteria) {
-    const group = criteriaByRequirement[criterion.criteria_requirement];
+    const group = criteriaByRequirement[criterion.requirement_level];
     group.total += 1;
     if (criterion.passed) group.passed += 1;
   }
@@ -336,7 +336,7 @@ function statistics(
 /** Average per-evaluation fractions; empty groups do not imply a pass or failure. */
 function criterionStatistics(
   runs: readonly ExperimentRunReportRunV1[],
-  requirement: CriteriaRequirementV1,
+  requirement: RequirementLevelV1,
 ): z.infer<typeof criterionStatisticsSchema> {
   let passed = 0;
   let total = 0;

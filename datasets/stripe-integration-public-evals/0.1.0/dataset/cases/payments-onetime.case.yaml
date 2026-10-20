@@ -26,20 +26,12 @@ execution_mode: multi_turn
 max_turns: 10
 setup: []
 judging_criteria:
-  - requirement_level: MUST
-    value: Uses checkout.sessions.create with mode 'payment' for the one-time charge — the prompt asks for the simplest hosted approach
-  - requirement_level: MUST NOT
-    value: Does NOT use paymentIntents.create directly (Checkout Sessions is the recommended approach for hosted checkout)
-  - requirement_level: MUST
-    value: Has success_url configured for the post-payment redirect
-  - requirement_level: MUST
-    value: Has cancel_url configured
-  - requirement_level: MUST
-    value: Has a webhook handler that verifies the payment (constructEvent or similar)
-  - requirement_level: MUST NOT
-    value: Does NOT pass payment_method_types to any Stripe API call — dynamic payment methods should remain enabled since the prompt does not request specific payment methods. If the code does not include payment_method_types at all, this expectation PASSES regardless of which Stripe API is used.
-  - requirement_level: MUST NOT
-    value: Does not explicitly hardcode an API version older than '2026-04-22.dahlia'. This expectation PASSES if apiVersion is omitted or set to '2026-04-22.dahlia' or any newer version. This expectation only FAILS if an apiVersion older than '2026-04-22.dahlia' is explicitly hardcoded.
-  - requirement_level: MUST
-    value: Includes the parameter integration_identifier in the checkout.sessions.create call
+  - Uses checkout.sessions.create with mode 'payment' for the one-time charge — the prompt asks for the simplest hosted approach
+  - Does NOT use paymentIntents.create directly (Checkout Sessions is the recommended approach for hosted checkout)
+  - Has success_url configured for the post-payment redirect
+  - Has cancel_url configured
+  - Has a webhook handler that verifies the payment (constructEvent or similar)
+  - Does NOT pass payment_method_types to any Stripe API call — dynamic payment methods should remain enabled since the prompt does not request specific payment methods. If the code does not include payment_method_types at all, this expectation PASSES regardless of which Stripe API is used.
+  - Does not explicitly hardcode an API version older than '2026-04-22.dahlia'. This expectation PASSES if apiVersion is omitted or set to '2026-04-22.dahlia' or any newer version. This expectation only FAILS if an apiVersion older than '2026-04-22.dahlia' is explicitly hardcoded.
+  - Includes the parameter integration_identifier in the checkout.sessions.create call
 checks: {}

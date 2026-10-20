@@ -1002,25 +1002,16 @@ through evidence collection.
 
 ### Criterion judging
 
-`judging_criteria` contains strict objects with nonblank `value`, required
-`requirement_level`, optional `label`, and `criteria_requirement` (default SHOULD).
-Every criterion declares one of these [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)
-requirement levels:
+`judging_criteria` accepts strings or strict objects with nonblank `value`,
+optional `label`, and optional `requirement_level`. Strings become unlabeled
+objects with that text as `value`. Omitted levels default to SHOULD. Parsed
+cases, resolved plans, and results always contain an explicit requirement level:
 
-| Level | Meaning |
-| --- | --- |
-| `MUST` | Required behavior |
-| `MUST NOT` | Prohibited behavior |
-| `SHOULD` | Recommended behavior; a justified exception may be appropriate |
-| `SHOULD NOT` | Discouraged behavior; a justified exception may be appropriate |
-| `MAY` | Optional behavior |
-
-Uppercase `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` in `value`
-must agree with `requirement_level`. Matching uses whole words and treats
-negations, including line-wrapped ones, as single terms. Repeated terms of the
-same level are allowed; conflicting levels are rejected. Split such requirements
-into separate criteria. Lowercase words do not determine the level; criteria
-without an uppercase keyword still require an explicit classification.
+| Level | Meaning | Scored |
+| --- | --- | --- |
+| `MUST` | Required criterion | Yes |
+| `SHOULD` | Recommended criterion; the default when omitted | Yes |
+| `OPTIONAL` | Telemetry or insight | No |
 
 Write each value as a complete, concrete expectation that can pass or fail.
 For example, use “Sets `billing_mode` to `flexible`” instead of “Uses the proper
@@ -1028,39 +1019,28 @@ billing mode.” State prohibited behavior as an expectation of absence, such as
 “Does not create a second subscription.” Prefer deterministic checks for
 conditions they can establish through programmatic inspection.
 
-Labels remain repeatable categories matching `[a-z][a-z0-9_]*`, independent of
-RFC wording. `criteria_requirement` controls scoring and requirement semantics:
-
-| Classification | Meaning | Scored |
-| --- | --- | --- |
-| `MUST` | Required criterion | Yes |
-| `SHOULD` | Recommended criterion; the default when omitted | Yes |
-| `OPTIONAL` | Telemetry or insight | No |
-
 A MUST criterion must contain the whole uppercase word `MUST`, including
 `MUST NOT` for prohibited behavior. This writing guardrail runs during case,
-plan, and result parsing, independently of scoring. RFC wording never infers
-`criteria_requirement`: an omitted classification remains SHOULD even when
-its text says MUST. A case with criteria must keep at least one scored
-criterion. Parsing materializes the default, so parsed cases, resolved plans,
-and results always contain an explicit classification.
+plan, and result parsing. Scoring uses only `requirement_level`; it never infers
+a level from wording. An omitted level remains SHOULD even when the text says
+MUST. Labels are repeatable categories matching `[a-z][a-z0-9_]*` and do not
+affect scoring. A case with criteria must keep at least one scored criterion.
 
 ```yaml
 judging_criteria:
+  - The integration creates a Checkout Session.
   - label: correctness
     requirement_level: MUST
-    criteria_requirement: MUST
     value: The integration MUST set billing_mode to flexible.
   - label: source
-    requirement_level: SHOULD
-    criteria_requirement: OPTIONAL
+    requirement_level: OPTIONAL
     value: The agent consulted the subscription documentation.
 ```
 
-Every criterion is judged, including excluded criteria. Only its text is sent
+Every criterion is judged, including OPTIONAL criteria. Only its text is sent
 to the judge; authored metadata is attached to the ordered result afterward.
 `result.json.evaluation.judging_criteria` retains every text, outcome,
-explanation, RFC wording level, optional label, and scoring classification. Source-consultation criteria
+explanation, requirement level, and optional label. Source-consultation criteria
 are model judgments about the available evidence, not verified network telemetry.
 
 Each judging criterion is judged independently against:
@@ -1090,9 +1070,7 @@ The numeric score is the fraction of MUST and SHOULD judging criteria that pass,
 with equal weight per criterion. `judging_criteria_passed` and
 `judging_criteria_total` count those two groups. OPTIONAL criteria affect neither
 score nor status. File checks are independent pass constraints and do not change
-that ratio. Labels and RFC wording levels do not determine inclusion; only
-`criteria_requirement` does. A `MAY` wording level is still scored when its
-classification is SHOULD (including the omitted default).
+that ratio. Only `requirement_level` determines scoring inclusion.
 
 Reports preserve per-run passed/total counts for all three classifications and
 verify that MUST plus SHOULD match the scored counts and ratio. Overall and
@@ -1193,7 +1171,7 @@ hashes. It also requires:
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
 - canonical plan bytes to match their artifact descriptor and result summary;
-- recorded criterion text, RFC wording levels, labels, and effective classification to match the plan;
+- recorded criterion text, labels, and requirement levels to match the plan;
 - workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
@@ -1204,9 +1182,9 @@ hashes. It also requires:
 - judge evidence to match the projection of the stored trajectory.
 
 `criterionResultMatchesDefinition` from `@stripe/forge` compares a recorded
-judgment's text, RFC wording level, label, and effective scoring classification
+judgment's text, label, and requirement level
 with its authored criterion. Embedding hosts with their own result envelopes
-use the same check. Omitted classification means SHOULD.
+use the same check. String definitions and omitted levels mean SHOULD.
 
 Publication is deliberately outside `executeEval`. A caller should verify the
 committed local run before passing it to a host-owned publisher.

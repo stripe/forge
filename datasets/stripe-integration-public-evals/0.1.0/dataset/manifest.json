@@ -9,8 +9,8 @@
   "files": [
     {
       "path": "cases/payments-onetime.case.yaml",
-      "size": 3346,
-      "sha256": "218c2c0b248b0d8ea3309f698986773cfef5c46653b7ec6c026d070008f43fa4"
+      "size": 3054,
+      "sha256": "6db0b213843c451ee15dc4f56d390e58614c6ba574d6422624559ff5728b86a6"
     }
   ]
 }

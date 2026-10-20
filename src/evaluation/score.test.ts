@@ -5,50 +5,41 @@ import { REQUIREMENT_LEVELS } from '../model/types.ts';
 import { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
 
 describe('scoreEvaluation', () => {
-  it('keeps requirement levels independent of scoring inclusion', () => {
+  it('scores MUST and SHOULD while retaining OPTIONAL as telemetry', () => {
     for (const requirement_level of REQUIREMENT_LEVELS) {
-      for (const criteria_requirement of [
-        'MUST',
-        'SHOULD',
-        'OPTIONAL',
-      ] as const) {
-        const result = scoreEvaluation(
-          [
-            {
-              criterion: 'Creates one subscription.',
-              requirement_level,
-              criteria_requirement,
-              passed: false,
-              explanation: 'Missing.',
-            },
-          ],
-          [],
-        );
-        assert.equal(
-          result.judging_criteria_total,
-          criteria_requirement === 'OPTIONAL' ? 0 : 1,
-        );
-        assert.equal(
-          result.status,
-          criteria_requirement === 'OPTIONAL' ? 'passed' : 'failed',
-        );
-        assert.equal(
-          result.judging_criteria[0]?.requirement_level,
-          requirement_level,
-        );
-      }
+      const result = scoreEvaluation(
+        [
+          {
+            criterion: 'The implementation MUST create one subscription.',
+            requirement_level,
+            passed: false,
+            explanation: 'Missing.',
+          },
+        ],
+        [],
+      );
+      assert.equal(
+        result.judging_criteria_total,
+        requirement_level === 'OPTIONAL' ? 0 : 1,
+      );
+      assert.equal(
+        result.status,
+        requirement_level === 'OPTIONAL' ? 'passed' : 'failed',
+      );
+      assert.equal(
+        result.judging_criteria[0]?.requirement_level,
+        requirement_level,
+      );
     }
   });
   it('binds required vs recommended scoring classifications', () => {
     const definition = {
-      criteria_requirement: 'SHOULD' as const,
+      requirement_level: 'SHOULD' as const,
       value: 'MUST create one subscription.',
-      requirement_level: 'MUST' as const,
     };
     const result = {
-      criteria_requirement: 'SHOULD' as const,
+      requirement_level: 'SHOULD' as const,
       criterion: definition.value,
-      requirement_level: definition.requirement_level,
       passed: false,
       explanation: 'Missing.',
     };
@@ -56,14 +47,14 @@ describe('scoreEvaluation', () => {
     assert.equal(scoreEvaluation([result], []).judging_criteria_total, 1);
     assert.equal(
       criterionResultMatchesDefinition(
-        { ...result, criteria_requirement: 'SHOULD' },
+        { ...result, requirement_level: 'SHOULD' },
         definition,
       ),
       true,
     );
     assert.equal(
       criterionResultMatchesDefinition(
-        { ...result, criteria_requirement: 'MUST' },
+        { ...result, requirement_level: 'MUST' },
         definition,
       ),
       false,
@@ -71,7 +62,7 @@ describe('scoreEvaluation', () => {
     assert.equal(
       criterionResultMatchesDefinition(result, {
         ...definition,
-        criteria_requirement: 'OPTIONAL',
+        requirement_level: 'OPTIONAL',
       }),
       false,
     );
@@ -80,18 +71,16 @@ describe('scoreEvaluation', () => {
     for (const passed of [true, false]) {
       const criteria = [
         {
-          criteria_requirement: 'SHOULD' as const,
+          requirement_level: 'SHOULD' as const,
           criterion: 'Correct answer',
-          requirement_level: 'MUST' as const,
           label: 'correctness',
           passed,
           explanation: '',
         },
         {
           criterion: 'Read docs',
-          requirement_level: 'MUST' as const,
           label: 'source',
-          criteria_requirement: 'OPTIONAL' as const,
+          requirement_level: 'OPTIONAL' as const,
           passed: !passed,
           explanation: '',
         },
@@ -125,16 +114,14 @@ describe('scoreEvaluation', () => {
       const actual = scoreEvaluation(
         [
           {
-            criteria_requirement: 'SHOULD' as const,
+            requirement_level: 'SHOULD' as const,
             criterion: 'one',
-            requirement_level: 'MUST' as const,
             passed: true,
             explanation: 'yes',
           },
           {
-            criteria_requirement: 'SHOULD' as const,
+            requirement_level: 'SHOULD' as const,
             criterion: 'two',
-            requirement_level: 'MUST' as const,
             passed: true,
             explanation: 'yes',
           },
@@ -152,16 +139,14 @@ describe('scoreEvaluation', () => {
   it('does not include deterministic checks in the criterion denominator', () => {
     const criteria = [
       {
-        criteria_requirement: 'SHOULD' as const,
+        requirement_level: 'SHOULD' as const,
         criterion: 'one',
-        requirement_level: 'MUST' as const,
         passed: true,
         explanation: 'yes',
       },
       {
-        criteria_requirement: 'SHOULD' as const,
+        requirement_level: 'SHOULD' as const,
         criterion: 'two',
-        requirement_level: 'MUST' as const,
         passed: false,
         explanation: 'no',
       },
@@ -185,9 +170,8 @@ describe('scoreEvaluation', () => {
   it('requires actual successful checks to establish partial success when no criterion passes', () => {
     const criteria = [
       {
-        criteria_requirement: 'SHOULD' as const,
+        requirement_level: 'SHOULD' as const,
         criterion: 'one',
-        requirement_level: 'MUST' as const,
         passed: false,
         explanation: 'no',
       },

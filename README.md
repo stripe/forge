@@ -269,15 +269,15 @@ JS
 ### Understand scores
 
 Numeric `score` is the fraction of scored judging criteria that passed.
-`criteria_requirement` classifies each criterion as `MUST` (required),
+`requirement_level` classifies each criterion as `MUST` (required),
 `SHOULD` (recommended), or `OPTIONAL` (non-scoring telemetry). Omitted values
 default to `SHOULD`. Both MUST and SHOULD contribute equally to the score;
 OPTIONAL judgments are retained but affect neither score nor evaluation status.
 File checks are additional pass/fail constraints and do not change the fraction.
 
-Each criterion also declares an RFC 2119 `requirement_level` for its wording.
-MUST criteria must use uppercase `MUST` or `MUST NOT` in their text. Wording
-validation does not infer scoring classification. See
+Criteria may be strings or objects; a string becomes an unlabeled SHOULD
+criterion. MUST criteria must use uppercase `MUST` or `MUST NOT` in their text.
+This writing guardrail does not infer or change the requirement level. See
 [criterion authoring](docs/architecture.md#criterion-judging) for the format.
 
 | Outcome | Meaning |

@@ -226,13 +226,12 @@ describe('experiment run scorecards', () => {
   it('separates required failures, recommended failures, and non-scoring telemetry', () => {
     const runs = [row(0), row(1), row(2), row(3)];
     function judgment(
-      criteria_requirement: 'MUST' | 'SHOULD' | 'OPTIONAL' = 'SHOULD',
+      requirement_level: 'MUST' | 'SHOULD' | 'OPTIONAL' = 'SHOULD',
       passed: boolean,
     ) {
       return {
         criterion: 'The answer MUST be complete.',
-        requirement_level: 'MUST' as const,
-        criteria_requirement,
+        requirement_level,
         passed,
         explanation: '',
       };
@@ -532,14 +531,12 @@ describe('experiment run scorecards', () => {
         {
           value: 'The answer MUST be complete.',
           requirement_level: 'MUST' as const,
-          criteria_requirement: 'MUST' as const,
           label: 'correctness',
         },
         {
           value: 'Read docs',
-          requirement_level: 'MUST' as const,
           label: 'source',
-          criteria_requirement: 'OPTIONAL' as const,
+          requirement_level: 'OPTIONAL' as const,
         },
       ],
       judge: { provider: 'scripted', model: 'judge' },

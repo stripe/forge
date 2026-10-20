@@ -261,9 +261,8 @@ describe('parseResolvedRunPlan', () => {
     const input = validPlan();
     input.case.judging_criteria = [
       {
-        criteria_requirement: 'SHOULD' as const,
+        requirement_level: 'SHOULD' as const,
         value: 'The task is complete.',
-        requirement_level: 'MUST',
       },
     ];
     input.evaluation.judging_criteria = [...input.case.judging_criteria];
@@ -271,7 +270,6 @@ describe('parseResolvedRunPlan', () => {
     assert.deepEqual(parseResolvedRunPlan(input), input);
     const authoredCriterion = {
       value: 'The task is complete.',
-      requirement_level: 'MUST',
     };
     const omittedRequirement = {
       ...input,
@@ -285,14 +283,18 @@ describe('parseResolvedRunPlan', () => {
     assert.deepEqual(
       parseResolvedRunPlan({
         ...omittedRequirement,
+        case: { ...input.case, judging_criteria: ['The task is complete.'] },
+      }),
+      input,
+    );
+    assert.deepEqual(
+      parseResolvedRunPlan({
+        ...omittedRequirement,
         evaluation: input.evaluation,
       }),
       input,
     );
-    assert.equal(
-      Object.hasOwn(authoredCriterion, 'criteria_requirement'),
-      false,
-    );
+    assert.equal(Object.hasOwn(authoredCriterion, 'requirement_level'), false);
 
     assert.throws(
       () =>
@@ -304,6 +306,7 @@ describe('parseResolvedRunPlan', () => {
               {
                 ...input.case.judging_criteria[0]!,
                 requirement_level: 'SHOULD',
+                label: 'changed',
               },
             ],
           },
@@ -325,9 +328,8 @@ describe('parseResolvedRunPlan', () => {
     }
     input.evaluation.judging_criteria = [
       {
-        criteria_requirement: 'SHOULD' as const,
+        requirement_level: 'SHOULD' as const,
         value: 'A different requirement.',
-        requirement_level: 'MUST',
       },
     ];
     assert.throws(() => parseResolvedRunPlan(input), {

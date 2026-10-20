@@ -95,13 +95,11 @@ describe('canonical interaction and judge evidence parsing', () => {
       judging_criteria: [
         {
           criterion: 'Complete the task.',
-          requirement_level: 'MUST' as const,
           passed: true,
           explanation: 'Done.',
         },
         {
           criterion: 'Explain the result.',
-          requirement_level: 'MUST' as const,
           passed: false,
           explanation: 'Missing.',
         },
@@ -113,11 +111,11 @@ describe('canonical interaction and judge evidence parsing', () => {
       ...evaluation,
       judging_criteria: evaluation.judging_criteria.map((criterion) => ({
         ...criterion,
-        criteria_requirement: 'SHOULD',
+        requirement_level: 'SHOULD',
       })),
     });
     assert.equal(
-      Object.hasOwn(evaluation.judging_criteria[0]!, 'criteria_requirement'),
+      Object.hasOwn(evaluation.judging_criteria[0]!, 'requirement_level'),
       false,
     );
     for (const [former, current] of [
@@ -139,7 +137,6 @@ describe('canonical interaction and judge evidence parsing', () => {
         judging_criteria: [
           {
             guideline: 'Complete the task.',
-            requirement_level: 'MUST',
             passed: true,
             explanation: 'Done.',
           },
@@ -178,19 +175,17 @@ describe('canonical interaction and judge evidence parsing', () => {
       judging_criteria: [
         {
           criterion: 'Correct answer',
-          requirement_level: 'MUST' as const,
           label: 'correctness',
           passed: true,
           explanation: '',
-          criteria_requirement: 'SHOULD' as const,
+          requirement_level: 'SHOULD' as const,
         },
         {
           criterion: 'Read docs',
-          requirement_level: 'MUST' as const,
           label: 'source',
           passed: false,
           explanation: '',
-          criteria_requirement: 'OPTIONAL' as const,
+          requirement_level: 'OPTIONAL' as const,
         },
       ],
       checks: [],
@@ -202,11 +197,10 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
     for (const changed of [
       { label: 'bad-label' },
-      { criteria_requirement: 'INVALID' },
+      { requirement_level: 'INVALID' },
       { include_in_score: false },
-      { requirement_level: undefined },
-      { requirement_level: 'must' },
-      { criterion: 'The agent MUST NOT read docs.', requirement_level: 'MUST' },
+      { requirement_level: 'MAY' },
+      { criteria_requirement: 'SHOULD' },
     ]) {
       assert.throws(() =>
         parseEvaluationResult({
@@ -223,7 +217,7 @@ describe('canonical interaction and judge evidence parsing', () => {
         parseEvaluationResult({
           ...evaluation,
           judging_criteria: [
-            { ...evaluation.judging_criteria[0], criteria_requirement: 'MUST' },
+            { ...evaluation.judging_criteria[0], requirement_level: 'MUST' },
             evaluation.judging_criteria[1],
           ],
         }),

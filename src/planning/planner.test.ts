@@ -609,9 +609,8 @@ describe('experiment expansion and run planning', () => {
         example_answer: 'A complete answer',
         judging_criteria: [
           {
-            criteria_requirement: 'SHOULD' as const,
+            requirement_level: 'SHOULD' as const,
             value: 'Correct answer',
-            requirement_level: 'MUST' as const,
             label: 'correctness',
           },
         ],
@@ -642,12 +641,10 @@ describe('experiment expansion and run planning', () => {
     assert.equal(typeof criterion, 'object');
     assert.equal(Object.isFrozen(criterion), false);
     criterion.value = 'Changed criterion';
-    criterion.requirement_level = 'MAY';
-    criterion.criteria_requirement = 'OPTIONAL';
+    criterion.requirement_level = 'OPTIONAL';
     definition.judging_criteria.push({
-      criteria_requirement: 'SHOULD' as const,
+      requirement_level: 'SHOULD' as const,
       value: 'Changed criterion',
-      requirement_level: 'MAY',
     });
     config.treatments['with-seed']!.setup[0]!.with.target = 'changed-seed.txt';
     config.models.role_player!.model = 'changed-role-player';
@@ -1009,9 +1006,8 @@ function evalCase(): EvalCaseV1 {
     setup: [{ uses: 'forge/command', with: { argv: ['git', 'init'] } }],
     judging_criteria: [
       {
-        criteria_requirement: 'SHOULD' as const,
+        requirement_level: 'SHOULD' as const,
         value: 'The task is complete',
-        requirement_level: 'MUST' as const,
       },
     ],
   };

@@ -49,7 +49,6 @@ export async function runCriterionJudgmentRegression(
   );
   const judgment = forge.parseCriterionJudgment(response.content, {
     value: 'Synthetic JSON escape check.',
-    requirement_level: 'MUST',
   });
   if (response.stopReason !== 'end_turn' || judgment.passed !== true) {
     throw new Error(

@@ -259,13 +259,7 @@ describe('executeEval multi-turn and judging integration', () => {
       prompt: 'Create a complete answer file.',
       context: 'A developer validating an implementation.',
       maxTurns: 3,
-      judgingCriteria: [
-        {
-          criteria_requirement: 'SHOULD' as const,
-          value: 'The requested answer file is complete.',
-          requirement_level: 'MUST' as const,
-        },
-      ],
+      judgingCriteria: ['The requested answer file is complete.'],
       checks: { files_created: ['answer.txt'] },
       rolePlayer: ROLE_MODEL,
       judge: JUDGE_MODEL,
@@ -476,13 +470,7 @@ describe('executeEval multi-turn and judging integration', () => {
         mode: 'multi_turn',
         prompt: 'Complete both parts.',
         maxTurns: 3,
-        judgingCriteria: [
-          {
-            criteria_requirement: 'SHOULD' as const,
-            value: 'Both requested parts are complete.',
-            requirement_level: 'MUST' as const,
-          },
-        ],
+        judgingCriteria: ['Both requested parts are complete.'],
         rolePlayer: ROLE_MODEL,
         judge: JUDGE_MODEL,
       }),
@@ -708,16 +696,8 @@ describe('executeEval multi-turn and judging integration', () => {
     const plan = createTestResolvedRunPlan({
       prompt: 'Produce visible evidence.',
       judgingCriteria: [
-        {
-          criteria_requirement: 'SHOULD' as const,
-          value: 'The assistant produced a visible response.',
-          requirement_level: 'MUST' as const,
-        },
-        {
-          criteria_requirement: 'SHOULD' as const,
-          value: 'The assistant invoked the visible tool.',
-          requirement_level: 'MUST' as const,
-        },
+        'The assistant produced a visible response.',
+        'The assistant invoked the visible tool.',
       ],
       judge: JUDGE_MODEL,
     });
@@ -851,13 +831,7 @@ describe('executeEval multi-turn and judging integration', () => {
           runId: 'redaction-boundary-1',
           plan: createTestResolvedRunPlan({
             prompt: 'Produce an answer.',
-            judgingCriteria: [
-              {
-                criteria_requirement: 'SHOULD' as const,
-                value: 'The assistant produced an answer.',
-                requirement_level: 'MUST' as const,
-              },
-            ],
+            judgingCriteria: ['The assistant produced an answer.'],
             judge: JUDGE_MODEL,
           }),
           composition: {

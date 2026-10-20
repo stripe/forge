@@ -4,7 +4,7 @@ dataset:
   path: ./dataset
   id: stripe-integration-public-evals
   version: 0.1.0
-  manifest_sha256: sha256:988984b4f44f0a251556372d19ee9b0d6f8c2d9629237a296197d2e88b1a0550
+  manifest_sha256: sha256:6b52bcfd75334b251060c996a6803a62b75b9425c26c2b6bf46c9240e2e81a19
 runtime:
   adapter: docker
   image:

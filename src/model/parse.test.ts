@@ -157,7 +157,6 @@ context: Existing integration
       judging_criteria: [
         {
           value: 'Returns HTTP 400 for invalid input.',
-          requirement_level: 'MUST',
         },
       ],
       checks: { files_created: ['answer.txt'] },
@@ -167,7 +166,7 @@ context: Existing integration
       parsed.judging_criteria,
       definition.judging_criteria.map((criterion) => ({
         ...criterion,
-        criteria_requirement: 'SHOULD',
+        requirement_level: 'SHOULD',
       })),
     );
     assert.deepEqual(parsed.checks, definition.checks);
@@ -218,22 +217,19 @@ initial_prompt: Two
     const criteria = [
       {
         value: 'Correct answer',
-        requirement_level: 'MUST',
         label: 'correctness',
       },
       {
         value: 'Read page A',
-        requirement_level: 'SHOULD',
         label: 'source',
-        criteria_requirement: 'OPTIONAL' as const,
+        requirement_level: 'OPTIONAL' as const,
       },
       {
         value: 'Read page B',
-        requirement_level: 'SHOULD',
         label: 'source',
-        criteria_requirement: 'OPTIONAL' as const,
+        requirement_level: 'OPTIONAL' as const,
       },
-      { value: 'Unlabeled criterion', requirement_level: 'MAY' },
+      { value: 'Unlabeled criterion' },
     ];
     assert.deepEqual(
       parseEvalCase({
@@ -243,7 +239,7 @@ initial_prompt: Two
       }).judging_criteria,
       criteria.map((criterion) => ({
         ...criterion,
-        criteria_requirement: criterion.criteria_requirement ?? 'SHOULD',
+        requirement_level: criterion.requirement_level ?? 'SHOULD',
       })),
     );
     for (const invalid of [
@@ -254,7 +250,7 @@ initial_prompt: Two
       { value: 'a', label: 'Uppercase' },
       { value: 'a', label: 'two-words' },
       { value: 'a', label: '1' },
-      { value: 'a', criteria_requirement: 'INVALID' },
+      { value: 'a', requirement_level: 'INVALID' },
       { value: 'a', id: 'correctness' },
     ]) {
       assert.throws(
@@ -262,7 +258,7 @@ initial_prompt: Two
           parseEvalCase({
             id: 'sample/task',
             task: 'Answer',
-            judging_criteria: [{ requirement_level: 'MUST', ...invalid }],
+            judging_criteria: [{ ...invalid }],
           }),
         BenchmarkModelError,
       );
@@ -275,8 +271,7 @@ initial_prompt: Two
           judging_criteria: [
             {
               value: 'Read docs',
-              requirement_level: 'SHOULD',
-              criteria_requirement: 'OPTIONAL' as const,
+              requirement_level: 'OPTIONAL' as const,
             },
           ],
         }),
@@ -292,9 +287,7 @@ initial_prompt: Two
           task: 'Evaluate a bounded criterion.',
           execution_mode: 'multi_turn',
           setup: [],
-          judging_criteria: [
-            { value: 'x'.repeat(64 * 1024 + 1), requirement_level: 'MUST' },
-          ],
+          judging_criteria: [{ value: 'x'.repeat(64 * 1024 + 1) }],
         }),
       BenchmarkModelError,
     );
