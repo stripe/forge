@@ -107,14 +107,31 @@ export interface ChecksV1 {
   file_checks?: FilesystemCheckV1[];
 }
 
-/** A repeatable category and scoring policy for one model-judged criterion. */
-export type JudgingCriterionV1 =
+export const REQUIREMENT_LEVELS = Object.freeze([
+  'MUST',
+  'SHOULD',
+  'OPTIONAL',
+] as const);
+
+export type RequirementLevelV1 = (typeof REQUIREMENT_LEVELS)[number];
+export const DEFAULT_REQUIREMENT_LEVEL = 'SHOULD' as const;
+
+/** Authored shorthand and objects; parsing materializes the requirement level. */
+export type JudgingCriterionInputV1 =
   | string
   | {
       value: string;
       label?: string;
-      include_in_score?: boolean;
+      requirement_level?: RequirementLevelV1;
     };
+
+/** One assertable criterion with an explicit requirement and scoring policy. */
+export interface JudgingCriterionV1 {
+  value: string;
+  label?: string;
+  /** Parsing defaults omitted input to SHOULD; OPTIONAL does not affect scoring. */
+  requirement_level: RequirementLevelV1;
+}
 
 /**
  * The benchmark case defines what is evaluated, never which agent runs it.

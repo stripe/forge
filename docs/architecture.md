@@ -1002,25 +1002,45 @@ through evidence collection.
 
 ### Criterion judging
 
-`judging_criteria` accepts nonblank strings or strict objects with `value`,
-optional `label`, and optional `include_in_score`. Labels are repeatable
-categories matching `[a-z][a-z0-9_]*`; they are not individual identities.
-`include_in_score` defaults to true. A case with criteria must keep at least
-one included criterion. Existing string criteria are unlabeled and included.
+`judging_criteria` accepts strings or strict objects with nonblank `value`,
+optional `label`, and optional `requirement_level`. Strings become unlabeled
+objects with that text as `value`. Omitted levels default to SHOULD. Parsed
+cases, resolved plans, and results always contain an explicit requirement level:
+
+| Level | Meaning | Scored |
+| --- | --- | --- |
+| `MUST` | Required criterion | Yes |
+| `SHOULD` | Recommended criterion; the default when omitted | Yes |
+| `OPTIONAL` | Telemetry or insight | No |
+
+Write each value as a complete, concrete expectation that can pass or fail.
+For example, use “Sets `billing_mode` to `flexible`” instead of “Uses the proper
+billing mode.” State prohibited behavior as an expectation of absence, such as
+“Does not create a second subscription.” Prefer deterministic checks for
+conditions they can establish through programmatic inspection.
+
+A MUST criterion must contain the whole uppercase word `MUST`, including
+`MUST NOT` for prohibited behavior. This writing guardrail runs during case,
+plan, and result parsing. Scoring uses only `requirement_level`; it never infers
+a level from wording. An omitted level remains SHOULD even when the text says
+MUST. Labels are repeatable categories matching `[a-z][a-z0-9_]*` and do not
+affect scoring. A case with criteria must keep at least one scored criterion.
 
 ```yaml
 judging_criteria:
+  - The integration creates a Checkout Session.
   - label: correctness
-    value: The answer correctly explains cancellation.
+    requirement_level: MUST
+    value: The integration MUST set billing_mode to flexible.
   - label: source
-    include_in_score: false
-    value: The agent consulted the cancellation documentation.
+    requirement_level: OPTIONAL
+    value: The agent consulted the subscription documentation.
 ```
 
-Every criterion is judged, including excluded criteria. Only its text is sent
+Every criterion is judged, including OPTIONAL criteria. Only its text is sent
 to the judge; authored metadata is attached to the ordered result afterward.
 `result.json.evaluation.judging_criteria` retains every text, outcome,
-explanation, optional label, and scoring inclusion. Source-consultation criteria
+explanation, requirement level, and optional label. Source-consultation criteria
 are model judgments about the available evidence, not verified network telemetry.
 
 Each judging criterion is judged independently against:
@@ -1046,19 +1066,26 @@ judge evidence.
 
 ### Score and status
 
-The numeric score is the fraction of included judging criteria that pass.
-`judging_criteria_passed` and `judging_criteria_total` count only results whose
-`include_in_score` is not false. Excluded criteria affect neither score nor
-status. File checks are independent pass constraints and do not change that
-ratio. Labels do not determine inclusion; authors select it explicitly.
+The numeric score is the fraction of MUST and SHOULD judging criteria that pass,
+with equal weight per criterion. `judging_criteria_passed` and
+`judging_criteria_total` count those two groups. OPTIONAL criteria affect neither
+score nor status. File checks are independent pass constraints and do not change
+that ratio. Only `requirement_level` determines scoring inclusion.
+
+Reports preserve per-run passed/total counts for all three classifications and
+verify that MUST plus SHOULD match the scored counts and ratio. Overall and
+per-case/configuration aggregates separate required failures from recommended
+failures and OPTIONAL telemetry. Group strict and average pass rates use only
+completed evaluations containing that classification, independently of checks;
+the README defines their [denominators](../README.md#understand-scores).
 
 | Situation | Status | Score |
 | --- | --- | --- |
 | No judging criteria; all checks pass | `passed` | `0` |
 | No judging criteria; a check fails | `failed` | `0` |
-| All included criteria and checks pass | `passed` | `1` |
-| Some included criteria pass, or checks pass while included criteria do not all pass | `partial` | Criterion pass ratio |
-| No included criterion passes and checks do not establish partial success | `failed` | `0` |
+| All scored criteria and checks pass | `passed` | `1` |
+| Some scored criteria pass, or checks pass while scored criteria do not all pass | `partial` | Criterion pass ratio |
+| No scored criterion passes and checks do not establish partial success | `failed` | `0` |
 
 Interaction stop reason and evaluation status are separate. For example, a
 `max_turns` run can still pass its evidence-based evaluation.
@@ -1144,7 +1171,7 @@ hashes. It also requires:
 - every declared artifact's size and SHA-256 to match;
 - no undeclared files, symlinks, or special files;
 - canonical plan bytes to match their artifact descriptor and result summary;
-- recorded criterion text, labels, and effective inclusion to match the plan;
+- recorded criterion text, labels, and requirement levels to match the plan;
 - workspace evidence with no unknown fields;
 - `setup.json` to match ordered plan actions and valid plugin receipts;
 - `interaction.json` to match result summaries;
@@ -1155,9 +1182,9 @@ hashes. It also requires:
 - judge evidence to match the projection of the stored trajectory.
 
 `criterionResultMatchesDefinition` from `@stripe/forge` compares a recorded
-judgment's text, label, and effective scoring inclusion with its authored
-criterion. Embedding hosts with their own result envelopes use the same check.
-Omitted inclusion on historical result rows means true.
+judgment's text, label, and requirement level
+with its authored criterion. Embedding hosts with their own result envelopes
+use the same check. String definitions and omitted levels mean SHOULD.
 
 Publication is deliberately outside `executeEval`. A caller should verify the
 committed local run before passing it to a host-owned publisher.

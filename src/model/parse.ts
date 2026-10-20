@@ -9,6 +9,7 @@ import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
 } from '../version.ts';
+import { JudgingCriterionSchema } from './criteria.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
 import { isSha256Digest, isSha256Hex } from './hashes.ts';
 import { agentSelectionKey } from './matrix.ts';
@@ -50,41 +51,18 @@ const MAX_SETUP_STEPS = 1_000;
 const MAX_RESOLVED_SETUP_STEPS = MAX_SETUP_STEPS * 2;
 const MAX_ACTION_BUNDLES = 100;
 const MAX_CHECK_REGEX_BYTES = 1_024;
-const MAX_SUCCESS_CRITERION_CHARACTERS = 64 * 1024;
 
 const FiniteNumberSchema = z.number().finite();
 const PositiveIntegerSchema = FiniteNumberSchema.int().safe().positive();
 const NonnegativeIntegerSchema = FiniteNumberSchema.int().safe().nonnegative();
 const TrimmedTextSchema = z.string().trim().min(1).refine(isBoundedText);
-const JudgingCriterionTextSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(MAX_SUCCESS_CRITERION_CHARACTERS)
-  .refine(isBoundedText);
-const JudgingCriterionSchema = z.union([
-  JudgingCriterionTextSchema,
-  z
-    .object({
-      value: JudgingCriterionTextSchema,
-      label: z
-        .string()
-        .regex(/^[a-z][a-z0-9_]*$/)
-        .optional(),
-      include_in_score: z.boolean().optional(),
-    })
-    .strict(),
-]);
 const JudgingCriteriaSchema = z
   .array(JudgingCriterionSchema)
   .max(1_000)
   .superRefine((criteria, context) => {
     if (
       criteria.length > 0 &&
-      criteria.every(
-        (criterion) =>
-          typeof criterion !== 'string' && criterion.include_in_score === false,
-      )
+      criteria.every((criterion) => criterion.requirement_level === 'OPTIONAL')
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

@@ -18,6 +18,7 @@ import {
   type ExperimentRunReportEvaluationV1,
   type ExperimentRunReportRunV1,
   serializeExperimentRunReport,
+  summarizeReportEvaluation,
 } from './experimentReport.ts';
 import type { ResolvedRunPlanV1, RunSelection } from './model/types.ts';
 import { resolvedRunPlanSha256 } from './planning/planner.ts';
@@ -590,14 +591,7 @@ async function inspectAttempt(
     const evaluation = completed.result.evaluation;
     return {
       attempt,
-      evaluation: {
-        status: evaluation.status,
-        score: evaluation.score,
-        judging_criteria_passed: evaluation.judging_criteria_passed,
-        judging_criteria_total: evaluation.judging_criteria_total,
-        checks_passed: evaluation.checks.filter((check) => check.passed).length,
-        checks_total: evaluation.checks.length,
-      },
+      evaluation: summarizeReportEvaluation(evaluation),
       artifact: {
         location,
         evaluation: {

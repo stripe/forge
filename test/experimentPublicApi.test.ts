@@ -56,7 +56,10 @@ describe('experiment public entry points', () => {
       JSON.stringify({
         results: [{ index: 0, passed: true, explanation: 'Done.' }],
       }),
-      'The task is complete.',
+      {
+        requirement_level: 'SHOULD' as const,
+        value: 'The task is complete.',
+      },
     );
     const evaluation: root.EvaluationResultV1 = root.scoreEvaluation(
       [criterion],
@@ -73,6 +76,32 @@ describe('experiment public entry points', () => {
     ): Promise<root.CriterionResultV1[]> =>
       root.judgeCriteria(input, invoke, options);
     assert.equal(typeof judge, 'function');
+  });
+
+  it('accepts string and object criteria with default SHOULD through the public API', () => {
+    const text = 'The integration creates a Checkout Session.';
+    const inputs: root.JudgingCriterionInputV1[] = [
+      text,
+      `  ${text}  `,
+      { value: text },
+      { value: `  ${text}  ` },
+      { value: text, requirement_level: 'SHOULD' },
+    ];
+    for (const input of inputs) {
+      const result = root.parseCriterionJudgment(
+        JSON.stringify({
+          results: [{ index: 0, passed: true, explanation: 'Done.' }],
+        }),
+        input,
+      );
+      assert.deepEqual(result, {
+        criterion: text,
+        requirement_level: 'SHOULD',
+        passed: true,
+        explanation: 'Done.',
+      });
+      assert.equal(root.criterionResultMatchesDefinition(result, input), true);
+    }
   });
 
   it('exports flat and grouped matrix types and their shared axes helper', () => {

@@ -259,10 +259,60 @@ describe('parseResolvedRunPlan', () => {
 
   it('binds judging criteria to the selected case and rejects former plan fields', () => {
     const input = validPlan();
-    input.case.judging_criteria = ['The task is complete.'];
+    input.case.judging_criteria = [
+      {
+        requirement_level: 'SHOULD' as const,
+        value: 'The task is complete.',
+      },
+    ];
     input.evaluation.judging_criteria = [...input.case.judging_criteria];
     input.evaluation.judge = { provider: 'anthropic', model: 'claude-judge' };
     assert.deepEqual(parseResolvedRunPlan(input), input);
+    const authoredCriterion = {
+      value: 'The task is complete.',
+    };
+    const omittedRequirement = {
+      ...input,
+      case: { ...input.case, judging_criteria: [authoredCriterion] },
+      evaluation: {
+        ...input.evaluation,
+        judging_criteria: [authoredCriterion],
+      },
+    };
+    assert.deepEqual(parseResolvedRunPlan(omittedRequirement), input);
+    assert.deepEqual(
+      parseResolvedRunPlan({
+        ...omittedRequirement,
+        case: { ...input.case, judging_criteria: ['The task is complete.'] },
+      }),
+      input,
+    );
+    assert.deepEqual(
+      parseResolvedRunPlan({
+        ...omittedRequirement,
+        evaluation: input.evaluation,
+      }),
+      input,
+    );
+    assert.equal(Object.hasOwn(authoredCriterion, 'requirement_level'), false);
+
+    assert.throws(
+      () =>
+        parseResolvedRunPlan({
+          ...input,
+          evaluation: {
+            ...input.evaluation,
+            judging_criteria: [
+              {
+                ...input.case.judging_criteria[0]!,
+                requirement_level: 'SHOULD',
+                label: 'changed',
+              },
+            ],
+          },
+        }),
+      /evaluation criteria must match/,
+    );
     for (const section of ['case', 'evaluation'] as const) {
       assert.throws(
         () =>
@@ -276,7 +326,12 @@ describe('parseResolvedRunPlan', () => {
         BenchmarkModelError,
       );
     }
-    input.evaluation.judging_criteria = ['A different requirement.'];
+    input.evaluation.judging_criteria = [
+      {
+        requirement_level: 'SHOULD' as const,
+        value: 'A different requirement.',
+      },
+    ];
     assert.throws(() => parseResolvedRunPlan(input), {
       code: 'invalid_plan',
       message: /evaluation criteria must match/,

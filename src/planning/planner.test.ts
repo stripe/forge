@@ -607,7 +607,13 @@ describe('experiment expansion and run planning', () => {
         ...evalCase(),
         checks: { files_created: ['answer.txt'] },
         example_answer: 'A complete answer',
-        judging_criteria: [{ value: 'Correct answer', label: 'correctness' }],
+        judging_criteria: [
+          {
+            requirement_level: 'SHOULD' as const,
+            value: 'Correct answer',
+            label: 'correctness',
+          },
+        ],
       },
     });
     const selected = expandExperiment(loaded.experiment, loaded.dataset)[1]!;
@@ -633,12 +639,13 @@ describe('experiment expansion and run planning', () => {
     definition.checks!.files_created!.push('changed.txt');
     const criterion = definition.judging_criteria[0]!;
     assert.equal(typeof criterion, 'object');
-    if (typeof criterion !== 'string') {
-      assert.equal(Object.isFrozen(criterion), false);
-      criterion.value = 'Changed criterion';
-      criterion.include_in_score = false;
-    }
-    definition.judging_criteria.push('Changed criterion');
+    assert.equal(Object.isFrozen(criterion), false);
+    criterion.value = 'Changed criterion';
+    criterion.requirement_level = 'OPTIONAL';
+    definition.judging_criteria.push({
+      requirement_level: 'SHOULD' as const,
+      value: 'Changed criterion',
+    });
     config.treatments['with-seed']!.setup[0]!.with.target = 'changed-seed.txt';
     config.models.role_player!.model = 'changed-role-player';
     config.models.judge!.model = 'changed-judge';
@@ -997,7 +1004,12 @@ function evalCase(): EvalCaseV1 {
     execution_mode: 'multi_turn',
     max_turns: 7,
     setup: [{ uses: 'forge/command', with: { argv: ['git', 'init'] } }],
-    judging_criteria: ['The task is complete'],
+    judging_criteria: [
+      {
+        requirement_level: 'SHOULD' as const,
+        value: 'The task is complete',
+      },
+    ],
   };
 }
 

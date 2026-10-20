@@ -336,8 +336,18 @@ describe('evaluateRunEvidence', () => {
       judge: { provider: 'test-judge', model: 'test-model' },
       checks: { files_created: ['answer.txt'] },
     });
-    const first = { criterion: 'first', passed: true, explanation: 'yes' };
-    const second = { criterion: 'second', passed: false, explanation: 'no' };
+    const first = {
+      requirement_level: 'SHOULD' as const,
+      criterion: 'first',
+      passed: true,
+      explanation: 'yes',
+    };
+    const second = {
+      requirement_level: 'SHOULD' as const,
+      criterion: 'second',
+      passed: false,
+      explanation: 'no',
+    };
     let inspections = 0;
     const sealedWorkspace = {
       ...workspace({ 'answer.txt': 'answer' }),
@@ -358,6 +368,7 @@ describe('evaluateRunEvidence', () => {
       [first],
       [second, first],
       [first, { ...second, criterion: 'altered' }],
+      [first, { ...second, requirement_level: 'OPTIONAL' }],
       [first, second, first],
     ] satisfies CriterionResultV1[][]) {
       await assert.rejects(
@@ -376,8 +387,16 @@ describe('evaluateRunEvidence', () => {
   it('rejects altered criterion labels or scoring inclusion before grading', async () => {
     const plan = createTestResolvedRunPlan({
       judgingCriteria: [
-        { value: 'Correct answer', label: 'correctness' },
-        { value: 'Read docs', label: 'source', include_in_score: false },
+        {
+          requirement_level: 'SHOULD' as const,
+          value: 'Correct answer',
+          label: 'correctness',
+        },
+        {
+          value: 'Read docs',
+          label: 'source',
+          requirement_level: 'OPTIONAL' as const,
+        },
       ],
       judge: { provider: 'test-judge', model: 'test-model' },
     });
@@ -385,14 +404,14 @@ describe('evaluateRunEvidence', () => {
       {
         criterion: 'Correct answer',
         label: 'correctness',
-        include_in_score: true,
+        requirement_level: 'SHOULD' as const,
         passed: true,
         explanation: '',
       },
       {
         criterion: 'Read docs',
         label: 'source',
-        include_in_score: false,
+        requirement_level: 'OPTIONAL' as const,
         passed: false,
         explanation: '',
       },
@@ -406,7 +425,7 @@ describe('evaluateRunEvidence', () => {
     assert.equal(actual.evaluation.score, 1);
     for (const changed of [
       { ...rows[1]!, label: 'correctness' },
-      { ...rows[1]!, include_in_score: true },
+      { ...rows[1]!, requirement_level: 'SHOULD' as const },
     ]) {
       await assert.rejects(
         evaluateRunEvidence({

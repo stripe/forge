@@ -154,11 +154,21 @@ context: Existing integration
     const definition = {
       id: 'sample/criteria',
       task: 'Complete the task.',
-      judging_criteria: ['Handle invalid input gracefully.'],
+      judging_criteria: [
+        {
+          value: 'Returns HTTP 400 for invalid input.',
+        },
+      ],
       checks: { files_created: ['answer.txt'] },
     };
     const parsed = parseEvalCase(definition);
-    assert.deepEqual(parsed.judging_criteria, definition.judging_criteria);
+    assert.deepEqual(
+      parsed.judging_criteria,
+      definition.judging_criteria.map((criterion) => ({
+        ...criterion,
+        requirement_level: 'SHOULD',
+      })),
+    );
     assert.deepEqual(parsed.checks, definition.checks);
     assert.throws(
       () => parseEvalCase({ ...definition, success_guidelines: [] }),
@@ -203,12 +213,22 @@ initial_prompt: Two
     );
   });
 
-  it('accepts mixed criteria and repeatable labels while rejecting invalid scoring definitions', () => {
+  it('accepts classified criteria and repeatable labels while rejecting invalid scoring definitions', () => {
     const criteria = [
-      'Legacy criterion',
-      { value: 'Correct answer', label: 'correctness' },
-      { value: 'Read page A', label: 'source', include_in_score: false },
-      { value: 'Read page B', label: 'source', include_in_score: false },
+      {
+        value: 'Correct answer',
+        label: 'correctness',
+      },
+      {
+        value: 'Read page A',
+        label: 'source',
+        requirement_level: 'OPTIONAL' as const,
+      },
+      {
+        value: 'Read page B',
+        label: 'source',
+        requirement_level: 'OPTIONAL' as const,
+      },
       { value: 'Unlabeled criterion' },
     ];
     assert.deepEqual(
@@ -217,7 +237,10 @@ initial_prompt: Two
         task: 'Answer',
         judging_criteria: criteria,
       }).judging_criteria,
-      criteria,
+      criteria.map((criterion) => ({
+        ...criterion,
+        requirement_level: criterion.requirement_level ?? 'SHOULD',
+      })),
     );
     for (const invalid of [
       { value: '' },
@@ -227,7 +250,7 @@ initial_prompt: Two
       { value: 'a', label: 'Uppercase' },
       { value: 'a', label: 'two-words' },
       { value: 'a', label: '1' },
-      { value: 'a', include_in_score: 'false' },
+      { value: 'a', requirement_level: 'INVALID' },
       { value: 'a', id: 'correctness' },
     ]) {
       assert.throws(
@@ -235,7 +258,7 @@ initial_prompt: Two
           parseEvalCase({
             id: 'sample/task',
             task: 'Answer',
-            judging_criteria: [invalid],
+            judging_criteria: [{ ...invalid }],
           }),
         BenchmarkModelError,
       );
@@ -245,7 +268,12 @@ initial_prompt: Two
         parseEvalCase({
           id: 'sample/task',
           task: 'Answer',
-          judging_criteria: [{ value: 'Read docs', include_in_score: false }],
+          judging_criteria: [
+            {
+              value: 'Read docs',
+              requirement_level: 'OPTIONAL' as const,
+            },
+          ],
         }),
       /at least one judging criterion must be included in scoring/,
     );
@@ -259,7 +287,7 @@ initial_prompt: Two
           task: 'Evaluate a bounded criterion.',
           execution_mode: 'multi_turn',
           setup: [],
-          judging_criteria: ['x'.repeat(64 * 1024 + 1)],
+          judging_criteria: [{ value: 'x'.repeat(64 * 1024 + 1) }],
         }),
       BenchmarkModelError,
     );

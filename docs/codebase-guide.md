@@ -90,11 +90,21 @@ Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
 setup without upstream calls.
 
 The live suite can create temporary authenticated host bridges for Codex
-Responses requests and loopback Claude endpoints. These require
-`host.docker.internal` support, such as Docker Desktop. The real upstream key
-stays host-side; the container receives a per-run bridge credential. This is
-test-suite behavior: the public CLI creates no bridge and requires endpoints
-reachable from the container.
+Responses requests and loopback Claude endpoints. The real upstream key
+stays host-side; the container receives a per-run bridge credential. The host
+running the bridge must already be able to reach the upstream endpoint.
+
+The container reaches the bridge through `host.docker.internal`, which Docker
+Desktop provides. On Linux Docker Engine, `docker run` may need
+`--add-host=host.docker.internal:host-gateway`. The suite does not add this
+mapping automatically. `FORGE_DOCKER_EXECUTABLE` can select a Docker wrapper
+that inserts it for `run` and passes other subcommands through unchanged.
+Verify connectivity from a container: a successful host-side request does not
+establish that the container can resolve or reach the bridge.
+
+This is test-suite behavior: the public CLI creates no bridge and requires
+endpoints reachable from the container. See the README's
+[endpoint configuration](../README.md#requirements--credentials).
 
 Results default to `results/live`. `FORGE_LIVE_RUN_ID` sets the suite/run ID
 prefix; `FORGE_LIVE_RESULTS_ROOT` changes the root; `FORGE_LIVE_TIMEOUT_MS` sets

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it, vi } from 'vitest';
+import { REQUIREMENT_LEVELS } from '../model/types.ts';
+import { parseEvaluationResult } from '../results/parse.ts';
 import {
   buildCriterionJudgePrompt,
   CRITERION_JUDGMENT_RESPONSE_SCHEMA,
@@ -37,6 +39,73 @@ function valid(passed = true, explanation = 'yes'): string {
 }
 
 describe('judgeCriteria', () => {
+  it('uses canonical criterion text in prompts and valid result artifacts at the size limit', async () => {
+    const value = 'x'.repeat(64 * 1024);
+    const criterion = {
+      requirement_level: 'SHOULD' as const,
+      value: ` \n${value}\t `,
+    };
+    for (const raw of [valid(), '{}']) {
+      const results = await judgeCriteria(
+        { transcript: EMPTY_TRANSCRIPT, criteria: [criterion] },
+        async (request) => {
+          assert.ok(
+            request.systemPrompt.includes(`Success Criterion:\n${value}\n`),
+          );
+          return raw;
+        },
+        noRetryWait,
+      );
+      assert.equal(results[0]?.criterion, value);
+      const evaluation = scoreEvaluation(results, []);
+      assert.deepEqual(parseEvaluationResult(evaluation), evaluation);
+    }
+    assert.equal(criterion.value, ` \n${value}\t `);
+  });
+
+  it('preserves each requirement level on successful and unavailable judgments', async () => {
+    const criteria = REQUIREMENT_LEVELS.map((requirement_level) => ({
+      requirement_level,
+      value: `The implementation ${requirement_level} create a subscription.`,
+    }));
+    for (const available of [true, false]) {
+      const results = await judgeCriteria(
+        { transcript: EMPTY_TRANSCRIPT, criteria },
+        async () => (available ? valid() : '{}'),
+        noRetryWait,
+      );
+      assert.deepEqual(
+        results.map((result) => result.requirement_level),
+        REQUIREMENT_LEVELS,
+      );
+      assert.ok(results.every((result) => result.passed === available));
+    }
+  });
+
+  it('validates every classification before starting any judge calls', async () => {
+    let calls = 0;
+    await assert.rejects(
+      judgeCriteria(
+        {
+          transcript: EMPTY_TRANSCRIPT,
+          criteria: [
+            'Creates a subscription.',
+            {
+              requirement_level: 'MUST' as const,
+              value: 'Do not create another subscription.',
+            },
+          ],
+        },
+        async () => {
+          calls += 1;
+          return valid();
+        },
+      ),
+      /MUST criteria must use the uppercase RFC keyword MUST/,
+    );
+    assert.equal(calls, 0);
+  });
+
   it('invokes one strict structured completion with the complete evidence prompt', async () => {
     const requests: CriterionCompletionRequest[] = [];
     const invoke: CriterionCompletionInvoker = async (request) => {
@@ -55,7 +124,12 @@ describe('judgeCriteria', () => {
     );
 
     assert.deepEqual(results, [
-      { criterion: 'THE_CRITERION', passed: true, explanation: 'yes' },
+      {
+        criterion: 'THE_CRITERION',
+        requirement_level: 'SHOULD' as const,
+        passed: true,
+        explanation: 'yes',
+      },
     ]);
     assert.equal(requests.length, 1);
     const request = requests[0]!;
@@ -92,10 +166,22 @@ describe('judgeCriteria', () => {
       {
         transcript: EMPTY_TRANSCRIPT,
         criteria: [
-          { label: 'correctness', value: 'Correct answer' },
-          { label: 'source', value: 'Read page A', include_in_score: false },
-          { label: 'source', value: 'Read page B', include_in_score: false },
-          'Legacy criterion',
+          {
+            requirement_level: 'SHOULD' as const,
+            label: 'correctness',
+            value: 'Correct answer',
+          },
+          {
+            label: 'source',
+            value: 'Read page A',
+            requirement_level: 'OPTIONAL' as const,
+          },
+          {
+            label: 'source',
+            value: 'Does not read page B',
+            requirement_level: 'OPTIONAL' as const,
+          },
+          'Optional behavior',
         ],
       },
       async (request) => {
@@ -108,31 +194,36 @@ describe('judgeCriteria', () => {
     for (const request of requests)
       assert.doesNotMatch(
         request.systemPrompt,
-        /correctness|include_in_score|\[object Object\]/,
+        /correctness|requirement_level|\[object Object\]/,
       );
     assert.deepEqual(results, [
       {
         criterion: 'Correct answer',
         label: 'correctness',
-        include_in_score: true,
+        requirement_level: 'SHOULD' as const,
         passed: true,
         explanation: 'yes',
       },
       {
         criterion: 'Read page A',
         label: 'source',
-        include_in_score: false,
+        requirement_level: 'OPTIONAL' as const,
         passed: false,
         explanation: 'yes',
       },
       {
-        criterion: 'Read page B',
+        criterion: 'Does not read page B',
         label: 'source',
-        include_in_score: false,
+        requirement_level: 'OPTIONAL' as const,
         passed: true,
         explanation: 'yes',
       },
-      { criterion: 'Legacy criterion', passed: true, explanation: 'yes' },
+      {
+        criterion: 'Optional behavior',
+        requirement_level: 'SHOULD' as const,
+        passed: true,
+        explanation: 'yes',
+      },
     ]);
   });
 
@@ -189,10 +280,10 @@ describe('judgeCriteria', () => {
   });
 
   it('bounds concurrency at four while preserving authored result order', async () => {
-    const criteria = Array.from(
-      { length: 10 },
-      (_, index) => `CRITERION_${index}`,
-    );
+    const criteria = Array.from({ length: 10 }, (_, index) => ({
+      requirement_level: 'SHOULD' as const,
+      value: `CRITERION_${index}`,
+    }));
     let active = 0;
     let maximumActive = 0;
     const invoke: CriterionCompletionInvoker = async (request) => {
@@ -202,7 +293,7 @@ describe('judgeCriteria', () => {
       active -= 1;
       const prompt = request.systemPrompt;
       const index = criteria.findIndex((criterion) =>
-        prompt.includes(`Success Criterion:\n${criterion}\n`),
+        prompt.includes(`Success Criterion:\n${criterion.value}\n`),
       );
       return valid(index % 2 === 0, `result ${index}`);
     };
@@ -216,7 +307,8 @@ describe('judgeCriteria', () => {
     assert.deepEqual(
       results,
       criteria.map((criterion, index) => ({
-        criterion,
+        criterion: criterion.value,
+        requirement_level: 'SHOULD' as const,
         passed: index % 2 === 0,
         explanation: `result ${index}`,
       })),
@@ -250,6 +342,7 @@ describe('judgeCriteria', () => {
       results,
       ['first', 'second', 'third'].map((criterion) => ({
         criterion,
+        requirement_level: 'SHOULD' as const,
         passed: true,
         explanation: criterion,
       })),
@@ -273,14 +366,22 @@ describe('judgeCriteria', () => {
     };
 
     const results = await judgeCriteria(
-      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      {
+        transcript: EMPTY_TRANSCRIPT,
+        criteria: ['criterion'],
+      },
       invoke,
       noRetryWait,
     );
 
     assert.equal(calls, 2);
     assert.deepEqual(results, [
-      { criterion: 'criterion', passed: true, explanation: 'recovered' },
+      {
+        criterion: 'criterion',
+        requirement_level: 'SHOULD' as const,
+        passed: true,
+        explanation: 'recovered',
+      },
     ]);
   });
 
@@ -293,7 +394,10 @@ describe('judgeCriteria', () => {
 
     await assert.rejects(
       judgeCriteria(
-        { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+        {
+          transcript: EMPTY_TRANSCRIPT,
+          criteria: ['criterion'],
+        },
         invoke,
         noRetryWait,
       ),
@@ -310,7 +414,10 @@ describe('judgeCriteria', () => {
 
     await assert.rejects(
       judgeCriteria(
-        { transcript: EMPTY_TRANSCRIPT, criteria: ['failing', 'peer'] },
+        {
+          transcript: EMPTY_TRANSCRIPT,
+          criteria: ['failing', 'peer'],
+        },
         async (request) => {
           if (request.systemPrompt.includes('Success Criterion:\nfailing\n')) {
             failingCalls += 1;
@@ -344,7 +451,10 @@ describe('judgeCriteria', () => {
     };
 
     const results = await judgeCriteria(
-      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      {
+        transcript: EMPTY_TRANSCRIPT,
+        criteria: ['criterion'],
+      },
       invoke,
       noRetryWait,
     );
@@ -353,6 +463,7 @@ describe('judgeCriteria', () => {
     assert.deepEqual(results, [
       {
         criterion: 'criterion',
+        requirement_level: 'SHOULD' as const,
         passed: false,
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
@@ -364,7 +475,10 @@ describe('judgeCriteria', () => {
   it('retains an exhausted malformed criterion in the score denominator alongside a successful peer', async () => {
     let failedCalls = 0;
     const results = await judgeCriteria(
-      { transcript: EMPTY_TRANSCRIPT, criteria: ['unavailable', 'successful'] },
+      {
+        transcript: EMPTY_TRANSCRIPT,
+        criteria: ['unavailable', 'successful'],
+      },
       async (request) => {
         if (request.systemPrompt.includes('Success Criterion:\nsuccessful\n')) {
           return valid(true, 'completed');
@@ -380,11 +494,17 @@ describe('judgeCriteria', () => {
     assert.deepEqual(results, [
       {
         criterion: 'unavailable',
+        requirement_level: 'SHOULD' as const,
         passed: false,
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
       },
-      { criterion: 'successful', passed: true, explanation: 'completed' },
+      {
+        criterion: 'successful',
+        requirement_level: 'SHOULD' as const,
+        passed: true,
+        explanation: 'completed',
+      },
     ]);
     const evaluation = scoreEvaluation(results, [
       { name: 'file', passed: true },
@@ -401,7 +521,10 @@ describe('judgeCriteria', () => {
     let calls = 0;
     await assert.rejects(
       judgeCriteria(
-        { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+        {
+          transcript: EMPTY_TRANSCRIPT,
+          criteria: ['criterion'],
+        },
         async () => {
           calls += 1;
           if (calls === MAX_CRITERION_JUDGE_ATTEMPTS) throw failure;
@@ -418,7 +541,10 @@ describe('judgeCriteria', () => {
     let calls = 0;
     const oversized = 'x'.repeat(MAX_CRITERION_EXPLANATION_CHARACTERS + 1);
     const results = await judgeCriteria(
-      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      {
+        transcript: EMPTY_TRANSCRIPT,
+        criteria: ['criterion'],
+      },
       async () => {
         calls += 1;
         return valid(true, oversized);
@@ -430,6 +556,7 @@ describe('judgeCriteria', () => {
     assert.deepEqual(results, [
       {
         criterion: 'criterion',
+        requirement_level: 'SHOULD' as const,
         passed: false,
         explanation:
           'Judge response did not match the required schema. (unavailable after 3 attempts)',
@@ -505,7 +632,10 @@ describe('judgeCriteria', () => {
     });
     let calls = 0;
     const pending = judgeCriteria(
-      { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
+      {
+        transcript: EMPTY_TRANSCRIPT,
+        criteria: ['criterion'],
+      },
       async () => {
         calls += 1;
         return '{}';
@@ -532,6 +662,21 @@ describe('judgeCriteria', () => {
 });
 
 describe('parseCriterionJudgment', () => {
+  it('returns canonical criterion text that survives artifact parsing at the size limit', () => {
+    const value = 'x'.repeat(64 * 1024);
+    const criterion = {
+      requirement_level: 'SHOULD' as const,
+      value: ` \n${value}\t `,
+    };
+    for (const raw of [valid(), '{}']) {
+      const result = parseCriterionJudgment(raw, criterion);
+      assert.equal(result.criterion, value);
+      const evaluation = scoreEvaluation([result], []);
+      assert.deepEqual(parseEvaluationResult(evaluation), evaluation);
+    }
+    assert.equal(criterion.value, ` \n${value}\t `);
+  });
+
   it('accepts JSON explanations containing Markdown backticks and escaped characters', () => {
     const explanation =
       '  Missing `cancel_url`; expected "https://example.com/cancel".\nCheck C:\\checkout.  ';
@@ -539,6 +684,7 @@ describe('parseCriterionJudgment', () => {
       parseCriterionJudgment(valid(false, explanation), 'criterion'),
       {
         criterion: 'criterion',
+        requirement_level: 'SHOULD' as const,
         passed: false,
         explanation: explanation.trim(),
       },
@@ -550,6 +696,7 @@ describe('parseCriterionJudgment', () => {
       '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}';
     assert.deepEqual(parseCriterionJudgment(raw, 'criterion'), {
       criterion: 'criterion',
+      requirement_level: 'SHOULD' as const,
       passed: false,
       explanation: 'Judge response was not valid JSON.',
     });
@@ -562,6 +709,7 @@ describe('parseCriterionJudgment', () => {
     ]) {
       assert.deepEqual(parseCriterionJudgment(raw, 'criterion'), {
         criterion: 'criterion',
+        requirement_level: 'SHOULD' as const,
         passed: false,
         explanation: 'Judge response was not valid JSON.',
       });
@@ -582,6 +730,7 @@ describe('parseCriterionJudgment', () => {
     ]) {
       assert.deepEqual(parseCriterionJudgment(JSON.stringify(response), 'g'), {
         criterion: 'g',
+        requirement_level: 'SHOULD' as const,
         passed: false,
         explanation: 'Judge response did not match the required schema.',
       });

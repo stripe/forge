@@ -19,6 +19,7 @@ import type {
   JsonObject,
   JsonValue,
   ModelRefV1,
+  RequirementLevelV1,
   RunSelection,
   SetupActionBundleReferenceV1,
   Sha256Digest,
@@ -42,8 +43,8 @@ export interface CheckResultV1 {
 
 export interface CriterionResultV1 {
   readonly label?: string;
-  /** Omitted on historical results means true. */
-  readonly include_in_score?: boolean;
+  /** Always present after parsing; omitted input defaults to SHOULD. */
+  readonly requirement_level: RequirementLevelV1;
   readonly criterion: string;
   readonly passed: boolean;
   readonly explanation: string;

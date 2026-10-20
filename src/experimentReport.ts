@@ -6,6 +6,8 @@ import {
 } from './experimentModel.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
+import type { RequirementLevelV1 } from './model/types.ts';
+import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import {
   assertCompatibleForgeVersion,
@@ -18,12 +20,36 @@ const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const selectionSchema = z.unknown().transform(parseRunSelection);
+const criterionCountsSchema = z
+  .object({ passed: count, total: count })
+  .strict()
+  .refine(
+    (value) => value.passed <= value.total,
+    'Passed counts exceed totals.',
+  );
+const criteriaByRequirementSchema = z
+  .object({
+    MUST: criterionCountsSchema,
+    SHOULD: criterionCountsSchema,
+    OPTIONAL: criterionCountsSchema,
+  })
+  .strict();
+const criterionStatisticsSchema = z
+  .object({
+    passed: count,
+    total: count,
+    evaluations: count,
+    strict_pass_rate: ratio.nullable(),
+    average_pass_rate: ratio.nullable(),
+  })
+  .strict();
 const evaluationSchema = z
   .object({
     status: z.enum(['passed', 'partial', 'failed']),
     score: ratio,
     judging_criteria_passed: count,
     judging_criteria_total: count,
+    criteria_by_requirement: criteriaByRequirementSchema,
     checks_passed: count,
     checks_total: count,
   })
@@ -33,7 +59,18 @@ const evaluationSchema = z
       value.judging_criteria_passed <= value.judging_criteria_total &&
       value.checks_passed <= value.checks_total,
     'Passed counts exceed totals.',
-  );
+  )
+  .refine((value) => {
+    const { MUST, SHOULD } = value.criteria_by_requirement;
+    return (
+      value.judging_criteria_passed === MUST.passed + SHOULD.passed &&
+      value.judging_criteria_total === MUST.total + SHOULD.total &&
+      value.score ===
+        (value.judging_criteria_total === 0
+          ? 0
+          : value.judging_criteria_passed / value.judging_criteria_total)
+    );
+  }, 'Scored counts and score must match MUST and SHOULD results.');
 const runSchema = z
   .object({
     selection_index: count,
@@ -78,6 +115,13 @@ const statisticsSchema = z
     retry_attempts: count,
     coverage: ratio.nullable(),
     pass_rate: ratio.nullable(),
+    criteria_by_requirement: z
+      .object({
+        MUST: criterionStatisticsSchema,
+        SHOULD: criterionStatisticsSchema,
+        OPTIONAL: criterionStatisticsSchema,
+      })
+      .strict(),
     judging_score: z
       .object({ mean: ratio.nullable(), evaluations: count })
       .strict(),
@@ -115,6 +159,31 @@ export type ExperimentRunReportRunV1 = z.infer<typeof runSchema>;
 export type ExperimentRunReportStatisticsV1 = z.infer<typeof statisticsSchema>;
 export type ExperimentRunReportCaseV1 = z.infer<typeof caseSchema>;
 export type ExperimentRunReportV1 = z.infer<typeof reportSchema>;
+
+/** Reduce verified results to bounded report data without discarding classifications. */
+export function summarizeReportEvaluation(
+  evaluation: EvaluationResultV1,
+): ExperimentRunReportEvaluationV1 {
+  const criteriaByRequirement: z.infer<typeof criteriaByRequirementSchema> = {
+    MUST: { passed: 0, total: 0 },
+    SHOULD: { passed: 0, total: 0 },
+    OPTIONAL: { passed: 0, total: 0 },
+  };
+  for (const criterion of evaluation.judging_criteria) {
+    const group = criteriaByRequirement[criterion.requirement_level];
+    group.total += 1;
+    if (criterion.passed) group.passed += 1;
+  }
+  return {
+    status: evaluation.status,
+    score: evaluation.score,
+    judging_criteria_passed: evaluation.judging_criteria_passed,
+    judging_criteria_total: evaluation.judging_criteria_total,
+    criteria_by_requirement: criteriaByRequirement,
+    checks_passed: evaluation.checks.filter((check) => check.passed).length,
+    checks_total: evaluation.checks.length,
+  };
+}
 
 /** Check the producing release, then verify every aggregate against its run rows. */
 export function parseExperimentRunReport(
@@ -251,10 +320,44 @@ function statistics(
     retry_attempts: retries,
     coverage: runs.length === 0 ? null : completed / runs.length,
     pass_rate: completed === 0 ? null : passed / completed,
+    criteria_by_requirement: {
+      MUST: criterionStatistics(runs, 'MUST'),
+      SHOULD: criterionStatistics(runs, 'SHOULD'),
+      OPTIONAL: criterionStatistics(runs, 'OPTIONAL'),
+    },
     judging_score: {
       mean:
         criterionEvaluations === 0 ? null : criterionSum / criterionEvaluations,
       evaluations: criterionEvaluations,
     },
+  };
+}
+
+/** Average per-evaluation fractions; empty groups do not imply a pass or failure. */
+function criterionStatistics(
+  runs: readonly ExperimentRunReportRunV1[],
+  requirement: RequirementLevelV1,
+): z.infer<typeof criterionStatisticsSchema> {
+  let passed = 0;
+  let total = 0;
+  let evaluations = 0;
+  let strictPasses = 0;
+  let fractionSum = 0;
+  for (const run of runs) {
+    if (run.state !== 'completed') continue;
+    const group = run.evaluation!.criteria_by_requirement[requirement];
+    if (group.total === 0) continue;
+    passed += group.passed;
+    total += group.total;
+    evaluations += 1;
+    if (group.passed === group.total) strictPasses += 1;
+    fractionSum += group.passed / group.total;
+  }
+  return {
+    passed,
+    total,
+    evaluations,
+    strict_pass_rate: evaluations === 0 ? null : strictPasses / evaluations,
+    average_pass_rate: evaluations === 0 ? null : fractionSum / evaluations,
   };
 }

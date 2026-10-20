@@ -13,12 +13,17 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
+import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
   isSafeActionIdentifier,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
+import {
+  DEFAULT_REQUIREMENT_LEVEL,
+  REQUIREMENT_LEVELS,
+} from '../model/types.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import {
   assertCompatibleForgeVersion,
@@ -133,7 +138,9 @@ const criterionResult = z
       .string()
       .regex(/^[a-z][a-z0-9_]*$/)
       .optional(),
-    include_in_score: z.boolean().optional(),
+    requirement_level: z
+      .enum(REQUIREMENT_LEVELS)
+      .default(DEFAULT_REQUIREMENT_LEVEL),
     criterion: z
       .string()
       .min(1)
@@ -141,7 +148,20 @@ const criterionResult = z
     passed: z.boolean(),
     explanation: z.string().max(64 * 1024),
   })
-  .strict();
+  .strict()
+  .superRefine((criterion, context) => {
+    const wordingIssue = criterionRequirementWordingIssue(
+      criterion.criterion,
+      criterion.requirement_level,
+    );
+    if (wordingIssue !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['criterion'],
+        message: wordingIssue,
+      });
+    }
+  });
 
 export const evaluationResultSchema = z
   .object({
@@ -155,7 +175,7 @@ export const evaluationResultSchema = z
   .strict()
   .superRefine((value, context) => {
     const included = value.judging_criteria.filter(
-      (criterion) => criterion.include_in_score !== false,
+      (criterion) => criterion.requirement_level !== 'OPTIONAL',
     );
     const passed = included.filter((criterion) => criterion.passed).length;
     if (

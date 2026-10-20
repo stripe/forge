@@ -1,4 +1,7 @@
-import type { JudgingCriterionV1 } from '../model/types.ts';
+import {
+  DEFAULT_REQUIREMENT_LEVEL,
+  type JudgingCriterionInputV1,
+} from '../model/types.ts';
 
 import type {
   CheckResultV1,
@@ -12,7 +15,7 @@ export function scoreEvaluation(
   checks: readonly CheckResultV1[],
 ): EvaluationResultV1 {
   const included = criteria.filter(
-    (criterion) => criterion.include_in_score !== false,
+    (criterion) => criterion.requirement_level !== 'OPTIONAL',
   );
   const criteriaTotal = included.length;
   const criteriaPassed = included.filter(
@@ -46,15 +49,14 @@ export function scoreEvaluation(
 /** Bind recorded text and effective scoring metadata to an authored criterion. */
 export function criterionResultMatchesDefinition(
   result: CriterionResultV1,
-  definition: JudgingCriterionV1,
+  definition: JudgingCriterionInputV1,
 ): boolean {
-  const text = typeof definition === 'string' ? definition : definition.value;
-  const label = typeof definition === 'string' ? undefined : definition.label;
-  const included =
-    typeof definition === 'string' || definition.include_in_score !== false;
+  const authored =
+    typeof definition === 'string' ? { value: definition } : definition;
   return (
-    result.criterion === text &&
-    result.label === label &&
-    (result.include_in_score !== false) === included
+    result.criterion === authored.value.trim() &&
+    result.label === authored.label &&
+    result.requirement_level ===
+      (authored.requirement_level ?? DEFAULT_REQUIREMENT_LEVEL)
   );
 }
