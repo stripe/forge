@@ -53,7 +53,10 @@ export class ExperimentRunReportError extends Error {
 /** Bounded metadata from a verified local commit, independent of publication. */
 export interface ExperimentRunArtifact {
   readonly location: string;
-  readonly evaluation: { readonly status: EvalStatus; readonly score: number };
+  readonly evaluation: {
+    readonly status: EvalStatus;
+    readonly score: number | null;
+  };
   readonly failure: 'role_player_error' | null;
 }
 

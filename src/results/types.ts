@@ -33,7 +33,7 @@ export interface ForgeArtifactParseContext {
   readonly forgeVersion: string;
 }
 
-export type EvalStatus = 'passed' | 'partial' | 'failed';
+export type EvalStatus = 'passed' | 'partial' | 'failed' | 'judge_error';
 
 export interface CheckResultV1 {
   readonly name: string;
@@ -41,20 +41,32 @@ export interface CheckResultV1 {
   readonly detail?: string;
 }
 
-export interface CriterionResultV1 {
+export type CriterionResultV1 = {
   readonly label?: string;
   /** Always present after parsing; omitted input defaults to SHOULD. */
   readonly requirement_level: RequirementLevelV1;
   readonly criterion: string;
-  readonly passed: boolean;
   readonly explanation: string;
-}
+} & (
+  | { readonly passed: boolean; readonly error?: never }
+  | {
+      readonly passed: null;
+      readonly error: {
+        readonly type: 'parse_error' | 'request_error';
+        readonly attempts: number;
+        /** Bounded diagnostic; request messages redact resolved credentials. */
+        readonly message: string;
+      };
+    }
+);
 
 export interface EvaluationResultV1 {
-  readonly score: number;
+  /** Null when included criteria exist but none received a valid judgment. */
+  readonly score: number | null;
   readonly status: EvalStatus;
   readonly judging_criteria_passed: number;
   readonly judging_criteria_total: number;
+  readonly judging_criteria_errored: number;
   readonly judging_criteria: readonly CriterionResultV1[];
   readonly checks: readonly CheckResultV1[];
 }

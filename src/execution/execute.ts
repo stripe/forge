@@ -465,20 +465,24 @@ export async function executeEvalWithTestHooks(
             signal,
           },
           async (request) => {
-            assertJudgePromptWillRemainUnchanged(request, secrets);
             return (await completions.invoke('judge', request, request.signal))
               .content;
           },
-          hooks.waitBeforeCompletionRetry === undefined
-            ? {}
-            : {
-                waitBeforeRetry: (attempt, retrySignal) =>
-                  hooks.waitBeforeCompletionRetry!(
-                    'judge',
-                    attempt,
-                    retrySignal ?? signal,
-                  ),
-              },
+          {
+            redactionSecrets: secrets,
+            validateRequest: (request) =>
+              assertJudgePromptWillRemainUnchanged(request, secrets),
+            ...(hooks.waitBeforeCompletionRetry === undefined
+              ? {}
+              : {
+                  waitBeforeRetry: (attempt, retrySignal) =>
+                    hooks.waitBeforeCompletionRetry!(
+                      'judge',
+                      attempt,
+                      retrySignal ?? signal,
+                    ),
+                }),
+          },
         );
         judgeEvidence = parseJudgeEvidence(
           {

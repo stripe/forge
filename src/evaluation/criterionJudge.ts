@@ -9,6 +9,7 @@ import type {
   JudgingCriterionV1,
 } from '../model/types.ts';
 import type { CriterionResultV1 } from '../results/types.ts';
+import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   type JudgeTranscriptProjectionV1,
   parseJudgeTranscriptProjection,
@@ -80,6 +81,10 @@ export interface CriterionJudgeInput {
 }
 
 export interface CriterionJudgeExecutionOptions {
+  /** Credentials to redact from request-error diagnostics for custom invokers. */
+  readonly redactionSecrets?: readonly string[];
+  /** Validate dispatch invariants outside the retryable provider invocation. */
+  readonly validateRequest?: (request: CriterionCompletionRequest) => void;
   /** Test seam for the fixed one-second and five-second retry waits. */
   readonly waitBeforeRetry?: (
     failedAttempt: number,
@@ -105,7 +110,11 @@ const StructuredJudgeResponse = z
 
 type JudgeParseOutcome =
   | { readonly valid: true; readonly result: CriterionResultV1 }
-  | { readonly valid: false; readonly explanation: string };
+  | {
+      readonly valid: false;
+      readonly explanation: string;
+      readonly message: string;
+    };
 
 /** Build the complete, transport-neutral prompt for one authored criterion. */
 export function buildCriterionJudgePrompt(
@@ -162,7 +171,11 @@ export function parseCriterionJudgment(
   const outcome = parseJudgeResponse(raw, parsedCriterion);
   return outcome.valid
     ? outcome.result
-    : criterionResult(parsedCriterion, false, outcome.explanation);
+    : criterionResult(parsedCriterion, {
+        passed: null,
+        error: { type: 'parse_error', attempts: 1, message: outcome.message },
+        explanation: outcome.explanation,
+      });
 }
 
 /** Grade each criterion independently with stable output order. */
@@ -209,7 +222,7 @@ export async function judgeCriteria(
         if (!failed) {
           failed = true;
           firstError = error ?? new Error('Criterion judging failed.');
-          // A fatal transport/cancellation result makes the run uncommittable.
+          // A dispatch invariant or cancellation makes the run uncommittable.
           // Stop already-running peers so they do not continue model calls and
           // retries while the workers converge on the same failure.
           peerCancellation.abort(firstError);
@@ -236,29 +249,45 @@ async function judgeOneCriterion(
   const waitBeforeRetry = options.waitBeforeRetry ?? waitBeforeJudgeRetry;
   const systemPrompt = renderCriterionJudgePrompt(input, criterion.value);
   let finalParseExplanation = 'Judge response was unavailable.';
+  let finalParseMessage = finalParseExplanation;
 
   for (let attempt = 1; attempt <= MAX_CRITERION_JUDGE_ATTEMPTS; attempt += 1) {
     input.signal?.throwIfAborted();
+    const request: CriterionCompletionRequest = {
+      systemPrompt,
+      messages: [
+        { role: 'user', content: 'Return the requested structured judgment.' },
+      ],
+      temperature: 0,
+      maxTokens: 1024,
+      responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+      signal: input.signal ?? new AbortController().signal,
+    };
+    options.validateRequest?.(request);
     try {
-      const raw = await invoke({
-        systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: 'Return the requested structured judgment.',
-          },
-        ],
-        temperature: 0,
-        maxTokens: 1024,
-        responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
-        signal: input.signal ?? new AbortController().signal,
-      });
+      const raw = await invoke(request);
+      input.signal?.throwIfAborted();
       const outcome = parseJudgeResponse(raw, criterion);
       if (outcome.valid) return outcome.result;
       finalParseExplanation = outcome.explanation;
+      finalParseMessage = outcome.message;
     } catch (error) {
       if (isAbort(error, input.signal)) throw error;
-      if (attempt === MAX_CRITERION_JUDGE_ATTEMPTS) throw error;
+      if (attempt === MAX_CRITERION_JUDGE_ATTEMPTS) {
+        return criterionResult(criterion, {
+          passed: null,
+          error: {
+            type: 'request_error',
+            attempts: attempt,
+            message: boundedErrorMessage(
+              error,
+              'Judge request failed.',
+              options.redactionSecrets,
+            ),
+          },
+          explanation: `Judge request failed after ${attempt} attempts.`,
+        });
+      }
     }
 
     if (attempt < MAX_CRITERION_JUDGE_ATTEMPTS) {
@@ -266,11 +295,15 @@ async function judgeOneCriterion(
     }
   }
 
-  return criterionResult(
-    criterion,
-    false,
-    `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
-  );
+  return criterionResult(criterion, {
+    passed: null,
+    error: {
+      type: 'parse_error',
+      attempts: MAX_CRITERION_JUDGE_ATTEMPTS,
+      message: finalParseMessage,
+    },
+    explanation: `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
+  });
 }
 
 function parseJudgeResponse(
@@ -278,40 +311,62 @@ function parseJudgeResponse(
   criterion: JudgingCriterionV1,
 ): JudgeParseOutcome {
   if (typeof raw !== 'string') {
-    return { valid: false, explanation: 'Judge response was not valid JSON.' };
+    return {
+      valid: false,
+      explanation: 'Judge response was not valid JSON.',
+      message: 'Judge response was not valid JSON.',
+    };
   }
   let decoded: unknown;
   try {
     decoded = JSON.parse(raw);
   } catch {
-    return { valid: false, explanation: 'Judge response was not valid JSON.' };
+    return {
+      valid: false,
+      explanation: 'Judge response was not valid JSON.',
+      message: 'Judge response was not valid JSON.',
+    };
   }
 
   const parsed = StructuredJudgeResponse.safeParse(decoded);
   if (!parsed.success) {
+    const issue = parsed.error.issues[0]!;
+    // Paths come only from this fixed schema. Never copy validator messages,
+    // unknown keys, received values, or raw output into persisted diagnostics.
+    const path = issue.path
+      .map((part) => (typeof part === 'number' ? `[${part}]` : `.${part}`))
+      .join('');
     return {
       valid: false,
       explanation: 'Judge response did not match the required schema.',
+      message: `Judge response did not match the required schema at response${path} (${issue.code}).`,
     };
   }
   const entry = parsed.data.results[0]!;
   return {
     valid: true,
-    result: criterionResult(criterion, entry.passed, entry.explanation),
+    result: criterionResult(criterion, {
+      passed: entry.passed,
+      explanation: entry.explanation,
+    }),
   };
 }
 
 function criterionResult(
   criterion: JudgingCriterionV1,
-  passed: boolean,
-  explanation: string,
+  judgment:
+    | { readonly passed: boolean; readonly explanation: string }
+    | {
+        readonly passed: null;
+        readonly explanation: string;
+        readonly error: NonNullable<CriterionResultV1['error']>;
+      },
 ): CriterionResultV1 {
   return {
     criterion: criterion.value,
     ...(criterion.label === undefined ? {} : { label: criterion.label }),
     requirement_level: criterion.requirement_level,
-    passed,
-    explanation,
+    ...judgment,
   };
 }
 

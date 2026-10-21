@@ -69,6 +69,18 @@ describe('experiment public entry points', () => {
     assert.equal(evaluation.judging_criteria_total, 1);
     assert.deepEqual(evaluation.judging_criteria, [criterion]);
     assert.equal(evaluation.score, 1);
+    const error: root.CriterionResultV1 = root.parseCriterionJudgment(
+      '{}',
+      'Unavailable criterion.',
+    );
+    assert.equal(typeof error.error!.message, 'string');
+    const incomplete = root.parseEvaluationResult(
+      root.scoreEvaluation([criterion, error], []),
+    );
+    assert.equal(incomplete.status, 'judge_error');
+    assert.equal(incomplete.judging_criteria_errored, 1);
+    assert.equal(incomplete.score, 1);
+    assert.equal(root.scoreEvaluation([error], []).score, null);
     const judge = (
       input: root.CriterionJudgeInput,
       invoke: root.CriterionCompletionInvoker,

@@ -22,6 +22,7 @@ import {
 } from '../contracts/metadata.ts';
 import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import type { CompletionCallSummaryV1 } from '../results/types.ts';
+import { boundedErrorMessage } from '../security/errorMessage.ts';
 import { redactSecrets } from '../security/redaction.ts';
 
 const SAFE_PROVIDER_METADATA = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,255}$/;
@@ -262,15 +263,27 @@ export async function prepareCompletionRuntime(input: {
           errorCode,
         );
         if (signal.aborted) throw abortReason(signal);
-        throw new CompletionInvocationError(errorCode);
+        throw new CompletionInvocationError(
+          errorCode,
+          purpose === 'judge'
+            ? boundedErrorMessage(
+                error,
+                'Completion provider call failed.',
+                secrets,
+              )
+            : 'Completion provider call failed.',
+        );
       }
     },
   });
 }
 
 class CompletionInvocationError extends Error {
-  constructor(readonly code: string) {
-    super('Completion provider call failed.');
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
     this.name = 'CompletionInvocationError';
   }
 }

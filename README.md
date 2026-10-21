@@ -277,7 +277,8 @@ JS
 
 ### Understand scores
 
-Numeric `score` is the fraction of scored judging criteria that passed.
+Numeric `score` is the fraction of valid MUST and SHOULD judgments that passed.
+Judge errors are excluded; the score is `null` if every scored criterion errored.
 `requirement_level` classifies each criterion as `MUST` (required),
 `SHOULD` (recommended), or `OPTIONAL` (non-scoring telemetry). Omitted values
 default to `SHOULD`. Both MUST and SHOULD contribute equally to the score;
@@ -294,9 +295,13 @@ This writing guardrail does not infer or change the requirement level. See
 | `passed` | All checks and scored criteria passed. A checks-only pass has score `0`. |
 | `partial` | Some scored criteria passed, or checks passed while scored criteria did not all pass. |
 | `failed` | The completed evaluation did not establish a pass or partial success. |
+| `judge_error` | At least one scored criterion could not be judged; valid judgments and checks remain recorded. |
 | Execution error | The selection did not complete successfully and can be retried. |
 
-For example, passing six of eight criteria gives a score of `0.75`.
+For nine scored criteria, six passes, two failures, and one judge error give a
+score of `0.75` and status `judge_error`. Each errored criterion records
+`passed: null` and an `error` with its type, attempt count, and diagnostic
+message; `judging_criteria_errored` counts MUST and SHOULD errors.
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
@@ -304,27 +309,34 @@ Interaction stop reasons are separate from evaluation status: reaching
 and one `runs` row per saved selection. With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, judging_score, criteria_by_requirement}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criteria_by_requirement}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
 `coverage` is completed selections divided by all saved selections.
-`pass_rate` is passed evaluations divided by completed evaluations, or `null`
-when none completed. `judging_score.mean` includes only completed evaluations
-with judging criteria; checks-only runs contribute to pass rate. Ratios range
-from 0 to 1. Only the latest verified effective outcome contributes for each
-selection, so retries do not add scores. Compare treatments on matched cases
-and agent configurations. See [scoring semantics](docs/architecture.md#evaluation-and-scoring).
+`pass_rate` is passed evaluations divided by completed evaluations without
+scored judge errors, or `null` when none qualify. `judging_score.mean` includes
+completed evaluations with at least one valid scored judgment; checks-only
+runs contribute to pass rate. `judge_errors` separately counts affected
+evaluations and errored criteria in the summary and each case/configuration,
+including errors on OPTIONAL criteria.
+These errors remain committed outcomes on resume; they do not rerun the coding
+agent. Ratios range from 0 to 1. Only the latest verified effective outcome
+contributes for each selection, so retries do not add scores. Compare treatments
+on matched cases and agent configurations. See
+[scoring semantics](docs/architecture.md#evaluation-and-scoring).
 
 `criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
-case groups, and run rows. Each aggregate includes passed/total criterion counts
-and the number of completed evaluations containing that classification.
-`strict_pass_rate` is the fraction of those evaluations where every criterion
-in that group passed. `average_pass_rate` is the mean of each evaluation's
-fraction passed in that group; it gives each evaluation equal weight. Empty
-groups have `null` rates. These group rates ignore file checks. MUST failures
-identify unmet requirements; SHOULD failures identify unmet recommendations.
-OPTIONAL statistics are telemetry and do not enter either scored group.
+case groups, and run rows, retaining passed, total, and errored criterion counts.
+Aggregate `evaluations` counts completed evaluations containing that group.
+`fully_judged_evaluations` counts those with no errors in that group;
+`strict_pass_rate` is the fraction of them where every criterion in the group
+passed. `judged_evaluations` counts evaluations with at least one valid judgment
+in the group; `average_pass_rate` is their mean fraction of valid judgments that
+passed, giving each evaluation equal weight. Rates are `null` when no evaluations
+qualify. These group rates ignore file checks. MUST failures identify unmet
+requirements; SHOULD failures identify unmet recommendations. OPTIONAL
+statistics are telemetry and do not enter either scored group.
 
 ### Inspect evidence
 
