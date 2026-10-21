@@ -32,11 +32,16 @@ export interface DatasetManifestFileV1 {
   sha256: Sha256Hex;
 }
 
+/** One case definition file, its declared identity, and the fixtures it uses. */
+export interface DatasetManifestCaseV1 extends DatasetManifestFileV1 {
+  id: CaseId;
+  version: string;
+  files: DatasetManifestFileV1[];
+}
+
 export interface DatasetManifestV1 {
   dataset: DatasetIdentityV1;
-  /** Case definition paths; each definition declares its own stable ID. */
-  cases: DatasetRelativePath[];
-  files: DatasetManifestFileV1[];
+  cases: DatasetManifestCaseV1[];
 }
 
 /** Exact host-supplied implementation identity for one setup-action namespace. */
@@ -153,6 +158,9 @@ export interface JudgingCriterionV1 {
  */
 export interface EvalCaseV1 {
   id: CaseId;
+  version: string;
+  /** Dataset files this case's setup reads; its manifest entry records their hashes. */
+  fixtures?: DatasetRelativePath[];
   display_name?: string;
   task?: string;
   initial_prompt?: string;

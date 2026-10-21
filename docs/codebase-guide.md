@@ -52,10 +52,15 @@ The publishing workflow checks and publishes versioned development snapshots
 after pushes to `main`; stable release commits are skipped.
 
 `pnpm check:docs` checks documentation links, the public export inventory, and
-structured snippets. `pnpm check:cases` validates checked-in release datasets
-and harness fixtures through the public loader without model calls. Sample
-release bundles live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets);
-harness inputs live under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+structured snippets. `pnpm check:cases` validates checked-in datasets and
+harness fixtures through the public loader without model calls. It also
+compares each manifest with its copy at the merge-base with `origin/main`
+(override with `-- --base <ref>`) and fails when a changed case keeps its
+version or a case version or membership change keeps the dataset version.
+Each dataset keeps only its latest version; earlier versions live in Git
+history. Sample datasets live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets),
+their experiments under [`experiments`](https://github.com/stripe/forge/tree/main/experiments),
+and harness inputs under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
 
 ### Opt-in live tests
 
@@ -782,7 +787,8 @@ gateway behavior, and suite configuration.
 
 | Path | Role |
 | --- | --- |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets. Each holds only its latest version as an exact-manifest tree; earlier versions live in Git history. |
+| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments for the sample datasets. Each `experiment.yaml` pins its dataset with `dataset.path` and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
 | [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`vitest.config.ts`](https://github.com/stripe/forge/blob/main/vitest.config.ts) | Vitest discovery, Node environment, process isolation, and mock restoration. |

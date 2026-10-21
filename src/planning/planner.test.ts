@@ -4,6 +4,7 @@ import { describe, it } from 'vitest';
 import { sha256Digest } from '../model/hashes.ts';
 import { getMatrixGroups } from '../model/matrix.ts';
 import type {
+  DatasetManifestFileV1,
   EvalCaseV1,
   ExperimentConfigV1,
   LoadedDatasetV1,
@@ -171,14 +172,23 @@ describe('experiment expansion and run planning', () => {
         ...original.dataset,
         manifest: {
           ...original.dataset.manifest,
-          cases: [CASE_A_PATH, CASE_A_PATH],
+          cases: [
+            original.dataset.manifest.cases[0]!,
+            original.dataset.manifest.cases[0]!,
+          ],
         },
       },
       {
         ...original.dataset,
         manifest: {
           ...original.dataset.manifest,
-          cases: [CASE_A_PATH, 'cases/ordinary.yaml'],
+          cases: [
+            original.dataset.manifest.cases[0]!,
+            {
+              ...original.dataset.manifest.cases[1]!,
+              path: 'cases/ordinary.yaml',
+            },
+          ],
         },
       },
     ];
@@ -874,7 +884,7 @@ describe('experiment expansion and run planning', () => {
       );
     }
 
-    const missingInput = inputs({ manifestFiles: [] });
+    const missingInput = inputs({ fixtureFiles: [] });
     assert.throws(
       () =>
         resolveRunPlan({
@@ -998,6 +1008,7 @@ function selection(
 function evalCase(): EvalCaseV1 {
   return {
     id: 'case/a',
+    version: '0.1.0',
     task: 'Complete the task',
     initial_prompt: 'Please start here',
     context: 'Existing application',
@@ -1070,16 +1081,19 @@ function inputs(
   options: {
     caseDefinition?: EvalCaseV1;
     experiment?: ExperimentConfigV1;
-    manifestFiles?: LoadedDatasetV1['manifest']['files'];
+    fixtureFiles?: DatasetManifestFileV1[];
   } = {},
 ): { dataset: LoadedDatasetV1; experiment: LoadedExperimentConfigV1 } {
-  const definition = options.caseDefinition ?? evalCase();
   const config = options.experiment ?? experimentConfig();
-  const manifestFiles = options.manifestFiles ?? [
-    { path: CASE_A_PATH, size: 100, sha256: 'b'.repeat(64) },
-    { path: CASE_B_PATH, size: 100, sha256: 'c'.repeat(64) },
+  const fixtureFiles = options.fixtureFiles ?? [
     { path: 'fixtures/seed.txt', size: 4, sha256: 'd'.repeat(64) },
   ];
+  const baseDefinition = options.caseDefinition ?? evalCase();
+  // case/a declares the fixtures its manifest entry records.
+  const definition =
+    fixtureFiles.length === 0
+      ? baseDefinition
+      : { ...baseDefinition, fixtures: fixtureFiles.map(({ path }) => path) };
   return {
     dataset: {
       root: '/dataset',
@@ -1088,15 +1102,31 @@ function inputs(
       manifestSha256: MANIFEST_DIGEST,
       manifest: {
         dataset: { id: 'dataset', version: '2026.09.0' },
-        cases: [CASE_A_PATH, CASE_B_PATH],
-        files: manifestFiles,
+        cases: [
+          {
+            id: definition.id,
+            version: definition.version,
+            path: CASE_A_PATH,
+            size: 100,
+            sha256: 'b'.repeat(64),
+            files: fixtureFiles,
+          },
+          {
+            id: 'case/b',
+            version: definition.version,
+            path: CASE_B_PATH,
+            size: 100,
+            sha256: 'c'.repeat(64),
+            files: [],
+          },
+        ],
       },
       cases: new Map([
         ['case/a', { definition, path: `/dataset/${CASE_A_PATH}` }],
         [
           'case/b',
           {
-            definition: { ...definition, id: 'case/b' },
+            definition: { ...baseDefinition, id: 'case/b' },
             path: `/dataset/${CASE_B_PATH}`,
           },
         ],

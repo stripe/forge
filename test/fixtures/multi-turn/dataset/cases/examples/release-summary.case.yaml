@@ -1,4 +1,5 @@
 id: examples/release-summary
+version: 0.1.0
 display_name: Multi-turn release summary
 task: Complete a two-step release handoff. The coding assistant must first ask for the exact status sentence. Once asked, provide "Forge is ready for multi-turn evaluation." and have it create release-summary.txt containing exactly that sentence followed by a newline.
 context: You are a developer checking a small release handoff. Do not volunteer the exact status sentence until the coding assistant asks for it.

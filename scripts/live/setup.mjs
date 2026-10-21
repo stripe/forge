@@ -486,14 +486,26 @@ async function verifyCodexPlugin(runtime, signal, pluginId) {
   return { id: installed[0].pluginId, version: installed[0].version };
 }
 
+function describeFile(file, body) {
+  return { path: file, size: Buffer.byteLength(body), sha256: sha256(body) };
+}
+
 async function createFixture(root, platform, specs, liveAgent) {
   const datasetRoot = path.join(root, 'dataset');
-  const files = {
+  const fixtures = {
     'fixtures/seed.txt': 'dataset seed\n',
   };
+  const files = { ...fixtures };
+  const caseFixtures = (spec) =>
+    spec.setup
+      .map((step) => step.with?.source?.dataset_path)
+      .filter((fixturePath) => fixturePath in fixtures);
   for (const spec of specs) {
+    const declared = caseFixtures(spec);
     files[`cases/setup/${spec.id}.case.yaml`] = stringify({
       id: `setup/${spec.id}`,
+      version: '0.1.0',
+      ...(declared.length === 0 ? {} : { fixtures: declared }),
       initial_prompt: `Verify ${spec.id} setup.`,
       execution_mode: 'one_shot',
       setup: spec.setup,
@@ -512,12 +524,18 @@ async function createFixture(root, platform, specs, liveAgent) {
   }
   const manifest = {
     dataset: { id: 'forge-live-setup', version: '1.0.0' },
-    cases: specs.map(({ id }) => `cases/setup/${id}.case.yaml`),
-    files: Object.entries(files).map(([file, body]) => ({
-      path: file,
-      size: Buffer.byteLength(body),
-      sha256: sha256(body),
-    })),
+    cases: specs.map((spec) => {
+      const casePath = `cases/setup/${spec.id}.case.yaml`;
+      const fixturePaths = caseFixtures(spec);
+      return {
+        id: `setup/${spec.id}`,
+        version: '0.1.0',
+        ...describeFile(casePath, files[casePath]),
+        files: fixturePaths.map((fixturePath) =>
+          describeFile(fixturePath, fixtures[fixturePath]),
+        ),
+      };
+    }),
   };
   for (const [file, body] of Object.entries(files)) {
     const destination = path.join(datasetRoot, file);

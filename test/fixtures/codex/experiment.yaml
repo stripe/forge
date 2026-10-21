@@ -1,10 +1,10 @@
 id: examples/codex
-version: 0.1.0
+version: 0.2.0
 dataset:
   path: ../one-shot/dataset
   id: forge-quickstart
-  version: 0.1.0
-  manifest_sha256: sha256:0705866807c02da99567f075787f5177c969e5616cf5fa1b1918d6794a41475f
+  version: 0.2.0
+  manifest_sha256: sha256:5631b0de6d603fe14e42a8c094c7112e3f56668ddc127bf8e56e92b8c993b24a
 runtime:
   adapter: docker
   image:

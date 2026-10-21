@@ -25,6 +25,7 @@ import {
   isSafeWorkspaceRelativePath,
 } from './paths.ts';
 import {
+  type DatasetManifestFileV1,
   type DatasetManifestV1,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
@@ -217,6 +218,14 @@ const ChecksSchema = z
 const CompatibleEvalCaseSchema = z
   .object({
     id: CaseIdSchema,
+    version: VersionSchema,
+    fixtures: z
+      .array(DatasetPathSchema)
+      .max(50_000)
+      .superRefine((paths, context) =>
+        addDuplicateIssues(paths, context, [], 'path'),
+      )
+      .optional(),
     display_name: TrimmedTextSchema.optional(),
     task: TrimmedTextSchema.optional(),
     initial_prompt: TrimmedTextSchema.optional(),
@@ -284,29 +293,56 @@ const ManifestFileSchema = z
   })
   .strict();
 
+const ManifestCaseSchema = ManifestFileSchema.extend({
+  path: CasePathSchema,
+  id: AuthoredCaseIdSchema,
+  version: VersionSchema,
+  files: z.array(ManifestFileSchema).max(50_000).default([]),
+}).strict();
+
 const DatasetManifestSchema = z
   .object({
     dataset: DatasetIdentitySchema,
-    cases: z.array(CasePathSchema).min(1).max(10_000),
-    files: z.array(ManifestFileSchema).min(1).max(50_000),
+    cases: z.array(ManifestCaseSchema).min(1).max(10_000),
   })
   .strict()
   .superRefine((manifest, context) => {
-    addDuplicateIssues(manifest.cases, context, ['cases'], 'path');
     addDuplicateIssues(
-      manifest.files.map(({ path }) => path),
+      manifest.cases.map(({ path }) => path),
       context,
-      ['files'],
+      ['cases'],
       'path',
     );
-    const files = new Set(manifest.files.map(({ path }) => path));
-    for (const [index, casePath] of manifest.cases.entries()) {
-      if (!files.has(casePath)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['cases', index],
-          message: 'case path must be present in the file manifest',
-        });
+    addDuplicateIssues(
+      manifest.cases.map(({ id }) => id),
+      context,
+      ['cases'],
+      'id',
+    );
+    const casePaths = new Set(manifest.cases.map(({ path }) => path));
+    const fixtures = new Map<string, { size: number; sha256: string }>();
+    for (const [caseIndex, entry] of manifest.cases.entries()) {
+      addDuplicateIssues(
+        entry.files.map(({ path }) => path),
+        context,
+        ['cases', caseIndex, 'files'],
+        'path',
+      );
+      for (const [fileIndex, file] of entry.files.entries()) {
+        const previous = fixtures.get(file.path);
+        if (
+          casePaths.has(file.path) ||
+          (previous !== undefined &&
+            (previous.size !== file.size || previous.sha256 !== file.sha256))
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['cases', caseIndex, 'files', fileIndex],
+            message:
+              'fixture files must not be case definitions and must have one size and hash across cases',
+          });
+        }
+        fixtures.set(file.path, file);
       }
     }
   });
@@ -853,6 +889,23 @@ export function parseDatasetManifest(value: unknown): DatasetManifestV1 {
     'invalid_manifest',
     'dataset manifest',
   ) as DatasetManifestV1;
+}
+
+/** Every inventoried payload file: case definitions plus their fixtures. */
+export function datasetPayloadFiles(
+  manifest: DatasetManifestV1,
+): DatasetManifestFileV1[] {
+  const files = new Map<string, DatasetManifestFileV1>();
+  for (const {
+    path: casePath,
+    size,
+    sha256,
+    files: fixtures,
+  } of manifest.cases) {
+    files.set(casePath, { path: casePath, size, sha256 });
+    for (const fixture of fixtures) files.set(fixture.path, fixture);
+  }
+  return [...files.values()];
 }
 
 export function parseDatasetManifestJson(source: string): DatasetManifestV1 {

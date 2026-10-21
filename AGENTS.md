@@ -66,11 +66,13 @@ implementation. Prose and formatting-only changes do not need new tests.
 Place focused unit tests beside source files as `*.test.ts`; put cross-module,
 CLI, package, and embedding tests under `test/`. Keep harness test inputs under
 `test/fixtures/`. Prefer deterministic fakes for the normal test suite.
-Versioned public release bundles belong under `datasets/<name>/<version>/`,
-with a runnable `experiment.yaml` beside the exact-manifest `dataset/` tree.
-Use `dataset.path: ./dataset` so the complete bundle can be moved or archived
-without rewriting its experiment. Keep release documentation outside the
-exact-manifest dataset tree.
+Public datasets belong under `datasets/<name>/`, holding only the latest
+version; earlier versions live in Git history. Put their runnable experiments
+and release documentation under `experiments/<name>/`, outside the
+exact-manifest dataset tree. Cases list the dataset files they use in
+`fixtures`. When a case or its fixtures change, bump the case `version` in both
+the case file and manifest, and bump the dataset version; `pnpm check:cases`
+enforces this against `origin/main`.
 
 While iterating, run the narrowest relevant tests, plus applicable type, build,
 or package checks from `package.json`:

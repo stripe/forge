@@ -11,11 +11,10 @@ import {
   resolveRunPlan,
 } from '../src/index.ts';
 
-const releaseRoot = path.resolve(
-  'datasets/stripe-integration-public-evals/0.1.0',
-);
-const datasetRoot = path.join(releaseRoot, 'dataset');
-const experimentPath = path.join(releaseRoot, 'experiment.yaml');
+const datasetRelativeRoot = 'datasets/stripe-integration-public-evals';
+const experimentRelativeRoot = 'experiments/stripe-integration-public-evals';
+const datasetRoot = path.resolve(datasetRelativeRoot);
+const experimentPath = path.resolve(experimentRelativeRoot, 'experiment.yaml');
 
 describe('sample dataset release', () => {
   it('validates the bundled dataset and plans its pinned public baseline without credentials', async () => {
@@ -25,11 +24,22 @@ describe('sample dataset release', () => {
     ]);
     assert.deepEqual(dataset.manifest.dataset, {
       id: 'stripe-integration-public-evals',
-      version: '0.1.0',
+      version: '0.2.0',
     });
-    assert.deepEqual(dataset.manifest.cases, [
-      'cases/payments-onetime.case.yaml',
-    ]);
+    assert.deepEqual(
+      dataset.manifest.cases.map(({ id, version, path }) => ({
+        id,
+        version,
+        path,
+      })),
+      [
+        {
+          id: 'stripe-integration-public-evals/payments-onetime',
+          version: '0.1.0',
+          path: 'cases/payments-onetime.case.yaml',
+        },
+      ],
+    );
     assert.equal(
       dataset.manifestSha256,
       experiment.config.dataset.manifest_sha256,
@@ -86,7 +96,7 @@ describe('sample dataset release', () => {
     }
   });
 
-  it('relocates the complete release without rewriting the experiment or changing its plan', async (context) => {
+  it('relocates the dataset and experiment together without rewriting the experiment or changing its plan', async (context) => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-dataset-release-'),
     );
@@ -102,10 +112,20 @@ describe('sample dataset release', () => {
     });
 
     const relocatedRoot = path.join(root, 'release');
-    await fs.cp(releaseRoot, relocatedRoot, { recursive: true });
-    const relocatedExperimentPath = path.join(relocatedRoot, 'experiment.yaml');
+    for (const relativeRoot of [datasetRelativeRoot, experimentRelativeRoot]) {
+      await fs.cp(
+        path.resolve(relativeRoot),
+        path.join(relocatedRoot, relativeRoot),
+        { recursive: true },
+      );
+    }
+    const relocatedExperimentPath = path.join(
+      relocatedRoot,
+      experimentRelativeRoot,
+      'experiment.yaml',
+    );
     const [relocated, consumer] = await Promise.all([
-      loadDataset(path.join(relocatedRoot, 'dataset')),
+      loadDataset(path.join(relocatedRoot, datasetRelativeRoot)),
       loadExperimentConfig(relocatedExperimentPath),
     ]);
     assert.equal(relocated.manifestRaw, dataset.manifestRaw);

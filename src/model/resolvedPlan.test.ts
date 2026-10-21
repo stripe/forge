@@ -46,6 +46,7 @@ function validPlan(): ResolvedRunPlanV1 {
     },
     case: {
       id: 'sample/write',
+      version: '0.1.0',
       initial_prompt: 'Create the requested file.',
       execution_mode: 'one_shot',
       setup,

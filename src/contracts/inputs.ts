@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sha256Hex } from '../model/hashes.ts';
-import { parseDatasetManifest } from '../model/parse.ts';
+import { datasetPayloadFiles, parseDatasetManifest } from '../model/parse.ts';
 import type { DatasetManifestV1 } from '../model/types.ts';
 
 export interface RunInputReadOptions {
@@ -52,10 +52,9 @@ export async function createDirectoryRunInputProvider(
     options.manifest === undefined
       ? undefined
       : new Map(
-          parseDatasetManifest(options.manifest).files.map((file) => [
-            file.path,
-            file,
-          ]),
+          datasetPayloadFiles(parseDatasetManifest(options.manifest)).map(
+            (file) => [file.path, file],
+          ),
         );
 
   function assertDeclaredFile(datasetPath: string, size: number) {

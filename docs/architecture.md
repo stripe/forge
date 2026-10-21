@@ -143,13 +143,30 @@ inputs independently of Forge format compatibility.
 [`loadDataset`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) treats the manifest as an exact
 inventory, not a best-effort index:
 
-- `manifest.json` identifies the dataset and every case and payload file;
+- `manifest.json` identifies the dataset and lists one entry per case: its
+  `id`, `version`, case-definition `path`, `size`, and `sha256`, plus
+  `files` recording the `path`, `size`, and `sha256` of each fixture the
+  case declares;
+- the payload is every case definition and fixture; a fixture shared by
+  several cases must have one size and hash;
 - every payload must be a regular file with the declared size and hash;
 - missing, extra, modified, symbolic-link, or special-file entries fail;
 - paths must be canonical, dataset-relative POSIX paths;
 - entry count, depth, individual document size, and total bytes are bounded;
-- the manifest lists case paths; IDs come from case definitions and must be
-  unique within the loaded dataset release.
+- case IDs are unique, and each case definition must declare the same `id`
+  and `version` as its manifest entry; and
+- a case's `fixtures` list is the source of truth for the dataset files it
+  uses, and its manifest `files` must name exactly those paths.
+
+Case and dataset versions are independent labels. Change a case's `version`
+whenever its definition or fixtures change, and change the dataset `version`
+whenever any case version changes or a case is added or removed. Forge records
+the case version in resolved plans through the case definition; it does not
+compare versions at load time. `loadDataset` rejects a case whose
+`forge/write` setup reads a file absent from its `fixtures`, so a fixture
+change reaches every dependent case version. Cases must also list files that
+custom setup actions read, which Forge cannot inspect; treatment setup may
+read any inventoried file.
 
 The experiment pins the dataset ID, version, and digest of the raw manifest
 bytes. Its optional `dataset.path` locates those bytes for the CLI, relative to
@@ -162,11 +179,9 @@ requires directory listings to match the pinned inventory. The public CLI
 supplies that manifest automatically. This closes the gap between initial
 verification and later setup reads.
 
-A release bundle can contain `experiment.yaml` beside its exact-manifest
-`dataset/` tree. The experiment uses `dataset.path: ./dataset`, keeping runtime
-choices outside the dataset inventory while allowing the complete bundle to be
-archived and extracted without path changes. See the
-[sample bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+Because the inventory is exact, experiments and documentation live outside
+the dataset root and point at it with `dataset.path`. See the
+[sample experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/README.md)
 for the layout and commands.
 
 ### Cases, treatments, and setup ordering
@@ -1365,7 +1380,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles with runnable experiments and exact-manifest dataset trees |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets, each holding only its latest version as an exact-manifest tree |
+| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments and release documentation for the sample datasets |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 

@@ -1920,6 +1920,7 @@ async function createBenchmarkFixture(
   ]);
 
   const caseBody = `id: case/example
+version: 0.1.0
 task: Do the thing
 execution_mode: one_shot
 setup: ${JSON.stringify(options.caseSetup ?? [])}
@@ -1931,6 +1932,7 @@ judging_criteria: []
   const unselectedCasePath = 'cases/unselected.case.yaml';
   const unselectedCaseFilePath = path.join(datasetRoot, unselectedCasePath);
   const unselectedCaseBody = `id: case/unselected
+version: 0.1.0
 task: Do another thing
 execution_mode: one_shot
 setup: []
@@ -1940,11 +1942,9 @@ judging_criteria: []
     await fs.writeFile(unselectedCaseFilePath, unselectedCaseBody);
   }
   const cases = [
-    casePath,
-    ...(options.includeUnselectedCase ? [unselectedCasePath] : []),
-  ];
-  const files = [
     {
+      id: 'case/example',
+      version: '0.1.0',
       path: casePath,
       size: Buffer.byteLength(caseBody),
       sha256: sha256Hex(caseBody),
@@ -1952,6 +1952,8 @@ judging_criteria: []
     ...(options.includeUnselectedCase
       ? [
           {
+            id: 'case/unselected',
+            version: '0.1.0',
             path: unselectedCasePath,
             size: Buffer.byteLength(unselectedCaseBody),
             sha256: sha256Hex(unselectedCaseBody),
@@ -1963,7 +1965,6 @@ judging_criteria: []
     {
       dataset: { id: 'example-dataset', version: '2026.09.0' },
       cases,
-      files,
     },
     null,
     2,

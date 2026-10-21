@@ -1256,7 +1256,7 @@ describe('resumable CLI experiment runs', () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(dataset, 'manifest.json'), 'utf8'),
     ) as DatasetManifestV1;
-    const file = manifest.files.find((entry) => entry.path === relative)!;
+    const file = manifest.cases.find((entry) => entry.path === relative)!;
     file.size = Buffer.byteLength(body);
     file.sha256 = sha256Hex(body);
     const raw = `${JSON.stringify(manifest)}\n`;
@@ -1460,11 +1460,13 @@ async function createFixture(
     const manifest = JSON.parse(
       await fs.readFile(path.join(dataset, 'manifest.json'), 'utf8'),
     ) as DatasetManifestV1;
-    manifest.cases.push(relative);
-    manifest.files.push({
+    manifest.cases.push({
+      id: 'examples/other-file',
+      version: '0.1.0',
       path: relative,
       size: Buffer.byteLength(body),
       sha256: sha256Hex(body),
+      files: [],
     });
     const raw = `${JSON.stringify(manifest)}\n`;
     await fs.writeFile(path.join(dataset, 'manifest.json'), raw);

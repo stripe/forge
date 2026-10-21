@@ -1328,6 +1328,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
     },
     case: {
       id: 'sample/case',
+      version: '0.1.0',
       initial_prompt: 'Create greeting.txt',
       execution_mode: 'one_shot',
       setup: [],

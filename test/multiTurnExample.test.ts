@@ -28,7 +28,7 @@ describe('multi-turn fixture', () => {
       experiment.config.dataset.manifest_sha256,
     );
     assert.deepEqual(
-      dataset.manifest.files.map(({ path }) => path),
+      dataset.manifest.cases.map(({ path }) => path),
       ['cases/examples/release-summary.case.yaml'],
     );
 

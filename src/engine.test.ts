@@ -58,6 +58,7 @@ describe('ForgeEngine setup action bundles', () => {
     const engine = createForgeEngine({ setupActionBundles: [testBundle()] });
     const caseValue = {
       id: 'testing/yaml-extension',
+      version: '0.1.0',
       initial_prompt: 'Complete the task.',
       execution_mode: 'one_shot',
       judging_criteria: [],
@@ -724,6 +725,7 @@ function planningInputs(
 } {
   const definition = engine.parseEvalCase({
     id: 'testing/action-bundle',
+    version: '0.1.0',
     initial_prompt: 'Complete the task.',
     execution_mode: 'one_shot',
     setup: [],
@@ -738,12 +740,14 @@ function planningInputs(
       manifestSha256: DIGEST,
       manifest: {
         dataset: { id: 'testing', version: '1.0.0' },
-        cases: ['cases/testing/action-bundle.case.yaml'],
-        files: [
+        cases: [
           {
+            id: 'testing/action-bundle',
+            version: '0.1.0',
             path: 'cases/testing/action-bundle.case.yaml',
             size: 1,
             sha256: CASE_DIGEST.slice('sha256:'.length),
+            files: [],
           },
         ],
       },

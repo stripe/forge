@@ -306,7 +306,7 @@ describe('createDirectoryRunInputProvider', () => {
       inputs.read('fixtures/hello.txt'),
       /manifest.*SHA-256/,
     );
-    dataset.manifest.files.find(
+    dataset.manifest.cases[0]!.files.find(
       (file) => file.path === 'fixtures/hello.txt',
     )!.sha256 = sha256Hex('other');
     await assert.rejects(
@@ -382,7 +382,7 @@ async function verifiedDatasetInputs() {
   );
   temporaryRoots.push(root);
   const caseBody =
-    'id: test/example\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
+    'id: test/example\nversion: 0.1.0\nfixtures: [fixtures/hello.txt]\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
   const payloads = [
     { path: 'cases/example.case.yaml', body: caseBody },
     { path: 'fixtures/hello.txt', body: 'hello' },
@@ -396,12 +396,14 @@ async function verifiedDatasetInputs() {
     path.join(root, 'manifest.json'),
     JSON.stringify({
       dataset: { id: 'test', version: '1' },
-      cases: ['cases/example.case.yaml'],
-      files: payloads.map(({ path: filePath, body }) => ({
-        path: filePath,
-        size: Buffer.byteLength(body),
-        sha256: sha256Hex(body),
-      })),
+      cases: [
+        {
+          id: 'test/example',
+          version: '0.1.0',
+          ...fileDescriptor(payloads[0]!),
+          files: payloads.slice(1).map(fileDescriptor),
+        },
+      ],
     }),
   );
   const dataset = await loadDataset(root);
@@ -409,4 +411,18 @@ async function verifiedDatasetInputs() {
     manifest: dataset.manifest,
   });
   return { root, dataset, inputs };
+}
+
+function fileDescriptor({
+  path: filePath,
+  body,
+}: {
+  path: string;
+  body: string;
+}) {
+  return {
+    path: filePath,
+    size: Buffer.byteLength(body),
+    sha256: sha256Hex(body),
+  };
 }

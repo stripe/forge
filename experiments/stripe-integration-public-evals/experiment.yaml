@@ -1,10 +1,10 @@
 id: stripe-integration-public-evals/baseline
-version: 0.1.0
+version: 0.2.0
 dataset:
-  path: ./dataset
+  path: ../../datasets/stripe-integration-public-evals
   id: stripe-integration-public-evals
-  version: 0.1.0
-  manifest_sha256: sha256:6b52bcfd75334b251060c996a6803a62b75b9425c26c2b6bf46c9240e2e81a19
+  version: 0.2.0
+  manifest_sha256: sha256:b86a8c4b616f64ad844ed50165feb39f009f14a7b5a89127157d87eeb7d30e31
 runtime:
   adapter: docker
   image:

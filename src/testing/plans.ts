@@ -89,6 +89,7 @@ export function createTestResolvedRunPlan(
     },
     case: {
       id: caseId,
+      version: '0.1.0',
       ...(mode === 'one_shot'
         ? { initial_prompt: initialPrompt! }
         : { task: prompt }),

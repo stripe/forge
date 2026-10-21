@@ -1,6 +1,7 @@
 import { sha256Digest } from '../model/hashes.ts';
 import { indexLoadedDatasetCases } from '../model/loaders.ts';
 import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
+import { datasetPayloadFiles } from '../model/parse.ts';
 import {
   type AgentSelectionV1,
   type CaseId,
@@ -398,7 +399,7 @@ function assertDatasetInputsExist(
   steps: readonly SetupStepV1[],
   dataset: LoadedDatasetV1,
 ): void {
-  const files = dataset.manifest.files.map(({ path }) => path);
+  const files = datasetPayloadFiles(dataset.manifest).map(({ path }) => path);
   for (const step of steps) {
     if (!isWriteSetupStep(step)) continue;
     const source = step.with.source;
