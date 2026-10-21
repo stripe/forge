@@ -288,10 +288,12 @@ try {
       assert.deepEqual(report.summary.criterion_scores, {
         required: {strict: null, avg: null, evaluations: 0},
         recommended: {strict: null, avg: null, evaluations: 0},
+        blend: {score: null, evaluations: 0},
       });
       assert.deepEqual(report.runs[0].evaluation.criterion_scores, {
         required: {strict: null, avg: null},
         recommended: {strict: null, avg: null},
+        blend: {score: null},
       });
       assert.equal(command.arguments.values.upload, true);
       assert.ok(command.outcomes.every((outcome) => outcome.artifact.evaluation.status === 'passed'));

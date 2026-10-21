@@ -1074,11 +1074,15 @@ that ratio. Only `requirement_level` determines scoring inclusion.
 
 Reports preserve per-run passed/total counts for all three classifications and
 verify that MUST plus SHOULD match the scored counts and ratio. Each run's
-`criterion_scores` matrix reports Required (MUST) and Recommended (MUST + SHOULD),
-each with Strict and Avg scores, independently of checks. Parsing verifies those
-scores against the per-classification counts, then verifies summary and
-case/configuration scores against the run rows. These aggregates use only the
-latest effective outcome per selection, when completed, and leave empty sets unscored. Disjoint
+`criterion_scores` reports Required (MUST) and Recommended (MUST + SHOULD), each
+with Strict and Avg scores. Blend gates each evaluation on all MUST passing,
+then uses only its SHOULD pass fraction. MUST-only evaluations receive `1` or `0`;
+SHOULD-only evaluations use their pass fraction. Empty evaluations are unscored.
+Blend aggregates average eligible evaluation scores after applying each gate.
+These report views ignore checks and do not change saved evaluation scores or
+status. Parsing verifies each view against the per-classification counts, then
+verifies summary and case/configuration scores against the run rows. Aggregates
+use only the latest completed effective outcome per selection. Disjoint
 `criteria_by_requirement` groups preserve required failures, recommended failures,
 and OPTIONAL telemetry. The README defines the
 [score formulas and aggregate denominators](../README.md#understand-scores).

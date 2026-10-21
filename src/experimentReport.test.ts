@@ -59,6 +59,7 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.summary.criterion_scores, {
       required: { strict: null, avg: null, evaluations: 0 },
       recommended: { strict: null, avg: null, evaluations: 0 },
+      blend: { score: null, evaluations: 0 },
     });
     assert.throws(() =>
       parseExperimentRunReport({ ...report, forge: undefined }),
@@ -198,6 +199,7 @@ describe('experiment run scorecards', () => {
       criterion_scores: {
         required: { strict: null, avg: null, evaluations: 0 },
         recommended: { strict: 1 / 3, avg: 0.5, evaluations: 3 },
+        blend: { score: 0.5, evaluations: 3 },
       },
       criteria_by_requirement: {
         MUST: {
@@ -229,11 +231,13 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.cases[0]!.criterion_scores, {
       required: { strict: null, avg: null, evaluations: 0 },
       recommended: { strict: 1 / 3, avg: 0.5, evaluations: 3 },
+      blend: { score: 0.5, evaluations: 3 },
     });
     for (const group of report.cases.slice(1)) {
       assert.deepEqual(group.criterion_scores, {
         required: { strict: null, avg: null, evaluations: 0 },
         recommended: { strict: null, avg: null, evaluations: 0 },
+        blend: { score: null, evaluations: 0 },
       });
     }
     assert.equal(report.cases[1]!.judging_score.mean, null);
@@ -280,14 +284,17 @@ describe('experiment run scorecards', () => {
         {
           required: { strict: 0, avg: 1 / 2 },
           recommended: { strict: 0, avg: 2 / 3 },
+          blend: { score: 0 },
         },
         {
           required: { strict: 1, avg: 1 },
           recommended: { strict: 0, avg: 1 / 2 },
+          blend: { score: 0 },
         },
         {
           required: { strict: null, avg: null },
           recommended: { strict: null, avg: null },
+          blend: { score: null },
         },
         null,
       ],
@@ -296,6 +303,7 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.summary.criterion_scores, {
       required: { strict: 0.5, avg: 2 / 3, evaluations: 2 },
       recommended: { strict: 0, avg: 3 / 5, evaluations: 2 },
+      blend: { score: 0, evaluations: 2 },
     });
     assert.deepEqual(
       report.cases[0]!.criterion_scores,
@@ -351,12 +359,14 @@ describe('experiment run scorecards', () => {
       criteria: [judgment('MUST', false), judgment('SHOULD', true)],
       required: { strict: 0, avg: 0 },
       recommended: { strict: 0, avg: 0.5 },
+      blend: { score: 0 },
     },
     {
       name: 'a failed SHOULD affects Recommended while Required passes',
       criteria: [judgment('MUST', true), judgment('SHOULD', false)],
       required: { strict: 1, avg: 1 },
       recommended: { strict: 0, avg: 0.5 },
+      blend: { score: 0 },
     },
     {
       name: 'a failed OPTIONAL does not affect either score',
@@ -367,34 +377,70 @@ describe('experiment run scorecards', () => {
       ],
       required: { strict: 1, avg: 1 },
       recommended: { strict: 1, avg: 1 },
+      blend: { score: 1 },
     },
     {
       name: 'no MUST leaves Required empty while SHOULD is scored',
       criteria: [judgment('SHOULD', true), judgment('SHOULD', false)],
       required: { strict: null, avg: null },
       recommended: { strict: 0, avg: 0.5 },
+      blend: { score: 0.5 },
     },
     {
       name: 'MUST alone contributes to both sets',
       criteria: [judgment('MUST', false)],
       required: { strict: 0, avg: 0 },
       recommended: { strict: 0, avg: 0 },
+      blend: { score: 0 },
+    },
+    {
+      name: 'MUST alone earns full credit when all pass',
+      criteria: [judgment('MUST', true)],
+      required: { strict: 1, avg: 1 },
+      recommended: { strict: 1, avg: 1 },
+      blend: { score: 1 },
+    },
+    {
+      name: 'passing MUST gates the SHOULD average without adding to it',
+      criteria: [
+        judgment('MUST', true),
+        judgment('MUST', true),
+        judgment('SHOULD', true),
+        judgment('SHOULD', false),
+      ],
+      required: { strict: 1, avg: 1 },
+      recommended: { strict: 0, avg: 0.75 },
+      blend: { score: 0.5 },
+    },
+    {
+      name: 'one failed MUST gates a mixed required set and passing SHOULD',
+      criteria: [
+        judgment('MUST', true),
+        judgment('MUST', false),
+        judgment('SHOULD', true),
+        judgment('SHOULD', true),
+      ],
+      required: { strict: 0, avg: 0.5 },
+      recommended: { strict: 0, avg: 0.75 },
+      blend: { score: 0 },
     },
     {
       name: 'OPTIONAL alone leaves both sets empty',
       criteria: [judgment('OPTIONAL', false)],
       required: { strict: null, avg: null },
       recommended: { strict: null, avg: null },
+      blend: { score: null },
     },
   ])(
-    'scores the two criterion sets: $name',
-    ({ criteria, required, recommended }) => {
+    'scores the criterion views: $name',
+    ({ criteria, required, recommended, blend }) => {
       const run = row(0);
       run.evaluation = summarizeReportEvaluation(scoreEvaluation(criteria, []));
       const report = build([run]);
       assert.deepEqual(report.runs[0]!.evaluation!.criterion_scores, {
         required,
         recommended,
+        blend,
       });
       assert.deepEqual(report.summary.criterion_scores, {
         required: {
@@ -405,9 +451,66 @@ describe('experiment run scorecards', () => {
           ...recommended,
           evaluations: recommended.strict === null ? 0 : 1,
         },
+        blend: { ...blend, evaluations: blend.score === null ? 0 : 1 },
       });
     },
   );
+
+  it('averages Blend per evaluation after gating and keeps failed MUST runs in the denominator', () => {
+    const runs = [row(0), row(1), row(2), row(3), row(4), row(5)];
+    const criteria = [
+      [judgment('MUST', false), judgment('SHOULD', true)],
+      [
+        judgment('MUST', true),
+        judgment('SHOULD', true),
+        judgment('SHOULD', true),
+        judgment('SHOULD', false),
+        judgment('SHOULD', false),
+      ],
+      [judgment('MUST', true)],
+    ];
+    for (const [index, judgments] of criteria.entries()) {
+      runs[index]!.evaluation = summarizeReportEvaluation(
+        scoreEvaluation(judgments, [{ name: 'file', passed: false }]),
+      );
+    }
+    // Checks-only, errored, and pending rows carry no Blend score.
+    Object.assign(runs[4]!, {
+      state: 'errored',
+      evaluation: null,
+      error_code: 'agent_failed',
+      result_path: null,
+    });
+    Object.assign(runs[5]!, {
+      state: 'pending',
+      run_id: null,
+      attempt_count: 0,
+      result_path: null,
+      evaluation: null,
+    });
+    const report = build(runs);
+    assert.deepEqual(
+      report.runs.map((run) => run.evaluation?.criterion_scores.blend ?? null),
+      [{ score: 0 }, { score: 0.5 }, { score: 1 }, { score: null }, null, null],
+    );
+    assert.deepEqual(report.summary.criterion_scores.blend, {
+      score: 0.5,
+      evaluations: 3,
+    });
+    assert.deepEqual(
+      report.cases[0]!.criterion_scores.blend,
+      report.summary.criterion_scores.blend,
+    );
+    // Blend is a report view; the canonical score and check-constrained status remain intact.
+    assert.equal(report.runs[0]!.evaluation!.score, 0.5);
+    assert.equal(report.runs[0]!.evaluation!.status, 'partial');
+    assert.deepEqual(
+      parseExperimentRunReport(
+        JSON.parse(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+  });
 
   it('rejects false classifications, scores, and requirement-group aggregates', () => {
     const run = row(0);
@@ -431,6 +534,21 @@ describe('experiment run scorecards', () => {
       },
       (value: typeof report) => {
         value.runs[0]!.evaluation!.criterion_scores.required.strict = 1;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.criterion_scores.blend.score = 1;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.criterion_scores.blend.score = null;
+      },
+      (value: typeof report) => {
+        value.summary.criterion_scores.blend.score = 1;
+      },
+      (value: typeof report) => {
+        value.summary.criterion_scores.blend.evaluations = 0;
+      },
+      (value: typeof report) => {
+        value.cases[0]!.criterion_scores.blend.score = 1;
       },
       (value: typeof report) => {
         value.summary.criterion_scores.recommended.avg = 1;
@@ -726,6 +844,7 @@ describe('experiment run scorecards', () => {
           criterion_scores: {
             required: { strict: 1, avg: 1 },
             recommended: { strict: 1, avg: 1 },
+            blend: { score: 1 },
           },
           criteria_by_requirement: {
             MUST: { passed: 1, total: 1 },
@@ -743,6 +862,7 @@ describe('experiment run scorecards', () => {
           criterion_scores: {
             required: { strict: 0, avg: 0 },
             recommended: { strict: 0, avg: 0 },
+            blend: { score: 0 },
           },
           criteria_by_requirement: {
             MUST: { passed: 0, total: 1 },
@@ -757,6 +877,7 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(report.summary.criterion_scores, {
       required: { strict: 0.5, avg: 0.5, evaluations: 2 },
       recommended: { strict: 0.5, avg: 0.5, evaluations: 2 },
+      blend: { score: 0.5, evaluations: 2 },
     });
     const resumed = await runExperiment({ ...fixture.options, resume: true });
     assert.equal(resumed.executed, 0);
@@ -927,6 +1048,7 @@ function evaluation(
         strict: total === 0 ? null : passed === total ? 1 : 0,
         avg: total === 0 ? null : passed / total,
       },
+      blend: { score: total === 0 ? null : passed / total },
     },
     criteria_by_requirement: {
       MUST: { passed: 0, total: 0 },

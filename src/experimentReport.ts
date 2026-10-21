@@ -37,10 +37,14 @@ const criteriaByRequirementSchema = z
 const criterionScoreSchema = z
   .object({ strict: ratio.nullable(), avg: ratio.nullable() })
   .strict();
+const blendedCriterionScoreSchema = z
+  .object({ score: ratio.nullable() })
+  .strict();
 const criterionScoresSchema = z
   .object({
     required: criterionScoreSchema,
     recommended: criterionScoreSchema,
+    blend: blendedCriterionScoreSchema,
   })
   .strict();
 const criterionScoreStatisticsSchema = criterionScoreSchema.extend({
@@ -88,7 +92,7 @@ const evaluationSchema = z
     (value) =>
       serializeCanonicalJson(value.criterion_scores) ===
       serializeCanonicalJson(criterionScores(value.criteria_by_requirement)),
-    'Criterion scores must match their required and recommended counts.',
+    'Criterion scores must match their requirement counts.',
   );
 const runSchema = z
   .object({
@@ -138,6 +142,7 @@ const statisticsSchema = z
       .object({
         required: criterionScoreStatisticsSchema,
         recommended: criterionScoreStatisticsSchema,
+        blend: blendedCriterionScoreSchema.extend({ evaluations: count }),
       })
       .strict(),
     criteria_by_requirement: z
@@ -349,6 +354,7 @@ function statistics(
     criterion_scores: {
       required: criterionScoreStatistics(runs, 'required'),
       recommended: criterionScoreStatistics(runs, 'recommended'),
+      blend: blendedCriterionScoreStatistics(runs),
     },
     criteria_by_requirement: {
       MUST: criterionStatistics(runs, 'MUST'),
@@ -366,7 +372,7 @@ function statistics(
 /** Required uses MUST; recommended includes both MUST and SHOULD. */
 function relevantCriterionCounts(
   groups: z.infer<typeof criteriaByRequirementSchema>,
-  set: keyof z.infer<typeof criterionScoresSchema>,
+  set: 'required' | 'recommended',
 ): z.infer<typeof criterionCountsSchema> {
   const { MUST, SHOULD } = groups;
   return set === 'required'
@@ -377,20 +383,52 @@ function relevantCriterionCounts(
 function criterionScores(
   groups: z.infer<typeof criteriaByRequirementSchema>,
 ): z.infer<typeof criterionScoresSchema> {
-  function score(set: keyof z.infer<typeof criterionScoresSchema>) {
+  function score(set: 'required' | 'recommended') {
     const { passed, total } = relevantCriterionCounts(groups, set);
     return {
       strict: total === 0 ? null : passed === total ? 1 : 0,
       avg: total === 0 ? null : passed / total,
     };
   }
-  return { required: score('required'), recommended: score('recommended') };
+  return {
+    required: score('required'),
+    recommended: score('recommended'),
+    blend: { score: blendedCriterionScore(groups) },
+  };
+}
+
+/** Fail on any unmet MUST, otherwise report the SHOULD pass fraction. */
+function blendedCriterionScore({
+  MUST,
+  SHOULD,
+}: z.infer<typeof criteriaByRequirementSchema>): number | null {
+  if (MUST.total + SHOULD.total === 0) return null;
+  if (MUST.passed !== MUST.total) return 0;
+  return SHOULD.total === 0 ? 1 : SHOULD.passed / SHOULD.total;
+}
+
+/** Gate each evaluation before averaging, so another run cannot hide a failed MUST. */
+function blendedCriterionScoreStatistics(
+  runs: readonly ExperimentRunReportRunV1[],
+): { score: number | null; evaluations: number } {
+  let sum = 0;
+  let evaluations = 0;
+  for (const run of runs) {
+    if (run.state !== 'completed') continue;
+    const score = blendedCriterionScore(
+      run.evaluation!.criteria_by_requirement,
+    );
+    if (score === null) continue;
+    sum += score;
+    evaluations += 1;
+  }
+  return { score: evaluations === 0 ? null : sum / evaluations, evaluations };
 }
 
 /** Pool criterion results for Avg; give each eligible evaluation one Strict vote. */
 function criterionScoreStatistics(
   runs: readonly ExperimentRunReportRunV1[],
-  set: keyof z.infer<typeof criterionScoresSchema>,
+  set: 'required' | 'recommended',
 ): z.infer<typeof criterionScoreStatisticsSchema> {
   let passed = 0;
   let total = 0;

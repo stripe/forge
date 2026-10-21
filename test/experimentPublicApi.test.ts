@@ -213,6 +213,8 @@ describe('experiment public entry points', () => {
       requiredAvg: number | null;
       recommendedStrict: number | null;
       recommendedAvg: number | null;
+      blendScore: number | null;
+      blendEvaluations: number;
       eligibleEvaluations: number;
       runScores: ExperimentRunReportEvaluationV1['criterion_scores'] | null;
     } => ({
@@ -224,6 +226,8 @@ describe('experiment public entry points', () => {
       requiredAvg: report.summary.criterion_scores.required.avg,
       recommendedStrict: report.summary.criterion_scores.recommended.strict,
       recommendedAvg: report.summary.criterion_scores.recommended.avg,
+      blendScore: report.summary.criterion_scores.blend.score,
+      blendEvaluations: report.summary.criterion_scores.blend.evaluations,
       eligibleEvaluations:
         report.summary.criterion_scores.recommended.evaluations,
       runScores: report.runs[0]?.evaluation?.criterion_scores ?? null,
