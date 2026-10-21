@@ -1,4 +1,4 @@
-export type { PluginMcpServerId } from './pluginMcp.ts';
+export type { PluginMcpServerId } from './plugins.ts';
 
 import type { ForgeBuildIdentity } from '../version.ts';
 
@@ -73,7 +73,7 @@ export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
   with: CommandSetupWithV1;
 }
 
-/** One agent's marketplace-backed native plugin selection. */
+/** Native distribution supplied to an agent's plugin installer. */
 export interface PluginSelectionV1 extends JsonObject {
   /** Agent-native qualified identity, such as `stripe@claude-plugins-official`. */
   plugin: string;
@@ -82,8 +82,8 @@ export interface PluginSelectionV1 extends JsonObject {
 }
 
 export interface PluginSetupWithV1 extends JsonObject {
-  /** Adapter ID to native selection. Only the selected branch is realized. */
-  agents: Record<string, PluginSelectionV1>;
+  /** Forge resolves the compatible native distribution for the selected agent. */
+  plugin: 'stripe';
 }
 
 export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {

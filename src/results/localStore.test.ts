@@ -1096,14 +1096,7 @@ describe('local artifact store', () => {
       treatmentSetup: [
         {
           uses: 'forge/plugin',
-          with: {
-            agents: {
-              'claude-code': {
-                plugin: 'stripe@claude-plugins-official',
-                marketplace: 'anthropics/claude-plugins-official',
-              },
-            },
-          },
+          with: { plugin: 'stripe' },
         },
       ],
       agent: { adapter: 'claude-code', provider: 'anthropic', model: 'test' },

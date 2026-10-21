@@ -700,8 +700,8 @@ The built-ins are:
   safe workspace-relative path;
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials; and
-- `forge/plugin`: delegate native plugin installation to the selected agent
-  adapter, currently Claude Code or Codex, and retain a verified installation receipt.
+- `forge/plugin`: resolve a registered plugin name for the selected agent
+  adapter, install it, and retain a verified installation receipt.
 
 Action IDs are namespaced but have no individual version suffix. Breaking
 changes to their payload or behavior require updating affected benchmark
@@ -710,17 +710,16 @@ extension bundles own exactly one other namespace, cannot replace built-ins,
 and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
-`forge/plugin` intentionally resolves the current marketplace entry at
-execution time. Its `setup.json` receipt records the selected IDs, catalog
-commit, installed version, reported source commit when available, and an
-installation-time tree fingerprint. These identify the catalog snapshot and
-observed installed contents; plugin state remains writable during interaction.
-This is a documented mutable-treatment semantic, not general plan
-reproducibility; see
-[Marketplace plugin treatments](plugin-action.md). Supported Stripe plugin
-selections also declare agent-scoped MCP credentials during pure preflight;
-Forge configures their existing connection before fingerprinting the installation.
-Other plugin selections do not request Stripe credentials.
+Plans retain `forge/plugin`'s short registered name. Pure preflight selects its
+native distribution and declares agent-scoped MCP credential requirements using
+policy fixed by the Forge version. Setup installs the current marketplace entry,
+configures its existing MCP connection, and fingerprints the installation.
+The `setup.json` receipt records resolved native IDs, catalog commit, installed
+version, reported source commit when available, and the installed-tree
+fingerprint. These identify the catalog snapshot and observed contents; plugin
+state remains writable during interaction. See
+[Marketplace plugin treatments](plugin-action.md) for registered names and
+installation semantics.
 
 ## Interaction architecture
 
@@ -1341,9 +1340,9 @@ The public CLI and built-in composition currently have these limits:
 - Execution is local, with bounded concurrency and explicit resume. There is no
   distributed scheduler, automatic experiment retry loop, remote publisher, or
   hosted execution service. `matrix.retries` does not schedule automatic attempts.
-- Marketplace plugins follow the current public catalog entry. Exact authored
-  pins, private repository authentication, transitive dependencies, and
-  user-defined plugin options are unsupported; see the authoritative
+- `forge/plugin` accepts registered names and follows the current public catalog
+  entry. Exact authored pins, private repository authentication, transitive
+  dependencies, and user-defined plugin options are unsupported; see the
   [plugin limitations](plugin-action.md#credentials-and-limitations).
 - Host-file imports verify transferred bytes without emitting a core setup
   receipt; this leaves a provenance gap when imported contents affect evaluation.

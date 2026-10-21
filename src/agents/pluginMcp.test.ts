@@ -1,25 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import {
-  createEnvironmentCredentialResolver,
-  credentialReference,
-} from '../contracts/credentials.ts';
 import { parseSetupStep } from '../model/parse.ts';
 import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
-import { createTestResolvedRunPlan } from '../testing/plans.ts';
-import {
-  configurePluginMcp,
-  configurePluginMcpDocument,
-  pluginMcpCredentials,
-  pluginMcpEnvironmentBindings,
-} from './pluginMcp.ts';
+import { configurePluginMcp, configurePluginMcpDocument } from './pluginMcp.ts';
 
 const servers = ['stripe'] as const;
 const step = {
   uses: 'forge/plugin',
-  with: {
-    agents: { codex: { plugin: 'stripe@stripe', marketplace: 'stripe/ai' } },
-  },
+  with: { plugin: 'stripe' },
 };
 
 describe('plugin MCP bearer authentication', () => {
@@ -117,72 +105,7 @@ describe('plugin MCP bearer authentication', () => {
     );
     await assert.rejects(
       configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
-      /Agent Plugins.*bearer auth.*stripe@claude-plugins-official/,
-    );
-  });
-
-  it('declares opaque credentials under their registered names and binds only selected inputs', () => {
-    assert.deepEqual(pluginMcpEnvironmentBindings([]), {});
-    assert.deepEqual(pluginMcpCredentials(servers), {
-      STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
-    });
-    const plan = createTestResolvedRunPlan({
-      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
-      treatmentSetup: [parseSetupStep(step)],
-    });
-    assert.deepEqual(pluginMcpEnvironmentBindings([plan]), {
-      'env:STRIPE_API_KEY': 'STRIPE_API_KEY',
-    });
-    assert.throws(
-      () =>
-        pluginMcpEnvironmentBindings([plan], { 'env:STRIPE_API_KEY': 'OTHER' }),
-      /must be bound/,
-    );
-  });
-
-  it('binds only the selected adapter distribution, not other plugins or marketplaces', () => {
-    for (const selected of [
-      { plugin: 'formatter@example', marketplace: 'example/plugins' },
-      { plugin: 'stripe@stripe', marketplace: 'example/stripe-mirror' },
-      { plugin: 'other@stripe', marketplace: 'stripe/ai' },
-    ]) {
-      const plan = createTestResolvedRunPlan({
-        agent: { adapter: 'codex', provider: 'openai', model: 'test' },
-        treatmentSetup: [
-          parseSetupStep({
-            uses: 'forge/plugin',
-            with: {
-              agents: {
-                codex: selected,
-                'claude-code': {
-                  plugin: 'stripe@claude-plugins-official',
-                  marketplace: 'anthropics/claude-plugins-official',
-                },
-              },
-            },
-          }),
-        ],
-      });
-      assert.deepEqual(pluginMcpEnvironmentBindings([plan]), {});
-    }
-  });
-
-  it('requires the registered host key without accepting an alternate auth variable', async () => {
-    const plan = createTestResolvedRunPlan({
-      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
-      treatmentSetup: [parseSetupStep(step)],
-    });
-    const resolver = createEnvironmentCredentialResolver({
-      bindings: pluginMcpEnvironmentBindings([plan]),
-      environment: { OTHER_KEY: 'synthetic-key' },
-    });
-    await assert.rejects(
-      resolver.resolve(credentialReference('env:STRIPE_API_KEY'), {
-        runId: 'test',
-        purpose: 'agent',
-        signal: new AbortController().signal,
-      }),
-      /Set STRIPE_API_KEY/,
+      /Agent Plugins.*bearer auth.*Claude-format/,
     );
   });
 

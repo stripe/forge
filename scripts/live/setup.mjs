@@ -102,11 +102,7 @@ const cases = [
     setup: [
       {
         uses: 'forge/plugin',
-        with: {
-          agents: {
-            'claude-code': { plugin: PLUGIN, marketplace: MARKETPLACE },
-          },
-        },
+        with: { plugin: 'stripe' },
       },
     ],
     files: { 'plugin-verified.txt': 'native plugin verified\n' },
@@ -131,17 +127,7 @@ export async function runSetupIntegrationSuite({
       : {
           ...spec,
           setup: [
-            {
-              uses: 'forge/plugin',
-              with: {
-                agents: {
-                  [liveAgent]: {
-                    plugin: selectedPlugin,
-                    marketplace: selectedMarketplace,
-                  },
-                },
-              },
-            },
+            ...spec.setup,
             command([
               'node',
               '-e',

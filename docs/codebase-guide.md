@@ -477,7 +477,7 @@ application across several files.
 | [`executor.ts`](https://github.com/stripe/forge/blob/main/src/setup/executor.ts) | `createSetupExecutorForRegistry`, `PreparedSetup` implementation | Calls each action's pure `preflight`, merges requirements, freezes prepared operations, and later applies them in order with least-privileged projections. Called by `execute.ts`. |
 | [`forgeWrite.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
 | [`forgeCommand.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
-| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Selects the current agent's `AgentPluginInstaller`, incorporates its requirements, installs, and validates its receipt. |
+| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Resolves a registered plugin for the selected agent, declares credentials and installer requirements, installs, and validates its receipt. |
 | [`resolution.ts`](https://github.com/stripe/forge/blob/main/src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
 
