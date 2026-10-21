@@ -407,6 +407,10 @@ describe('Claude plugin installer', () => {
     for (const candidate of [
       {
         version: '1.0.0',
+        source: './plugins/formatter',
+      },
+      {
+        version: '1.0.1',
         source: './providers/claude/plugin/',
       },
       {
