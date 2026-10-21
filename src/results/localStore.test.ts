@@ -1144,6 +1144,22 @@ describe('local artifact store', () => {
       assert.equal(actual.runId, 'run-1');
     }
 
+    const redundantMcpServers = await commitArtifacts(
+      [
+        ...core,
+        {
+          path: 'setup.json',
+          body: setup({ ...receipt, mcp_servers: ['stripe'] }),
+        },
+      ],
+      (result) => result,
+      { plan: pluginPlan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(redundantMcpServers),
+      /invalid plugin installation resolution/,
+    );
+
     const missingResolution = await commitArtifacts(core, (result) => result, {
       plan: pluginPlan,
     });

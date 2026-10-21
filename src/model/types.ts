@@ -1,3 +1,5 @@
+export type { PluginMcpServerId } from './pluginMcp.ts';
+
 import type { ForgeBuildIdentity } from '../version.ts';
 
 export const DEFAULT_MAX_TURNS = 10;

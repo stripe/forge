@@ -262,6 +262,61 @@ describe('portable setup actions', () => {
     ]);
   });
 
+  for (const [adapter, plugin, marketplace] of [
+    [
+      'claude-code',
+      'stripe@claude-plugins-official',
+      'anthropics/claude-plugins-official',
+    ],
+    ['codex', 'stripe@stripe', 'stripe/ai'],
+    [
+      'codex',
+      'stripe@claude-plugins-official',
+      'anthropics/claude-plugins-official',
+    ],
+  ] as const) {
+    it(`automatically requests agent-scoped Stripe authentication for ${adapter}`, () => {
+      const step = parseSetupStep({
+        uses: 'forge/plugin',
+        with: { agents: { [adapter]: { plugin, marketplace } } },
+      });
+      const target = {
+        ...setupTarget,
+        selection: { ...setupTarget.selection, adapter },
+      };
+      const installer: AgentPluginInstaller = {
+        supportsMcpBearerAuth: true,
+        preflight(distribution, context) {
+          assert.deepEqual(distribution, { plugin, marketplace });
+          assert.deepEqual(context.mcpServers, ['stripe']);
+          return {
+            requirements: { executables: [], stateDirectories: [] },
+            async install() {
+              throw new Error('preflight must not install');
+            },
+          };
+        },
+      };
+      const prepared = createSetupExecutor().preflight([step], {
+        ...target,
+        pluginInstaller: installer,
+      });
+      assert.deepEqual(prepared.requirements.credentials, {
+        agent: {
+          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
+        },
+      });
+      assert.throws(
+        () =>
+          createSetupExecutor().preflight([step], {
+            ...target,
+            pluginInstaller: { preflight: installer.preflight },
+          }),
+        /does not support plugin MCP bearer authentication/,
+      );
+    });
+  }
+
   it('rejects an unsupported or missing selected plugin realization in preflight', () => {
     const step = parseSetupStep({
       uses: 'forge/plugin',

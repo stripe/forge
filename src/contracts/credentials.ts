@@ -221,7 +221,7 @@ export function createEnvironmentCredentialResolver(
         /[\0\r\n]/.test(value)
       ) {
         throw new Error(
-          `No value is available for credential reference ${JSON.stringify(reference)}.`,
+          `Set ${name}: no value is available for credential reference ${JSON.stringify(reference)}.`,
         );
       }
       return value;

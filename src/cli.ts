@@ -4,9 +4,9 @@ import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import { pluginMcpEnvironmentBindings } from './agents/pluginMcp.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
@@ -502,8 +502,9 @@ async function runPublicExperiment(
           ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
         }),
       );
-      const credentialBindings = parseCredentialEnvironmentBindings(
-        values['credential-env'],
+      const credentialBindings = pluginMcpEnvironmentBindings(
+        plans,
+        parseCredentialEnvironmentBindings(values['credential-env']),
       );
       const composition = await (
         options.compositionFactory ?? createDefaultCliComposition

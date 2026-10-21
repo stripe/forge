@@ -123,8 +123,8 @@ export async function runSetupIntegrationSuite({
   liveAgent = 'claude-code',
 }) {
   const codex = liveAgent === 'codex';
-  const selectedPlugin = codex ? 'stripe@stripe' : PLUGIN;
-  const selectedMarketplace = codex ? 'stripe/ai' : MARKETPLACE;
+  const selectedPlugin = PLUGIN;
+  const selectedMarketplace = MARKETPLACE;
   const specs = cases.map((spec) =>
     spec.id !== 'plugin'
       ? spec
@@ -142,6 +142,11 @@ export async function runSetupIntegrationSuite({
                 },
               },
             },
+            command([
+              'node',
+              '-e',
+              "if (Object.hasOwn(process.env, 'STRIPE_API_KEY')) throw new Error('Setup received an agent credential.');",
+            ]),
           ],
         },
   );
@@ -245,13 +250,19 @@ export async function runSetupIntegrationSuite({
                 '-e',
                 `
               const fs = require('node:fs');
-              const entries = process.argv.slice(1).map((file) =>
+              const [caseId, ...files] = process.argv.slice(1);
+              const expectedKey = caseId === 'plugin' ? 'forge-setup-synthetic-stripe-key' : undefined;
+              if (process.env.STRIPE_API_KEY !== expectedKey) {
+                throw new Error('Stripe key has incorrect agent scope.');
+              }
+              const entries = files.map((file) =>
                 [file, fs.readFileSync(file).toString('base64')]);
               if (fs.existsSync('expanded.txt') || fs.existsSync('nested/expanded.txt')) {
                 throw new Error('An argv argument was interpreted by a shell.');
               }
               process.stdout.write(JSON.stringify(entries));
             `,
+                spec.id,
                 ...Object.keys(spec.files),
               ],
               { signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024 },
@@ -295,8 +306,11 @@ export async function runSetupIntegrationSuite({
       inputProvider,
       artifactStore: createArtifactStore({ root: resultsRoot }),
       credentialResolver: {
-        async resolve() {
-          throw new Error('Setup integration must never resolve credentials');
+        async resolve(reference, context) {
+          assert.equal(reference, 'env:STRIPE_API_KEY');
+          assert.equal(context.purpose, 'forge-eval:STRIPE_API_KEY');
+          // Installation is exercised without making authenticated MCP calls.
+          return 'forge-setup-synthetic-stripe-key';
         },
       },
     };
@@ -382,6 +396,7 @@ export async function runSetupIntegrationSuite({
             assert.equal(receipt.marketplace, selectedMarketplace);
             assert.equal(receipt.native_plugin_id, installed.id);
             assert.equal(receipt.version, installed.version);
+            assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
             assert.match(receipt.marketplace_commit, /^[a-f0-9]{40}$/);
             assert.match(
               receipt.installed_tree.sha256,
@@ -473,7 +488,7 @@ async function verifyCodexPlugin(runtime, signal, pluginId) {
   const manifest = JSON.parse(
     Buffer.from(
       await home.readFile(
-        `plugins/cache/stripe/stripe/${installed[0].version}/.claude-plugin/plugin.json`,
+        `plugins/cache/${installed[0].marketplaceName}/stripe/${installed[0].version}/.claude-plugin/plugin.json`,
       ),
     ).toString(),
   );
