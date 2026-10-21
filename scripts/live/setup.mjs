@@ -236,9 +236,9 @@ export async function runSetupIntegrationSuite({
                 '-e',
                 `
               const fs = require('node:fs');
-              const [caseId, ...files] = process.argv.slice(1);
-              const expectedKey = caseId === 'plugin' ? 'forge-setup-synthetic-stripe-key' : undefined;
-              if (process.env.STRIPE_API_KEY !== expectedKey) {
+              const [, ...files] = process.argv.slice(1);
+              // The experiment merchant supplies the key to every agent command.
+              if (process.env.STRIPE_API_KEY !== 'forge-setup-synthetic-stripe-key') {
                 throw new Error('Stripe key has incorrect agent scope.');
               }
               const entries = files.map((file) =>
