@@ -303,7 +303,7 @@ describe('portable setup actions', () => {
       });
       assert.deepEqual(prepared.requirements.credentials, {
         agent: {
-          FORGE_MCP_BEARER_STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
+          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
         },
       });
       assert.throws(

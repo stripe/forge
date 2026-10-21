@@ -44,7 +44,7 @@ describe('plugin MCP bearer authentication', () => {
           ...input.mcpServers.stripe,
           headers: {
             Accept: 'application/json',
-            Authorization: `Bearer \${FORGE_MCP_BEARER_STRIPE_API_KEY}`,
+            Authorization: `Bearer \${STRIPE_API_KEY}`,
           },
         },
       },
@@ -67,7 +67,7 @@ describe('plugin MCP bearer authentication', () => {
         stripe: {
           url: 'https://mcp.stripe.com',
           http_headers: { Accept: 'application/json' },
-          bearer_token_env_var: 'FORGE_MCP_BEARER_STRIPE_API_KEY',
+          bearer_token_env_var: 'STRIPE_API_KEY',
         },
       },
     });
@@ -121,10 +121,10 @@ describe('plugin MCP bearer authentication', () => {
     );
   });
 
-  it('declares opaque credentials under safe runtime names and binds only selected inputs', () => {
+  it('declares opaque credentials under their registered names and binds only selected inputs', () => {
     assert.deepEqual(pluginMcpEnvironmentBindings([]), {});
     assert.deepEqual(pluginMcpCredentials(servers), {
-      FORGE_MCP_BEARER_STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
+      STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
     });
     const plan = createTestResolvedRunPlan({
       agent: { adapter: 'codex', provider: 'openai', model: 'test' },

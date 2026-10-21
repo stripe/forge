@@ -52,13 +52,13 @@ describe('Claude plugin installer', () => {
     const receipt = await installerPreflight(distribution, servers).install(
       installContext(state, harness.commands),
     );
-    assert.deepEqual(receipt.mcp_servers, servers);
+    assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
     const configured = JSON.parse(
       Buffer.from(await state.mutable.readFile(`${root}/.mcp.json`)).toString(),
     );
     assert.equal(
       configured.mcpServers.stripe.headers.Authorization,
-      `Bearer \${FORGE_MCP_BEARER_STRIPE_API_KEY}`,
+      `Bearer \${STRIPE_API_KEY}`,
     );
     const originalTree = await installerPreflight().install(
       installContext(state, harness.commands),

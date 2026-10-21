@@ -33,7 +33,6 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
     /** Git revision reported by the native installer, when available. */
     readonly commit?: string;
   };
-  readonly mcp_servers?: PluginMcpServerId[];
   readonly installed_tree: JsonObject & {
     readonly format: 'forge-plugin-tree-v1';
     readonly sha256: Sha256Digest;

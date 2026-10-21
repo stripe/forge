@@ -207,9 +207,10 @@ validation and planning need no values.
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference
-`FORGE_MCP_BEARER_<host-variable>` inside the runtime. Tokens reach only agent
-commands, never setup commands. Forge records the configured server names in the receipt and fingerprints the
-configured installation. Credential mappings are part of the Forge version.
+`STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
+use the same key. Tokens reach only agent commands, never setup commands.
+Forge fingerprints the configured installation. Credential mappings are part
+of the Forge version.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
 source fails setup. Codex can install the Claude-format distribution shown above.

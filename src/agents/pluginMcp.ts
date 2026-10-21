@@ -15,17 +15,12 @@ const PLUGIN_MCP_SERVERS = Object.freeze({
   }),
 });
 
-/** Host names are separate from runtime names so keys cannot replace PATH/HOME. */
-export function pluginMcpTokenEnvironment(name: string): string {
-  return `FORGE_MCP_BEARER_${name}`;
-}
-
 export function pluginMcpCredentials(servers: readonly PluginMcpServerId[]) {
   return Object.fromEntries(
     servers.map((name) => {
       const server = PLUGIN_MCP_SERVERS[name];
       return [
-        pluginMcpTokenEnvironment(server.credentialEnvironmentVariable),
+        server.credentialEnvironmentVariable,
         { reference: server.credentialReference },
       ];
     }),
@@ -153,9 +148,8 @@ export function configurePluginMcpDocument(
       throw new Error(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );
-    const environmentName = pluginMcpTokenEnvironment(
-      PLUGIN_MCP_SERVERS[name].credentialEnvironmentVariable,
-    );
+    const environmentName =
+      PLUGIN_MCP_SERVERS[name].credentialEnvironmentVariable;
     if (adapter === 'claude-code') {
       if (server.headers !== undefined && !record(server.headers))
         throw new Error(`Plugin MCP server ${name} has invalid headers.`);

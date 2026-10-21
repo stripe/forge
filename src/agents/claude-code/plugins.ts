@@ -196,7 +196,6 @@ export function createClaudePluginInstaller(
             native_plugin_id: nativePluginId,
             version: installed.version,
             source: pluginSourceReceipt(entry.source, sourceCommit),
-            ...(mcpServers ? { mcp_servers: [...mcpServers] } : {}),
             installed_tree: installedTree,
           });
         },

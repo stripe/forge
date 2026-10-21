@@ -274,7 +274,6 @@ export function createCodexPluginInstaller(options: {
             native_plugin_id: selected.plugin,
             version: installed.version,
             source: Object.freeze({ kind: source.kind }),
-            ...(mcpServers ? { mcp_servers: [...mcpServers] } : {}),
             installed_tree: installedTree,
           });
         },

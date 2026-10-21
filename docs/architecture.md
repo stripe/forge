@@ -719,7 +719,7 @@ This is a documented mutable-treatment semantic, not general plan
 reproducibility; see
 [Marketplace plugin treatments](plugin-action.md). Supported Stripe plugin
 selections also declare agent-scoped MCP credentials during pure preflight;
-Forge configures their existing connection and records that change in the receipt.
+Forge configures their existing connection before fingerprinting the installation.
 Other plugin selections do not request Stripe credentials.
 
 ## Interaction architecture

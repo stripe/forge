@@ -198,7 +198,7 @@ describe('Codex native plugin installer', () => {
       ),
     );
     const receipt = await test.install();
-    assert.deepEqual(receipt.mcp_servers, mcpServers);
+    assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
     const configured = JSON.parse(
       Buffer.from(
         await test.state.mutable.readFile(`${cache}/.mcp.json`),
@@ -206,7 +206,7 @@ describe('Codex native plugin installer', () => {
     );
     assert.equal(
       configured.mcpServers.stripe.bearer_token_env_var,
-      'FORGE_MCP_BEARER_STRIPE_API_KEY',
+      'STRIPE_API_KEY',
     );
     assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
   });
