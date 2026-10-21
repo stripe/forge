@@ -13,14 +13,15 @@ import type { AgentAdapter } from './contracts/agent.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
-import { FORGE_VERSION } from './execution/index.ts';
+import { FORGE_VERSION, ForgeExecutionError } from './execution/index.ts';
 import {
   parseExperimentConfigYaml,
+  type SetupStepV1,
   sha256Digest,
   sha256Hex,
 } from './model/index.ts';
 import { serializeResolvedRunPlan } from './planning/index.ts';
-import { createArtifactStore } from './results/index.ts';
+import { type CompletedRunV1, createArtifactStore } from './results/index.ts';
 import { defineSetupActionBundle } from './setup/index.ts';
 import {
   createFakeRuntimeAdapter,
@@ -1526,6 +1527,241 @@ describe('Forge CLI', () => {
     );
   });
 
+  it('validates and plans case and treatment credentials without host bindings', async () => {
+    const caseSetup: SetupStepV1[] = [
+      { uses: 'forge/credentials', with: { env: ['API_TOKEN'] } },
+    ];
+    const treatmentSetup: SetupStepV1[] = [
+      { uses: 'forge/credentials', with: { env: ['SECOND_API_TOKEN'] } },
+    ];
+    const fixture = await createBenchmarkFixture({ caseSetup });
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    config.treatments.authenticated = { setup: treatmentSetup };
+    assert.ok(config.matrix.groups === undefined);
+    config.matrix.treatments = ['baseline', 'authenticated'];
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    let stdout = '';
+    let stderr = '';
+    const options: RunCliOptions = {
+      environment: {},
+      stdout: (text) => {
+        stdout += text;
+      },
+      stderr: (text) => {
+        stderr += text;
+      },
+    };
+
+    assert.equal(
+      await runCli(
+        ['validate', '--experiment', fixture.experimentPath],
+        options,
+      ),
+      0,
+      stderr,
+    );
+    assert.equal(JSON.parse(stdout).run_count, 2);
+    for (const treatment of ['baseline', 'authenticated']) {
+      stdout = '';
+      assert.equal(
+        await runCli(
+          [
+            'plan',
+            '--experiment',
+            fixture.experimentPath,
+            '--treatment',
+            treatment,
+          ],
+          options,
+        ),
+        0,
+        stderr,
+      );
+      const plan = JSON.parse(stdout);
+      const selectedSetup = treatment === 'baseline' ? [] : treatmentSetup;
+      assert.deepEqual(plan.case.setup, caseSetup);
+      assert.deepEqual(plan.treatment.setup, selectedSetup);
+      assert.deepEqual(plan.setup, [...caseSetup, ...selectedSetup]);
+    }
+  });
+
+  it('forwards explicitly bound case and treatment credentials only to the agent and redacts them', async () => {
+    const fixture = await createBenchmarkFixture({
+      caseSetup: [
+        { uses: 'forge/credentials', with: { env: ['API_TOKEN'] } },
+        { uses: 'forge/command', with: { argv: ['probe-setup'] } },
+      ],
+    });
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    config.treatments.authenticated = {
+      setup: [
+        { uses: 'forge/credentials', with: { env: ['SECOND_API_TOKEN'] } },
+      ],
+    };
+    assert.ok(config.matrix.groups === undefined);
+    config.matrix.treatments = ['authenticated'];
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    const runtime = createFakeRuntimeAdapter();
+    const caseSecret = 'case-api-secret';
+    const treatmentSecret = 'treatment-api-secret';
+    const scripted = createScriptedAgentAdapter({
+      id: 'claude-code',
+      turns: [
+        {
+          text: `Used ${caseSecret} and ${treatmentSecret}.`,
+          sessionId: 'credential-session',
+          toolCalls: [],
+        },
+      ],
+    });
+    const agent: AgentAdapter = {
+      ...scripted.adapter,
+      async openSession(context) {
+        await context.runtime.commands.agent.run(['probe-agent']);
+        return scripted.adapter.openSession(context);
+      },
+    };
+    let completed: CompletedRunV1 | undefined;
+    let output = '';
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--credential-env',
+        'env:API_TOKEN=EVAL_API_TOKEN',
+        '--credential-env',
+        'env:SECOND_API_TOKEN=SECOND_API_TOKEN',
+      ],
+      {
+        stdout: (text) => {
+          output += text;
+        },
+        stderr: (text) => {
+          output += text;
+        },
+        environment: {
+          API_TOKEN: 'default-must-not-be-selected',
+          EVAL_API_TOKEN: caseSecret,
+          SECOND_API_TOKEN: treatmentSecret,
+          UNDECLARED_TOKEN: 'must-not-be-forwarded',
+        },
+        execute: async (input) => {
+          completed = await defaultForgeEngine.executeEval({
+            ...input,
+            composition: {
+              ...input.composition,
+              runtime: runtime.adapter,
+              agents: new Map([[agent.id, agent]]),
+            },
+          });
+          return completed;
+        },
+      },
+    );
+
+    assert.equal(exitCode, 0, output);
+    assert.equal(runtime.runs.length, 1);
+    assert.deepEqual(runtime.runs[0]!.input.environment, {
+      variables: {},
+      credentials: {
+        API_TOKEN: { value: caseSecret, scopes: ['agent'] },
+        SECOND_API_TOKEN: { value: treatmentSecret, scopes: ['agent'] },
+      },
+    });
+    assert.deepEqual(
+      runtime.runs[0]!.commands.map(({ argv, credentialEnvironmentNames }) => ({
+        argv,
+        credentialEnvironmentNames,
+      })),
+      [
+        { argv: ['probe-setup'], credentialEnvironmentNames: [] },
+        {
+          argv: ['probe-agent'],
+          credentialEnvironmentNames: ['API_TOKEN', 'SECOND_API_TOKEN'],
+        },
+      ],
+    );
+    assert.ok(completed);
+    assert.equal(completed.result.evidence.redaction_count, 2);
+    const location = completed.location;
+    const artifacts = await Promise.all(
+      completed.result.artifacts.map((artifact) =>
+        fs.readFile(path.join(location, artifact.path), 'utf8'),
+      ),
+    );
+    assert.ok(artifacts.some((body) => body.includes('[REDACTED]')));
+    for (const body of [
+      ...artifacts,
+      output,
+      JSON.stringify(completed.result),
+    ]) {
+      assert.ok(!body.includes(caseSecret));
+      assert.ok(!body.includes(treatmentSecret));
+      assert.ok(!body.includes('EVAL_API_TOKEN'));
+    }
+  });
+
+  for (const explicitBinding of [false, true]) {
+    it(`rejects a ${explicitBinding ? 'missing mapped value' : 'missing explicit binding'} before allocating a runtime`, async () => {
+      const fixture = await createBenchmarkFixture({
+        caseSetup: [
+          { uses: 'forge/credentials', with: { env: ['API_TOKEN'] } },
+        ],
+      });
+      const runtime = createFakeRuntimeAdapter();
+      const agent = createScriptedAgentAdapter({ id: 'claude-code' });
+      let failure: unknown;
+
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          ...(explicitBinding
+            ? ['--credential-env', 'env:API_TOKEN=EVAL_API_TOKEN']
+            : []),
+        ],
+        {
+          stdout: () => undefined,
+          environment: { API_TOKEN: 'same-name-does-not-grant-access' },
+          execute: async (input) => {
+            try {
+              return await defaultForgeEngine.executeEval({
+                ...input,
+                composition: {
+                  ...input.composition,
+                  runtime: runtime.adapter,
+                  agents: new Map([[agent.adapter.id, agent.adapter]]),
+                },
+              });
+            } catch (error) {
+              failure = error;
+              throw error;
+            }
+          },
+        },
+      );
+
+      assert.equal(exitCode, 1);
+      assert.ok(failure instanceof ForgeExecutionError);
+      assert.equal(failure.code, 'credential_failed');
+      assert.ok(failure.cause instanceof Error);
+      assert.match(
+        failure.cause.message,
+        explicitBinding
+          ? /Set EVAL_API_TOKEN: no value is available/
+          : /No environment binding exists.*env:API_TOKEN/,
+      );
+      assert.equal(runtime.runs.length, 0);
+    });
+  }
+
   it('rejects malformed credential mappings without echoing their value', async () => {
     const fixture = await createBenchmarkFixture();
     const accidentalSecret = 'sk-live-accidental-secret';
@@ -1661,7 +1897,11 @@ async function createGroupedBenchmarkFixture() {
 }
 
 async function createBenchmarkFixture(
-  options: { repetitions?: number; includeUnselectedCase?: boolean } = {},
+  options: {
+    repetitions?: number;
+    includeUnselectedCase?: boolean;
+    caseSetup?: readonly SetupStepV1[];
+  } = {},
 ): Promise<{
   root: string;
   datasetRoot: string;
@@ -1682,7 +1922,7 @@ async function createBenchmarkFixture(
   const caseBody = `id: case/example
 task: Do the thing
 execution_mode: one_shot
-setup: []
+setup: ${JSON.stringify(options.caseSetup ?? [])}
 judging_criteria: []
 `;
   const casePath = 'cases/example.case.yaml';

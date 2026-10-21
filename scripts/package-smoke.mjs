@@ -168,6 +168,10 @@ try {
       }
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');
+      assert.equal(setup.credentialsSetupHandler, forge.credentialsSetupHandler);
+      assert.deepEqual(forge.parseSetupStep({
+        uses: 'forge/credentials', with: {env: ['API_TOKEN']},
+      }), {uses: 'forge/credentials', with: {env: ['API_TOKEN']}});
       assert.equal(typeof setup.defineSetupActionBundle, 'function');
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
 

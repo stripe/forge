@@ -10,6 +10,7 @@ import {
   createJudgeTranscriptProjection,
   createSetupExecutor,
   credentialReference,
+  credentialsSetupHandler,
   criterionResultMatchesDefinition,
   defineSetupActionBundle,
   evaluateRunEvidence,
@@ -86,9 +87,11 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof createForgeEngine, 'function');
     assert.equal(typeof createSetupExecutor, 'function');
+    assert.equal(credentialsSetupHandler.uses, 'forge/credentials');
     assert.equal(typeof defineSetupActionBundle, 'function');
     assert.deepEqual([...firstPartySetupHandlers.keys()].sort(), [
       'forge/command',
+      'forge/credentials',
       'forge/plugin',
       'forge/write',
     ]);

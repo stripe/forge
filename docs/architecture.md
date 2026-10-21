@@ -468,6 +468,15 @@ The resolver is called only for the selected plan's declared bindings. Plain
 variables remain structurally separate from resolved secrets, and the ambient
 host environment is never copied wholesale.
 
+`forge/credentials` lets a case or treatment declare additional agent credentials
+by runtime environment name. Each name maps to the opaque reference `env:NAME`;
+the declaration grants no automatic host lookup. The CLI requires an explicit
+`--credential-env` binding unless a selected integration already supplies one.
+Embedding hosts authorize and resolve references through their credential
+resolver. Missing bindings or values fail before runtime allocation. See
+[additional API credentials](../README.md#additional-api-credentials) for the
+case, treatment, and launch configuration.
+
 Completion-provider credentials use a separate path. They are resolved per
 purpose (`role_player` or `judge`), remain host-side, and are passed only to the
 selected provider. An optional provider `preflight` runs here, after resolution
@@ -699,7 +708,9 @@ The built-ins are:
 - `forge/write`: copy inline bytes or a manifest-listed dataset file to a
   safe workspace-relative path;
 - `forge/command`: execute an explicit argv vector from a safe
-  workspace-relative directory, without credentials; and
+  workspace-relative directory, without credentials;
+- `forge/credentials`: declare agent-scoped credentials without issuing setup
+  commands or mutating state; and
 - `forge/plugin`: resolve a registered plugin name for the selected agent
   adapter, install it, and retain a verified installation receipt.
 
@@ -1227,8 +1238,8 @@ Other important safeguards include:
 
 Redaction matches exact resolved secret values; it does not detect transformed
 or partially leaked values. The evaluated agent receives its selected provider
-credential and outbound network access, so it can intentionally disclose that
-credential. Use restricted, short-lived keys with appropriate account limits.
+and API credentials and outbound network access, so it can intentionally disclose
+those credentials. Use restricted, short-lived keys with appropriate account limits.
 The built-in runtime provides no domain allowlisting or offline execution mode;
 custom network policy requires an explicit runtime implementation. Ava and judge
 providers receive benchmark prompts and the evidence needed for their roles.

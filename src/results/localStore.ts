@@ -523,7 +523,9 @@ function verifySetupArtifact(
         );
       }
     } else if (
-      (step.uses === 'forge/write' || step.uses === 'forge/command') &&
+      (step.uses === 'forge/write' ||
+        step.uses === 'forge/command' ||
+        step.uses === 'forge/credentials') &&
       step.resolution !== undefined
     ) {
       throw new ArtifactStoreError(

@@ -103,6 +103,55 @@ merchant outside Forge.
 The runtime installs pinned Claude Code and Codex CLI releases from npm.
 Their use remains subject to their providers' terms.
 
+### Additional API credentials
+
+Use `forge/credentials` when agent code needs an API credential independently of
+a plugin. Declare variable names in case setup when every treatment, including
+baseline, needs them:
+
+```yaml
+# case.yaml excerpt
+setup:
+  - uses: forge/credentials
+    with:
+      env:
+        - API_TOKEN
+```
+
+For access specific to one treatment, put the same action in the experiment:
+
+```yaml
+# experiment.yaml excerpt
+treatments:
+  baseline:
+    setup: []
+  authenticated-api:
+    setup:
+      - uses: forge/credentials
+        with:
+          env:
+            - API_TOKEN
+```
+
+`env` accepts 1–128 unique names matching `[A-Za-z_][A-Za-z0-9_]*`, each at most
+255 characters. Supply names only; values stay outside authored files and plans.
+The CLI requires an explicit host binding for each additional credential, even
+when the host and runtime names match:
+
+```sh
+npx --no-install forge run --experiment ./my-eval/experiment.yaml \
+  --credential-env env:API_TOKEN=EVAL_API_TOKEN
+```
+
+Export `EVAL_API_TOKEN` before running. The agent and its child processes receive
+the value as `API_TOKEN`; setup commands do not. Missing bindings or values fail
+before runtime allocation. `validate` and `plan` do not read secret values.
+Embedding hosts resolve `env:API_TOKEN` through their credential resolver.
+
+This action adds requirements without adding automatic host bindings. Existing
+bindings still apply: selecting `forge/plugin` with `plugin: stripe` already
+declares and binds `STRIPE_API_KEY`, so there is no need to repeat it here.
+
 ## Installation
 
 Install Forge directly from GitHub source in your consuming project:
