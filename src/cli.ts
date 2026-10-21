@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
-import { pluginMcpEnvironmentBindings } from './agents/pluginMcp.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
@@ -28,6 +27,7 @@ import {
   parseRunSelection,
   type RunSelection,
 } from './model/index.ts';
+import { pluginMcpEnvironmentBindings } from './model/pluginCredentials.ts';
 import {
   expandExperiment,
   ManifestCaseFileError,

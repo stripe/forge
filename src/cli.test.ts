@@ -9,6 +9,7 @@ import {
   runCli as invokeCli,
   type RunCliOptions,
 } from './cli.ts';
+import type { AgentAdapter } from './contracts/agent.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
@@ -1424,6 +1425,104 @@ describe('Forge CLI', () => {
         },
       ),
       'alternate-key',
+    );
+  });
+
+  it('remaps a plugin host credential while preserving its runtime name and agent scope', async () => {
+    const fixture = await createBenchmarkFixture();
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    config.treatments['with-plugin'] = {
+      setup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+    };
+    assert.ok(config.matrix.groups === undefined);
+    config.matrix.treatments = ['with-plugin'];
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    const runtime = createFakeRuntimeAdapter();
+    const scripted = createScriptedAgentAdapter({ id: 'claude-code' });
+    const agent: AgentAdapter = {
+      ...scripted.adapter,
+      pluginInstaller: {
+        supportsMcpBearerAuth: true,
+        preflight(distribution, context) {
+          return {
+            requirements: { executables: [], stateDirectories: [] },
+            async install({ commands }) {
+              await commands.run(['probe-plugin-setup']);
+              return {
+                adapter: context.selection.adapter,
+                plugin: distribution.plugin,
+                marketplace: distribution.marketplace,
+                marketplace_commit: 'a'.repeat(40),
+                native_plugin_id: distribution.plugin,
+                version: '1.0.0',
+                source: { kind: 'marketplace-path' },
+                installed_tree: {
+                  format: 'forge-plugin-tree-v1',
+                  sha256: `sha256:${'b'.repeat(64)}`,
+                  entry_count: 1,
+                  file_count: 1,
+                  size_bytes: 1,
+                },
+              };
+            },
+          };
+        },
+      },
+      async openSession(context) {
+        await context.runtime.commands.agent.run(['probe-agent']);
+        return scripted.adapter.openSession(context);
+      },
+    };
+    let stderr = '';
+
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--credential-env',
+        'env:STRIPE_API_KEY=STRIPE_TEST_KEY',
+      ],
+      {
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+        environment: {
+          STRIPE_API_KEY: 'default-must-not-be-selected',
+          STRIPE_TEST_KEY: 'explicit-plugin-key',
+        },
+        execute: (input) =>
+          defaultForgeEngine.executeEval({
+            ...input,
+            composition: {
+              ...input.composition,
+              runtime: runtime.adapter,
+              agents: new Map([[agent.id, agent]]),
+            },
+          }),
+      },
+    );
+
+    assert.equal(exitCode, 0, stderr);
+    assert.equal(runtime.runs.length, 1);
+    assert.deepEqual(runtime.runs[0]!.input.environment.credentials, {
+      STRIPE_API_KEY: { value: 'explicit-plugin-key', scopes: ['agent'] },
+    });
+    assert.deepEqual(
+      runtime.runs[0]!.commands.map(({ argv, credentialEnvironmentNames }) => ({
+        argv,
+        credentialEnvironmentNames,
+      })),
+      [
+        { argv: ['probe-plugin-setup'], credentialEnvironmentNames: [] },
+        {
+          argv: ['probe-agent'],
+          credentialEnvironmentNames: ['STRIPE_API_KEY'],
+        },
+      ],
     );
   });
 

@@ -178,9 +178,18 @@ quiesces all mutation before evidence selection.
 ## Credentials and limitations
 
 Selecting `plugin: stripe` automatically configures bearer authentication for
-its bundled HTTP MCP connection. Export `STRIPE_API_KEY` with an Agent API key
-before starting the eval; account or merchant provisioning remains external to
-Forge.
+its bundled HTTP MCP connection. By default, the CLI reads an Agent API key from
+the host's `STRIPE_API_KEY`. To read another host variable, pass an explicit binding:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml --output ./results \
+  --credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY
+```
+
+Export the selected host variable before starting the eval. An explicit binding
+takes precedence over the default; if its value is missing, Forge fails without
+falling back to another variable. Account or merchant provisioning remains
+external to Forge.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
@@ -189,8 +198,9 @@ Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference
 `STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
 use the same key. Tokens reach only agent commands, never setup commands.
-Forge fingerprints the configured installation. Credential mappings are part
-of the Forge version.
+Forge fingerprints the configured installation. Runtime credential names and
+references are part of the Forge version; the host variable name is not recorded
+in the plan.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
 source fails setup. Custom MCP config paths, OAuth, and host login passthrough

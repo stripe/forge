@@ -93,6 +93,9 @@ the container. The development live suite has separate
 
 For the [Stripe plugin treatment](docs/plugin-action.md), use
 `with: {plugin: stripe}` and export `STRIPE_API_KEY` with an Agent API key.
+To use a different host variable, pass
+`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`; the agent still receives
+`STRIPE_API_KEY`.
 Forge selects the distribution for the run's agent and configures its bundled
 MCP connection. The token reaches only agent commands; prepare the account or
 merchant outside Forge.

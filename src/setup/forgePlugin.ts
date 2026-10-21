@@ -1,6 +1,6 @@
-import { pluginMcpCredentials } from '../agents/pluginMcp.ts';
 import type { PreparedAgentPluginInstallation } from '../contracts/plugin.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import { pluginMcpCredentials } from '../model/pluginCredentials.ts';
 import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.ts';
 import type {
