@@ -51,6 +51,12 @@ function fixture(
         { 'test.token': 'test-only-value' },
         { onResolve: (reference) => resolutions.push(reference) },
       ),
+      stripeKeyProvisioner: {
+        async provisionKey(recipe) {
+          resolutions.push(`provision:${recipe}`);
+          return 'rk_test_only_value';
+        },
+      },
       inputProvider: createMemoryRunInputProvider(),
       artifactStore: createMemoryArtifactStore().store,
     },
@@ -257,6 +263,26 @@ describe('runtime composition preflight', () => {
       assert.equal(runtime.runs.length, 0);
     });
   }
+
+  it('requires a key provisioner when a merchant is planned', async () => {
+    const runtime = createFakeRuntimeAdapter({ id: selected.adapter });
+    const { stripeKeyProvisioner: _, ...composition } = fixture(
+      runtime.adapter,
+    ).composition;
+    const plan = createTestResolvedRunPlan({
+      runtime: selected,
+      merchant: { recipe: 'default' },
+    });
+    assert.throws(() => preflightEval({ plan, composition }), {
+      code: 'unsupported_capability',
+      message: /supply composition.stripeKeyProvisioner/,
+    });
+    await assert.rejects(
+      executeEval({ runId: 'missing-provisioner', plan, composition }),
+      { code: 'unsupported_capability', phase: 'preflight' },
+    );
+    assert.equal(runtime.runs.length, 0);
+  });
 
   it('rejects identity mismatches, absent validation and invalid config before credentials or prepare', async () => {
     const fake = createFakeRuntimeAdapter({ id: selected.adapter });

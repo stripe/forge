@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { credentialReference } from './credentials.ts';
+import { type CredentialResolver, credentialReference } from './credentials.ts';
 import {
-  createMerchantCredentialResolver,
   merchantCredentialReference,
+  routeMerchantCredentials,
 } from './merchant.ts';
 
 const context = {
@@ -12,45 +12,48 @@ const context = {
   signal: new AbortController().signal,
 };
 
-describe('merchant credential resolver', () => {
-  it('routes merchant references to the provisioner and all others to the fallback', async () => {
+describe('merchant credential routing', () => {
+  it('routes merchant references to the provisioner and all others to lookup', async () => {
     const calls: string[] = [];
-    const resolver = createMerchantCredentialResolver({
-      async provision(recipe, received) {
+    const lookup: CredentialResolver = {
+      async resolve(reference) {
+        calls.push(`lookup:${reference}`);
+        return 'model-key';
+      },
+    };
+    const resolver = routeMerchantCredentials(lookup, {
+      async provisionKey(recipe, received) {
         assert.equal(received, context);
         calls.push(`provision:${recipe}`);
-        return `sk_test_${recipe}`;
-      },
-      fallback: {
-        async resolve(reference) {
-          calls.push(`fallback:${reference}`);
-          return 'model-key';
-        },
+        return `rk_test_${recipe}`;
       },
     });
 
     assert.equal(
       await resolver.resolve(merchantCredentialReference('default'), context),
-      'sk_test_default',
+      'rk_test_default',
     );
     assert.equal(
       await resolver.resolve(credentialReference('model.api-key'), context),
       'model-key',
     );
-    assert.deepEqual(calls, ['provision:default', 'fallback:model.api-key']);
+    assert.deepEqual(calls, ['provision:default', 'lookup:model.api-key']);
+    assert.equal(routeMerchantCredentials(lookup, undefined), lookup);
   });
 
-  it('propagates provisioning failures without consulting the fallback', async () => {
-    const resolver = createMerchantCredentialResolver({
-      async provision() {
-        throw new Error('No merchant is available.');
-      },
-      fallback: {
+  it('propagates provisioning failures without consulting lookup', async () => {
+    const resolver = routeMerchantCredentials(
+      {
         async resolve() {
-          throw new Error('Fallback must not resolve merchant references.');
+          throw new Error('Lookup must not resolve merchant references.');
         },
       },
-    });
+      {
+        async provisionKey() {
+          throw new Error('No merchant is available.');
+        },
+      },
+    );
 
     await assert.rejects(
       resolver.resolve(merchantCredentialReference('default'), context),

@@ -6,6 +6,7 @@ import type {
 } from './completion.ts';
 import type { CredentialResolver } from './credentials.ts';
 import type { RunInputProvider } from './inputs.ts';
+import type { StripeKeyProvisioner } from './merchant.ts';
 import type { RunObserver } from './observability.ts';
 import type { RuntimeAdapter } from './runtime.ts';
 
@@ -21,7 +22,10 @@ export interface ForgeComposition {
   readonly runtime: RuntimeAdapter;
   readonly agents: ReadonlyMap<string, AgentAdapter>;
   readonly completionProviders?: CompletionProviderCollection;
+  /** Looks up existing secrets by opaque reference, without side effects. */
   readonly credentialResolver: CredentialResolver;
+  /** Required by plans that declare an experiment merchant. */
+  readonly stripeKeyProvisioner?: StripeKeyProvisioner;
   readonly inputProvider: RunInputProvider;
   readonly artifactStore: RunArtifactStore;
   readonly observer?: RunObserver;

@@ -40,6 +40,7 @@ import {
 import {
   MERCHANT_ENVIRONMENT_VARIABLE,
   merchantCredentialReference,
+  routeMerchantCredentials,
 } from '../contracts/merchant.ts';
 import {
   type AgentAdapterMetadata,
@@ -933,6 +934,13 @@ function buildEvalPreflight(
     plan,
     declaredEnvironment,
   );
+  if (plan.merchant !== undefined && !composition.stripeKeyProvisioner) {
+    throw new ForgeExecutionError(
+      'unsupported_capability',
+      'preflight',
+      'This plan declares a merchant; supply composition.stripeKeyProvisioner.',
+    );
+  }
   const completionBindings = completionBindingsForPlan(plan, composition);
   preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
@@ -1019,7 +1027,10 @@ async function resolveEnvironment(
 ): Promise<ResolvedEnvironment> {
   try {
     return await createEnvironmentResolver(
-      input.composition.credentialResolver,
+      routeMerchantCredentials(
+        input.composition.credentialResolver,
+        input.composition.stripeKeyProvisioner,
+      ),
     ).resolve(specification, {
       runId: input.runId,
       purpose: 'forge-eval',

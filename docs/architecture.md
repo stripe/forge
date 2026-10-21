@@ -377,6 +377,7 @@ contains:
 | `AgentAdapter` map | Drive the selected coding agent and collect its exact session evidence | Agent-scoped runtime commands |
 | `CompletionProvider` map/resolver | Host-side Ava and judge model calls | Declared completion credentials only; no workspace or commands |
 | `CredentialResolver` | Resolve opaque references | Secret lookup only for explicitly requested references |
+| `StripeKeyProvisioner` (optional) | Supply the Stripe key for a planned merchant | Called once per eval run attempt; may create the account |
 | `RunInputProvider` | Read dataset payloads | Read-only access below one dataset root |
 | `RunArtifactStore` | Stage and atomically commit results | One run namespace in the result store |
 | `RunObserver` | Receive lifecycle events | No control; failures are ignored |
@@ -472,11 +473,11 @@ An experiment `merchant` is the only source of `STRIPE_API_KEY`. Forge declares
 it as an agent credential with the opaque reference `stripe-merchant:<recipe>`,
 and any other declaration of that name fails preflight. The CLI binds the
 reference to the host's `STRIPE_API_KEY` unless `--credential-env` overrides it,
-and rejects bindings that match no planned merchant. Embedding hosts can
-provision a merchant for each eval run attempt with
-`createMerchantCredentialResolver`. Forge does not create, prepare, or clean up
-accounts; hosts own the merchant lifecycle, including attempts that fail after
-provisioning. See [Stripe merchant](../README.md#stripe-merchant).
+and rejects bindings that match no planned merchant. Forge resolves the
+reference through `composition.stripeKeyProvisioner`, called once per eval run
+attempt; a plan with a merchant fails preflight without one. Forge does not
+create, prepare, or clean up accounts; hosts own any accounts they provision,
+including for attempts that fail afterward. See [Stripe merchant](../README.md#stripe-merchant).
 
 `forge/credentials` lets a case or treatment declare additional agent credentials
 by runtime environment name. Each name maps to the opaque reference `env:NAME`;

@@ -119,15 +119,19 @@ To read another variable, pass
 `--credential-env stripe-merchant:default=STRIPE_TEST_KEY`. The key reaches only
 agent commands and is redacted from outputs.
 
-Embedding hosts can provision a merchant for each run attempt instead, and own
-its cleanup:
+Embedding hosts supply a key for each run attempt instead, and own any
+accounts they create:
 
 ```ts
-const credentialResolver = createMerchantCredentialResolver({
-  provision: (recipe, { runId, signal }) => createMerchantKey(recipe, runId, signal),
-  fallback: baseCredentialResolver, // model keys and other references
-});
+const composition = {
+  ...baseComposition,
+  stripeKeyProvisioner: {
+    provisionKey: (recipe, { runId, signal }) => createKey(recipe, runId, signal),
+  },
+};
 ```
+
+A plan with a merchant fails preflight without `stripeKeyProvisioner`.
 
 ### Additional API credentials
 

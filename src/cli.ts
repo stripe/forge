@@ -13,6 +13,7 @@ import {
   isMerchantCredentialReference,
   MERCHANT_ENVIRONMENT_VARIABLE,
   merchantCredentialReference,
+  type StripeKeyProvisioner,
 } from './contracts/merchant.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
@@ -193,6 +194,11 @@ export async function createDefaultCliComposition(
     bindings: Object.fromEntries(bindings),
     environment,
   });
+  // The CLI creates no accounts; it reads the key bound by --credential-env.
+  const stripeKeyProvisioner: StripeKeyProvisioner = {
+    provisionKey: (recipe, context) =>
+      credentialResolver.resolve(merchantCredentialReference(recipe), context),
+  };
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
@@ -202,6 +208,7 @@ export async function createDefaultCliComposition(
     ]),
     completionProviders: new Map([[completionProvider.id, completionProvider]]),
     credentialResolver,
+    stripeKeyProvisioner,
     inputProvider: await createDirectoryRunInputProvider(options.datasetRoot, {
       ...(options.datasetManifest === undefined
         ? {}

@@ -179,7 +179,6 @@ try {
         uses: 'forge/credentials', with: {env: ['API_TOKEN']},
       }), {uses: 'forge/credentials', with: {env: ['API_TOKEN']}});
       assert.equal(typeof setup.defineSetupActionBundle, 'function');
-      assert.equal(typeof forge.createMerchantCredentialResolver, 'function');
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
 
       const externalPlan = testing.createTestResolvedRunPlan({runtime: {

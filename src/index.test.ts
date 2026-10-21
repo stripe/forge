@@ -8,7 +8,6 @@ import {
   createArtifactStore,
   createForgeEngine,
   createJudgeTranscriptProjection,
-  createMerchantCredentialResolver,
   createSetupExecutor,
   credentialReference,
   credentialsSetupHandler,
@@ -88,8 +87,8 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof createForgeEngine, 'function');
     assert.equal(typeof createSetupExecutor, 'function');
-    assert.equal(typeof createMerchantCredentialResolver, 'function');
     assert.equal('merchantCredentialReference' in rootExports, false);
+    assert.equal('routeMerchantCredentials' in rootExports, false);
     assert.equal(credentialsSetupHandler.uses, 'forge/credentials');
     assert.equal(typeof defineSetupActionBundle, 'function');
     assert.deepEqual([...firstPartySetupHandlers.keys()].sort(), [

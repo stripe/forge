@@ -292,8 +292,13 @@ export async function runSetupIntegrationSuite({
       inputProvider,
       artifactStore: createArtifactStore({ root: resultsRoot }),
       credentialResolver: {
-        async resolve(reference, context) {
-          assert.equal(reference, 'stripe-merchant:default');
+        async resolve(reference) {
+          throw new Error(`Setup mode resolves no ${reference} credential.`);
+        },
+      },
+      stripeKeyProvisioner: {
+        async provisionKey(recipe, context) {
+          assert.equal(recipe, 'default');
           assert.equal(context.purpose, 'forge-eval:STRIPE_API_KEY');
           // Installation is exercised without making authenticated MCP calls.
           return 'forge-setup-synthetic-stripe-key';
