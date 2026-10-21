@@ -1197,6 +1197,36 @@ describe('local artifact store', () => {
     );
   });
 
+  it('rejects fabricated resolutions for credential declarations', async () => {
+    const plan = createTestResolvedRunPlan({
+      caseSetup: [{ uses: 'forge/credentials', with: { env: ['API_TOKEN'] } }],
+    });
+    const location = await commitArtifacts(
+      [
+        { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+        { path: 'trajectory.json', body: oneShotTrajectory },
+        {
+          path: 'setup.json',
+          body: jsonBody({
+            steps: [
+              {
+                index: 0,
+                uses: 'forge/credentials',
+                resolution: { host: 'UNDECLARED_TOKEN' },
+              },
+            ],
+          }),
+        },
+      ],
+      (result) => result,
+      { plan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(location),
+      /Static setup action forge\/credentials cannot record a resolution\./,
+    );
+  });
+
   it('binds canonical setup receipts to the plan and disallows static resolutions', async () => {
     const plan = createTestResolvedRunPlan({
       caseId: 'sample/case',

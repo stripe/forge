@@ -73,6 +73,17 @@ export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
   with: CommandSetupWithV1;
 }
 
+export interface CredentialsSetupWithV1 extends JsonObject {
+  /** Agent environment names; the host resolves each opaque env:<NAME> reference. */
+  env: string[];
+}
+
+export interface CredentialsSetupStepV1
+  extends SetupStepV1<CredentialsSetupWithV1> {
+  uses: 'forge/credentials';
+  with: CredentialsSetupWithV1;
+}
+
 /** Native distribution supplied to an agent's plugin installer. */
 export interface PluginSelectionV1 extends JsonObject {
   /** Agent-native qualified identity, such as `stripe@claude-plugins-official`. */
@@ -95,6 +106,7 @@ export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
 export type BuiltInSetupStepV1 =
   | WriteSetupStepV1
   | CommandSetupStepV1
+  | CredentialsSetupStepV1
   | PluginSetupStepV1;
 
 export interface FilesystemCheckV1 {

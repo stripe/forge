@@ -5,6 +5,7 @@ import {
 } from '../model/paths.ts';
 import type { JsonObject } from '../model/types.ts';
 import { commandSetupHandler } from './forgeCommand.ts';
+import { credentialsSetupHandler } from './forgeCredentials.ts';
 import { pluginSetupHandler } from './forgePlugin.ts';
 import { writeSetupHandler } from './forgeWrite.ts';
 import type { SetupActionDefinition } from './registry.ts';
@@ -59,6 +60,23 @@ const PluginSetupWithSchema = z
   })
   .strict();
 
+const CredentialsSetupWithSchema = z
+  .object({
+    env: z
+      .array(
+        z
+          .string()
+          .max(255)
+          .regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+      )
+      .min(1)
+      .max(128)
+      .refine((names) => new Set(names).size === names.length, {
+        message: 'credential environment names must be unique',
+      }),
+  })
+  .strict();
+
 const writeSetupAction: SetupActionDefinition = Object.freeze({
   ...writeSetupHandler,
   parseWith(input: unknown): JsonObject {
@@ -80,8 +98,20 @@ const pluginSetupAction: SetupActionDefinition = Object.freeze({
   },
 });
 
+const credentialsSetupAction: SetupActionDefinition = Object.freeze({
+  ...credentialsSetupHandler,
+  parseWith(input: unknown): JsonObject {
+    return CredentialsSetupWithSchema.parse(input) as JsonObject;
+  },
+});
+
 export const builtInSetupActions: readonly SetupActionDefinition[] =
-  Object.freeze([writeSetupAction, commandSetupAction, pluginSetupAction]);
+  Object.freeze([
+    writeSetupAction,
+    commandSetupAction,
+    pluginSetupAction,
+    credentialsSetupAction,
+  ]);
 
 function isBoundedText(value: string): boolean {
   return (

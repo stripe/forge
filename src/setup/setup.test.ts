@@ -43,7 +43,7 @@ function result(exitCode = 0): CommandResult {
 }
 
 describe('portable setup actions', () => {
-  it('applies forge/write and forge/command in source order', async () => {
+  it('applies static actions in source order without exposing agent credentials to setup', async () => {
     const events: string[] = [];
     const writes = new Map<string, Uint8Array>();
     const workspace: MutableWorkspace = {
@@ -77,12 +77,19 @@ describe('portable setup actions', () => {
         },
       },
       {
+        uses: 'forge/credentials',
+        with: { env: ['API_TOKEN'] },
+      },
+      {
         uses: 'forge/command',
         with: { argv: ['node', '--version'], cwd: '.', timeout_ms: 1234 },
       },
     ];
 
     const prepared = createSetupExecutor().preflight(steps, setupTarget);
+    assert.deepEqual(prepared.requirements.credentials, {
+      agent: { API_TOKEN: { reference: 'env:API_TOKEN' } },
+    });
     const applied = await prepared.apply({
       runId: 'run-1',
       paths: { workspace: '/workspace', home: '/home/forge' },
@@ -126,7 +133,8 @@ describe('portable setup actions', () => {
     assert.deepEqual(applied.steps, [
       { index: 0, uses: 'forge/write' },
       { index: 1, uses: 'forge/write' },
-      { index: 2, uses: 'forge/command' },
+      { index: 2, uses: 'forge/credentials' },
+      { index: 3, uses: 'forge/command' },
     ]);
     assert.equal(
       Buffer.from(writes.get('notes/fixture.txt')!).toString(),
@@ -289,6 +297,22 @@ describe('portable setup actions', () => {
       assert.deepEqual(prepared.requirements.credentials, {
         agent: {
           STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
+        },
+      });
+      const augmented = createSetupExecutor().preflight(
+        [
+          step,
+          parseSetupStep({
+            uses: 'forge/credentials',
+            with: { env: ['STRIPE_API_KEY', 'API_TOKEN'] },
+          }),
+        ],
+        { ...target, pluginInstaller: installer },
+      );
+      assert.deepEqual(augmented.requirements.credentials, {
+        agent: {
+          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
+          API_TOKEN: { reference: 'env:API_TOKEN' },
         },
       });
       assert.throws(

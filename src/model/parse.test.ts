@@ -335,6 +335,34 @@ initial_prompt: Two
     );
   });
 
+  it('accepts only a bounded list of unique credential environment names', () => {
+    const step = {
+      uses: 'forge/credentials',
+      with: { env: ['API_TOKEN', '_mixedCase2'] },
+    };
+    assert.deepEqual(parseSetupStep(step), step);
+    for (const withValue of [
+      {},
+      { env: [] },
+      { env: 'API_TOKEN' },
+      { env: ['API_TOKEN', 'API_TOKEN'] },
+      { env: [''] },
+      { env: ['API_TOKEN=secret'] },
+      { env: ['1TOKEN'] },
+      { env: ['API-TOKEN'] },
+      { env: [{ API_TOKEN: 'secret' }] },
+      { env: ['API_TOKEN'], scope: 'setup' },
+      { env: ['API_TOKEN'], value: 'secret' },
+      { env: ['A'.repeat(256)] },
+      { env: Array.from({ length: 129 }, (_, i) => `TOKEN_${i}`) },
+    ]) {
+      assert.throws(
+        () => parseSetupStep({ uses: 'forge/credentials', with: withValue }),
+        BenchmarkModelError,
+      );
+    }
+  });
+
   it('parses registered plugin names without exposing native distribution fields', () => {
     const step = { uses: 'forge/plugin', with: { plugin: 'stripe' } };
     assert.deepEqual(parseSetupStep(step), step);
