@@ -106,12 +106,12 @@ merchant:
   recipe: default # optional; names the account state the experiment expects
 ```
 
-The CLI doesn't create or clean up accounts. Export a Stripe secret key, such
-as a sandbox key from [docs.stripe.com](https://docs.stripe.com); plugin
-treatments need an Agent API key. Every run in the experiment shares it.
+The CLI doesn't create or clean up accounts. Export a Stripe
+[agent key](https://docs.stripe.com/keys#agent-keys); every run in the
+experiment shares it.
 
 ```sh
-export STRIPE_API_KEY=sk_test_...
+export STRIPE_API_KEY=rk_test_...
 npx --no-install forge run --experiment ./my-eval/experiment.yaml
 ```
 

@@ -1095,7 +1095,10 @@ function mergeEnvironmentSpecifications(
   return normalizeScopedEnvironmentSpecification({ variables, credentials });
 }
 
-/** The experiment merchant is the only source of its agent-scoped key. */
+/**
+ * The experiment merchant is the only source of its agent-scoped key. Built-ins
+ * never declare it; this rejects host agent adapters and setup action bundles.
+ */
 function withMerchantCredential(
   plan: ResolvedRunPlanV1,
   environment: NormalizedScopedEnvironmentSpecification,
@@ -1108,15 +1111,16 @@ function withMerchantCredential(
     throw new TypeError(`${name} comes only from the experiment merchant.`);
   }
   if (plan.merchant === undefined) return environment;
-  return normalizeScopedEnvironmentSpecification({
+  const merchant = Object.freeze({
+    reference: merchantCredentialReference(plan.merchant.recipe),
+    scopes: Object.freeze(['agent'] as const),
+  });
+  return Object.freeze({
     variables: environment.variables,
-    credentials: {
+    credentials: Object.freeze({
       ...environment.credentials,
-      [name]: {
-        reference: merchantCredentialReference(plan.merchant.recipe),
-        scopes: ['agent'],
-      },
-    },
+      [name]: merchant,
+    }),
   });
 }
 

@@ -182,8 +182,8 @@ quiesces all mutation before evidence selection.
 
 Selecting `plugin: stripe` configures bearer authentication for its bundled
 HTTP MCP connection from `STRIPE_API_KEY`. The plugin declares no credential of
-its own; the experiment merchant supplies the key, which must be an Agent API
-key. See [Stripe merchant](../README.md#stripe-merchant) for CLI bindings and
+its own; the experiment merchant supplies the key, which must be an
+[agent key](https://docs.stripe.com/keys#agent-keys). See [Stripe merchant](../README.md#stripe-merchant) for CLI bindings and
 host provisioning.
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an

@@ -34,13 +34,10 @@ describe('merchant credential resolver', () => {
       'sk_test_default',
     );
     assert.equal(
-      await resolver.resolve(credentialReference('anthropic.api-key'), context),
+      await resolver.resolve(credentialReference('model.api-key'), context),
       'model-key',
     );
-    assert.deepEqual(calls, [
-      'provision:default',
-      'fallback:anthropic.api-key',
-    ]);
+    assert.deepEqual(calls, ['provision:default', 'fallback:model.api-key']);
   });
 
   it('propagates provisioning failures without consulting the fallback', async () => {
