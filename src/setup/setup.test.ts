@@ -134,10 +134,11 @@ describe('portable setup actions', () => {
     );
   });
 
-  it('routes forge/plugin through only the selected agent capability', async () => {
+  it('resolves the named plugin and installs through the selected agent capability', async () => {
     const events: string[] = [];
     const pluginState = emptyWorkspace();
     const installer: AgentPluginInstaller = {
+      supportsMcpBearerAuth: true,
       preflight(distribution, context) {
         events.push(
           `preflight:${context.selection.adapter}:${distribution.plugin}`,
@@ -177,7 +178,7 @@ describe('portable setup actions', () => {
               plugin: distribution.plugin,
               marketplace: distribution.marketplace,
               marketplace_commit: 'a'.repeat(40),
-              native_plugin_id: 'formatter@forge-test',
+              native_plugin_id: 'stripe@forge-test',
               version: '1.0.0',
               source: { kind: 'marketplace-path' },
               installed_tree: {
@@ -194,24 +195,17 @@ describe('portable setup actions', () => {
     };
     const step = parseSetupStep({
       uses: 'forge/plugin',
-      with: {
-        agents: {
-          'test-agent': {
-            plugin: 'formatter@example-marketplace',
-            marketplace: 'example/marketplace',
-          },
-          'other-agent': {
-            plugin: 'other@other-marketplace',
-            marketplace: 'other/marketplace',
-          },
-        },
-      },
+      with: { plugin: 'stripe' },
     });
     const prepared = createSetupExecutor().preflight([step], {
       ...setupTarget,
+      selection: { ...setupTarget.selection, adapter: 'claude-code' },
       pluginInstaller: installer,
     });
     assert.deepEqual(prepared.requirements, {
+      credentials: {
+        agent: { STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' } },
+      },
       executables: ['git'],
       stateDirectories: [
         {
@@ -235,7 +229,7 @@ describe('portable setup actions', () => {
       signal: new AbortController().signal,
     });
     assert.deepEqual(events, [
-      'preflight:test-agent:formatter@example-marketplace',
+      'preflight:claude-code:stripe@claude-plugins-official',
       'install',
     ]);
     assert.deepEqual(applied.steps, [
@@ -243,11 +237,11 @@ describe('portable setup actions', () => {
         index: 0,
         uses: 'forge/plugin',
         resolution: {
-          adapter: 'test-agent',
-          plugin: 'formatter@example-marketplace',
-          marketplace: 'example/marketplace',
+          adapter: 'claude-code',
+          plugin: 'stripe@claude-plugins-official',
+          marketplace: 'anthropics/claude-plugins-official',
           marketplace_commit: 'a'.repeat(40),
-          native_plugin_id: 'formatter@forge-test',
+          native_plugin_id: 'stripe@forge-test',
           version: '1.0.0',
           source: { kind: 'marketplace-path' },
           installed_tree: {
@@ -262,23 +256,11 @@ describe('portable setup actions', () => {
     ]);
   });
 
-  for (const [adapter, plugin, marketplace] of [
-    [
-      'claude-code',
-      'stripe@claude-plugins-official',
-      'anthropics/claude-plugins-official',
-    ],
-    ['codex', 'stripe@stripe', 'stripe/ai'],
-    [
-      'codex',
-      'stripe@claude-plugins-official',
-      'anthropics/claude-plugins-official',
-    ],
-  ] as const) {
-    it(`automatically requests agent-scoped Stripe authentication for ${adapter}`, () => {
+  for (const adapter of ['claude-code', 'codex'] as const) {
+    it(`selects the compatible Stripe distribution and agent credentials for ${adapter}`, () => {
       const step = parseSetupStep({
         uses: 'forge/plugin',
-        with: { agents: { [adapter]: { plugin, marketplace } } },
+        with: { plugin: 'stripe' },
       });
       const target = {
         ...setupTarget,
@@ -287,7 +269,10 @@ describe('portable setup actions', () => {
       const installer: AgentPluginInstaller = {
         supportsMcpBearerAuth: true,
         preflight(distribution, context) {
-          assert.deepEqual(distribution, { plugin, marketplace });
+          assert.deepEqual(distribution, {
+            plugin: 'stripe@claude-plugins-official',
+            marketplace: 'anthropics/claude-plugins-official',
+          });
           assert.deepEqual(context.mcpServers, ['stripe']);
           return {
             requirements: { executables: [], stateDirectories: [] },
@@ -317,35 +302,21 @@ describe('portable setup actions', () => {
     });
   }
 
-  it('rejects an unsupported or missing selected plugin realization in preflight', () => {
+  it('rejects unsupported agents and missing installers in preflight', () => {
     const step = parseSetupStep({
       uses: 'forge/plugin',
-      with: {
-        agents: {
-          'other-agent': {
-            plugin: 'formatter@example-marketplace',
-            marketplace: 'example/marketplace',
-          },
-        },
-      },
+      with: { plugin: 'stripe' },
     });
     assert.throws(
       () => createSetupExecutor().preflight([step], setupTarget),
-      /does not define a distribution/,
+      /does not support agent/,
     );
-    const selected = parseSetupStep({
-      uses: 'forge/plugin',
-      with: {
-        agents: {
-          'test-agent': {
-            plugin: 'formatter@example-marketplace',
-            marketplace: 'example/marketplace',
-          },
-        },
-      },
-    });
     assert.throws(
-      () => createSetupExecutor().preflight([selected], setupTarget),
+      () =>
+        createSetupExecutor().preflight([step], {
+          ...setupTarget,
+          selection: { ...setupTarget.selection, adapter: 'codex' },
+        }),
       /does not support forge\/plugin/,
     );
   });

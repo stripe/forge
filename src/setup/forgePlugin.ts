@@ -1,7 +1,7 @@
 import { pluginMcpCredentials } from '../agents/pluginMcp.ts';
 import type { PreparedAgentPluginInstallation } from '../contracts/plugin.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
-import { pluginMcpServersForDistribution } from '../model/pluginMcp.ts';
+import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.ts';
 import type {
   PreparedSetupStep,
@@ -22,10 +22,13 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
       );
     }
     const pluginStep = step as PluginSetupStepV1;
-    const distribution = pluginStep.with.agents[context.selection.adapter];
-    if (!distribution) {
+    const definition = pluginDefinitionForAgent(
+      pluginStep.with.plugin,
+      context.selection.adapter,
+    );
+    if (!definition) {
       throw new TypeError(
-        `forge/plugin does not define a distribution for agent ${JSON.stringify(context.selection.adapter)}.`,
+        `Plugin ${JSON.stringify(pluginStep.with.plugin)} does not support agent ${JSON.stringify(context.selection.adapter)}.`,
       );
     }
     if (!context.pluginInstaller) {
@@ -33,11 +36,8 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
         `Agent ${JSON.stringify(context.selection.adapter)} does not support forge/plugin.`,
       );
     }
-    const mcpServers = pluginMcpServersForDistribution(
-      context.selection.adapter,
-      distribution,
-    );
-    if (mcpServers && !context.pluginInstaller.supportsMcpBearerAuth) {
+    const { distribution, mcpServers } = definition;
+    if (!context.pluginInstaller.supportsMcpBearerAuth) {
       throw new TypeError(
         `Agent ${JSON.stringify(context.selection.adapter)} does not support plugin MCP bearer authentication.`,
       );
@@ -45,19 +45,15 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
     const prepared = context.pluginInstaller.preflight(distribution, {
       selection: context.selection,
       runtime: context.runtime,
-      ...(mcpServers ? { mcpServers } : {}),
+      mcpServers,
     });
     assertPreparedInstallation(prepared);
 
     return Object.freeze({
       requirements: Object.freeze({
-        ...(mcpServers
-          ? {
-              credentials: {
-                agent: pluginMcpCredentials(mcpServers),
-              },
-            }
-          : {}),
+        credentials: {
+          agent: pluginMcpCredentials(mcpServers),
+        },
         executables: prepared.requirements.executables,
         stateDirectories: prepared.requirements.stateDirectories,
       }),

@@ -1,6 +1,6 @@
 import { credentialReference } from '../contracts/credentials.ts';
 import type { MutableWorkspace } from '../contracts/runtime.ts';
-import { pluginMcpServersForDistribution } from '../model/pluginMcp.ts';
+import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import type {
   PluginMcpServerId,
   PluginSetupStepV1,
@@ -36,13 +36,11 @@ export function pluginMcpEnvironmentBindings(
   for (const plan of plans)
     for (const step of plan.setup) {
       if (step.uses !== 'forge/plugin') continue;
-      const distribution = (step as PluginSetupStepV1).with.agents[
-        plan.agent.adapter
-      ];
-      for (const name of pluginMcpServersForDistribution(
+      const definition = pluginDefinitionForAgent(
+        (step as PluginSetupStepV1).with.plugin,
         plan.agent.adapter,
-        distribution,
-      ) ?? []) {
+      );
+      for (const name of definition?.mcpServers ?? []) {
         const server = PLUGIN_MCP_SERVERS[name];
         const env = server.credentialEnvironmentVariable;
         const reference = server.credentialReference;
@@ -81,7 +79,7 @@ export async function configurePluginMcp(
     );
     if (manifest === 'plugin.json' && adapter === 'codex')
       throw new Error(
-        'Codex Agent Plugins mcp.json does not support environment-backed bearer auth. Select stripe@claude-plugins-official from anthropics/claude-plugins-official instead.',
+        'Codex Agent Plugins mcp.json does not support environment-backed bearer auth. The registered Stripe plugin requires a compatible Claude-format distribution.',
       );
     if (
       !record(value) ||

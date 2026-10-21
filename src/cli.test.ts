@@ -611,52 +611,74 @@ describe('Forge CLI', () => {
     assert.equal(hostValidationCalled, false);
   });
 
-  it('purely validates a latest Claude plugin treatment without fetching it', async () => {
-    const fixture = await createBenchmarkFixture();
-    const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
-    await fs.writeFile(
-      fixture.experimentPath,
-      experiment
-        .replace(
-          'treatments:\n  baseline:\n    setup: []',
-          `treatments:
+  for (const adapter of ['claude-code', 'codex'] as const) {
+    it(`validates and plans the named plugin for ${adapter} without fetching it`, async () => {
+      const fixture = await createBenchmarkFixture();
+      const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
+      await fs.writeFile(
+        fixture.experimentPath,
+        experiment
+          .replace(
+            'treatments:\n  baseline:\n    setup: []',
+            `treatments:
   baseline:
     setup: []
   stripe-plugin:
     setup:
       - uses: forge/plugin
         with:
-          agents:
-            claude-code:
-              plugin: stripe@claude-plugins-official
-              marketplace: anthropics/claude-plugins-official`,
-        )
-        .replace('treatments: [baseline]', 'treatments: [stripe-plugin]'),
-    );
-    let stdout = '';
-    let stderr = '';
+          plugin: stripe`,
+          )
+          .replace('treatments: [baseline]', 'treatments: [stripe-plugin]')
+          .replace('adapter: claude-code', `adapter: ${adapter}`)
+          .replace(
+            'provider: anthropic',
+            `provider: ${adapter === 'codex' ? 'openai' : 'anthropic'}`,
+          ),
+      );
+      let stdout = '';
+      let stderr = '';
 
-    const exitCode = await runCli(
-      ['validate', '--experiment', fixture.experimentPath],
+      const exitCode = await runCli(
+        ['validate', '--experiment', fixture.experimentPath],
+        {
+          stdout: (text) => {
+            stdout += text;
+          },
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      );
+
+      assert.equal(exitCode, 0);
+      assert.ok(!stderr.includes('forge:'));
       {
-        stdout: (text) => {
-          stdout += text;
-        },
-        stderr: (text) => {
-          stderr += text;
-        },
-      },
-    );
-
-    assert.equal(exitCode, 0);
-    assert.ok(!stderr.includes('forge:'));
-    {
-      const actual = JSON.parse(stdout);
-      assert.ok(actual);
-      assert.equal(actual.valid, true);
-      assert.equal(actual.run_count, 1);
-    }
-  });
+        const actual = JSON.parse(stdout);
+        assert.ok(actual);
+        assert.equal(actual.valid, true);
+        assert.equal(actual.run_count, 1);
+      }
+      stdout = '';
+      assert.equal(
+        await runCli(['plan', '--experiment', fixture.experimentPath], {
+          stdout: (text) => {
+            stdout += text;
+          },
+          stderr: (text) => {
+            stderr += text;
+          },
+        }),
+        0,
+      );
+      const plan = JSON.parse(stdout);
+      assert.deepEqual(plan.setup, [
+        { uses: 'forge/plugin', with: { plugin: 'stripe' } },
+      ]);
+      assert.deepEqual(plan.treatment.setup, plan.setup);
+      assert.equal(plan.agent.adapter, adapter);
+    });
+  }
 
   it('prints the canonical resolved plan for one matrix selection', async () => {
     const fixture = await createBenchmarkFixture();

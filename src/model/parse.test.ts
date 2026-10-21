@@ -335,53 +335,20 @@ initial_prompt: Two
     );
   });
 
-  it('parses only latest-marketplace forge/plugin selections', () => {
-    {
-      const actual = parseSetupStep({
-        uses: 'forge/plugin',
-        with: {
-          agents: {
-            'claude-code': {
-              plugin: 'stripe@claude-plugins-official',
-              marketplace: 'anthropics/claude-plugins-official',
-            },
-          },
-        },
-      });
-      assert.ok(actual);
-      assert.equal(actual.uses, 'forge/plugin');
-      const agents = actual.with.agents;
-      assert.ok(agents && typeof agents === 'object' && !Array.isArray(agents));
-      const claude = agents['claude-code'];
-      assert.ok(claude && typeof claude === 'object' && !Array.isArray(claude));
-      assert.equal(claude.plugin, 'stripe@claude-plugins-official');
-      assert.equal(claude.marketplace, 'anthropics/claude-plugins-official');
-    }
-
+  it('parses registered plugin names without exposing native distribution fields', () => {
+    const step = { uses: 'forge/plugin', with: { plugin: 'stripe' } };
+    assert.deepEqual(parseSetupStep(step), step);
     for (const withValue of [
-      { agents: {} },
+      {},
+      { plugin: 'unknown' },
+      { plugin: 'stripe@stripe' },
+      { plugin: 'stripe', marketplace: 'stripe/ai' },
+      { plugin: 'stripe', version: '1.0.0' },
       {
         agents: {
           'claude-code': {
-            plugin: 'stripe',
-            marketplace: 'example/catalog',
-          },
-        },
-      },
-      {
-        agents: {
-          'claude-code': {
-            plugin: 'stripe@example',
-            marketplace: 'https://github.com/example/catalog.git',
-          },
-        },
-      },
-      {
-        agents: {
-          'claude-code': {
-            plugin: 'stripe@example',
-            version: '0.9.2',
-            marketplace: 'example/catalog',
+            plugin: 'stripe@claude-plugins-official',
+            marketplace: 'anthropics/claude-plugins-official',
           },
         },
       },

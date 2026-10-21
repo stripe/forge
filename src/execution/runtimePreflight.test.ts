@@ -20,12 +20,16 @@ const selected: ForgeExternalRuntimeV1 = {
   config: { profile: 'test' },
 };
 
-function fixture(runtime: RuntimeAdapter): {
+function fixture(
+  runtime: RuntimeAdapter,
+  agentId = 'test-agent',
+): {
   composition: ForgeComposition;
   resolutions: string[];
 } {
   const resolutions: string[] = [];
   const agent = createScriptedAgentAdapter({
+    id: agentId,
     requirements: {
       executables: ['test-agent'],
       stateDirectories: [
@@ -57,54 +61,55 @@ describe('runtime composition preflight', () => {
   it('supplies frozen merged requirements and the exact external configuration without resolving authority', () => {
     const fake = createFakeRuntimeAdapter({ id: selected.adapter });
     let calls = 0;
-    const current = fixture({
-      ...fake.adapter,
-      preflight({ plan, requirements, environment }) {
-        calls += 1;
-        assert.deepEqual(plan.runtime, selected);
-        assert(Object.isFrozen(plan.runtime));
-        assert(Object.isFrozen(requirements));
-        assert(Object.isFrozen(requirements.stateDirectories));
-        assert(Object.isFrozen(environment));
-        assert(Object.isFrozen(environment.credentials));
-        assert.deepEqual(environment.credentials, {
-          AGENT_TOKEN: { reference: 'test.token', scopes: ['agent'] },
-        });
-        assert.equal(
-          JSON.stringify(environment).includes('test-only-value'),
-          false,
-        );
-        assert.deepEqual(requirements.executables, [
-          'plugin-install',
-          'test-agent',
-        ]);
-        assert.deepEqual(requirements.stateDirectories, [
-          { id: 'agent-state', containerPath: '/run/agent-state' },
-          {
-            id: 'plugin-state',
-            containerPath: '/run/plugin-state',
-            sealAfterSetup: true,
-          },
-        ]);
+    const current = fixture(
+      {
+        ...fake.adapter,
+        preflight({ plan, requirements, environment }) {
+          calls += 1;
+          assert.deepEqual(plan.runtime, selected);
+          assert(Object.isFrozen(plan.runtime));
+          assert(Object.isFrozen(requirements));
+          assert(Object.isFrozen(requirements.stateDirectories));
+          assert(Object.isFrozen(environment));
+          assert(Object.isFrozen(environment.credentials));
+          assert.deepEqual(environment.credentials, {
+            AGENT_TOKEN: { reference: 'test.token', scopes: ['agent'] },
+            STRIPE_API_KEY: {
+              reference: 'env:STRIPE_API_KEY',
+              scopes: ['agent'],
+            },
+          });
+          assert.equal(
+            JSON.stringify(environment).includes('test-only-value'),
+            false,
+          );
+          assert.deepEqual(requirements.executables, [
+            'plugin-install',
+            'test-agent',
+          ]);
+          assert.deepEqual(requirements.stateDirectories, [
+            { id: 'agent-state', containerPath: '/run/agent-state' },
+            {
+              id: 'plugin-state',
+              containerPath: '/run/plugin-state',
+              sealAfterSetup: true,
+            },
+          ]);
+        },
       },
-    });
+      'codex',
+    );
     const plan = createTestResolvedRunPlan({
       runtime: selected,
+      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
       caseSetup: [
         {
           uses: 'forge/plugin',
-          with: {
-            agents: {
-              'test-agent': {
-                plugin: 'example@marketplace',
-                marketplace: 'acme/plugins',
-              },
-            },
-          },
+          with: { plugin: 'stripe' },
         },
       ],
     });
-    const baseAgent = current.composition.agents.get('test-agent')!;
+    const baseAgent = current.composition.agents.get('codex')!;
     preflightEval({
       plan,
       composition: {
@@ -115,6 +120,7 @@ describe('runtime composition preflight', () => {
             {
               ...baseAgent,
               pluginInstaller: {
+                supportsMcpBearerAuth: true,
                 preflight() {
                   return {
                     requirements: {
@@ -141,6 +147,44 @@ describe('runtime composition preflight', () => {
     assert.equal(calls, 1);
     assert.deepEqual(current.resolutions, []);
     assert.equal(fake.runs.length, 0);
+  });
+
+  it('rejects unsupported named-plugin agents before credentials, installation, or runtime preparation', async () => {
+    const runtime = createFakeRuntimeAdapter({ id: selected.adapter });
+    const current = fixture(runtime.adapter);
+    const baseAgent = current.composition.agents.get('test-agent')!;
+    let installerCalled = false;
+    const composition = {
+      ...current.composition,
+      agents: new Map([
+        [
+          baseAgent.id,
+          {
+            ...baseAgent,
+            pluginInstaller: {
+              supportsMcpBearerAuth: true as const,
+              preflight() {
+                installerCalled = true;
+                throw new Error(
+                  'Unsupported plugin must not reach the installer.',
+                );
+              },
+            },
+          },
+        ],
+      ]),
+    };
+    const plan = createTestResolvedRunPlan({
+      runtime: selected,
+      treatmentSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+    });
+    assert.throws(() => preflightEval({ plan, composition }));
+    await assert.rejects(
+      executeEval({ runId: 'unsupported-plugin', plan, composition }),
+    );
+    assert.equal(installerCalled, false);
+    assert.deepEqual(current.resolutions, []);
+    assert.equal(runtime.runs.length, 0);
   });
 
   it('rejects identity mismatches, absent validation and invalid config before credentials or prepare', async () => {

@@ -17,9 +17,7 @@ import {
 const servers = ['stripe'] as const;
 const step = {
   uses: 'forge/plugin',
-  with: {
-    agents: { codex: { plugin: 'stripe@stripe', marketplace: 'stripe/ai' } },
-  },
+  with: { plugin: 'stripe' },
 };
 
 describe('plugin MCP bearer authentication', () => {
@@ -117,7 +115,7 @@ describe('plugin MCP bearer authentication', () => {
     );
     await assert.rejects(
       configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
-      /Agent Plugins.*bearer auth.*stripe@claude-plugins-official/,
+      /Agent Plugins.*bearer auth.*Claude-format/,
     );
   });
 
@@ -140,31 +138,15 @@ describe('plugin MCP bearer authentication', () => {
     );
   });
 
-  it('binds only the selected adapter distribution, not other plugins or marketplaces', () => {
-    for (const selected of [
-      { plugin: 'formatter@example', marketplace: 'example/plugins' },
-      { plugin: 'stripe@stripe', marketplace: 'example/stripe-mirror' },
-      { plugin: 'other@stripe', marketplace: 'stripe/ai' },
-    ]) {
-      const plan = createTestResolvedRunPlan({
-        agent: { adapter: 'codex', provider: 'openai', model: 'test' },
-        treatmentSetup: [
-          parseSetupStep({
-            uses: 'forge/plugin',
-            with: {
-              agents: {
-                codex: selected,
-                'claude-code': {
-                  plugin: 'stripe@claude-plugins-official',
-                  marketplace: 'anthropics/claude-plugins-official',
-                },
-              },
-            },
-          }),
-        ],
-      });
-      assert.deepEqual(pluginMcpEnvironmentBindings([plan]), {});
-    }
+  it('does not bind plugin credentials for a baseline or unsupported adapter', () => {
+    const baseline = createTestResolvedRunPlan({
+      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
+    });
+    const unsupported = createTestResolvedRunPlan({
+      agent: { adapter: 'other', provider: 'openai', model: 'test' },
+      treatmentSetup: [parseSetupStep(step)],
+    });
+    assert.deepEqual(pluginMcpEnvironmentBindings([baseline, unsupported]), {});
   });
 
   it('requires the registered host key without accepting an alternate auth variable', async () => {

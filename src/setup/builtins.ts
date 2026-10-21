@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import {
   isSafeDatasetRelativePath,
-  isSafeGitHubRepository,
-  isSafeSimpleIdentifier,
   isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
 import type { JsonObject } from '../model/types.ts';
@@ -13,7 +11,6 @@ import type { SetupActionDefinition } from './registry.ts';
 
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_COMMAND_ARGUMENTS = 256;
-const MAX_PLUGIN_DISTRIBUTIONS = 100;
 
 const DatasetPathSchema = z
   .string()
@@ -56,46 +53,9 @@ const CommandSetupWithSchema = z
   })
   .strict();
 
-const GitHubRepositorySchema = z
-  .string()
-  .max(512)
-  .refine(isSafeGitHubRepository, 'must be a GitHub owner/repository');
-const PluginIdSchema = z
-  .string()
-  .refine(
-    isQualifiedPluginId,
-    'must be plugin@marketplace using safe identifiers',
-  );
-
-const PluginDistributionSchema = z
-  .object({
-    plugin: PluginIdSchema,
-    marketplace: GitHubRepositorySchema,
-  })
-  .strict();
-
 const PluginSetupWithSchema = z
   .object({
-    agents: z
-      .record(z.string(), PluginDistributionSchema)
-      .superRefine((agents, context) => {
-        const names = Object.keys(agents);
-        if (names.length === 0 || names.length > MAX_PLUGIN_DISTRIBUTIONS) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'must contain a bounded non-empty agent map',
-          });
-        }
-        for (const name of names) {
-          if (!isSafeSimpleIdentifier(name)) {
-            context.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [name],
-              message: 'agent key must be a safe adapter identifier',
-            });
-          }
-        }
-      }),
+    plugin: z.literal('stripe'),
   })
   .strict();
 
@@ -126,15 +86,5 @@ export const builtInSetupActions: readonly SetupActionDefinition[] =
 function isBoundedText(value: string): boolean {
   return (
     Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES && !value.includes('\0')
-  );
-}
-
-function isQualifiedPluginId(value: string): boolean {
-  const separator = value.indexOf('@');
-  return (
-    separator > 0 &&
-    separator === value.lastIndexOf('@') &&
-    isSafeSimpleIdentifier(value.slice(0, separator)) &&
-    isSafeSimpleIdentifier(value.slice(separator + 1))
   );
 }
