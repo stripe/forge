@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MERCHANT_ENVIRONMENT_VARIABLE } from '../contracts/merchant.ts';
 import {
   isSafeDatasetRelativePath,
   isSafeWorkspaceRelativePath,
@@ -73,6 +74,9 @@ const CredentialsSetupWithSchema = z
       .max(128)
       .refine((names) => new Set(names).size === names.length, {
         message: 'credential environment names must be unique',
+      })
+      .refine((names) => !names.includes(MERCHANT_ENVIRONMENT_VARIABLE), {
+        message: `${MERCHANT_ENVIRONMENT_VARIABLE} comes only from the experiment merchant`,
       }),
   })
   .strict();

@@ -31,11 +31,16 @@ import {
   createEnvironmentResolver,
   credentialReference,
   type EnvironmentSpecification,
+  type NormalizedScopedEnvironmentSpecification,
   normalizeEnvironmentSpecification,
   normalizeScopedEnvironmentSpecification,
   type ResolvedEnvironment,
   type ScopedEnvironmentSpecification,
 } from '../contracts/credentials.ts';
+import {
+  MERCHANT_ENVIRONMENT_VARIABLE,
+  merchantCredentialReference,
+} from '../contracts/merchant.ts';
 import {
   type AgentAdapterMetadata,
   agentAdapterMetadataSchema,
@@ -902,7 +907,7 @@ function buildEvalPreflight(
       stateDirectories: setup.requirements.stateDirectories ?? [],
     },
   );
-  const environmentSpecification = mergeEnvironmentSpecifications([
+  const declaredEnvironment = mergeEnvironmentSpecifications([
     { scope: 'agent', specification: agentRequirements.environment },
     {
       scope: 'setup',
@@ -924,6 +929,10 @@ function buildEvalPreflight(
       },
     },
   ]);
+  const environmentSpecification = withMerchantCredential(
+    plan,
+    declaredEnvironment,
+  );
   const completionBindings = completionBindingsForPlan(plan, composition);
   preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
@@ -1033,7 +1042,7 @@ interface ScopedEnvironmentDeclaration {
 
 function mergeEnvironmentSpecifications(
   declarations: readonly ScopedEnvironmentDeclaration[],
-): ScopedEnvironmentSpecification {
+): NormalizedScopedEnvironmentSpecification {
   const variables: Record<string, string> = {};
   const credentials: Record<string, CredentialEnvironmentBinding> = {};
   for (const { scope, specification } of declarations) {
@@ -1084,6 +1093,31 @@ function mergeEnvironmentSpecifications(
     }
   }
   return normalizeScopedEnvironmentSpecification({ variables, credentials });
+}
+
+/** The experiment merchant is the only source of its agent-scoped key. */
+function withMerchantCredential(
+  plan: ResolvedRunPlanV1,
+  environment: NormalizedScopedEnvironmentSpecification,
+): ScopedEnvironmentSpecification {
+  const name = MERCHANT_ENVIRONMENT_VARIABLE;
+  if (
+    Object.hasOwn(environment.variables, name) ||
+    Object.hasOwn(environment.credentials, name)
+  ) {
+    throw new TypeError(`${name} comes only from the experiment merchant.`);
+  }
+  if (plan.merchant === undefined) return environment;
+  return normalizeScopedEnvironmentSpecification({
+    variables: environment.variables,
+    credentials: {
+      ...environment.credentials,
+      [name]: {
+        reference: merchantCredentialReference(plan.merchant.recipe),
+        scopes: ['agent'],
+      },
+    },
+  });
 }
 
 function normalizeAgentRequirements(

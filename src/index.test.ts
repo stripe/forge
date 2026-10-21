@@ -8,6 +8,7 @@ import {
   createArtifactStore,
   createForgeEngine,
   createJudgeTranscriptProjection,
+  createMerchantCredentialResolver,
   createSetupExecutor,
   credentialReference,
   credentialsSetupHandler,
@@ -29,6 +30,7 @@ import {
   type JudgeEvidenceV1,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   MAX_JUDGE_TRANSCRIPT_BYTES,
+  MERCHANT_ENVIRONMENT_VARIABLE,
   normalizeEnvironmentSpecification,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
@@ -87,6 +89,9 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof createForgeEngine, 'function');
     assert.equal(typeof createSetupExecutor, 'function');
+    assert.equal(typeof createMerchantCredentialResolver, 'function');
+    assert.equal(MERCHANT_ENVIRONMENT_VARIABLE, 'STRIPE_API_KEY');
+    assert.equal('merchantCredentialReference' in rootExports, false);
     assert.equal(credentialsSetupHandler.uses, 'forge/credentials');
     assert.equal(typeof defineSetupActionBundle, 'function');
     assert.deepEqual([...firstPartySetupHandlers.keys()].sort(), [

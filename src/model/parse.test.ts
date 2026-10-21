@@ -353,6 +353,7 @@ initial_prompt: Two
       { env: [{ API_TOKEN: 'secret' }] },
       { env: ['API_TOKEN'], scope: 'setup' },
       { env: ['API_TOKEN'], value: 'secret' },
+      { env: ['API_TOKEN', 'STRIPE_API_KEY'] },
       { env: ['A'.repeat(256)] },
       { env: Array.from({ length: 129 }, (_, i) => `TOKEN_${i}`) },
     ]) {
@@ -536,6 +537,34 @@ task: safe
     });
     assert.equal(explicit.matrix.repetitions, 3);
     assert.equal(explicit.matrix.retries, 2);
+  });
+
+  it('materializes the default merchant recipe and rejects other merchant shapes', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    assert.equal(config.merchant, undefined);
+    assert.deepEqual(
+      parseExperimentConfig({ ...config, merchant: {} }).merchant,
+      {
+        recipe: 'default',
+      },
+    );
+    assert.deepEqual(
+      parseExperimentConfig({ ...config, merchant: { recipe: 'connect.v2' } })
+        .merchant,
+      { recipe: 'connect.v2' },
+    );
+    for (const merchant of [
+      null,
+      { recipe: '' },
+      { recipe: 'Basic Payments' },
+      { recipe: 'a'.repeat(129) },
+      { recipe: 'default', api_key: 'sk_test_secret' },
+    ]) {
+      assert.throws(
+        () => parseExperimentConfig({ ...config, merchant }),
+        BenchmarkModelError,
+      );
+    }
   });
 
   it('rejects missing, mixed, empty, inherited, and unknown matrix axes', () => {

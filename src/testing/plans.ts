@@ -4,6 +4,7 @@ import type {
   ChecksV1,
   ForgeRuntimeV1,
   JudgingCriterionInputV1,
+  MerchantV1,
   ModelRefV1,
   ResolvedRunPlanV1,
   SetupStepV1,
@@ -29,6 +30,7 @@ export interface TestResolvedRunPlanOptions {
   readonly treatmentSetup?: readonly SetupStepV1[];
   readonly checks?: ChecksV1;
   readonly runtime?: ForgeRuntimeV1;
+  readonly merchant?: MerchantV1;
 }
 
 /** Create a strict, minimal one-shot plan for public contract tests. */
@@ -147,6 +149,9 @@ export function createTestResolvedRunPlan(
         process_count: 512,
       },
     },
+    ...(options.merchant === undefined
+      ? {}
+      : { merchant: { ...options.merchant } }),
     limits: { run_timeout_ms: 30_000 },
   });
 }

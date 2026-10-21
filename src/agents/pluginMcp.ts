@@ -1,5 +1,5 @@
+import { MERCHANT_ENVIRONMENT_VARIABLE } from '../contracts/merchant.ts';
 import type { MutableWorkspace } from '../contracts/runtime.ts';
-import { PLUGIN_MCP_CREDENTIALS } from '../model/pluginCredentials.ts';
 import type { PluginMcpServerId } from '../model/types.ts';
 
 /** Change one existing connection; never add a second global MCP server. */
@@ -93,8 +93,8 @@ export function configurePluginMcpDocument(
       throw new Error(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );
-    const environmentName =
-      PLUGIN_MCP_CREDENTIALS[name].credentialEnvironmentVariable;
+    // The experiment merchant supplies the only Stripe credential.
+    const environmentName = MERCHANT_ENVIRONMENT_VARIABLE;
     if (adapter === 'claude-code') {
       if (server.headers !== undefined && !record(server.headers))
         throw new Error(`Plugin MCP server ${name} has invalid headers.`);

@@ -1,4 +1,8 @@
-import type { PluginSelectionV1, PluginSetupWithV1 } from './types.ts';
+import type {
+  PluginSelectionV1,
+  PluginSetupWithV1,
+  SetupStepV1,
+} from './types.ts';
 
 export type PluginMcpServerId = 'stripe';
 
@@ -23,4 +27,11 @@ export function pluginDefinitionForAgent(
   if (plugin === 'stripe' && (adapter === 'claude-code' || adapter === 'codex'))
     return STRIPE_PLUGIN;
   return undefined;
+}
+
+/** The Stripe plugin authenticates only with the experiment merchant's key. */
+export function setupRequiresMerchant(setup: readonly SetupStepV1[]): boolean {
+  return setup.some(
+    (step) => step.uses === 'forge/plugin' && step.with.plugin === 'stripe',
+  );
 }

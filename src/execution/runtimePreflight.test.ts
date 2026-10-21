@@ -75,7 +75,7 @@ describe('runtime composition preflight', () => {
           assert.deepEqual(environment.credentials, {
             AGENT_TOKEN: { reference: 'test.token', scopes: ['agent'] },
             STRIPE_API_KEY: {
-              reference: 'env:STRIPE_API_KEY',
+              reference: 'stripe-merchant:default',
               scopes: ['agent'],
             },
           });
@@ -102,6 +102,7 @@ describe('runtime composition preflight', () => {
     const plan = createTestResolvedRunPlan({
       runtime: selected,
       agent: { adapter: 'codex', provider: 'openai', model: 'test' },
+      merchant: { recipe: 'default' },
       caseSetup: [
         {
           uses: 'forge/plugin',
@@ -176,6 +177,7 @@ describe('runtime composition preflight', () => {
     };
     const plan = createTestResolvedRunPlan({
       runtime: selected,
+      merchant: { recipe: 'default' },
       treatmentSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
     });
     assert.throws(() => preflightEval({ plan, composition }));
@@ -186,6 +188,75 @@ describe('runtime composition preflight', () => {
     assert.deepEqual(current.resolutions, []);
     assert.equal(runtime.runs.length, 0);
   });
+
+  for (const [label, merchant, environment] of [
+    [
+      'a conflicting credential',
+      { recipe: 'default' },
+      {
+        credentials: {
+          STRIPE_API_KEY: { reference: credentialReference('test.token') },
+        },
+      },
+    ],
+    [
+      'the merchant reference',
+      { recipe: 'default' },
+      {
+        credentials: {
+          STRIPE_API_KEY: {
+            reference: credentialReference('stripe-merchant:default'),
+          },
+        },
+      },
+    ],
+    [
+      'a plain variable',
+      { recipe: 'default' },
+      { variables: { STRIPE_API_KEY: 'x' } },
+    ],
+    [
+      'a credential without a merchant',
+      undefined,
+      {
+        credentials: {
+          STRIPE_API_KEY: { reference: credentialReference('test.token') },
+        },
+      },
+    ],
+  ] as const) {
+    it(`rejects STRIPE_API_KEY from ${label} before credentials or runtime`, async () => {
+      const runtime = createFakeRuntimeAdapter({ id: selected.adapter });
+      const current = fixture(runtime.adapter);
+      const agent = createScriptedAgentAdapter({
+        id: 'test-agent',
+        requirements: { executables: [], stateDirectories: [], environment },
+      });
+      const composition = {
+        ...current.composition,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+      };
+      const plan = createTestResolvedRunPlan({
+        runtime: selected,
+        ...(merchant === undefined ? {} : { merchant }),
+      });
+      assert.throws(
+        () => preflightEval({ plan, composition }),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.cause instanceof Error &&
+          /STRIPE_API_KEY comes only from the experiment merchant/.test(
+            error.cause.message,
+          ),
+      );
+      await assert.rejects(
+        executeEval({ runId: 'conflicting-merchant', plan, composition }),
+        { code: 'invalid_plan', phase: 'preflight' },
+      );
+      assert.deepEqual(current.resolutions, []);
+      assert.equal(runtime.runs.length, 0);
+    });
+  }
 
   it('rejects identity mismatches, absent validation and invalid config before credentials or prepare', async () => {
     const fake = createFakeRuntimeAdapter({ id: selected.adapter });

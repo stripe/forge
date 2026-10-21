@@ -1,6 +1,5 @@
 import type { PreparedAgentPluginInstallation } from '../contracts/plugin.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
-import { pluginMcpCredentials } from '../model/pluginCredentials.ts';
 import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.ts';
 import type {
@@ -51,9 +50,6 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
 
     return Object.freeze({
       requirements: Object.freeze({
-        credentials: {
-          agent: pluginMcpCredentials(mcpServers),
-        },
         executables: prepared.requirements.executables,
         stateDirectories: prepared.requirements.stateDirectories,
       }),

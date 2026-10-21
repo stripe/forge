@@ -24,12 +24,14 @@ import {
   isSafeVersion,
   isSafeWorkspaceRelativePath,
 } from './paths.ts';
+import { setupRequiresMerchant } from './plugins.ts';
 import {
   type DatasetManifestV1,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
   DEFAULT_DOCKER_PROCESS_COUNT,
   DEFAULT_MAX_TURNS,
+  DEFAULT_MERCHANT_RECIPE,
   DEFAULT_RUN_TIMEOUT_MS,
   type EvalCaseV1,
   type ExperimentConfigV1,
@@ -484,6 +486,12 @@ const ExperimentMatrixSchema = z.unknown().transform((matrix, context) => {
   return parsed.data;
 });
 
+const MerchantSchema = z
+  .object({
+    recipe: SimpleIdentifierSchema.default(DEFAULT_MERCHANT_RECIPE),
+  })
+  .strict();
+
 const ExperimentConfigSchema = z
   .object({
     id: CaseIdSchema,
@@ -504,6 +512,7 @@ const ExperimentConfigSchema = z
     }).strict(),
     forge: AuthoredForgeSchema.optional(),
     runtime: RuntimeSchema,
+    merchant: MerchantSchema.optional(),
     models: z
       .object({
         role_player: ModelRefSchema.optional(),
@@ -689,6 +698,7 @@ const ResolvedRunPlanSchema = z
     role_player: ModelRefSchema.optional(),
     agent: AgentSelectionSchema,
     runtime: ResolvedRuntimeSchema,
+    merchant: z.object({ recipe: SimpleIdentifierSchema }).strict().optional(),
     limits: z
       .object({
         run_timeout_ms: PositiveIntegerSchema.max(24 * 60 * 60 * 1000),
@@ -728,6 +738,13 @@ const ResolvedRunPlanSchema = z
         context,
         ['setup'],
         'resolved setup must be case setup followed by treatment setup',
+      );
+    }
+    if (plan.merchant === undefined && setupRequiresMerchant(plan.setup)) {
+      addPlanIssue(
+        context,
+        ['merchant'],
+        'the Stripe plugin requires an experiment merchant',
       );
     }
 

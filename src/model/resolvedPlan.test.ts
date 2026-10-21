@@ -78,6 +78,24 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('requires a materialized merchant for the Stripe plugin', () => {
+    const plan = validPlan();
+    const plugin = { uses: 'forge/plugin', with: { plugin: 'stripe' } };
+    plan.treatment = { id: 'stripe-plugin', setup: [plugin] };
+    plan.selection.treatment = 'stripe-plugin';
+    plan.setup = [...plan.case.setup, plugin];
+    assert.throws(
+      () => parseResolvedRunPlan(plan),
+      /the Stripe plugin requires an experiment merchant/,
+    );
+    plan.merchant = { recipe: 'default' };
+    assert.deepEqual(parseResolvedRunPlan(plan), plan);
+    assert.throws(
+      () => parseResolvedRunPlan({ ...plan, merchant: {} }),
+      BenchmarkModelError,
+    );
+  });
+
   it('retains historical case identities and filenames in saved artifacts', () => {
     const plan = validPlan();
     const id = 'Legacy_Suite/Case.1';

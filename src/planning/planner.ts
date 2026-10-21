@@ -1,6 +1,7 @@
 import { sha256Digest } from '../model/hashes.ts';
 import { indexLoadedDatasetCases } from '../model/loaders.ts';
 import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
+import { setupRequiresMerchant } from '../model/plugins.ts';
 import {
   type AgentSelectionV1,
   type CaseId,
@@ -30,6 +31,7 @@ export type PlanningErrorCode =
   | 'invalid_repetition'
   | 'missing_role_player'
   | 'missing_judge'
+  | 'missing_merchant'
   | 'missing_dataset_input'
   | 'invalid_loaded_dataset'
   | 'action_bundle_mismatch'
@@ -175,6 +177,12 @@ export function resolveRunPlanWithSetupActions(
       { cause: error },
     );
   }
+  if (config.merchant === undefined && setupRequiresMerchant(setup)) {
+    throw new PlanningError(
+      'missing_merchant',
+      'The Stripe plugin requires merchant in the experiment config.',
+    );
+  }
   const requiredActionBundles = setupActions.requiredActionBundles(setup);
   assertDatasetInputsExist(setup, dataset);
 
@@ -257,6 +265,9 @@ export function resolveRunPlanWithSetupActions(
       : { role_player: cloneJson(config.models.role_player) }),
     agent: resolveAgentSelection(selection.agent),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
+    ...(config.merchant === undefined
+      ? {}
+      : { merchant: cloneJson(config.merchant) }),
     limits: cloneJson(config.limits),
   };
   return deepFreeze(plan);

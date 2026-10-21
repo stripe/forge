@@ -622,7 +622,8 @@ describe('Forge CLI', () => {
         experiment
           .replace(
             'treatments:\n  baseline:\n    setup: []',
-            `treatments:
+            `merchant: {}
+treatments:
   baseline:
     setup: []
   stripe-plugin:
@@ -678,9 +679,37 @@ describe('Forge CLI', () => {
         { uses: 'forge/plugin', with: { plugin: 'stripe' } },
       ]);
       assert.deepEqual(plan.treatment.setup, plan.setup);
+      assert.deepEqual(plan.merchant, { recipe: 'default' });
       assert.equal(plan.agent.adapter, adapter);
     });
   }
+
+  it('rejects the Stripe plugin without an experiment merchant', async () => {
+    const fixture = await createBenchmarkFixture();
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    config.treatments['with-plugin'] = {
+      setup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+    };
+    assert.ok(config.matrix.groups === undefined);
+    config.matrix.treatments = ['with-plugin'];
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    let stderr = '';
+
+    const exitCode = await runCli(
+      ['validate', '--experiment', fixture.experimentPath],
+      {
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+
+    assert.equal(exitCode, 1);
+    assert.match(stderr, /requires merchant in the experiment config/);
+  });
 
   it('prints the canonical resolved plan for one matrix selection', async () => {
     const fixture = await createBenchmarkFixture();
@@ -1429,103 +1458,159 @@ describe('Forge CLI', () => {
     );
   });
 
-  it('remaps a plugin host credential while preserving its runtime name and agent scope', async () => {
-    const fixture = await createBenchmarkFixture();
-    const config = parseExperimentConfigYaml(
-      await fs.readFile(fixture.experimentPath, 'utf8'),
-    );
-    config.treatments['with-plugin'] = {
-      setup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
-    };
-    assert.ok(config.matrix.groups === undefined);
-    config.matrix.treatments = ['with-plugin'];
-    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
-    const runtime = createFakeRuntimeAdapter();
-    const scripted = createScriptedAgentAdapter({ id: 'claude-code' });
-    const agent: AgentAdapter = {
-      ...scripted.adapter,
-      pluginInstaller: {
-        supportsMcpBearerAuth: true,
-        preflight(distribution, context) {
-          return {
-            requirements: { executables: [], stateDirectories: [] },
-            async install({ commands }) {
-              await commands.run(['probe-plugin-setup']);
-              return {
-                adapter: context.selection.adapter,
-                plugin: distribution.plugin,
-                marketplace: distribution.marketplace,
-                marketplace_commit: 'a'.repeat(40),
-                native_plugin_id: distribution.plugin,
-                version: '1.0.0',
-                source: { kind: 'marketplace-path' },
-                installed_tree: {
-                  format: 'forge-plugin-tree-v1',
-                  sha256: `sha256:${'b'.repeat(64)}`,
-                  entry_count: 1,
-                  file_count: 1,
-                  size_bytes: 1,
-                },
-              };
-            },
-          };
+  for (const remapped of [false, true]) {
+    it(`supplies the merchant key from ${remapped ? 'an explicit' : 'the default'} host binding to agent commands only`, async () => {
+      const fixture = await createBenchmarkFixture();
+      const config = parseExperimentConfigYaml(
+        await fs.readFile(fixture.experimentPath, 'utf8'),
+      );
+      config.merchant = { recipe: 'default' };
+      config.treatments['with-plugin'] = {
+        setup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+      };
+      assert.ok(config.matrix.groups === undefined);
+      config.matrix.treatments = ['with-plugin'];
+      await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+      const runtime = createFakeRuntimeAdapter();
+      const scripted = createScriptedAgentAdapter({ id: 'claude-code' });
+      const agent: AgentAdapter = {
+        ...scripted.adapter,
+        pluginInstaller: {
+          supportsMcpBearerAuth: true,
+          preflight(distribution, context) {
+            return {
+              requirements: { executables: [], stateDirectories: [] },
+              async install({ commands }) {
+                await commands.run(['probe-plugin-setup']);
+                return {
+                  adapter: context.selection.adapter,
+                  plugin: distribution.plugin,
+                  marketplace: distribution.marketplace,
+                  marketplace_commit: 'a'.repeat(40),
+                  native_plugin_id: distribution.plugin,
+                  version: '1.0.0',
+                  source: { kind: 'marketplace-path' },
+                  installed_tree: {
+                    format: 'forge-plugin-tree-v1',
+                    sha256: `sha256:${'b'.repeat(64)}`,
+                    entry_count: 1,
+                    file_count: 1,
+                    size_bytes: 1,
+                  },
+                };
+              },
+            };
+          },
         },
-      },
-      async openSession(context) {
-        await context.runtime.commands.agent.run(['probe-agent']);
-        return scripted.adapter.openSession(context);
-      },
-    };
-    let stderr = '';
+        async openSession(context) {
+          await context.runtime.commands.agent.run(['probe-agent']);
+          return scripted.adapter.openSession(context);
+        },
+      };
+      let stderr = '';
 
-    const exitCode = await runCli(
-      [
-        'run',
-        '--experiment',
-        fixture.experimentPath,
-        '--credential-env',
-        'env:STRIPE_API_KEY=STRIPE_TEST_KEY',
-      ],
-      {
-        stdout: () => undefined,
-        stderr: (text) => {
-          stderr += text;
-        },
-        environment: {
-          STRIPE_API_KEY: 'default-must-not-be-selected',
-          STRIPE_TEST_KEY: 'explicit-plugin-key',
-        },
-        execute: (input) =>
-          defaultForgeEngine.executeEval({
-            ...input,
-            composition: {
-              ...input.composition,
-              runtime: runtime.adapter,
-              agents: new Map([[agent.id, agent]]),
-            },
-          }),
-      },
-    );
-
-    assert.equal(exitCode, 0, stderr);
-    assert.equal(runtime.runs.length, 1);
-    assert.deepEqual(runtime.runs[0]!.input.environment.credentials, {
-      STRIPE_API_KEY: { value: 'explicit-plugin-key', scopes: ['agent'] },
-    });
-    assert.deepEqual(
-      runtime.runs[0]!.commands.map(({ argv, credentialEnvironmentNames }) => ({
-        argv,
-        credentialEnvironmentNames,
-      })),
-      [
-        { argv: ['probe-plugin-setup'], credentialEnvironmentNames: [] },
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          ...(remapped
+            ? ['--credential-env', 'stripe-merchant:default=STRIPE_TEST_KEY']
+            : []),
+        ],
         {
-          argv: ['probe-agent'],
-          credentialEnvironmentNames: ['STRIPE_API_KEY'],
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          environment: {
+            STRIPE_API_KEY: 'default-merchant-key',
+            STRIPE_TEST_KEY: 'explicit-merchant-key',
+          },
+          execute: (input) =>
+            defaultForgeEngine.executeEval({
+              ...input,
+              composition: {
+                ...input.composition,
+                runtime: runtime.adapter,
+                agents: new Map([[agent.id, agent]]),
+              },
+            }),
         },
-      ],
-    );
-  });
+      );
+
+      assert.equal(exitCode, 0, stderr);
+      assert.equal(runtime.runs.length, 1);
+      assert.deepEqual(runtime.runs[0]!.input.environment.credentials, {
+        STRIPE_API_KEY: {
+          value: remapped ? 'explicit-merchant-key' : 'default-merchant-key',
+          scopes: ['agent'],
+        },
+      });
+      assert.deepEqual(
+        runtime.runs[0]!.commands.map(
+          ({ argv, credentialEnvironmentNames }) => ({
+            argv,
+            credentialEnvironmentNames,
+          }),
+        ),
+        [
+          { argv: ['probe-plugin-setup'], credentialEnvironmentNames: [] },
+          {
+            argv: ['probe-agent'],
+            credentialEnvironmentNames: ['STRIPE_API_KEY'],
+          },
+        ],
+      );
+    });
+  }
+
+  for (const binding of [
+    'env:STRIPE_API_KEY=STRIPE_TEST_KEY',
+    'stripe-merchant:other=STRIPE_TEST_KEY',
+  ]) {
+    it(`rejects the unmatched merchant binding ${binding} before running`, async () => {
+      const fixture = await createBenchmarkFixture();
+      const config = parseExperimentConfigYaml(
+        await fs.readFile(fixture.experimentPath, 'utf8'),
+      );
+      config.merchant = { recipe: 'default' };
+      await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+      let executed = false;
+      let stderr = '';
+
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          binding,
+        ],
+        {
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          environment: {
+            STRIPE_API_KEY: 'default-merchant-key',
+            STRIPE_TEST_KEY: 'explicit-merchant-key',
+          },
+          execute: async () => {
+            executed = true;
+            throw new Error('An unmatched binding must not execute.');
+          },
+        },
+      );
+
+      assert.equal(exitCode, 2);
+      assert.match(
+        stderr,
+        /does not match the experiment merchant; bind stripe-merchant:default/,
+      );
+      assert.equal(executed, false);
+    });
+  }
 
   it('validates and plans case and treatment credentials without host bindings', async () => {
     const caseSetup: SetupStepV1[] = [

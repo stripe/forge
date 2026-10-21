@@ -91,17 +91,71 @@ The public CLI creates no host bridge; supply an endpoint reachable from
 the container. The development live suite has separate
 [gateway bridge support](docs/codebase-guide.md#opt-in-live-tests).
 
-For the [Stripe plugin treatment](docs/plugin-action.md), use
-`with: {plugin: stripe}` and export `STRIPE_API_KEY` with an Agent API key.
-To use a different host variable, pass
-`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`; the agent still receives
-`STRIPE_API_KEY`.
-Forge selects the distribution for the run's agent and configures its bundled
-MCP connection. The token reaches only agent commands; prepare the account or
-merchant outside Forge.
-
 The runtime installs pinned Claude Code and Codex CLI releases from npm.
 Their use remains subject to their providers' terms.
+
+### Stripe merchant
+
+Declare `merchant` when the agent needs a Stripe account. It is the only source
+of `STRIPE_API_KEY`: agent code and the
+[Stripe plugin treatment](docs/plugin-action.md) read that variable, and the
+plugin requires a merchant.
+
+```yaml
+# experiment.yaml excerpt
+merchant:
+  recipe: default
+treatments:
+  baseline:
+    setup: []
+  stripe-plugin:
+    setup:
+      - uses: forge/plugin
+        with:
+          plugin: stripe
+```
+
+`recipe` names the account state the experiment expects and defaults to
+`default`. It starts with a lowercase letter or digit, continues with lowercase
+letters, digits, `.`, `_`, or `-`, is at most 128 characters, and is recorded
+in each plan.
+
+The CLI does not create, prepare, or clean up accounts. Export a Stripe secret
+key, such as a sandbox key from [docs.stripe.com](https://docs.stripe.com) or
+your account's Dashboard, before running. Plugin treatments need an Agent API
+key, which their MCP connection requires.
+
+```sh
+export STRIPE_API_KEY=sk_test_...
+npx --no-install forge run --experiment ./my-eval/experiment.yaml
+```
+
+To read another host variable, pass
+`--credential-env stripe-merchant:default=STRIPE_TEST_KEY`; the agent still
+receives `STRIPE_API_KEY`. The CLI rejects bindings that match no planned
+merchant, including `env:STRIPE_API_KEY`. Every run in the experiment uses the
+same key, so state created by one run is visible to later runs. The key reaches
+only agent commands, and Forge redacts its value from outputs.
+
+Embedding hosts can provision a fresh merchant for each run instead:
+
+```ts
+import { createMerchantCredentialResolver } from '@stripe/forge';
+
+const credentialResolver = createMerchantCredentialResolver({
+  // Called once per eval run attempt, before its runtime is allocated.
+  async provision(recipe, { runId, signal }) {
+    return createMerchantApiKey({ recipe, runId, signal });
+  },
+  // Resolves every other credential, such as model keys.
+  fallback: baseCredentialResolver,
+});
+```
+
+Pass the resolver as `composition.credentialResolver` to `executeEval`. A failed
+or empty provision fails the run before its runtime is allocated. Retries
+provision again, and the host owns cleanup, including attempts that fail after
+provisioning.
 
 ### Additional API credentials
 
@@ -148,9 +202,9 @@ the value as `API_TOKEN`; setup commands do not. Missing bindings or values fail
 before runtime allocation. `validate` and `plan` do not read secret values.
 Embedding hosts resolve `env:API_TOKEN` through their credential resolver.
 
-This action adds requirements without adding automatic host bindings. Existing
-bindings still apply: selecting `forge/plugin` with `plugin: stripe` already
-declares and binds `STRIPE_API_KEY`, so there is no need to repeat it here.
+This action adds requirements without adding automatic host bindings. It
+rejects `STRIPE_API_KEY`, which only the [Stripe merchant](#stripe-merchant)
+supplies.
 
 ## Installation
 

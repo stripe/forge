@@ -127,7 +127,7 @@ Forge keeps authored definitions, resolved inputs, and execution identities dist
 | --- | --- | --- |
 | Dataset | Versioned evaluation payload | Manifest, cases, fixture files, exact sizes and SHA-256 hashes |
 | Eval case | What is evaluated | Task or prompt, context, invariant setup, interaction mode, turn limit, checks, judging criteria, example answer |
-| Experiment | How cases run, defined by an experiment config | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
+| Experiment | How cases run, defined by an experiment config | Dataset pin, treatments, agent/model matrix, runtime, merchant, harness models, resources, repetitions, retry policy, timeout |
 | Experiment run | One resumable batch from an experiment | Experiment run ID, selected plans, checkpoint, attempt history, and aggregate report |
 | Eval run | One execution attempt for a selected plan | Eval run ID, isolated lifecycle, committed artifacts, and evaluation outcome |
 | Resolved run plan | Complete input to one eval run | One case/treatment/agent/repetition, merged setup, materialized defaults, runtime and model selections, provenance |
@@ -468,12 +468,22 @@ The resolver is called only for the selected plan's declared bindings. Plain
 variables remain structurally separate from resolved secrets, and the ambient
 host environment is never copied wholesale.
 
+An experiment `merchant` is the only source of `STRIPE_API_KEY`. Forge declares
+it as an agent credential with the opaque reference `stripe-merchant:<recipe>`,
+and any other declaration of that name fails preflight. The CLI binds the
+reference to the host's `STRIPE_API_KEY` unless `--credential-env` overrides it,
+and rejects bindings that match no planned merchant. Embedding hosts can
+provision a merchant for each eval run attempt with
+`createMerchantCredentialResolver`. Forge does not create, prepare, or clean up
+accounts; hosts own the merchant lifecycle, including attempts that fail after
+provisioning. See [Stripe merchant](../README.md#stripe-merchant).
+
 `forge/credentials` lets a case or treatment declare additional agent credentials
 by runtime environment name. Each name maps to the opaque reference `env:NAME`;
 the declaration grants no automatic host lookup. The CLI requires an explicit
-`--credential-env` binding unless a selected integration already supplies one.
-Embedding hosts authorize and resolve references through their credential
-resolver. Missing bindings or values fail before runtime allocation. See
+`--credential-env` binding for each name. Embedding hosts authorize and resolve
+references through their credential resolver. Missing bindings or values fail
+before runtime allocation. See
 [additional API credentials](../README.md#additional-api-credentials) for the
 case, treatment, and launch configuration.
 
@@ -722,9 +732,10 @@ and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
 Plans retain `forge/plugin`'s short registered name. Pure preflight selects its
-native distribution and declares agent-scoped MCP credential requirements using
-policy fixed by the Forge version. Setup installs the current marketplace entry,
-configures its existing MCP connection, and fingerprints the installation.
+native distribution using policy fixed by the Forge version. The Stripe plugin
+requires an experiment merchant and declares no credential of its own. Setup
+installs the current marketplace entry, configures its existing MCP connection,
+and fingerprints the installation.
 The `setup.json` receipt records resolved native IDs, catalog commit, installed
 version, reported source commit when available, and the installed-tree
 fingerprint. These identify the catalog snapshot and observed contents; plugin

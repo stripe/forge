@@ -7,6 +7,7 @@ export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_DOCKER_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
 export const DEFAULT_DOCKER_CPU_COUNT = 2;
 export const DEFAULT_DOCKER_PROCESS_COUNT = 512;
+export const DEFAULT_MERCHANT_RECIPE = 'default';
 
 /** Types are aliases rather than brands so parsed values remain plain data. */
 export type Sha256Hex = string;
@@ -180,6 +181,12 @@ export interface TreatmentV1 {
   setup: SetupStepV1[];
 }
 
+/** Stripe account state a run expects; the host supplies its key as STRIPE_API_KEY. */
+export interface MerchantV1 {
+  /** Host-interpreted name; public CLI runs use the supplied key as-is. */
+  recipe: string;
+}
+
 export interface DockerResourcesV1 {
   memory_bytes: number;
   cpu_count: number;
@@ -257,6 +264,7 @@ export interface ExperimentConfigV1 {
   /** Required only when the experiment uses host-supplied setup actions. */
   forge?: { action_bundles: SetupActionBundleReferenceV1[] };
   runtime: ForgeRuntimeConfigV1;
+  merchant?: MerchantV1;
   models: {
     role_player?: ModelRefV1;
     judge?: ModelRefV1;
@@ -337,5 +345,6 @@ export interface ResolvedRunPlanV1 {
   role_player?: ModelRefV1;
   agent: AgentSelectionV1;
   runtime: ForgeRuntimeV1;
+  merchant?: MerchantV1;
   limits: { run_timeout_ms: number };
 }

@@ -9,6 +9,11 @@ import { createCodexAdapter } from './agents/codex/index.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
+import {
+  isMerchantCredentialReference,
+  MERCHANT_ENVIRONMENT_VARIABLE,
+  merchantCredentialReference,
+} from './contracts/merchant.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
 import { type executeEval, FORGE_VERSION } from './execution/index.ts';
@@ -25,9 +30,9 @@ import {
   type ForgeRuntimeV1,
   type LoadedDatasetV1,
   parseRunSelection,
+  type ResolvedRunPlanV1,
   type RunSelection,
 } from './model/index.ts';
-import { pluginMcpEnvironmentBindings } from './model/pluginCredentials.ts';
 import {
   expandExperiment,
   ManifestCaseFileError,
@@ -502,7 +507,7 @@ async function runPublicExperiment(
           ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
         }),
       );
-      const credentialBindings = pluginMcpEnvironmentBindings(
+      const credentialBindings = merchantEnvironmentBindings(
         plans,
         parseCredentialEnvironmentBindings(values['credential-env']),
       );
@@ -656,6 +661,37 @@ function parseCredentialEnvironmentBindings(
     bindings.set(reference, environmentName);
   }
   return Object.freeze(Object.fromEntries(bindings));
+}
+
+/** Default each planned merchant to the host's key; explicit bindings win. */
+function merchantEnvironmentBindings(
+  plans: readonly ResolvedRunPlanV1[],
+  explicit: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  const planned = new Set<string>(
+    plans.flatMap(({ merchant }) =>
+      merchant === undefined
+        ? []
+        : [merchantCredentialReference(merchant.recipe)],
+    ),
+  );
+  // A stale or mistyped binding must not silently select another account.
+  for (const reference of Object.keys(explicit)) {
+    if (
+      reference === `env:${MERCHANT_ENVIRONMENT_VARIABLE}` ||
+      (isMerchantCredentialReference(reference) && !planned.has(reference))
+    ) {
+      throw new CliUsageError(
+        `--credential-env ${JSON.stringify(reference)} does not match the experiment merchant; bind ${[...planned].join(', ') || 'stripe-merchant:<recipe> after declaring merchant'}.`,
+      );
+    }
+  }
+  const bindings: Record<string, string> = { ...explicit };
+  for (const reference of planned) {
+    if (!Object.hasOwn(bindings, reference))
+      bindings[reference] = MERCHANT_ENVIRONMENT_VARIABLE;
+  }
+  return Object.freeze(bindings);
 }
 
 function isCommand(

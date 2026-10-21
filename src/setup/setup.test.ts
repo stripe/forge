@@ -211,9 +211,6 @@ describe('portable setup actions', () => {
       pluginInstaller: installer,
     });
     assert.deepEqual(prepared.requirements, {
-      credentials: {
-        agent: { STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' } },
-      },
       executables: ['git'],
       stateDirectories: [
         {
@@ -265,7 +262,7 @@ describe('portable setup actions', () => {
   });
 
   for (const adapter of ['claude-code', 'codex'] as const) {
-    it(`selects the compatible Stripe distribution and agent credentials for ${adapter}`, () => {
+    it(`selects the compatible Stripe distribution without declaring credentials for ${adapter}`, () => {
       const step = parseSetupStep({
         uses: 'forge/plugin',
         with: { plugin: 'stripe' },
@@ -294,27 +291,8 @@ describe('portable setup actions', () => {
         ...target,
         pluginInstaller: installer,
       });
-      assert.deepEqual(prepared.requirements.credentials, {
-        agent: {
-          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
-        },
-      });
-      const augmented = createSetupExecutor().preflight(
-        [
-          step,
-          parseSetupStep({
-            uses: 'forge/credentials',
-            with: { env: ['STRIPE_API_KEY', 'API_TOKEN'] },
-          }),
-        ],
-        { ...target, pluginInstaller: installer },
-      );
-      assert.deepEqual(augmented.requirements.credentials, {
-        agent: {
-          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
-          API_TOKEN: { reference: 'env:API_TOKEN' },
-        },
-      });
+      // The experiment merchant, not the plugin, supplies STRIPE_API_KEY.
+      assert.equal(prepared.requirements.credentials, undefined);
       assert.throws(
         () =>
           createSetupExecutor().preflight([step], {

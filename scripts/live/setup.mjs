@@ -293,7 +293,7 @@ export async function runSetupIntegrationSuite({
       artifactStore: createArtifactStore({ root: resultsRoot }),
       credentialResolver: {
         async resolve(reference, context) {
-          assert.equal(reference, 'env:STRIPE_API_KEY');
+          assert.equal(reference, 'stripe-merchant:default');
           assert.equal(context.purpose, 'forge-eval:STRIPE_API_KEY');
           // Installation is exercised without making authenticated MCP calls.
           return 'forge-setup-synthetic-stripe-key';
@@ -548,6 +548,7 @@ async function createFixture(root, platform, specs, liveAgent) {
         },
       },
       models: {},
+      merchant: { recipe: 'default' },
       treatments: { baseline: { setup: [] } },
       matrix: {
         cases: specs.map(({ id }) => `cases/setup/${id}.case.yaml`),

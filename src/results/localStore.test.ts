@@ -1093,6 +1093,7 @@ describe('local artifact store', () => {
       caseId: 'sample/case',
       prompt: 'do it',
       treatment: 'stripe-plugin',
+      merchant: { recipe: 'default' },
       treatmentSetup: [
         {
           uses: 'forge/plugin',
