@@ -91,10 +91,12 @@ by this action.
 
 Codex accepts a string or `{source: local, path: ./...}` marketplace-relative
 path, or a credential-free HTTPS `url` or `git-subdir` source with optional
-`ref` and subdirectory. It rejects archives, npm, `github` source objects,
-dependencies, and SHA-pinned Git metadata. The pinned Codex CLI does not report
-installed source commits, so Codex receipts omit that optional field and use
-the installed-tree fingerprint to identify observed bytes.
+`ref`, full 40-hex Git `sha`, and subdirectory. Forge checks that native source
+metadata retains the catalog's selectors. Codex applies the pin during install;
+Forge does not independently verify the checkout commit. It rejects archives,
+npm, `github` source objects, and dependencies. Codex receipts omit the optional
+resolved source commit and use the installed-tree fingerprint to identify
+observed bytes.
 
 Codex selects the first native catalog present in this order:
 
@@ -168,10 +170,10 @@ independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
 Git commits identify the catalog snapshot and the source revision reported by
-the native installer. A source commit is optional for an unpinned Git source;
-when the catalog supplies an expected commit, the installer must report that
-same commit. The tree fingerprint identifies observed installation-time
-contents separately from those source identities.
+the native installer. Claude must report any source commit pinned by its
+catalog; Codex reports the requested selectors, as described above. The tree
+fingerprint identifies observed installation-time contents separately from
+those source identities.
 
 The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may
@@ -180,8 +182,44 @@ quiesces all mutation before evidence selection.
 
 ## Credentials and limitations
 
-`forge/plugin` declares no credentials and receives an uncredentialed setup
-command runner. It never receives the coding agent's model credential. Fetches
+Selecting either supported Stripe plugin distribution below automatically
+configures bearer authentication for its bundled HTTP MCP connection:
+
+```yaml
+with:
+  agents:
+    claude-code:
+      plugin: stripe@claude-plugins-official
+      marketplace: anthropics/claude-plugins-official
+    codex:
+      plugin: stripe@claude-plugins-official
+      marketplace: anthropics/claude-plugins-official
+```
+
+Export `STRIPE_API_KEY` with an Agent API key before starting the eval; account
+or merchant provisioning remains external to Forge. Forge recognizes the exact
+adapter, plugin ID, and marketplace pairs above. Other plugin selections are
+installed unchanged and do not require this key. Experiments declare no MCP
+server or authentication fields.
+Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
+credential resolver. Missing values fail before runtime allocation. Ordinary
+validation and planning need no values.
+
+Forge keeps the bundled URL and unrelated plugin content. Claude uses an
+Authorization header template; Codex uses `bearer_token_env_var`. Both reference
+`STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
+use the same key. Tokens reach only agent commands, never setup commands.
+Forge fingerprints the configured installation. Credential mappings are part
+of the Forge version.
+
+A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
+source fails setup. Codex can install the Claude-format distribution shown above.
+The newer `stripe@stripe` distribution from `stripe/ai` is recognized, but fails
+with a message to use that compatible choice: Codex's Agent Plugins 1.0
+`mcp.json` cannot read bearer tokens from environment variables. Custom MCP
+config paths, OAuth, and host login passthrough are unsupported.
+
+Plugin installation receives an uncredentialed setup command runner. It never receives the coding agent's model credential. Fetches
 therefore work only for credential-free HTTPS sources accepted by the action.
 
 Current limitations are:

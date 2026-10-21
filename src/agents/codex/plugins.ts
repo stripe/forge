@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-
 import type { CommandRunner } from '../../contracts/command.ts';
 import type {
   AgentPluginInstallationReceipt,
@@ -15,6 +14,7 @@ import {
   isSafeWorkspaceRelativePath,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
+import { configurePluginMcp } from '../pluginMcp.ts';
 import { inspectInstalledPluginTree } from '../pluginTree.ts';
 import {
   assertCodexRuntimeLayout,
@@ -45,6 +45,7 @@ export function createCodexPluginInstaller(options: {
 }): AgentPluginInstaller {
   const layout = resolveCodexLayout(options.layout);
   return Object.freeze({
+    supportsMcpBearerAuth: true as const,
     preflight(
       distribution: PluginSelectionV1,
       context: AgentPluginPreflightContext,
@@ -257,6 +258,9 @@ export function createCodexPluginInstaller(options: {
             identity.name,
             installed.version,
           );
+          const mcpServers = context.mcpServers;
+          if (mcpServers)
+            await configurePluginMcp(home, relative, 'codex', mcpServers);
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,
@@ -310,10 +314,12 @@ function validatedSource(
     fail('unsupported plugin source');
   if (
     Object.keys(source).some(
-      (key) => !['source', 'url', 'path', 'ref'].includes(key),
+      (key) => !['source', 'url', 'path', 'ref', 'sha'].includes(key),
     ) ||
     typeof source.url !== 'string' ||
     !safeGitUrl(source.url) ||
+    (source.sha !== undefined &&
+      (typeof source.sha !== 'string' || !/^[a-f0-9]{40}$/.test(source.sha))) ||
     (source.ref !== undefined &&
       (typeof source.ref !== 'string' ||
         !source.ref.length ||
@@ -325,9 +331,7 @@ function validatedSource(
         path.posix.normalize(source.path) !== source.path)) ||
     (source.source === 'git-subdir' && source.path === undefined)
   ) {
-    fail(
-      'unsupported Git source; Codex does not report installed source commits',
-    );
+    fail('unsupported Git source');
   }
   return {
     kind: source.source,
@@ -336,6 +340,7 @@ function validatedSource(
       url: source.url,
       ...(source.path === undefined ? {} : { path: source.path }),
       ...(source.ref === undefined ? {} : { ref: source.ref }),
+      ...(source.sha === undefined ? {} : { sha: source.sha }),
     },
   };
 }

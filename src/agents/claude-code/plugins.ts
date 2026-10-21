@@ -12,6 +12,7 @@ import {
   isSafeVersion,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
+import { configurePluginMcp } from '../pluginMcp.ts';
 import {
   assertClaudeRuntimeLayout,
   type ClaudeCodeLayout,
@@ -64,6 +65,7 @@ export function createClaudePluginInstaller(
   const pluginStatePath = `${layout.configDirectory}/plugins`;
 
   return Object.freeze({
+    supportsMcpBearerAuth: true as const,
     preflight(
       distribution: PluginSelectionV1,
       context: AgentPluginPreflightContext,
@@ -173,6 +175,14 @@ export function createClaudePluginInstaller(
             installedLocation.absolute,
             entry.source,
           );
+          const mcpServers = context.mcpServers;
+          if (mcpServers)
+            await configurePluginMcp(
+              state,
+              installedLocation.relative,
+              'claude-code',
+              mcpServers,
+            );
           const installedTree = await inspectInstalledPluginTree(
             state,
             installedLocation.relative,

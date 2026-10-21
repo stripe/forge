@@ -18,6 +18,7 @@ const distribution = { plugin: 'fixture@test', marketplace: 'example/plugins' };
 function fixture(
   options: {
     source?: unknown;
+    mcpServers?: readonly import('../../model/types.ts').PluginMcpServerId[];
     catalogPath?: string;
     manifestPath?: string;
     mutate?: (argv: readonly string[], output: unknown) => unknown;
@@ -166,7 +167,11 @@ function fixture(
   const prepared = createCodexPluginInstaller({
     adapterId: 'codex',
     executable: 'codex',
-  }).preflight(distribution, { selection: plan.agent, runtime: plan.runtime });
+  }).preflight(distribution, {
+    selection: plan.agent,
+    runtime: plan.runtime,
+    ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+  });
   const install = (signal = new AbortController().signal) =>
     prepared.install({
       runId: 'test',
@@ -179,6 +184,33 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
+  it('sets the native bearer environment reference in the installed plugin', async () => {
+    const mcpServers = ['stripe'] as const;
+    const test = fixture({ mcpServers });
+    await test.state.mutable.writeFile(
+      `${cache}/.mcp.json`,
+      Buffer.from(
+        JSON.stringify({
+          mcpServers: {
+            stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+          },
+        }),
+      ),
+    );
+    const receipt = await test.install();
+    assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
+    const configured = JSON.parse(
+      Buffer.from(
+        await test.state.mutable.readFile(`${cache}/.mcp.json`),
+      ).toString(),
+    );
+    assert.equal(
+      configured.mcpServers.stripe.bearer_token_env_var,
+      'STRIPE_API_KEY',
+    );
+    assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
+  });
+
   it('binds installation without commands and shares the adapter home mount', async () => {
     const test = fixture();
     assert.equal(test.calls.length, 0);
@@ -242,6 +274,35 @@ describe('Codex native plugin installer', () => {
       source: { source: 'url', url: 'https://github.com/example/plugin.git' },
     }).install();
     assert.deepEqual(receipt.source, { kind: 'url' });
+  });
+
+  it('passes catalog Git pins to the native installer and verifies its reported selector', async () => {
+    const source = {
+      source: 'git-subdir',
+      url: 'https://github.com/example/plugin.git',
+      path: 'plugin',
+      ref: 'main',
+      sha: commit,
+    };
+    const receipt = await fixture({ source }).install();
+    // Native source metadata reports the requested pin, not a resolved commit.
+    assert.deepEqual(receipt.source, { kind: 'git-subdir' });
+    for (const sha of [undefined, 'b'.repeat(40)]) {
+      await assert.rejects(
+        fixture({
+          source,
+          mutate(_argv, output) {
+            const inventory = output as {
+              installed?: Record<string, unknown>[];
+            };
+            if (inventory.installed?.[0])
+              inventory.installed[0].source = { ...source, sha };
+            return output;
+          },
+        }).install(),
+        /installed plugin state or source/,
+      );
+    }
   });
 
   it('uses native catalog precedence and rejects an unsupported Codex catalog', async () => {
@@ -339,7 +400,7 @@ describe('Codex native plugin installer', () => {
         source: 'git-subdir',
         url: 'https://example.test/plugin.git',
         path: 'plugin',
-        sha: commit,
+        sha: 'invalid',
       },
     ]) {
       const test = fixture({ source });
