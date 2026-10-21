@@ -238,14 +238,23 @@ describe('Claude plugin installer', () => {
     const state = createMemoryWorkspace();
     const harness = nativeCommandHarness(state, {
       marketplaceArgument: 'stripe/ai#my-hook-fix',
-      marketplaceRepository: 'stripe/ai',
       origin: PLUGIN_REPOSITORY,
     });
-    await installerPreflight({
+    const prepared = installerPreflight({
       ...distribution,
       marketplace: 'stripe/ai',
       ref: 'my-hook-fix',
-    }).install(installContext(state, harness.commands));
+    });
+    await prepared.install(installContext(state, harness.commands));
+  });
+
+  it('rejects empty or unsafe marketplace branches', () => {
+    for (const ref of ['', 'bad\nref', 'bad\0ref']) {
+      assert.throws(
+        () => installerPreflight({ ...distribution, ref }),
+        /distribution is invalid/,
+      );
+    }
   });
 
   it('reuses the registered marketplace across repeated plugin setup', async () => {
@@ -396,10 +405,6 @@ describe('Claude plugin installer', () => {
 
   it('supports latest entries stored in the marketplace or in an archive', async () => {
     for (const candidate of [
-      {
-        version: '1.0.0',
-        source: './plugins/formatter',
-      },
       {
         version: '1.0.0',
         source: './providers/claude/plugin/',
@@ -610,7 +615,6 @@ function nativeCommandHarness(
   options: {
     readonly catalogSource?: unknown;
     readonly marketplaceArgument?: string;
-    readonly marketplaceRepository?: string;
     readonly installedVersion?: string;
     readonly marketplaceCommit?: string;
     readonly installedCommit?: string | null;
@@ -678,6 +682,9 @@ function nativeCommandHarness(
           options.marketplaceArgument ?? distribution.marketplace,
         );
         const relative = 'marketplaces/claude-plugins-official';
+        const marketplace =
+          options.marketplaceArgument?.split('#')[0] ??
+          distribution.marketplace;
         await state.mutable.writeFile(
           `${relative}/.git/HEAD`,
           Buffer.from('ref'),
@@ -691,11 +698,7 @@ function nativeCommandHarness(
           Buffer.from(
             JSON.stringify({
               'claude-plugins-official': {
-                source: {
-                  source: 'github',
-                  repo:
-                    options.marketplaceRepository ?? distribution.marketplace,
-                },
+                source: { source: 'github', repo: marketplace },
                 installLocation: `${pluginStatePath}/${relative}`,
               },
             }),

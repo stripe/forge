@@ -3,6 +3,7 @@ import { describe, it } from 'vitest';
 
 import type { CommandRunner } from '../../contracts/command.ts';
 import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.ts';
+import type { PluginSelectionV1 } from '../../model/types.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { createTestResolvedRunPlan } from '../../testing/plans.ts';
 import { CODEX_HOME_STATE_ID } from './layout.ts';
@@ -17,6 +18,7 @@ const distribution = { plugin: 'fixture@test', marketplace: 'example/plugins' };
 
 function fixture(
   options: {
+    distribution?: PluginSelectionV1;
     source?: unknown;
     mcpServers?: readonly import('../../model/types.ts').PluginMcpServerId[];
     catalogPath?: string;
@@ -167,7 +169,7 @@ function fixture(
   const prepared = createCodexPluginInstaller({
     adapterId: 'codex',
     executable: 'codex',
-  }).preflight(distribution, {
+  }).preflight(options.distribution ?? distribution, {
     selection: plan.agent,
     runtime: plan.runtime,
     ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
@@ -238,19 +240,8 @@ describe('Codex native plugin installer', () => {
   });
 
   it('rejects a marketplace branch in a Codex distribution', () => {
-    const plan = createTestResolvedRunPlan({
-      agent: { adapter: 'codex', provider: 'openai', model: 'test' },
-    });
-    const installer = createCodexPluginInstaller({
-      adapterId: 'codex',
-      executable: 'codex',
-    });
     assert.throws(
-      () =>
-        installer.preflight(
-          { ...distribution, ref: 'my-hook-fix' },
-          { selection: plan.agent, runtime: plan.runtime },
-        ),
+      () => fixture({ distribution: { ...distribution, ref: 'my-hook-fix' } }),
       /Codex plugin distribution/,
     );
   });

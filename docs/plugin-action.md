@@ -12,6 +12,9 @@ by the built-in Claude Code and Codex adapters.
 
 Embedding hosts can use `AgentPluginInstaller` from a trusted
 [setup action bundle](setup-action-bundles.md) to install other distributions.
+A Claude Code installer distribution may carry `ref` to install its marketplace
+from a branch. `forge/plugin` always uses the registered distribution at its
+default branch.
 
 ## Experiment configuration
 

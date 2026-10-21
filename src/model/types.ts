@@ -90,7 +90,7 @@ export interface PluginSelectionV1 extends JsonObject {
   plugin: string;
   /** GitHub owner/repository whose selected catalog entry is installed. */
   marketplace: string;
-  /** Optional Claude Code marketplace branch. */
+  /** Optional Claude Code marketplace branch for embedding hosts. */
   ref?: string;
 }
 

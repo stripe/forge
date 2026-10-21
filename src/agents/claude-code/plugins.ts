@@ -287,9 +287,8 @@ async function ensureMarketplaceCheckout(input: {
 }
 
 function marketplaceSource(distribution: PluginSelectionV1): string {
-  return distribution.ref === undefined
-    ? distribution.marketplace
-    : `${distribution.marketplace}#${distribution.ref}`;
+  if (distribution.ref === undefined) return distribution.marketplace;
+  return `${distribution.marketplace}#${distribution.ref}`;
 }
 
 async function readSelectedMarketplaceEntry(input: {
