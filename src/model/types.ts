@@ -181,9 +181,9 @@ export interface TreatmentV1 {
   setup: SetupStepV1[];
 }
 
-/** Stripe account state a run expects; the host supplies its key as STRIPE_API_KEY. */
+/** The Stripe account a run expects; its key is the agent's STRIPE_API_KEY. */
 export interface MerchantV1 {
-  /** Host-interpreted name; public CLI runs use the supplied key as-is. */
+  /** Interpreted by the host's provisioner. */
   recipe: string;
 }
 

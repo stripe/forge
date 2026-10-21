@@ -93,7 +93,6 @@ export function configurePluginMcpDocument(
       throw new Error(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );
-    // The experiment merchant supplies the only Stripe credential.
     const environmentName = MERCHANT_ENVIRONMENT_VARIABLE;
     if (adapter === 'claude-code') {
       if (server.headers !== undefined && !record(server.headers))

@@ -1604,10 +1604,7 @@ treatments:
       );
 
       assert.equal(exitCode, 2);
-      assert.match(
-        stderr,
-        /does not match the experiment merchant; bind stripe-merchant:default/,
-      );
+      assert.match(stderr, /matches no planned merchant/);
       assert.equal(executed, false);
     });
   }

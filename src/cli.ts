@@ -670,27 +670,23 @@ function merchantEnvironmentBindings(
 ): Readonly<Record<string, string>> {
   const planned = new Set<string>(
     plans.flatMap(({ merchant }) =>
-      merchant === undefined
-        ? []
-        : [merchantCredentialReference(merchant.recipe)],
+      merchant ? [merchantCredentialReference(merchant.recipe)] : [],
     ),
   );
-  // A stale or mistyped binding must not silently select another account.
-  for (const reference of Object.keys(explicit)) {
+  // A stale binding, such as the former env:STRIPE_API_KEY, must not silently
+  // select another account.
+  for (const reference of Object.keys(explicit))
     if (
-      reference === `env:${MERCHANT_ENVIRONMENT_VARIABLE}` ||
-      (isMerchantCredentialReference(reference) && !planned.has(reference))
-    ) {
+      (isMerchantCredentialReference(reference) ||
+        reference === 'env:STRIPE_API_KEY') &&
+      !planned.has(reference)
+    )
       throw new CliUsageError(
-        `--credential-env ${JSON.stringify(reference)} does not match the experiment merchant; bind ${[...planned].join(', ') || 'stripe-merchant:<recipe> after declaring merchant'}.`,
+        `--credential-env ${JSON.stringify(reference)} matches no planned merchant.`,
       );
-    }
-  }
   const bindings: Record<string, string> = { ...explicit };
-  for (const reference of planned) {
-    if (!Object.hasOwn(bindings, reference))
-      bindings[reference] = MERCHANT_ENVIRONMENT_VARIABLE;
-  }
+  for (const reference of planned)
+    bindings[reference] ??= MERCHANT_ENVIRONMENT_VARIABLE;
   return Object.freeze(bindings);
 }
 
