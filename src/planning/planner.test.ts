@@ -4,7 +4,6 @@ import { describe, it } from 'vitest';
 import { sha256Digest } from '../model/hashes.ts';
 import { getMatrixGroups } from '../model/matrix.ts';
 import type {
-  DatasetManifestFileV1,
   EvalCaseV1,
   ExperimentConfigV1,
   LoadedDatasetV1,
@@ -841,7 +840,7 @@ describe('experiment expansion and run planning', () => {
     }
   });
 
-  it('rejects experiment/dataset drift and missing manifest inputs', () => {
+  it('rejects experiment/dataset drift', () => {
     const loaded = inputs();
     const selected = selection(
       'case/a',
@@ -883,62 +882,37 @@ describe('experiment expansion and run planning', () => {
         { code: 'dataset_experiment_mismatch' },
       );
     }
+  });
 
-    const missingInput = inputs({ fixtureFiles: [] });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...missingInput,
-          selection: selection(
-            'case/a',
-            'with-seed',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
-        }),
-      { code: 'missing_dataset_input' },
-    );
-
-    const directoryInput = inputs({
-      experiment: experimentConfig({
-        treatments: {
-          directory: {
-            setup: [
-              {
-                uses: 'forge/write',
-                with: {
-                  target: 'seed.txt',
-                  source: { dataset_path: 'fixtures' },
-                },
-              },
-            ],
-          },
-        },
-        matrix: {
-          ...getMatrixGroups(experimentConfig().matrix)[0]!,
-          treatments: ['directory'],
-          repetitions: 1,
-          retries: 0,
-        },
-      }),
+  it('leaves treatment dataset inputs to setup instead of checking them while planning', () => {
+    const treatmentSetup = (datasetPath: string) => ({
+      uses: 'forge/write',
+      with: { target: 'seed.txt', source: { dataset_path: datasetPath } },
     });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...directoryInput,
-          selection: selection(
-            'case/a',
-            'directory',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
+    const plan = resolveRunPlan({
+      ...inputs({
+        experiment: experimentConfig({
+          treatments: {
+            missing: { setup: [treatmentSetup('fixtures/missing.txt')] },
+          },
+          matrix: {
+            ...getMatrixGroups(experimentConfig().matrix)[0]!,
+            treatments: ['missing'],
+            repetitions: 1,
+            retries: 0,
+          },
         }),
-      { code: 'missing_dataset_input' },
-    );
+      }),
+      selection: selection(
+        'case/a',
+        'missing',
+        'claude-code',
+        'anthropic',
+        'sonnet',
+        0,
+      ),
+    });
+    assert.deepEqual(plan.setup.at(-1), treatmentSetup('fixtures/missing.txt'));
   });
 
   it('serializes plans canonically and hashes equivalent object key order equally', () => {
@@ -1081,19 +1055,10 @@ function inputs(
   options: {
     caseDefinition?: EvalCaseV1;
     experiment?: ExperimentConfigV1;
-    fixtureFiles?: DatasetManifestFileV1[];
   } = {},
 ): { dataset: LoadedDatasetV1; experiment: LoadedExperimentConfigV1 } {
   const config = options.experiment ?? experimentConfig();
-  const fixtureFiles = options.fixtureFiles ?? [
-    { path: 'fixtures/seed.txt', size: 4, sha256: 'd'.repeat(64) },
-  ];
-  const baseDefinition = options.caseDefinition ?? evalCase();
-  // case/a declares the fixtures its manifest entry records.
-  const definition =
-    fixtureFiles.length === 0
-      ? baseDefinition
-      : { ...baseDefinition, fixtures: fixtureFiles.map(({ path }) => path) };
+  const definition = options.caseDefinition ?? evalCase();
   return {
     dataset: {
       root: '/dataset',
@@ -1107,17 +1072,11 @@ function inputs(
             id: definition.id,
             version: definition.version,
             path: CASE_A_PATH,
-            size: 100,
-            sha256: 'b'.repeat(64),
-            files: fixtureFiles,
           },
           {
             id: 'case/b',
             version: definition.version,
             path: CASE_B_PATH,
-            size: 100,
-            sha256: 'c'.repeat(64),
-            files: [],
           },
         ],
       },
@@ -1126,7 +1085,7 @@ function inputs(
         [
           'case/b',
           {
-            definition: { ...baseDefinition, id: 'case/b' },
+            definition: { ...definition, id: 'case/b' },
             path: `/dataset/${CASE_B_PATH}`,
           },
         ],

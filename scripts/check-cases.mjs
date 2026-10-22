@@ -43,9 +43,8 @@ export async function checkRepositoryCases({
 }
 
 /**
- * Compare two parsed manifests of one dataset. A case whose definition or
- * fixtures changed needs a new case version; any case version or membership
- * change needs a new dataset version.
+ * Compare two parsed manifests of one dataset. Any case version or membership
+ * change needs a new dataset version; case content is versioned by its owner.
  */
 export function datasetVersionViolations(baseline, candidate) {
   const violations = [];
@@ -54,36 +53,20 @@ export function datasetVersionViolations(baseline, candidate) {
       `dataset ID changed from ${baseline.dataset.id} to ${candidate.dataset.id}; add it as a new dataset instead.`,
     );
   }
-  const baselineCases = new Map(
-    baseline.cases.map((entry) => [entry.id, entry]),
+  const baselineVersions = new Map(
+    baseline.cases.map(({ id, version }) => [id, version]),
   );
-  const candidateCases = new Map(
-    candidate.cases.map((entry) => [entry.id, entry]),
-  );
-  let casesChanged = baselineCases.size !== candidateCases.size;
-  for (const [id, entry] of candidateCases) {
-    const previous = baselineCases.get(id);
-    if (previous === undefined || previous.version !== entry.version) {
-      casesChanged = true;
-    } else if (caseContentKey(previous) !== caseContentKey(entry)) {
-      violations.push(
-        `case ${id} changed without a version bump (still ${entry.version}).`,
-      );
-    }
-  }
+  const casesChanged =
+    baselineVersions.size !== candidate.cases.length ||
+    candidate.cases.some(
+      ({ id, version }) => baselineVersions.get(id) !== version,
+    );
   if (casesChanged && baseline.dataset.version === candidate.dataset.version) {
     violations.push(
       `case versions or membership changed, so dataset version ${candidate.dataset.version} must change.`,
     );
   }
   return violations;
-}
-
-function caseContentKey({ path: casePath, size, sha256, files }) {
-  const fixtures = [...files]
-    .sort((left, right) => (left.path < right.path ? -1 : 1))
-    .map((file) => [file.path, file.size, file.sha256]);
-  return JSON.stringify([casePath, size, sha256, fixtures]);
 }
 
 /** Read each dataset's manifest at the merge-base with `baseRef`, if it exists. */

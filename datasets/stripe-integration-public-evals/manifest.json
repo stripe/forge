@@ -7,9 +7,7 @@
     {
       "id": "stripe-integration-public-evals/payments-onetime",
       "version": "0.1.0",
-      "path": "cases/payments-onetime.case.yaml",
-      "size": 3069,
-      "sha256": "23e23017da89d26592ef2f0ec61ff3b931128cf79bd9d7a7cbf16ed9d4acbb1f"
+      "path": "cases/payments-onetime.case.yaml"
     }
   ]
 }

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -184,12 +183,9 @@ describe('repository case check', () => {
     await rewriteCase(datasetRoot, (source) =>
       source.replace('display_name: Hello file', 'display_name: Hello'),
     );
-    const caseNotBumped = invoke();
-    assert.equal(caseNotBumped.status, 1);
-    assert.match(
-      caseNotBumped.stderr,
-      /^cases: test\/fixtures\/one-shot\/dataset: case examples\/hello-file changed without a version bump/,
-    );
+    // Case content is versioned by its owner; only version changes propagate.
+    const caseEdited = invoke();
+    assert.equal(caseEdited.status, 0, caseEdited.stderr);
 
     await rewriteCase(datasetRoot, (source) =>
       source.replace('version: 0.1.0', 'version: 0.1.1'),
@@ -217,21 +213,18 @@ describe('repository case check', () => {
 describe('dataset version propagation', () => {
   const manifest = (
     datasetVersion: string,
-    ...cases: Array<[id: string, version: string, sha: string]>
+    ...cases: Array<[id: string, version: string]>
   ): DatasetManifestV1 => ({
     dataset: { id: 'd', version: datasetVersion },
-    cases: cases.map(([id, version, sha]) => ({
+    cases: cases.map(([id, version]) => ({
       id,
       version,
       path: `cases/${id}.case.yaml`,
-      size: 1,
-      sha256: sha.repeat(64),
-      files: [],
     })),
   });
 
   it('rejects a changed dataset ID', () => {
-    const base = manifest('1.0.0', ['d/a', '1.0.0', 'a']);
+    const base = manifest('1.0.0', ['d/a', '1.0.0']);
     const renamed = structuredClone(base);
     renamed.dataset.id = 'e';
     assert.match(
@@ -241,37 +234,22 @@ describe('dataset version propagation', () => {
   });
 
   it('accepts unchanged datasets and fully propagated bumps', () => {
-    const base = manifest('1.0.0', ['d/a', '1.0.0', 'a']);
+    const base = manifest('1.0.0', ['d/a', '1.0.0']);
     assert.deepEqual(datasetVersionViolations(base, base), []);
     assert.deepEqual(
-      datasetVersionViolations(base, manifest('1.1.0', ['d/a', '1.1.0', 'b'])),
+      datasetVersionViolations(base, manifest('1.1.0', ['d/a', '1.1.0'])),
       [],
     );
   });
 
-  it('requires a case bump when its definition or fixtures change', () => {
-    const base = manifest('1.0.0', ['d/a', '1.0.0', 'a']);
-    assert.deepEqual(
-      datasetVersionViolations(base, manifest('1.0.0', ['d/a', '1.0.0', 'b'])),
-      ['case d/a changed without a version bump (still 1.0.0).'],
-    );
-    const withFixture = structuredClone(base);
-    withFixture.cases[0]!.files.push({
-      path: 'fixtures/seed.txt',
-      size: 4,
-      sha256: 'c'.repeat(64),
-    });
-    assert.equal(datasetVersionViolations(base, withFixture).length, 1);
-  });
-
   it('requires a dataset bump for case version or membership changes', () => {
-    const base = manifest('1.0.0', ['d/a', '1.0.0', 'a']);
+    const base = manifest('1.0.0', ['d/a', '1.0.0']);
     const message =
       'case versions or membership changed, so dataset version 1.0.0 must change.';
     for (const candidate of [
-      manifest('1.0.0', ['d/a', '1.0.1', 'b']),
-      manifest('1.0.0', ['d/a', '1.0.0', 'a'], ['d/b', '1.0.0', 'a']),
-      manifest('1.0.0', ['d/b', '1.0.0', 'a']),
+      manifest('1.0.0', ['d/a', '1.0.1']),
+      manifest('1.0.0', ['d/a', '1.0.0'], ['d/b', '1.0.0']),
+      manifest('1.0.0', ['d/b', '1.0.0']),
     ]) {
       assert.deepEqual(datasetVersionViolations(base, candidate), [message]);
     }
@@ -292,8 +270,6 @@ async function rewriteCase(
     const source = edit(await fs.readFile(casePath, 'utf8'));
     await fs.writeFile(casePath, source);
     entry.version = /^version: (.*)$/m.exec(source)?.[1] ?? entry.version;
-    entry.size = Buffer.byteLength(source);
-    entry.sha256 = createHash('sha256').update(source).digest('hex');
   });
 }
 

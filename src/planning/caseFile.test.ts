@@ -4,7 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
-import { sha256Hex } from '../model/hashes.ts';
 import { loadDataset } from '../model/loaders.ts';
 import type { LoadedDatasetV1 } from '../model/types.ts';
 import {
@@ -210,7 +209,6 @@ async function createDataset(): Promise<{
     [
       'id: sample/write',
       'version: 0.1.0',
-      `fixtures: [${fixturePath}]`,
       'execution_mode: one_shot',
       'initial_prompt: Write a file.',
       '',
@@ -234,22 +232,11 @@ async function createDataset(): Promise<{
           id: 'sample/write',
           version: '0.1.0',
           path: casePath,
-          size: caseBody.byteLength,
-          sha256: sha256Hex(caseBody),
-          files: [
-            {
-              path: fixturePath,
-              size: fixtureBody.byteLength,
-              sha256: sha256Hex(fixtureBody),
-            },
-          ],
         },
         {
           id: 'unselected',
           version: '0.1.0',
           path: otherCasePath,
-          size: otherCaseBody.byteLength,
-          sha256: sha256Hex(otherCaseBody),
         },
       ],
     }),

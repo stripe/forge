@@ -7,9 +7,7 @@
     {
       "id": "examples/release-summary",
       "version": "0.1.0",
-      "path": "cases/examples/release-summary.case.yaml",
-      "size": 1132,
-      "sha256": "6f0adbb274f9424d866a1065fac4a1a7445b59e0d8f01573161ed6c913c15e6a"
+      "path": "cases/examples/release-summary.case.yaml"
     }
   ]
 }

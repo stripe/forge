@@ -20,9 +20,9 @@ experiments/stripe-integration-public-evals/
 
 The dataset directory holds only the latest version; earlier versions live in
 Git history. Its manifest declares identity and lists each case's ID, version,
-path, byte size, and SHA-256 hash. The case file declares the same ID and
-version. `manifest.json` is excluded from its own inventory, and this README
-and the experiment sit outside the dataset tree.
+and path. The case file declares the same ID and version. This README and the
+experiment sit outside the dataset tree, because every file inside it is
+dataset payload.
 
 The [baseline experiment](experiment.yaml) points at the dataset with
 `dataset.path` and pins the dataset identity and raw manifest digest. It
@@ -42,7 +42,7 @@ node dist/cli.js plan \
   --experiment experiments/stripe-integration-public-evals/experiment.yaml
 ```
 
-Validation and planning verify the complete inventory and experiment pin without
+Validation and planning verify the case inventory and experiment pin without
 Docker or credentials. To execute the evaluation, use Docker and an Anthropic key:
 
 ```sh
@@ -57,9 +57,8 @@ Forge prints the experiment run identity and artifact locations.
 
 ## Update the dataset
 
-A case lists the dataset files it uses in `fixtures`; the manifest records
-their sizes and hashes under that case. When the case or its fixtures change,
-bump the case `version` in both the case file and the manifest, update its size
-and hash, bump the dataset version, and update the experiment's dataset version
-and manifest digest. From a Forge checkout, `pnpm check:cases` fails if a
-required bump is missing.
+A case uses fixtures through the `dataset_path` sources of its `forge/write`
+setup. When a case version changes or a case is added or removed, update the
+manifest, bump the dataset version, and update the experiment's dataset version
+and manifest digest. From a Forge checkout, `pnpm check:cases` fails if the
+dataset version bump is missing.

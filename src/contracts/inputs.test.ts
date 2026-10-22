@@ -5,11 +5,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, describe, it, vi } from 'vitest';
-import { sha256Hex } from '../model/hashes.ts';
-import { loadDataset } from '../model/loaders.ts';
-import { writeSetupHandler } from '../setup/forgeWrite.ts';
-import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
-import { createTestResolvedRunPlan } from '../testing/plans.ts';
 import {
   assertDatasetPath,
   createDirectoryRunInputProvider,
@@ -58,7 +53,7 @@ describe('createDirectoryRunInputProvider', () => {
   });
 
   it('rejects symlinks to files and ancestor directories even when their targets are inside the dataset', async () => {
-    const { root } = await verifiedDatasetInputs();
+    const { root } = await datasetInputs();
     await fs.symlink('hello.txt', path.join(root, 'fixtures/file-link.txt'));
     await fs.symlink('fixtures', path.join(root, 'tree-link'));
     const inputs = await createDirectoryRunInputProvider(root);
@@ -87,7 +82,7 @@ describe('createDirectoryRunInputProvider', () => {
 
   it('rejects a directory swapped to an outside symlink between validation and opening', async () => {
     for (const replacement of ['different-inode', 'same-inode']) {
-      const { root } = await verifiedDatasetInputs();
+      const { root } = await datasetInputs();
       const outside = await fs.mkdtemp(
         path.join(os.tmpdir(), 'forge-outside-input-test-'),
       );
@@ -124,7 +119,7 @@ describe('createDirectoryRunInputProvider', () => {
   });
 
   it('enforces exact byte and entry limits and rejects invalid limits', async () => {
-    const { root } = await verifiedDatasetInputs();
+    const { root } = await datasetInputs();
     const inputs = await createDirectoryRunInputProvider(root, { maxBytes: 4 });
     await assert.rejects(inputs.read('fixtures/hello.txt'), /4 byte limit/);
     assert.equal(
@@ -166,7 +161,7 @@ describe('createDirectoryRunInputProvider', () => {
   });
 
   it('checks streamed byte limits after the file size check', async () => {
-    const { root, inputs } = await verifiedDatasetInputs();
+    const { root, inputs } = await datasetInputs();
     const probe = await fs.open(path.join(root, 'fixtures/hello.txt'), 'r');
     const fileHandlePrototype = Object.getPrototypeOf(probe);
     await probe.close();
@@ -180,7 +175,7 @@ describe('createDirectoryRunInputProvider', () => {
   });
 
   it('preserves cancellation reasons for reads and listings', async () => {
-    const { inputs } = await verifiedDatasetInputs();
+    const { inputs } = await datasetInputs();
     const controller = new AbortController();
     const reason = new Error('cancelled input access');
     controller.abort(reason);
@@ -194,73 +189,10 @@ describe('createDirectoryRunInputProvider', () => {
     );
   });
 
-  it('rejects a manifest file replaced by an empty directory without rejecting subtrees', async () => {
-    const { root, inputs } = await verifiedDatasetInputs();
-    assert.equal((await inputs.inspect('fixtures')).kind, 'directory');
-    assert.deepEqual(await inputs.listFiles('fixtures'), [
-      { path: 'fixtures/hello.txt', kind: 'file', size: 5 },
-    ]);
-    const source = path.join(root, 'fixtures/hello.txt');
-    await fs.rm(source);
-    await fs.mkdir(source);
-    await assert.rejects(
-      inputs.inspect('fixtures/hello.txt'),
-      /manifest file type/,
-    );
-    await assert.rejects(
-      inputs.listFiles('fixtures/hello.txt'),
-      /manifest file type/,
-    );
-    await assert.rejects(inputs.listFiles('fixtures'), /manifest file type/);
-
-    const plain = await createDirectoryRunInputProvider(root);
-    assert.equal((await plain.inspect('fixtures/hello.txt')).kind, 'directory');
-    assert.deepEqual(await plain.listFiles('fixtures/hello.txt'), []);
-  });
-
-  it('fails forge/write instead of skipping a source file replaced by an empty directory', async () => {
-    const { root, inputs } = await verifiedDatasetInputs();
-    const source = path.join(root, 'fixtures/hello.txt');
-    await fs.rm(source);
-    await fs.mkdir(source);
-    const workspace = createMemoryWorkspace();
-    const plan = createTestResolvedRunPlan();
-    const prepared = writeSetupHandler.preflight(
-      {
-        uses: 'forge/write',
-        with: {
-          target: 'hello.txt',
-          source: { dataset_path: 'fixtures/hello.txt' },
-        },
-      },
-      { stepIndex: 0, selection: plan.agent, runtime: plan.runtime },
-    );
-    await assert.rejects(
-      prepared.apply({
-        runId: 'changed-input-type',
-        paths: { workspace: '/workspace', home: '/home/forge' },
-        workspace: workspace.mutable,
-        stateDirectories: new Map(),
-        commands: {
-          async run() {
-            throw new Error('No commands expected.');
-          },
-        },
-        inputs,
-        signal: new AbortController().signal,
-        stepIndex: 0,
-        selection: plan.agent,
-        runtime: plan.runtime,
-      }),
-      /manifest file type/,
-    );
-    assert.equal(workspace.snapshot().size, 0);
-  });
-
   it('aborts an active read while it waits for input bytes', {
     timeout: 1_000,
   }, async (t) => {
-    const { root, inputs } = await verifiedDatasetInputs();
+    const { root, inputs } = await datasetInputs();
     const probe = await fs.open(path.join(root, 'fixtures/hello.txt'), 'r');
     const fileHandlePrototype = Object.getPrototypeOf(probe) as {
       createReadStream(
@@ -293,47 +225,6 @@ describe('createDirectoryRunInputProvider', () => {
     await started;
     controller.abort();
     await rejected;
-  });
-
-  it('verifies consumed bytes against a snapshot of the loaded manifest', async () => {
-    const { root, dataset, inputs } = await verifiedDatasetInputs();
-    assert.equal(
-      Buffer.from(await inputs.read('fixtures/hello.txt')).toString(),
-      'hello',
-    );
-    await fs.writeFile(path.join(root, 'fixtures/hello.txt'), 'other');
-    await assert.rejects(
-      inputs.read('fixtures/hello.txt'),
-      /manifest.*SHA-256/,
-    );
-    dataset.manifest.cases[0]!.files.find(
-      (file) => file.path === 'fixtures/hello.txt',
-    )!.sha256 = sha256Hex('other');
-    await assert.rejects(
-      inputs.read('fixtures/hello.txt'),
-      /manifest.*SHA-256/,
-    );
-  });
-
-  it('rejects undeclared and missing files after dataset verification', async () => {
-    const { root, inputs } = await verifiedDatasetInputs();
-    assert.deepEqual(await inputs.listFiles('fixtures'), [
-      { path: 'fixtures/hello.txt', kind: 'file', size: 5 },
-    ]);
-    const extra = path.join(root, 'fixtures/extra.txt');
-    await fs.writeFile(extra, 'extra');
-    await assert.rejects(
-      inputs.inspect('fixtures/extra.txt'),
-      /manifest inventory/,
-    );
-    await assert.rejects(
-      inputs.read('fixtures/extra.txt'),
-      /manifest inventory/,
-    );
-    await assert.rejects(inputs.listFiles('fixtures'), /manifest inventory/);
-    await fs.rm(extra);
-    await fs.rm(path.join(root, 'fixtures/hello.txt'));
-    await assert.rejects(inputs.listFiles('fixtures'), /manifest inventory/);
   });
 
   it('reads bounded dataset files and rejects traversal and escaping symlinks', async () => {
@@ -376,53 +267,11 @@ describe('createDirectoryRunInputProvider', () => {
   });
 });
 
-async function verifiedDatasetInputs() {
-  const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), 'forge-verified-input-test-'),
-  );
+async function datasetInputs() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-input-test-'));
   temporaryRoots.push(root);
-  const caseBody =
-    'id: test/example\nversion: 0.1.0\nfixtures: [fixtures/hello.txt]\nexecution_mode: one_shot\ninitial_prompt: Read the fixture\n';
-  const payloads = [
-    { path: 'cases/example.case.yaml', body: caseBody },
-    { path: 'fixtures/hello.txt', body: 'hello' },
-  ];
-  for (const file of payloads) {
-    const target = path.join(root, file.path);
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, file.body);
-  }
-  await fs.writeFile(
-    path.join(root, 'manifest.json'),
-    JSON.stringify({
-      dataset: { id: 'test', version: '1' },
-      cases: [
-        {
-          id: 'test/example',
-          version: '0.1.0',
-          ...fileDescriptor(payloads[0]!),
-          files: payloads.slice(1).map(fileDescriptor),
-        },
-      ],
-    }),
-  );
-  const dataset = await loadDataset(root);
-  const inputs = await createDirectoryRunInputProvider(dataset.root, {
-    manifest: dataset.manifest,
-  });
-  return { root, dataset, inputs };
-}
-
-function fileDescriptor({
-  path: filePath,
-  body,
-}: {
-  path: string;
-  body: string;
-}) {
-  return {
-    path: filePath,
-    size: Buffer.byteLength(body),
-    sha256: sha256Hex(body),
-  };
+  await fs.mkdir(path.join(root, 'fixtures'));
+  await fs.writeFile(path.join(root, 'fixtures', 'hello.txt'), 'hello');
+  const inputs = await createDirectoryRunInputProvider(root);
+  return { root, inputs };
 }

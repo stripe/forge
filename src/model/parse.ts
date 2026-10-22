@@ -11,7 +11,7 @@ import {
 } from '../version.ts';
 import { JudgingCriterionSchema } from './criteria.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
-import { isSha256Digest, isSha256Hex } from './hashes.ts';
+import { isSha256Digest } from './hashes.ts';
 import { agentSelectionKey } from './matrix.ts';
 import {
   isAuthoredCaseId,
@@ -25,7 +25,6 @@ import {
   isSafeWorkspaceRelativePath,
 } from './paths.ts';
 import {
-  type DatasetManifestFileV1,
   type DatasetManifestV1,
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
@@ -219,13 +218,6 @@ const CompatibleEvalCaseSchema = z
   .object({
     id: CaseIdSchema,
     version: VersionSchema,
-    fixtures: z
-      .array(DatasetPathSchema)
-      .max(50_000)
-      .superRefine((paths, context) =>
-        addDuplicateIssues(paths, context, [], 'path'),
-      )
-      .optional(),
     display_name: TrimmedTextSchema.optional(),
     task: TrimmedTextSchema.optional(),
     initial_prompt: TrimmedTextSchema.optional(),
@@ -285,20 +277,13 @@ const DatasetIdentitySchema = z
   })
   .strict();
 
-const ManifestFileSchema = z
+const ManifestCaseSchema = z
   .object({
-    path: DatasetPathSchema,
-    size: NonnegativeIntegerSchema,
-    sha256: z.string().refine(isSha256Hex, 'must be lowercase SHA-256 hex'),
+    id: AuthoredCaseIdSchema,
+    version: VersionSchema,
+    path: CasePathSchema,
   })
   .strict();
-
-const ManifestCaseSchema = ManifestFileSchema.extend({
-  path: CasePathSchema,
-  id: AuthoredCaseIdSchema,
-  version: VersionSchema,
-  files: z.array(ManifestFileSchema).max(50_000).default([]),
-}).strict();
 
 const DatasetManifestSchema = z
   .object({
@@ -319,32 +304,6 @@ const DatasetManifestSchema = z
       ['cases'],
       'id',
     );
-    const casePaths = new Set(manifest.cases.map(({ path }) => path));
-    const fixtures = new Map<string, { size: number; sha256: string }>();
-    for (const [caseIndex, entry] of manifest.cases.entries()) {
-      addDuplicateIssues(
-        entry.files.map(({ path }) => path),
-        context,
-        ['cases', caseIndex, 'files'],
-        'path',
-      );
-      for (const [fileIndex, file] of entry.files.entries()) {
-        const previous = fixtures.get(file.path);
-        if (
-          casePaths.has(file.path) ||
-          (previous !== undefined &&
-            (previous.size !== file.size || previous.sha256 !== file.sha256))
-        ) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['cases', caseIndex, 'files', fileIndex],
-            message:
-              'fixture files must not be case definitions and must have one size and hash across cases',
-          });
-        }
-        fixtures.set(file.path, file);
-      }
-    }
   });
 
 const ModelRefSchema = z
@@ -889,23 +848,6 @@ export function parseDatasetManifest(value: unknown): DatasetManifestV1 {
     'invalid_manifest',
     'dataset manifest',
   ) as DatasetManifestV1;
-}
-
-/** Every inventoried payload file: case definitions plus their fixtures. */
-export function datasetPayloadFiles(
-  manifest: DatasetManifestV1,
-): DatasetManifestFileV1[] {
-  const files = new Map<string, DatasetManifestFileV1>();
-  for (const {
-    path: casePath,
-    size,
-    sha256,
-    files: fixtures,
-  } of manifest.cases) {
-    files.set(casePath, { path: casePath, size, sha256 });
-    for (const fixture of fixtures) files.set(fixture.path, fixture);
-  }
-  return [...files.values()];
 }
 
 export function parseDatasetManifestJson(source: string): DatasetManifestV1 {

@@ -7,9 +7,7 @@
     {
       "id": "examples/hello-file",
       "version": "0.1.0",
-      "path": "cases/examples/hello-file.case.yaml",
-      "size": 345,
-      "sha256": "7ee418f2bfbbe99ab6865463ef6cb29c4972a7f338fdd8928a6250d003bb38d6"
+      "path": "cases/examples/hello-file.case.yaml"
     }
   ]
 }

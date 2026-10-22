@@ -8,7 +8,7 @@ import {
   resolveRunPlan,
   serializeResolvedRunPlan,
 } from '../planning/planner.ts';
-import { sha256Digest, sha256Hex } from './hashes.ts';
+import { sha256Digest } from './hashes.ts';
 import {
   indexLoadedDatasetCases,
   loadDataset,
@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 describe('benchmark filesystem loaders', () => {
-  it('verifies a complete dataset and loads cases by stable ID', async () => {
+  it('loads cases by stable ID', async () => {
     const fixture = await createDataset();
     const loaded = await loadDataset(fixture.root);
 
@@ -40,52 +40,33 @@ describe('benchmark filesystem loaders', () => {
       loaded.cases.get('smoke/write')?.definition.task,
       'Create greeting.txt',
     );
-    assert.equal('sha256' in loaded.cases.get('smoke/write')!, false);
   });
 
-  it('fails closed for tampered, extra, and symlinked payloads', async () => {
-    const tampered = await createDataset();
-    await fs.appendFile(tampered.casePath, '\n# changed');
-    await assert.rejects(loadDataset(tampered.root), {
+  it('requires the manifest to list exactly the case definitions present', async () => {
+    const missing = await createDataset();
+    await fs.rm(missing.casePath);
+    await assert.rejects(loadDataset(missing.root), {
       code: 'dataset_integrity_mismatch',
+      message: /listed in the manifest but absent/,
     });
 
-    const extra = await createDataset();
-    await fs.writeFile(path.join(extra.root, 'extra.txt'), 'not declared');
-    await assert.rejects(loadDataset(extra.root), {
+    const unlisted = await createDataset();
+    await fs.writeFile(
+      path.join(unlisted.root, 'cases', 'extra.case.yaml'),
+      'id: smoke/extra\n',
+    );
+    await assert.rejects(loadDataset(unlisted.root), {
       code: 'dataset_integrity_mismatch',
+      message: /"cases\/extra.case.yaml" is absent from the manifest/,
     });
+
+    const fixture = await createDataset();
+    await fs.writeFile(path.join(fixture.root, 'fixtures', 'more.txt'), 'm');
+    assert.equal((await loadDataset(fixture.root)).cases.size, 1);
 
     const linked = await createDataset();
     await fs.symlink(linked.casePath, path.join(linked.root, 'linked.yaml'));
     await assert.rejects(loadDataset(linked.root), { code: 'unsafe_path' });
-  });
-
-  it('checks hashes for same-size case and fixture corruption', async () => {
-    const caseFixture = await createDataset();
-    const changedCase = caseFixture.caseYaml.replace(
-      'greeting.txt',
-      'farewell.txt',
-    );
-    assert.equal(
-      Buffer.byteLength(changedCase),
-      Buffer.byteLength(caseFixture.caseYaml),
-    );
-    await fs.writeFile(caseFixture.casePath, changedCase);
-    await assert.rejects(loadDataset(caseFixture.root), {
-      code: 'dataset_integrity_mismatch',
-      message: /declared size or hash/,
-    });
-
-    const inputFixture = await createDataset();
-    await fs.writeFile(
-      path.join(inputFixture.root, 'fixtures', 'seed.txt'),
-      'reed',
-    );
-    await assert.rejects(loadDataset(inputFixture.root), {
-      code: 'dataset_integrity_mismatch',
-      message: /declared size or hash/,
-    });
   });
 
   it('requires the definition ID and version to match the manifest entry, independent of filename', async () => {
@@ -129,129 +110,49 @@ describe('benchmark filesystem loaders', () => {
       code: 'dataset_integrity_mismatch',
       message: /declares smoke\/write@0\.1\.0/,
     });
-    assert.throws(
-      () =>
-        indexLoadedDatasetCases({
-          ...dataset,
-          manifest: {
-            ...dataset.manifest,
-            cases: [{ ...entry!, files: [] }],
-          },
-        }),
-      {
-        code: 'dataset_integrity_mismatch',
-        message: /must exactly match the fixtures it declares/,
-      },
-    );
     assert.equal(indexLoadedDatasetCases(dataset).size, 1);
   });
 
-  it('requires manifest files to match the fixtures each case declares', async () => {
-    // The manifest records a fixture the case does not declare.
-    const undeclared = await createDataset();
+  it('requires case forge/write sources to name a dataset file or directory', async () => {
+    const directory = await createDataset();
     await replaceCasePayload(
-      undeclared,
+      directory,
       Buffer.from(
-        undeclared.caseYaml.replace('fixtures: [fixtures/seed.txt]\n', ''),
+        directory.caseYaml.replace(
+          '{dataset_path: fixtures/seed.txt}',
+          '{dataset_path: fixtures}',
+        ),
       ),
     );
-    await assert.rejects(loadDataset(undeclared.root), {
-      code: 'dataset_integrity_mismatch',
-      message: /manifest files must exactly match the fixtures it declares/,
-    });
+    assert.equal((await loadDataset(directory.root)).cases.size, 1);
 
-    // The case declares a fixture the manifest does not record.
-    const unrecorded = await createDataset();
-    const unrecordedManifest = JSON.parse(
-      unrecorded.manifestRaw,
-    ) as DatasetManifestV1;
-    unrecordedManifest.cases[0]!.files = [];
-    await fs.rm(path.join(unrecorded.root, 'fixtures'), { recursive: true });
-    await fs.writeFile(
-      path.join(unrecorded.root, 'manifest.json'),
-      JSON.stringify(unrecordedManifest),
-    );
-    await assert.rejects(loadDataset(unrecorded.root), {
-      code: 'dataset_integrity_mismatch',
-      message: /manifest files must exactly match the fixtures it declares/,
-    });
+    for (const missingPath of ['fixtures/missing.txt', 'fixtures/seed']) {
+      const missing = await createDataset();
+      await replaceCasePayload(
+        missing,
+        Buffer.from(
+          missing.caseYaml.replace('fixtures/seed.txt}', `${missingPath}}`),
+        ),
+      );
+      await assert.rejects(loadDataset(missing.root), {
+        code: 'dataset_integrity_mismatch',
+        message: new RegExp(`reads "${missingPath}", which is absent`),
+      });
+    }
 
-    // Another case owns the fixture; this case reads it without declaring it.
-    const borrowed = await createDataset();
-    const borrowedManifest = JSON.parse(
-      borrowed.manifestRaw,
-    ) as DatasetManifestV1;
-    const [owner] = borrowedManifest.cases;
-    const ownerYaml = borrowed.caseYaml.replace(
-      'fixtures: [fixtures/seed.txt]\n',
-      '',
-    );
-    await fs.writeFile(borrowed.casePath, ownerYaml);
-    const otherYaml =
-      'id: smoke/other\nversion: 0.1.0\nfixtures: [fixtures/seed.txt]\nexecution_mode: one_shot\ninitial_prompt: Go.\n';
-    await fs.writeFile(
-      path.join(borrowed.root, 'cases', 'other.case.yaml'),
-      otherYaml,
-    );
-    borrowedManifest.cases = [
-      {
-        ...owner!,
-        size: Buffer.byteLength(ownerYaml),
-        sha256: sha256Hex(ownerYaml),
-        files: [],
-      },
-      {
-        id: 'smoke/other',
-        version: '0.1.0',
-        path: 'cases/other.case.yaml',
-        size: Buffer.byteLength(otherYaml),
-        sha256: sha256Hex(otherYaml),
-        files: owner!.files,
-      },
-    ];
-    await fs.writeFile(
-      path.join(borrowed.root, 'manifest.json'),
-      JSON.stringify(borrowedManifest),
-    );
-    await assert.rejects(loadDataset(borrowed.root), {
-      code: 'dataset_integrity_mismatch',
-      message: /smoke\/write reads "fixtures\/seed.txt" without declaring it/,
-    });
-
-    // The case declares the fixture, but forge/write reads a different file.
-    const unread = await createDataset();
-    await fs.writeFile(
-      path.join(unread.root, 'fixtures', 'other.txt'),
-      'other',
-    );
-    const manifest = JSON.parse(unread.manifestRaw) as DatasetManifestV1;
-    manifest.cases[0]!.files.push({
-      path: 'fixtures/other.txt',
-      size: 5,
-      sha256: sha256Hex('other'),
-    });
-    await fs.writeFile(
-      path.join(unread.root, 'manifest.json'),
-      JSON.stringify(manifest),
-    );
-    await replaceCasePayload(
-      { ...unread, manifestRaw: JSON.stringify(manifest) },
-      Buffer.from(
-        unread.caseYaml
-          .replace(
-            'fixtures: [fixtures/seed.txt]',
-            'fixtures: [fixtures/seed.txt, fixtures/other.txt]',
-          )
-          .replace(
-            '{dataset_path: fixtures/seed.txt}',
-            '{dataset_path: fixtures/missing.txt}',
-          ),
-      ),
-    );
-    await assert.rejects(loadDataset(unread.root), {
-      code: 'dataset_integrity_mismatch',
-      message: /reads "fixtures\/missing.txt" without declaring it in fixtures/,
-    });
+    for (const casePath of ['cases/smoke/write/case.yaml', 'cases']) {
+      const exposed = await createDataset();
+      await replaceCasePayload(
+        exposed,
+        Buffer.from(
+          exposed.caseYaml.replace('fixtures/seed.txt}', `${casePath}}`),
+        ),
+      );
+      await assert.rejects(loadDataset(exposed.root), {
+        code: 'dataset_integrity_mismatch',
+        message: /which contains case definitions/,
+      });
+    }
   });
 
   it('rejects duplicate authored IDs across every case', async () => {
@@ -423,9 +324,6 @@ async function appendCase(
     id: manifestId,
     version: '0.1.0',
     path: casePath,
-    size: Buffer.byteLength(body),
-    sha256: sha256Hex(body),
-    files: [],
   });
   await fs.writeFile(manifestPath, JSON.stringify(manifest));
 }
@@ -438,8 +336,6 @@ async function replaceCasePayload(
   const manifest = JSON.parse(fixture.manifestRaw) as DatasetManifestV1;
   const entry = manifest.cases[0]!;
   if (identity.id !== undefined) entry.id = identity.id;
-  entry.size = body.byteLength;
-  entry.sha256 = sha256Hex(body);
   await fs.writeFile(fixture.casePath, body);
   await fs.writeFile(
     path.join(fixture.root, 'manifest.json'),
@@ -459,7 +355,6 @@ async function createDataset(): Promise<{
   const caseYaml = `
 id: smoke/write
 version: 0.1.0
-fixtures: [fixtures/seed.txt]
 execution_mode: one_shot
 task: Create greeting.txt
 setup:
@@ -480,15 +375,6 @@ setup:
         id: 'smoke/write',
         version: '0.1.0',
         path: 'cases/smoke/write/case.yaml',
-        size: Buffer.byteLength(caseYaml),
-        sha256: sha256Hex(caseYaml),
-        files: [
-          {
-            path: 'fixtures/seed.txt',
-            size: Buffer.byteLength(input),
-            sha256: sha256Hex(input),
-          },
-        ],
       },
     ],
   })}\n`;

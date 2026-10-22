@@ -21,7 +21,7 @@ when designing a benchmark.
 | Concept | What it means |
 | --- | --- |
 | Case | One task, its shared setup, interaction mode, checks, and judging criteria. |
-| Dataset | A versioned collection of cases and fixtures, with an exact inventory of their sizes and hashes. |
+| Dataset | A versioned collection of cases and fixtures, with a manifest listing each case's ID, version, and path. |
 | Treatment | Setup applied after case setup, such as installing a plugin. A baseline has no additional setup. |
 | Experiment | A dataset pin, treatments, agents/models, runtime choices, and a matrix of cases to evaluate. |
 | Experiment run | One resumable execution of the selected matrix, with a checkpoint and report. |

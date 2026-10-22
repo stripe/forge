@@ -32,7 +32,6 @@ import {
 
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const SECOND_DIGEST = `sha256:${'d'.repeat(64)}` as const;
-const CASE_DIGEST = `sha256:${'b'.repeat(64)}` as const;
 const BUNDLE_REFERENCE: SetupActionBundleReferenceV1 = {
   namespace: 'acme-evals',
   version: '2026.9.0',
@@ -745,9 +744,6 @@ function planningInputs(
             id: 'testing/action-bundle',
             version: '0.1.0',
             path: 'cases/testing/action-bundle.case.yaml',
-            size: 1,
-            sha256: CASE_DIGEST.slice('sha256:'.length),
-            files: [],
           },
         ],
       },

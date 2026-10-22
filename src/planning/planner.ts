@@ -1,7 +1,6 @@
 import { sha256Digest } from '../model/hashes.ts';
 import { indexLoadedDatasetCases } from '../model/loaders.ts';
 import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
-import { datasetPayloadFiles } from '../model/parse.ts';
 import {
   type AgentSelectionV1,
   type CaseId,
@@ -13,8 +12,6 @@ import {
   type LoadedExperimentConfigV1,
   type ResolvedRunPlanV1,
   type RunSelection,
-  type SetupStepV1,
-  type WriteSetupStepV1,
 } from '../model/types.ts';
 import {
   defaultSetupActionRegistry,
@@ -31,7 +28,6 @@ export type PlanningErrorCode =
   | 'invalid_repetition'
   | 'missing_role_player'
   | 'missing_judge'
-  | 'missing_dataset_input'
   | 'invalid_loaded_dataset'
   | 'action_bundle_mismatch'
   | 'missing_runtime_platform';
@@ -177,7 +173,6 @@ export function resolveRunPlanWithSetupActions(
     );
   }
   const requiredActionBundles = setupActions.requiredActionBundles(setup);
-  assertDatasetInputsExist(setup, dataset);
 
   const initialPromptSource =
     definition.initial_prompt === undefined
@@ -393,28 +388,6 @@ function assertSelection(
       'Run selection does not belong to a single benchmark matrix group.',
     );
   }
-}
-
-function assertDatasetInputsExist(
-  steps: readonly SetupStepV1[],
-  dataset: LoadedDatasetV1,
-): void {
-  const files = datasetPayloadFiles(dataset.manifest).map(({ path }) => path);
-  for (const step of steps) {
-    if (!isWriteSetupStep(step)) continue;
-    const source = step.with.source;
-    if (!('dataset_path' in source)) continue;
-    if (!files.includes(source.dataset_path)) {
-      throw new PlanningError(
-        'missing_dataset_input',
-        'A setup step references an input absent from the dataset manifest.',
-      );
-    }
-  }
-}
-
-function isWriteSetupStep(step: SetupStepV1): step is WriteSetupStepV1 {
-  return step.uses === 'forge/write';
 }
 
 function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {

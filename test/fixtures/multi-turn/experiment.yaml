@@ -4,7 +4,7 @@ dataset:
   path: ./dataset
   id: forge-multi-turn
   version: 0.2.0
-  manifest_sha256: sha256:aed09c01a1d34ccd22f2205ecbf2d5657f4483f50a511c4a85b3be1a3b9e7cb7
+  manifest_sha256: sha256:6cc6c832329c79c6a1948af2805493031792ed007b50ad6862dbcda8289d8b69
 runtime:
   adapter: docker
   image:

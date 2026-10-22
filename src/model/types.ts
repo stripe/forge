@@ -26,17 +26,11 @@ export interface DatasetIdentityV1 {
   version: string;
 }
 
-export interface DatasetManifestFileV1 {
-  path: DatasetRelativePath;
-  size: number;
-  sha256: Sha256Hex;
-}
-
-/** One case definition file, its declared identity, and the fixtures it uses. */
-export interface DatasetManifestCaseV1 extends DatasetManifestFileV1 {
+/** One case definition file and the identity it declares. */
+export interface DatasetManifestCaseV1 {
   id: CaseId;
   version: string;
-  files: DatasetManifestFileV1[];
+  path: DatasetRelativePath;
 }
 
 export interface DatasetManifestV1 {
@@ -159,8 +153,6 @@ export interface JudgingCriterionV1 {
 export interface EvalCaseV1 {
   id: CaseId;
   version: string;
-  /** Dataset files this case's setup reads; its manifest entry records their hashes. */
-  fixtures?: DatasetRelativePath[];
   display_name?: string;
   task?: string;
   initial_prompt?: string;

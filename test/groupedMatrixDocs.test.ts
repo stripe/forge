@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -44,8 +43,6 @@ it('expands the architecture guide grouped matrix into its documented selections
       id: entry.id,
       version: '0.1.0',
       path: entry.path,
-      size: Buffer.byteLength(body),
-      sha256: createHash('sha256').update(body).digest('hex'),
     });
   }
   await writeFile(

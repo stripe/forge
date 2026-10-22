@@ -31,24 +31,15 @@ describe('public benchmark parsing', () => {
       () => parseEvalCase({ id: 'suite/task', task: 'Complete the task.' }),
       /Required/,
     );
-    assert.deepEqual(
-      parseEvalCase({
-        id: 'suite/task',
-        version,
-        fixtures: ['fixtures/a.txt'],
-        task: 'Complete the task.',
-      }).fixtures,
-      ['fixtures/a.txt'],
-    );
     assert.throws(
       () =>
         parseEvalCase({
           id: 'suite/task',
           version,
-          fixtures: ['fixtures/a.txt', 'fixtures/a.txt'],
+          fixtures: ['fixtures/a.txt'],
           task: 'Complete the task.',
         }),
-      /path values must be unique/,
+      /Unrecognized key/,
     );
     for (const id of [
       'Suite/task',
@@ -83,8 +74,6 @@ describe('public benchmark parsing', () => {
           id: 'sample/task',
           version: '0.1.0',
           path: 'cases/sample/task.case.yaml',
-          size: 10,
-          sha256: HASH,
         },
       ],
     };
@@ -839,46 +828,30 @@ treatments:
     );
   });
 
-  it('validates manifest hashes, path inventory, and uniqueness', () => {
+  it('validates manifest case identities, paths, and uniqueness', () => {
     const entry = {
       id: 'smoke/write',
       version: '0.1.0',
       path: 'cases/smoke/write/case.yaml',
-      size: 100,
-      sha256: HASH,
     };
-    const fixture = { path: 'fixtures/seed.txt', size: 4, sha256: HASH };
     const manifest = {
       dataset: { id: 'forge-smoke', version: '2026.09.0' },
       cases: [entry],
     };
-    {
-      const actual = parseDatasetManifestJson(JSON.stringify(manifest));
-      assert.equal(actual.dataset.id, 'forge-smoke');
-      assert.deepEqual(actual.cases[0]!.files, []);
-    }
+    assert.deepEqual(
+      parseDatasetManifestJson(JSON.stringify(manifest)),
+      manifest,
+    );
     const other = {
       ...entry,
       id: 'smoke/other',
       path: 'cases/other.case.yaml',
     };
-    assert.deepEqual(
-      parseDatasetManifestJson(
-        JSON.stringify({
-          ...manifest,
-          cases: [
-            { ...entry, files: [fixture] },
-            { ...other, files: [fixture] },
-          ],
-        }),
-      ).cases.map(({ files }) => files),
-      [[fixture], [fixture]],
-    );
 
     const invalidManifests = [
       { value: { ...manifest, cases: [] }, reason: 'at least 1' },
       {
-        value: { ...manifest, files: [fixture] },
+        value: { ...manifest, files: [] },
         reason: 'Unrecognized key',
       },
       {
@@ -889,13 +862,10 @@ treatments:
         value: { ...manifest, cases: [{ ...entry, version: undefined }] },
         reason: 'Required',
       },
-      {
-        value: {
-          ...manifest,
-          cases: [{ ...entry, sha256: HASH.toUpperCase() }],
-        },
-        reason: 'lowercase SHA-256 hex',
-      },
+      ...['size', 'sha256', 'files'].map((key) => ({
+        value: { ...manifest, cases: [{ ...entry, [key]: 0 }] },
+        reason: 'Unrecognized key',
+      })),
       {
         value: { ...manifest, cases: [entry, { ...other, path: entry.path }] },
         reason: 'path values must be unique',
@@ -903,33 +873,6 @@ treatments:
       {
         value: { ...manifest, cases: [entry, { ...other, id: entry.id }] },
         reason: 'id values must be unique',
-      },
-      {
-        value: {
-          ...manifest,
-          cases: [{ ...entry, files: [fixture, fixture] }],
-        },
-        reason: 'path values must be unique',
-      },
-      {
-        value: {
-          ...manifest,
-          cases: [
-            entry,
-            { ...other, files: [{ ...fixture, path: entry.path }] },
-          ],
-        },
-        reason: 'fixture files must not be case definitions',
-      },
-      {
-        value: {
-          ...manifest,
-          cases: [
-            { ...entry, files: [fixture] },
-            { ...other, files: [{ ...fixture, size: 5 }] },
-          ],
-        },
-        reason: 'one size and hash across cases',
       },
     ];
     for (const casePath of [

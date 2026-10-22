@@ -12,7 +12,7 @@ import { defaultForgeEngine } from '../src/engine.ts';
 import { ForgeExecutionError } from '../src/execution/errors.ts';
 import { executeEvalWithTestHooks } from '../src/execution/execute.ts';
 import { parseExperimentRunReport } from '../src/experiment.ts';
-import { sha256Digest, sha256Hex } from '../src/model/hashes.ts';
+import { sha256Digest } from '../src/model/hashes.ts';
 import { parseExperimentConfigYaml } from '../src/model/parse.ts';
 import type { DatasetManifestV1, RunSelection } from '../src/model/types.ts';
 import {
@@ -1253,18 +1253,9 @@ describe('resumable CLI experiment runs', () => {
       'execution_mode: multi_turn\ntask: Complete the task',
     );
     await fs.writeFile(path.join(dataset, relative), body);
-    const manifest = JSON.parse(
-      await fs.readFile(path.join(dataset, 'manifest.json'), 'utf8'),
-    ) as DatasetManifestV1;
-    const file = manifest.cases.find((entry) => entry.path === relative)!;
-    file.size = Buffer.byteLength(body);
-    file.sha256 = sha256Hex(body);
-    const raw = `${JSON.stringify(manifest)}\n`;
-    await fs.writeFile(path.join(dataset, 'manifest.json'), raw);
     const config = parseExperimentConfigYaml(
       await fs.readFile(fixture.experiment, 'utf8'),
     );
-    config.dataset.manifest_sha256 = sha256Digest(raw);
     config.matrix.repetitions = 1;
     config.models.role_player = {
       provider: 'scripted',
@@ -1464,9 +1455,6 @@ async function createFixture(
       id: 'examples/other-file',
       version: '0.1.0',
       path: relative,
-      size: Buffer.byteLength(body),
-      sha256: sha256Hex(body),
-      files: [],
     });
     const raw = `${JSON.stringify(manifest)}\n`;
     await fs.writeFile(path.join(dataset, 'manifest.json'), raw);

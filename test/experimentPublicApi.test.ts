@@ -28,14 +28,11 @@ import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
 
 describe('experiment public entry points', () => {
-  it('exports versioned dataset case entries with their file paths', () => {
+  it('exports versioned dataset case entries with their paths', () => {
     const entry: root.DatasetManifestCaseV1 = {
       id: 'first',
       version: '0.1.0',
       path: 'cases/first.case.yaml',
-      size: 1,
-      sha256: 'a'.repeat(64),
-      files: [],
     };
     const manifest: root.DatasetManifestV1 = {
       dataset: { id: 'public-api', version: '1.0.0' },
