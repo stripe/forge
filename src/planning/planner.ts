@@ -7,6 +7,7 @@ import {
   type DatasetRelativePath,
   DEFAULT_MAX_TURNS,
   type ExperimentConfigV1,
+  type ExperimentMatrixGroupV1,
   type ForgeDockerRuntimeV1,
   type LoadedDatasetV1,
   type LoadedExperimentConfigV1,
@@ -80,6 +81,7 @@ export function expandExperiment(
             repetition += 1
           ) {
             selections.push({
+              ...(group.id === undefined ? {} : { group_id: group.id }),
               case_id: caseId,
               treatment,
               agent: resolveAgentSelection(agent),
@@ -119,7 +121,7 @@ export function resolveRunPlanWithSetupActions(
   const casePath = [...caseIdsByPath].find(
     ([, id]) => id === selection.case_id,
   )?.[0];
-  assertSelection(config, selection, casePath);
+  const group = assertSelection(config, selection, casePath);
 
   const loadedCase = dataset.cases.get(selection.case_id);
   if (!loadedCase) {
@@ -194,6 +196,7 @@ export function resolveRunPlanWithSetupActions(
   const plan: ResolvedRunPlanV1 = {
     selection: {
       ...cloneJson(selection),
+      ...(group.id === undefined ? {} : { group_id: group.id }),
       agent: resolveAgentSelection(selection.agent),
     },
     provenance: {
@@ -342,7 +345,7 @@ function assertSelection(
   config: ExperimentConfigV1,
   selection: RunSelection,
   casePath: DatasetRelativePath | undefined,
-): void {
+): ExperimentMatrixGroupV1 {
   const groups = getMatrixGroups(config.matrix);
   if (
     casePath === undefined ||
@@ -379,19 +382,25 @@ function assertSelection(
       'Run selection repetition is outside the benchmark matrix.',
     );
   }
-  if (
-    !groups.some(
-      (group) =>
-        group.cases.includes(casePath) &&
-        group.treatments.includes(selection.treatment) &&
-        group.agents.some((agent) => agentsEqual(agent, selection.agent)),
-    )
-  ) {
+  const group = groups.find(
+    (group) =>
+      group.cases.includes(casePath) &&
+      group.treatments.includes(selection.treatment) &&
+      group.agents.some((agent) => agentsEqual(agent, selection.agent)),
+  );
+  if (group === undefined) {
     throw new PlanningError(
       'invalid_selection',
       'Run selection does not belong to a single benchmark matrix group.',
     );
   }
+  if (selection.group_id !== undefined && selection.group_id !== group.id) {
+    throw new PlanningError(
+      'invalid_selection',
+      'Run selection group ID does not match its benchmark matrix group.',
+    );
+  }
+  return group;
 }
 
 function assertDatasetInputsExist(

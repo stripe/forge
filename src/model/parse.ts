@@ -335,6 +335,7 @@ const AgentSelectionSchema = ModelRefSchema.extend({
 
 const RunSelectionSchema = z
   .object({
+    group_id: SimpleIdentifierSchema.optional(),
     case_id: CaseIdSchema,
     treatment: SimpleIdentifierSchema,
     agent: AgentSelectionSchema,
@@ -445,7 +446,7 @@ function assertRuntimeConfigBytes(value: unknown): void {
   }
 }
 
-const ExperimentMatrixGroupSchema = z
+const ExperimentMatrixAxesSchema = z
   .object({
     cases: z.array(CasePathSchema).min(1).max(10_000),
     treatments: z.array(z.string()).min(1).max(1_000),
@@ -453,12 +454,16 @@ const ExperimentMatrixGroupSchema = z
   })
   .strict();
 
+const ExperimentMatrixGroupSchema = ExperimentMatrixAxesSchema.extend({
+  id: SimpleIdentifierSchema.optional(),
+}).strict();
+
 const MatrixRunPolicySchema = {
   repetitions: PositiveIntegerSchema.max(10_000).default(1),
   retries: NonnegativeIntegerSchema.max(100).default(0),
 };
 
-const FlatExperimentMatrixSchema = ExperimentMatrixGroupSchema.extend(
+const FlatExperimentMatrixSchema = ExperimentMatrixAxesSchema.extend(
   MatrixRunPolicySchema,
 ).strict();
 const GroupedExperimentMatrixSchema = z
@@ -545,6 +550,20 @@ const ExperimentConfigSchema = z
     const matrix = config.matrix;
     const grouped = 'groups' in matrix;
     const groups = 'groups' in matrix ? matrix.groups : [matrix];
+    if (grouped) {
+      const ids = new Set<string>();
+      for (const [index, group] of matrix.groups.entries()) {
+        if (group.id === undefined) continue;
+        if (ids.has(group.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['matrix', 'groups', index, 'id'],
+            message: 'matrix group IDs must be unique',
+          });
+        }
+        ids.add(group.id);
+      }
+    }
     const treatmentNames = new Set([
       'baseline',
       ...Object.keys(config.treatments),

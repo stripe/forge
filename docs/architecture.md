@@ -201,7 +201,8 @@ matrix:
   repetitions: 2
   retries: 0
   groups:
-    - cases:
+    - id: payment
+      cases:
         - cases/examples/payment.case.yaml
       treatments:
         - baseline
@@ -213,7 +214,8 @@ matrix:
         - adapter: claude-code
           provider: anthropic
           model: claude-opus-4-6
-    - cases:
+    - id: marketplace
+      cases:
         - cases/examples/marketplace/case.yaml
       treatments:
         - baseline
@@ -236,10 +238,22 @@ authored order:
 group → case → treatment → agent → repetition
 ```
 
-The flat form behaves as one group. Groups flatten into ordinary selections;
-group identity does not enter plans, checkpoints, or reports. Membership checks
-require the complete case/treatment/agent tuple to coexist in one group, which
-prevents combinations from crossing group boundaries.
+The flat form behaves as one unnamed group. Explicit groups may declare an
+optional `id`, unique within the experiment and matching
+`[a-z0-9][a-z0-9._-]*` with at most 128 characters. Flat matrices do not accept
+`id`. Unnamed groups retain their existing selection format; no positional ID
+is generated. Distinct group IDs do not permit duplicate resolved combinations.
+
+Named groups retain their ID as `selection.group_id` in plans, results,
+checkpoints, and report run rows. Membership checks require the complete
+case/treatment/agent tuple to coexist in one group and any supplied group ID
+to match it. Planning fills an omitted ID from the matching group. Adding,
+removing, or renaming a group ID changes its plan digests and prevents resume
+against the original saved plans.
+
+The CLI's `--group <id>` selector intersects with other filters; unknown group
+IDs and empty intersections are errors. Resume uses the saved selections and
+rejects new selectors, including `--group`.
 
 The experiment-level `retries` value is experiment run policy and does not
 create a new semantic selection. `executeEval` executes one resolved plan once;

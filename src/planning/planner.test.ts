@@ -25,6 +25,55 @@ const CASE_B_PATH = 'cases/case-b.case.yaml';
 const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
 describe('experiment expansion and run planning', () => {
+  it('binds named groups to selections and plan identity without using array position', () => {
+    const config = experimentConfig();
+    const axes = getMatrixGroups(config.matrix)[0]!;
+    const experiment = experimentConfig({
+      matrix: {
+        groups: [{ ...axes, id: 'comparison' }],
+        repetitions: 1,
+        retries: 0,
+      },
+    });
+    const loaded = inputs({ experiment });
+    const selected = expandExperiment(experiment, loaded.dataset)[0]!;
+    assert.equal(selected.group_id, 'comparison');
+    const plan = resolveRunPlan({ ...loaded, selection: selected });
+    assert.equal(plan.selection.group_id, 'comparison');
+    const { group_id: _, ...unnamed } = selected;
+    assert.deepEqual(resolveRunPlan({ ...loaded, selection: unnamed }), plan);
+    assert.throws(
+      () =>
+        resolveRunPlan({
+          ...loaded,
+          selection: { ...selected, group_id: 'wrong' },
+        }),
+      /group ID does not match/,
+    );
+    const renamed = inputs({
+      experiment: {
+        ...experiment,
+        matrix: {
+          repetitions: 1,
+          retries: 0,
+          groups: [{ ...axes, id: 'renamed' }],
+        },
+      },
+    });
+    assert.notEqual(
+      resolvedRunPlanSha256(resolveRunPlan({ ...renamed, selection: unnamed })),
+      resolvedRunPlanSha256(plan),
+    );
+    assert.throws(
+      () =>
+        resolveRunPlan({
+          ...inputs({ experiment: config }),
+          selection: selected,
+        }),
+      /group ID does not match/,
+    );
+  });
+
   it('resolves authored file paths to stable case IDs while preserving manifest paths in plans', () => {
     const experiment = experimentConfig({
       matrix: {
