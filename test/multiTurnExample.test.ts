@@ -23,9 +23,12 @@ describe('multi-turn fixture', () => {
       loadExperimentConfig(experimentPath),
     ]);
 
-    assert.equal(
-      dataset.manifestSha256,
-      experiment.config.dataset.manifest_sha256,
+    assert.deepEqual(
+      {
+        id: experiment.config.dataset.id,
+        version: experiment.config.dataset.version,
+      },
+      dataset.manifest.dataset,
     );
     assert.deepEqual(
       dataset.manifest.cases.map(({ path }) => path),

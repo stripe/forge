@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -531,7 +530,6 @@ async function createFixture(root, platform, specs, liveAgent) {
       dataset: {
         ...manifest.dataset,
         path: './dataset',
-        manifest_sha256: `sha256:${sha256(manifestBody)}`,
       },
       runtime: {
         adapter: 'docker',
@@ -565,8 +563,4 @@ async function createFixture(root, platform, specs, liveAgent) {
     dataset: await engine.loadDataset(datasetRoot),
     experiment: await engine.loadExperimentConfig(experimentPath),
   };
-}
-
-function sha256(body) {
-  return createHash('sha256').update(body).digest('hex');
 }

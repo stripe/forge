@@ -493,9 +493,6 @@ const ExperimentConfigSchema = z
           'must be a non-empty dataset location without NUL bytes',
         )
         .optional(),
-      manifest_sha256: z
-        .string()
-        .refine(isSha256Digest, 'must be a sha256: digest'),
     }).strict(),
     forge: AuthoredForgeSchema.optional(),
     runtime: RuntimeSchema,
@@ -634,11 +631,7 @@ const ResolvedRunPlanSchema = z
     selection: RunSelectionSchema,
     provenance: z
       .object({
-        dataset: DatasetIdentitySchema.extend({
-          manifest_sha256: z
-            .string()
-            .refine(isSha256Digest, 'must be a sha256: digest'),
-        }).strict(),
+        dataset: DatasetIdentitySchema,
         experiment: z
           .object({
             id: CaseIdSchema,

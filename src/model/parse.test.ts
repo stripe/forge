@@ -12,8 +12,6 @@ import {
   parseSetupStep,
 } from './parse.ts';
 
-const HASH = 'a'.repeat(64);
-
 describe('public benchmark parsing', () => {
   it('requires an explicit lowercase kebab-case authored identity and version', () => {
     const version = '0.1.0';
@@ -104,6 +102,16 @@ describe('public benchmark parsing', () => {
           `schema_version: 1\n${experimentConfigYaml()}`,
         ),
       BenchmarkModelError,
+    );
+    assert.throws(
+      () =>
+        parseExperimentConfigYaml(
+          experimentConfigYaml().replace(
+            '  version: 2026.09.0\nruntime:',
+            `  version: 2026.09.0\n  manifest_sha256: sha256:${'a'.repeat(64)}\nruntime:`,
+          ),
+        ),
+      /Unrecognized key.*manifest_sha256/,
     );
   });
 
@@ -913,7 +921,6 @@ version: 2026.09.0
 dataset:
   id: forge-smoke
   version: 2026.09.0
-  manifest_sha256: sha256:${HASH}
 runtime:
   adapter: docker
   image: {kind: forge}

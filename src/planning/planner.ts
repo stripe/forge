@@ -193,10 +193,7 @@ export function resolveRunPlanWithSetupActions(
       agent: resolveAgentSelection(selection.agent),
     },
     provenance: {
-      dataset: {
-        ...cloneJson(dataset.manifest.dataset),
-        manifest_sha256: dataset.manifestSha256,
-      },
+      dataset: cloneJson(dataset.manifest.dataset),
       experiment: {
         id: config.id,
         version: config.version,
@@ -312,8 +309,7 @@ function assertDatasetCompatibility(
   }
   if (
     dataset.manifest.dataset.id !== config.dataset.id ||
-    dataset.manifest.dataset.version !== config.dataset.version ||
-    dataset.manifestSha256 !== config.dataset.manifest_sha256
+    dataset.manifest.dataset.version !== config.dataset.version
   ) {
     throw new PlanningError(
       'dataset_experiment_mismatch',

@@ -14,11 +14,7 @@ import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import { FORGE_VERSION, ForgeExecutionError } from './execution/index.ts';
-import {
-  parseExperimentConfigYaml,
-  type SetupStepV1,
-  sha256Digest,
-} from './model/index.ts';
+import { parseExperimentConfigYaml, type SetupStepV1 } from './model/index.ts';
 import { serializeResolvedRunPlan } from './planning/index.ts';
 import { type CompletedRunV1, createArtifactStore } from './results/index.ts';
 import { defineSetupActionBundle } from './setup/index.ts';
@@ -1936,7 +1932,6 @@ dataset:
   path: ../dataset
   id: example-dataset
   version: 2026.09.0
-  manifest_sha256: ${sha256Digest(manifestRaw)}
 runtime:
   adapter: docker
   image: {kind: forge}

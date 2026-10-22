@@ -40,9 +40,12 @@ describe('sample dataset release', () => {
         },
       ],
     );
-    assert.equal(
-      dataset.manifestSha256,
-      experiment.config.dataset.manifest_sha256,
+    assert.deepEqual(
+      {
+        id: experiment.config.dataset.id,
+        version: experiment.config.dataset.version,
+      },
+      dataset.manifest.dataset,
     );
 
     const selections = expandExperiment(experiment, dataset);

@@ -250,7 +250,6 @@ export interface ExperimentConfigV1 {
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {
-    manifest_sha256: Sha256Digest;
     /** CLI dataset location, relative to the experiment file; not run semantics. */
     path?: string;
   };
@@ -277,7 +276,6 @@ export interface LoadedDatasetV1 {
   root: string;
   manifestPath: string;
   manifestRaw: string;
-  manifestSha256: Sha256Digest;
   manifest: DatasetManifestV1;
   cases: ReadonlyMap<CaseId, LoadedEvalCaseV1>;
 }
@@ -302,7 +300,7 @@ export type InitialPromptSourceV1 = 'case.task' | 'case.initial_prompt';
 export interface ResolvedRunPlanV1 {
   selection: RunSelection;
   provenance: {
-    dataset: DatasetIdentityV1 & { manifest_sha256: Sha256Digest };
+    dataset: DatasetIdentityV1;
     experiment: {
       id: string;
       version: string;

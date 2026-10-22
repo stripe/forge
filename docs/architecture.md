@@ -168,18 +168,19 @@ Case and dataset versions are independent labels. Change the dataset
 Forge records the case version in resolved plans through the case
 definition; it does not compare versions at load time.
 
-Forge does not hash case definitions or fixtures. The experiment pins the
-dataset ID, version, and digest of the raw manifest bytes, which identify the
-dataset and its case versions. Each resolved plan embeds the full case
-definition, so `plan.json` and the experiment checkpoint bind the case
-content that ran; fixture bytes are not recorded. Hosts that need content
-integrity must govern it outside Forge, for example by requiring a case
-version change for every case or fixture edit.
+Forge does not hash the manifest, case definitions, or fixtures. The
+experiment pins only the dataset ID and version, so the dataset version is the
+identity of its case set and must change with it. Each resolved plan embeds
+the full case definition, so `plan.json` and the experiment checkpoint bind
+the case content that ran; fixture bytes are not recorded. Hosts that need
+content integrity must govern it outside Forge, for example by requiring a
+case version change for every case or fixture edit.
 
 The optional `dataset.path` locates the manifest for the CLI, relative to the
 experiment file. Programmatic hosts can continue supplying a loaded dataset
 directly; the location is excluded from resolved plans and execution
-semantics. Planning refuses to combine a loaded dataset with a different pin.
+semantics. Planning refuses to combine a loaded dataset with a different ID
+or version.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
 access to dataset payloads.
 
@@ -361,7 +362,7 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
   host-supplied platform selection; and
-- records the dataset manifest pin, experiment and case identities, installed
+- records the dataset, experiment, and case identities, installed
   Forge package, and action-bundle implementation pins.
 
 Plans use canonical JSON with recursively sorted object keys and retained array

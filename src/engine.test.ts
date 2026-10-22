@@ -736,7 +736,6 @@ function planningInputs(
       root: '/dataset',
       manifestPath: '/dataset/manifest.json',
       manifestRaw: '{}',
-      manifestSha256: DIGEST,
       manifest: {
         dataset: { id: 'testing', version: '1.0.0' },
         cases: [
@@ -773,7 +772,6 @@ function experimentValue() {
     dataset: {
       id: 'testing',
       version: '1.0.0',
-      manifest_sha256: DIGEST,
     },
     forge: {
       action_bundles: [{ ...BUNDLE_REFERENCE }],

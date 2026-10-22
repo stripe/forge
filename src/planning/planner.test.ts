@@ -22,8 +22,6 @@ import {
 const CASE_A_PATH = 'cases/case/a/case.yaml';
 const CASE_B_PATH = 'cases/case-b.case.yaml';
 
-const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
-
 describe('experiment expansion and run planning', () => {
   it('resolves authored file paths to stable case IDs while preserving manifest paths in plans', () => {
     const experiment = experimentConfig({
@@ -601,7 +599,7 @@ describe('experiment expansion and run planning', () => {
     {
       const actual = plan.provenance;
       assert.ok(actual);
-      assert.equal(actual.dataset.manifest_sha256, MANIFEST_DIGEST);
+      assert.deepEqual(actual.dataset, { id: 'dataset', version: '2026.09.0' });
       assert.equal(actual.experiment.id, 'experiment/default');
       assert.equal(actual.experiment.version, '2026.09.0');
       assert.equal(actual.case.id, 'case/a');
@@ -853,7 +851,6 @@ describe('experiment expansion and run planning', () => {
     for (const changed of [
       { id: 'other-dataset' },
       { version: 'other-version' },
-      { manifest_sha256: `sha256:${'0'.repeat(64)}` as const },
     ]) {
       assert.throws(
         () =>
@@ -1007,7 +1004,6 @@ function experimentConfig(
     dataset: {
       id: 'dataset',
       version: '2026.09.0',
-      manifest_sha256: MANIFEST_DIGEST,
     },
     runtime: {
       adapter: 'docker',
@@ -1064,7 +1060,6 @@ function inputs(
       root: '/dataset',
       manifestPath: '/dataset/manifest.json',
       manifestRaw: '{}',
-      manifestSha256: MANIFEST_DIGEST,
       manifest: {
         dataset: { id: 'dataset', version: '2026.09.0' },
         cases: [

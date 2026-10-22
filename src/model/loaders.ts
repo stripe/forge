@@ -6,7 +6,6 @@ import {
   type SetupActionRegistry,
 } from '../setup/registry.ts';
 import { BenchmarkModelError } from './errors.ts';
-import { sha256Digest } from './hashes.ts';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
@@ -54,7 +53,6 @@ export async function loadDatasetWithSetupActions(
     MAX_DATASET_MANIFEST_BYTES,
     'Dataset manifest',
   );
-  const manifestSha256 = sha256Digest(manifestBytes);
   const manifestRaw = decodeDocument(manifestBytes, 'Dataset manifest');
   const manifest = parseDatasetManifestJson(manifestRaw);
 
@@ -114,7 +112,6 @@ export async function loadDatasetWithSetupActions(
     root,
     manifestPath,
     manifestRaw,
-    manifestSha256,
     manifest,
     cases,
   };

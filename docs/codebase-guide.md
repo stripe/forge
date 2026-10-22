@@ -43,7 +43,7 @@ pnpm test path/to/file.test.ts
 without changing files. Use `pnpm lint:fix` to apply safe fixes, or `pnpm format`
 to format only. The [Biome configuration](https://github.com/stripe/forge/blob/main/biome.json)
 excludes dataset releases, test fixtures, and packaged Docker assets so their
-pinned bytes are not rewritten.
+bytes are not rewritten.
 
 `pnpm check` runs Biome, type checking, tests, build, dataset validation,
 documentation validation, and package checks. PRs targeting `main`, including drafts, run the
@@ -825,7 +825,7 @@ Usually touch:
 4. `execution` or the relevant subsystem that consumes it;
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
-7. adjacent tests, affected dataset snapshots and eval fixtures, experiment manifest pins,
+7. adjacent tests, affected dataset snapshots and eval fixtures, experiment dataset versions,
    and the architecture guide's [data model](architecture.md#the-benchmark-data-model).
 
 Do not let runtime code infer a new default. Materialize it during parsing or

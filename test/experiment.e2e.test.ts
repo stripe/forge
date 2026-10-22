@@ -1458,7 +1458,6 @@ async function createFixture(
     });
     const raw = `${JSON.stringify(manifest)}\n`;
     await fs.writeFile(path.join(dataset, 'manifest.json'), raw);
-    config.dataset.manifest_sha256 = sha256Digest(raw);
     config.matrix.cases.push(relative);
   }
   await fs.writeFile(experiment, JSON.stringify(config));

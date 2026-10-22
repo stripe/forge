@@ -8,7 +8,6 @@ import {
   resolveRunPlan,
   serializeResolvedRunPlan,
 } from '../planning/planner.ts';
-import { sha256Digest } from './hashes.ts';
 import {
   indexLoadedDatasetCases,
   loadDataset,
@@ -35,7 +34,7 @@ describe('benchmark filesystem loaders', () => {
     const fixture = await createDataset();
     const loaded = await loadDataset(fixture.root);
 
-    assert.equal(loaded.manifestSha256, sha256Digest(fixture.manifestRaw));
+    assert.equal(loaded.manifestRaw, fixture.manifestRaw);
     assert.equal(
       loaded.cases.get('smoke/write')?.definition.task,
       'Create greeting.txt',
@@ -213,7 +212,7 @@ describe('benchmark filesystem loaders', () => {
     const root = await temporaryDirectory();
     const target = path.join(root, 'experiment.yaml');
     const link = path.join(root, 'linked.yaml');
-    await fs.writeFile(target, experimentConfigYaml('a'.repeat(64)));
+    await fs.writeFile(target, experimentConfigYaml());
     await fs.symlink(target, link);
     await assert.rejects(loadExperimentConfig(link), { code: 'unsafe_path' });
     await assert.rejects(
@@ -225,7 +224,7 @@ describe('benchmark filesystem loaders', () => {
   it('loads an experiment config without an unused source digest', async () => {
     const root = await temporaryDirectory();
     const experimentPath = path.join(root, 'default.yaml');
-    const raw = experimentConfigYaml('a'.repeat(64));
+    const raw = experimentConfigYaml();
     await fs.writeFile(experimentPath, raw);
 
     const loaded = await loadExperimentConfig(experimentPath);
@@ -241,10 +240,7 @@ describe('benchmark filesystem loaders', () => {
       await temporaryDirectory(),
       'experiment.yaml',
     );
-    await fs.writeFile(
-      experimentPath,
-      experimentConfigYaml(dataset.manifestSha256.slice(7)),
-    );
+    await fs.writeFile(experimentPath, experimentConfigYaml());
     const original = await loadExperimentConfig(experimentPath);
     await fs.appendFile(
       experimentPath,
@@ -280,7 +276,7 @@ describe('benchmark filesystem loaders', () => {
     await fs.writeFile(
       experimentPath,
       Buffer.concat([
-        Buffer.from(`${experimentConfigYaml('a'.repeat(64))}\n# `),
+        Buffer.from(`${experimentConfigYaml()}\n# `),
         Buffer.from([0x80]),
         Buffer.from('\n'),
       ]),
@@ -388,14 +384,13 @@ async function temporaryDirectory(): Promise<string> {
   return root;
 }
 
-function experimentConfigYaml(manifestHash: string): string {
+function experimentConfigYaml(): string {
   return `
 id: forge-smoke
 version: 2026.09.0
 dataset:
   id: forge-smoke
   version: 2026.09.0
-  manifest_sha256: sha256:${manifestHash}
 runtime:
   adapter: docker
   image: {kind: forge}

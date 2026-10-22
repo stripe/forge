@@ -25,7 +25,7 @@ experiment sit outside the dataset tree, because every file inside it is
 dataset payload.
 
 The [baseline experiment](experiment.yaml) points at the dataset with
-`dataset.path` and pins the dataset identity and raw manifest digest. It
+`dataset.path` and pins the dataset ID and version. It
 selects this case once with Claude Code and Sonnet 4.6, using public Anthropic
 models for Ava and judging. Runtime and model choices belong to the experiment
 rather than the dataset.
@@ -59,6 +59,6 @@ Forge prints the experiment run identity and artifact locations.
 
 A case uses fixtures through the `dataset_path` sources of its `forge/write`
 setup. When a case version changes or a case is added or removed, update the
-manifest, bump the dataset version, and update the experiment's dataset version
-and manifest digest. From a Forge checkout, `pnpm check:cases` fails if the
+manifest, bump the dataset version, and update the experiment's dataset
+version. From a Forge checkout, `pnpm check:cases` fails if the
 dataset version bump is missing.

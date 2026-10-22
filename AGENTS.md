@@ -165,8 +165,9 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   serialization, tests, and public documentation together.
 - When adding or changing an entry point, update `package.json`, root and
   subpath export tests, the package smoke test, and `docs/architecture.md`.
-- When changing checked-in dataset manifests, update dependent
-  `manifest_sha256` pins in experiment configs, plus mirrored README snippets.
+- When changing case versions or membership in a checked-in dataset manifest,
+  bump the manifest's dataset version and the `dataset.version` of dependent
+  experiment configs, plus mirrored README snippets.
 - When changing packaged Docker assets or tool pins, update their recorded
   digests, runtime metadata, and tests.
 - Keep ATIF changes tied to a specific upstream version and update provenance,

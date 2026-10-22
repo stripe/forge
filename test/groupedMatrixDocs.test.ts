@@ -60,7 +60,6 @@ version: 0.1.0
 dataset:
   id: grouped-matrix-docs
   version: 0.1.0
-  manifest_sha256: ${dataset.manifestSha256}
 runtime:
   adapter: docker
   image:

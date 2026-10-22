@@ -41,7 +41,6 @@ import {
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
 const RAW_NATIVE_SESSION = `{"type":"system","credential":"${SECRET}"}\n`;
-const DIGEST_A = `sha256:${'a'.repeat(64)}` as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -1321,7 +1320,7 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       repetition: 0,
     },
     provenance: {
-      dataset: { id: 'sample', version: '1', manifest_sha256: DIGEST_A },
+      dataset: { id: 'sample', version: '1' },
       experiment: { id: 'local', version: '1' },
       case: { id: 'sample/case', path: 'cases/case.yaml' },
       forge: { ...FORGE_BUILD_IDENTITY },
