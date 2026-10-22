@@ -216,14 +216,18 @@ export type ForgeRuntimeConfigV1 =
   | ForgeExternalRuntimeV1;
 
 /** One authored Cartesian product; selections never cross group boundaries. */
-export interface ExperimentMatrixGroupV1 {
+interface ExperimentMatrixAxesV1 {
   /** Manifest-listed case YAML paths, relative to the dataset root. */
   cases: DatasetRelativePath[];
   treatments: TreatmentId[];
   agents: AgentSelectionV1[];
 }
 
-export interface FlatExperimentMatrixV1 extends ExperimentMatrixGroupV1 {
+export interface ExperimentMatrixGroupV1 extends ExperimentMatrixAxesV1 {
+  id?: string;
+}
+
+export interface FlatExperimentMatrixV1 extends ExperimentMatrixAxesV1 {
   groups?: never;
   /** Number of independent samples; selections use a zero-based index. */
   repetitions: number;
@@ -290,6 +294,7 @@ export interface LoadedExperimentConfigV1 {
 }
 
 export interface RunSelection {
+  group_id?: string;
   case_id: CaseId;
   treatment: TreatmentId;
   agent: AgentSelectionV1;

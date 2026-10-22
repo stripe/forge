@@ -234,6 +234,7 @@ select existing combinations; `plan` requires exactly one match:
 --treatment <treatment-id>        --agent <adapter-id>
 --provider <provider-id>          --model <model-id>
 --repetition <zero-based-index>
+--group <group-id>
 ```
 
 `--case` and `--case-file` are mutually exclusive. For example:
@@ -243,6 +244,13 @@ npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
   --case stripe-integration-public-evals/payments-onetime --treatment baseline --agent claude-code
 ```
+
+Groups may declare a unique optional `id`; see the
+[grouped matrix contract](docs/architecture.md#matrix-expansion-and-selection).
+Use `--group <id>` to select that group's combinations, intersected with any
+other filters. Unknown IDs and filters matching no combinations are errors.
+Plans, results, checkpoints, and report run rows retain `selection.group_id`
+for named groups. Omit `--group` on resume; the saved group scope is restored.
 
 `--run-id` names an **eval run** and requires one matching selection. Omit it
 for an automatically generated ID. Experiment runs receive their own IDs.

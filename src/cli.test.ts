@@ -65,6 +65,98 @@ afterEach(async () => {
 });
 
 describe('Forge CLI', () => {
+  it('targets named groups, intersects selectors, and preserves saved group identity on resume', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    assert.ok(config.matrix.groups !== undefined);
+    config.matrix.groups[0]!.id = 'sonnet';
+    config.matrix.groups[1]!.id = 'opus';
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    const output = path.join(fixture.root, 'group-results');
+    let stdout = '';
+    let stderr = '';
+    let executed = 0;
+    const options: RunCliOptions = {
+      environment: {},
+      experimentRunIdFactory: () => 'group-run',
+      runIdFactory: () => 'group-eval',
+      stdout: (text) => {
+        stdout += text;
+      },
+      stderr: (text) => {
+        stderr += text;
+      },
+      execute: async (input) => {
+        executed += 1;
+        assert.equal(input.plan.selection.group_id, 'opus');
+        assert.equal(input.plan.selection.treatment, 'enhanced');
+        return executeOffline(input);
+      },
+    };
+    const base = ['--experiment', fixture.experimentPath, '--output', output];
+    assert.equal(
+      await runCli(
+        ['run', ...base, '--group', 'opus', '--treatment', 'enhanced'],
+        options,
+      ),
+      0,
+      stderr,
+    );
+    const checkpoint = JSON.parse(
+      await fs.readFile(
+        path.join(output, 'experiments/group-run/experiment.json'),
+        'utf8',
+      ),
+    );
+    const report = JSON.parse(
+      await fs.readFile(
+        path.join(output, 'experiments/group-run/report.json'),
+        'utf8',
+      ),
+    );
+    assert.equal(checkpoint.entries[0].selection.group_id, 'opus');
+    assert.equal(report.runs[0].selection.group_id, 'opus');
+    assert.equal(report.runs.length, 1);
+    assert.equal(
+      await runCli(['run', ...base, '--resume', 'group-run'], options),
+      0,
+      stderr,
+    );
+    assert.equal(executed, 1);
+    for (const selectors of [
+      ['--group', 'missing'],
+      ['--group', 'sonnet', '--treatment', 'enhanced'],
+    ]) {
+      assert.equal(await runCli(['run', ...base, ...selectors], options), 2);
+    }
+    assert.equal(
+      await runCli(
+        ['run', ...base, '--resume', 'group-run', '--group', 'sonnet'],
+        options,
+      ),
+      2,
+    );
+    stdout = '';
+    assert.equal(
+      await runCli(
+        ['plan', '--experiment', fixture.experimentPath, '--group', 'sonnet'],
+        options,
+      ),
+      0,
+      stderr,
+    );
+    assert.equal(JSON.parse(stdout).selection.group_id, 'sonnet');
+    config.matrix.groups[1]!.id = 'renamed';
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    assert.equal(
+      await runCli(['run', ...base, '--resume', 'group-run'], options),
+      1,
+    );
+    assert.equal(executed, 1);
+  });
+
   it('reports the installed package version', async () => {
     let stdout = '';
     const exitCode = await runCli(['--version'], {

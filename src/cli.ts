@@ -23,6 +23,7 @@ import {
   type DatasetManifestV1,
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
+  getMatrixGroups,
   type LoadedDatasetV1,
   parseRunSelection,
   type RunSelection,
@@ -59,6 +60,7 @@ const HOST_CLI_OPTIONS = {
   case: { type: 'string' },
   'case-file': { type: 'string' },
   treatment: { type: 'string' },
+  group: { type: 'string' },
   agent: { type: 'string' },
   provider: { type: 'string' },
   model: { type: 'string' },
@@ -76,6 +78,7 @@ const SELECTOR_OPTIONS: readonly (keyof typeof HOST_CLI_OPTIONS)[] = [
   'case',
   'case-file',
   'treatment',
+  'group',
   'agent',
   'provider',
   'model',
@@ -92,6 +95,7 @@ Selection options:
   --case <id>          Select an eval case
   --case-file <file>   Select a manifest-listed case within the configured dataset
   --treatment <id>     Select a treatment
+  --group <id>         Select a named matrix group
   --agent <adapter>    Select an agent adapter
   --provider <id>      Select a model provider
   --model <id>         Select a model
@@ -386,6 +390,7 @@ export async function runCli(
     }
     const filters: SelectionFilters = {
       caseId,
+      groupId: parsed.values.group,
       treatment: parsed.values.treatment,
       adapter: parsed.values.agent,
       provider: parsed.values.provider,
@@ -480,6 +485,7 @@ async function runPublicExperiment(
         savedSelections ??
         selectMatching(experiment.config, dataset, {
           caseId,
+          groupId: values.group,
           treatment: values.treatment,
           adapter: values.agent,
           provider: values.provider,
@@ -533,6 +539,7 @@ async function runPublicExperiment(
 }
 
 interface SelectionFilters {
+  readonly groupId: string | undefined;
   readonly caseId: string | undefined;
   readonly treatment: string | undefined;
   readonly adapter: string | undefined;
@@ -560,8 +567,18 @@ function selectMatching(
   dataset: LoadedDatasetV1,
   filters: SelectionFilters,
 ): RunSelection[] {
+  if (
+    filters.groupId !== undefined &&
+    !getMatrixGroups(experiment.matrix).some(
+      (group) => group.id === filters.groupId,
+    )
+  ) {
+    throw new CliUsageError(`Unknown matrix group: ${filters.groupId}`);
+  }
   const matches = expandExperiment(experiment, dataset).filter(
     (selection) =>
+      (filters.groupId === undefined ||
+        selection.group_id === filters.groupId) &&
       (filters.caseId === undefined || selection.case_id === filters.caseId) &&
       (filters.treatment === undefined ||
         selection.treatment === filters.treatment) &&

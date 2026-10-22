@@ -548,6 +548,7 @@ task: safe
       agents: group.agents,
     };
     const invalid: unknown[] = [
+      { ...axes, id: 'flat-group' },
       {},
       { groups: [] },
       { groups: [axes], ...axes },
@@ -573,6 +574,53 @@ task: safe
         BenchmarkModelError,
       );
     }
+  });
+
+  it('accepts optional unique group IDs and rejects invalid or duplicate IDs', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const axes = getMatrixGroups(config.matrix)[0]!;
+    const other = { ...axes, agents: [{ ...axes.agents[0]!, model: 'other' }] };
+    const groups = [{ ...axes, id: 'sonnet-comparison' }, other];
+    assert.deepEqual(
+      parseExperimentConfig({ ...config, matrix: { groups } }).matrix.groups,
+      groups,
+    );
+    for (const id of ['', 'Uppercase', '../group', 'a'.repeat(129), 1, null]) {
+      assert.throws(
+        () =>
+          parseExperimentConfig({
+            ...config,
+            matrix: { groups: [{ ...axes, id }] },
+          }),
+        BenchmarkModelError,
+      );
+    }
+    assert.throws(
+      () =>
+        parseExperimentConfig({
+          ...config,
+          matrix: {
+            groups: [
+              { ...axes, id: 'same' },
+              { ...other, id: 'same' },
+            ],
+          },
+        }),
+      /Invalid experiment config/,
+    );
+    assert.throws(
+      () =>
+        parseExperimentConfig({
+          ...config,
+          matrix: {
+            groups: [
+              { ...axes, id: 'first' },
+              { ...axes, id: 'second' },
+            ],
+          },
+        }),
+      /Invalid experiment config/,
+    );
   });
 
   it('allows overlapping case paths when treatments or resolved agents differ', () => {
