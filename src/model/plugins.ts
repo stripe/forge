@@ -20,7 +20,10 @@ export function pluginDefinitionForAgent(
   plugin: PluginSetupWithV1['plugin'],
   adapter: string,
 ): PluginDefinition | undefined {
-  if (plugin === 'stripe' && (adapter === 'claude-code' || adapter === 'codex'))
+  if (
+    plugin === 'stripe' &&
+    (adapter === 'claude-code' || adapter === 'codex' || adapter === 'opencode')
+  )
     return STRIPE_PLUGIN;
   return undefined;
 }

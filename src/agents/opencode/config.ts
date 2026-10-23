@@ -1,5 +1,5 @@
-import type { ReadonlyWorkspace } from '../../contracts/runtime.js';
-import { parseJson, record } from './native.js';
+import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import { parseJson, record } from './native.ts';
 
 /** Authored JSON is supplied by ordinary setup, and snapshotted before interaction. */
 export async function readOpenCodeConfiguration(

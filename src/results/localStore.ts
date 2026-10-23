@@ -507,16 +507,21 @@ function verifySetupArtifact(
         distribution === undefined
           ? undefined
           : distribution.plugin.slice(0, distribution.plugin.indexOf('@'));
-      const nativeName = receipt.native_plugin_id.slice(
-        0,
-        receipt.native_plugin_id.indexOf('@'),
-      );
+      const nativeName =
+        typeof receipt.native_plugin_id === 'string'
+          ? receipt.native_plugin_id.slice(
+              0,
+              receipt.native_plugin_id.indexOf('@'),
+            )
+          : undefined;
       if (
         distribution === undefined ||
         receipt.adapter !== plan.agent.adapter ||
         receipt.plugin !== distribution.plugin ||
         receipt.marketplace !== distribution.marketplace ||
-        nativeName !== requestedName
+        (plan.agent.adapter === 'opencode'
+          ? receipt.installation !== 'opencode-bundle'
+          : receipt.installation !== undefined || nativeName !== requestedName)
       ) {
         throw new ArtifactStoreError(
           'Plugin installation resolution does not match the completed run plan.',

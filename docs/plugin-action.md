@@ -2,13 +2,12 @@
 
 ## Purpose
 
-`forge/plugin` installs a registered plugin through the selected agent's native
-installer. Forge owns the distribution mapping; experiments evaluate the plugin
+`forge/plugin` installs a registered plugin for the selected agent. Forge owns the distribution mapping; experiments evaluate the plugin
 currently published by its GitHub marketplace.
 
 The action's schema and lifecycle are public Forge behavior. Agent-specific
 commands stay behind the narrow `AgentPluginInstaller` capability, implemented
-by the built-in Claude Code and Codex adapters.
+by the built-in Claude Code, Codex, and OpenCode adapters.
 
 Embedding hosts can use `AgentPluginInstaller` from a trusted
 [setup action bundle](setup-action-bundles.md) to install other distributions.
@@ -44,9 +43,9 @@ plugin name must select exactly one entry.
 The plugin action intentionally follows the marketplace's current default branch:
 
 1. Each run starts with fresh, run-owned agent state.
-2. Forge registers the selected marketplace through the agent's native CLI.
+2. Forge fetches the selected marketplace, using the native CLI where supported.
 3. The marketplace entry selects the plugin source and installed version.
-4. Forge validates the native installation and records its IDs, version,
+4. Forge validates the installation and records its identity, version,
    catalog commit, source commit when reported, and installed-content fingerprint.
 5. Plugin state remains writable during interaction.
 
@@ -60,7 +59,7 @@ to affected experiment configs.
 
 ## Installed behavior and external dependencies
 
-Forge installs the complete native plugin, not only its skills. A plugin may
+Claude Code and Codex install the complete native plugin. A plugin may
 contain commands, agents, hooks, language servers, or MCP configuration in
 addition to skills.
 
@@ -106,6 +105,34 @@ Installed manifests may use the native `.codex-plugin`, `.claude-plugin`, or
 `.cursor-plugin` format, or Agent Plugins 1.0's schema-qualified root
 `plugin.json`. Forge checks the native manifest's identity and version.
 
+## OpenCode standard bundle
+
+OpenCode uses the same `stripe@claude-plugins-official` catalog entry as Codex.
+It requires that entry to select `stripe/ai` with a full Git source SHA, checks
+out that exact commit, and installs its `providers/agent-plugins/plugin`
+standard bundle. The bundle may have a different version from the Claude-format
+plugin at that commit. The catalog itself is fetched at execution time, so its
+source pin can change between runs; Forge does not hard-code a plugin revision.
+
+OpenCode has no native marketplace installer. Forge validates the standard
+manifest and materializes its files into run-owned OpenCode state. Supported
+behavior is skills plus the bundled Stripe HTTP MCP connection. Unsupported
+behavioral declarations, missing skills, and unsafe filesystem entries fail
+setup. Claude-specific hooks, commands, and agents are not ported.
+
+The generated native config adds an absolute skill path and a remote MCP server
+with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
+the bundled URL. An authored Stripe MCP entry is rejected rather than replacing
+or disabling this connection. The adapter snapshots the combined authored and
+plugin config and restores it before every turn, including resume.
+
+OpenCode receipts use `installation: opencode-bundle` instead of
+`native_plugin_id`. They retain the selected catalog identity and commit, record
+`source: {kind: git-subdir, commit, path}` for the actual standard bundle, and
+fingerprint the copied bundle plus generated config. The native Claude/Codex
+receipt shape is unchanged. Like other plugin state, bundle files remain writable
+during interaction; the receipt describes installation-time contents.
+
 ## Hook policy and writable state
 
 Codex plugin installation and interaction share the run-owned `CODEX_HOME`.
@@ -144,9 +171,9 @@ During setup, the prepared operation:
 
 1. registers the marketplace;
 2. validates the catalog and selected source;
-3. installs through the agent's native CLI;
-4. validates the native plugin identity, version, path, load status, and source
-   provenance;
+3. installs through the agent's native CLI, or materializes OpenCode's standard bundle;
+4. validates the plugin identity, version, path, source provenance, and native
+   load status where applicable;
 5. configures the bundled MCP connection; and
 6. fingerprints the configured installation and records a receipt in `setup.json`.
 
@@ -154,7 +181,7 @@ The receipt includes:
 
 - the resolved marketplace and native plugin selection;
 - the exact catalog commit used to read the marketplace entry;
-- the native plugin ID and installed version;
+- the native plugin ID or bundle installation kind, and installed version;
 - the selected source kind and installer-reported Git commit when available; and
 - a deterministic digest and size/count summary of the installed tree.
 
@@ -165,8 +192,9 @@ independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
 Git commits identify the catalog snapshot and the source revision reported by
-the native installer. Claude must report any source commit pinned by its
-catalog; Codex reports the requested selectors, as described above. The tree
+the installer. Claude must report any source commit pinned by its
+catalog; Codex reports the requested selectors; OpenCode verifies the checked-out
+source commit. The tree
 fingerprint identifies observed installation-time contents separately from
 those source identities.
 
@@ -194,8 +222,8 @@ Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
 
-Forge keeps the bundled URL and unrelated plugin content. Claude uses an
-Authorization header template; Codex uses `bearer_token_env_var`. Both reference
+Forge keeps the bundled URL and unrelated plugin content. Claude and OpenCode use
+Authorization header templates; Codex uses `bearer_token_env_var`. All reference
 `STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
 use the same key. Tokens reach only agent commands, never setup commands.
 Forge fingerprints the configured installation. Runtime credential names and
@@ -211,7 +239,7 @@ therefore work only for credential-free HTTPS sources accepted by the installer.
 
 Current limitations are:
 
-- native source support differs between Claude Code and Codex;
+- supported distributions and source handling differ by agent;
 - marketplace and plugin versions resolve at execution time;
 - installed state remains writable during interaction;
 - remote services referenced by a plugin are not pinned;

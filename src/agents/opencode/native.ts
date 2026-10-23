@@ -1,4 +1,4 @@
-import { assertBoundedJsonValue } from '../../atif/parser.js';
+import { assertBoundedJsonValue } from '../../atif/parser.ts';
 
 export const MAX_NATIVE_BYTES = 16 * 1024 * 1024;
 export const OPENCODE_FORMAT = 'opencode-session-json';

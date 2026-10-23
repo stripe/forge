@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.js';
+import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
 import {
   identifier,
   MAX_NATIVE_BYTES,
@@ -11,7 +11,7 @@ import {
   string,
   terminal,
   tool,
-} from './native.js';
+} from './native.ts';
 
 /** Parse completed part snapshots emitted by pinned `opencode run --format json`. */
 export function parseOpenCodeStream(

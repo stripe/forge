@@ -4,13 +4,13 @@ import {
   type AtifStep,
   type JsonObject,
   parseAtifTrajectory,
-} from '../../atif/index.js';
+} from '../../atif/index.ts';
 import type {
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
-} from '../../contracts/agent.js';
-import type { ReadonlyWorkspace } from '../../contracts/runtime.js';
+} from '../../contracts/agent.ts';
+import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
 import {
   array,
   EXPORT_PATH,
@@ -25,7 +25,7 @@ import {
   string,
   terminal,
   tool,
-} from './native.js';
+} from './native.ts';
 
 export interface LoadOpenCodeEvidenceInput {
   readonly state: ReadonlyWorkspace | undefined;

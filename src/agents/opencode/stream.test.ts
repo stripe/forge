@@ -4,8 +4,8 @@ import {
   OPEN_CODE_SESSION,
   openCodeEvents,
   openCodeStream,
-} from '../../../test/support/opencode.js';
-import { OpenCodeStreamError, parseOpenCodeStream } from './stream.js';
+} from '../../../test/support/opencode.ts';
+import { OpenCodeStreamError, parseOpenCodeStream } from './stream.ts';
 
 const turn = { prompt: 'Do it', response: 'Done.' };
 const encode = (events: unknown[]) =>

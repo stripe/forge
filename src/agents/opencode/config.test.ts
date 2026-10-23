@@ -3,9 +3,9 @@ import { describe, it } from 'vitest';
 import {
   OPEN_CODE_CONFIG,
   OPEN_CODE_MODEL,
-} from '../../../test/support/opencode.js';
-import { createMemoryWorkspace } from '../../testing/index.js';
-import { readOpenCodeConfiguration } from './config.js';
+} from '../../../test/support/opencode.ts';
+import { createMemoryWorkspace } from '../../testing/index.ts';
+import { readOpenCodeConfiguration } from './config.ts';
 
 const read = (extra: Record<string, unknown>) =>
   readOpenCodeConfiguration(
@@ -28,8 +28,8 @@ describe('OpenCode authored configuration', () => {
       { instructions: ['AGENTS.md'] },
       { skills: { paths: ['./skills'] } },
       { plugin: ['./plugin.ts'] },
-      { plugins: [['../plugin.js', {}]] },
-      { plugin: ['file:./plugin.js'] },
+      { plugins: [['../plugin.ts', {}]] },
+      { plugin: ['file:./plugin.ts'] },
     ])
       await assert.rejects(read(extra), /relative config references/);
   });
