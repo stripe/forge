@@ -34,6 +34,8 @@ const MAX_SCHEMA_NODES = 100_000;
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 const CLAUDE_MODEL_VERSION =
   /(?:^|[./-])claude-(?:haiku|sonnet|opus)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-./])/;
+const CLAUDE_MODEL_FAMILY_VERSION =
+  /(?:^|[./-])claude-(haiku|sonnet|opus)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-./])/;
 const ANTHROPIC_UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
   'minimum',
   'maximum',
@@ -82,6 +84,21 @@ export class AnthropicCompletionError extends Error {
     super(message);
     this.name = 'AnthropicCompletionError';
   }
+}
+
+/**
+ * Opus 4.7 and later and every Claude 5 model reject explicit sampling
+ * parameters (Sonnet 5.5 rejects non-default values), so Forge omits
+ * `temperature` for them and the model's default sampling applies.
+ */
+export function acceptsAnthropicSamplingTemperature(model: string): boolean {
+  const match = CLAUDE_MODEL_FAMILY_VERSION.exec(model);
+  if (!match) return true;
+  const family = match[1];
+  const major = Number(match[2]);
+  const minor = Number(match[3] ?? 0);
+  if (major >= 5) return false;
+  return !(family === 'opus' && major === 4 && minor >= 7);
 }
 
 /** Anthropic structured outputs require Claude 4.5 or newer. */
@@ -463,7 +480,8 @@ function serializeRequest(request: CompletionRequest): string {
       ...(request.systemPrompt === undefined
         ? {}
         : { system: request.systemPrompt }),
-      ...(request.temperature === undefined
+      ...(request.temperature === undefined ||
+      !acceptsAnthropicSamplingTemperature(request.model.model)
         ? {}
         : { temperature: request.temperature }),
       ...(request.responseSchema === undefined

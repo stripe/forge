@@ -19,6 +19,7 @@ import {
   ANTHROPIC_MESSAGES_API_VERSION,
   ANTHROPIC_STRUCTURED_OUTPUT_FORMAT,
   AnthropicCompletionError,
+  acceptsAnthropicSamplingTemperature,
   createAnthropicCompletionProvider,
   supportsAnthropicStructuredOutputModel,
 } from './index.ts';
@@ -130,6 +131,37 @@ describe('Anthropic completion provider', () => {
         },
       },
     });
+  });
+
+  it('omits temperature for models that reject explicit sampling parameters', async () => {
+    for (const [model, sent] of [
+      ['claude-sonnet-4-6', true],
+      ['claude-opus-4-6', true],
+      ['claude-haiku-4-5', true],
+      ['claude-opus-4-7', false],
+      ['claude-opus-4-8', false],
+      ['claude-sonnet-5-5', false],
+      ['claude-opus-5-5', false],
+      ['anthropic/claude-sonnet-5', false],
+    ] as const) {
+      assert.equal(acceptsAnthropicSamplingTemperature(model), sent, model);
+      const transport = recordingFetch(() =>
+        messageResponse({ content: '{"message":"continue"}' }),
+      );
+      const provider = createAnthropicCompletionProvider({
+        fetch: transport.fetch,
+      });
+      await provider.complete(
+        completionRequest({
+          model: { provider: 'anthropic', model },
+          temperature: 0,
+          responseSchema: schema,
+        }),
+        { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
+      );
+      const body = JSON.parse(String(transport.calls[0]!.init.body));
+      assert.equal(Object.hasOwn(body, 'temperature'), sent, model);
+    }
   });
 
   it('recursively projects unsupported constraints without mutating the neutral schema', async () => {

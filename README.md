@@ -72,7 +72,10 @@ appropriate account limits: the evaluated agent receives its credential and
 outbound network access. Keep secrets outside dataset and experiment files.
 
 The built-in Ava/judge provider is Anthropic and requires Claude 4.5-or-newer
-model identifiers with strict structured-output support. Selecting Codex as
+model identifiers with strict structured-output support. Opus 4.7 and later
+and the Claude 5 generation reject explicit sampling parameters, so Forge
+omits Ava's and the judge's `temperature` for them and those models use their
+default sampling. Selecting Codex as
 coding agent does not change that provider.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
