@@ -38,6 +38,7 @@ import { createOwnedWorkspace } from '../workspace.ts';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
+  FORGE_OPENCODE_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.ts';
 import { DockerCommandController } from './commandRunner.ts';
@@ -516,6 +517,7 @@ export function createDockerRuntimeAdapter(
             adapter: 'forge/docker',
             claudeCodeVersion: FORGE_CLAUDE_CODE_VERSION,
             codexVersion: FORGE_CODEX_VERSION,
+            opencodeVersion: FORGE_OPENCODE_VERSION,
             containerUserId: String(filesystemIdentity.containerUserId),
             imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
             imageId: image.id,

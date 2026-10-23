@@ -94,8 +94,25 @@ mode uses scripted host completions for multi-turn coverage, so it needs no
 Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
 setup without upstream calls.
 
-The live suite can create temporary authenticated host bridges for Codex
-Responses requests and loopback Claude endpoints. The real upstream key
+OpenCode setup mode exercises the real pinned CLI against a deterministic
+authenticated Chat Completions endpoint, including plugin/no-plugin treatments, tools, one-shot and Ava turns,
+exact-session exports, restricted artifacts, and cleanup. It also installs the
+published Stripe bundle and verifies native skill discovery, then uses local
+Git and MCP fixtures to check bearer auth, discovery, tool use, and rejected keys:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=setup FORGE_LIVE_AGENT=opencode pnpm test:live
+```
+
+It needs Docker with `host.docker.internal` support and network access for
+runtime installation, but no upstream model credentials or billable calls.
+OpenCode full mode is not yet available. For upstream acceptance, run the public
+CLI with the desired model and a paired experiment after this suite passes.
+Keep endpoint configuration and credentials outside the experiment, and verify
+both completed runs. Ava and judging retain their separate Anthropic provider.
+
+The live helpers can create temporary authenticated host bridges for Codex
+Responses, OpenCode Chat Completions, and loopback Claude endpoints. The real upstream key
 stays host-side; the container receives a per-run bridge credential. The host
 running the bridge must already be able to reach the upstream endpoint.
 
@@ -431,14 +448,14 @@ implementations.
 | --- | --- | --- |
 | [`composition.ts`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
-| [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
+| [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by coding-agent adapters and testing fakes; consumed by `execution` and `evidence` |
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
-| [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code and Codex; selected by `setup/forgePlugin.ts` |
+| [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code, Codex, and OpenCode; selected by `setup/forgePlugin.ts` |
 | [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
 | [`metadata.ts`](https://github.com/stripe/forge/blob/main/src/contracts/metadata.ts) | Adapter/provider configuration metadata types and strict internal snapshot schemas | Shared by pure execution preflight and result parsing |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
@@ -622,10 +639,27 @@ Codex has extra evidence helpers because its rollout protocol contains several
 representations of tool activity. `evidence.ts` is the coordinator; the helper
 files should remain unaware of Forge lifecycle or result storage.
 
-Both plugin installers use
+All three plugin installers use
 [`src/agents/pluginTree.ts`](https://github.com/stripe/forge/blob/main/src/agents/pluginTree.ts)
 to bound installed contents, reject unsafe entries, and compute the shared
 tree receipt.
+
+### `src/agents/opencode`
+
+`plugins.ts` installs the standard Stripe bundle at the official catalog's source
+pin. `pluginConfig.ts` validates its manifest and MCP declaration and merges the
+native configuration with the authored model definition. These use the shared
+plugin credential policy and tree fingerprinting; the receipt variant records
+the actual standard-bundle source path.
+
+`index.ts` owns routing, isolated state, version verification, stdin execution,
+exact-session resumption, and pre-quiescence exports. `config.ts` validates the
+authored model definition; `launcher.ts` supplies the prompt file to stdin.
+`stream.ts` validates completed live part snapshots. `evidence.ts` reads the
+sealed export and converts supported native content to ATIF, using bounded
+JSON helpers in `native.ts`. `layout.ts` validates external-runtime paths.
+See the architecture's [adapter contract](architecture.md#coding-agent-adapters)
+for supported configuration and evidence limits.
 
 ## `src/providers`: host-side model transport
 
@@ -761,7 +795,7 @@ CLI, package, and embedding tests live under [`test`](https://github.com/stripe/
 - `quickstart.e2e.test.ts`: one-shot CLI execution;
 - `multiTurn.e2e.test.ts` and `multiTurnExample.test.ts`: Ava execution and multi-turn planning;
 - `externalRuntime.e2e.test.ts`: external runtime composition;
-- `claudeCode.e2e.test.ts` and `codex.e2e.test.ts`: actual adapter integration
+- `claudeCode.e2e.test.ts`, `codex.e2e.test.ts`, and `opencode.e2e.test.ts`: actual adapter integration
   through a fake command transport and verified local artifacts;
 - `cliProcess.test.ts` and `experimentProcess.test.ts`: real CLI subprocesses and
   experiment run recovery after process death;

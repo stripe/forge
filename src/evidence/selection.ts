@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifAgentStep,
@@ -147,12 +148,14 @@ interface NativeTurnCoverage {
   hasResponseEvidence: boolean;
   hasAssistantText: boolean;
   toolCounts: Map<string, number>;
+  text: string[];
+  calls: AtifToolCall[];
 }
 
 /**
- * Shared selection/verification policy. Native Codex evidence must preserve
- * separately observed text and comparable tool activity in each turn. Other
- * native formats and bounded driver fallback retain structural coverage only.
+ * Shared selection/verification policy. Codex reconciles comparable tool kinds;
+ * OpenCode reconciles identical part snapshots. Other native formats and
+ * bounded driver fallback retain structural coverage only.
  */
 export function trajectoryCoversCompletedTurns(
   trajectory: AtifTrajectoryV1_8,
@@ -161,6 +164,8 @@ export function trajectoryCoversCompletedTurns(
 ): boolean {
   const reconcileCodex =
     source.kind === 'native_log' && source.format === 'codex-rollout-jsonl';
+  const reconcileOpenCode =
+    source.kind === 'native_log' && source.format === 'opencode-session-json';
   const nativeTurns: NativeTurnCoverage[] = [];
   let current: NativeTurnCoverage | undefined;
 
@@ -174,6 +179,8 @@ export function trajectoryCoversCompletedTurns(
         hasResponseEvidence: false,
         hasAssistantText: false,
         toolCounts: new Map(),
+        text: [],
+        calls: [],
       };
       nativeTurns.push(current);
       continue;
@@ -182,6 +189,11 @@ export function trajectoryCoversCompletedTurns(
     current.hasAgentStep = true;
     if (hasVisibleAgentEvidence(step)) current.hasResponseEvidence = true;
     if (hasAssistantText(step)) current.hasAssistantText = true;
+    if (reconcileOpenCode) {
+      if (typeof step.message !== 'string') return false;
+      if (step.message.length > 0) current.text.push(step.message);
+      current.calls.push(...(step.tool_calls ?? []));
+    }
     if (reconcileCodex) {
       for (const call of step.tool_calls ?? []) {
         const category = codexToolCategory(call.function_name, 'native');
@@ -196,6 +208,30 @@ export function trajectoryCoversCompletedTurns(
     const native = nativeTurns[index];
     if (native === undefined || native.user !== completed.user) return false;
     if (!native.hasAgentStep) return false;
+    if (reconcileOpenCode) {
+      if (native.text.join('\n\n') !== completed.assistant) return false;
+      if (native.calls.length !== completed.toolCalls.length) return false;
+      const nativeCalls = new Map(
+        native.calls.map((call) => [call.tool_call_id, call]),
+      );
+      if (nativeCalls.size !== native.calls.length) return false;
+      const driverCallIds = new Set(completed.toolCalls.map((call) => call.id));
+      if (driverCallIds.size !== completed.toolCalls.length) return false;
+      if (
+        !completed.toolCalls.every((call) => {
+          // The live stream emits completion order; the export retains call
+          // creation order. Unique IDs correlate parallel tools without loss.
+          const observed =
+            call.id === undefined ? undefined : nativeCalls.get(call.id);
+          return (
+            observed !== undefined &&
+            observed.function_name === call.name &&
+            isDeepStrictEqual(observed.arguments, call.input)
+          );
+        })
+      )
+        return false;
+    }
     if (reconcileCodex) {
       if (completed.assistant.length > 0 && !native.hasAssistantText)
         return false;

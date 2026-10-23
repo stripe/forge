@@ -17,7 +17,9 @@ export function parseAgentPluginInstallationReceipt(
       'plugin',
       'marketplace',
       'marketplace_commit',
-      'native_plugin_id',
+      input.installation === 'opencode-bundle'
+        ? 'installation'
+        : 'native_plugin_id',
       'version',
       'source',
       'installed_tree',
@@ -30,22 +32,47 @@ export function parseAgentPluginInstallationReceipt(
     !isSafeGitHubRepository(input.marketplace) ||
     typeof input.marketplace_commit !== 'string' ||
     !isFullGitCommit(input.marketplace_commit) ||
-    typeof input.native_plugin_id !== 'string' ||
-    !isQualifiedPluginId(input.native_plugin_id) ||
+    (input.installation !== 'opencode-bundle' &&
+      (typeof input.native_plugin_id !== 'string' ||
+        !isQualifiedPluginId(input.native_plugin_id))) ||
     typeof input.version !== 'string' ||
     !isSafeVersion(input.version)
   ) {
     throw new TypeError('Agent plugin installation receipt is invalid.');
   }
-  return Object.freeze({
+  const common = {
     adapter: input.adapter,
     plugin: input.plugin,
     marketplace: input.marketplace,
     marketplace_commit: input.marketplace_commit,
-    native_plugin_id: input.native_plugin_id,
     version: input.version,
-    source: parsePluginSourceReceipt(input.source),
     installed_tree: parseInstalledPluginTree(input.installed_tree),
+  };
+  if (input.installation === 'opencode-bundle') {
+    const source = input.source;
+    if (
+      !isPlainRecord(source) ||
+      !hasExactKeys(source, ['kind', 'commit', 'path']) ||
+      source.kind !== 'git-subdir' ||
+      typeof source.commit !== 'string' ||
+      !isFullGitCommit(source.commit) ||
+      source.path !== 'providers/agent-plugins/plugin'
+    )
+      throw new TypeError('OpenCode bundle source receipt is invalid.');
+    return Object.freeze({
+      ...common,
+      installation: 'opencode-bundle',
+      source: Object.freeze({
+        kind: source.kind,
+        commit: source.commit,
+        path: source.path,
+      }),
+    });
+  }
+  return Object.freeze({
+    ...common,
+    native_plugin_id: input.native_plugin_id as string,
+    source: parsePluginSourceReceipt(input.source),
   });
 }
 

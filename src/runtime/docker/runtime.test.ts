@@ -15,6 +15,7 @@ import type {
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
+  FORGE_OPENCODE_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.ts';
 import {
@@ -85,7 +86,10 @@ function fakeDocker(
           assert.ok(
             dockerfile.includes(`@openai/codex@${FORGE_CODEX_VERSION} \\\n`),
           );
-          for (const executable of ['claude', 'codex']) {
+          assert.ok(
+            dockerfile.includes(`opencode-ai@${FORGE_OPENCODE_VERSION}`),
+          );
+          for (const executable of ['claude', 'codex', 'opencode']) {
             assert.ok(
               dockerfile.includes(`test -x /usr/local/bin/${executable}`),
             );
@@ -731,6 +735,7 @@ describe('Forge Docker runtime', () => {
     );
     assert.equal(sealed.metadata.claudeCodeVersion, FORGE_CLAUDE_CODE_VERSION);
     assert.equal(sealed.metadata.codexVersion, FORGE_CODEX_VERSION);
+    assert.equal(sealed.metadata.opencodeVersion, FORGE_OPENCODE_VERSION);
     assert.equal(sealed.metadata.containerUserId, String(expectedUserId));
     for (const commands of [
       prepared.commands.uncredentialed,
@@ -983,6 +988,7 @@ describe('Forge Docker runtime', () => {
       'codex evidence',
     );
     assert.equal(sealed.metadata.codexVersion, FORGE_CODEX_VERSION);
+    assert.equal(sealed.metadata.opencodeVersion, FORGE_OPENCODE_VERSION);
     await assert.rejects(
       prepared.commands.agent.run(['codex', '--version']),
       /quiesced/,

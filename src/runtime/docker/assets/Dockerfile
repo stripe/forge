@@ -12,10 +12,13 @@ RUN apt-get update \
 RUN npm install --global --omit=dev --no-audit --no-fund \
       @anthropic-ai/claude-code@2.1.273 \
       @openai/codex@0.149.0 \
+      opencode-ai@1.19.0 \
     && test -x /usr/local/bin/claude \
     && /usr/local/bin/claude --version \
     && test -x /usr/local/bin/codex \
-    && /usr/local/bin/codex --version
+    && /usr/local/bin/codex --version \
+    && test -x /usr/local/bin/opencode \
+    && /usr/local/bin/opencode --version
 
 COPY --chown=root:root entrypoint.sh /usr/local/bin/forge-entrypoint
 RUN chmod 0755 /usr/local/bin/forge-entrypoint
