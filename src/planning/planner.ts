@@ -1,5 +1,9 @@
 import { sha256Digest } from '../model/hashes.ts';
-import { indexLoadedDatasetCases } from '../model/loaders.ts';
+import {
+  ancestorDirectories,
+  assertDatasetSetupInputs,
+  indexLoadedDatasetCases,
+} from '../model/loaders.ts';
 import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
 import {
   type AgentSelectionV1,
@@ -30,6 +34,7 @@ export type PlanningErrorCode =
   | 'missing_role_player'
   | 'missing_judge'
   | 'invalid_loaded_dataset'
+  | 'invalid_dataset_input'
   | 'action_bundle_mismatch'
   | 'missing_runtime_platform';
 
@@ -164,6 +169,20 @@ export function resolveRunPlanWithSetupActions(
   }
 
   const setup = [...cloneJson(definition.setup), ...cloneJson(treatment.setup)];
+  try {
+    assertDatasetSetupInputs(
+      setup,
+      ancestorDirectories(dataset.manifest.cases.map(({ path }) => path)),
+      dataset.inputPaths,
+      'Selected setup',
+    );
+  } catch (error) {
+    throw new PlanningError(
+      'invalid_dataset_input',
+      error instanceof Error ? error.message : 'Invalid setup dataset source.',
+      { cause: error },
+    );
+  }
   const configuredActionBundles = config.forge?.action_bundles ?? [];
   try {
     setupActions.assertStepsDeclared(setup, configuredActionBundles);

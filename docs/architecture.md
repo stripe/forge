@@ -155,13 +155,16 @@ case inventory:
 - case IDs and paths are unique, and each case definition must declare the
   same `id` and `version` as its manifest entry.
 
-Fixtures a case uses are the `dataset_path` sources of its `forge/write`
-setup; `loadDataset` rejects a case whose source names neither a payload file
-nor a directory containing one, or names a case definition or a directory
-containing one. Custom setup actions, treatment setup, and agents may read any
-payload file; Forge cannot infer those reads. `validate` and `plan` therefore
-do not catch a missing treatment source, which fails each attempt when setup
-applies it. Hosts that supply a loaded dataset directly own these checks.
+Fixtures used by built-in `forge/write` steps are their `dataset_path`
+sources. A source must name a payload file or a directory containing one,
+excluding case definitions and directories containing them. `loadDataset`
+checks case setup and retains discovered file and nonempty directory paths in
+`LoadedDatasetV1.inputPaths`. Planning checks the combined case and selected
+treatment setup against that index without reading the filesystem, so
+`validate` and `plan` reject missing treatment sources before execution.
+Hosts constructing loaded datasets may supply the index or own existence
+validation themselves; planning still excludes case definitions. Custom
+actions and agents may read payloads outside these built-in write checks.
 
 Case and dataset versions are independent labels. Change the dataset
 `version` whenever any case version changes or a case is added or removed.
@@ -182,7 +185,9 @@ directly; the location is excluded from resolved plans and execution
 semantics. Planning refuses to combine a loaded dataset with a different ID
 or version.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
-access to dataset payloads.
+access to dataset payloads. The path index records load-time existence, not
+content integrity or later filesystem changes. Setup reads current bytes and
+rejects an empty source directory instead of silently skipping its copy.
 
 Because every file under the root is readable payload, experiments and
 documentation live outside the dataset root and point at it with
@@ -371,7 +376,8 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - requires `models.role_player` for a multi-turn case;
 - requires `models.judge` when judging criteria are non-empty;
 - concatenates case and treatment setup;
-- validates action-bundle pins;
+- validates built-in dataset sources against the available path index and
+  action-bundle pins;
 - chooses the effective prompt and records its source;
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
@@ -740,8 +746,8 @@ handler during application.
 
 The built-ins are:
 
-- `forge/write`: copy inline bytes or a dataset file to a safe
-  workspace-relative path;
+- `forge/write`: copy inline bytes, a dataset file, or a nonempty dataset
+  directory tree to a safe workspace-relative path;
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials;
 - `forge/credentials`: declare agent-scoped credentials without issuing setup

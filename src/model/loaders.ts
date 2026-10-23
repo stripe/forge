@@ -27,6 +27,7 @@ import type {
   LoadedDatasetV1,
   LoadedEvalCaseV1,
   LoadedExperimentConfigV1,
+  SetupStepV1,
   WriteSetupStepV1,
 } from './types.ts';
 
@@ -85,11 +86,11 @@ export async function loadDatasetWithSetupActions(
     }
   }
 
-  const inputs = {
-    files: payloadFiles,
-    directories: ancestorDirectories(payloadFiles.keys()),
-    caseDirectories: ancestorDirectories(casePaths),
-  };
+  const inputPaths = new Set([
+    ...payloadFiles.keys(),
+    ...ancestorDirectories(payloadFiles.keys()),
+  ]);
+  const caseDirectories = ancestorDirectories(casePaths);
   const cases = new Map<string, LoadedEvalCaseV1>();
   for (const entry of manifest.cases) {
     const absolutePath = await resolveContainedRegularFile(root, entry.path);
@@ -101,7 +102,12 @@ export async function loadDatasetWithSetupActions(
     const raw = decodeDocument(bytes, 'Eval case');
     const definition = parseEvalCaseYamlWithSetupActions(raw, setupActions);
     assertManifestCaseIdentity(entry, definition);
-    assertCaseInputsExist(definition, inputs);
+    assertDatasetSetupInputs(
+      definition.setup,
+      caseDirectories,
+      inputPaths,
+      `Case ${definition.id}`,
+    );
     cases.set(definition.id, {
       definition,
       path: absolutePath,
@@ -114,6 +120,7 @@ export async function loadDatasetWithSetupActions(
     manifestRaw,
     manifest,
     cases,
+    inputPaths,
   };
 }
 
@@ -497,8 +504,8 @@ function assertManifestCaseIdentity(
   }
 }
 
-/** Every proper ancestor directory of the given dataset-relative paths. */
-function ancestorDirectories(paths: Iterable<string>): Set<string> {
+/** @internal Every proper ancestor directory of dataset-relative paths. */
+export function ancestorDirectories(paths: Iterable<string>): Set<string> {
   const directories = new Set<string>();
   for (const filePath of paths) {
     for (let end = filePath.indexOf('/'); end !== -1; ) {
@@ -510,36 +517,29 @@ function ancestorDirectories(paths: Iterable<string>): Set<string> {
 }
 
 /**
- * A case's forge/write sources must name a fixture file or a directory of
- * fixtures; copying case definitions would expose criteria to the agent.
+ * @internal Built-in write sources must name fixtures, excluding case
+ * definitions and their ancestors. Existence checks use the loader's index
+ * when available; programmatic hosts may instead own those checks.
  */
-function assertCaseInputsExist(
-  definition: EvalCaseV1,
-  inputs: {
-    files: ReadonlyMap<string, number>;
-    directories: ReadonlySet<string>;
-    caseDirectories: ReadonlySet<string>;
-  },
+export function assertDatasetSetupInputs(
+  setup: readonly SetupStepV1[],
+  caseDirectories: ReadonlySet<string>,
+  inputPaths: ReadonlySet<string> | undefined,
+  owner: string,
 ): void {
-  for (const step of definition.setup) {
+  for (const step of setup) {
     if (step.uses !== 'forge/write') continue;
     const { source } = (step as WriteSetupStepV1).with;
     if (!('dataset_path' in source)) continue;
     const datasetPath = source.dataset_path;
-    if (
-      !inputs.files.has(datasetPath) &&
-      !inputs.directories.has(datasetPath)
-    ) {
+    if (inputPaths !== undefined && !inputPaths.has(datasetPath)) {
       throw integrityError(
-        `Case ${definition.id} reads ${JSON.stringify(datasetPath)}, which is absent from the dataset.`,
+        `${owner} reads ${JSON.stringify(datasetPath)}, which is absent from the dataset.`,
       );
     }
-    if (
-      isCaseDefinitionPath(datasetPath) ||
-      inputs.caseDirectories.has(datasetPath)
-    ) {
+    if (isCaseDefinitionPath(datasetPath) || caseDirectories.has(datasetPath)) {
       throw integrityError(
-        `Case ${definition.id} reads ${JSON.stringify(datasetPath)}, which contains case definitions.`,
+        `${owner} reads ${JSON.stringify(datasetPath)}, which contains case definitions.`,
       );
     }
   }
