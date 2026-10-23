@@ -1,10 +1,13 @@
 # Stripe integration sample dataset
 
-The `stripe-integration-public-evals` dataset contains one case,
-`stripe-integration-public-evals/payments-onetime`: implement hosted Stripe
-Checkout for a $50 photography book, a confirmation page, and a webhook handler.
-The case retains its task, opening prompt, context, ten-turn limit, and eight
-judging criteria. It has no fixture files or setup steps.
+The `stripe-integration-public-evals` dataset contains 73 cases covering
+Stripe Connect, Payments, and Subscriptions integration scenarios — for
+example `stripe-integration-public-evals/payments-onetime`: implement hosted
+Stripe Checkout for a $50 photography book, a confirmation page, and a
+webhook handler. Each case declares its own task, opening prompt, optional
+context, ten-turn limit, and judging criteria, each criterion carrying an
+explicit `requirement_level` (`MUST`, `SHOULD`, or `OPTIONAL`). None of the
+cases use fixture files or setup steps.
 
 ## Layout
 
@@ -12,7 +15,9 @@ judging criteria. It has no fixture files or setup steps.
 datasets/stripe-integration-public-evals/
 ├── manifest.json
 └── cases/
-    └── payments-onetime.case.yaml
+    ├── payments-onetime.case.yaml
+    ├── subscriptions-fixed.case.yaml
+    └── ... (73 cases total)
 experiments/stripe-integration-public-evals/
 ├── README.md
 └── experiment.yaml
@@ -20,15 +25,16 @@ experiments/stripe-integration-public-evals/
 
 The dataset directory holds only the latest version; earlier versions live in
 Git history. Its manifest declares identity and lists each case's ID, version,
-and path. The case file declares the same ID and version. This README and the
-experiment sit outside the dataset tree, because every file inside it is
-dataset payload.
+and path. Each case file declares the same ID and version as its manifest
+entry. This README and the experiment sit outside the dataset tree, because
+every file inside it is dataset payload.
 
 The [baseline experiment](experiment.yaml) points at the dataset with
-`dataset.path` and pins the dataset ID and version. It
-selects this case once with Claude Code and Sonnet 4.6, using public Anthropic
-models for Ava and judging. Runtime and model choices belong to the experiment
-rather than the dataset.
+`dataset.path` and pins the dataset ID and version. It selects one case
+(`payments-onetime`) once with Claude Code and Sonnet 4.6, using public
+Anthropic models for Ava and judging — the matrix picks a single
+representative case rather than running the whole dataset. Runtime and model
+choices belong to the experiment rather than the dataset.
 
 ## Validate and run
 

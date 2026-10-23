@@ -10,7 +10,7 @@ setup: []
 judging_criteria:
   - value: 'MUST: Uses paymentIntents.create on the backend — does not use checkout.sessions.create'
     requirement_level: MUST
-  - value: 'MUST NOT: Passes the Payment Intent client_secret to the frontend'
+  - value: 'MUST: Passes the Payment Intent client_secret to the frontend'
     requirement_level: MUST
   - value: 'MUST: iOS client uses PaymentSheet'
     requirement_level: MUST
