@@ -14,12 +14,7 @@ import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import { FORGE_VERSION, ForgeExecutionError } from './execution/index.ts';
-import {
-  parseExperimentConfigYaml,
-  type SetupStepV1,
-  sha256Digest,
-  sha256Hex,
-} from './model/index.ts';
+import { parseExperimentConfigYaml, type SetupStepV1 } from './model/index.ts';
 import { serializeResolvedRunPlan } from './planning/index.ts';
 import { type CompletedRunV1, createArtifactStore } from './results/index.ts';
 import { defineSetupActionBundle } from './setup/index.ts';
@@ -334,41 +329,6 @@ describe('Forge CLI', () => {
     assert.equal(agentEnumerations, 0);
   });
 
-  it('checks default-composition input bytes against the manifest loaded for the run', async () => {
-    const fixture = await createBenchmarkFixture();
-    const exitCode = await runCli(
-      ['run', '--experiment', fixture.experimentPath],
-      {
-        environment: {},
-        stdout: () => undefined,
-        execute: async (input) => {
-          const { composition } = input;
-          const original = await fs.readFile(fixture.caseFilePath, 'utf8');
-          await fs.writeFile(
-            fixture.caseFilePath,
-            original.replace('Do the thing', 'Do bad thing'),
-          );
-          await assert.rejects(
-            composition.inputProvider.read('cases/example.case.yaml'),
-            /SHA-256/,
-          );
-          await fs.writeFile(
-            path.join(fixture.datasetRoot, 'cases/extra.yaml'),
-            'extra',
-          );
-          await assert.rejects(
-            composition.inputProvider.listFiles('cases'),
-            /manifest inventory/,
-          );
-          await fs.writeFile(fixture.caseFilePath, original);
-          await fs.rm(path.join(fixture.datasetRoot, 'cases/extra.yaml'));
-          return executeOffline(input);
-        },
-      },
-    );
-    assert.equal(exitCode, 0);
-  });
-
   it('supplies the selected external runtime to the host factory for validation and execution', async () => {
     const fixture = await createBenchmarkFixture();
     const config = parseExperimentConfigYaml(
@@ -394,10 +354,6 @@ describe('Forge CLI', () => {
           compositionFactory: async (options) => {
             factoryCalls += 1;
             assert.deepEqual(options.runtime, descriptor);
-            assert.equal(
-              options.datasetManifest?.dataset.id,
-              'example-dataset',
-            );
             return {
               runtime: runtime.adapter,
               agents: new Map([[agent.adapter.id, agent.adapter]]),
@@ -2012,6 +1968,7 @@ async function createBenchmarkFixture(
   ]);
 
   const caseBody = `id: case/example
+version: 0.1.0
 task: Do the thing
 execution_mode: one_shot
 setup: ${JSON.stringify(options.caseSetup ?? [])}
@@ -2023,6 +1980,7 @@ judging_criteria: []
   const unselectedCasePath = 'cases/unselected.case.yaml';
   const unselectedCaseFilePath = path.join(datasetRoot, unselectedCasePath);
   const unselectedCaseBody = `id: case/unselected
+version: 0.1.0
 task: Do another thing
 execution_mode: one_shot
 setup: []
@@ -2032,21 +1990,17 @@ judging_criteria: []
     await fs.writeFile(unselectedCaseFilePath, unselectedCaseBody);
   }
   const cases = [
-    casePath,
-    ...(options.includeUnselectedCase ? [unselectedCasePath] : []),
-  ];
-  const files = [
     {
+      id: 'case/example',
+      version: '0.1.0',
       path: casePath,
-      size: Buffer.byteLength(caseBody),
-      sha256: sha256Hex(caseBody),
     },
     ...(options.includeUnselectedCase
       ? [
           {
+            id: 'case/unselected',
+            version: '0.1.0',
             path: unselectedCasePath,
-            size: Buffer.byteLength(unselectedCaseBody),
-            sha256: sha256Hex(unselectedCaseBody),
           },
         ]
       : []),
@@ -2055,7 +2009,6 @@ judging_criteria: []
     {
       dataset: { id: 'example-dataset', version: '2026.09.0' },
       cases,
-      files,
     },
     null,
     2,
@@ -2071,7 +2024,6 @@ dataset:
   path: ../dataset
   id: example-dataset
   version: 2026.09.0
-  manifest_sha256: ${sha256Digest(manifestRaw)}
 runtime:
   adapter: docker
   image: {kind: forge}

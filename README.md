@@ -21,7 +21,7 @@ when designing a benchmark.
 | Concept | What it means |
 | --- | --- |
 | Case | One task, its shared setup, interaction mode, checks, and judging criteria. |
-| Dataset | A versioned collection of cases and fixtures, with an exact inventory of their sizes and hashes. |
+| Dataset | A versioned collection of cases and fixtures, with a manifest listing each case's ID, version, and path. |
 | Treatment | Setup applied after case setup, such as installing a plugin. A baseline has no additional setup. |
 | Experiment | A dataset pin, treatments, agents/models, runtime choices, and a matrix of cases to evaluate. |
 | Experiment run | One resumable execution of the selected matrix, with a checkpoint and report. |
@@ -175,33 +175,33 @@ For work on Forge itself, see [Development](#development).
 
 ### Run your first experiment
 
-Dataset releases include an experiment and its dataset bundle. Run the
-supplied experiment with the released inputs. For a working example, copy
-`experiment.yaml` and the complete `dataset/` directory from the
-[Stripe integration sample release](https://github.com/stripe/forge/tree/main/datasets/stripe-integration-public-evals/0.1.0)
-into `my-eval/` in the project where you installed Forge:
+Datasets ship with an experiment that runs them. For a working example, copy
+the [Stripe integration sample experiment](https://github.com/stripe/forge/tree/main/experiments/stripe-integration-public-evals)
+and [dataset](https://github.com/stripe/forge/tree/main/datasets/stripe-integration-public-evals)
+into `my-eval/` in the project where you installed Forge, keeping their
+relative layout:
 
 ```text
 my-eval/
-├── experiment.yaml
-└── dataset/
+├── experiments/stripe-integration-public-evals/experiment.yaml
+└── datasets/stripe-integration-public-evals/
     ├── manifest.json
     └── cases/payments-onetime.case.yaml
 ```
 
 The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
 and a criterion judge. All three use the configured Anthropic credential.
-The bundle is separate from the installed Forge package; preserve its dataset
-bytes and keep `experiment.yaml` beside `dataset/`.
+The dataset is separate from the installed Forge package; preserve its bytes.
+The experiment's `dataset.path` resolves relative to the experiment file.
 
 Validate without Docker allocation or model credentials, then run with your
 Anthropic key configured:
 
 ```sh
-npx --no-install forge validate --experiment ./my-eval/experiment.yaml
+npx --no-install forge validate --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml
 export ANTHROPIC_API_KEY=your-restricted-key
 npx --no-install forge run \
-  --experiment ./my-eval/experiment.yaml \
+  --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
@@ -213,7 +213,7 @@ experiment run. See [Results and Scores](#results-and-scores) to inspect it.
 To inspect the resolved plan before execution:
 
 ```sh
-npx --no-install forge plan --experiment ./my-eval/experiment.yaml
+npx --no-install forge plan --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml
 ```
 
 Planning with `platform: native` queries the Docker server's architecture
@@ -241,7 +241,7 @@ select existing combinations; `plan` requires exactly one match:
 
 ```sh
 npx --no-install forge run \
-  --experiment ./my-eval/experiment.yaml \
+  --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml \
   --case stripe-integration-public-evals/payments-onetime --treatment baseline --agent claude-code
 ```
 
@@ -260,7 +260,7 @@ for an automatically generated ID. Experiment runs receive their own IDs.
 Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
 
 ```sh
-npx --no-install forge run --experiment ./my-eval/experiment.yaml --jobs 4
+npx --no-install forge run --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml --jobs 4
 ```
 
 Each run owns its runtime and artifacts. Size concurrency for host resources
@@ -273,7 +273,7 @@ credentials configured again if work remains:
 
 ```sh
 npx --no-install forge run \
-  --experiment ./my-eval/experiment.yaml \
+  --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml \
   --output ./results --resume EXPERIMENT_RUN_ID --jobs 2
 ```
 

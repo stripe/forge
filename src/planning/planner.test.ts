@@ -22,8 +22,6 @@ import {
 const CASE_A_PATH = 'cases/case/a/case.yaml';
 const CASE_B_PATH = 'cases/case-b.case.yaml';
 
-const MANIFEST_DIGEST = `sha256:${'a'.repeat(64)}` as const;
-
 describe('experiment expansion and run planning', () => {
   it('binds named groups to selections and plan identity without using array position', () => {
     const config = experimentConfig();
@@ -220,14 +218,23 @@ describe('experiment expansion and run planning', () => {
         ...original.dataset,
         manifest: {
           ...original.dataset.manifest,
-          cases: [CASE_A_PATH, CASE_A_PATH],
+          cases: [
+            original.dataset.manifest.cases[0]!,
+            original.dataset.manifest.cases[0]!,
+          ],
         },
       },
       {
         ...original.dataset,
         manifest: {
           ...original.dataset.manifest,
-          cases: [CASE_A_PATH, 'cases/ordinary.yaml'],
+          cases: [
+            original.dataset.manifest.cases[0]!,
+            {
+              ...original.dataset.manifest.cases[1]!,
+              path: 'cases/ordinary.yaml',
+            },
+          ],
         },
       },
     ];
@@ -641,7 +648,7 @@ describe('experiment expansion and run planning', () => {
     {
       const actual = plan.provenance;
       assert.ok(actual);
-      assert.equal(actual.dataset.manifest_sha256, MANIFEST_DIGEST);
+      assert.deepEqual(actual.dataset, { id: 'dataset', version: '2026.09.0' });
       assert.equal(actual.experiment.id, 'experiment/default');
       assert.equal(actual.experiment.version, '2026.09.0');
       assert.equal(actual.case.id, 'case/a');
@@ -880,7 +887,7 @@ describe('experiment expansion and run planning', () => {
     }
   });
 
-  it('rejects experiment/dataset drift and missing manifest inputs', () => {
+  it('rejects experiment/dataset drift', () => {
     const loaded = inputs();
     const selected = selection(
       'case/a',
@@ -893,7 +900,6 @@ describe('experiment expansion and run planning', () => {
     for (const changed of [
       { id: 'other-dataset' },
       { version: 'other-version' },
-      { manifest_sha256: `sha256:${'0'.repeat(64)}` as const },
     ]) {
       assert.throws(
         () =>
@@ -922,62 +928,37 @@ describe('experiment expansion and run planning', () => {
         { code: 'dataset_experiment_mismatch' },
       );
     }
+  });
 
-    const missingInput = inputs({ manifestFiles: [] });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...missingInput,
-          selection: selection(
-            'case/a',
-            'with-seed',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
-        }),
-      { code: 'missing_dataset_input' },
-    );
-
-    const directoryInput = inputs({
-      experiment: experimentConfig({
-        treatments: {
-          directory: {
-            setup: [
-              {
-                uses: 'forge/write',
-                with: {
-                  target: 'seed.txt',
-                  source: { dataset_path: 'fixtures' },
-                },
-              },
-            ],
-          },
-        },
-        matrix: {
-          ...getMatrixGroups(experimentConfig().matrix)[0]!,
-          treatments: ['directory'],
-          repetitions: 1,
-          retries: 0,
-        },
-      }),
+  it('leaves treatment dataset inputs to setup instead of checking them while planning', () => {
+    const treatmentSetup = (datasetPath: string) => ({
+      uses: 'forge/write',
+      with: { target: 'seed.txt', source: { dataset_path: datasetPath } },
     });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...directoryInput,
-          selection: selection(
-            'case/a',
-            'directory',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
+    const plan = resolveRunPlan({
+      ...inputs({
+        experiment: experimentConfig({
+          treatments: {
+            missing: { setup: [treatmentSetup('fixtures/missing.txt')] },
+          },
+          matrix: {
+            ...getMatrixGroups(experimentConfig().matrix)[0]!,
+            treatments: ['missing'],
+            repetitions: 1,
+            retries: 0,
+          },
         }),
-      { code: 'missing_dataset_input' },
-    );
+      }),
+      selection: selection(
+        'case/a',
+        'missing',
+        'claude-code',
+        'anthropic',
+        'sonnet',
+        0,
+      ),
+    });
+    assert.deepEqual(plan.setup.at(-1), treatmentSetup('fixtures/missing.txt'));
   });
 
   it('serializes plans canonically and hashes equivalent object key order equally', () => {
@@ -1047,6 +1028,7 @@ function selection(
 function evalCase(): EvalCaseV1 {
   return {
     id: 'case/a',
+    version: '0.1.0',
     task: 'Complete the task',
     initial_prompt: 'Please start here',
     context: 'Existing application',
@@ -1071,7 +1053,6 @@ function experimentConfig(
     dataset: {
       id: 'dataset',
       version: '2026.09.0',
-      manifest_sha256: MANIFEST_DIGEST,
     },
     runtime: {
       adapter: 'docker',
@@ -1119,26 +1100,29 @@ function inputs(
   options: {
     caseDefinition?: EvalCaseV1;
     experiment?: ExperimentConfigV1;
-    manifestFiles?: LoadedDatasetV1['manifest']['files'];
   } = {},
 ): { dataset: LoadedDatasetV1; experiment: LoadedExperimentConfigV1 } {
-  const definition = options.caseDefinition ?? evalCase();
   const config = options.experiment ?? experimentConfig();
-  const manifestFiles = options.manifestFiles ?? [
-    { path: CASE_A_PATH, size: 100, sha256: 'b'.repeat(64) },
-    { path: CASE_B_PATH, size: 100, sha256: 'c'.repeat(64) },
-    { path: 'fixtures/seed.txt', size: 4, sha256: 'd'.repeat(64) },
-  ];
+  const definition = options.caseDefinition ?? evalCase();
   return {
     dataset: {
       root: '/dataset',
       manifestPath: '/dataset/manifest.json',
       manifestRaw: '{}',
-      manifestSha256: MANIFEST_DIGEST,
       manifest: {
         dataset: { id: 'dataset', version: '2026.09.0' },
-        cases: [CASE_A_PATH, CASE_B_PATH],
-        files: manifestFiles,
+        cases: [
+          {
+            id: definition.id,
+            version: definition.version,
+            path: CASE_A_PATH,
+          },
+          {
+            id: 'case/b',
+            version: definition.version,
+            path: CASE_B_PATH,
+          },
+        ],
       },
       cases: new Map([
         ['case/a', { definition, path: `/dataset/${CASE_A_PATH}` }],

@@ -36,8 +36,9 @@ truth for feature details; do not duplicate their full specifications here.
   their owning schemas. Resolve explicit inputs and defaults into canonical,
   cloned, deeply frozen plans without mutating inputs or introducing hidden
   execution defaults.
-- Verify exact dataset inventories, sizes, hashes, and experiment pins. Add
-  other digests only for a defined integrity or identity purpose.
+- Verify exact dataset case inventories, case identities, and experiment pins.
+  Case and fixture content integrity is governed outside Forge; add digests
+  only for a defined integrity or identity purpose.
 - Finish parsing and pure capability preflight before credential lookup,
   provider requests, allocation, or workspace mutation.
 - `executeEval` owns lifecycle and scoring order. Apply case setup before
@@ -66,11 +67,13 @@ implementation. Prose and formatting-only changes do not need new tests.
 Place focused unit tests beside source files as `*.test.ts`; put cross-module,
 CLI, package, and embedding tests under `test/`. Keep harness test inputs under
 `test/fixtures/`. Prefer deterministic fakes for the normal test suite.
-Versioned public release bundles belong under `datasets/<name>/<version>/`,
-with a runnable `experiment.yaml` beside the exact-manifest `dataset/` tree.
-Use `dataset.path: ./dataset` so the complete bundle can be moved or archived
-without rewriting its experiment. Keep release documentation outside the
-exact-manifest dataset tree.
+Public datasets belong under `datasets/<name>/`, holding only the latest
+version; earlier versions live in Git history. Put their runnable experiments
+and release documentation under `experiments/<name>/`, outside the dataset
+tree. Cases read fixtures through `forge/write` `dataset_path` sources. When a
+case version changes or a case is added or removed, update the manifest and
+bump the dataset version; `pnpm check:cases` enforces this against
+`origin/main`.
 
 While iterating, run the narrowest relevant tests, plus applicable type, build,
 or package checks from `package.json`:
@@ -82,7 +85,7 @@ pnpm test path/to/file.test.ts
 Use Biome for formatting, import organization, and linting. Run `pnpm lint`
 for code changes; it is also included in `pnpm check`. Use `pnpm lint:fix`
 for safe automatic fixes, and preserve the exclusions in `biome.json` for
-integrity-pinned inputs and assets.
+pinned inputs and assets.
 
 Run `pnpm check` before handing off changes that affect code, public types,
 exports, execution, packaging, or release artifacts. For a documentation-only
@@ -162,9 +165,9 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   serialization, tests, and public documentation together.
 - When adding or changing an entry point, update `package.json`, root and
   subpath export tests, the package smoke test, and `docs/architecture.md`.
-- When changing checked-in dataset snapshots or eval fixtures, update dependent
-  sizes and SHA-256 digests in dataset manifests and experiment configs, plus
-  mirrored README snippets.
+- When changing case versions or membership in a checked-in dataset manifest,
+  bump the manifest's dataset version and the `dataset.version` of dependent
+  experiment configs, plus mirrored README snippets.
 - When changing packaged Docker assets or tool pins, update their recorded
   digests, runtime metadata, and tests.
 - Keep ATIF changes tied to a specific upstream version and update provenance,

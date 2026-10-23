@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +6,6 @@ import {
   type SetupActionRegistry,
 } from '../setup/registry.ts';
 import { BenchmarkModelError } from './errors.ts';
-import { sha256Digest, sha256Hex } from './hashes.ts';
 import {
   MAX_BENCHMARK_YAML_BYTES,
   MAX_DATASET_MANIFEST_BYTES,
@@ -23,18 +21,20 @@ import {
   isSafeVersion,
 } from './paths.ts';
 import type {
+  DatasetManifestCaseV1,
   DatasetRelativePath,
+  EvalCaseV1,
   LoadedDatasetV1,
   LoadedEvalCaseV1,
   LoadedExperimentConfigV1,
-  Sha256Hex,
+  WriteSetupStepV1,
 } from './types.ts';
 
 const MAX_DATASET_ENTRIES = 50_001; // payload files plus manifest.json
 const MAX_DATASET_DEPTH = 64;
 const MAX_DATASET_TOTAL_BYTES = 4 * 1024 * 1024 * 1024;
 
-/** Load and verify every byte named by a dataset's manifest. */
+/** Load a dataset manifest and its cases, checking the tree's case inventory. */
 export async function loadDataset(
   datasetRoot: string,
 ): Promise<LoadedDatasetV1> {
@@ -53,36 +53,28 @@ export async function loadDatasetWithSetupActions(
     MAX_DATASET_MANIFEST_BYTES,
     'Dataset manifest',
   );
-  const manifestSha256 = sha256Digest(manifestBytes);
   const manifestRaw = decodeDocument(manifestBytes, 'Dataset manifest');
   const manifest = parseDatasetManifestJson(manifestRaw);
 
-  if (
-    manifest.files.some(({ path: filePath }) => filePath === 'manifest.json')
-  ) {
-    throw integrityError('manifest.json must not list or hash itself.');
+  const payloadFiles = await collectPayloadFiles(root);
+  const casePaths = new Set(manifest.cases.map(({ path }) => path));
+  for (const casePath of casePaths) {
+    if (!payloadFiles.has(casePath)) {
+      throw integrityError(
+        `Case ${JSON.stringify(casePath)} is listed in the manifest but absent from the dataset.`,
+      );
+    }
   }
-
-  const actualPayloadPaths = await collectPayloadFiles(root);
-  const declaredPayloadPaths = new Set(
-    manifest.files.map(({ path: filePath }) => filePath),
-  );
-  if (
-    actualPayloadPaths.size !== declaredPayloadPaths.size ||
-    [...actualPayloadPaths].some(
-      (filePath) => !declaredPayloadPaths.has(filePath),
-    )
-  ) {
-    throw integrityError(
-      'Dataset payload files do not exactly match the manifest inventory.',
-    );
+  for (const filePath of payloadFiles.keys()) {
+    if (isCaseDefinitionPath(filePath) && !casePaths.has(filePath)) {
+      throw integrityError(
+        `Case ${JSON.stringify(filePath)} is absent from the manifest.`,
+      );
+    }
   }
-
   let totalBytes = 0;
-  const absoluteFiles = new Map<string, string>();
-  const casePaths = new Set(manifest.cases);
-  for (const file of manifest.files) {
-    totalBytes += file.size;
+  for (const size of payloadFiles.values()) {
+    totalBytes += size;
     if (
       !Number.isSafeInteger(totalBytes) ||
       totalBytes > MAX_DATASET_TOTAL_BYTES
@@ -91,50 +83,25 @@ export async function loadDatasetWithSetupActions(
         `Dataset payload exceeds the ${MAX_DATASET_TOTAL_BYTES}-byte limit.`,
       );
     }
-    const absolutePath = await resolveContainedRegularFile(root, file.path);
-    if (!casePaths.has(file.path)) {
-      const actual = await hashFile(absolutePath, file.size);
-      if (actual.size !== file.size || actual.sha256 !== file.sha256) {
-        throw integrityError(
-          'A dataset file does not match its declared size or hash.',
-        );
-      }
-    }
-    absoluteFiles.set(file.path, absolutePath);
   }
 
+  const inputs = {
+    files: payloadFiles,
+    directories: ancestorDirectories(payloadFiles.keys()),
+    caseDirectories: ancestorDirectories(casePaths),
+  };
   const cases = new Map<string, LoadedEvalCaseV1>();
-  const manifestFiles = new Map(
-    manifest.files.map((file) => [file.path, file]),
-  );
-  for (const casePath of manifest.cases) {
-    const file = manifestFiles.get(casePath)!;
-    if (file.size > MAX_BENCHMARK_YAML_BYTES) {
-      throw integrityError(
-        'An eval case exceeds the benchmark YAML size limit.',
-      );
-    }
-    const absolutePath = absoluteFiles.get(casePath)!;
+  for (const entry of manifest.cases) {
+    const absolutePath = await resolveContainedRegularFile(root, entry.path);
     const bytes = await readBoundedRegularFile(
       absolutePath,
       MAX_BENCHMARK_YAML_BYTES,
       'Eval case',
     );
-    if (bytes.byteLength !== file.size || sha256Hex(bytes) !== file.sha256) {
-      throw integrityError(
-        'An eval case does not match its declared size or hash.',
-      );
-    }
     const raw = decodeDocument(bytes, 'Eval case');
     const definition = parseEvalCaseYamlWithSetupActions(raw, setupActions);
-    const previous = cases.get(definition.id);
-    if (previous !== undefined) {
-      throw integrityError(
-        `Duplicate case ID ${JSON.stringify(definition.id)} in ` +
-          `${JSON.stringify(path.relative(root, previous.path).split(path.sep).join('/'))} and ` +
-          `${JSON.stringify(casePath)}.`,
-      );
-    }
+    assertManifestCaseIdentity(entry, definition);
+    assertCaseInputsExist(definition, inputs);
     cases.set(definition.id, {
       definition,
       path: absolutePath,
@@ -145,7 +112,6 @@ export async function loadDatasetWithSetupActions(
     root,
     manifestPath,
     manifestRaw,
-    manifestSha256,
     manifest,
     cases,
   };
@@ -186,18 +152,20 @@ export function indexLoadedDatasetCases(
     ) {
       throw integrityError('The loaded dataset has an invalid case index.');
     }
-    const manifestPaths = new Set<string>();
-    for (const casePath of dataset.manifest.cases) {
+    const manifestPaths = new Map<string, DatasetManifestCaseV1>();
+    for (const entry of dataset.manifest.cases) {
       if (
-        typeof casePath !== 'string' ||
-        !isCaseDefinitionPath(casePath) ||
-        manifestPaths.has(casePath)
+        entry === null ||
+        typeof entry !== 'object' ||
+        typeof entry.path !== 'string' ||
+        !isCaseDefinitionPath(entry.path) ||
+        manifestPaths.has(entry.path)
       ) {
         throw integrityError(
           'The loaded dataset manifest has an invalid or duplicate case path.',
         );
       }
-      manifestPaths.add(casePath);
+      manifestPaths.set(entry.path, entry);
     }
     const byPath = new Map<DatasetRelativePath, LoadedEvalCaseV1>();
     const ids = new Set<string>();
@@ -247,6 +215,10 @@ export function indexLoadedDatasetCases(
           'The loaded case index does not match the dataset manifest.',
         );
       }
+      assertManifestCaseIdentity(
+        manifestPaths.get(casePath)!,
+        loadedCase.definition,
+      );
       byPath.set(casePath, loadedCase);
     }
     if (
@@ -372,8 +344,9 @@ async function resolveContainedRegularFile(
   return current;
 }
 
-async function collectPayloadFiles(root: string): Promise<Set<string>> {
-  const files = new Set<string>();
+/** Walk the dataset tree, returning each payload file's lstat size by path. */
+async function collectPayloadFiles(root: string): Promise<Map<string, number>> {
+  const files = new Map<string, number>();
   let entriesVisited = 0;
   const visit = async (directory: string, relative: string, depth: number) => {
     if (depth > MAX_DATASET_DEPTH) {
@@ -400,7 +373,14 @@ async function collectPayloadFiles(root: string): Promise<Set<string>> {
         if (stat.isDirectory()) {
           await visit(absolutePath, relativePath, depth + 1);
         } else if (stat.isFile()) {
-          if (relativePath !== 'manifest.json') files.add(relativePath);
+          if (relativePath === 'manifest.json') continue;
+          if (!isSafeDatasetRelativePath(relativePath)) {
+            throw new BenchmarkModelError(
+              'unsafe_path',
+              'Dataset file paths must be canonical relative POSIX paths.',
+            );
+          }
+          files.set(relativePath, stat.size);
         } else {
           throw new BenchmarkModelError(
             'unsafe_path',
@@ -478,31 +458,6 @@ function decodeDocument(body: Buffer, label: string): string {
   }
 }
 
-async function hashFile(
-  filePath: string,
-  maximumBytes: number,
-): Promise<{ size: number; sha256: Sha256Hex }> {
-  const hash = createHash('sha256');
-  let size = 0;
-  const handle = await fs.open(
-    filePath,
-    constants.O_RDONLY + (constants.O_NOFOLLOW ?? 0),
-  );
-  try {
-    for await (const chunk of handle.createReadStream({ autoClose: false })) {
-      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
-      size += bytes.byteLength;
-      if (size > maximumBytes) {
-        throw integrityError('A dataset file grew beyond its declared size.');
-      }
-      hash.update(bytes);
-    }
-  } finally {
-    await handle.close();
-  }
-  return { size, sha256: hash.digest('hex') };
-}
-
 async function lstatOrModelError(
   filePath: string,
   label: string,
@@ -528,4 +483,64 @@ function isWithin(root: string, candidate: string): boolean {
 
 function integrityError(message: string): BenchmarkModelError {
   return new BenchmarkModelError('dataset_integrity_mismatch', message);
+}
+
+function assertManifestCaseIdentity(
+  entry: DatasetManifestCaseV1,
+  definition: EvalCaseV1,
+): void {
+  if (entry.id !== definition.id || entry.version !== definition.version) {
+    throw integrityError(
+      `Case ${JSON.stringify(entry.path)} declares ${definition.id}@${definition.version}, ` +
+        `but the manifest lists ${entry.id}@${entry.version}.`,
+    );
+  }
+}
+
+/** Every proper ancestor directory of the given dataset-relative paths. */
+function ancestorDirectories(paths: Iterable<string>): Set<string> {
+  const directories = new Set<string>();
+  for (const filePath of paths) {
+    for (let end = filePath.indexOf('/'); end !== -1; ) {
+      directories.add(filePath.slice(0, end));
+      end = filePath.indexOf('/', end + 1);
+    }
+  }
+  return directories;
+}
+
+/**
+ * A case's forge/write sources must name a fixture file or a directory of
+ * fixtures; copying case definitions would expose criteria to the agent.
+ */
+function assertCaseInputsExist(
+  definition: EvalCaseV1,
+  inputs: {
+    files: ReadonlyMap<string, number>;
+    directories: ReadonlySet<string>;
+    caseDirectories: ReadonlySet<string>;
+  },
+): void {
+  for (const step of definition.setup) {
+    if (step.uses !== 'forge/write') continue;
+    const { source } = (step as WriteSetupStepV1).with;
+    if (!('dataset_path' in source)) continue;
+    const datasetPath = source.dataset_path;
+    if (
+      !inputs.files.has(datasetPath) &&
+      !inputs.directories.has(datasetPath)
+    ) {
+      throw integrityError(
+        `Case ${definition.id} reads ${JSON.stringify(datasetPath)}, which is absent from the dataset.`,
+      );
+    }
+    if (
+      isCaseDefinitionPath(datasetPath) ||
+      inputs.caseDirectories.has(datasetPath)
+    ) {
+      throw integrityError(
+        `Case ${definition.id} reads ${JSON.stringify(datasetPath)}, which contains case definitions.`,
+      );
+    }
+  }
 }

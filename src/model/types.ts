@@ -26,17 +26,16 @@ export interface DatasetIdentityV1 {
   version: string;
 }
 
-export interface DatasetManifestFileV1 {
+/** One case definition file and the identity it declares. */
+export interface DatasetManifestCaseV1 {
+  id: CaseId;
+  version: string;
   path: DatasetRelativePath;
-  size: number;
-  sha256: Sha256Hex;
 }
 
 export interface DatasetManifestV1 {
   dataset: DatasetIdentityV1;
-  /** Case definition paths; each definition declares its own stable ID. */
-  cases: DatasetRelativePath[];
-  files: DatasetManifestFileV1[];
+  cases: DatasetManifestCaseV1[];
 }
 
 /** Exact host-supplied implementation identity for one setup-action namespace. */
@@ -153,6 +152,7 @@ export interface JudgingCriterionV1 {
  */
 export interface EvalCaseV1 {
   id: CaseId;
+  version: string;
   display_name?: string;
   task?: string;
   initial_prompt?: string;
@@ -254,7 +254,6 @@ export interface ExperimentConfigV1 {
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {
-    manifest_sha256: Sha256Digest;
     /** CLI dataset location, relative to the experiment file; not run semantics. */
     path?: string;
   };
@@ -281,7 +280,6 @@ export interface LoadedDatasetV1 {
   root: string;
   manifestPath: string;
   manifestRaw: string;
-  manifestSha256: Sha256Digest;
   manifest: DatasetManifestV1;
   cases: ReadonlyMap<CaseId, LoadedEvalCaseV1>;
 }
@@ -307,7 +305,7 @@ export type InitialPromptSourceV1 = 'case.task' | 'case.initial_prompt';
 export interface ResolvedRunPlanV1 {
   selection: RunSelection;
   provenance: {
-    dataset: DatasetIdentityV1 & { manifest_sha256: Sha256Digest };
+    dataset: DatasetIdentityV1;
     experiment: {
       id: string;
       version: string;

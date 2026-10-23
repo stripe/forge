@@ -1,9 +1,6 @@
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { sha256Hex } from '../model/hashes.ts';
-import { parseDatasetManifest } from '../model/parse.ts';
-import type { DatasetManifestV1 } from '../model/types.ts';
 
 export interface RunInputReadOptions {
   readonly signal?: AbortSignal;
@@ -34,8 +31,6 @@ export interface RunInputProvider {
 
 export interface DirectoryRunInputProviderOptions {
   readonly maxBytes?: number;
-  /** Verified dataset inventory to enforce again when payloads are consumed. */
-  readonly manifest?: DatasetManifestV1;
 }
 
 /** A traversal- and symlink-safe provider rooted at one dataset directory. */
@@ -48,34 +43,6 @@ export async function createDirectoryRunInputProvider(
   if (!stat.isDirectory())
     throw new TypeError('Run input root must be a directory.');
   const defaultLimit = positiveLimit(options.maxBytes ?? 64 * 1024 * 1024);
-  const manifestFiles =
-    options.manifest === undefined
-      ? undefined
-      : new Map(
-          parseDatasetManifest(options.manifest).files.map((file) => [
-            file.path,
-            file,
-          ]),
-        );
-
-  function assertDeclaredFile(datasetPath: string, size: number) {
-    if (manifestFiles === undefined) return undefined;
-    const file = manifestFiles.get(datasetPath);
-    if (!file || file.size !== size) {
-      throw new Error(
-        `Dataset input does not match its manifest inventory: ${datasetPath}`,
-      );
-    }
-    return file;
-  }
-
-  function assertDeclaredDirectory(datasetPath: string) {
-    if (manifestFiles?.has(datasetPath)) {
-      throw new Error(
-        `Dataset input no longer has its manifest file type: ${datasetPath}`,
-      );
-    }
-  }
 
   return {
     async inspect(datasetPath) {
@@ -89,9 +56,6 @@ export async function createDirectoryRunInputProvider(
           `Dataset input is not a regular file or directory: ${datasetPath}`,
         );
       }
-      if (inputStat.isFile())
-        assertDeclaredFile(datasetPath, Number(inputStat.size));
-      else assertDeclaredDirectory(datasetPath);
       return Object.freeze({
         path: datasetPath,
         kind: inputStat.isFile() ? 'file' : 'directory',
@@ -113,23 +77,13 @@ export async function createDirectoryRunInputProvider(
           `Dataset input exceeds its ${limit} byte limit: ${datasetPath}`,
         );
       }
-      const file = assertDeclaredFile(datasetPath, Number(inputStat.size));
-      const body = await readBoundedInput(
+      return readBoundedInput(
         canonicalPath,
         inputStat,
         () => resolveSafeInput(canonicalRoot, datasetPath),
         limit,
         readOptions.signal,
       );
-      if (
-        file &&
-        (body.byteLength !== file.size || sha256Hex(body) !== file.sha256)
-      ) {
-        throw new Error(
-          `Dataset input does not match its manifest size or SHA-256: ${datasetPath}`,
-        );
-      }
-      return body;
     },
     async listFiles(datasetPath, listOptions = {}) {
       const { canonicalPath, stat: inputStat } = await resolveSafeInput(
@@ -139,7 +93,6 @@ export async function createDirectoryRunInputProvider(
       if (!inputStat.isDirectory()) {
         throw new Error(`Dataset input is not a directory: ${datasetPath}`);
       }
-      assertDeclaredDirectory(datasetPath);
       const limit = positiveLimit(listOptions.maxEntries ?? 100_000);
       const entries: RunInputEntry[] = [];
       const pending: Array<{ absolute: string; relative: string }> = [
@@ -162,10 +115,8 @@ export async function createDirectoryRunInputProvider(
             );
           }
           if (childStat.isDirectory()) {
-            assertDeclaredDirectory(childPath);
             pending.push({ absolute: childAbsolute, relative: childPath });
           } else if (childStat.isFile()) {
-            assertDeclaredFile(childPath, childStat.size);
             entries.push(
               Object.freeze({
                 path: childPath,
@@ -186,16 +137,6 @@ export async function createDirectoryRunInputProvider(
         }
       }
       entries.sort((left, right) => compareStrings(left.path, right.path));
-      if (manifestFiles !== undefined) {
-        const expected = [...manifestFiles.keys()].filter((filePath) =>
-          filePath.startsWith(`${datasetPath}/`),
-        );
-        if (expected.length !== entries.length) {
-          throw new Error(
-            `Dataset input tree does not match its manifest inventory: ${datasetPath}`,
-          );
-        }
-      }
       return Object.freeze(entries);
     },
   };

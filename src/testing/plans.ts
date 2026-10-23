@@ -10,8 +10,6 @@ import type {
 } from '../model/types.ts';
 import { FORGE_BUILD_IDENTITY } from '../version.ts';
 
-const DATASET_DIGEST = `sha256:${'1'.repeat(64)}` as const;
-
 export interface TestResolvedRunPlanOptions {
   readonly forgeVersion?: string;
   readonly caseId?: string;
@@ -70,7 +68,6 @@ export function createTestResolvedRunPlan(
       dataset: {
         id: 'forge-testing',
         version: '1.0.0',
-        manifest_sha256: DATASET_DIGEST,
       },
       experiment: {
         id: 'testing/experiment',
@@ -89,6 +86,7 @@ export function createTestResolvedRunPlan(
     },
     case: {
       id: caseId,
+      version: '0.1.0',
       ...(mode === 'one_shot'
         ? { initial_prompt: initialPrompt! }
         : { task: prompt }),

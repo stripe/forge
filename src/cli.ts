@@ -20,7 +20,6 @@ import {
   runExperimentCommand,
 } from './experimentCli.ts';
 import {
-  type DatasetManifestV1,
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
   getMatrixGroups,
@@ -120,8 +119,6 @@ The plan command requires exactly one matching matrix entry.
 
 export interface DefaultCliCompositionOptions {
   readonly datasetRoot: string;
-  /** Verified inventory supplied by runCli for consumption-time input checks. */
-  readonly datasetManifest?: DatasetManifestV1;
   readonly resultsRoot: string;
   /** Resolved runtime selection supplied by runCli to embedding hosts. */
   readonly runtime?: ForgeRuntimeV1;
@@ -201,11 +198,7 @@ export async function createDefaultCliComposition(
     ]),
     completionProviders: new Map([[completionProvider.id, completionProvider]]),
     credentialResolver,
-    inputProvider: await createDirectoryRunInputProvider(options.datasetRoot, {
-      ...(options.datasetManifest === undefined
-        ? {}
-        : { manifest: options.datasetManifest }),
-    }),
+    inputProvider: await createDirectoryRunInputProvider(options.datasetRoot),
     artifactStore: createArtifactStore({ root: options.resultsRoot }),
   });
 }
@@ -334,7 +327,6 @@ export async function runCli(
         );
         const composition = await compositionFactory({
           datasetRoot: dataset.root,
-          datasetManifest: dataset.manifest,
           ...(plans[0] === undefined ? {} : { runtime: plans[0].runtime }),
           resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
           ...(options.environment === undefined
@@ -516,7 +508,6 @@ async function runPublicExperiment(
         options.compositionFactory ?? createDefaultCliComposition
       )({
         datasetRoot: dataset.root,
-        datasetManifest: dataset.manifest,
         runtime: plans[0]!.runtime,
         resultsRoot: root,
         ...(options.environment === undefined

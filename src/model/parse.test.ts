@@ -12,16 +12,32 @@ import {
   parseSetupStep,
 } from './parse.ts';
 
-const HASH = 'a'.repeat(64);
-
 describe('public benchmark parsing', () => {
-  it('requires an explicit lowercase kebab-case authored identity', () => {
+  it('requires an explicit lowercase kebab-case authored identity and version', () => {
+    const version = '0.1.0';
     for (const id of ['task', 'suite/task', 'team-name/task-2']) {
-      assert.equal(parseEvalCase({ id, task: 'Complete the task.' }).id, id);
+      assert.equal(
+        parseEvalCase({ id, version, task: 'Complete the task.' }).id,
+        id,
+      );
     }
     assert.throws(
-      () => parseEvalCase({ task: 'Complete the task.' }),
+      () => parseEvalCase({ version, task: 'Complete the task.' }),
       BenchmarkModelError,
+    );
+    assert.throws(
+      () => parseEvalCase({ id: 'suite/task', task: 'Complete the task.' }),
+      /Required/,
+    );
+    assert.throws(
+      () =>
+        parseEvalCase({
+          id: 'suite/task',
+          version,
+          fixtures: ['fixtures/a.txt'],
+          task: 'Complete the task.',
+        }),
+      /Unrecognized key/,
     );
     for (const id of [
       'Suite/task',
@@ -30,13 +46,17 @@ describe('public benchmark parsing', () => {
       'suite/task--2',
     ]) {
       assert.throws(
-        () => parseEvalCase({ id, task: 'Complete the task.' }),
+        () => parseEvalCase({ id, version, task: 'Complete the task.' }),
         /case ID/,
       );
     }
   });
   it('uses the installed grammar and rejects removed authored schema fields', () => {
-    const definition = { id: 'sample/task', task: 'Complete the task.' };
+    const definition = {
+      id: 'sample/task',
+      version: '0.1.0',
+      task: 'Complete the task.',
+    };
     assert.equal(
       Object.hasOwn(parseEvalCase(definition), 'schema_version'),
       false,
@@ -47,8 +67,13 @@ describe('public benchmark parsing', () => {
     );
     const manifest = {
       dataset: { id: 'sample', version: '1' },
-      cases: ['cases/sample/task.case.yaml'],
-      files: [{ path: 'cases/sample/task.case.yaml', size: 10, sha256: HASH }],
+      cases: [
+        {
+          id: 'sample/task',
+          version: '0.1.0',
+          path: 'cases/sample/task.case.yaml',
+        },
+      ],
     };
     assert.equal(
       Object.hasOwn(
@@ -77,6 +102,16 @@ describe('public benchmark parsing', () => {
           `schema_version: 1\n${experimentConfigYaml()}`,
         ),
       BenchmarkModelError,
+    );
+    assert.throws(
+      () =>
+        parseExperimentConfigYaml(
+          experimentConfigYaml().replace(
+            '  version: 2026.09.0\nruntime:',
+            `  version: 2026.09.0\n  manifest_sha256: sha256:${'a'.repeat(64)}\nruntime:`,
+          ),
+        ),
+      /Unrecognized key.*manifest_sha256/,
     );
   });
 
@@ -133,6 +168,7 @@ describe('public benchmark parsing', () => {
   it('preserves multi-turn prompt semantics and materializes defaults', () => {
     const definition = parseEvalCaseYaml(`
 id: payments/checkout
+version: 0.1.0
 task: "  Help the user integrate Checkout.  "
 initial_prompt: "  I need help with Checkout.  "
 context: Existing integration
@@ -153,6 +189,7 @@ context: Existing integration
   it('accepts judging criteria and rejects the former case field', () => {
     const definition = {
       id: 'sample/criteria',
+      version: '0.1.0',
       task: 'Complete the task.',
       judging_criteria: [
         {
@@ -188,6 +225,7 @@ context: Existing integration
   it('accepts exactly one effective prompt in one-shot mode', () => {
     const oneShot = parseEvalCaseYaml(`
 id: smoke/write-file
+version: 0.1.0
 execution_mode: one_shot
 initial_prompt: Create greeting.txt
 checks:
@@ -205,6 +243,7 @@ checks:
       () =>
         parseEvalCaseYaml(`
 id: smoke/invalid
+version: 0.1.0
 execution_mode: one_shot
 task: One
 initial_prompt: Two
@@ -234,6 +273,7 @@ initial_prompt: Two
     assert.deepEqual(
       parseEvalCase({
         id: 'sample/task',
+        version: '0.1.0',
         task: 'Answer',
         judging_criteria: criteria,
       }).judging_criteria,
@@ -257,6 +297,7 @@ initial_prompt: Two
         () =>
           parseEvalCase({
             id: 'sample/task',
+            version: '0.1.0',
             task: 'Answer',
             judging_criteria: [{ ...invalid }],
           }),
@@ -267,6 +308,7 @@ initial_prompt: Two
       () =>
         parseEvalCase({
           id: 'sample/task',
+          version: '0.1.0',
           task: 'Answer',
           judging_criteria: [
             {
@@ -284,6 +326,7 @@ initial_prompt: Two
       () =>
         parseEvalCase({
           id: 'safe/oversized-criterion',
+          version: '0.1.0',
           task: 'Evaluate a bounded criterion.',
           execution_mode: 'multi_turn',
           setup: [],
@@ -393,6 +436,7 @@ initial_prompt: Two
       () =>
         parseEvalCaseYaml(`
 id: ../escape
+version: 0.1.0
 task: unsafe
 `),
       /case ID/,
@@ -401,6 +445,7 @@ task: unsafe
       () =>
         parseEvalCaseYaml(`
 id: safe/case
+version: 0.1.0
 task: safe
 typo: true
 `),
@@ -410,6 +455,7 @@ typo: true
       () =>
         parseEvalCaseYaml(`
 id: safe/case
+version: 0.1.0
 task: safe
 checks:
   file_checks:
@@ -422,7 +468,9 @@ checks:
       () =>
         parseEvalCaseYaml(`
 id: safe/case
+version: 0.1.0
 id: safe/other
+version: 0.1.0
 task: safe
 `),
       /Invalid eval case YAML/,
@@ -836,61 +884,51 @@ treatments:
     );
   });
 
-  it('validates manifest hashes, path inventory, and uniqueness', () => {
+  it('validates manifest case identities, paths, and uniqueness', () => {
+    const entry = {
+      id: 'smoke/write',
+      version: '0.1.0',
+      path: 'cases/smoke/write/case.yaml',
+    };
     const manifest = {
       dataset: { id: 'forge-smoke', version: '2026.09.0' },
-      cases: ['cases/smoke/write/case.yaml'],
-      files: [{ path: 'cases/smoke/write/case.yaml', size: 100, sha256: HASH }],
+      cases: [entry],
     };
-    {
-      const actual = parseDatasetManifestJson(JSON.stringify(manifest));
-      assert.ok(actual);
-      assert.equal(actual.dataset.id, 'forge-smoke');
-    }
+    assert.deepEqual(
+      parseDatasetManifestJson(JSON.stringify(manifest)),
+      manifest,
+    );
+    const other = {
+      ...entry,
+      id: 'smoke/other',
+      path: 'cases/other.case.yaml',
+    };
 
     const invalidManifests = [
-      { value: { ...manifest, files: [] }, reason: 'at least 1' },
+      { value: { ...manifest, cases: [] }, reason: 'at least 1' },
       {
-        value: {
-          ...manifest,
-          files: [{ ...manifest.files[0], sha256: HASH.toUpperCase() }],
-        },
-        reason: 'lowercase SHA-256 hex',
+        value: { ...manifest, files: [] },
+        reason: 'Unrecognized key',
       },
       {
-        value: {
-          ...manifest,
-          files: [{ ...manifest.files[0], path: 'fixtures/other.txt' }],
-        },
-        reason: 'case path must be present',
+        value: { ...manifest, cases: ['cases/smoke/write/case.yaml'] },
+        reason: 'Expected object',
       },
       {
-        value: {
-          ...manifest,
-          files: [...manifest.files, { ...manifest.files[0] }],
-        },
+        value: { ...manifest, cases: [{ ...entry, version: undefined }] },
+        reason: 'Required',
+      },
+      ...['size', 'sha256', 'files'].map((key) => ({
+        value: { ...manifest, cases: [{ ...entry, [key]: 0 }] },
+        reason: 'Unrecognized key',
+      })),
+      {
+        value: { ...manifest, cases: [entry, { ...other, path: entry.path }] },
         reason: 'path values must be unique',
       },
       {
-        value: {
-          ...manifest,
-          cases: [
-            ...manifest.cases,
-            { id: 'smoke/write', path: 'cases/other.case.yaml' },
-          ],
-          files: [
-            ...manifest.files,
-            { path: 'cases/other.case.yaml', size: 100, sha256: HASH },
-          ],
-        },
-        reason: 'Expected string',
-      },
-      {
-        value: {
-          ...manifest,
-          cases: [...manifest.cases, manifest.cases[0]!],
-        },
-        reason: 'path values must be unique',
+        value: { ...manifest, cases: [entry, { ...other, id: entry.id }] },
+        reason: 'id values must be unique',
       },
     ];
     for (const casePath of [
@@ -901,11 +939,7 @@ treatments:
       './cases/case.yaml',
     ]) {
       invalidManifests.push({
-        value: {
-          ...manifest,
-          cases: [casePath],
-          files: [{ path: casePath, size: 100, sha256: HASH }],
-        },
+        value: { ...manifest, cases: [{ ...entry, path: casePath }] },
         reason: casePath.startsWith('./')
           ? 'canonical dataset-relative POSIX path'
           : 'case definitions must be',
@@ -935,7 +969,6 @@ version: 2026.09.0
 dataset:
   id: forge-smoke
   version: 2026.09.0
-  manifest_sha256: sha256:${HASH}
 runtime:
   adapter: docker
   image: {kind: forge}

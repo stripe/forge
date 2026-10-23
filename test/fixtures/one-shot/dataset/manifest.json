@@ -1,16 +1,13 @@
 {
   "dataset": {
     "id": "forge-quickstart",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "cases": [
-    "cases/examples/hello-file.case.yaml"
-  ],
-  "files": [
     {
-      "path": "cases/examples/hello-file.case.yaml",
-      "size": 330,
-      "sha256": "de86e553802bdbaf1f98a7f075dabde85cb288ec0c76860574f23ab3dd52e341"
+      "id": "examples/hello-file",
+      "version": "0.1.0",
+      "path": "cases/examples/hello-file.case.yaml"
     }
   ]
 }

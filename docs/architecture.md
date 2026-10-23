@@ -125,7 +125,7 @@ Forge keeps authored definitions, resolved inputs, and execution identities dist
 
 | Object | Responsibility | Important contents |
 | --- | --- | --- |
-| Dataset | Versioned evaluation payload | Manifest, cases, fixture files, exact sizes and SHA-256 hashes |
+| Dataset | Versioned evaluation payload | Manifest of case identities, case definitions, fixture files |
 | Eval case | What is evaluated | Task or prompt, context, invariant setup, interaction mode, turn limit, checks, judging criteria, example answer |
 | Experiment | How cases run, defined by an experiment config | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
 | Experiment run | One resumable batch from an experiment | Experiment run ID, selected plans, checkpoint, attempt history, and aggregate report |
@@ -141,32 +141,53 @@ inputs independently of Forge format compatibility.
 ### Dataset loading and integrity
 
 [`loadDataset`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) treats the manifest as an exact
-inventory, not a best-effort index:
+case inventory:
 
-- `manifest.json` identifies the dataset and every case and payload file;
-- every payload must be a regular file with the declared size and hash;
-- missing, extra, modified, symbolic-link, or special-file entries fail;
+- `manifest.json` identifies the dataset and lists one entry per case: its
+  `id`, `version`, and case-definition `path`;
+- every manifest case path must exist, and every `case.yaml` or `*.case.yaml`
+  file under `cases/` must appear in the manifest;
+- every other regular file under the root is a fixture;
+- symbolic links and special files fail;
 - paths must be canonical, dataset-relative POSIX paths;
 - entry count, depth, individual document size, and total bytes are bounded;
-- the manifest lists case paths; IDs come from case definitions and must be
-  unique within the loaded dataset release.
+  and
+- case IDs and paths are unique, and each case definition must declare the
+  same `id` and `version` as its manifest entry.
 
-The experiment pins the dataset ID, version, and digest of the raw manifest
-bytes. Its optional `dataset.path` locates those bytes for the CLI, relative to
-the experiment file. Programmatic hosts can continue supplying a loaded dataset
-directly; the location is excluded from resolved plans and execution semantics. Planning refuses to combine a loaded dataset with a different pin.
+Fixtures a case uses are the `dataset_path` sources of its `forge/write`
+setup; `loadDataset` rejects a case whose source names neither a payload file
+nor a directory containing one, or names a case definition or a directory
+containing one. Custom setup actions, treatment setup, and agents may read any
+payload file; Forge cannot infer those reads. `validate` and `plan` therefore
+do not catch a missing treatment source, which fails each attempt when setup
+applies it. Hosts that supply a loaded dataset directly own these checks.
+
+Case and dataset versions are independent labels. Change the dataset
+`version` whenever any case version changes or a case is added or removed.
+Forge records the case version in resolved plans through the case
+definition; it does not compare versions at load time.
+
+Forge does not hash the manifest, case definitions, or fixtures. The
+experiment pins only the dataset ID and version, so the dataset version is the
+identity of its case set and must change with it. Each resolved plan embeds
+the full case definition, so `plan.json` and the experiment checkpoint bind
+the case content that ran; fixture bytes are not recorded. Hosts that need
+content integrity must govern it outside Forge, for example by requiring a
+case version change for every case or fixture edit.
+
+The optional `dataset.path` locates the manifest for the CLI, relative to the
+experiment file. Programmatic hosts can continue supplying a loaded dataset
+directly; the location is excluded from resolved plans and execution
+semantics. Planning refuses to combine a loaded dataset with a different ID
+or version.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
-access to dataset payloads. The directory provider accepts the verified
-manifest, checks each returned buffer against its declared size and hash, and
-requires directory listings to match the pinned inventory. The public CLI
-supplies that manifest automatically. This closes the gap between initial
-verification and later setup reads.
+access to dataset payloads.
 
-A release bundle can contain `experiment.yaml` beside its exact-manifest
-`dataset/` tree. The experiment uses `dataset.path: ./dataset`, keeping runtime
-choices outside the dataset inventory while allowing the complete bundle to be
-archived and extracted without path changes. See the
-[sample bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+Because every file under the root is readable payload, experiments and
+documentation live outside the dataset root and point at it with
+`dataset.path`. See the
+[sample experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/README.md)
 for the layout and commands.
 
 ### Cases, treatments, and setup ordering
@@ -342,7 +363,7 @@ exit policy.
 
 ### Plan resolution
 
-[`resolveRunPlan`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) validates all references and
+[`resolveRunPlan`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) validates experiment references and
 produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 - checks dataset and experiment compatibility;
@@ -350,12 +371,12 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 - requires `models.role_player` for a multi-turn case;
 - requires `models.judge` when judging criteria are non-empty;
 - concatenates case and treatment setup;
-- validates referenced dataset inputs and action-bundle pins;
+- validates action-bundle pins;
 - chooses the effective prompt and records its source;
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
   host-supplied platform selection; and
-- records the dataset manifest pin, experiment and case identities, installed
+- records the dataset, experiment, and case identities, installed
   Forge package, and action-bundle implementation pins.
 
 Plans use canonical JSON with recursively sorted object keys and retained array
@@ -719,8 +740,8 @@ handler during application.
 
 The built-ins are:
 
-- `forge/write`: copy inline bytes or a manifest-listed dataset file to a
-  safe workspace-relative path;
+- `forge/write`: copy inline bytes or a dataset file to a safe
+  workspace-relative path;
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials;
 - `forge/credentials`: declare agent-scoped credentials without issuing setup
@@ -1263,7 +1284,7 @@ trusted.
 
 | Boundary | What is trusted | What Forge still enforces |
 | --- | --- | --- |
-| Authored YAML/JSON and dataset bytes | Untrusted data | Strict schemas, bounded input, canonical paths, exact inventory and hashes |
+| Authored YAML/JSON and dataset bytes | Untrusted data | Strict schemas, bounded input, canonical paths, exact case inventory |
 | Setup action bundle code | Trusted host code | Explicit import, pinned identity, namespace isolation, pure preflight, constrained apply capabilities |
 | Runtime adapter | Trusted mechanism | Exact plan adapter ID/config validation, pure preflight, lifecycle-shaped capability projections |
 | Agent adapter | Trusted integration, untrusted output | Exact selection match, bounded turns, stable session ID, native-evidence parsing and coverage |
@@ -1379,7 +1400,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles with runnable experiments and exact-manifest dataset trees |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets, each holding only its latest version |
+| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments and release documentation for the sample datasets |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 

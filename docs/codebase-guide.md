@@ -43,7 +43,7 @@ pnpm test path/to/file.test.ts
 without changing files. Use `pnpm lint:fix` to apply safe fixes, or `pnpm format`
 to format only. The [Biome configuration](https://github.com/stripe/forge/blob/main/biome.json)
 excludes dataset releases, test fixtures, and packaged Docker assets so their
-integrity-pinned bytes are not rewritten.
+bytes are not rewritten.
 
 `pnpm check` runs Biome, type checking, tests, build, dataset validation,
 documentation validation, and package checks. PRs targeting `main`, including drafts, run the
@@ -52,10 +52,15 @@ The publishing workflow checks and publishes versioned development snapshots
 after pushes to `main`; stable release commits are skipped.
 
 `pnpm check:docs` checks documentation links, the public export inventory, and
-structured snippets. `pnpm check:cases` validates checked-in release datasets
-and harness fixtures through the public loader without model calls. Sample
-release bundles live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets);
-harness inputs live under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+structured snippets. `pnpm check:cases` validates checked-in datasets and
+harness fixtures through the public loader without model calls. It also
+compares each manifest with its copy at the merge-base with `origin/main`
+(override with `-- --base <ref>`) and fails when a case version or membership
+change keeps the dataset version.
+Each dataset keeps only its latest version; earlier versions live in Git
+history. Sample datasets live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets),
+their experiments under [`experiments`](https://github.com/stripe/forge/tree/main/experiments),
+and harness inputs under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
 
 ### Opt-in live tests
 
@@ -368,7 +373,7 @@ is selected.
 | [`types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts) | TypeScript wire types for manifests, cases, experiments, selections, setup steps, runtimes, and resolved plans | Imported across nearly every directory; contains data only |
 | [`parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
 | [`matrix.ts`](https://github.com/stripe/forge/blob/main/src/model/matrix.ts) | `getMatrixGroups` and shared agent identity after defaults | Provides shared matrix views and agent identity for parsing and planning. |
-| [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
+| [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest case inventory, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
 | [`paths.ts`](https://github.com/stripe/forge/blob/main/src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
 | [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for dataset pins, bundle identity checks, plugin snapshot fingerprints, and artifact verification |
 | [`checks.ts`](https://github.com/stripe/forge/blob/main/src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
@@ -384,7 +389,7 @@ raw YAML/JSON
    │ parse.ts
    ▼
 EvalCaseV1 / ExperimentConfigV1 / DatasetManifestV1
-   │ loaders.ts verifies dataset bytes and adds source paths
+   │ loaders.ts checks the case inventory and setup inputs and adds source paths
    ▼
 LoadedDatasetV1 + LoadedExperimentConfigV1
    │ planning/planner.ts
@@ -430,7 +435,7 @@ implementations.
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
-| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; manifest-backed directory providers check returned bytes and inventory |
+| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code and Codex; selected by `setup/forgePlugin.ts` |
@@ -767,8 +772,8 @@ Tests use `node:assert/strict` with explicit field assertions for partial object
 Keep native parser inputs and expected canonical bytes independent of the
 implementation being tested. Checked-in eval inputs under
 [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures) serve
-deterministic tests and the opt-in live suite; their manifest sizes and hashes
-are verified by `pnpm check:cases` and loader tests.
+deterministic tests and the opt-in live suite; their manifests are validated
+by `pnpm check:cases` and loader tests.
 
 The normal suite combines focused unit tests, deterministic integration tests,
 real local subprocesses, and loopback HTTP transport tests. Subprocess tests
@@ -782,7 +787,8 @@ gateway behavior, and suite configuration.
 
 | Path | Role |
 | --- | --- |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
+| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets. Each holds only its latest version; earlier versions live in Git history. |
+| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments for the sample datasets. Each `experiment.yaml` pins its dataset with `dataset.path` and selects treatments and models. |
 | [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
 | [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`vitest.config.ts`](https://github.com/stripe/forge/blob/main/vitest.config.ts) | Vitest discovery, Node environment, process isolation, and mock restoration. |
@@ -819,7 +825,7 @@ Usually touch:
 4. `execution` or the relevant subsystem that consumes it;
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
-7. adjacent tests, affected dataset snapshots and eval fixtures, manifest sizes/hashes,
+7. adjacent tests, affected dataset snapshots and eval fixtures, experiment dataset versions,
    and the architecture guide's [data model](architecture.md#the-benchmark-data-model).
 
 Do not let runtime code infer a new default. Materialize it during parsing or

@@ -11,7 +11,7 @@ import {
 } from '../version.ts';
 import { JudgingCriterionSchema } from './criteria.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
-import { isSha256Digest, isSha256Hex } from './hashes.ts';
+import { isSha256Digest } from './hashes.ts';
 import { agentSelectionKey } from './matrix.ts';
 import {
   isAuthoredCaseId,
@@ -217,6 +217,7 @@ const ChecksSchema = z
 const CompatibleEvalCaseSchema = z
   .object({
     id: CaseIdSchema,
+    version: VersionSchema,
     display_name: TrimmedTextSchema.optional(),
     task: TrimmedTextSchema.optional(),
     initial_prompt: TrimmedTextSchema.optional(),
@@ -276,39 +277,33 @@ const DatasetIdentitySchema = z
   })
   .strict();
 
-const ManifestFileSchema = z
+const ManifestCaseSchema = z
   .object({
-    path: DatasetPathSchema,
-    size: NonnegativeIntegerSchema,
-    sha256: z.string().refine(isSha256Hex, 'must be lowercase SHA-256 hex'),
+    id: AuthoredCaseIdSchema,
+    version: VersionSchema,
+    path: CasePathSchema,
   })
   .strict();
 
 const DatasetManifestSchema = z
   .object({
     dataset: DatasetIdentitySchema,
-    cases: z.array(CasePathSchema).min(1).max(10_000),
-    files: z.array(ManifestFileSchema).min(1).max(50_000),
+    cases: z.array(ManifestCaseSchema).min(1).max(10_000),
   })
   .strict()
   .superRefine((manifest, context) => {
-    addDuplicateIssues(manifest.cases, context, ['cases'], 'path');
     addDuplicateIssues(
-      manifest.files.map(({ path }) => path),
+      manifest.cases.map(({ path }) => path),
       context,
-      ['files'],
+      ['cases'],
       'path',
     );
-    const files = new Set(manifest.files.map(({ path }) => path));
-    for (const [index, casePath] of manifest.cases.entries()) {
-      if (!files.has(casePath)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['cases', index],
-          message: 'case path must be present in the file manifest',
-        });
-      }
-    }
+    addDuplicateIssues(
+      manifest.cases.map(({ id }) => id),
+      context,
+      ['cases'],
+      'id',
+    );
   });
 
 const ModelRefSchema = z
@@ -503,9 +498,6 @@ const ExperimentConfigSchema = z
           'must be a non-empty dataset location without NUL bytes',
         )
         .optional(),
-      manifest_sha256: z
-        .string()
-        .refine(isSha256Digest, 'must be a sha256: digest'),
     }).strict(),
     forge: AuthoredForgeSchema.optional(),
     runtime: RuntimeSchema,
@@ -658,11 +650,7 @@ const ResolvedRunPlanSchema = z
     selection: RunSelectionSchema,
     provenance: z
       .object({
-        dataset: DatasetIdentitySchema.extend({
-          manifest_sha256: z
-            .string()
-            .refine(isSha256Digest, 'must be a sha256: digest'),
-        }).strict(),
+        dataset: DatasetIdentitySchema,
         experiment: z
           .object({
             id: CaseIdSchema,

@@ -1,4 +1,5 @@
 id: examples/hello-file
+version: 0.1.0
 display_name: Hello file
 initial_prompt: Create hello.txt containing exactly "hello, forge!" followed by a newline.
 execution_mode: one_shot

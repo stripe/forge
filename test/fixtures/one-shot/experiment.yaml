@@ -1,10 +1,9 @@
 id: examples/quickstart
-version: 0.1.0
+version: 0.2.0
 dataset:
   path: ./dataset
   id: forge-quickstart
-  version: 0.1.0
-  manifest_sha256: sha256:0705866807c02da99567f075787f5177c969e5616cf5fa1b1918d6794a41475f
+  version: 0.2.0
 runtime:
   adapter: docker
   image:
