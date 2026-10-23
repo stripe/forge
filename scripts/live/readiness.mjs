@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -37,6 +36,7 @@ export async function runReadinessIntegrationSuite({
       const setup = readinessFixtureSetup(scenario);
       const caseBody = stringify({
         id: 'readiness/fixture',
+        version: '0.1.0',
         initial_prompt: 'Unused: readiness makes no model calls.',
         execution_mode: 'one_shot',
         setup,
@@ -50,12 +50,11 @@ export async function runReadinessIntegrationSuite({
       );
       const manifest = JSON.stringify({
         dataset: { id: 'forge-live-readiness', version: '1.0.0' },
-        cases: ['cases/fixture.case.yaml'],
-        files: [
+        cases: [
           {
+            id: 'readiness/fixture',
+            version: '0.1.0',
             path: 'cases/fixture.case.yaml',
-            size: Buffer.byteLength(caseBody),
-            sha256: digest(caseBody),
           },
         ],
       });
@@ -70,7 +69,6 @@ export async function runReadinessIntegrationSuite({
             id: 'forge-live-readiness',
             version: '1.0.0',
             path: './dataset',
-            manifest_sha256: `sha256:${digest(manifest)}`,
           },
           runtime: {
             adapter: 'docker',
@@ -83,11 +81,7 @@ export async function runReadinessIntegrationSuite({
               setup: [
                 {
                   uses: 'forge/plugin',
-                  with: {
-                    agents: {
-                      [liveAgent]: distribution,
-                    },
-                  },
+                  with: { plugin: 'stripe' },
                 },
               ],
             },
@@ -305,8 +299,4 @@ const server=http.createServer(async(req,res)=>{
   const result=message.method==='initialize'?{protocolVersion:message.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:message.method==='tools/list'?{tools:[{name:'ping',description:'Fixture tool; never invoked.',inputSchema:{type:'object'}}]}:message.method==='resources/list'?{resources:[]}:{resourceTemplates:[]};
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify({jsonrpc:'2.0',id:message.id,result}));
 });server.listen(0,'127.0.0.1',()=>{fs.writeFileSync('catalog/plugin/.mcp.json',JSON.stringify({mcpServers:{[${JSON.stringify(scenario)}==='absent'?'other':'stripe']:{type:'http',url:'http://127.0.0.1:'+server.address().port+'/mcp'}}}));fs.writeFileSync('mcp-ready','ready');});`;
-}
-
-function digest(body) {
-  return createHash('sha256').update(body).digest('hex');
 }
