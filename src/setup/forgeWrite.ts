@@ -55,6 +55,11 @@ export const writeSetupHandler: SetupStepHandler = Object.freeze({
               signal: context.signal,
               maxEntries: 100_000,
             });
+            if (entries.length === 0) {
+              throw new Error(
+                `Setup input directory contains no files: ${sourcePath}`,
+              );
+            }
             const totalBytes = entries.reduce<number>(
               (total, entry) => total + (entry.size ?? 0),
               0,

@@ -70,9 +70,19 @@ export function datasetVersionViolations(baseline, candidate) {
 }
 
 /** Read each dataset's manifest at the merge-base with `baseRef`, if it exists. */
-export function gitBaselineReader({ root, baseRef, parseDatasetManifestJson }) {
+export function gitBaselineReader({
+  root,
+  baseRef,
+  parseDatasetManifestJson,
+  maxManifestBytes,
+}) {
   const git = (...args) =>
-    execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+    execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      maxBuffer: maxManifestBytes,
+    });
   const mergeBase = git('merge-base', baseRef, 'HEAD').trim();
   return (relativeRoot) => {
     const manifestPath = `${relativeRoot}/manifest.json`;
@@ -103,9 +113,11 @@ if (
       args: process.argv.slice(2).filter((arg) => arg !== '--'),
       options: { base: { type: 'string', default: 'origin/main' } },
     });
-    const { loadDataset, parseDatasetManifestJson } = await import(
-      '../dist/index.js'
-    );
+    const {
+      loadDataset,
+      parseDatasetManifestJson,
+      MAX_DATASET_MANIFEST_BYTES,
+    } = await import('../dist/index.js');
     const result = await checkRepositoryCases({
       root: repositoryRoot,
       loadDataset,
@@ -113,6 +125,7 @@ if (
         root: repositoryRoot,
         baseRef: values.base,
         parseDatasetManifestJson,
+        maxManifestBytes: MAX_DATASET_MANIFEST_BYTES,
       }),
     });
     if (result.errors.length > 0) {
