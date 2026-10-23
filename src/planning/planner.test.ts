@@ -930,35 +930,58 @@ describe('experiment expansion and run planning', () => {
     }
   });
 
-  it('leaves treatment dataset inputs to setup instead of checking them while planning', () => {
+  it('validates treatment fixture sources before execution, including directories and case exclusions', () => {
     const treatmentSetup = (datasetPath: string) => ({
       uses: 'forge/write',
       with: { target: 'seed.txt', source: { dataset_path: datasetPath } },
     });
-    const plan = resolveRunPlan({
-      ...inputs({
+    const planFor = (datasetPath: string, withIndex = true) => {
+      const loaded = inputs({
         experiment: experimentConfig({
           treatments: {
-            missing: { setup: [treatmentSetup('fixtures/missing.txt')] },
+            fixture: { setup: [treatmentSetup(datasetPath)] },
           },
           matrix: {
             ...getMatrixGroups(experimentConfig().matrix)[0]!,
-            treatments: ['missing'],
+            treatments: ['fixture'],
             repetitions: 1,
             retries: 0,
           },
         }),
-      }),
-      selection: selection(
-        'case/a',
-        'missing',
-        'claude-code',
-        'anthropic',
-        'sonnet',
-        0,
-      ),
+      });
+      if (!withIndex) delete loaded.dataset.inputPaths;
+      return resolveRunPlan({
+        ...loaded,
+        selection: selection(
+          'case/a',
+          'fixture',
+          'claude-code',
+          'anthropic',
+          'sonnet',
+          0,
+        ),
+      });
+    };
+    for (const source of ['fixtures/seed.txt', 'fixtures']) {
+      assert.deepEqual(planFor(source).setup.at(-1), treatmentSetup(source));
+    }
+    assert.throws(() => planFor('fixtures/missing.txt'), {
+      code: 'invalid_dataset_input',
+      message: /absent from the dataset/,
     });
-    assert.deepEqual(plan.setup.at(-1), treatmentSetup('fixtures/missing.txt'));
+    for (const source of [CASE_A_PATH, 'cases/case', 'cases']) {
+      for (const withIndex of [true, false]) {
+        assert.throws(() => planFor(source, withIndex), {
+          code: 'invalid_dataset_input',
+          message: /contains case definitions/,
+        });
+      }
+    }
+    // Hosts with virtual inputs may omit the filesystem index and own existence checks.
+    assert.deepEqual(
+      planFor('fixtures/virtual.txt', false).setup.at(-1),
+      treatmentSetup('fixtures/virtual.txt'),
+    );
   });
 
   it('serializes plans canonically and hashes equivalent object key order equally', () => {
@@ -1133,6 +1156,15 @@ function inputs(
             path: `/dataset/${CASE_B_PATH}`,
           },
         ],
+      ]),
+      inputPaths: new Set([
+        CASE_A_PATH,
+        CASE_B_PATH,
+        'cases',
+        'cases/case',
+        'cases/case/a',
+        'fixtures',
+        'fixtures/seed.txt',
       ]),
     },
     experiment: {

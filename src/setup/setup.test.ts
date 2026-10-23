@@ -1098,6 +1098,46 @@ describe('portable setup actions', () => {
     assert.deepEqual(applied.steps, [{ index: 0, uses: 'forge/write' }]);
   });
 
+  it('rejects empty dataset directories instead of silently skipping a write', async () => {
+    const prepared = createSetupExecutor().preflight(
+      [
+        {
+          uses: 'forge/write',
+          with: {
+            target: 'out.txt',
+            source: { dataset_path: 'fixtures/source.txt' },
+          },
+        },
+      ],
+      setupTarget,
+    );
+    await assert.rejects(
+      prepared.apply(
+        setupApplyContext({
+          inputs: {
+            async inspect(path) {
+              return { path, kind: 'directory' };
+            },
+            async listFiles() {
+              return [];
+            },
+            async read() {
+              throw new Error('Must not read an empty tree');
+            },
+          },
+        }),
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof SetupActionError);
+        assert.match(
+          String(error.cause),
+          /directory contains no files: fixtures\/source.txt/,
+        );
+        return true;
+      },
+    );
+  });
+
   it('rejects an oversized dataset tree before reading or writing any file', async () => {
     let read = false;
     let written = false;
@@ -1158,8 +1198,6 @@ describe('portable setup actions', () => {
   });
 
   it('honors cancellation after a dataset read before file or directory handler writes', async () => {
-    // Directory inputs exercise the lower-level handler; the public planner
-    // intentionally accepts only manifest-listed dataset files.
     for (const kind of ['file', 'directory'] as const) {
       const controller = new AbortController();
       const cancellation = new Error(`cancelled after ${kind} read`);

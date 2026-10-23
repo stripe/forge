@@ -302,6 +302,11 @@ export interface LoadedDatasetV1 {
   manifestRaw: string;
   manifest: DatasetManifestV1;
   cases: ReadonlyMap<CaseId, LoadedEvalCaseV1>;
+  /**
+   * Payload files and nonempty ancestor directories discovered at load time.
+   * Hosts omitting this index own setup-source existence checks.
+   */
+  inputPaths?: ReadonlySet<DatasetRelativePath>;
 }
 
 export interface LoadedExperimentConfigV1 {
