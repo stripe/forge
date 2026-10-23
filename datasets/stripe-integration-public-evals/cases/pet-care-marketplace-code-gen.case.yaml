@@ -18,7 +18,7 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: Account-creation code configures Recipient with stripe_balance.stripe_transfers.'
     requirement_level: MUST
-  - value: 'MUST NOT: Account-creation code does NOT configure Merchant or card_payments.'
+  - value: 'MUST NOT: Account-creation code configures Merchant or card_payments.'
     requirement_level: MUST
   - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
     requirement_level: MUST
@@ -30,7 +30,7 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: Code checks configuration.recipient.capabilities.stripe_balance.stripe_transfers.status === ''active'' before accepting a booking for the provider.'
     requirement_level: MUST
-  - value: 'MUST NOT: Code does NOT use v1 charges_enabled or payouts_enabled as the readiness condition.'
+  - value: 'MUST NOT: Code uses v1 charges_enabled or payouts_enabled as the readiness condition.'
     requirement_level: MUST
-  - value: 'MUST NOT: PaymentIntent code does NOT set on_behalf_of.'
+  - value: 'MUST NOT: PaymentIntent code sets on_behalf_of.'
     requirement_level: MUST

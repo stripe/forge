@@ -12,11 +12,11 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: Sets ui_mode to ''form'' on the Checkout Session so the form stays on the page'
     requirement_level: MUST
-  - value: 'MUST NOT: Passes the Checkout Session client_secret to the frontend'
+  - value: 'MUST: Passes the Checkout Session client_secret to the frontend'
     requirement_level: MUST
   - value: 'Frontend uses EmbeddedCheckout from @stripe/react-stripe-js'
     requirement_level: SHOULD
   - value: 'Has a webhook endpoint that handles checkout.session.completed or payment events'
     requirement_level: OPTIONAL
-  - value: 'MUST NOT: Stripe secret key is only used server-side, never exposed in frontend code'
+  - value: 'MUST: Stripe secret key is only used server-side, never exposed in frontend code'
     requirement_level: MUST

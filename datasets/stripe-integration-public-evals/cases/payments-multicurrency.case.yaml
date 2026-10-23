@@ -34,7 +34,7 @@ judging_criteria:
     requirement_level: SHOULD
   - value: 'MUST NOT implement manual currency routing — no logic that reads currency from a query parameter or request body and passes it to the Checkout Session'
     requirement_level: MUST
-  - value: 'MUST NOT: Defines prices in a single settlement currency (e.g., USD) rather than creating separate prices or currency_options for EUR, GBP, etc.'
+  - value: 'MUST: Defines prices in a single settlement currency (e.g., USD) rather than creating separate prices or currency_options for EUR, GBP, etc.'
     requirement_level: MUST
   - value: 'MUST: For embedded checkout: uses CurrencySelectorElement; for redirect checkout: Stripe''s hosted page handles currency display automatically'
     requirement_level: MUST

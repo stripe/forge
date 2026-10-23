@@ -186,11 +186,14 @@ my-eval/
 ├── experiments/stripe-integration-public-evals/experiment.yaml
 └── datasets/stripe-integration-public-evals/
     ├── manifest.json
-    └── cases/payments-onetime.case.yaml
+    └── cases/ (73 cases, including payments-onetime.case.yaml)
 ```
 
-The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
-and a criterion judge. All three use the configured Anthropic credential.
+Copy the whole `cases/` directory — the manifest lists all 73 case paths and
+`loadDataset` requires each to exist, so a partial copy fails validation even
+though the bundled experiment only selects `payments-onetime`. The sample
+evaluates a Stripe Checkout integration using Claude Code, Ava, and a
+criterion judge. All three use the configured Anthropic credential.
 The dataset is separate from the installed Forge package; preserve its bytes.
 The experiment's `dataset.path` resolves relative to the experiment file.
 

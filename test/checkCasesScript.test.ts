@@ -41,7 +41,7 @@ describe('repository case check', () => {
       }),
       {
         datasets: 3,
-        cases: 3,
+        cases: 75,
         errors: [],
       },
     );
@@ -95,7 +95,7 @@ describe('repository case check', () => {
       }),
       {
         datasets: 3,
-        cases: 3,
+        cases: 75,
         errors: [],
       },
     );
@@ -115,7 +115,7 @@ describe('repository case check', () => {
       readBaselineManifest: noBaseline,
     });
     assert.equal(result.datasets, 3);
-    assert.equal(result.cases, 2);
+    assert.equal(result.cases, 74);
     assert.equal(result.errors.length, 1);
     assert.match(result.errors[0]!, /^test\/fixtures\/one-shot\/dataset:/);
     assert.match(result.errors[0]!, /id|identifier/i);
@@ -176,7 +176,7 @@ describe('repository case check', () => {
     assert.equal(unchanged.status, 0, unchanged.stderr);
     assert.equal(
       unchanged.stdout,
-      'cases: checked 3 datasets and 3 cases against base\n',
+      'cases: checked 3 datasets and 75 cases against base\n',
     );
 
     const datasetRoot = path.join(root, REPOSITORY_DATASET_ROOTS[0]!);

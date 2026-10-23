@@ -10,11 +10,6 @@
       "path": "cases/b2b-enterprise-platform.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/connect-ai-model-platform",
-      "version": "0.1.0",
-      "path": "cases/connect-ai-model-platform.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/connect-crafthub-multi-seller",
       "version": "0.1.0",
       "path": "cases/connect-crafthub-multi-seller.case.yaml"
@@ -40,11 +35,6 @@
       "path": "cases/edge-inclusive-fee-language.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/edge-on-top-of-fee-language",
-      "version": "0.1.0",
-      "path": "cases/edge-on-top-of-fee-language.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/edge-very-low-flat-fee",
       "version": "0.1.0",
       "path": "cases/edge-very-low-flat-fee.case.yaml"
@@ -63,11 +53,6 @@
       "id": "stripe-integration-public-evals/freelancer-marketplace-upwork-like",
       "version": "0.1.0",
       "path": "cases/freelancer-marketplace-upwork-like.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/high-margin-marketplace-15pct",
-      "version": "0.1.0",
-      "path": "cases/high-margin-marketplace-15pct.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/hybrid-saas-marketplace-fitness",
@@ -93,16 +78,6 @@
       "id": "stripe-integration-public-evals/invoicing-b2b",
       "version": "0.1.0",
       "path": "cases/invoicing-b2b.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/low-margin-marketplace-1pct-emily",
-      "version": "0.1.0",
-      "path": "cases/low-margin-marketplace-1pct-emily.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/marketplace-sct-flat-fee-hold-release",
-      "version": "0.1.0",
-      "path": "cases/marketplace-sct-flat-fee-hold-release.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/on-demand-services-uber-like",
@@ -160,21 +135,6 @@
       "path": "cases/payments-fixed-usd-jpy-prices.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/payments-fulfillment-replay-safety",
-      "version": "0.1.0",
-      "path": "cases/payments-fulfillment-replay-safety.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/payments-hosted-migration",
-      "version": "0.1.0",
-      "path": "cases/payments-hosted-migration.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/payments-mobile-inapp",
-      "version": "0.1.0",
-      "path": "cases/payments-mobile-inapp.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/payments-mobile-physical-goods",
       "version": "0.1.0",
       "path": "cases/payments-mobile-physical-goods.case.yaml"
@@ -183,11 +143,6 @@
       "id": "stripe-integration-public-evals/payments-multicurrency",
       "version": "0.1.0",
       "path": "cases/payments-multicurrency.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/payments-off-session-balance",
-      "version": "0.1.0",
-      "path": "cases/payments-off-session-balance.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/payments-on-session-recovery",
@@ -218,16 +173,6 @@
       "id": "stripe-integration-public-evals/payments-saved-card-consent",
       "version": "0.1.0",
       "path": "cases/payments-saved-card-consent.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/payments-simple-embedded-prompt",
-      "version": "0.1.0",
-      "path": "cases/payments-simple-embedded-prompt.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/payments-simple-hosted-prompt",
-      "version": "0.1.0",
-      "path": "cases/payments-simple-hosted-prompt.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/payments-simple-link",
@@ -265,11 +210,6 @@
       "path": "cases/pet-care-marketplace-code-gen.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/rental-marketplace-airbnb-like",
-      "version": "0.1.0",
-      "path": "cases/rental-marketplace-airbnb-like.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/saas-self-serve-platform-managed-pricing",
       "version": "0.1.0",
       "path": "cases/saas-self-serve-platform-managed-pricing.case.yaml"
@@ -305,11 +245,6 @@
       "path": "cases/subscriptions-bank-debits.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/subscriptions-billing-credits-basic",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-billing-credits-basic.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/subscriptions-cardless-trial",
       "version": "0.1.0",
       "path": "cases/subscriptions-cardless-trial.case.yaml"
@@ -335,16 +270,6 @@
       "path": "cases/subscriptions-custom-date-cancellation.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/subscriptions-customer-portal",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-customer-portal.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/subscriptions-dunning-recovery-policy",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-dunning-recovery-policy.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/subscriptions-entitlements",
       "version": "0.1.0",
       "path": "cases/subscriptions-entitlements.case.yaml"
@@ -355,19 +280,9 @@
       "path": "cases/subscriptions-fixed.case.yaml"
     },
     {
-      "id": "stripe-integration-public-evals/subscriptions-free-to-paid-flexible",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-free-to-paid-flexible.case.yaml"
-    },
-    {
       "id": "stripe-integration-public-evals/subscriptions-incomplete-sca-signup",
       "version": "0.1.0",
       "path": "cases/subscriptions-incomplete-sca-signup.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/subscriptions-item-level-trial-offer",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-item-level-trial-offer.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/subscriptions-metered-basic",
@@ -378,11 +293,6 @@
       "id": "stripe-integration-public-evals/subscriptions-migration-backdated",
       "version": "0.1.0",
       "path": "cases/subscriptions-migration-backdated.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/subscriptions-mixed-intervals",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-mixed-intervals.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/subscriptions-month-end-anchor",
@@ -413,11 +323,6 @@
       "id": "stripe-integration-public-evals/subscriptions-prebilling",
       "version": "0.1.0",
       "path": "cases/subscriptions-prebilling.case.yaml"
-    },
-    {
-      "id": "stripe-integration-public-evals/subscriptions-price-migration",
-      "version": "0.1.0",
-      "path": "cases/subscriptions-price-migration.case.yaml"
     },
     {
       "id": "stripe-integration-public-evals/subscriptions-promotion-codes",
