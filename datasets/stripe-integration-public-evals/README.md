@@ -10,23 +10,24 @@ judging criteria. It has no fixture files or setup steps.
 
 ```text
 datasets/stripe-integration-public-evals/
-├── manifest.json
-└── cases/
-    └── payments-onetime.case.yaml
-experiments/stripe-integration-public-evals/
 ├── README.md
-└── experiment.yaml
+├── experiment.yaml
+└── dataset/
+    ├── manifest.json
+    └── cases/
+        └── payments-onetime.case.yaml
 ```
 
-The dataset directory holds only the latest version; earlier versions live in
-Git history. Its manifest declares identity and lists each case's ID, version,
-and path. The case file declares the same ID and version. This README and the
-experiment sit outside the dataset tree, because every file inside it is
-dataset payload.
+The bundle holds only the latest version; earlier versions live in Git
+history. Its nested `dataset/` contains the payload: the manifest, cases, and
+any fixtures. The manifest lists each case's ID, version, and path; each case
+file declares the same ID and version. This README and the experiment remain
+outside that payload tree.
 
-The [baseline experiment](experiment.yaml) points at the dataset with
-`dataset.path` and pins the dataset ID and version. It
-selects this case once with Claude Code and Sonnet 4.6, using public Anthropic
+The [baseline experiment](experiment.yaml) uses `dataset.path: ./dataset` and
+pins the dataset ID and version. Copy the whole bundle to run it elsewhere
+without rewriting configuration. It selects this case once with Claude Code
+and Sonnet 4.6, using public Anthropic
 models for Ava and judging. Runtime and model choices belong to the experiment
 rather than the dataset.
 
@@ -37,9 +38,9 @@ From the repository root:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --experiment experiments/stripe-integration-public-evals/experiment.yaml
+  --experiment datasets/stripe-integration-public-evals/experiment.yaml
 node dist/cli.js plan \
-  --experiment experiments/stripe-integration-public-evals/experiment.yaml
+  --experiment datasets/stripe-integration-public-evals/experiment.yaml
 ```
 
 Validation and planning verify the case inventory and experiment pin without
@@ -48,7 +49,7 @@ Docker or credentials. To execute the evaluation, use Docker and an Anthropic ke
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
 node dist/cli.js run \
-  --experiment experiments/stripe-integration-public-evals/experiment.yaml \
+  --experiment datasets/stripe-integration-public-evals/experiment.yaml \
   --output ./results
 ```
 

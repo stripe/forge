@@ -11,10 +11,9 @@ import {
   resolveRunPlan,
 } from '../src/index.ts';
 
-const datasetRelativeRoot = 'datasets/stripe-integration-public-evals';
-const experimentRelativeRoot = 'experiments/stripe-integration-public-evals';
-const datasetRoot = path.resolve(datasetRelativeRoot);
-const experimentPath = path.resolve(experimentRelativeRoot, 'experiment.yaml');
+const bundleRoot = path.resolve('datasets/stripe-integration-public-evals');
+const datasetRoot = path.join(bundleRoot, 'dataset');
+const experimentPath = path.join(bundleRoot, 'experiment.yaml');
 
 describe('sample dataset release', () => {
   it('validates the bundled dataset and plans its pinned public baseline without credentials', async () => {
@@ -47,6 +46,7 @@ describe('sample dataset release', () => {
       },
       dataset.manifest.dataset,
     );
+    assert.equal(experiment.config.dataset.path, './dataset');
 
     const selections = expandExperiment(experiment, dataset);
     assert.equal(selections.length, 1);
@@ -115,20 +115,10 @@ describe('sample dataset release', () => {
     });
 
     const relocatedRoot = path.join(root, 'release');
-    for (const relativeRoot of [datasetRelativeRoot, experimentRelativeRoot]) {
-      await fs.cp(
-        path.resolve(relativeRoot),
-        path.join(relocatedRoot, relativeRoot),
-        { recursive: true },
-      );
-    }
-    const relocatedExperimentPath = path.join(
-      relocatedRoot,
-      experimentRelativeRoot,
-      'experiment.yaml',
-    );
+    await fs.cp(bundleRoot, relocatedRoot, { recursive: true });
+    const relocatedExperimentPath = path.join(relocatedRoot, 'experiment.yaml');
     const [relocated, consumer] = await Promise.all([
-      loadDataset(path.join(relocatedRoot, datasetRelativeRoot)),
+      loadDataset(path.join(relocatedRoot, 'dataset')),
       loadExperimentConfig(relocatedExperimentPath),
     ]);
     assert.equal(relocated.manifestRaw, dataset.manifestRaw);

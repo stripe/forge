@@ -1,7 +1,7 @@
 id: stripe-integration-public-evals/baseline
 version: 0.2.0
 dataset:
-  path: ../../datasets/stripe-integration-public-evals
+  path: ./dataset
   id: stripe-integration-public-evals
   version: 0.2.0
 runtime:
