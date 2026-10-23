@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'vitest';
@@ -10,19 +10,23 @@ import {
   OPEN_CODE_SESSION,
   openCodeExport,
   openCodeStream,
-} from '../../../test/support/opencode.js';
+} from '../../../test/support/opencode.ts';
 import type {
   AgentPrepareContext,
   AgentSessionContext,
-} from '../../contracts/agent.js';
-import type { CommandOptions, CommandResult } from '../../contracts/command.js';
+} from '../../contracts/agent.ts';
+import type { CommandOptions, CommandResult } from '../../contracts/command.ts';
 import {
   createMemoryRunInputProvider,
   createMemoryWorkspace,
   createTestResolvedRunPlan,
-} from '../../testing/index.js';
-import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.js';
-import { OPENCODE_LAUNCHER } from './launcher.js';
+} from '../../testing/index.ts';
+import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
+import { OPENCODE_LAUNCHER } from './launcher.ts';
+import {
+  PLUGIN_CONFIG_PATH,
+  stripeOpenCodeConfiguration,
+} from './pluginConfig.ts';
 
 const selection = {
   adapter: 'opencode',
@@ -104,6 +108,46 @@ async function fixture(
 }
 
 describe('OpenCode adapter', () => {
+  it('restores the installed plugin configuration on initial and resumed turns', async () => {
+    const test = await fixture();
+    const config = stripeOpenCodeConfiguration(
+      {
+        $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+        mcpServers: {
+          stripe: { type: 'streamable-http', url: 'https://mcp.stripe.com' },
+        },
+      },
+      '/home/forge/.opencode-forge',
+    );
+    await test.state.mutable.writeFile(
+      PLUGIN_CONFIG_PATH,
+      Buffer.from(JSON.stringify(config)),
+    );
+    const plan = createTestResolvedRunPlan({
+      agent: selection,
+      treatment: 'stripe-plugin',
+      treatmentSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+    });
+    const session = await test.adapter.openSession({ ...test.context, plan });
+    const signal = new AbortController().signal;
+    await session.send('Do it', { signal });
+    const original = await test.state.readonly.readFile('config.json');
+    assert.deepEqual(
+      JSON.parse(Buffer.from(original).toString()).mcp,
+      config.mcp,
+    );
+    await test.state.mutable.writeFile(
+      'config.json',
+      Buffer.from('{"model":"wrong"}'),
+    );
+    await session.send('Continue', { signal });
+    assert.deepEqual(
+      await test.state.readonly.readFile('config.json'),
+      original,
+    );
+    assert.ok(test.calls.some(({ argv }) => argv.includes('--session')));
+  });
+
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {
     const adapter = createOpenCodeAdapter({
       baseUrl: 'https://gateway.example/v1',
@@ -219,6 +263,75 @@ describe('OpenCode adapter', () => {
         await readFile(path.join(directory, 'captured'), 'utf8'),
         prompt,
       );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('refuses global config and discovered extensions before invoking the native CLI', async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-global-'),
+    );
+    try {
+      await writeFile(path.join(directory, 'prompt'), 'Use the selected model');
+      for (const relative of [
+        'config/opencode/config.json',
+        'config/opencode/opencode.json',
+        'config/opencode/opencode.jsonc',
+        'config/opencode/config',
+        'config/opencode/agents/override.md',
+        'config/opencode/plugins/override.js',
+        'config/opencode/skill/override/SKILL.md',
+        'config/opencode/AGENTS.md',
+        'home/.opencode/opencode.json',
+        'data/opencode/auth.json',
+      ]) {
+        const target = path.join(directory, relative);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(
+          target,
+          JSON.stringify({
+            provider: {
+              forge: {
+                models: {
+                  [OPEN_CODE_MODEL]: {
+                    id: 'unselected-model',
+                    provider: { npm: '@ai-sdk/anthropic' },
+                  },
+                },
+              },
+            },
+          }),
+        );
+        const launched = spawnSync(
+          process.execPath,
+          [
+            '-e',
+            OPENCODE_LAUNCHER,
+            path.join(directory, 'prompt'),
+            process.execPath,
+            '-e',
+            'process.stdout.write("must-not-run")',
+          ],
+          {
+            env: {
+              HOME: path.join(directory, 'home'),
+              XDG_CONFIG_HOME: path.join(directory, 'config'),
+              XDG_DATA_HOME: path.join(directory, 'data'),
+            },
+          },
+        );
+        assert.equal(launched.status, 1, relative);
+        assert.equal(launched.stdout.toString(), '');
+        assert.match(
+          launched.stderr.toString(),
+          /implicit global configuration/,
+        );
+        for (const child of ['home', 'config', 'data'])
+          await rm(path.join(directory, child), {
+            recursive: true,
+            force: true,
+          });
+      }
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

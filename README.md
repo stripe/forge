@@ -331,8 +331,7 @@ for an automatically generated ID. Experiment runs receive their own IDs.
 
 ### OpenCode setup
 
-OpenCode support is experimental; real Docker/OpenCode and upstream model
-validation are still pending. Select `adapter: opencode`,
+OpenCode support is experimental. Select `adapter: opencode`,
 `provider: openai-compatible`, and the exact gateway model alias in your
 experiment matrix. Embedded slashes in the model name are preserved.
 
@@ -367,6 +366,19 @@ npx --no-install forge run --experiment ./my-eval/experiment.yaml --agent openco
   --credential-env OPENCODE_API_KEY \
   --credential-env OPENAI_API_KEY
 ```
+
+For a plugin comparison, use two named treatments, `no-plugin` and
+`stripe-plugin`, with the same model configuration above in each. Add
+`uses: forge/plugin` with `with: {plugin: stripe}` only to `stripe-plugin`.
+If both arms need Stripe account access, declare `forge/credentials` with
+`env: [STRIPE_API_KEY]` in both and pass
+`--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`. Keep shared treatment
+setup out of the reserved `baseline`, which requires an empty setup list.
+
+OpenCode loads Stripe's standard skills-and-MCP bundle from the source commit
+selected by the same official marketplace used for Codex. It does not load
+Claude-specific hooks or commands. See the [plugin contract](docs/plugin-action.md)
+for installation provenance and the catalog's rolling revision semantics.
 
 The CLI credential reference is `opencode.api-key`; use
 `--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment

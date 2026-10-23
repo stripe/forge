@@ -864,7 +864,12 @@ Forge ships these adapters:
 
 OpenCode snapshots the setup-authored workspace `opencode.json` before opening
 the session and restores that snapshot before each invocation. JSONC and
-automatic project configuration and AGENTS.md discovery are not supported. The selected
+automatic project configuration, external skill, and AGENTS.md/CLAUDE.md
+discovery are disabled or unsupported; use explicit skill paths and instructions.
+Before each turn, the launcher rejects implicit global config files, discovered
+global agents/plugins/skills, the legacy home `.opencode` directory, and stored
+provider login state; these could otherwise change the selected model through
+native config merging. The selected
 `provider.forge.models` entry must declare positive context/output limits,
 boolean reasoning/temperature/attachment capabilities, and `tool_call: true`.
 Model aliases must equal the selection; per-model provider, headers, options,
@@ -876,8 +881,12 @@ through the authored file and setup commands. Because this file is relocated,
 local `{file:...}` references, instruction globs, skill paths, and local plugin
 paths must use absolute runtime paths (for example `/workspace/AGENTS.md`).
 Relative forms are rejected; HTTP(S) instruction URLs and npm plugin names
-remain usable. There is no OpenCode
-`forge/plugin` installer. `createOpenCodeAdapter` accepts explicit `baseUrl`,
+remain usable. OpenCode's `forge/plugin` installer materializes Stripe's standard
+bundle into the same run-owned state and generates native skill paths and MCP
+configuration. The adapter merges that fragment with the authored model config,
+rejects an authored Stripe MCP collision, and restores the combined snapshot on
+every turn. See the [plugin contract](plugin-action.md) for source selection,
+authentication, supported bundle behavior, and installation receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`,
 `credential`, `id`, `executable`, `expectedVersion`, and logical `layout`
 options; the CLI supplies its endpoint and credential binding as documented
 in the [README](../README.md#opencode-setup).
@@ -1658,10 +1667,10 @@ The public CLI and built-in composition currently have these limits:
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
 - OpenCode currently accepts only `openai-compatible` Chat Completions.
-  Real Docker/OpenCode and upstream model validation remain pending; protocol
-  compatibility alone does not establish model compatibility. OpenRouter,
-  native OpenAI Responses, Anthropic, OAuth/subscription login, and remote
-  OpenCode servers are not supported.
+  Protocol compatibility alone does not establish model compatibility. Native
+  OpenRouter, OpenAI Responses, Anthropic, OAuth/subscription login, and remote
+  OpenCode servers are not supported; gateways can expose their own exact aliases
+  through Chat Completions.
 - Multi-turn automation uses fixed Ava semantics. Anthropic and OpenAI are
   built-in host completion providers; other providers require an explicit
   [completion-provider implementation](#host-side-completion-providers) and

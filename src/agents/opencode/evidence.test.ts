@@ -4,15 +4,15 @@ import {
   OPEN_CODE_MODEL,
   OPEN_CODE_SESSION,
   openCodeExport,
-} from '../../../test/support/opencode.js';
-import { parseAtifTrajectory } from '../../atif/index.js';
-import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.js';
-import { trajectoryCoversCompletedTurns } from '../../evidence/selection.js';
-import { createMemoryWorkspace } from '../../testing/index.js';
+} from '../../../test/support/opencode.ts';
+import { parseAtifTrajectory } from '../../atif/index.ts';
+import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
+import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
+import { createMemoryWorkspace } from '../../testing/index.ts';
 import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
-} from './evidence.js';
+} from './evidence.ts';
 
 const turns = [
   { prompt: 'First', response: 'Done.' },

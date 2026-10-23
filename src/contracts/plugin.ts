@@ -21,12 +21,11 @@ export type AgentPluginSourceKind =
   | 'git-subdir';
 
 /** Installation-time audit record; plugins may change during interaction. */
-export interface AgentPluginInstallationReceipt extends JsonObject {
+interface PluginInstallationReceiptBase extends JsonObject {
   readonly adapter: string;
   readonly plugin: string;
   readonly marketplace: string;
   readonly marketplace_commit: string;
-  readonly native_plugin_id: string;
   readonly version: string;
   readonly source: JsonObject & {
     readonly kind: AgentPluginSourceKind;
@@ -54,6 +53,26 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
     readonly url: string;
   })[];
 }
+
+export interface NativeAgentPluginInstallationReceipt
+  extends PluginInstallationReceiptBase {
+  readonly native_plugin_id: string;
+}
+
+/** An adapter materializes the standard bundle without a native marketplace CLI. */
+export interface OpenCodeBundleInstallationReceipt
+  extends PluginInstallationReceiptBase {
+  readonly installation: 'opencode-bundle';
+  readonly source: JsonObject & {
+    readonly kind: 'git-subdir';
+    readonly commit: string;
+    readonly path: 'providers/agent-plugins/plugin';
+  };
+}
+
+export type AgentPluginInstallationReceipt =
+  | NativeAgentPluginInstallationReceipt
+  | OpenCodeBundleInstallationReceipt;
 
 /** Ambient-free context for binding one portable plugin to an agent adapter. */
 export interface AgentPluginPreflightContext {

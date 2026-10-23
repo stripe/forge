@@ -23,6 +23,8 @@ const HOP_BY_HOP_HEADERS = new Set([
 
 function gatewayBridgePaths(prefix, protocol) {
   if (protocol === 'responses') return new Set([`/${prefix}/responses`]);
+  if (protocol === 'chat-completions')
+    return new Set([`/${prefix}/chat/completions`]);
   if (protocol === 'messages')
     return new Set([
       `/${prefix}/v1/messages`,

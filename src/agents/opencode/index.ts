@@ -2,29 +2,34 @@ import type {
   AgentAdapter,
   AgentRuntimeRequirements,
   AgentSession,
-} from '../../contracts/agent.js';
+} from '../../contracts/agent.ts';
 import {
   type CredentialReference,
   credentialReference,
-} from '../../contracts/credentials.js';
-import type { AgentSelectionV1 } from '../../model/types.js';
-import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.js';
-import { FORGE_VERSION } from '../../version.js';
-import { readOpenCodeConfiguration } from './config.js';
+} from '../../contracts/credentials.ts';
+import type { AgentSelectionV1 } from '../../model/types.ts';
+import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.ts';
+import { FORGE_VERSION } from '../../version.ts';
+import { readOpenCodeConfiguration } from './config.ts';
 import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
-} from './evidence.js';
-import { OPENCODE_LAUNCHER } from './launcher.js';
+} from './evidence.ts';
+import { OPENCODE_LAUNCHER } from './launcher.ts';
 import {
   assertOpenCodeRuntimeLayout,
   OPENCODE_STATE_ID,
   type OpenCodeLayout,
   resolveOpenCodeLayout,
   usesDefaultOpenCodeLayout,
-} from './layout.js';
-import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.js';
-import { parseOpenCodeStream } from './stream.js';
+} from './layout.ts';
+import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.ts';
+import {
+  mergeStripeOpenCodeConfiguration,
+  PLUGIN_CONFIG_PATH,
+} from './pluginConfig.ts';
+import { createOpenCodePluginInstaller } from './plugins.ts';
+import { parseOpenCodeStream } from './stream.ts';
 
 export interface OpenCodeAdapterOptions {
   readonly id?: string;
@@ -86,6 +91,8 @@ export function createOpenCodeAdapter(
           XDG_STATE_HOME: `${layout.stateDirectory}/state`,
           OPENCODE_CONFIG: `${layout.stateDirectory}/config.json`,
           OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
+          OPENCODE_DISABLE_EXTERNAL_SKILLS: 'true',
+          OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: 'true',
           OPENCODE_DISABLE_AUTOUPDATE: 'true',
           OPENCODE_DISABLE_MODELS_FETCH: 'true',
           OPENCODE_CONFIG_CONTENT: JSON.stringify({
@@ -122,6 +129,7 @@ export function createOpenCodeAdapter(
       layout_mode: usesDefaultOpenCodeLayout(layout) ? 'default' : 'custom',
     }),
     requirements,
+    pluginInstaller: createOpenCodePluginInstaller({ adapterId: id, layout }),
     evidenceIdentity(selection) {
       requirements(selection);
       return { name: 'opencode', version: expectedVersion };
@@ -151,10 +159,19 @@ export function createOpenCodeAdapter(
       const state = context.runtime.stateDirectories.get(OPENCODE_STATE_ID);
       if (!state)
         throw new TypeError('OpenCode run-owned state is unavailable.');
-      const config = await readOpenCodeConfiguration(
+      let config = await readOpenCodeConfiguration(
         context.runtime.workspace,
         context.selection.model,
       );
+      if (context.plan.setup.some((step) => step.uses === 'forge/plugin')) {
+        config = mergeStripeOpenCodeConfiguration(
+          config,
+          new TextDecoder('utf-8', { fatal: true }).decode(
+            await state.readFile(PLUGIN_CONFIG_PATH, { maxBytes: 1024 * 1024 }),
+          ),
+          layout.stateDirectory,
+        );
+      }
       context.signal.throwIfAborted();
       let currentSessionId: string | undefined;
       let sending = false;
@@ -301,6 +318,6 @@ function validateBaseUrl(value: string): string {
   return value;
 }
 
-export { loadOpenCodeEvidence } from './evidence.js';
-export { OPENCODE_STATE_ID, type OpenCodeLayout } from './layout.js';
-export { OpenCodeStreamError, parseOpenCodeStream } from './stream.js';
+export { loadOpenCodeEvidence } from './evidence.ts';
+export { OPENCODE_STATE_ID, type OpenCodeLayout } from './layout.ts';
+export { OpenCodeStreamError, parseOpenCodeStream } from './stream.ts';

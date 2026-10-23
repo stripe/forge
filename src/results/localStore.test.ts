@@ -1131,6 +1131,47 @@ describe('local artifact store', () => {
       (result) => result,
       { plan: pluginPlan },
     );
+    const openCodePlan = createTestResolvedRunPlan({
+      agent: {
+        adapter: 'opencode',
+        provider: 'openai-compatible',
+        model: 'test',
+      },
+      treatment: 'stripe-plugin',
+      treatmentSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+    });
+    const { native_plugin_id: _nativeId, ...bundleBase } = receipt;
+    const bundleReceipt = {
+      ...bundleBase,
+      adapter: 'opencode',
+      installation: 'opencode-bundle',
+      source: {
+        kind: 'git-subdir',
+        commit: 'b'.repeat(40),
+        path: 'providers/agent-plugins/plugin',
+      },
+    };
+    const openCodeLocation = await commitArtifacts(
+      [...core, { path: 'setup.json', body: setup(bundleReceipt) }],
+      (result) => result,
+      { plan: openCodePlan },
+    );
+    await verifyCompletedRun(openCodeLocation);
+    const wrongInstallation = await commitArtifacts(
+      [
+        ...core,
+        {
+          path: 'setup.json',
+          body: setup({ ...receipt, adapter: 'opencode' }),
+        },
+      ],
+      (result) => result,
+      { plan: openCodePlan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(wrongInstallation),
+      /does not match the completed run plan/,
+    );
     {
       const actual = await verifyCompletedRun(valid);
       assert.ok(actual);

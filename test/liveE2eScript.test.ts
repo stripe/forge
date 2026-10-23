@@ -459,7 +459,11 @@ describe('unified live end-to-end suite', () => {
     );
   });
 
-  for (const protocol of ['responses', 'messages'] as const) {
+  for (const protocol of [
+    'responses',
+    'messages',
+    'chat-completions',
+  ] as const) {
     it(`forwards only authorized ${protocol} routes and isolates upstream credentials and headers`, {
       timeout: 10_000,
     }, async () => {
@@ -491,7 +495,7 @@ describe('unified live end-to-end suite', () => {
       try {
         bridge = await startLoopbackGatewayBridge({
           upstream: new URL(
-            `${upstream.url}/${protocol === 'responses' ? 'v1/' : 'anthropic'}`,
+            `${upstream.url}/${protocol === 'messages' ? 'anthropic' : 'v1/'}`,
           ),
           upstreamCredential: 'synthetic-host-only-key',
           protocol,
@@ -502,7 +506,9 @@ describe('unified live end-to-end suite', () => {
         const routes =
           protocol === 'responses'
             ? ['/responses']
-            : ['/v1/messages', '/v1/messages/count_tokens'];
+            : protocol === 'chat-completions'
+              ? ['/chat/completions']
+              : ['/v1/messages', '/v1/messages/count_tokens'];
         for (const route of routes) {
           const result = await bridgeRequest(
             bridge,
@@ -535,7 +541,7 @@ describe('unified live end-to-end suite', () => {
           const forwarded = calls.at(-1)!;
           assert.equal(
             forwarded.url,
-            `${protocol === 'responses' ? '/v1' : '/anthropic'}${route}?probe=1`,
+            `${protocol === 'messages' ? '/anthropic' : '/v1'}${route}?probe=1`,
           );
           assert.equal(forwarded.body, '{"message":"local fixture"}');
           assert.equal(forwarded.headers.host, new URL(upstream.url).host);
@@ -571,7 +577,7 @@ describe('unified live end-to-end suite', () => {
           ...[
             '/responses',
             `${prefix}/v1/responses`,
-            `${prefix}/chat/completions`,
+            `${prefix}${protocol === 'chat-completions' ? '/responses' : '/chat/completions'}`,
             `${prefix}/models`,
             `${prefix}${protocol === 'responses' ? '/v1/messages' : '/responses'}`,
           ].map((target) => ({
