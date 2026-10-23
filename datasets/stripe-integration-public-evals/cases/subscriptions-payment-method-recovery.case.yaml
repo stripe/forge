@@ -1,0 +1,28 @@
+id: stripe-integration-public-evals/subscriptions-payment-method-recovery
+version: 0.1.0
+task: |-
+  I'm building a collaboration app called "BoardBase" using Next.js and TypeScript. When a renewal card fails, the account owner should be able to authenticate and save a replacement card for future off-session invoices, make it the subscription's default, and recover access after Stripe successfully collects payment. Build the recovery flow using the stripe npm package. Requirements: - Detect failed renewal invoices - Create a secure SetupIntent-based card replacement flow - Attach the PaymentMethod to the correct Customer and update the affected subscription - Retry or pay the open invoice after replacement - Restore access only after successful payment Assume Next.js App Router and a database helper already exist.
+initial_prompt: |-
+  I'm building a collaboration app called "BoardBase" using Next.js and TypeScript. When a renewal card fails, the account owner should be able to authenticate and save a replacement card for future off-session invoices, make it the subscription's default, and recover access after Stripe successfully collects payment. Build the recovery flow using the stripe npm package. Requirements: - Detect failed renewal invoices - Create a secure SetupIntent-based card replacement flow - Attach the PaymentMethod to the correct Customer and update the affected subscription - Retry or pay the open invoice after replacement - Restore access only after successful payment Assume Next.js App Router and a database helper already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Requires an authenticated account owner and derives the affected Customer, subscription, and open invoice from server-side ownership data.'
+    requirement_level: MUST
+  - value: 'MUST: Detects the failed renewal from invoice.payment_failed and persists the specific open invoice requiring recovery.'
+    requirement_level: MUST
+  - value: 'MUST: Creates a Customer-scoped SetupIntent with usage ''off_session'' and confirms it client-side, completing any required SetupIntent authentication.'
+    requirement_level: MUST
+  - value: 'MUST: Before use, verifies the SetupIntent succeeded and its PaymentMethod belongs to the same Customer, then sets subscription.default_payment_method.'
+    requirement_level: MUST
+  - value: 'MUST: Retries the specific open invoice with the replacement PaymentMethod or relies on configured Smart Retries; it does not create a separate PaymentIntent or charge for the debt.'
+    requirement_level: MUST
+  - value: 'MUST: If the invoice PaymentIntent requires_action, exposes its client secret only to the authorized owner and completes PaymentIntent authentication client-side.'
+    requirement_level: MUST
+  - value: 'MUST NOT restore access merely because the card was saved, the retry was requested, or authentication was attempted.'
+    requirement_level: MUST
+  - value: 'MUST: Restores access only after invoice.paid and a refresh confirming the target invoice is paid and the subscription is in an allowed servicing state.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and handles invoice.payment_failed, invoice.payment_action_required, and invoice.paid idempotently by event ID, refreshing current Stripe state before changing access.'
+    requirement_level: MUST

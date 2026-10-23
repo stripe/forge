@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-ach-delayed-fulfillment
+version: 0.1.0
+task: |-
+  Let US customers pay for our equipment orders from their bank accounts. Don't send an order to the warehouse until the payment has succeeded.
+initial_prompt: |-
+  Let US customers pay for our equipment orders from their bank accounts. Don't send an order to the warehouse until the payment has succeeded.
+context: |-
+  These are one-time USD purchases through hosted Checkout, not subscriptions. Our US account can accept ACH Direct Debit. We use Node/TypeScript and already take cards. Customers need a pending-payment page while the bank payment processes. If it fails, we should tell them how to try again. A later bank return should flag the order for our operations team.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Offer an eligible ACH Direct Debit path through Checkout while preserving the requested card option.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat `checkout.session.completed` or a browser return as proof that a bank debit has succeeded.'
+    requirement_level: MUST
+  - value: 'MUST: Keep an unpaid/processing order pending, and fulfill once after authoritative payment success; Checkout async-success handling is the standard path.'
+    requirement_level: MUST
+  - value: 'MUST: Handle delayed failure without fulfillment and provide a retry path.'
+    requirement_level: MUST
+  - value: 'MUST: Record a later bank-return/dispute exception for operations rather than claiming that initial success rules out later returns.'
+    requirement_level: MUST
+  - value: 'Let Checkout handle bank-detail collection, mandate acceptance, and supported verification flows instead of rebuilding them.'
+    requirement_level: SHOULD
+  - value: 'Explain the delay in customer-facing status text without promising a universal settlement date.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+    requirement_level: MUST

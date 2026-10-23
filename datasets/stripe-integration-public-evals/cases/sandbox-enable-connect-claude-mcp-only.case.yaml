@@ -1,0 +1,24 @@
+id: stripe-integration-public-evals/sandbox-enable-connect-claude-mcp-only
+version: 0.1.0
+task: |-
+  Enable Connect in this Stripe Sandbox so I can create connected accounts. Use the Stripe MCP tool available in this environment and perform the operation rather than only describing it.
+initial_prompt: |-
+  Enable Connect in this Stripe Sandbox so I can create connected accounts. Use the Stripe MCP tool available in this environment and perform the operation rather than only describing it.
+context: |-
+  If asked: this environment exposes Stripe MCP stripe_api_write; the required operation ID is EnableConnect; enabled true can mean newly enabled or already enabled; the Stripe CLI is not available for this case.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Calls Stripe MCP stripe_api_write with stripe_api_operation_id exactly ''EnableConnect''.'
+    requirement_level: MUST
+  - value: 'MUST NOT substitute the CLI, curl, a direct API call, or an explanation for the MCP write.'
+    requirement_level: MUST
+  - value: 'MUST: Reports a newly successful enablement only when the MCP response returns enabled: true.'
+    requirement_level: MUST
+  - value: 'MUST: Treats enabled: true from an already-enabled sandbox as idempotent success.'
+    requirement_level: MUST
+  - value: 'MUST: On success, states that Connect is enabled and the sandbox can create connected accounts.'
+    requirement_level: MUST
+  - value: 'MUST: If the MCP call errors or returns enabled: false, reports failure and does NOT claim Connect is enabled.'
+    requirement_level: MUST

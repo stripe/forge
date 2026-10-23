@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/subscriptions-month-end-anchor
+version: 0.1.0
+task: |-
+  I'm building an accounting service that bills every customer on the last day of each month, including February and months with only 30 days. New customers should see the prorated first charge before they confirm. Build subscription creation and preview logic in Node.js/TypeScript using the stripe npm package.
+initial_prompt: |-
+  I'm building an accounting service that bills every customer on the last day of each month, including February and months with only 30 days. New customers should see the prorated first charge before they confirm. Build subscription creation and preview logic in Node.js/TypeScript using the stripe npm package.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses billing_cycle_anchor_config.day_of_month: 31 for the monthly subscription.'
+    requirement_level: MUST
+  - value: 'MUST: Treats the anchor as UTC and sets hour, minute, and second explicitly when accounting requires a specific UTC cutoff.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe''s month-end anchor behavior for February, leap years, and 30-day months without custom date rollover code.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the first invoice before confirmation using the same Customer, items, quantities, billing_cycle_anchor_config, proration_behavior, and proration_date as creation.'
+    requirement_level: MUST
+  - value: 'MUST: Displays Stripe-returned invoice currency, line items, tax, discounts, and total rather than calculating a prorated month locally.'
+    requirement_level: MUST
+  - value: 'MUST NOT hardcode 28-, 29-, 30-, or 31-day billing durations.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a stable idempotency key for subscription creation and binds the preview and create request to the authenticated Customer and approved Price.'
+    requirement_level: MUST
+  - value: 'MUST: On current Basil-or-later behavior, reads and persists current_period_start and current_period_end from each subscription item rather than top-level Subscription fields.'
+    requirement_level: MUST
+  - value: 'MUST: Persists Stripe''s returned billing anchor and item periods as UTC instants and does not derive them from local time zones.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and updates invoice and subscription state idempotently without assuming event order.'
+    requirement_level: MUST

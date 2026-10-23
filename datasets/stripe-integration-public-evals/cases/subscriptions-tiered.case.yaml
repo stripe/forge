@@ -1,0 +1,46 @@
+id: stripe-integration-public-evals/subscriptions-tiered
+version: 0.1.0
+task: |-
+  I'm building a design tool called "PixelPro" using Next.js and TypeScript. We have three subscription tiers: - Starter: $9/month (5 projects, basic export) - Pro: $29/month (unlimited projects, HD export, collaboration) - Enterprise: $99/month (everything in Pro + SSO, priority support, API access) Users should be able to start with a 14-day free trial on any plan, then upgrade or downgrade between plans at any time. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A pricing page showing all three tiers with a "Start Free Trial" button for each - A custom Elements signup flow backed by the Subscriptions API that attaches a current Stripe 14-day Trial Offer (no charge until the trial ends) - Upgrade and downgrade endpoints that switch plans mid-cycle with prorated billing - A webhook endpoint that handles: trial ending, subscription created, plan changed, payment failure - Cancel and reactivation logic Assume Next.js App Router is already set up. Build out the Stripe integration pieces.
+initial_prompt: |-
+  I'm building a design tool called "PixelPro" using Next.js and TypeScript. We have three subscription tiers: - Starter: $9/month (5 projects, basic export) - Pro: $29/month (unlimited projects, HD export, collaboration) - Enterprise: $99/month (everything in Pro + SSO, priority support, API access) Users should be able to start with a 14-day free trial on any plan, then upgrade or downgrade between plans at any time. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A pricing page showing all three tiers with a "Start Free Trial" button for each - A custom Elements signup flow backed by the Subscriptions API that attaches a current Stripe 14-day Trial Offer (no charge until the trial ends) - Upgrade and downgrade endpoints that switch plans mid-cycle with prorated billing - A webhook endpoint that handles: trial ending, subscription created, plan changed, payment failure - Cancel and reactivation logic Assume Next.js App Router is already set up. Build out the Stripe integration pieces.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Shows Starter at $9/month, Pro at $29/month, and Enterprise at $99/month with a Start Free Trial action for each.'
+    requirement_level: MUST
+  - value: 'MUST: Maps each selectable tier to a server-side allowlisted recurring Price.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a custom Stripe Elements flow backed by server-side Subscriptions API calls rather than Checkout Sessions.'
+    requirement_level: MUST
+  - value: 'MUST: Creates the Trial Offer subscription on API version 2026-09-30.endive or later with flexible billing mode.'
+    requirement_level: MUST
+  - value: 'MUST: Attaches the configured 14-day Trial Offer through the selected item''s current_trial.trial_offer field.'
+    requirement_level: MUST
+  - value: 'MUST: Collects and attaches a reusable payment method through Elements without charging it during the trial.'
+    requirement_level: MUST
+  - value: 'MUST: Keeps Stripe secret keys and privileged subscription creation calls on the server.'
+    requirement_level: MUST
+  - value: 'MUST: Authenticates the user and resolves the owned Customer and Subscription server-side for every plan, cancellation, or reactivation mutation.'
+    requirement_level: MUST
+  - value: 'MUST: Previews a proposed plan change and applies an explicit proration_behavior to the update.'
+    requirement_level: MUST
+  - value: 'MUST: Replaces the existing tier subscription item''s Price instead of adding another tier item.'
+    requirement_level: MUST
+  - value: 'MUST: Implements cancellation by setting cancel_at_period_end=true.'
+    requirement_level: MUST
+  - value: 'MUST: Implements reactivation before period end by setting cancel_at_period_end=false.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable subscription-creation and mutation POST requests.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures with the unmodified raw request body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles customer.subscription.trial_will_end, customer.subscription.created, customer.subscription.updated, customer.subscription.deleted, invoice.paid, and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches current subscription or invoice state before changing plan access when an event may be stale or out of order.'
+    requirement_level: MUST
+  - value: 'MUST NOT grant post-trial paid access unless current Stripe subscription and invoice state authorizes it.'
+    requirement_level: MUST

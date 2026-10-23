@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-card-element-migration
+version: 0.1.0
+task: |-
+  Replace our old card-only payment form with Stripe's newer payment form. Keep the backend payment flow and order tracking working as they are.
+initial_prompt: |-
+  Replace our old card-only payment form with Stripe's newer payment form. Keep the backend payment flow and order tracking working as they are.
+context: |-
+  Our React frontend uses Card Element and confirmCardPayment. Node/TypeScript creates a PaymentIntent for each order and returns its client secret. Webhooks already update those orders. We want Payment Element and eligible additional payment methods, but this project doesn't include migrating to Checkout Sessions or rewriting our order backend. The existing order/PaymentIntent IDs must keep working.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Replace the legacy Card Element UI with Payment Element.'
+    requirement_level: MUST
+  - value: 'MUST: Use the corresponding documented confirmation flow, including method-required redirects/actions.'
+    requirement_level: MUST
+  - value: 'MUST: Preserve the direct PaymentIntents backend and existing order-to-payment linkage.'
+    requirement_level: MUST
+  - value: 'MUST: Configure method support consistently with the existing backend and the newly exposed client methods.'
+    requirement_level: MUST
+  - value: 'MUST: Preserve webhook fulfillment and handle any newly possible processing/delayed outcomes without treating them as instant success.'
+    requirement_level: MUST
+  - value: 'MUST NOT replace the backend with Checkout Sessions against the user''s explicit migration boundary.'
+    requirement_level: MUST
+  - value: 'Add regression coverage for the existing card path and at least one newly enabled method.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+    requirement_level: MUST

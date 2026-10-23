@@ -1,0 +1,40 @@
+id: stripe-integration-public-evals/subscriptions-mixed-intervals
+version: 0.1.0
+task: |-
+  I'm building an HR platform called "PeopleGrid" using Node.js and TypeScript. Each customer pays $49/month for the core platform and $600/year for the compliance add-on, and both items must live on one subscription. Build the Stripe integration using the stripe npm package. Requirements: - Create the mixed-interval subscription for an existing Customer - Show each item's independent billing period and next renewal - Preview the first invoice before confirmation - Allow the customer to remove only the annual add-on without canceling the monthly core plan - Keep local billing state synchronized through webhooks Assume an Express app and a simple database layer already exist.
+initial_prompt: |-
+  I'm building an HR platform called "PeopleGrid" using Node.js and TypeScript. Each customer pays $49/month for the core platform and $600/year for the compliance add-on, and both items must live on one subscription. Build the Stripe integration using the stripe npm package. Requirements: - Create the mixed-interval subscription for an existing Customer - Show each item's independent billing period and next renewal - Preview the first invoice before confirmation - Allow the customer to remove only the annual add-on without canceling the monthly core plan - Keep local billing state synchronized through webhooks Assume an Express app and a simple database layer already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Authenticates the caller and verifies that the existing Customer belongs to the caller''s account before subscription operations.'
+    requirement_level: MUST
+  - value: 'MUST: Loads the monthly core and annual add-on Price IDs from server configuration or an allowlist.'
+    requirement_level: MUST
+  - value: 'MUST: Creates one Subscription with separate items for the $49 monthly core Price and $600 annual add-on Price.'
+    requirement_level: MUST
+  - value: 'MUST: Uses flexible billing mode on an API version that supports mixed-interval subscription items.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the proposed mixed-interval subscription with stripe.invoices.createPreview before confirmation.'
+    requirement_level: MUST
+  - value: 'MUST: Displays each subscription item''s own current_period_start and current_period_end.'
+    requirement_level: MUST
+  - value: 'MUST: Labels each item''s next renewal from that item''s current_period_end rather than a subscription-wide date.'
+    requirement_level: MUST
+  - value: 'MUST: Removes only the annual add-on subscription item when the customer requests add-on removal.'
+    requirement_level: MUST
+  - value: 'MUST NOT cancel the Subscription when removing the annual add-on.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable subscription creation and item-removal POST requests.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures with stripe.webhooks.constructEvent using the unmodified raw body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles customer.subscription.updated, customer.subscription.deleted, invoice.paid, and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches current Subscription and Invoice state before changing local billing state when an event may be stale or out of order.'
+    requirement_level: MUST
+  - value: 'MUST: Bases access to core and add-on features on the current authoritative subscription items and payment state.'
+    requirement_level: MUST

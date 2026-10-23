@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/payments-off-session-balance
+version: 0.1.0
+task: |-
+  When a repair is finished, charge the customer's approved balance to their saved card. If their bank needs them to verify it, let them finish the payment online.
+initial_prompt: |-
+  When a repair is finished, charge the customer's approved balance to their saved card. If their bank needs them to verify it, let them finish the payment online.
+context: |-
+  We use Node/TypeScript. Customers have already consented to off-session charging and approved a quote. The saved card belongs to their Stripe Customer. Staff mark a repair ready to collect; that action can be retried. A signed-in customer can open a recovery page. We should mark the repair paid only once payment actually succeeds.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Use the server-owned approved balance and the correct Customer''s saved PaymentMethod for the one-time charge.'
+    requirement_level: MUST
+  - value: 'MUST: Attempt the absent-customer payment with the documented off-session confirmation flow; create-and-confirm or separate confirmation are both valid.'
+    requirement_level: MUST
+  - value: 'MUST: Make repeated staff actions and transport retries resolve to the same logical collection attempt rather than duplicate charges.'
+    requirement_level: MUST
+  - value: 'MUST: Provide authenticated on-session recovery without creating a duplicate financial obligation; reconcile the prior attempt before any replacement.'
+    requirement_level: MUST
+  - value: 'Reuse the existing PaymentIntent while its state remains recoverable; a terminal/canceled intent may require a deliberate replacement.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT blindly create a second charge when the first attempt needs customer authentication.'
+    requirement_level: MUST
+  - value: 'MUST: Mark paid only after authoritative success.'
+    requirement_level: MUST
+  - value: 'Send an actionable payment-recovery notification without exposing payment secrets in a public link.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+    requirement_level: MUST

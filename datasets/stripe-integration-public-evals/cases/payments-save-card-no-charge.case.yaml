@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-save-card-no-charge
+version: 0.1.0
+task: |-
+  Add a way for customers to leave a card on file when they book a repair. We shouldn't charge them until the work is done.
+initial_prompt: |-
+  Add a way for customers to leave a card on file when they book a repair. We shouldn't charge them until the work is done.
+context: |-
+  Customers sign in to our bicycle-repair app. We use Node/TypeScript and don't need a custom payment form. Each account maps to a Stripe Customer. The final amount varies; customers approve the quote separately before collection. This task is only the card-saving step. We need permission to charge that card later when they aren't on the site.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Use a supported setup-only flow—Checkout setup mode or a SetupIntent—without collecting a payment now.'
+    requirement_level: MUST
+  - value: 'MUST: Associate the setup with the authenticated account''s server-resolved Stripe Customer.'
+    requirement_level: MUST
+  - value: 'MUST: Configure the setup for future off-session use, accepting documented defaults when equivalent.'
+    requirement_level: MUST
+  - value: 'MUST: Present explicit consent covering the described future use and retain evidence of that acceptance.'
+    requirement_level: MUST
+  - value: 'MUST: Record a saved/ready state only after authoritative successful setup, not a return-page visit alone.'
+    requirement_level: MUST
+  - value: 'MUST NOT substitute a small refundable charge or zero-amount PaymentIntent for the requested no-charge setup.'
+    requirement_level: MUST
+  - value: 'Prefer hosted setup Checkout for this user''s minimal-custom-UI requirement; a correct SetupIntent integration remains valid.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+    requirement_level: MUST

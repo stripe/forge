@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/incompatibility-oauth-onboarding
+version: 0.1.0
+task: |-
+  IMPORTANT: Non-interactive mode. I'm building a freelance marketplace where freelancers provide services and the platform keeps 10%. We initially wanted OAuth to connect freelancers' existing Stripe accounts. Explain whether that is a standard supported new-account flow, redirect me appropriately for existing-account connectivity, and provide a concrete replacement path using newly created Accounts v2 accounts and embedded onboarding.
+initial_prompt: |-
+  IMPORTANT: Non-interactive mode. I'm building a freelance marketplace where freelancers provide services and the platform keeps 10%. We initially wanted OAuth to connect freelancers' existing Stripe accounts. Explain whether that is a standard supported new-account flow, redirect me appropriately for existing-account connectivity, and provide a concrete replacement path using newly created Accounts v2 accounts and embedded onboarding.
+context: |-
+  If asked: each job payment has one freelancer and routes immediately; the platform is merchant of record and owns pricing, disputes, refunds, and losses; most freelancers do not need to preserve an existing Stripe account; the platform can offer a new-account path now.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: States that OAuth connection of existing Stripe accounts is not the standard supported new-account flow covered by this implementation.'
+    requirement_level: MUST
+  - value: 'MUST: Directs the existing-account OAuth requirement to current Connect documentation or Stripe Sales.'
+    requirement_level: MUST
+  - value: 'Notes that connected accounts may disconnect or reduce platform visibility in an OAuth model.'
+    requirement_level: SHOULD
+  - value: 'Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: SHOULD
+  - value: 'MUST: Offers creation of new Accounts v2 connected accounts as the replacement path.'
+    requirement_level: MUST
+  - value: 'MUST: For the replacement marketplace path, configures dashboard express, fees_collector application, losses_collector application, and Recipient stripe_balance.stripe_transfers.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges and sets application_fee_amount to round(charge_amount * 0.10).'
+    requirement_level: MUST
+  - value: 'MUST NOT present OAuth as implemented without a redirect or warning.'
+    requirement_level: MUST

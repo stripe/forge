@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/subscriptions-price-migration
+version: 0.1.0
+task: |-
+  We are retiring a $30/month legacy Price and moving selected customers to a $35/month replacement Price. Preserve each subscription's quantity and renewal date, preview any proration, and avoid adding a second plan item. Build a batch-safe Node.js/TypeScript migration with the stripe npm package.
+initial_prompt: |-
+  We are retiring a $30/month legacy Price and moving selected customers to a $35/month replacement Price. Preserve each subscription's quantity and renewal date, preview any proration, and avoid adding a second plan item. Build a batch-safe Node.js/TypeScript migration with the stripe npm package.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Retrieves the authorized subscription and identifies exactly one legacy subscription item to replace by subscription-item ID.'
+    requirement_level: MUST
+  - value: 'MUST: Updates that item with the replacement Price instead of adding a second subscription item.'
+    requirement_level: MUST
+  - value: 'MUST: Passes the existing quantity explicitly when changing the item Price.'
+    requirement_level: MUST
+  - value: 'MUST: Preserves the existing billing-cycle anchor and does not reset it to now.'
+    requirement_level: MUST
+  - value: 'MUST: Creates an invoice preview with the same replacement item, quantity, proration_behavior, and proration_date that the update will use.'
+    requirement_level: MUST
+  - value: 'MUST: Chooses proration_behavior explicitly and obtains approval for the previewed debit or credit before applying the update.'
+    requirement_level: MUST
+  - value: 'MUST: For an automatic-charge update that must not apply unless its invoice is paid, uses payment_behavior: ''pending_if_incomplete'' with supported invoice-generating parameters and checks pending_update.'
+    requirement_level: MUST
+  - value: 'MUST: Handles customer.subscription.pending_update_applied and customer.subscription.pending_update_expired when using a pending update.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a unique migration record and deterministic idempotency key per subscription and target Price.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies the final item ID, replacement Price, preserved quantity and anchor, pending-update outcome, and next invoice before marking success.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures and processes subscription and invoice events idempotently without assuming delivery order.'
+    requirement_level: MUST

@@ -1,0 +1,34 @@
+id: stripe-integration-public-evals/connect-plant-wholesale
+version: 0.1.0
+task: |-
+  Build the Stripe Connect integration for a SaaS product that lets independent plant wholesalers create online stores and accept payments from their own customers. The wholesalers already run their own businesses but are new to online payments. Provide the Accounts v2 account configuration, onboarding and account-management flow, direct-charge payment pattern, readiness check, and options for how my platform can monetize the software.
+initial_prompt: |-
+  Build the Stripe Connect integration for a SaaS product that lets independent plant wholesalers create online stores and accept payments from their own customers. The wholesalers already run their own businesses but are new to online payments. Provide the Accounts v2 account configuration, onboarding and account-management flow, direct-charge payment pattern, readiness check, and options for how my platform can monetize the software.
+context: |-
+  If asked: this is a greenfield integration for newly created connected accounts; each wholesaler is merchant of record; wholesalers want lightweight Stripe-hosted operational access; the platform prefers Stripe to own negative-balance liability; no platform fee model has been chosen yet.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Configures dashboard as express, fees_collector as stripe, and losses_collector as stripe.'
+    requirement_level: MUST
+  - value: 'MUST: Configures Merchant with card_payments for the connected business.'
+    requirement_level: MUST
+  - value: 'MUST: Creates customer payments as direct charges on the connected account.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Gates live SaaS charges on configuration.merchant.capabilities.card_payments.status === ''active''.'
+    requirement_level: MUST
+  - value: 'MUST NOT use v1 charges_enabled or payouts_enabled as the Accounts v2 readiness check.'
+    requirement_level: MUST
+  - value: 'MUST: Provides a working link from the platform UI to the connected account Express Dashboard.'
+    requirement_level: MUST
+  - value: 'Presents subscription pricing, a transaction fee, or both as platform monetization options without assuming one was selected.'
+    requirement_level: SHOULD
+  - value: 'If the recommended Express, Stripe-pricing, Stripe-owned-losses configuration is not GA at evaluation time, the response MUST disclose its preview status and use the currently required preview API version.'
+    requirement_level: MUST

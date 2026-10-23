@@ -1,0 +1,36 @@
+id: stripe-integration-public-evals/connect-crowdfunding-3d
+version: 0.1.0
+task: |-
+  Build the Stripe Connect integration for a crowdfunding platform for 3D-printed projects. Creators set funding goals; rewards may be a single object, a template, or a collection delivered over years. Backers pledge money, the platform keeps 5% only for funded campaigns, and creator payouts occur after the campaign ends. Recommend and implement a clear collection model, creator onboarding, fund routing, and payout gating.
+initial_prompt: |-
+  Build the Stripe Connect integration for a crowdfunding platform for 3D-printed projects. Creators set funding goals; rewards may be a single object, a template, or a collection delivered over years. Backers pledge money, the platform keeps 5% only for funded campaigns, and creator payouts occur after the campaign ends. Recommend and implement a clear collection model, creator onboarding, fund routing, and payout gating.
+context: |-
+  If asked: each campaign has one creator; the platform may either charge immediately without goal-based refunds or authorize/collect only after a successful campaign, but it must state which model it implements; creators receive 95% of successfully collected funds; the platform's 5% is gross revenue and Stripe processing fees come out of that 5%; creators only receive transfers after campaign completion.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Chooses and states exactly one collection model: immediate collection without automatic goal-failure refunds, or collection only after the campaign succeeds.'
+    requirement_level: MUST
+  - value: 'MUST NOT collect a pledge after campaign failure when using the success-only collection model.'
+    requirement_level: MUST
+  - value: 'MUST: Calculates the platform gross share as 5% of successfully collected campaign funds.'
+    requirement_level: MUST
+  - value: 'MUST: Transfers 95% of successfully collected campaign funds to the creator.'
+    requirement_level: MUST
+  - value: 'MUST: States that platform net equals 5% of collected funds minus Stripe processing fees.'
+    requirement_level: MUST
+  - value: 'MUST: Uses separate charges and transfers so creator transfers can wait until the campaign ends.'
+    requirement_level: MUST
+  - value: 'MUST: Collects platform margin through transfer math rather than application_fee_amount.'
+    requirement_level: MUST
+  - value: 'MUST: Configures dashboard as express, fees_collector as application, losses_collector as application, and Recipient with stripe_balance.stripe_transfers.'
+    requirement_level: MUST
+  - value: 'MUST: Gates creator transfers on configuration.recipient.capabilities.stripe_balance.stripe_transfers.status === ''active''.'
+    requirement_level: MUST

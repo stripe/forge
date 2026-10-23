@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/payments-terminal-reader-recovery
+version: 0.1.0
+task: |-
+  Add a Pay on reader button to our shop's order screen. Staff need to know when they can hand over the goods, including when the reader disconnects.
+initial_prompt: |-
+  Add a Pay on reader button to our shop's order screen. Staff need to know when they can hand over the goods, including when the reader disconnects.
+context: |-
+  Our Node/TypeScript backend will control a registered Stripe smart reader through the server-driven integration. The store, reader, account, and local currency are supported. The order amount is already in our database. Use automatic capture. If a command times out, staff can check status and retry, but the same order must not be charged twice. Hardware can be simulated in testing.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Create/use a server-authoritative card-present PaymentIntent for the order and send it to the intended registered reader through the server-driven flow.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat acceptance of a reader command as successful payment.'
+    requirement_level: MUST
+  - value: 'MUST: Gate handover on authoritative successful payment state, not only a reader UI/action callback.'
+    requirement_level: MUST
+  - value: 'MUST: Establish the authoritative payment outcome after an ambiguous reader request before taking any action that could charge the order again.'
+    requirement_level: MUST
+  - value: 'Retrieve and reconcile Reader and PaymentIntent state to recover from ambiguous timeouts.'
+    requirement_level: SHOULD
+  - value: 'MUST: Prevent overlapping conflicting commands on the same reader and duplicate payment attempts for the same order.'
+    requirement_level: MUST
+  - value: 'Show staff actionable waiting, success, and failure/recovery states.'
+    requirement_level: SHOULD
+  - value: 'Provide a simulator/test-mode path without claiming real hardware was exercised.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+    requirement_level: MUST

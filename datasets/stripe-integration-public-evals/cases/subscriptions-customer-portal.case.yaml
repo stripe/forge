@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/subscriptions-customer-portal
+version: 0.1.0
+task: |-
+  I'm adding a Manage billing button to a multi-tenant SaaS app. Signed-in account owners can update payment methods, switch among an approved set of subscription plans, download invoices, or cancel at period end through Stripe's Customer Portal. Build the secure Portal integration in Next.js and TypeScript.
+initial_prompt: |-
+  I'm adding a Manage billing button to a multi-tenant SaaS app. Signed-in account owners can update payment methods, switch among an approved set of subscription plans, download invoices, or cancel at period end through Stripe's Customer Portal. Build the secure Portal integration in Next.js and TypeScript.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates each Customer Portal Session server-side with stripe.billingPortal.sessions.create.'
+    requirement_level: MUST
+  - value: 'MUST: Authorizes the signed-in user as an owner of the requested tenant before creating a Portal Session.'
+    requirement_level: MUST
+  - value: 'MUST: Resolves the Stripe Customer ID from the authorized tenant''s server-side record.'
+    requirement_level: MUST
+  - value: 'MUST: Selects a Portal Configuration whose enabled features, allowed products and Prices, proration behavior, and cancellation mode match the approved policy.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Portal management only for subscription shapes supported by the enabled Portal features and routes unsupported shapes to an authorized application-managed flow.'
+    requirement_level: MUST
+  - value: 'MUST: Uses only a fixed or same-origin allowlisted return_url.'
+    requirement_level: MUST
+  - value: 'MUST: Treats the Portal return as navigation only and re-fetches authoritative Stripe state before changing local access.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies Stripe webhook signatures against the raw request body before processing Portal-originated changes.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook event IDs durably and tolerates delayed or out-of-order subscription, invoice, and payment-method events.'
+    requirement_level: MUST
+  - value: 'MUST NOT expose a Portal Session URL or Customer billing data across tenant boundaries.'
+    requirement_level: MUST
