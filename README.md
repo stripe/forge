@@ -452,7 +452,7 @@ Interaction stop reasons are separate from evaluation status: reaching
 and one `runs` row per saved selection. With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criteria_by_requirement}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criterion_scores, criteria_by_requirement}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
@@ -468,6 +468,42 @@ agent. Ratios range from 0 to 1. Only the latest verified effective outcome
 contributes for each selection, so retries do not add scores. Compare treatments
 on matched cases and agent configurations. See
 [scoring semantics](docs/architecture.md#evaluation-and-scoring).
+
+`criterion_scores` reports Required and Recommended scores in each run's
+`evaluation`, the overall summary, and each case/configuration group:
+
+| Criteria set | `strict` | `avg` |
+| --- | --- | --- |
+| `required`: MUST | `1` if all MUST pass, else `0` | Passed MUST / total MUST |
+| `recommended`: MUST + SHOULD | `1` if all MUST and SHOULD pass, else `0` | Passed MUST and SHOULD / total MUST and SHOULD |
+
+For example, passing one MUST and failing one SHOULD gives Required Strict and
+Avg of `1`, Recommended Strict of `0`, and Recommended Avg of `0.5`. OPTIONAL
+and file checks do not affect these scores. An empty set has `null` scores.
+For summary and case groups, `strict` is the fraction of eligible evaluations
+where all relevant criteria passed. `avg` pools their passed/total counts, so
+each criterion result has equal weight across runs. Each set's `evaluations`
+counts completed evaluations with at least one relevant criterion; empty sets,
+pending runs, and execution errors do not enter either denominator.
+
+`criterion_scores.blend.score` combines a hard MUST gate with the SHOULD average.
+Any failed MUST gives `0`; otherwise the score is passed SHOULD / total SHOULD.
+For example, passing all MUST and half the SHOULD gives `0.5`; failing one MUST
+gives `0` even if every SHOULD passes. Without MUST, Blend is the SHOULD average.
+Without SHOULD, it is `1` if all MUST pass, else `0`. With neither, it is `null`.
+OPTIONAL criteria and file checks do not affect Blend.
+
+Summary and case groups average the per-evaluation Blend scores with equal
+weight, including zeros from failed MUST gates. Their `blend.evaluations` counts
+completed evaluations with any MUST or SHOULD; empty, pending, and errored runs
+are excluded. Blend is a report view; saved evaluation `score`, `status`, and
+`pass_rate` retain the rules above.
+
+Judge errors never count as failures. A set containing an errored criterion has
+`null` Strict for that evaluation and casts no Strict vote in aggregates; Avg
+counts only judged criteria. A judged MUST failure still gives Blend `0`; MUST
+errors without one leave Blend `null`, and SHOULD errors drop out of its SHOULD
+fraction. Groups average Blend over evaluations whose Blend is not `null`.
 
 `criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
 case groups, and run rows, retaining passed, total, and errored criterion counts.

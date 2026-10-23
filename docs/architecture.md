@@ -1210,9 +1210,21 @@ inclusion.
 
 Reports preserve per-run passed, total, and errored counts for all three
 classifications and verify that MUST plus SHOULD match the scored counts and
-ratio, while OPTIONAL errors match the excluded error count. Overall and per-case
-aggregates separate required failures from recommended failures and OPTIONAL
-telemetry. The README defines group [denominators](../README.md#understand-scores).
+ratio, while OPTIONAL errors match the excluded error count. Each run's
+`criterion_scores` reports Required (MUST) and Recommended (MUST + SHOULD), each
+with Strict and Avg scores. Blend gates each evaluation on no judged MUST
+failing, then uses only its judged SHOULD pass fraction. MUST-only evaluations
+receive `1` or `0`; SHOULD-only evaluations use their pass fraction. Empty
+evaluations are unscored. Judge errors are never failures: they make Strict
+`null`, drop out of Avg, and leave Blend `null` when an errored MUST could still
+decide the gate. Blend aggregates average eligible evaluation scores after
+applying each gate. These report views ignore checks and do not change saved
+evaluation scores or status. Parsing verifies each view against the
+per-classification counts, then verifies summary and case/configuration scores
+against the run rows. Aggregates use only the latest completed effective
+outcome per selection. Disjoint `criteria_by_requirement` groups preserve
+required failures, recommended failures, and OPTIONAL telemetry. The README
+defines the [score formulas and aggregate denominators](../README.md#understand-scores).
 
 | Situation | Status | Score |
 | --- | --- | --- |
