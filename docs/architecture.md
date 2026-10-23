@@ -189,12 +189,12 @@ access to dataset payloads. The path index records load-time existence, not
 content integrity or later filesystem changes. Setup reads current bytes and
 rejects an empty source directory instead of silently skipping its copy.
 
-Public bundles under `datasets/<name>/` keep their experiment and documentation
-beside a nested `dataset/` containing the manifest, cases, and fixtures. The
-experiment uses `dataset.path: ./dataset`, so the bundle can be relocated as
-one folder. The experiment and documentation stay outside the payload root,
-where every file is readable input. See the
-[sample bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+Public datasets under `release/datasets/<name>/` contain the manifest, cases,
+and fixtures. The runnable experiment at `release/experiment.yaml` and its
+documentation at `release/README.md` stay outside the payload root where
+every file is readable input. The experiment's dataset path is relative to its
+file, so `release/` can be relocated as one folder. See the
+[sample release](https://github.com/stripe/forge/blob/main/release/README.md)
 for the layout and commands.
 
 ### Cases, treatments, and setup ordering
@@ -1408,7 +1408,7 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample bundles with runnable experiments, documentation, and nested dataset payloads, each holding only its latest version |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads in `datasets/`, with a runnable `experiment.yaml` and release documentation at the root; holds only the latest versions |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
 
 ## Current limitations

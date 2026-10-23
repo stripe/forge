@@ -11,7 +11,7 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 export const REPOSITORY_DATASET_ROOTS = Object.freeze([
   'test/fixtures/one-shot/dataset',
   'test/fixtures/multi-turn/dataset',
-  'datasets/stripe-integration-public-evals/dataset',
+  'release/datasets/stripe-integration-public-evals',
 ]);
 
 export async function checkRepositoryCases({
@@ -86,10 +86,9 @@ export function gitBaselineReader({
   const mergeBase = git('merge-base', baseRef, 'HEAD').trim();
   return (relativeRoot) => {
     const candidates = [`${relativeRoot}/manifest.json`];
-    // A bundle may move its existing payload into a nested dataset/ directory.
-    // Keep comparing its versions against the manifest at the former root.
-    if (path.posix.basename(relativeRoot) === 'dataset')
-      candidates.push(`${path.posix.dirname(relativeRoot)}/manifest.json`);
+    // Preserve version comparisons across the move into release/datasets/.
+    if (relativeRoot.startsWith('release/datasets/'))
+      candidates.push(`${relativeRoot.slice('release/'.length)}/manifest.json`);
     const manifestPath = candidates.find((candidate) => {
       try {
         git('cat-file', '-e', `${mergeBase}:${candidate}`);

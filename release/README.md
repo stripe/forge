@@ -1,4 +1,4 @@
-# Stripe integration sample dataset
+# Stripe integration sample experiment
 
 The `stripe-integration-public-evals` dataset contains one case,
 `stripe-integration-public-evals/payments-onetime`: implement hosted Stripe
@@ -9,27 +9,27 @@ judging criteria. It has no fixture files or setup steps.
 ## Layout
 
 ```text
-datasets/stripe-integration-public-evals/
+release/
 ├── README.md
-├── experiment.yaml
-└── dataset/
-    ├── manifest.json
-    └── cases/
-        └── payments-onetime.case.yaml
+├── datasets/stripe-integration-public-evals/
+│   ├── manifest.json
+│   └── cases/
+│       └── payments-onetime.case.yaml
+└── experiment.yaml
 ```
 
-The bundle holds only the latest version; earlier versions live in Git
-history. Its nested `dataset/` contains the payload: the manifest, cases, and
-any fixtures. The manifest lists each case's ID, version, and path; each case
-file declares the same ID and version. This README and the experiment remain
-outside that payload tree.
+The release holds only the latest version; earlier versions live in Git
+history. The [dataset payload](./datasets/stripe-integration-public-evals)
+contains the manifest, cases, and any fixtures. The manifest lists each case's
+ID, version, and path; each case file declares the same ID and version. This
+README and the experiment remain outside that payload tree.
 
-The [baseline experiment](experiment.yaml) uses `dataset.path: ./dataset` and
-pins the dataset ID and version. Copy the whole bundle to run it elsewhere
-without rewriting configuration. It selects this case once with Claude Code
-and Sonnet 4.6, using public Anthropic
-models for Ava and judging. Runtime and model choices belong to the experiment
-rather than the dataset.
+The [baseline experiment](experiment.yaml) uses
+`dataset.path: ./datasets/stripe-integration-public-evals` and pins the
+dataset ID and version. Copy `release/` to run it elsewhere without rewriting
+configuration. It selects this case once with Claude Code and Sonnet 4.6,
+using public Anthropic models for Ava and judging. Runtime and model choices
+belong to the experiment rather than the dataset.
 
 ## Validate and run
 
@@ -38,9 +38,9 @@ From the repository root:
 ```sh
 pnpm build
 node dist/cli.js validate \
-  --experiment datasets/stripe-integration-public-evals/experiment.yaml
+  --experiment release/experiment.yaml
 node dist/cli.js plan \
-  --experiment datasets/stripe-integration-public-evals/experiment.yaml
+  --experiment release/experiment.yaml
 ```
 
 Validation and planning verify the case inventory and experiment pin without
@@ -49,7 +49,7 @@ Docker or credentials. To execute the evaluation, use Docker and an Anthropic ke
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
 node dist/cli.js run \
-  --experiment datasets/stripe-integration-public-evals/experiment.yaml \
+  --experiment release/experiment.yaml \
   --output ./results
 ```
 

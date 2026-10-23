@@ -59,22 +59,26 @@ describe('repository case check', () => {
   });
 
   it('lists every checked-in dataset for version checks', async () => {
-    const datasets = await fs.readdir(path.join(repositoryRoot, 'datasets'), {
-      withFileTypes: true,
-    });
+    const datasets = await fs.readdir(
+      path.join(repositoryRoot, 'release/datasets'),
+      { withFileTypes: true },
+    );
     for (const entry of datasets) {
       if (!entry.isDirectory()) continue;
-      const bundleRoot = `datasets/${entry.name}`;
-      const root = `${bundleRoot}/dataset`;
-      const anyTracked = spawnSync('git', ['ls-files', bundleRoot], {
+      const root = `release/datasets/${entry.name}`;
+      const tracked = spawnSync(
+        'git',
+        ['ls-files', '--error-unmatch', `${root}/manifest.json`],
+        {
+          cwd: repositoryRoot,
+        },
+      );
+      const anyTracked = spawnSync('git', ['ls-files', root], {
         cwd: repositoryRoot,
         encoding: 'utf8',
       }).stdout;
       if (anyTracked === '') continue; // untracked local datasets
-      await assert.doesNotReject(
-        fs.access(path.join(repositoryRoot, root, 'manifest.json')),
-        `${root} needs a manifest.json`,
-      );
+      assert.equal(tracked.status, 0, `${root} needs a root manifest.json`);
       assert.ok(REPOSITORY_DATASET_ROOTS.includes(root), root);
     }
   });
@@ -193,22 +197,22 @@ describe('repository case check', () => {
     assert.deepEqual(read('dataset'), manifest);
   });
 
-  it('enforces version bumps when a bundle moves its payload into dataset/', async (context) => {
+  it('enforces version bumps when a dataset moves into release/datasets/', async (context) => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-moved-dataset-'),
     );
     context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
-    const bundle = 'datasets/sample';
-    const dataset = `${bundle}/dataset`;
+    const formerRoot = 'datasets/sample';
+    const dataset = `release/${formerRoot}`;
     const baseline: DatasetManifestV1 = {
       dataset: { id: 'sample', version: '1.0.0' },
       cases: [
         { id: 'sample/task', version: '1.0.0', path: 'cases/task.case.yaml' },
       ],
     };
-    await fs.mkdir(path.join(root, bundle), { recursive: true });
+    await fs.mkdir(path.join(root, formerRoot), { recursive: true });
     await fs.writeFile(
-      path.join(root, bundle, 'manifest.json'),
+      path.join(root, formerRoot, 'manifest.json'),
       JSON.stringify(baseline),
     );
     const git = (...args: string[]) =>
@@ -228,7 +232,7 @@ describe('repository case check', () => {
         { encoding: 'utf8', stdio: 'pipe' },
       );
     git('init', '-q');
-    git('add', `${bundle}/manifest.json`);
+    git('add', `${formerRoot}/manifest.json`);
     git('commit', '-q', '-m', 'baseline');
     const read = gitBaselineReader({
       root,
@@ -243,7 +247,7 @@ describe('repository case check', () => {
     assert.deepEqual(datasetVersionViolations(prior!, changed), [
       'case versions or membership changed, so dataset version 1.0.0 must change.',
     ]);
-    assert.equal(read('datasets/new/dataset'), undefined);
+    assert.equal(read('release/datasets/new'), undefined);
   });
 
   it('uses the public loader and enforces version bumps against a git base', {

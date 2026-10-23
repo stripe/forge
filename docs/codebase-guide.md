@@ -58,9 +58,10 @@ compares each manifest with its copy at the merge-base with `origin/main`
 (override with `-- --base <ref>`) and fails when a case version or membership
 change keeps the dataset version.
 Each dataset keeps only its latest version; earlier versions live in Git
-history. Sample bundles under [`datasets`](https://github.com/stripe/forge/tree/main/datasets)
-keep `experiment.yaml` beside a nested `dataset/` payload; harness inputs live
-under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+history. Public inputs under [`release`](https://github.com/stripe/forge/tree/main/release)
+keep dataset payloads in `datasets/`, with `experiment.yaml` and release
+documentation at the release root; harness inputs live under
+[`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
 
 ### Opt-in live tests
 
@@ -787,7 +788,7 @@ gateway behavior, and suite configuration.
 
 | Path | Role |
 | --- | --- |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample bundles containing an experiment, documentation, and a nested `dataset/` payload. Each holds only its latest version; earlier versions live in Git history. |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads under `datasets/`, with a runnable `experiment.yaml` and documentation at the root. Holds only the latest versions; earlier versions live in Git history. |
 | [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`vitest.config.ts`](https://github.com/stripe/forge/blob/main/vitest.config.ts) | Vitest discovery, Node environment, process isolation, and mock restoration. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |

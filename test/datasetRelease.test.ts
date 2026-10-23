@@ -11,12 +11,14 @@ import {
   resolveRunPlan,
 } from '../src/index.ts';
 
-const bundleRoot = path.resolve('datasets/stripe-integration-public-evals');
-const datasetRoot = path.join(bundleRoot, 'dataset');
-const experimentPath = path.join(bundleRoot, 'experiment.yaml');
+const releaseRoot = path.resolve('release');
+const datasetPath = 'datasets/stripe-integration-public-evals';
+const experimentFile = 'experiment.yaml';
+const datasetRoot = path.join(releaseRoot, datasetPath);
+const experimentPath = path.join(releaseRoot, experimentFile);
 
 describe('sample dataset release', () => {
-  it('validates the bundled dataset and plans its pinned public baseline without credentials', async () => {
+  it('validates the released dataset and plans its pinned public baseline without credentials', async () => {
     const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),
       loadExperimentConfig(experimentPath),
@@ -46,7 +48,10 @@ describe('sample dataset release', () => {
       },
       dataset.manifest.dataset,
     );
-    assert.equal(experiment.config.dataset.path, './dataset');
+    assert.equal(
+      experiment.config.dataset.path,
+      './datasets/stripe-integration-public-evals',
+    );
 
     const selections = expandExperiment(experiment, dataset);
     assert.equal(selections.length, 1);
@@ -115,10 +120,10 @@ describe('sample dataset release', () => {
     });
 
     const relocatedRoot = path.join(root, 'release');
-    await fs.cp(bundleRoot, relocatedRoot, { recursive: true });
-    const relocatedExperimentPath = path.join(relocatedRoot, 'experiment.yaml');
+    await fs.cp(releaseRoot, relocatedRoot, { recursive: true });
+    const relocatedExperimentPath = path.join(relocatedRoot, experimentFile);
     const [relocated, consumer] = await Promise.all([
-      loadDataset(path.join(relocatedRoot, 'dataset')),
+      loadDataset(path.join(relocatedRoot, datasetPath)),
       loadExperimentConfig(relocatedExperimentPath),
     ]);
     assert.equal(relocated.manifestRaw, dataset.manifestRaw);
