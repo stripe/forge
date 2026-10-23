@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import { resolveCliRuntime } from './cliRuntime.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
@@ -269,7 +270,10 @@ export async function runCli(
       'case-file',
       cwd,
     );
-    const experiment = await engine.loadExperimentConfig(experimentPath);
+    const experiment = resolveCliRuntime(
+      await engine.loadExperimentConfig(experimentPath),
+      options.environment ?? process.env,
+    );
     if (experiment.config.dataset.path === undefined) {
       throw new CliUsageError(
         'The experiment must declare dataset.path, relative to the experiment file.',
@@ -345,6 +349,16 @@ export async function runCli(
                 options.validateDockerHost ?? validateDockerRuntimeHost
               )({
                 platform: hostSelection.runtime_platform,
+                ...(experiment.config.runtime.adapter === 'docker' &&
+                !('config' in experiment.config.runtime) &&
+                experiment.config.runtime.build_network
+                  ? { buildNetwork: experiment.config.runtime.build_network }
+                  : {}),
+                ...(experiment.config.runtime.adapter === 'docker' &&
+                !('config' in experiment.config.runtime) &&
+                experiment.config.runtime.proxy
+                  ? { proxy: experiment.config.runtime.proxy }
+                  : {}),
                 ...(options.signal === undefined
                   ? {}
                   : { signal: options.signal }),
@@ -445,8 +459,11 @@ async function runPublicExperiment(
       parseCredentialEnvironmentBindings(values['credential-env']);
     },
     loadExperiment: async ({ values, cwd, root, savedSelections, signal }) => {
-      const experiment = await engine.loadExperimentConfig(
-        resolveRequiredPath(values.experiment, 'experiment', cwd),
+      const experiment = resolveCliRuntime(
+        await engine.loadExperimentConfig(
+          resolveRequiredPath(values.experiment, 'experiment', cwd),
+        ),
+        options.environment ?? process.env,
       );
       if (experiment.config.dataset.path === undefined) {
         throw new CliUsageError(

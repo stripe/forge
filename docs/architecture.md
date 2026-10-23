@@ -641,7 +641,7 @@ with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
 builds an image with pinned Claude Code and Codex versions, and records the
 built image ID. Image builds begin during runtime preparation or explicit
 `validate --host`; ordinary validation, planning, and a resume that skips every
-selection do not build an image. A runtime adapter shares its build per platform,
+selection do not build an image. A runtime adapter shares its build per platform and build network,
 and Docker's content cache can reuse layers across invocations.
 
 Each run uses a non-root container with a read-only image filesystem. On hosts
@@ -653,6 +653,21 @@ metadata alongside the immutable image ID. Forge limits CPU, memory, processes,
 and writable `/tmp`; drops Linux capabilities; blocks privilege escalation;
 and does not mount the Docker socket. Commands go through `docker exec` as
 argument lists, without an implicit shell.
+
+Docker uses its normal network unless the plan declares `runtime.network: host`.
+The separate `runtime.build_network: host` applies only to image builds. Both
+are optional strict fields in authored and resolved configs. The CLI resolves
+`FORGE_DOCKER_NETWORK` and `FORGE_DOCKER_BUILD_NETWORK` (`host` or `default`)
+before planning. Effective values participate in plan identity and resume
+checks. Setup and interaction, including a replacement container after setup,
+use the same run network. Optional `runtime.proxy` fields (`http`, `https`,
+`no_proxy`) hold bounded nonsecret settings. The CLI resolves explicit
+`FORGE_HTTP_PROXY`, `FORGE_HTTPS_PROXY`, and `FORGE_NO_PROXY` before planning.
+URL credentials, query strings, and fragments are rejected. Docker's standard
+proxy build args supply cold builds; upper- and lowercase variables supply
+setup and agent commands. Proxy bindings cannot conflict with agent/setup
+environment requirements. Proxy settings do not alter packaged image assets.
+The built-in runtime has no domain allowlist.
 
 #### Run-owned paths and mounts
 
@@ -1419,7 +1434,7 @@ The public CLI and built-in composition currently have these limits:
 - Deterministic evaluation supports file creation, existence, and regex content
   checks. Post-agent test commands and static-analysis checks are not built in.
 - The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
-  network policies need a host-supplied [runtime adapter](#runtime-architecture).
+  network policies beyond the host option need a host-supplied [runtime adapter](#runtime-architecture).
 - Execution is local, with bounded concurrency and explicit resume. There is no
   distributed scheduler, automatic experiment retry loop, remote publisher, or
   hosted execution service. `matrix.retries` does not schedule automatic attempts.

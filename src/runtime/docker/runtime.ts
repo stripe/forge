@@ -21,6 +21,10 @@ import type {
   SealedRuntime,
   WorkspaceWriteOptions,
 } from '../../contracts/runtime.ts';
+import {
+  DockerProxySchema,
+  dockerProxyEnvironment,
+} from '../../model/dockerNetwork.ts';
 import type {
   ForgeDockerRuntimeV1,
   ForgeRuntimeV1,
@@ -83,6 +87,8 @@ export interface ValidateDockerRuntimeHostOptions {
   readonly buildTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
   readonly platform: RuntimePlatform;
+  readonly buildNetwork?: 'host';
+  readonly proxy?: ForgeDockerRuntimeV1['proxy'];
   readonly signal?: AbortSignal;
 }
 
@@ -116,6 +122,8 @@ export async function validateDockerRuntimeHost(
     dockerExecutable,
     hostCommands,
     platform: options.platform,
+    ...(options.buildNetwork ? { buildNetwork: options.buildNetwork } : {}),
+    ...(options.proxy ? { proxy: DockerProxySchema.parse(options.proxy) } : {}),
     signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
     userId: filesystemIdentity.containerUserId,
@@ -195,14 +203,17 @@ export function createDockerRuntimeAdapter(
     'maximumCommandOutputBytes',
   );
   const filesystemIdentity = resolveFilesystemIdentity();
-  const imageBuilds = new Map<RuntimePlatform, SharedImageBuild>();
+  const imageBuilds = new Map<string, SharedImageBuild>();
 
   async function imageFor(
     platform: RuntimePlatform,
     signal: AbortSignal,
+    buildNetwork?: 'host',
+    proxy?: ForgeDockerRuntimeV1['proxy'],
   ): Promise<BuiltForgeImage> {
     signal.throwIfAborted();
-    let build = imageBuilds.get(platform);
+    const buildKey = JSON.stringify([platform, buildNetwork, proxy]);
+    let build = imageBuilds.get(buildKey);
     if (!build) {
       const controller = new AbortController();
       const created: SharedImageBuild = {
@@ -214,6 +225,8 @@ export function createDockerRuntimeAdapter(
           dockerExecutable,
           hostCommands,
           platform,
+          ...(buildNetwork ? { buildNetwork } : {}),
+          ...(proxy ? { proxy } : {}),
           signal: controller.signal,
           temporaryRoot,
           userId: filesystemIdentity.containerUserId,
@@ -224,13 +237,13 @@ export function createDockerRuntimeAdapter(
           },
           (error: unknown) => {
             created.settled = true;
-            if (imageBuilds.get(platform) === created)
-              imageBuilds.delete(platform);
+            if (imageBuilds.get(buildKey) === created)
+              imageBuilds.delete(buildKey);
             throw error;
           },
         ),
       };
-      imageBuilds.set(platform, created);
+      imageBuilds.set(buildKey, created);
       build = created;
     }
     const shared = build;
@@ -249,7 +262,7 @@ export function createDockerRuntimeAdapter(
       if (shared.waiters === 0 && !shared.settled) {
         // A run may stop waiting independently. Only the last waiter cancels
         // the shared build, and must drain its command and temporary context.
-        if (imageBuilds.get(platform) === shared) imageBuilds.delete(platform);
+        if (imageBuilds.get(buildKey) === shared) imageBuilds.delete(buildKey);
         shared.controller.abort();
         await shared.promise.catch(() => undefined);
       }
@@ -258,8 +271,9 @@ export function createDockerRuntimeAdapter(
 
   return Object.freeze({
     id: 'forge/docker',
-    preflight({ plan, requirements }: RuntimePreflight) {
-      validateRuntime(plan.runtime);
+    preflight({ plan, requirements, environment }: RuntimePreflight) {
+      const runtime = validateRuntime(plan.runtime);
+      assertProxyBindings(runtime.proxy, environment);
       validateExecutableRequirements(requirements.executables);
       validateStateRequirements(requirements.stateDirectories);
     },
@@ -267,13 +281,19 @@ export function createDockerRuntimeAdapter(
       input.signal.throwIfAborted();
       const runtime = validateRuntime(input.plan.runtime);
       validateEnvironment(input.environment);
+      assertProxyBindings(runtime.proxy, input.environment);
       const executableRequirements = validateExecutableRequirements(
         input.requirements.executables,
       );
       const stateRequirements = validateStateRequirements(
         input.requirements.stateDirectories,
       );
-      const image = await imageFor(runtime.platform, input.signal);
+      const image = await imageFor(
+        runtime.platform,
+        input.signal,
+        runtime.build_network,
+        runtime.proxy,
+      );
       input.signal.throwIfAborted();
 
       const runRoot = await fs.mkdtemp(
@@ -387,6 +407,7 @@ export function createDockerRuntimeAdapter(
           homeRoot,
           image: image.id,
           platform: runtime.platform,
+          ...(runtime.network ? { network: runtime.network } : {}),
           resources: runtime.resources,
           sealSetupState,
           stateMounts,
@@ -425,7 +446,13 @@ export function createDockerRuntimeAdapter(
           10 * 60_000,
         ),
         dockerExecutable,
-        environment: input.environment,
+        environment: {
+          variables: {
+            ...dockerProxyEnvironment(runtime.proxy),
+            ...input.environment.variables,
+          },
+          credentials: input.environment.credentials,
+        },
         environmentFileRoot,
         hostCommands,
         maximumOutputBytes: maximumCommandOutputBytes,
@@ -494,6 +521,8 @@ export function createDockerRuntimeAdapter(
             imageId: image.id,
             imageTag: image.tag,
             platform: runtime.platform,
+            network: runtime.network ?? 'default',
+            buildNetwork: runtime.build_network ?? 'default',
           }),
         });
 
@@ -729,6 +758,8 @@ function readonlyWorkspace(workspace: MutableWorkspace): ReadonlyWorkspace {
 }
 
 interface BuildForgeImageInput {
+  readonly buildNetwork?: 'host';
+  readonly proxy?: ForgeDockerRuntimeV1['proxy'];
   readonly buildTimeoutMs: number;
   readonly dockerExecutable: string;
   readonly hostCommands: HostCommandRunner;
@@ -756,7 +787,14 @@ async function buildForgeImage(
   const buildRoot = await fs.mkdtemp(
     path.join(input.temporaryRoot, 'stripe-forge-build-'),
   );
-  const image = imageTag(input.platform, input.userId);
+  const settingsSuffix =
+    input.buildNetwork === undefined && input.proxy === undefined
+      ? ''
+      : `-${createHash('sha256')
+          .update(JSON.stringify([input.buildNetwork, input.proxy]))
+          .digest('hex')
+          .slice(0, 16)}`;
+  const image = `${imageTag(input.platform, input.userId)}${settingsSuffix}`;
   try {
     const dockerfile = await fs.readFile(
       path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'),
@@ -784,6 +822,10 @@ async function buildForgeImage(
       [
         input.dockerExecutable,
         'build',
+        ...(input.buildNetwork ? ['--network', input.buildNetwork] : []),
+        ...Object.entries(dockerProxyEnvironment(input.proxy)).flatMap(
+          ([name, value]) => ['--build-arg', `${name}=${value}`],
+        ),
         '--platform',
         input.platform,
         '--build-arg',
@@ -835,6 +877,7 @@ function dockerRunArgv(input: {
   homeRoot: string;
   image: string;
   platform: RuntimePlatform;
+  network?: 'host';
   resources: ForgeDockerRuntimeV1['resources'];
   sealSetupState: boolean;
   stateMounts: readonly {
@@ -847,6 +890,7 @@ function dockerRunArgv(input: {
   return [
     input.dockerExecutable,
     'run',
+    ...(input.network ? ['--network', input.network] : []),
     '--detach',
     '--name',
     input.containerName,
@@ -959,10 +1003,34 @@ function validateRuntime(runtime: ForgeRuntimeV1): ForgeDockerRuntimeV1 {
       'Forge v1 supports only its owned Docker runtime image.',
     );
   }
+  if (runtime.network !== undefined && runtime.network !== 'host')
+    throw new TypeError('runtime.network must be host or omitted.');
+  if (runtime.build_network !== undefined && runtime.build_network !== 'host')
+    throw new TypeError('runtime.build_network must be host or omitted.');
+  if (runtime.proxy !== undefined) DockerProxySchema.parse(runtime.proxy);
   positive(runtime.resources.memory_bytes, 'runtime.resources.memory_bytes');
   positive(runtime.resources.cpu_count, 'runtime.resources.cpu_count');
   positive(runtime.resources.process_count, 'runtime.resources.process_count');
   return runtime;
+}
+
+function assertProxyBindings(
+  proxy: ForgeDockerRuntimeV1['proxy'],
+  environment: {
+    readonly variables?: Readonly<Record<string, string>>;
+    readonly credentials?: Readonly<Record<string, unknown>>;
+  },
+): void {
+  for (const [name, value] of Object.entries(dockerProxyEnvironment(proxy))) {
+    if (
+      Object.hasOwn(environment.credentials ?? {}, name) ||
+      (Object.hasOwn(environment.variables ?? {}, name) &&
+        environment.variables?.[name] !== value)
+    )
+      throw new TypeError(
+        `Runtime proxy ${name} conflicts with command environment requirements.`,
+      );
+  }
 }
 
 function validateEnvironment(

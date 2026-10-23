@@ -223,6 +223,28 @@ Planning with `platform: native` queries the Docker server's architecture
 without building or allocating a runtime. `validate --host` additionally
 builds the runtime image and probes the host without making model calls.
 
+### Docker networking
+
+Docker's normal network is the default. To reach services bound to the host,
+set `runtime.network: host` in the experiment, or export
+`FORGE_DOCKER_NETWORK=host`. Image builds have a separate opt-in:
+`runtime.build_network: host` or `FORGE_DOCKER_BUILD_NETWORK=host`. An explicit
+`default` environment value clears the matching authored option.
+
+Set `FORGE_HTTP_PROXY`, `FORGE_HTTPS_PROXY`, and `FORGE_NO_PROXY` when builds
+and container commands need a proxy. Forge passes these explicit settings as
+standard Docker proxy build args and command environment variables, without
+changing image assets. Ambient host proxy variables are not forwarded. URL
+credentials are unsupported; these nonsecret addresses are saved in the plan.
+They can also be authored as `runtime.proxy.http`, `.https`, and `.no_proxy`.
+An empty override clears that proxy field.
+
+These effective settings are saved in the plan; changing them prevents resume
+from reusing the old configuration. Host networking shares the host's network
+namespace, including ports and loopback. It requires Linux Docker or Docker
+Desktop 4.34+ with host networking enabled. Concurrent runs can compete for
+ports. See the [runtime boundary](docs/architecture.md#built-in-docker-runtime).
+
 ### Select from an experiment
 
 The bundled experiment defines the available cases, treatments, and agents.
