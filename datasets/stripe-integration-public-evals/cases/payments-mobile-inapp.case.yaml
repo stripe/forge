@@ -1,0 +1,48 @@
+id: stripe-integration-public-evals/payments-mobile-inapp
+version: 0.1.0
+task: |-
+  I'm building a React Native app for a meal prep subscription service. Users can subscribe to a weekly meal plan for $65/week directly in the app. When they tap "Start My Plan," I want them to go through Stripe's hosted payment page and return back to the app when payment is done.
+
+  Build the Stripe integration. Use Node.js/TypeScript on the backend and React Native on the frontend.
+
+  Requirements:
+  - A backend endpoint that creates a payment session for the weekly subscription and returns a URL the app can open
+  - The app opens the payment page (the customer leaves the app temporarily for checkout)
+  - The customer is returned to the app after payment completes
+  - A webhook endpoint that handles successful subscription creation and activates the user's meal plan (stub the activation logic)
+  - Pricing and subscription configuration must be managed server-side — never trust the client
+
+  Assume a basic Express server and a React Native app with deep link support already exist. Just build out the Stripe pieces.
+initial_prompt: |-
+  I'm building a React Native app for a meal prep subscription service. Users can subscribe to a weekly meal plan for $65/week directly in the app. When they tap "Start My Plan," I want them to go through Stripe's hosted payment page and return back to the app when payment is done.
+
+  Build the Stripe integration. Use Node.js/TypeScript on the backend and React Native on the frontend.
+
+  Requirements:
+  - A backend endpoint that creates a payment session for the weekly subscription and returns a URL the app can open
+  - The app opens the payment page (the customer leaves the app temporarily for checkout)
+  - The customer is returned to the app after payment completes
+  - A webhook endpoint that handles successful subscription creation and activates the user's meal plan (stub the activation logic)
+  - Pricing and subscription configuration must be managed server-side — never trust the client
+
+  Assume a basic Express server and a React Native app with deep link support already exist. Just build out the Stripe pieces.
+context: |-
+  You are a developer building a React Native meal prep subscription app. When customers check out, you want to send them to a web browser payment page and bring them back into the app afterward via a deep link, while automatically displaying all available payment methods.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses checkout.sessions.create on the backend with mode ''subscription'' (hosted surface — NOT PaymentSheet or paymentIntents.create)'
+    requirement_level: MUST
+  - value: 'MUST: Does NOT set ui_mode to ''embedded'' — the hosted surface is required for the in-app redirect flow'
+    requirement_level: MUST
+  - value: 'MUST: Configures success_url or return_url to use a deep link scheme so the React Native app can handle the redirect back (e.g. a custom URL scheme like myapp://checkout/complete or a universal link)'
+    requirement_level: MUST
+  - value: 'Has a webhook endpoint that handles checkout.session.completed or customer.subscription.created'
+    requirement_level: SHOULD
+  - value: 'Stripe secret key is only used server-side, never exposed in the React Native client'
+    requirement_level: SHOULD
+  - value: 'MUST NOT pass payment_method_types to any Stripe API call — dynamic payment methods must remain enabled. If payment_method_types is absent from all Stripe API calls, this expectation PASSES regardless of which Stripe API is used.'
+    requirement_level: MUST
+  - value: 'Includes the parameter integration_identifier in the checkout.sessions.create call — required for Checkout Studio attribution'
+    requirement_level: SHOULD

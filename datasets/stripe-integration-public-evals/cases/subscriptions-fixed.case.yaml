@@ -1,0 +1,38 @@
+id: stripe-integration-public-evals/subscriptions-fixed
+version: 0.1.0
+task: |-
+  I'm building a SaaS project management tool called "TaskFlow" using Next.js and TypeScript. I need to add subscription billing so users can subscribe to our $29/month Pro plan. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A pricing page with a "Subscribe" button for the Pro plan ($29/month) - When a user clicks Subscribe, they go through a payment flow and land on a success page - A webhook endpoint that handles subscription lifecycle events (new subscription, cancellation, payment failure) and updates user status in the database (stub the DB write) Assume Next.js App Router is already set up. Build out the Stripe integration pieces: the checkout flow, portal, API routes, and webhook handler.
+initial_prompt: |-
+  I'm building a SaaS project management tool called "TaskFlow" using Next.js and TypeScript. I need to add subscription billing so users can subscribe to our $29/month Pro plan. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A pricing page with a "Subscribe" button for the Pro plan ($29/month) - When a user clicks Subscribe, they go through a payment flow and land on a success page - A webhook endpoint that handles subscription lifecycle events (new subscription, cancellation, payment failure) and updates user status in the database (stub the DB write) Assume Next.js App Router is already set up. Build out the Stripe integration pieces: the checkout flow, portal, API routes, and webhook handler.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Shows the Pro plan as $29 per month with a Subscribe action that calls a server-side Checkout endpoint.'
+    requirement_level: MUST
+  - value: 'MUST: Creates a Checkout Session with mode=''subscription'' and the recurring Pro Price.'
+    requirement_level: MUST
+  - value: 'MUST: Selects the Pro Price from a server-side allowlist instead of trusting a client-supplied Price ID or amount.'
+    requirement_level: MUST
+  - value: 'MUST: Authenticates the application user before creating a Checkout Session.'
+    requirement_level: MUST
+  - value: 'MUST: Creates or reuses the authenticated user''s Stripe Customer and persists that Customer mapping.'
+    requirement_level: MUST
+  - value: 'MUST: Sets success_url and cancel_url and provides a success page that reports the resulting billing state.'
+    requirement_level: MUST
+  - value: 'MUST: Creates a Billing Portal session only after resolving the authenticated user''s Customer server-side.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable Stripe POST requests that create or mutate billing resources.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies each webhook with stripe.webhooks.constructEvent using the unmodified raw request body, Stripe-Signature header, and endpoint secret.'
+    requirement_level: MUST
+  - value: 'MUST: Handles checkout.session.completed, customer.subscription.created, customer.subscription.updated, customer.subscription.deleted, invoice.paid, and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by persisting the Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Retrieves the current Subscription or Invoice from Stripe before applying access changes when an event may be stale or out of order.'
+    requirement_level: MUST
+  - value: 'MUST: Updates the stubbed user billing status from authoritative Stripe subscription and invoice state.'
+    requirement_level: MUST
+  - value: 'MUST NOT grant Pro access solely from the success redirect or Checkout Session creation response.'
+    requirement_level: MUST

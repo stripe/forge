@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/subscriptions-prebilling
+version: 0.1.0
+task: |-
+  A training company sells a six-month subscription at $200/month but collects the first three service periods up front when the customer signs. After the prepaid period, the subscription should resume normal monthly invoicing without duplicate charges. Build the integration and invoice reconciliation in Node.js/TypeScript with the stripe npm package.
+initial_prompt: |-
+  A training company sells a six-month subscription at $200/month but collects the first three service periods up front when the customer signs. After the prepaid period, the subscription should resume normal monthly invoicing without duplicate charges. Build the integration and invoice reconciliation in Node.js/TypeScript with the stripe npm package.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses subscription billing_schedules with bill_until to prebill the first three monthly service periods.'
+    requirement_level: MUST
+  - value: 'MUST: Uses flexible billing mode on API version 2026-05-27.dahlia or later.'
+    requirement_level: MUST
+  - value: 'MUST: Uses applies_to when prebilling only selected licensed subscription items.'
+    requirement_level: MUST
+  - value: 'MUST NOT apply prebilling to metered usage items.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the change with subscription_details.billing_schedules using the same bill_until, applies_to, and proration inputs as the write.'
+    requirement_level: MUST
+  - value: 'MUST: Sets proration_behavior deliberately and uses always_invoice when the three-period invoice must be created immediately.'
+    requirement_level: MUST
+  - value: 'MUST: Reconciles invoice line service periods to prove the first three periods are billed once and ordinary monthly billing resumes with period four.'
+    requirement_level: MUST
+  - value: 'MUST NOT combine subscription prebilling with payment_behavior=''pending_if_incomplete''.'
+    requirement_level: MUST
+  - value: 'MUST NOT exceed 50 prepaid cycles or five years.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a stable idempotency key for each create or update operation that can generate the advance invoice.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures and durably deduplicates invoice and subscription event IDs before reconciliation.'
+    requirement_level: MUST

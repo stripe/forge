@@ -1,0 +1,40 @@
+id: stripe-integration-public-evals/hybrid-saas-marketplace-fitness
+version: 0.1.0
+task: |-
+  Design Stripe Connect for GymFlow, which has two payment products using the same gym accounts. On the SaaS side, each gym sells memberships and class packages under its own brand as merchant of record. On the marketplace side, consumers book one gym's drop-in class in GymFlow's app and GymFlow keeps 12%. Provide distinct charge patterns, Accounts v2 configurations, capability gating, and fee logic for both sides.
+initial_prompt: |-
+  Design Stripe Connect for GymFlow, which has two payment products using the same gym accounts. On the SaaS side, each gym sells memberships and class packages under its own brand as merchant of record. On the marketplace side, consumers book one gym's drop-in class in GymFlow's app and GymFlow keeps 12%. Provide distinct charge patterns, Accounts v2 configurations, capability gating, and fee logic for both sides.
+context: |-
+  If asked: accounts are newly created; gyms want Express Dashboard access; SaaS direct charges should use Stripe-owned fees and losses; marketplace bookings route immediately to one gym and require platform-owned fees and losses; a gym may participate in both products, but incompatible responsibility sets may require separate connected accounts or an architecture review.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Uses direct charges with Merchant and card_payments for gym-owned SaaS membership and package payments.'
+    requirement_level: MUST
+  - value: 'MUST: Configures the SaaS account path with dashboard express, fees_collector stripe, and losses_collector stripe.'
+    requirement_level: MUST
+  - value: 'MUST: Gates SaaS charges on configuration.merchant.capabilities.card_payments.status === ''active''.'
+    requirement_level: MUST
+  - value: 'MUST: For recurring gym memberships, configures Customer and supplies customer_account on SetupIntent and Subscription creation.'
+    requirement_level: MUST
+  - value: 'MUST NOT create a legacy v1 Customer on the connected account for recurring memberships.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges for a single-gym marketplace drop-in booking.'
+    requirement_level: MUST
+  - value: 'MUST: Configures the marketplace path with dashboard express, fees_collector application, losses_collector application, and Recipient stripe_balance.stripe_transfers.'
+    requirement_level: MUST
+  - value: 'MUST: Sets marketplace application_fee_amount to round(charge_amount * 0.12) in minor units.'
+    requirement_level: MUST
+  - value: 'MUST NOT claim one responsibility configuration can simultaneously be both Stripe-owned and application-owned.'
+    requirement_level: MUST
+  - value: 'MUST: Calls out the need for separate connected accounts or Stripe architecture review if one gym must use both incompatible responsibility sets.'
+    requirement_level: MUST
+  - value: 'If the recommended Express, Stripe-pricing, Stripe-owned-losses configuration is not GA at evaluation time, the response MUST disclose its preview status and use the currently required preview API version.'
+    requirement_level: MUST

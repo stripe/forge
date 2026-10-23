@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/white-label-custom-platform
+version: 0.1.0
+task: |-
+  I'm designing a fully branded payment platform for a franchise network. Each franchise location accepts payments under our brand, should not see Stripe branding, and needs onboarding and ongoing account operations. Recommend the best architecture; dashboard none is acceptable only if the white-label requirement truly justifies its operational burden. Explain charge-pattern and fee-model choices that depend on whether a franchise or the platform owns the customer transaction.
+initial_prompt: |-
+  I'm designing a fully branded payment platform for a franchise network. Each franchise location accepts payments under our brand, should not see Stripe branding, and needs onboarding and ongoing account operations. Recommend the best architecture; dashboard none is acceptable only if the white-label requirement truly justifies its operational burden. Explain charge-pattern and fee-model choices that depend on whether a franchise or the platform owns the customer transaction.
+context: |-
+  If asked: unlike the explicit-insistence case, leadership is open to embedded components if they satisfy branding; franchises may either be merchant of record for their own customers or act as recipients of platform-owned transactions; the platform wants an architecture recommendation before committing to custom KYC operations.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Recommends embedded onboarding and embedded account-management components as the default white-label approach.'
+    requirement_level: MUST
+  - value: 'MUST NOT recommend dashboard none without tying it to an explicit need to eliminate all Stripe-hosted account surfaces.'
+    requirement_level: MUST
+  - value: 'MUST: If recommending dashboard none, states that the platform owns KYC collection, remediation, refunds, disputes, and ongoing requirements surfaces.'
+    requirement_level: MUST
+  - value: 'For franchise-owned customer payments, recommends Merchant with card_payments, direct charges, and a compatible Stripe-owned-fees and Stripe-owned-losses configuration.'
+    requirement_level: SHOULD
+  - value: 'For platform-owned single-franchise transactions, recommends Recipient with stripe_balance.stripe_transfers, destination charges, fees_collector application, and losses_collector application.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT present Stripe-owned losses with destination charges as compatible.'
+    requirement_level: MUST
+  - value: 'MUST: Explains who pays Stripe fees and how platform revenue is collected for the recommended pattern.'
+    requirement_level: MUST

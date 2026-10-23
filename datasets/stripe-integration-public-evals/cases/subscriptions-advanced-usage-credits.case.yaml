@@ -1,0 +1,34 @@
+id: stripe-integration-public-evals/subscriptions-advanced-usage-credits
+version: 0.1.0
+task: |-
+  I'm building a generative-AI API with a $100 monthly platform fee, token-based overages, and $50 of recurring monthly usage credits that burn down in real time. New customers should use Stripe's current advanced usage-based billing stack. Build the integration with Node.js/TypeScript and the stripe npm package, including usage ingestion, credits, invoicing, and plan-version changes.
+initial_prompt: |-
+  I'm building a generative-AI API with a $100 monthly platform fee, token-based overages, and $50 of recurring monthly usage credits that burn down in real time. New customers should use Stripe's current advanced usage-based billing stack. Build the integration with Node.js/TypeScript and the stripe npm package, including usage ingestion, credits, invoicing, and plan-version changes.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Selects the advanced usage-based billing pricing-plan stack for this greenfield offer only after confirming the account and environment have access to every required v2 capability.'
+    requirement_level: MUST
+  - value: 'MUST NOT present legacy Usage Records as the recommended greenfield ingestion path.'
+    requirement_level: MUST
+  - value: 'MUST: Models the $100 fixed fee, dimensioned token rate, and recurring $50 credit issuance as separate components of one versioned pricing plan.'
+    requirement_level: MUST
+  - value: 'MUST: Creates the Customer billing interval and pricing-plan subscription with supported v2 APIs or a currently supported Checkout path.'
+    requirement_level: MUST
+  - value: 'MUST: Ingests token usage as dimensioned meter events with a stable unique event identifier.'
+    requirement_level: MUST
+  - value: 'MUST: Keeps Stripe secret keys server-side and authorizes the tenant before accepting or querying tenant usage.'
+    requirement_level: MUST
+  - value: 'MUST: Reads Stripe''s authoritative real-time usage and credit balance before enforcing credit-dependent product behavior.'
+    requirement_level: MUST
+  - value: 'MUST: Treats real-time credit drawdown as gated and verifies its throughput and availability before relying on it in production.'
+    requirement_level: MUST
+  - value: 'MUST: Creates a new pricing-plan version for rate changes instead of mutating the commercial terms of the active version.'
+    requirement_level: MUST
+  - value: 'MUST: Moves existing customers to a new plan version only through an explicit migration policy.'
+    requirement_level: MUST
+  - value: 'MUST: Tests v2 resources in a supported Sandbox and does not assume legacy test-mode parity.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures and durably deduplicates applicable servicing, collection, credit, invoice, and payment events.'
+    requirement_level: MUST

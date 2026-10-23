@@ -1,0 +1,44 @@
+id: stripe-integration-public-evals/invoicing-b2b
+version: 0.1.0
+task: |-
+  I run a B2B software consulting firm. Every month I need to send invoices to clients for work completed. Build an invoicing system using Stripe. Use Node.js/TypeScript and the `stripe` npm package. Requirements: - Create clients (Stripe Customers) with their billing email - Create invoices with multiple line items (e.g., "Backend development: 20hrs @ $200/hr", "Code review: 5hrs @ $150/hr") - Finalize and send invoices to clients by email - Track payment status (paid, outstanding, overdue) - List unpaid invoices for a given client - A webhook endpoint that fires when an invoice is paid or payment fails Assume an Express app already exists.
+initial_prompt: |-
+  I run a B2B software consulting firm. Every month I need to send invoices to clients for work completed. Build an invoicing system using Stripe. Use Node.js/TypeScript and the `stripe` npm package. Requirements: - Create clients (Stripe Customers) with their billing email - Create invoices with multiple line items (e.g., "Backend development: 20hrs @ $200/hr", "Code review: 5hrs @ $150/hr") - Finalize and send invoices to clients by email - Track payment status (paid, outstanding, overdue) - List unpaid invoices for a given client - A webhook endpoint that fires when an invoice is paid or payment fails Assume an Express app already exists.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates or reuses a Stripe Customer with the client''s billing email.'
+    requirement_level: MUST
+  - value: 'MUST: Authenticates the caller before creating, sending, listing, or reading client invoices.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies server-side that the requested client Customer belongs to the caller''s permitted account or tenant.'
+    requirement_level: MUST
+  - value: 'MUST: Creates one itemized invoice line for each service with description, quantity, currency, and integer unit amount.'
+    requirement_level: MUST
+  - value: 'MUST: Creates the invoice for the intended Customer with collection_method=''send_invoice''.'
+    requirement_level: MUST
+  - value: 'MUST: Sets days_until_due or due_date on each sent invoice.'
+    requirement_level: MUST
+  - value: 'MUST: Finalizes the draft invoice before sending it.'
+    requirement_level: MUST
+  - value: 'MUST: Sends the finalized invoice with the Invoices API so Stripe emails the client.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable Customer, invoice-item, invoice, finalize, and send POST requests.'
+    requirement_level: MUST
+  - value: 'MUST: Reports paid when status=''paid''.'
+    requirement_level: MUST
+  - value: 'MUST: Reports outstanding when status=''open'' and amount_remaining is positive but the due date has not passed.'
+    requirement_level: MUST
+  - value: 'MUST: Reports overdue when status=''open'', amount_remaining is positive, and due_date is in the past.'
+    requirement_level: MUST
+  - value: 'MUST: Lists unpaid invoices by querying invoices for the authorized Customer and returning only open invoices with amount_remaining greater than zero.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures with stripe.webhooks.constructEvent using the unmodified raw request body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles invoice.paid and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Retrieves the current Invoice before persisting payment status when an event may be stale or out of order.'
+    requirement_level: MUST

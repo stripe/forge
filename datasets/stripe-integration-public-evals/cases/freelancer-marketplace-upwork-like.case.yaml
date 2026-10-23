@@ -1,0 +1,36 @@
+id: stripe-integration-public-evals/freelancer-marketplace-upwork-like
+version: 0.1.0
+task: |-
+  I'm building a freelancer marketplace where clients hire freelancers for jobs. The platform keeps 20% of each payment, freelancers receive 80%, and freelancers need simple onboarding. Recommend the Accounts v2 configuration and implement an immediate one-freelancer payment flow with the exact commission.
+initial_prompt: |-
+  I'm building a freelancer marketplace where clients hire freelancers for jobs. The platform keeps 20% of each payment, freelancers receive 80%, and freelancers need simple onboarding. Recommend the Accounts v2 configuration and implement an immediate one-freelancer payment flow with the exact commission.
+context: |-
+  If asked: each payment is for one freelancer and routes immediately; the platform is merchant of record and owns disputes, refunds, pricing, and losses; freelancers only receive transfers; the 20% commission is gross platform revenue before processing fees.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST: Does NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
+    requirement_level: MUST
+  - value: 'MUST: Configures dashboard as express, fees_collector as application, and losses_collector as application.'
+    requirement_level: MUST
+  - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
+    requirement_level: MUST
+  - value: 'MUST NOT request Merchant configuration or card_payments for a recipient-only connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT require on_behalf_of for the destination charge.'
+    requirement_level: MUST
+  - value: 'MUST: Sets application_fee_amount to round(charge_amount * 0.20) in minor units.'
+    requirement_level: MUST
+  - value: 'MUST: States that the freelancer receives 80% of the charge before any recipient-side adjustments.'
+    requirement_level: MUST
+  - value: 'Explains that a 20% gross commission provides more processing-fee headroom than low-single-digit commissions.'
+    requirement_level: SHOULD
+  - value: 'Links to current Stripe pricing or recommends validating the margin with the Platform Pricing Tool.'
+    requirement_level: SHOULD

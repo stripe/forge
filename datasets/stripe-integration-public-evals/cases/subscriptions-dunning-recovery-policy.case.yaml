@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/subscriptions-dunning-recovery-policy
+version: 0.1.0
+task: |-
+  I'm building renewal recovery for a $60/month SaaS subscription. Configure Smart Retries or Billing Automations, notify the account owner after failures, keep access during a defined grace period, and revoke access only when the authoritative billing state reaches our terminal policy. Build the Node.js/TypeScript webhook and recovery logic.
+initial_prompt: |-
+  I'm building renewal recovery for a $60/month SaaS subscription. Configure Smart Retries or Billing Automations, notify the account owner after failures, keep access during a defined grace period, and revoke access only when the authoritative billing state reaches our terminal policy. Build the Node.js/TypeScript webhook and recovery logic.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses either Smart Retries or Billing Automations as the single retry scheduler.'
+    requirement_level: MUST
+  - value: 'MUST: Defines a bounded grace period that starts from an explicit authoritative failure timestamp.'
+    requirement_level: MUST
+  - value: 'MUST: Defines access outcomes for active, trialing, past_due, unpaid, paused, and canceled subscription states.'
+    requirement_level: MUST
+  - value: 'MUST NOT permanently revoke access on the first failed renewal unless the stated policy explicitly requires it.'
+    requirement_level: MUST
+  - value: 'MUST: Notifies the authorized account owner after invoice.payment_failed without exposing sensitive payment details.'
+    requirement_level: MUST
+  - value: 'MUST: Provides an authenticated Customer-scoped Portal or SetupIntent flow for replacing the renewal payment method.'
+    requirement_level: MUST
+  - value: 'MUST: Handles invoice.payment_action_required, invoice.paid, and the configured terminal subscription outcome.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches the current invoice and subscription before granting or revoking access.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures against the raw request body.'
+    requirement_level: MUST
+  - value: 'MUST: Durably deduplicates event IDs and records notification and access transitions atomically.'
+    requirement_level: MUST
+  - value: 'MUST NOT store or log full payment-method details in the application.'
+    requirement_level: MUST

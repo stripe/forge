@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/b2b-enterprise-platform
+version: 0.1.0
+task: |-
+  Design the Connect architecture for an enterprise procurement platform serving established vendors with complex billing. The business asks for fully white-labeled onboarding and complete control of the payment experience. Explain the operational commitment, recommend an Accounts v2 configuration and charge pattern, and show how the platform retains revenue.
+initial_prompt: |-
+  Design the Connect architecture for an enterprise procurement platform serving established vendors with complex billing. The business asks for fully white-labeled onboarding and complete control of the payment experience. Explain the operational commitment, recommend an Accounts v2 configuration and charge pattern, and show how the platform retains revenue.
+context: |-
+  If asked: one corporate purchase can be allocated to one or more vendors; settlement may happen independently of charge time; the platform accepts platform-owned loss liability and pricing; the company has not yet engaged Stripe Sales; no legacy account types may be used.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'Recommends contacting Stripe Sales or the existing Stripe account team for the enterprise and white-label design.'
+    requirement_level: SHOULD
+  - value: 'MUST: States that dashboard none is an advanced choice that makes the platform responsible for KYC collection, remediation, refunds, disputes, and ongoing requirements surfaces.'
+    requirement_level: MUST
+  - value: 'MUST: Uses dashboard none only because the prompt explicitly requires a fully white-labeled experience.'
+    requirement_level: MUST
+  - value: 'MUST: Uses separate charges and transfers for multi-vendor or independently timed settlement.'
+    requirement_level: MUST
+  - value: 'MUST: Configures fees_collector as application, losses_collector as application, and Recipient with stripe_balance.stripe_transfers.'
+    requirement_level: MUST
+  - value: 'MUST: Collects platform revenue by transferring less than the platform charge amount.'
+    requirement_level: MUST
+  - value: 'MUST NOT set application_fee_amount on a Transfer.'
+    requirement_level: MUST

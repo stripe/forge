@@ -1,0 +1,46 @@
+id: stripe-integration-public-evals/subscriptions-paid-upgrade-pending
+version: 0.1.0
+task: |-
+  I'm building a video hosting service called "StreamForge" using Next.js and TypeScript. Customers on the $20/month Basic plan can upgrade immediately to the $80/month Studio plan, but the plan change must take effect only if Stripe successfully collects the prorated upgrade invoice. Build the upgrade flow with the stripe npm package. Requirements: - Preview the exact prorated amount before confirmation - Reuse the preview's proration timestamp in the update - Attempt immediate collection - Leave the customer on Basic when payment fails or authentication isn't completed - Update local access only after the pending update is applied Assume Next.js App Router and a database helper already exist.
+initial_prompt: |-
+  I'm building a video hosting service called "StreamForge" using Next.js and TypeScript. Customers on the $20/month Basic plan can upgrade immediately to the $80/month Studio plan, but the plan change must take effect only if Stripe successfully collects the prorated upgrade invoice. Build the upgrade flow with the stripe npm package. Requirements: - Preview the exact prorated amount before confirmation - Reuse the preview's proration timestamp in the update - Attempt immediate collection - Leave the customer on Basic when payment fails or authentication isn't completed - Update local access only after the pending update is applied Assume Next.js App Router and a database helper already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Authenticates the caller and resolves the owned Basic Subscription and subscription item server-side.'
+    requirement_level: MUST
+  - value: 'MUST: Loads the Basic and Studio Prices from a server-side allowlist.'
+    requirement_level: MUST
+  - value: 'MUST: Previews replacement of the Basic item with the Studio Price using stripe.invoices.createPreview and subscription_details.items.'
+    requirement_level: MUST
+  - value: 'MUST: Creates one fixed proration timestamp and passes it as subscription_details.proration_date in the preview.'
+    requirement_level: MUST
+  - value: 'MUST: Displays the preview''s prorated amount and currency before confirmation.'
+    requirement_level: MUST
+  - value: 'MUST: Reuses the preview''s proration timestamp as proration_date on the Subscription update.'
+    requirement_level: MUST
+  - value: 'MUST: Updates the existing Basic subscription item to the Studio Price instead of adding another item.'
+    requirement_level: MUST
+  - value: 'MUST: Sets proration_behavior=''always_invoice'' on the upgrade update.'
+    requirement_level: MUST
+  - value: 'MUST: Sets payment_behavior=''pending_if_incomplete'' on the upgrade update.'
+    requirement_level: MUST
+  - value: 'MUST: Uses automatic collection and exposes any required next-action client secret without treating incomplete authentication as success.'
+    requirement_level: MUST
+  - value: 'MUST: Uses an idempotency key for the retryable upgrade POST request.'
+    requirement_level: MUST
+  - value: 'MUST NOT grant Studio access while subscription.pending_update is present.'
+    requirement_level: MUST
+  - value: 'MUST: Keeps Basic access when the upgrade invoice payment fails or required authentication remains incomplete.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures with stripe.webhooks.constructEvent using the unmodified raw body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles customer.subscription.pending_update_applied, customer.subscription.pending_update_expired, invoice.payment_action_required, invoice.paid, and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Retrieves the current Subscription before changing local access after a pending-update event.'
+    requirement_level: MUST
+  - value: 'MUST: Grants Studio access only when the current Subscription item has the Studio Price and no pending update remains.'
+    requirement_level: MUST
