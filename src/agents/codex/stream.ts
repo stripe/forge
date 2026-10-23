@@ -24,6 +24,8 @@ export function parseCodexStream(
   options: {
     readonly hookAutomation?: boolean;
     readonly workspacePath?: string;
+    /** Selected model; tolerates only the pinned CLI's metadata advisory for it. */
+    readonly model?: string;
   } = {},
 ): AgentTurn {
   if (
@@ -109,8 +111,14 @@ export function parseCodexStream(
           options.workspacePath !== undefined &&
           raw.message ===
             `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`;
+        // The pinned CLI has no bundled metadata for models newer than itself and
+        // reports that before turn.started, then runs with fallback metadata.
+        const modelMetadataAdvisory =
+          options.model !== undefined &&
+          raw.message ===
+            `Model metadata for \`${options.model}\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`;
         if (
-          (hookAdvisory || configAdvisory) &&
+          (hookAdvisory || configAdvisory || modelMetadataAdvisory) &&
           sessionId !== undefined &&
           !started &&
           event.type === 'item.completed' &&

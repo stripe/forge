@@ -56,6 +56,49 @@ function assertInvalid(
 }
 
 describe('Codex exec stream', () => {
+  it('accepts the pinned CLI model-metadata advisory only for the selected model before the turn', () => {
+    const notice = (model: string) =>
+      `Model metadata for \`${model}\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`;
+    const advisory = (message: string) => ({
+      type: 'item.completed',
+      item: { id: 'item_0', type: 'error', message },
+    });
+    const answer = item('agent_message', { id: 'item_1', text: 'ok' });
+    const accepted = jsonl(
+      started,
+      advisory(notice('gpt-6.1-sol')),
+      turnStarted,
+      answer,
+      completed,
+    );
+    assert.equal(
+      parseCodexStream(accepted, undefined, { model: 'gpt-6.1-sol' }).text,
+      'ok',
+    );
+    // Not tolerated without the selected model, for another model, or mid-turn.
+    assertInvalid(accepted);
+    for (const [events, model] of [
+      [
+        [
+          started,
+          advisory(notice('gpt-6.1-sol')),
+          turnStarted,
+          answer,
+          completed,
+        ],
+        'gpt-5.4',
+      ],
+      [
+        [started, turnStarted, advisory(notice('gpt-6.1-sol')), completed],
+        'gpt-6.1-sol',
+      ],
+    ] as const)
+      assert.throws(
+        () => parseCodexStream(jsonl(...events), undefined, { model }),
+        CodexStreamError,
+      );
+  });
+
   it('accepts only captured pre-turn hook automation and ignored-provider advisories for the selected invocation', () => {
     const warning =
       '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.';
