@@ -81,6 +81,7 @@ try {
       assert.deepEqual(forge.FORGE_BUILD_IDENTITY, ${JSON.stringify(packagedBuildIdentity)});
       assert.equal(Object.isFrozen(forge.FORGE_BUILD_IDENTITY), true);
       assert.equal(typeof forge.createForgeEngine, 'function');
+      assert.equal(typeof forge.createForgeEngine().validateRuntime, 'function');
       assert.equal(typeof forge.preflightEval, 'function');
       assert.equal(typeof forge.parseInteractionArtifact, 'function');
       assert.equal(typeof forge.parseJudgeEvidence, 'function');

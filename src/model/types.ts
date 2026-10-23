@@ -174,6 +174,8 @@ export interface AgentSelectionV1 extends ModelRefV1 {
   adapter: string;
   /** Codex hook review: native by default; automation permits all enabled hooks. */
   hook_trust?: 'native' | 'automation';
+  /** Claude gateway compatibility; omit to retain the native beta behavior. */
+  disable_experimental_betas?: true;
 }
 
 export interface TreatmentV1 {

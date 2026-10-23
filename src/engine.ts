@@ -1,10 +1,12 @@
 import type {
   ExecuteEvalInput,
   PreflightEvalInput,
+  RuntimeReadinessResult,
 } from './execution/execute.ts';
 import {
   executeEvalWithSetupActions,
   preflightEvalWithSetupActions,
+  validateRuntimeWithSetupActions,
 } from './execution/execute.ts';
 import {
   loadDatasetWithSetupActions,
@@ -63,6 +65,11 @@ export interface ForgeEngine {
     readonly runtimePlatform?: ForgeDockerRuntimeV1['platform'];
   }): ResolvedRunPlanV1;
   preflightEval(request: PreflightEvalInput): void;
+  /** Apply setup and check configured native MCP servers, without model calls. */
+  validateRuntime(
+    requests: readonly PreflightEvalInput[],
+    signal?: AbortSignal,
+  ): Promise<readonly RuntimeReadinessResult[]>;
   executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1>;
   verifyCompletedRun(location: string): Promise<CompletedRun>;
 }
@@ -112,6 +119,9 @@ export function createForgeEngine(
     },
     preflightEval(request) {
       preflightEvalWithSetupActions(request, setupActions);
+    },
+    validateRuntime(requests, signal) {
+      return validateRuntimeWithSetupActions(requests, setupActions, signal);
     },
     executeEval(request) {
       return executeEvalWithSetupActions(request, setupActions);

@@ -20,7 +20,8 @@ datasets/stripe-integration-public-evals/
     └── ... (73 cases total)
 experiments/stripe-integration-public-evals/
 ├── README.md
-└── experiment.yaml
+├── experiment.yaml
+└── plugin-experiment.yaml
 ```
 
 The dataset directory holds only the latest version; earlier versions live in
@@ -60,6 +61,23 @@ node dist/cli.js run \
 
 Execution makes model calls for the agent, Ava, and the criterion judge.
 Forge prints the experiment run identity and artifact locations.
+
+The [plugin experiment](plugin-experiment.yaml) uses the same dataset with
+Stripe's plugin, HTTP MCP bearer auth, and both Claude Code and Codex. It keeps
+the bundled public MCP endpoint. Export a Stripe Agent API key as
+`STRIPE_API_KEY`, then check setup and tool discovery:
+
+```sh
+node dist/cli.js validate --host \
+  --experiment experiments/stripe-integration-public-evals/plugin-experiment.yaml
+```
+
+This check makes no model calls and does not test model authentication. To run
+the payment eval, export `ANTHROPIC_API_KEY` and `CODEX_API_KEY`, then use `run`
+with that experiment and `--output ./results`. Use `--agent claude-code` or
+`--agent codex` to select one. Ava and judging retain Anthropic configuration.
+Prepare the account or merchant outside Forge; any account accepted by the
+plugin's endpoint uses the same credential interface.
 
 ## Update the dataset
 

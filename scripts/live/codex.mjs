@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { resolveCliRuntime } from '../../dist/cliRuntime.js';
 
 import { assertNoCleanupWarnings, assertRuntimeCleanup } from './cleanup.mjs';
 
@@ -284,16 +285,30 @@ export async function runCodexPluginIntegrationSuite({
               },
             ],
           },
-          runtime: {
-            adapter: 'docker',
-            image: { kind: 'forge' },
-            platform,
-            resources: {
-              memory_bytes: 4 * 1024 ** 3,
-              cpu_count: 2,
-              process_count: 512,
+          runtime: resolveCliRuntime(
+            {
+              config: {
+                matrix: {
+                  agents: [
+                    { adapter: 'codex', provider: 'openai', model: 'gpt-5.4' },
+                  ],
+                  cases: [],
+                  treatments: [],
+                },
+                runtime: {
+                  adapter: 'docker',
+                  image: { kind: 'forge' },
+                  platform,
+                  resources: {
+                    memory_bytes: 4 * 1024 ** 3,
+                    cpu_count: 2,
+                    process_count: 512,
+                  },
+                },
+              },
             },
-          },
+            process.env,
+          ).config.runtime,
         }),
         limits: { run_timeout_ms: 5 * 60_000 },
       });

@@ -36,6 +36,14 @@ try {
       progress,
     });
   } else if (mode === 'setup') {
+    const { runReadinessIntegrationSuite } = await import(
+      './live/readiness.mjs'
+    );
+    const readiness = await runReadinessIntegrationSuite({
+      ...configuration,
+      signal,
+      progress,
+    });
     const { runSetupIntegrationSuite } = await import('./live/setup.mjs');
     const setup = await runSetupIntegrationSuite({
       ...configuration,
@@ -52,6 +60,7 @@ try {
       suite_id: suiteId,
       mode,
       setup,
+      readiness,
       ...(codex === undefined ? {} : { codex }),
     };
   } else {

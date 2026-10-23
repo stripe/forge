@@ -20,11 +20,13 @@ export function agentSelectionKey(agent: {
   provider: string;
   model: string;
   hook_trust?: 'native' | 'automation' | undefined;
+  disable_experimental_betas?: true | undefined;
 }): string {
   return JSON.stringify([
     agent.adapter,
     agent.provider,
     agent.model,
     agent.hook_trust ?? (agent.adapter === 'codex' ? 'native' : null),
+    ...(agent.disable_experimental_betas === undefined ? [] : [true]),
   ]);
 }

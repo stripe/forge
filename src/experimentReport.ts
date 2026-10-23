@@ -210,6 +210,7 @@ const coordinates = z
         provider: z.string().min(1).max(4096),
         model: z.string().min(1).max(4096),
         hook_trust: z.enum(['native', 'automation']).optional(),
+        disable_experimental_betas: z.literal(true).optional(),
       })
       .strict(),
   })

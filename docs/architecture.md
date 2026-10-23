@@ -486,9 +486,22 @@ run, or workspaces inspected during this phase. Ordinary `forge validate` uses
 this same boundary for every matrix selection; a `native` Docker experiment is
 preflighted as both supported concrete platforms without host discovery. The
 explicit `forge validate --host` readiness check additionally queries the
-Docker server, builds the selected image, and executes a network-disabled
-disposable probe from its immutable image ID, but does not alter preflight or
-execute an evaluation.
+Docker server and uses `ForgeEngine.validateRuntime` to prepare temporary runtimes,
+verify the pinned agent, apply ordered setup, finalize it, and check configured
+plugin MCP connections through the native client. All selected plans finish
+pure preflight and resolve setup/MCP credentials before allocation. Model and
+completion credentials are not resolved. Claude uses native `mcp list`; Codex
+uses app-server initialization and `mcpServerStatus/list`, without a thread or
+turn. No model calls or MCP tool invocations occur. Checks report MCP auth
+separately from untested model auth and dispose temporary runtimes on all paths.
+Setup can have external side effects, so host validation is explicit. Ordinary
+validation stays pure; host validation supports the same selection filters.
+
+The Claude agent coordinate `disable_experimental_betas: true` opts into its
+native compatibility environment setting. The CLI can resolve it from
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` (`0` clears it). It participates in
+selection identity, saved plans, report grouping, and resume checks. Codex
+rejects this coordinate. MCP readiness does not verify model gateway behavior.
 
 ### 2. Resolve credentials and completion transports
 

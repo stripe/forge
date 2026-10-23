@@ -146,6 +146,7 @@ describe('unified live end-to-end suite', () => {
       path.join(repositoryRoot, 'scripts', 'live', 'judgment.mjs'),
       path.join(repositoryRoot, 'scripts', 'live', 'setup.mjs'),
       path.join(repositoryRoot, 'scripts', 'live', 'codex.mjs'),
+      path.join(repositoryRoot, 'scripts', 'live', 'readiness.mjs'),
     ]) {
       const syntax = spawnSync(process.execPath, ['--check', script], {
         cwd: repositoryRoot,

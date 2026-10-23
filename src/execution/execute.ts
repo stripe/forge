@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import {
   ATIF_SCHEMA_VERSION,
@@ -41,6 +42,10 @@ import {
   agentAdapterMetadataSchema,
 } from '../contracts/metadata.ts';
 import type { RunPhase } from '../contracts/observability.ts';
+import {
+  isNativePluginInstallationReceipt,
+  parseAgentPluginInstallationReceipt,
+} from '../contracts/pluginReceipt.ts';
 import type {
   MutableWorkspace,
   PreparedRuntime,
@@ -80,6 +85,8 @@ import {
   type ResolvedRunPlanV1,
 } from '../model/index.ts';
 import { parseResolvedRunPlanWithSetupActions } from '../model/parse.ts';
+import { pluginDefinitionForAgent } from '../model/plugins.ts';
+import type { PluginSetupStepV1 } from '../model/types.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import {
   type ArtifactDescriptorV1,
@@ -208,6 +215,211 @@ export function preflightEvalWithSetupActions(
       error,
     );
   }
+}
+
+/** @internal Readiness shares preflight and setup with execution, but opens no session. */
+export async function validateRuntimeWithSetupActions(
+  requests: readonly PreflightEvalInput[],
+  setupActions: SetupActionRegistry,
+  signal: AbortSignal = new AbortController().signal,
+): Promise<readonly RuntimeReadinessResult[]> {
+  const checks = requests.map(({ plan: inputPlan, composition }) => {
+    const plan = parseResolvedRunPlanWithSetupActions(inputPlan, setupActions);
+    const preflight = buildEvalPreflight(
+      plan,
+      composition,
+      createSetupExecutorForRegistry(setupActions),
+    );
+    if (
+      plan.setup.some(
+        (step) =>
+          step.uses === 'forge/plugin' &&
+          (pluginDefinitionForAgent(
+            (step as PluginSetupStepV1).with.plugin,
+            plan.agent.adapter,
+          )?.mcpServers.length ?? 0) > 0,
+      ) &&
+      !preflight.agent.pluginInstaller?.checkMcp
+    )
+      throw new Error(
+        `Agent ${plan.agent.adapter} does not support native MCP readiness checks.`,
+      );
+    // Agent model credentials and host completion credentials are deliberately
+    // not resolved: readiness never starts a model session.
+    const environmentSpecification = mergeEnvironmentSpecifications([
+      {
+        scope: 'setup',
+        specification: {
+          variables: preflight.environmentSpecification.variables ?? {},
+          credentials: preflight.setup.requirements.credentials?.setup ?? {},
+        },
+      },
+      {
+        scope: 'agent',
+        specification: {
+          credentials: preflight.setup.requirements.credentials?.agent ?? {},
+        },
+      },
+    ]);
+    return {
+      plan,
+      composition,
+      preflight,
+      environmentSpecification,
+      runId: `forge-readiness-${randomUUID()}`,
+    };
+  });
+  const resolved = [];
+  const readinessSecrets: string[] = [];
+  // Resolve every selected check before the first runtime allocation.
+  for (const check of checks) {
+    signal.throwIfAborted();
+    try {
+      const environment = await createEnvironmentResolver({
+        async resolve(reference, context) {
+          const value = await check.composition.credentialResolver.resolve(
+            reference,
+            context,
+          );
+          if (typeof value === 'string') readinessSecrets.push(value);
+          return value;
+        },
+      }).resolve(check.environmentSpecification, {
+        runId: check.runId,
+        purpose: 'readiness',
+        signal,
+      });
+      resolved.push({ ...check, environment });
+    } catch (error) {
+      throw new Error(
+        `Runtime readiness failed at credentials: ${
+          redactSecrets(readinessErrorDetail(error), readinessSecrets).value
+        }`,
+      );
+    }
+  }
+  const results: RuntimeReadinessResult[] = [];
+  for (const { plan, composition, preflight, environment, runId } of resolved) {
+    const runSignal = AbortSignal.any([
+      signal,
+      AbortSignal.timeout(plan.limits.run_timeout_ms),
+    ]);
+    let runtime: PreparedRuntime | undefined;
+    let stage = 'runtime';
+    let failure: Error | undefined;
+    try {
+      runSignal.throwIfAborted();
+      runtime = await composition.runtime.prepare({
+        runId,
+        plan,
+        requirements: preflight.requirements,
+        environment,
+        signal: runSignal,
+      });
+      stage = 'agent';
+      await preflight.agent.prepare({
+        runId,
+        plan,
+        selection: plan.agent,
+        runtime: projectAgentPrepareRuntime(runtime),
+        inputs: composition.inputProvider,
+        signal: runSignal,
+      });
+      stage = 'setup';
+      const applied = await preflight.setup.apply({
+        runId,
+        paths: runtime.paths,
+        workspace: runtime.workspace,
+        stateDirectories: runtime.stateDirectories,
+        commands: runtime.commands,
+        inputs: composition.inputProvider,
+        signal: runSignal,
+      });
+      stage = 'finalize';
+      await runtime.finalizeSetup();
+      stage = 'mcp';
+      let serverCount = 0;
+      for (const step of applied.steps) {
+        if (step.uses !== 'forge/plugin') continue;
+        const receipt = parseAgentPluginInstallationReceipt(step.resolution);
+        const planned = plan.setup[step.index] as PluginSetupStepV1;
+        const definition = pluginDefinitionForAgent(
+          planned.with.plugin,
+          plan.agent.adapter,
+        );
+        if (
+          definition === undefined ||
+          receipt.adapter !== plan.agent.adapter ||
+          receipt.plugin !== definition.distribution.plugin ||
+          receipt.marketplace !== definition.distribution.marketplace
+        )
+          throw new Error(
+            'Plugin MCP receipt does not match the expected plugin and authentication.',
+          );
+        if (definition.mcpServers.length === 0) continue;
+        // Expected servers come from the code-owned definition, never the receipt.
+        if (
+          !isNativePluginInstallationReceipt(receipt) ||
+          receipt.native_plugin_id.split('@')[0] !==
+            definition.distribution.plugin.split('@')[0]
+        )
+          throw new Error(
+            'Plugin MCP receipt does not match the expected plugin and authentication.',
+          );
+        await preflight.agent.pluginInstaller!.checkMcp!({
+          receipt,
+          servers: definition.mcpServers,
+          stateDirectories: runtime.stateDirectories,
+          commands: runtime.commands.agent,
+          signal: runSignal,
+        });
+        serverCount += definition.mcpServers.length;
+      }
+      stage = 'quiesce';
+      const sealed = await runtime.quiesce();
+      results.push(
+        Object.freeze({
+          selection: plan.selection,
+          runtime: sealed.metadata,
+          mcp_servers_checked: serverCount,
+          mcp_authentication: serverCount > 0 ? 'verified' : 'untested',
+          model_authentication: 'untested',
+        }),
+      );
+    } catch (error) {
+      failure = new Error(
+        `Runtime readiness failed at ${stage} for ${plan.selection.case_id} (${plan.agent.adapter}/${plan.selection.treatment}): ${redactSecrets(readinessErrorDetail(error), credentialValues(environment)).value}`,
+      );
+    } finally {
+      try {
+        await runtime?.dispose();
+      } catch {
+        failure = new Error(
+          `${failure?.message ?? 'Runtime readiness check finished'}; runtime cleanup failed.`,
+        );
+      }
+    }
+    if (failure) throw failure;
+  }
+  return Object.freeze(results);
+}
+
+function readinessErrorDetail(error: unknown): string {
+  const messages: string[] = [];
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth++) {
+    messages.push(current.message);
+    current = current.cause;
+  }
+  return messages.join(' ') || 'check failed';
+}
+
+export interface RuntimeReadinessResult {
+  readonly selection: ResolvedRunPlanV1['selection'];
+  readonly runtime: Readonly<Record<string, string>>;
+  readonly mcp_servers_checked: number;
+  readonly mcp_authentication: 'verified' | 'untested';
+  readonly model_authentication: 'untested';
 }
 
 /** Execute one already-resolved run and return only after atomic commit. */

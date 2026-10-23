@@ -67,8 +67,10 @@ and harness inputs under [`test/fixtures`](https://github.com/stripe/forge/tree/
 The single live suite under
 [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
 is separate from `pnpm test` and `pnpm check`. Both modes require Docker and
-network access. Setup mode exercises real setup actions and plugin installation
-without model credentials or upstream model calls:
+network access. Setup mode exercises real setup actions and plugin installation,
+plus the standard CLI's native MCP readiness checks against a local HTTP mock.
+The mock verifies bearer headers, initialization and discovery, auth/discovery
+failures, absent servers, and cleanup without model credentials or upstream calls:
 
 ```sh
 FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
@@ -92,7 +94,8 @@ FORGE_LIVE=1 FORGE_LIVE_AGENT=codex CODEX_API_KEY=your-restricted-key pnpm test:
 Optional `OPENAI_BASE_URL` selects a Responses-compatible endpoint. Codex full
 mode uses scripted host completions for multi-turn coverage, so it needs no
 Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
-setup without upstream calls.
+setup without upstream calls. Explicit Docker network/proxy overrides described
+in the [README](../README.md#docker-networking) also apply to setup fixtures.
 
 OpenCode setup mode exercises the real pinned CLI against a deterministic
 authenticated Chat Completions endpoint, including plugin/no-plugin treatments, tools, one-shot and Ava turns,

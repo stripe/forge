@@ -107,6 +107,13 @@ protocol used by LiteLLM and other compatible gateways; each selected model
 must support the configured tools and capabilities. Responses endpoints use
 the separate Codex route. See [OpenCode setup](#opencode-setup).
 
+Claude gateways that reject experimental beta headers can opt in with
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`. Forge records this as
+`disable_experimental_betas: true` on each selected Claude agent, includes it
+in resume checks, and passes the setting to Claude. `0` clears the override.
+The gateway must still support the agent and host judge APIs; validate this
+with a complete eval in that environment.
+
 The runtime installs pinned Claude Code, Codex, and OpenCode CLI releases from npm.
 Their use remains subject to their providers' terms.
 
@@ -228,7 +235,26 @@ npx --no-install forge plan --experiment ./my-eval/experiments/stripe-integratio
 
 Planning with `platform: native` queries the Docker server's architecture
 without building or allocating a runtime. `validate --host` additionally
-builds the runtime image and probes the host without making model calls.
+builds and starts temporary runtimes, installs the selected setup, and checks
+configured plugin MCP servers through each agent's native client. It initializes
+MCP and discovers tools without invoking them or making model calls. It requires
+the required MCP keys, and reports model authentication as untested. Failures
+name the stage; temporary runtimes are disposed after success or failure.
+
+For a payment case with Stripe MCP and both agents, use the portable
+[plugin experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/plugin-experiment.yaml);
+its `dataset.path` locates the dataset relative to the experiment file:
+
+```sh
+export STRIPE_API_KEY=your-agent-api-key
+npx --no-install forge validate --host --experiment ./my-eval/plugin-experiment.yaml
+export ANTHROPIC_API_KEY=your-anthropic-key
+export CODEX_API_KEY=your-codex-key
+npx --no-install forge run --experiment ./my-eval/plugin-experiment.yaml --output ./results
+```
+
+Use `--agent claude-code` or `--agent codex` to select one adapter. Host-side Ava
+and judging use the Anthropic configuration for either agent.
 
 ### Docker networking
 
@@ -258,7 +284,7 @@ The bundled experiment defines the available cases, treatments, and agents.
 CLI case filters use the IDs declared inside the released case files.
 `dataset.path` resolves relative to the experiment file.
 
-`run` executes every matching matrix selection. These optional filters
+`run` and `validate` check every matching matrix selection. These optional filters
 select existing combinations; `plan` requires exactly one match:
 
 ```text

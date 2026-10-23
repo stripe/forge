@@ -4,7 +4,17 @@ import {
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
-import type { AgentPluginInstallationReceipt } from './plugin.ts';
+import type {
+  AgentPluginInstallationReceipt,
+  NativeAgentPluginInstallationReceipt,
+} from './plugin.ts';
+
+/** Native installers report a qualified plugin ID; the OpenCode bundle does not. */
+export function isNativePluginInstallationReceipt(
+  receipt: AgentPluginInstallationReceipt,
+): receipt is NativeAgentPluginInstallationReceipt {
+  return receipt.installation !== 'opencode-bundle';
+}
 
 /** Validate and snapshot an adapter-produced plugin receipt at a trust boundary. */
 export function parseAgentPluginInstallationReceipt(

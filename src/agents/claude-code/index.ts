@@ -96,6 +96,7 @@ export function createClaudeCodeAdapter(
     adapter: string;
     provider: string;
     hook_trust?: string;
+    disable_experimental_betas?: true;
   }): AgentRuntimeRequirements => {
     if (selection.hook_trust !== undefined) {
       throw new TypeError('hook_trust is not supported by Claude Code.');
@@ -108,9 +109,17 @@ export function createClaudeCodeAdapter(
     return {
       executables: [executable],
       environment: {
-        ...(Object.keys(variables).length === 0
+        ...(Object.keys(variables).length === 0 &&
+        !selection.disable_experimental_betas
           ? {}
-          : { variables: { ...variables } }),
+          : {
+              variables: {
+                ...variables,
+                ...(selection.disable_experimental_betas
+                  ? { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' }
+                  : {}),
+              },
+            }),
         credentials: {
           [credentialEnvironmentName]: {
             reference: credential,

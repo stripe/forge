@@ -11,6 +11,7 @@ import {
   CODEX_HOME_STATE_ID,
   createCodexAdapter,
 } from '../../dist/agents/codex/index.js';
+import { resolveCliRuntime } from '../../dist/cliRuntime.js';
 import {
   createArtifactStore,
   createDirectoryRunInputProvider,
@@ -561,6 +562,9 @@ async function createFixture(root, platform, specs, liveAgent) {
   );
   return {
     dataset: await engine.loadDataset(datasetRoot),
-    experiment: await engine.loadExperimentConfig(experimentPath),
+    experiment: resolveCliRuntime(
+      await engine.loadExperimentConfig(experimentPath),
+      process.env,
+    ),
   };
 }
