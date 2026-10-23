@@ -207,7 +207,9 @@ describe('repository case check', () => {
     const invalid = invoke();
     assert.equal(invalid.status, 1, invalid.stderr);
     assert.match(invalid.stderr, /^cases: test\/fixtures\/one-shot\/dataset:/);
-  });
+    // Six subprocess runs, each loading all 75 checked-in cases through tsx:
+    // ~3s alone and over the 5s default under full-suite worker load.
+  }, 30_000);
 });
 
 describe('dataset version propagation', () => {
