@@ -50,6 +50,10 @@
       "types": "./dist/experiment.d.ts",
       "import": "./dist/experiment.js"
     },
+    "./regrade": {
+      "types": "./dist/regrade/index.d.ts",
+      "import": "./dist/regrade/index.js"
+    },
     "./experiment/cli": {
       "types": "./dist/experimentCli.d.ts",
       "import": "./dist/experimentCli.js"

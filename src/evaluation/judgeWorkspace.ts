@@ -474,10 +474,25 @@ export function boundJudgeWorkspaceEvidence(
   });
 }
 
-/** Render the exact bounded evidence fragment supplied to the judge. */
-export function renderJudgeWorkspaceEvidence(
-  evidence: JudgeWorkspaceEvidenceV1,
-): string {
+/** Warning fields the renderer reads; the code selects "omitted" or "truncated". */
+type RenderedJudgeWorkspaceWarning = {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+};
+
+/**
+ * Render the exact bounded evidence fragment supplied to the judge. Only entry
+ * paths and contents and warnings are read, so the saved judge-evidence.json
+ * workspace section reproduces the rendered text.
+ */
+export function renderJudgeWorkspaceEvidence(evidence: {
+  readonly entries: readonly Pick<
+    JudgeWorkspaceEvidenceEntryV1,
+    'path' | 'content'
+  >[];
+  readonly warnings: readonly RenderedJudgeWorkspaceWarning[];
+}): string {
   if (evidence.entries.length === 0 && evidence.warnings.length === 0)
     return '';
   return `${WORKSPACE_SECTION_PREFIX}${[
@@ -486,7 +501,9 @@ export function renderJudgeWorkspaceEvidence(
   ].join('\n')}`;
 }
 
-function renderEntry(entry: JudgeWorkspaceEvidenceEntryV1): string {
+function renderEntry(
+  entry: Pick<JudgeWorkspaceEvidenceEntryV1, 'path' | 'content'>,
+): string {
   const longestRun = Math.max(
     0,
     ...[...entry.content.matchAll(/`+/g)].map(([run]) => run.length),
@@ -495,7 +512,7 @@ function renderEntry(entry: JudgeWorkspaceEvidenceEntryV1): string {
   return `### ${entry.path}\n${fence}\n${entry.content}\n${fence}\n`;
 }
 
-function renderWarning(warning: JudgeWorkspaceWarningV1): string {
+function renderWarning(warning: RenderedJudgeWorkspaceWarning): string {
   const disposition =
     warning.code === 'workspace_binary_omitted' ? 'omitted' : 'truncated';
   return `(${disposition} — ${
@@ -505,9 +522,13 @@ function renderWarning(warning: JudgeWorkspaceWarningV1): string {
   })`;
 }
 
-function renderedEvidenceLength(
-  evidence: Pick<JudgeWorkspaceEvidenceV1, 'entries' | 'warnings'>,
-): number {
+function renderedEvidenceLength(evidence: {
+  readonly entries: readonly Pick<
+    JudgeWorkspaceEvidenceEntryV1,
+    'path' | 'content'
+  >[];
+  readonly warnings: readonly RenderedJudgeWorkspaceWarning[];
+}): number {
   const fragments = [
     ...evidence.entries.map(renderEntry),
     ...evidence.warnings.map(renderWarning),

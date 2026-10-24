@@ -1496,6 +1496,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
 | `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
 | `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
+| `@stripe/forge/regrade` | Judge verified saved runs again from their artifacts with a chosen judge, into a separate directory |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/agents/opencode` | Experimental OpenCode Chat Completions adapter, stream parser, and exact-session export loader |
