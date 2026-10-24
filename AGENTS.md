@@ -67,12 +67,15 @@ implementation. Prose and formatting-only changes do not need new tests.
 Place focused unit tests beside source files as `*.test.ts`; put cross-module,
 CLI, package, and embedding tests under `test/`. Keep harness test inputs under
 `test/fixtures/`. Prefer deterministic fakes for the normal test suite.
-Public datasets belong under `datasets/<name>/`, holding only the latest
-version; earlier versions live in Git history. Put their runnable experiments
-and release documentation under `experiments/<name>/`, outside the dataset
-tree. Cases read fixtures through `forge/write` `dataset_path` sources. When a
-case version changes or a case is added or removed, update the manifest and
-bump the dataset version; `pnpm check:cases` enforces this against
+Public datasets belong under `release/datasets/<name>/`, holding only the latest
+version; earlier versions live in Git history. Keep the manifest, cases, and
+fixtures there. Put the runnable experiment at `release/experiment.yaml` and
+release documentation at `release/README.md`, outside the dataset payload.
+Set `dataset.path` relative to the experiment file so `release/` can be relocated
+without rewriting configuration. Cases read fixtures through `forge/write`
+`dataset_path` sources.
+When a case version changes or a case is added or removed, update the manifest
+and bump the dataset version; `pnpm check:cases` enforces this against
 `origin/main`.
 
 While iterating, run the narrowest relevant tests, plus applicable type, build,

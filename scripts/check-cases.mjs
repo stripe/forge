@@ -11,7 +11,7 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 export const REPOSITORY_DATASET_ROOTS = Object.freeze([
   'test/fixtures/one-shot/dataset',
   'test/fixtures/multi-turn/dataset',
-  'datasets/stripe-integration-public-evals',
+  'release/datasets/stripe-integration-public-evals',
 ]);
 
 export async function checkRepositoryCases({
@@ -85,12 +85,19 @@ export function gitBaselineReader({
     });
   const mergeBase = git('merge-base', baseRef, 'HEAD').trim();
   return (relativeRoot) => {
-    const manifestPath = `${relativeRoot}/manifest.json`;
-    try {
-      git('cat-file', '-e', `${mergeBase}:${manifestPath}`);
-    } catch {
-      return undefined; // New dataset: nothing to compare against.
-    }
+    const candidates = [`${relativeRoot}/manifest.json`];
+    // Preserve version comparisons across the move into release/datasets/.
+    if (relativeRoot.startsWith('release/datasets/'))
+      candidates.push(`${relativeRoot.slice('release/'.length)}/manifest.json`);
+    const manifestPath = candidates.find((candidate) => {
+      try {
+        git('cat-file', '-e', `${mergeBase}:${candidate}`);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (manifestPath === undefined) return undefined; // New dataset.
     const source = git('show', `${mergeBase}:${manifestPath}`);
     try {
       return parseDatasetManifestJson(source);

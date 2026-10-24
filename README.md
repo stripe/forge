@@ -175,33 +175,35 @@ For work on Forge itself, see [Development](#development).
 
 ### Run your first experiment
 
-Datasets ship with an experiment that runs them. For a working example, copy
-the [Stripe integration sample experiment](https://github.com/stripe/forge/tree/main/experiments/stripe-integration-public-evals)
-and [dataset](https://github.com/stripe/forge/tree/main/datasets/stripe-integration-public-evals)
-into `my-eval/` in the project where you installed Forge, keeping their
-relative layout:
+Released datasets ship with experiments that run them. Copy the contents of
+[`release/`](https://github.com/stripe/forge/tree/main/release) into `my-eval/`
+in the project where you installed Forge:
 
 ```text
 my-eval/
-├── experiments/stripe-integration-public-evals/experiment.yaml
-└── datasets/stripe-integration-public-evals/
-    ├── manifest.json
-    └── cases/payments-onetime.case.yaml
+├── README.md
+├── datasets/stripe-integration-public-evals/
+│   ├── manifest.json
+│   └── cases/payments-onetime.case.yaml
+└── experiment.yaml
 ```
 
 The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
 and a criterion judge. All three use the configured Anthropic credential.
-The dataset is separate from the installed Forge package; preserve its bytes.
-The experiment's `dataset.path` resolves relative to the experiment file.
+The release inputs are separate from the installed Forge package; preserve
+their bytes. The experiment's
+`dataset.path: ./datasets/stripe-integration-public-evals` resolves relative
+to the experiment file. Copy the whole release directory so configuration
+needs no rewriting.
 
 Validate without Docker allocation or model credentials, then run with your
 Anthropic key configured:
 
 ```sh
-npx --no-install forge validate --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml
+npx --no-install forge validate --experiment ./my-eval/experiment.yaml
 export ANTHROPIC_API_KEY=your-restricted-key
 npx --no-install forge run \
-  --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml \
+  --experiment ./my-eval/experiment.yaml \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
@@ -213,7 +215,7 @@ experiment run. See [Results and Scores](#results-and-scores) to inspect it.
 To inspect the resolved plan before execution:
 
 ```sh
-npx --no-install forge plan --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml
+npx --no-install forge plan --experiment ./my-eval/experiment.yaml
 ```
 
 Planning with `platform: native` queries the Docker server's architecture
@@ -222,7 +224,7 @@ builds the runtime image and probes the host without making model calls.
 
 ### Select from an experiment
 
-The bundled experiment defines the available cases, treatments, and agents.
+The released experiment defines the available cases, treatments, and agents.
 CLI case filters use the IDs declared inside the released case files.
 `dataset.path` resolves relative to the experiment file.
 
@@ -241,7 +243,7 @@ select existing combinations; `plan` requires exactly one match:
 
 ```sh
 npx --no-install forge run \
-  --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml \
+  --experiment ./my-eval/experiment.yaml \
   --case stripe-integration-public-evals/payments-onetime --treatment baseline --agent claude-code
 ```
 
@@ -260,7 +262,7 @@ for an automatically generated ID. Experiment runs receive their own IDs.
 Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
 
 ```sh
-npx --no-install forge run --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml --jobs 4
+npx --no-install forge run --experiment ./my-eval/experiment.yaml --jobs 4
 ```
 
 Each run owns its runtime and artifacts. Size concurrency for host resources
@@ -273,7 +275,7 @@ credentials configured again if work remains:
 
 ```sh
 npx --no-install forge run \
-  --experiment ./my-eval/experiments/stripe-integration-public-evals/experiment.yaml \
+  --experiment ./my-eval/experiment.yaml \
   --output ./results --resume EXPERIMENT_RUN_ID --jobs 2
 ```
 

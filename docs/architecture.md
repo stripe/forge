@@ -189,10 +189,12 @@ access to dataset payloads. The path index records load-time existence, not
 content integrity or later filesystem changes. Setup reads current bytes and
 rejects an empty source directory instead of silently skipping its copy.
 
-Because every file under the root is readable payload, experiments and
-documentation live outside the dataset root and point at it with
-`dataset.path`. See the
-[sample experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/README.md)
+Public datasets under `release/datasets/<name>/` contain the manifest, cases,
+and fixtures. The runnable experiment at `release/experiment.yaml` and its
+documentation at `release/README.md` stay outside the payload root where
+every file is readable input. The experiment's dataset path is relative to its
+file, so `release/` can be relocated as one folder. See the
+[sample release](https://github.com/stripe/forge/blob/main/release/README.md)
 for the layout and commands.
 
 ### Cases, treatments, and setup ordering
@@ -1406,10 +1408,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets, each holding only its latest version |
-| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments and release documentation for the sample datasets |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads in `datasets/`, with a runnable `experiment.yaml` and release documentation at the root; holds only the latest versions |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 
 ## Current limitations
 

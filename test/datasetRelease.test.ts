@@ -11,13 +11,14 @@ import {
   resolveRunPlan,
 } from '../src/index.ts';
 
-const datasetRelativeRoot = 'datasets/stripe-integration-public-evals';
-const experimentRelativeRoot = 'experiments/stripe-integration-public-evals';
-const datasetRoot = path.resolve(datasetRelativeRoot);
-const experimentPath = path.resolve(experimentRelativeRoot, 'experiment.yaml');
+const releaseRoot = path.resolve('release');
+const datasetPath = 'datasets/stripe-integration-public-evals';
+const experimentFile = 'experiment.yaml';
+const datasetRoot = path.join(releaseRoot, datasetPath);
+const experimentPath = path.join(releaseRoot, experimentFile);
 
 describe('sample dataset release', () => {
-  it('validates the bundled dataset and plans its pinned public baseline without credentials', async () => {
+  it('validates the released dataset and plans its pinned public baseline without credentials', async () => {
     const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),
       loadExperimentConfig(experimentPath),
@@ -46,6 +47,10 @@ describe('sample dataset release', () => {
         version: experiment.config.dataset.version,
       },
       dataset.manifest.dataset,
+    );
+    assert.equal(
+      experiment.config.dataset.path,
+      './datasets/stripe-integration-public-evals',
     );
 
     const selections = expandExperiment(experiment, dataset);
@@ -115,20 +120,10 @@ describe('sample dataset release', () => {
     });
 
     const relocatedRoot = path.join(root, 'release');
-    for (const relativeRoot of [datasetRelativeRoot, experimentRelativeRoot]) {
-      await fs.cp(
-        path.resolve(relativeRoot),
-        path.join(relocatedRoot, relativeRoot),
-        { recursive: true },
-      );
-    }
-    const relocatedExperimentPath = path.join(
-      relocatedRoot,
-      experimentRelativeRoot,
-      'experiment.yaml',
-    );
+    await fs.cp(releaseRoot, relocatedRoot, { recursive: true });
+    const relocatedExperimentPath = path.join(relocatedRoot, experimentFile);
     const [relocated, consumer] = await Promise.all([
-      loadDataset(path.join(relocatedRoot, datasetRelativeRoot)),
+      loadDataset(path.join(relocatedRoot, datasetPath)),
       loadExperimentConfig(relocatedExperimentPath),
     ]);
     assert.equal(relocated.manifestRaw, dataset.manifestRaw);
