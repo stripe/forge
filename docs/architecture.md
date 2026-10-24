@@ -867,9 +867,16 @@ The completion runtime:
 - validates response size, usage, cost, and stop metadata; and
 - retains only safe call summaries in `result.json`.
 
-The built-in Anthropic provider uses Node's native `fetch` and the Messages API
-with strict structured output. Compatible endpoints are explicit adapter
-configuration; neither endpoints nor credentials enter plans or results.
+The built-in Anthropic and OpenAI providers use Node's native `fetch` with
+strict structured output through Messages and Responses respectively. The
+OpenAI provider disables response storage, normalizes cached input usage, and
+ignores reasoning blocks. Both bound requests, responses, and duration, reject
+redirects, and expose errors without provider response bodies. OpenAI projects
+`uniqueItems` out of generation schemas; Ava still validates uniqueness locally.
+Provider-specific output budgets account for reasoning tokens without changing
+Ava or judge validation. Compatible endpoints and credentials are explicit host
+configuration; neither enters plans or results. See the README's
+[credentials](../README.md#requirements--credentials) for CLI bindings.
 
 ## Evidence architecture
 
@@ -1361,6 +1368,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
+| `@stripe/forge/providers/openai` | OpenAI Responses-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
 | `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
@@ -1384,7 +1392,7 @@ engine APIs:
   experiment run command stage for bounded execution and explicit resume.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
-Codex agent adapters, the Anthropic host completion provider, an explicit
+Codex agent adapters, Anthropic and OpenAI host completion providers, an explicit
 environment-backed credential resolver, a directory input provider, and the
 local artifact store. Embedding hosts can replace this composition or use an
 external runtime without changing core lifecycle semantics.
@@ -1418,8 +1426,8 @@ The public CLI and built-in composition currently have these limits:
 - Claude Code and Codex are the built-in agents. Cursor and interactive human
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
-- Multi-turn automation uses fixed Ava semantics. Anthropic is the only
-  built-in host completion provider; other providers require an explicit
+- Multi-turn automation uses fixed Ava semantics. Anthropic and OpenAI are
+  built-in host completion providers; other providers require an explicit
   [completion-provider implementation](#host-side-completion-providers) and
   cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content

@@ -61,9 +61,9 @@ For the built-in CLI, you need:
 | Workload | Coding-agent credential | Ava/judge credential |
 | --- | --- | --- |
 | Claude Code, one-shot with checks only | `ANTHROPIC_API_KEY` | None |
-| Claude Code with Ava or judging criteria | `ANTHROPIC_API_KEY` | Uses the same Anthropic configuration |
+| Claude Code with Ava or judging criteria | `ANTHROPIC_API_KEY` | Selected host provider credential |
 | Codex, one-shot with checks only | `CODEX_API_KEY` | None |
-| Codex with Ava or judging criteria | `CODEX_API_KEY` | Independently configured Anthropic credential |
+| Codex with Ava or judging criteria | `CODEX_API_KEY` | Selected host provider credential |
 | `validate` or `plan` | None | None |
 
 Export the required variables in your shell or credential manager before
@@ -71,9 +71,27 @@ running or resuming pending work. Use restricted, short-lived keys with
 appropriate account limits: the evaluated agent receives its credential and
 outbound network access. Keep secrets outside dataset and experiment files.
 
-The built-in Ava/judge provider is Anthropic and requires Claude 4.5-or-newer
-model identifiers with strict structured-output support. Selecting Codex as
-coding agent does not change that provider.
+Select Ava and judge models independently with `models.role_player` and
+`models.judge`. Both accept `provider: anthropic` or `provider: openai`;
+selecting a coding agent does not change either host model. For example:
+
+```yaml
+models:
+  role_player: { provider: openai, model: gpt-5.4 }
+  judge: { provider: openai, model: gpt-5.4 }
+```
+
+OpenAI host completions use the Responses API with strict JSON Schema,
+`store: false`, and `OPENAI_API_KEY` (credential reference
+`openai.completion-api-key`). `OPENAI_BASE_URL` optionally sets the complete
+API root, including `/v1`; Forge appends `/responses`. Codex uses the same
+endpoint setting but its separate `CODEX_API_KEY` credential. Neither key
+falls back to the other. GPT-5 and later and o-series model identifiers omit
+`temperature` and receive an output budget of at least 16,000 tokens to allow
+for reasoning. Reasoning blocks are excluded from completion text.
+
+The Anthropic provider requires Claude 4.5-or-newer model identifiers with
+strict structured-output support.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present, the CLI requires that token

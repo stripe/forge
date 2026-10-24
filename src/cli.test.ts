@@ -1236,7 +1236,7 @@ describe('Forge CLI', () => {
           composition.completionProviders as ReadonlyMap<string, unknown>
         ).keys(),
       ],
-      ['anthropic'],
+      ['anthropic', 'openai'],
     );
     assert.equal(
       (
@@ -1257,6 +1257,63 @@ describe('Forge CLI', () => {
         },
       ),
       'test-api-key',
+    );
+  });
+
+  it('keeps host OpenAI credentials separate from the Codex agent credential', async () => {
+    const fixture = await createBenchmarkFixture();
+    const composition = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      environment: {
+        OPENAI_API_KEY: 'host-key',
+        CODEX_API_KEY: 'agent-key',
+        OPENAI_BASE_URL: 'https://gateway.example/v1',
+      },
+    });
+    const provider = (
+      composition.completionProviders as ReadonlyMap<
+        string,
+        import('./contracts/completion.ts').CompletionProvider
+      >
+    ).get('openai')!;
+    assert.deepEqual(provider.metadata, { endpoint_mode: 'custom' });
+    assert.deepEqual(
+      provider.requirements({
+        model: { provider: 'openai', model: 'gpt-6.1-sol' },
+        purpose: 'judge',
+      }),
+      { credentials: { apiKey: { reference: 'openai.completion-api-key' } } },
+    );
+    const scope = {
+      runId: 'run-1',
+      purpose: 'judge',
+      signal: new AbortController().signal,
+    };
+    assert.equal(
+      await composition.credentialResolver.resolve(
+        credentialReference('openai.completion-api-key'),
+        scope,
+      ),
+      'host-key',
+    );
+    assert.equal(
+      await composition.credentialResolver.resolve(
+        credentialReference('openai.api-key'),
+        scope,
+      ),
+      'agent-key',
+    );
+    const noHostKey = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'other-results'),
+      environment: { CODEX_API_KEY: 'agent-key' },
+    });
+    await assert.rejects(
+      noHostKey.credentialResolver.resolve(
+        credentialReference('openai.completion-api-key'),
+        scope,
+      ),
     );
   });
 
