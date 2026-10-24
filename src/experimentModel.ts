@@ -25,6 +25,25 @@ export const experimentRunErrorCodeSchema = z.enum([
   'setup_failed',
   'unsupported_capability',
 ]);
+export const experimentRunDiagnosticSchema = z
+  .object({
+    phase: z.enum([
+      'preflight',
+      'runtime_prepare',
+      'setup',
+      'interaction',
+      'quiesce',
+      'evidence',
+      'evaluation',
+      'artifact_stage',
+      'runtime_dispose',
+      'result_commit',
+    ]),
+    reason: z.enum(['failure', 'timeout', 'cancelled']),
+    message: z.string().min(1).max(4096),
+  })
+  .strict();
+
 const attemptSchema = z.discriminatedUnion('state', [
   z
     .object({ run_id: experimentRunIdSchema, state: z.literal('running') })
@@ -37,6 +56,7 @@ const attemptSchema = z.discriminatedUnion('state', [
       run_id: experimentRunIdSchema,
       state: z.literal('errored'),
       error_code: experimentRunErrorCodeSchema,
+      diagnostic: experimentRunDiagnosticSchema.optional(),
     })
     .strict(),
 ]);

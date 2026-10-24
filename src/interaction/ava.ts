@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StrictCompletionResponseSchema } from '../contracts/completion.ts';
+import { boundedErrorMessage } from '../security/errorMessage.ts';
 import type {
   InteractionCompletionInvoker,
   InteractionHistoryMessage,
@@ -26,6 +27,8 @@ export interface AvaRolePlayerOptions extends AvaPromptInputs {
 }
 
 export interface AvaRolePlayerExecutionOptions {
+  /** Credentials to redact from custom invoker request-error diagnostics. */
+  readonly redactionSecrets?: readonly string[];
   /** Test seam for the otherwise fixed one- and five-second retry delays. */
   readonly waitBeforeRetry?: (
     failedAttempt: number,
@@ -43,6 +46,8 @@ export interface AvaError {
   readonly errorType: 'parse_error' | 'request_error';
   readonly attempts: number;
   readonly explanation: string;
+  /** Final rejection reason; never includes the rejected response. */
+  readonly message?: string;
 }
 
 export interface AvaTurn {
@@ -56,6 +61,8 @@ export interface AvaTurn {
   readonly source: 'configured_initial_prompt' | 'generated';
   readonly error?: AvaError;
 }
+
+class AvaResponseError extends Error {}
 
 const InitialNeedResponse = z
   .object({
@@ -157,7 +164,7 @@ function parseContinuationResponse(
     returned.size !== parsed.remaining_need_ids.length ||
     parsed.remaining_need_ids.some((id) => !allowed.has(id))
   ) {
-    throw new Error('Ava returned invalid remaining need IDs.');
+    throw new AvaResponseError('Ava returned invalid remaining need IDs.');
   }
   if (returned.size === 0) {
     return { remainingNeedIds: [], focusNeedId: null, message: '' };
@@ -174,7 +181,7 @@ function assertUniqueNeedDescriptions(
 ): void {
   const normalized = needs.map(({ description }) => description.toLowerCase());
   if (new Set(normalized).size !== normalized.length) {
-    throw new Error('Ava returned duplicate private user needs.');
+    throw new AvaResponseError('Ava returned duplicate private user needs.');
   }
 }
 
@@ -193,19 +200,24 @@ function assertSafeGeneratedMessage(
   needs: readonly AvaNeed[],
 ): string {
   const trimmed = stripLeadingAcknowledgment(message);
-  if (!trimmed) throw new Error('Ava returned an empty nonterminal message.');
+  if (!trimmed)
+    throw new AvaResponseError('Ava returned an empty nonterminal message.');
   if (/```/.test(trimmed)) {
-    throw new Error('Ava returned implementation code in its message.');
+    throw new AvaResponseError(
+      'Ava returned implementation code in its message.',
+    );
   }
   if (/^\s*(?:[-*]|\d+[.)])\s+/m.test(trimmed)) {
-    throw new Error('Ava returned a list instead of one human-like message.');
+    throw new AvaResponseError(
+      'Ava returned a list instead of one human-like message.',
+    );
   }
   if (
     /\b(?:checklist|rubric|grading|remaining needs?|completion criteria|need_\d+)\b/i.test(
       trimmed,
     )
   ) {
-    throw new Error('Ava exposed private task-model terminology.');
+    throw new AvaResponseError('Ava exposed private task-model terminology.');
   }
   const lowerMessage = trimmed.toLowerCase();
   for (const need of needs) {
@@ -214,7 +226,7 @@ function assertSafeGeneratedMessage(
       need.description.length >= 20 &&
       lowerMessage.includes(need.description.toLowerCase())
     ) {
-      throw new Error('Ava exposed a non-focused private need.');
+      throw new AvaResponseError('Ava exposed a non-focused private need.');
     }
   }
   return trimmed;
@@ -319,7 +331,15 @@ export class AvaRolePlayer {
         raw = response.content;
       } catch (error) {
         if (isAbort(error, this.#signal)) throw error;
-        finalError = avaError('request_error', attempt);
+        finalError = avaError(
+          'request_error',
+          attempt,
+          boundedErrorMessage(
+            error,
+            'Ava completion request failed.',
+            this.#executionOptions.redactionSecrets,
+          ),
+        );
       }
 
       if (raw !== undefined) {
@@ -333,7 +353,11 @@ export class AvaRolePlayer {
           return turn;
         } catch (error) {
           if (isAbort(error, this.#signal)) throw error;
-          finalError = avaError('parse_error', attempt);
+          finalError = avaError(
+            'parse_error',
+            attempt,
+            responseRejectionMessage(error),
+          );
         }
       }
 
@@ -434,16 +458,33 @@ export class AvaRolePlayer {
 function avaError(
   errorType: AvaError['errorType'],
   attempts: number,
+  message: string,
 ): AvaError {
   return {
     status: 'role_player_error',
     errorType,
     attempts,
+    message,
     explanation:
       errorType === 'parse_error'
         ? `Ava returned invalid structured output after ${attempts} attempts.`
         : `Ava request failed after ${attempts} attempts.`,
   };
+}
+
+function responseRejectionMessage(error: unknown): string {
+  if (error instanceof AvaResponseError) return error.message;
+  if (error instanceof SyntaxError) return 'Ava response was not valid JSON.';
+  if (error instanceof z.ZodError) {
+    const issue = error.issues[0]!;
+    // Fixed schema paths and issue categories only: no values, unknown keys,
+    // validator messages, or raw rejected responses.
+    const path = issue.path
+      .map((part) => (typeof part === 'number' ? `[${part}]` : `.${part}`))
+      .join('');
+    return `Ava response did not match the required schema at response${path} (${issue.code}).`;
+  }
+  return 'Ava response could not be validated.';
 }
 
 function isAbort(error: unknown, signal: AbortSignal): boolean {

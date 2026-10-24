@@ -109,6 +109,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.ts';
+import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
@@ -472,6 +473,7 @@ export async function executeEvalWithTestHooks(
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
+  let diagnosticSecrets: readonly string[] | undefined;
 
   try {
     const preflight = await events.phase('preflight', async () => {
@@ -511,6 +513,8 @@ export async function executeEvalWithTestHooks(
       ...credentialValues(environment),
       ...completions.secrets,
     ]);
+
+    diagnosticSecrets = secrets;
 
     prepared = await events.phase('runtime_prepare', async () => {
       phase = 'runtime_prepare';
@@ -843,21 +847,35 @@ export async function executeEvalWithTestHooks(
       result: committedResult,
     };
   } catch (error) {
+    // Cleanup may outlast the timeout; retain the failure which started it.
+    const aborted = signal.aborted;
+    const timedOut =
+      aborted &&
+      timeoutSignal.aborted &&
+      signal.reason === timeoutSignal.reason;
     await transaction?.rollback().catch(() => undefined);
     if (prepared && !runtimeDisposed) {
       await prepared.dispose().catch(() => undefined);
     }
-    if (signal.aborted) {
+    if (aborted) {
       throw new ForgeExecutionError(
         'aborted',
         phase,
-        'The Forge run was aborted.',
+        timedOut
+          ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
+          : 'The Forge run was cancelled by the caller.',
         {
           cause: signal.reason,
+          diagnostic: {
+            reason: timedOut ? 'timeout' : 'cancelled',
+            message: timedOut
+              ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
+              : 'Caller cancellation stopped the run.',
+          },
         },
       );
     }
-    throw mapExecutionError(error, phase);
+    throw mapExecutionError(error, phase, diagnosticSecrets);
   }
 }
 
@@ -958,12 +976,15 @@ async function executeInteraction(
       signal,
     },
     (request) => completions.invoke('role_player', request, signal),
-    waitBeforeCompletionRetry === undefined
-      ? {}
-      : {
-          waitBeforeRetry: (attempt, retrySignal) =>
-            waitBeforeCompletionRetry('role_player', attempt, retrySignal),
-        },
+    {
+      redactionSecrets: completions.secrets,
+      ...(waitBeforeCompletionRetry === undefined
+        ? {}
+        : {
+            waitBeforeRetry: (attempt: number, retrySignal: AbortSignal) =>
+              waitBeforeCompletionRetry('role_player', attempt, retrySignal),
+          }),
+    },
   );
   const conversation = await runConversation({
     session: trackedSession,
@@ -1072,12 +1093,14 @@ function rolePlayerErrorRecord(error: {
   readonly errorType: 'parse_error' | 'request_error';
   readonly attempts: number;
   readonly explanation: string;
+  readonly message?: string;
 }): RolePlayerErrorV1 {
   return Object.freeze({
     status: error.status,
     error_type: error.errorType,
     attempts: error.attempts,
     explanation: error.explanation,
+    ...(error.message === undefined ? {} : { message: error.message }),
   });
 }
 
@@ -2148,8 +2171,21 @@ function assertRunId(runId: string): void {
 function mapExecutionError(
   error: unknown,
   phase: RunPhase,
+  secrets: readonly string[] | undefined,
 ): ForgeExecutionError {
-  if (error instanceof ForgeExecutionError) return error;
+  if (error instanceof ForgeExecutionError) {
+    return new ForgeExecutionError(error.code, error.phase, error.message, {
+      cause: error.cause,
+      diagnostic: {
+        reason: error.diagnostic?.reason ?? 'failure',
+        message: boundedErrorMessage(
+          new Error(error.diagnostic?.message ?? error.message),
+          'Forge execution failed.',
+          secrets ?? [],
+        ),
+      },
+    });
+  }
   const code =
     phase === 'preflight'
       ? 'invalid_plan'
@@ -2166,5 +2202,15 @@ function mapExecutionError(
               : phase === 'evaluation'
                 ? 'evaluation_failed'
                 : 'artifact_failed';
-  return executionError(code, phase, `Forge failed during ${phase}.`, error);
+  const message = `Forge failed during ${phase}.`;
+  return new ForgeExecutionError(code, phase, message, {
+    cause: error,
+    diagnostic: {
+      reason: 'failure',
+      message:
+        secrets === undefined
+          ? message
+          : boundedErrorMessage(error, message, secrets),
+    },
+  });
 }

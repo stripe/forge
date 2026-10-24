@@ -1301,6 +1301,11 @@ describe('resumable CLI experiment runs', () => {
         run_id: 'attempt-1',
         state: 'errored',
         error_code: 'role_player_error',
+        diagnostic: {
+          phase: 'interaction',
+          reason: 'failure',
+          message: 'unavailable',
+        },
       },
     ]);
     const resumed = await fixture.run(['--resume', 'exp-1'], options);

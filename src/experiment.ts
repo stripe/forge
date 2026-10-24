@@ -69,6 +69,7 @@ export interface ExperimentRunOutcome {
   readonly error_code:
     | Extract<Attempt, { state: 'errored' }>['error_code']
     | null;
+  readonly diagnostic?: Extract<Attempt, { state: 'errored' }>['diagnostic'];
   readonly artifact: ExperimentRunArtifact | null;
 }
 
@@ -91,6 +92,10 @@ export type ExperimentRunProgressEvent =
       readonly selection: RunSelection;
       readonly run_id: string;
       readonly error_code: Extract<Attempt, { state: 'errored' }>['error_code'];
+      readonly diagnostic?: Extract<
+        Attempt,
+        { state: 'errored' }
+      >['diagnostic'];
     };
 
 export interface ExperimentRunSummary {
@@ -428,7 +433,7 @@ export async function runExperiment(
             artifact = inspected.artifact;
           } catch (error) {
             // Error messages and causes may carry host data or credentials.
-            // Persist stable codes, never arbitrary strings from an adapter.
+            // Only execution-boundary diagnostics have been bounded and redacted.
             attempt = {
               run_id: runId,
               state: 'errored',
@@ -437,6 +442,10 @@ export async function runExperiment(
                 : error instanceof ForgeExecutionError
                   ? error.code
                   : 'execution_error',
+              ...(error instanceof ForgeExecutionError &&
+              error.diagnostic !== undefined
+                ? { diagnostic: { phase: error.phase, ...error.diagnostic } }
+                : {}),
             };
             // A callback can fail after its local commit (for example during
             // host cleanup). Keep the execution error while exposing verified
@@ -521,6 +530,10 @@ export async function runExperiment(
               state: effective.state,
               error_code:
                 effective.state === 'errored' ? effective.error_code : null,
+              ...(effective.state === 'errored' &&
+              effective.diagnostic !== undefined
+                ? { diagnostic: effective.diagnostic }
+                : {}),
               attempt_count: entry.attempts.length,
               result_path:
                 inspected.artifact === null
@@ -590,7 +603,18 @@ async function inspectAttempt(
     const attempt: SettledAttempt =
       completed.result.failure === null
         ? { run_id: runId, state: 'completed' }
-        : { run_id: runId, state: 'errored', error_code: 'role_player_error' };
+        : {
+            run_id: runId,
+            state: 'errored',
+            error_code: 'role_player_error',
+            diagnostic: {
+              phase: 'interaction',
+              reason: 'failure',
+              message:
+                completed.result.failure.message ??
+                completed.result.failure.explanation.slice(0, 4096),
+            },
+          };
     const evaluation = completed.result.evaluation;
     return {
       attempt,
@@ -628,6 +652,9 @@ function experimentRunOutcome(
     run_id: attempt.run_id,
     state: attempt.state,
     error_code: attempt.state === 'errored' ? attempt.error_code : null,
+    ...(attempt.state === 'errored' && attempt.diagnostic !== undefined
+      ? { diagnostic: attempt.diagnostic }
+      : {}),
     artifact,
   };
 }

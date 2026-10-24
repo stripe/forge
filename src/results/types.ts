@@ -137,6 +137,8 @@ export interface AvaNeedV1 {
 }
 
 export interface RolePlayerErrorV1 {
+  /** Bounded final rejection reason, with resolved credentials redacted. */
+  readonly message?: string;
   readonly status: 'role_player_error';
   readonly error_type: 'parse_error' | 'request_error';
   readonly attempts: number;

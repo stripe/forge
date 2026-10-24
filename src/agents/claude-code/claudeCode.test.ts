@@ -29,6 +29,49 @@ it('passes the explicit compatibility setting through the agent requirements', (
 });
 
 describe('Claude Code adapter', () => {
+  it('retains a failed exit status without copying raw command output', async () => {
+    const adapter = createClaudeCodeAdapter({
+      sessionIdFactory: () => 'session-1',
+    });
+    const plan = createTestResolvedRunPlan({
+      agent: {
+        adapter: 'claude-code',
+        provider: 'anthropic',
+        model: 'claude-test',
+      },
+    });
+    const signal = new AbortController().signal;
+    const session = await adapter.openSession({
+      runId: 'failed-exit',
+      plan,
+      selection: plan.agent,
+      signal,
+      inputs: createMemoryRunInputProvider(),
+      runtime: {
+        runtimeId: 'failed-exit',
+        paths: { workspace: '/workspace', home: '/home/forge' },
+        workspace: createMemoryWorkspace().mutable,
+        stateDirectories: new Map(),
+        commands: {
+          agent: {
+            async run() {
+              return {
+                exitCode: 23,
+                stdout: 'private stdout',
+                stderr: 'private stderr',
+                durationMs: 1,
+              };
+            },
+          },
+        },
+      },
+    });
+    await assert.rejects(session.send('Run the task', { signal }), {
+      message:
+        'Claude Code exited with status 23 without a completed result event.',
+    });
+  });
+
   it('rejects Codex hook policy even when registered with a custom adapter ID', () => {
     for (const id of ['claude-code', 'custom-claude']) {
       const adapter = createClaudeCodeAdapter({ id });
