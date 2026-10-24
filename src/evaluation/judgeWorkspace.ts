@@ -33,8 +33,7 @@ const SKIP_DIRECTORIES = new Set([
   'target',
 ]);
 
-const SKIP_EXTENSIONS = new Set([
-  '.lock',
+const BINARY_EXTENSIONS = new Set([
   '.png',
   '.jpg',
   '.jpeg',
@@ -42,6 +41,26 @@ const SKIP_EXTENSIONS = new Set([
   '.ico',
   '.woff',
   '.woff2',
+  '.pdf',
+  '.sqlite',
+  '.sqlite3',
+  '.db',
+  '.sqlite-shm',
+  '.sqlite-wal',
+  '.tar',
+  '.gz',
+  '.tgz',
+  '.zip',
+  '.bz2',
+  '.xz',
+  '.zst',
+  '.7z',
+  '.rar',
+  '.pyc',
+  '.wasm',
+  '.exe',
+  '.so',
+  '.dll',
 ]);
 
 const SKIP_FILE_NAMES = new Set([
@@ -53,6 +72,7 @@ const SKIP_FILE_NAMES = new Set([
 const WORKSPACE_SECTION_PREFIX = '\n## Workspace Files\n\n';
 
 export type JudgeWorkspaceWarningCode =
+  | 'workspace_binary_omitted'
   | 'workspace_depth_limit_reached'
   | 'workspace_entry_limit_reached'
   | 'workspace_file_truncated'
@@ -118,6 +138,7 @@ class CollectionStop extends Error {
     readonly code: Exclude<
       JudgeWorkspaceWarningCode,
       | 'workspace_file_truncated'
+      | 'workspace_binary_omitted'
       | 'workspace_listing_unavailable'
       | 'workspace_read_unavailable'
     >,
@@ -228,6 +249,11 @@ export async function collectJudgeWorkspaceEvidence(
       assertBeforeDeadline(deadline, limits.maxDurationMs);
       if (!isEligibleFile(entry, symlinkRoots)) continue;
 
+      if (BINARY_EXTENSIONS.has(extension(entry.path))) {
+        warnings.push(binaryOmission(entry, 'binary filename format'));
+        continue;
+      }
+
       const depth = entry.path.split('/').length - 1;
       if (depth > limits.maxDepth) {
         throw new CollectionStop(
@@ -268,7 +294,11 @@ export async function collectJudgeWorkspaceEvidence(
       }
       bytesRead += body.byteLength;
 
-      const decoded = Buffer.from(body).toString('utf8');
+      const decoded = decodeWorkspaceText(body);
+      if (decoded === null) {
+        warnings.push(binaryOmission(entry, 'non-text bytes', body.byteLength));
+        continue;
+      }
       const content = decoded.slice(0, limits.maxCharactersPerFile);
       const fileTruncated = content.length < decoded.length;
       const evidenceEntry: JudgeWorkspaceEvidenceEntryV1 = {
@@ -466,7 +496,9 @@ function renderEntry(entry: JudgeWorkspaceEvidenceEntryV1): string {
 }
 
 function renderWarning(warning: JudgeWorkspaceWarningV1): string {
-  return `(truncated — ${
+  const disposition =
+    warning.code === 'workspace_binary_omitted' ? 'omitted' : 'truncated';
+  return `(${disposition} — ${
     warning.path === undefined
       ? warning.message
       : `${warning.path}: ${warning.message}`
@@ -514,10 +546,41 @@ function isEligibleFile(
     return false;
   }
   const fileName = segments.at(-1)?.toLowerCase() ?? '';
-  return (
-    !SKIP_FILE_NAMES.has(fileName) &&
-    !SKIP_EXTENSIONS.has(extension(entry.path))
-  );
+  return !SKIP_FILE_NAMES.has(fileName) && extension(entry.path) !== '.lock';
+}
+
+/** Reject binary bytes rather than replacing or stripping them in judge evidence. */
+function decodeWorkspaceText(body: Uint8Array): string | null {
+  if (
+    body.some(
+      (byte) =>
+        byte < 9 ||
+        (byte > 10 && byte < 13) ||
+        (byte > 13 && byte < 32) ||
+        byte === 127,
+    )
+  )
+    return null;
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+      body,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function binaryOmission(
+  entry: WorkspaceEntry,
+  reason: string,
+  bytesRead?: number,
+): JudgeWorkspaceWarningV1 {
+  const size = entry.size ?? bytesRead;
+  return {
+    code: 'workspace_binary_omitted',
+    path: entry.path,
+    message: `Binary workspace file omitted (${reason}${size === undefined ? '' : `; ${size} bytes`}). Its contents were not judged.`,
+  };
 }
 
 function extension(relativePath: string): string {

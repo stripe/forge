@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { gzipSync } from 'node:zlib';
 import { describe, it } from 'vitest';
 
 import type {
@@ -172,7 +173,88 @@ describe('collectJudgeWorkspaceEvidence', () => {
       test.reads.map(({ path }) => path),
       ['src/app.ts'],
     );
-    assert.doesNotMatch(collected.renderedText, /node_modules|logo\.PNG|\.git/);
+    assert.doesNotMatch(collected.renderedText, /node_modules|\.git/);
+  });
+
+  it('omits known binary formats before reading, including oversized archives', async () => {
+    const test = fixture({
+      entries: [
+        file('a.tar.gz', MAX_JUDGE_WORKSPACE_READ_BYTES + 1),
+        file('b.sqlite-shm', 64),
+        file('z.txt', 4),
+      ],
+      bodies: { 'z.txt': 'keep' },
+    });
+    const collected = await collectJudgeWorkspaceEvidence(test.workspace);
+    assert.deepEqual(
+      test.reads.map(({ path }) => path),
+      ['z.txt'],
+    );
+    assert.equal(collected.evidence.bytes_read, 4);
+    assert.equal(collected.evidence.complete, false);
+    assert.equal(collected.evidence.truncated, false);
+    assert.deepEqual(
+      collected.evidence.warnings.map(({ code, path }) => ({ code, path })),
+      [
+        { code: 'workspace_binary_omitted', path: 'a.tar.gz' },
+        { code: 'workspace_binary_omitted', path: 'b.sqlite-shm' },
+      ],
+    );
+    assert.match(collected.renderedText, /omitted — a.tar.gz/);
+    assert.match(collected.renderedText, /Its contents were not judged/);
+    assert.match(collected.renderedText, /keep/);
+  });
+
+  it('detects binary bytes regardless of extension and preserves valid Unicode text', async () => {
+    const bodies = {
+      'a.txt': Buffer.from('SQLite format 3\0private database content'),
+      b: gzipSync('private archive content'),
+      'c.txt': Uint8Array.from([0xc3, 0x28]),
+      'd.txt': Uint8Array.from([65, 1, 66]),
+      'z.txt': '\uFEFFhello \uFFFD 世界 👋\n\tUnicode\r\n',
+    };
+    const test = fixture({
+      entries: Object.entries(bodies).map(([path, body]) =>
+        file(path, Buffer.byteLength(body)),
+      ),
+      bodies,
+    });
+    const collected = await collectJudgeWorkspaceEvidence(test.workspace);
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['z.txt'],
+    );
+    assert.equal(collected.evidence.entries[0]?.content, bodies['z.txt']);
+    assert.equal(collected.evidence.warnings.length, 4);
+    assert.equal(
+      collected.evidence.bytes_read,
+      Object.values(bodies).reduce(
+        (sum, body) => sum + Buffer.byteLength(body),
+        0,
+      ),
+    );
+    assert.doesNotMatch(collected.renderedText, /private|SQLite|\0/);
+  });
+
+  it('bounds binary omission warnings and records when their inventory is cut off', async () => {
+    const test = fixture({
+      entries: Array.from({ length: 40 }, (_, i) => file(`${i}.sqlite`, 10)),
+    });
+    const collected = await collectJudgeWorkspaceEvidence(test.workspace, {
+      maxTotalCharacters: 500,
+    });
+    assert.equal(test.reads.length, 0);
+    assert.ok(collected.renderedText.length <= 500);
+    assert.equal(collected.evidence.complete, false);
+    assert.equal(collected.evidence.truncated, true);
+    assert.equal(
+      collected.evidence.warnings[0]?.code,
+      'workspace_binary_omitted',
+    );
+    assert.equal(
+      collected.evidence.warnings.at(-1)?.code,
+      'workspace_output_limit_reached',
+    );
   });
 
   it('does not read symlinks or paths reported below a symlink', async () => {

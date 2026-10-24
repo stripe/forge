@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { afterEach, describe, it } from 'vitest';
 
 import { runCli } from '../src/cli.ts';
@@ -85,6 +86,14 @@ describe('multi-turn CLI end to end', () => {
               assert.equal(message, context.plan.case.initial_prompt);
             } else {
               assert.ok(message.includes(deliverable.trim()));
+              await context.runtime.workspace.writeFile(
+                'state.sqlite',
+                Buffer.from('SQLite format 3\0private database bytes'),
+              );
+              await context.runtime.workspace.writeFile(
+                'archive',
+                gzipSync('private archive bytes'),
+              );
               await context.runtime.workspace.writeFile(
                 'release-summary.txt',
                 Buffer.from(deliverable),
@@ -229,6 +238,25 @@ describe('multi-turn CLI end to end', () => {
         'What exact status sentence should the release summary contain?',
         'Created release-summary.txt with the status sentence you supplied.',
       ],
+    );
+    assert.equal(judge.workspace.complete, false);
+    assert.equal(
+      judge.workspace.warnings.filter(
+        ({ code }) => code === 'workspace_binary_omitted',
+      ).length,
+      2,
+    );
+    assert.deepEqual(
+      judge.workspace.entries.map(({ path }) => path),
+      ['release-summary.txt'],
+    );
+    const judgeCall = completion.calls.find(
+      ({ request }) => request.purpose === 'judge',
+    );
+    assert.ok(judgeCall);
+    assert.doesNotMatch(
+      JSON.stringify(judgeCall),
+      /private database bytes|private archive bytes|\\u0000/,
     );
     assert.equal(completion.calls.length, 3);
     assert.deepEqual(

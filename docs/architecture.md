@@ -1106,7 +1106,19 @@ Each judging criterion is judged independently against:
 - the optional authored example answer.
 
 Workspace collection skips symlinks, agent state, dependencies, build output,
-lockfiles, and common binary formats. Its hard bounds are 10,000 listed entries,
+and lockfiles. Known binary filename formats (including databases and archives)
+are omitted without reading them. Other files are omitted if their bytes contain
+non-text controls or cannot be decoded as strict UTF-8; Forge never strips or
+replaces these bytes to make a file judge-visible. Binary omissions record the
+path, reason, and size when known in bounded `workspace_binary_omitted` warnings.
+They mark workspace evidence incomplete, without implying a failed criterion.
+The judge receives the same omission markers saved in `judge-evidence.json`.
+Intelligible representations of databases, archives, and other binary artifacts
+are an area for future expansion; no extraction or conversion is performed.
+These exclusions apply to workspace text collection; deterministic file checks
+and transcript tool results retain their existing evidence policies.
+
+Its hard bounds are 10,000 listed entries,
 depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
 rendered characters total. Truncation and unavailable evidence are recorded
 explicitly. `judge-evidence.json` records the redacted workspace subset and
