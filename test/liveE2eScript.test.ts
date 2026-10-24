@@ -11,10 +11,12 @@ import { describe, it } from 'vitest';
 import { parseAtifTrajectory } from '../src/atif/index.ts';
 import * as forge from '../src/index.ts';
 import { createAnthropicCompletionProvider } from '../src/providers/anthropic/index.ts';
+import { createOpenAICompletionProvider } from '../src/providers/openai/index.ts';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
 } from '../src/runtime/docker/assets.ts';
+import * as testing from '../src/testing/index.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -46,6 +48,110 @@ const verifiers = createRunVerifiers({
 });
 
 describe('unified live end-to-end suite', () => {
+  it('runs OpenAI host completion coverage through verified Ava and judge artifacts', async () => {
+    const { runOpenAICompletionSuite } = await liveModule('completions');
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-live-completion-test-'),
+    );
+    const answers = [
+      {
+        user_needs: [{ description: 'Receive HELLO', status: 'remaining' }],
+        message: 'Please reply with HELLO.',
+      },
+      { remaining_need_ids: [], message: '' },
+      {
+        results: [
+          {
+            index: 0,
+            passed: true,
+            explanation: 'The assistant replied HELLO.',
+          },
+        ],
+      },
+    ];
+    let calls = 0;
+    try {
+      const report = await runOpenAICompletionSuite(
+        {
+          completionModel: 'gpt-6.1-sol',
+          upstreamCredential: 'synthetic-host-key',
+          resultsRoot: root,
+          suiteId: 'completion-test',
+          signal: new AbortController().signal,
+          progress() {},
+        },
+        {
+          ...forge,
+          ...testing,
+          createOpenAICompletionProvider: () =>
+            createOpenAICompletionProvider({
+              fetch: async () =>
+                Response.json({
+                  object: 'response',
+                  status: 'completed',
+                  output: [
+                    {
+                      type: 'message',
+                      role: 'assistant',
+                      content: [
+                        {
+                          type: 'output_text',
+                          text: JSON.stringify(answers[calls++]),
+                        },
+                      ],
+                    },
+                  ],
+                  usage: { input_tokens: 1, output_tokens: 1 },
+                }),
+            }),
+        },
+      );
+      assert.equal(report.verified, true);
+      assert.equal(calls, 3);
+      assert.deepEqual(report.schemas, [
+        'ava_initial_turn',
+        'ava_turn',
+        'criterion_judgment',
+      ]);
+      const verified = await forge.verifyCompletedRun(report.location);
+      assert.equal(
+        verified.result.completion_calls.every(
+          (call) => call.provider === 'openai' && call.model === 'gpt-6.1-sol',
+        ),
+        true,
+      );
+      assert.equal(verified.result.evaluation.judging_criteria_errored, 0);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires only explicit host configuration for completion live mode', () => {
+    const options = configuration({
+      FORGE_LIVE: '1',
+      FORGE_LIVE_MODE: 'completions',
+      FORGE_LIVE_COMPLETION_MODEL: 'gpt-6.1-sol',
+      OPENAI_API_KEY: 'host-key',
+      OPENAI_BASE_URL: 'https://gateway.example/v1',
+      ANTHROPIC_API_KEY: '\0',
+      CODEX_API_KEY: '\0',
+    });
+    assert.equal(options.mode, 'completions');
+    assert.equal(options.completionModel, 'gpt-6.1-sol');
+    assert.equal(options.upstreamCredential, 'host-key');
+    assert.equal(options.gatewayBaseUrl, 'https://gateway.example/v1');
+    assert.throws(
+      () =>
+        configuration({
+          FORGE_LIVE: '1',
+          FORGE_LIVE_MODE: 'completions',
+          FORGE_LIVE_COMPLETION_MODEL: 'gpt-6.1-sol',
+          CODEX_API_KEY: 'agent-key',
+        }),
+      /OPENAI_API_KEY is required/,
+    );
+  });
+
   it('serves deterministic authenticated OpenCode Chat Completions without an upstream', async () => {
     const { startOpenCodeFixtureEndpoint, OPENCODE_FIXTURE_MODEL } =
       await liveModule('opencode');

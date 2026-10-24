@@ -71,6 +71,7 @@ try {
       import * as codex from '@stripe/forge/agents/codex';
       import * as opencode from '@stripe/forge/agents/opencode';
       import * as anthropic from '@stripe/forge/providers/anthropic';
+      import * as openai from '@stripe/forge/providers/openai';
       import * as docker from '@stripe/forge/runtime/docker';
       import * as setup from '@stripe/forge/setup';
       import * as testing from '@stripe/forge/testing';
@@ -169,6 +170,9 @@ try {
       assert.equal(codex.createCodexAdapter().version, forge.FORGE_VERSION);
       assert.equal(docker.FORGE_CODEX_VERSION, '0.149.0');
       assert.equal(claude.createClaudeCodeAdapter({baseUrl: 'https://gateway.example.com'}).version, forge.FORGE_VERSION);
+      assert.equal(typeof openai.createOpenAICompletionProvider, 'function');
+      assert.equal(openai.createOpenAICompletionProvider().version, forge.FORGE_VERSION);
+      assert.deepEqual(openai.createOpenAICompletionProvider().metadata, {endpoint_mode: 'default'});
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(anthropic.createAnthropicCompletionProvider().version, forge.FORGE_VERSION);
       assert.deepEqual(codex.createCodexAdapter().metadata, {endpoint_mode: 'default', layout_mode: 'default'});

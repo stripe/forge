@@ -44,6 +44,16 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('keeps the OpenAI provider on its documented implementation subpath', async () => {
+    assert.equal('createOpenAICompletionProvider' in rootExports, false);
+    const openai = await import('./providers/openai/index.ts');
+    assert.equal(typeof openai.createOpenAICompletionProvider, 'function');
+    assert.equal(
+      openai.createOpenAICompletionProvider().version,
+      FORGE_VERSION,
+    );
+  });
+
   it('keeps OpenCode on its documented implementation subpath', async () => {
     assert.equal('createOpenCodeAdapter' in rootExports, false);
     const opencode = await import('./agents/opencode/index.js');

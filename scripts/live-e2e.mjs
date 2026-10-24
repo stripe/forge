@@ -28,7 +28,14 @@ process.once('SIGTERM', abort);
 let runtimeRoot;
 try {
   let report;
-  if (configuration.liveAgent === 'opencode') {
+  if (mode === 'completions') {
+    const { runOpenAICompletionSuite } = await import('./live/completions.mjs');
+    report = await runOpenAICompletionSuite({
+      ...configuration,
+      signal,
+      progress,
+    });
+  } else if (configuration.liveAgent === 'opencode') {
     const { runOpenCodeIntegrationSuite } = await import('./live/opencode.mjs');
     report = await runOpenCodeIntegrationSuite({
       ...configuration,

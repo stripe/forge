@@ -39,6 +39,7 @@ import {
 } from './planning/index.ts';
 import { validateExperimentDataset } from './planning/planner.ts';
 import { createAnthropicCompletionProvider } from './providers/anthropic/index.ts';
+import { createOpenAICompletionProvider } from './providers/openai/index.ts';
 import { createArtifactStore } from './results/index.ts';
 import {
   createDockerRuntimeAdapter,
@@ -177,6 +178,9 @@ export async function createDefaultCliComposition(
     ...(baseUrl === undefined ? {} : { baseUrl }),
   });
   const codexBaseUrl = environment[OPENAI_BASE_URL_ENVIRONMENT];
+  const openaiCompletionProvider = createOpenAICompletionProvider({
+    ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
+  });
   const codex = createCodexAdapter({
     credential: OPENAI_API_KEY_REFERENCE,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
@@ -188,6 +192,7 @@ export async function createDefaultCliComposition(
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
     [OPENAI_API_KEY_REFERENCE, CODEX_API_KEY_ENVIRONMENT],
+    ['openai.completion-api-key', 'OPENAI_API_KEY'],
     ['opencode.api-key', 'OPENCODE_API_KEY'],
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
@@ -203,7 +208,10 @@ export async function createDefaultCliComposition(
       [codex.id, codex],
       [opencode.id, opencode],
     ]),
-    completionProviders: new Map([[completionProvider.id, completionProvider]]),
+    completionProviders: new Map([
+      [completionProvider.id, completionProvider],
+      [openaiCompletionProvider.id, openaiCompletionProvider],
+    ]),
     credentialResolver,
     inputProvider: await createDirectoryRunInputProvider(options.datasetRoot),
     artifactStore: createArtifactStore({ root: options.resultsRoot }),
