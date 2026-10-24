@@ -75,7 +75,9 @@ The built-in Ava/judge provider is Anthropic and requires Claude 4.5-or-newer
 model identifiers with strict structured-output support. Opus 4.7 and later
 and the Claude 5 generation reject explicit sampling parameters, so Forge
 omits Ava's and the judge's `temperature` for them and those models use their
-default sampling. Selecting Codex as
+default sampling. Claude 5 models always think and thinking counts toward
+the output limit, so Forge raises Ava's and the judge's limits to at least
+16,000 tokens for them and ignores the returned thinking blocks. Selecting Codex as
 coding agent does not change that provider.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and

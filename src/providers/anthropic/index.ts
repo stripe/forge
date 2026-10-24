@@ -24,6 +24,8 @@ export const ANTHROPIC_MAX_RESPONSE_BYTES = 1024 * 1024;
 export const ANTHROPIC_MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 export const ANTHROPIC_MAX_MESSAGE_BYTES = 1024 * 1024;
 export const ANTHROPIC_MAX_TOKENS = 16_384;
+/** Output floor for models that always think; thinking counts toward max_tokens. */
+export const ANTHROPIC_ALWAYS_THINKING_MIN_MAX_TOKENS = 16_000;
 export const ANTHROPIC_MAX_REQUEST_DURATION_MS = 5 * 60 * 1_000;
 export const ANTHROPIC_API_KEY_CREDENTIAL = 'apiKey' as const;
 export const ANTHROPIC_AUTH_TOKEN_CREDENTIAL = 'authToken' as const;
@@ -99,6 +101,16 @@ export function acceptsAnthropicSamplingTemperature(model: string): boolean {
   const minor = Number(match[3] ?? 0);
   if (major >= 5) return false;
   return !(family === 'opus' && major === 4 && minor >= 7);
+}
+
+/**
+ * Claude 5 models think adaptively whether or not `thinking` is sent, and
+ * thinking tokens count toward `max_tokens`. Small caps sized for older models
+ * can be spent entirely on thinking, leaving no text.
+ */
+export function alwaysThinksAnthropicModel(model: string): boolean {
+  const match = CLAUDE_MODEL_FAMILY_VERSION.exec(model);
+  return match !== null && Number(match[2]) >= 5;
 }
 
 /** Anthropic structured outputs require Claude 4.5 or newer. */
@@ -471,11 +483,18 @@ function resolveCredential(
   return value;
 }
 
+function effectiveMaxTokens(request: CompletionRequest): number {
+  const requested = request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
+  return alwaysThinksAnthropicModel(request.model.model)
+    ? Math.max(requested, ANTHROPIC_ALWAYS_THINKING_MIN_MAX_TOKENS)
+    : requested;
+}
+
 function serializeRequest(request: CompletionRequest): string {
   try {
     const serialized = JSON.stringify({
       model: request.model.model,
-      max_tokens: request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
+      max_tokens: effectiveMaxTokens(request),
       messages: request.messages,
       ...(request.systemPrompt === undefined
         ? {}
@@ -613,6 +632,12 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   }
   const text: string[] = [];
   for (const block of value.content) {
+    // Thinking blocks carry no answer (their text is omitted by default).
+    if (
+      isRecord(block) &&
+      (block.type === 'thinking' || block.type === 'redacted_thinking')
+    )
+      continue;
     if (
       !isRecord(block) ||
       block.type !== 'text' ||
