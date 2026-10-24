@@ -8,6 +8,7 @@ import type {
 } from '../../contracts/completion.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import {
+  ANTHROPIC_ALWAYS_THINKING_MIN_MAX_TOKENS,
   ANTHROPIC_API_KEY_CREDENTIAL,
   ANTHROPIC_AUTH_TOKEN_CREDENTIAL,
   ANTHROPIC_DEFAULT_BASE_URL,
@@ -20,6 +21,7 @@ import {
   ANTHROPIC_STRUCTURED_OUTPUT_FORMAT,
   AnthropicCompletionError,
   acceptsAnthropicSamplingTemperature,
+  alwaysThinksAnthropicModel,
   createAnthropicCompletionProvider,
   supportsAnthropicStructuredOutputModel,
 } from './index.ts';
@@ -161,6 +163,49 @@ describe('Anthropic completion provider', () => {
       );
       const body = JSON.parse(String(transport.calls[0]!.init.body));
       assert.equal(Object.hasOwn(body, 'temperature'), sent, model);
+    }
+  });
+
+  it('raises small output caps for always-thinking models and ignores thinking blocks', async () => {
+    for (const [model, thinks] of [
+      ['claude-sonnet-4-6', false],
+      ['claude-opus-4-8', false],
+      ['claude-sonnet-5-5', true],
+      ['anthropic/claude-opus-5-5', true],
+    ] as const) {
+      assert.equal(alwaysThinksAnthropicModel(model), thinks, model);
+      const transport = recordingFetch(() =>
+        Response.json({
+          id: 'msg_test',
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: '', signature: 'sig' },
+            { type: 'text', text: '{"message":"continue"}' },
+          ],
+          model,
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 4 },
+        }),
+      );
+      const provider = createAnthropicCompletionProvider({
+        fetch: transport.fetch,
+      });
+      const response = await provider.complete(
+        completionRequest({
+          model: { provider: 'anthropic', model },
+          maxTokens: 400,
+          responseSchema: schema,
+        }),
+        { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
+      );
+      assert.equal(response.content, '{"message":"continue"}', model);
+      const body = JSON.parse(String(transport.calls[0]!.init.body));
+      assert.equal(
+        body.max_tokens,
+        thinks ? ANTHROPIC_ALWAYS_THINKING_MIN_MAX_TOKENS : 400,
+        model,
+      );
     }
   });
 
