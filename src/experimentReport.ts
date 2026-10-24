@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  experimentRunDiagnosticSchema,
   experimentRunErrorCodeSchema,
   experimentRunIdSchema,
 } from './experimentModel.ts';
@@ -143,6 +144,7 @@ const runSchema = z
     run_id: experimentRunIdSchema.nullable(),
     state: z.enum(['pending', 'completed', 'errored']),
     error_code: experimentRunErrorCodeSchema.nullable(),
+    diagnostic: experimentRunDiagnosticSchema.optional(),
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
@@ -157,6 +159,7 @@ const runSchema = z
       (pending && run.result_path !== null) ||
       completed !== (run.evaluation !== null) ||
       (run.state === 'errored') !== (run.error_code !== null) ||
+      (run.state !== 'errored' && run.diagnostic !== undefined) ||
       (completed && run.result_path === null) ||
       (run.result_path !== null &&
         run.result_path !== `runs/${run.run_id}/result.json`)

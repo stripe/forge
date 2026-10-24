@@ -265,13 +265,11 @@ export async function prepareCompletionRuntime(input: {
         if (signal.aborted) throw abortReason(signal);
         throw new CompletionInvocationError(
           errorCode,
-          purpose === 'judge'
-            ? boundedErrorMessage(
-                error,
-                'Completion provider call failed.',
-                secrets,
-              )
-            : 'Completion provider call failed.',
+          boundedErrorMessage(
+            error,
+            'Completion provider call failed.',
+            secrets,
+          ),
         );
       }
     },

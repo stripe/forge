@@ -486,6 +486,11 @@ describe('shared experiment command', () => {
     assert.equal(first.errored, 1);
     assert.equal(first.outcomes[0]!.error_code, 'role_player_error');
     assert.equal(first.outcomes[0]!.artifact!.failure, 'role_player_error');
+    assert.deepEqual(first.outcomes[0]!.diagnostic, {
+      phase: 'interaction',
+      reason: 'failure',
+      message: 'unavailable',
+    });
     const report = parseExperimentRunReport(
       JSON.parse(await fs.readFile(first.report, 'utf8')),
     );
@@ -494,6 +499,7 @@ describe('shared experiment command', () => {
     assert.equal(report.summary.pass_rate, null);
     assert.equal(report.runs[0]!.evaluation, null);
     assert.equal(report.runs[0]!.error_code, 'role_player_error');
+    assert.deepEqual(report.runs[0]!.diagnostic, first.outcomes[0]!.diagnostic);
     assert.equal(
       report.runs[0]!.result_path,
       `runs/${first.outcomes[0]!.run_id}/result.json`,

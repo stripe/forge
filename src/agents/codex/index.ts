@@ -215,7 +215,7 @@ export function createCodexAdapter(
             );
             if (result.exitCode !== 0)
               throw new Error(
-                'Codex exited without a successful completed turn.',
+                `Codex exited with status ${result.exitCode} without a successful completed turn.`,
               );
             const turn = parseCodexStream(result.stdout, currentSessionId, {
               hookAutomation: automation,

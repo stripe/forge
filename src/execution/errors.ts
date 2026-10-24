@@ -14,14 +14,30 @@ export type ForgeExecutionErrorCode =
 
 /** Stable, secret-safe failure surfaced by the shared execution lifecycle. */
 export class ForgeExecutionError extends Error {
+  /** Bounded, credential-redacted detail produced at the execution boundary. */
+  readonly diagnostic:
+    | {
+        readonly reason: 'failure' | 'timeout' | 'cancelled';
+        readonly message: string;
+      }
+    | undefined;
   constructor(
     readonly code: ForgeExecutionErrorCode,
     readonly phase: RunPhase,
     message: string,
-    options: ErrorOptions = {},
+    options: ErrorOptions & {
+      diagnostic?: {
+        readonly reason: 'failure' | 'timeout' | 'cancelled';
+        readonly message: string;
+      };
+    } = {},
   ) {
     super(message, options);
     this.name = 'ForgeExecutionError';
+    this.diagnostic =
+      options.diagnostic === undefined
+        ? undefined
+        : Object.freeze({ ...options.diagnostic });
   }
 }
 

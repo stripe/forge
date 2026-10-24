@@ -177,6 +177,23 @@ describe('Codex adapter', () => {
     );
   });
 
+  it('retains a failed process exit status without copying command output', async () => {
+    const test = fixture({
+      command: () => ({
+        ...result('private stdout', 17),
+        stderr: 'private stderr',
+      }),
+    });
+    const session = await test.adapter.openSession(test.sessionContext);
+    await assert.rejects(
+      session.send('Run the task', { signal: test.sessionContext.signal }),
+      {
+        message:
+          'Codex exited with status 17 without a successful completed turn.',
+      },
+    );
+  });
+
   it('applies hook policy and refreshed native plugin settings on initial and resumed turns', async () => {
     for (const hookTrust of ['native', 'automation'] as const) {
       const test = fixture({ hookTrust });

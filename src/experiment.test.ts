@@ -59,6 +59,98 @@ describe('public experiment run API', () => {
     };
   });
 
+  it('persists execution diagnostics without run artifacts and retains them in retry history', async () => {
+    const root = await experimentRunRoot();
+    const plan = createTestResolvedRunPlan();
+    const composition = makeComposition(root);
+    const selected = composition.agents.get(plan.agent.adapter)!;
+    let fail = true;
+    let nextId = 0;
+    const events: ExperimentRunProgressEvent[] = [];
+    const configured = {
+      ...composition,
+      agents: new Map([
+        [
+          selected.id,
+          {
+            ...selected,
+            async openSession(
+              context: Parameters<typeof selected.openSession>[0],
+            ) {
+              if (fail)
+                throw new Error('Agent stream ended before a completed turn.');
+              return selected.openSession(context);
+            },
+          },
+        ],
+      ]),
+    };
+    const options: ExperimentRunOptions = {
+      root,
+      engine: defaultForgeEngine,
+      plans: [plan],
+      composition: configured,
+      resume: false,
+      signal: new AbortController().signal,
+      runIdFactory: () => `diagnostic-${++nextId}`,
+      execute: (input) => defaultForgeEngine.executeEval(input),
+      progress: (event) => events.push(event),
+    };
+    const result = await runExperiment(options);
+    assert.equal(result.errored, 1);
+    const expected = {
+      phase: 'interaction',
+      reason: 'failure',
+      message: 'Agent stream ended before a completed turn.',
+    };
+    const checkpoint = parseExperimentRunCheckpoint(
+      JSON.parse(await fs.readFile(result.checkpoint, 'utf8')),
+    );
+    const last = checkpoint.entries[0]!.attempts[0]!;
+    assert.equal(last.state, 'errored');
+    if (last.state !== 'errored') throw new Error('Expected failed attempt');
+    assert.deepEqual(last.diagnostic, expected);
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(result.report, 'utf8')),
+    );
+    assert.deepEqual(report.runs[0]!.diagnostic, expected);
+    assert.equal(report.runs[0]!.result_path, null);
+    const inspected = await inspectExperimentRun({
+      root,
+      engine: defaultForgeEngine,
+    });
+    assert.deepEqual(inspected.outcomes[0]!.diagnostic, expected);
+    const event = events.find((event) => event.state === 'errored');
+    assert.equal(event?.state, 'errored');
+    if (event?.state === 'errored')
+      assert.deepEqual(event.diagnostic, expected);
+    for (const diagnostic of [
+      { ...expected, phase: 'unknown' },
+      { ...expected, reason: 'unknown' },
+      { ...expected, message: 'x'.repeat(4097) },
+      { ...expected, response: 'private' },
+    ]) {
+      const invalid = structuredClone(checkpoint);
+      const attempt = invalid.entries[0]!.attempts[0]!;
+      Object.assign(attempt, { diagnostic });
+      assert.throws(() => parseExperimentRunCheckpoint(invalid));
+      assert.throws(() =>
+        parseExperimentRunReport({
+          ...report,
+          runs: [{ ...report.runs[0]!, diagnostic }],
+        }),
+      );
+    }
+    fail = false;
+    const resumed = await runExperiment({ ...options, resume: true });
+    assert.equal(resumed.completed, 1);
+    const history = parseExperimentRunCheckpoint(
+      JSON.parse(await fs.readFile(result.checkpoint, 'utf8')),
+    ).entries[0]!.attempts;
+    assert.deepEqual(history[0], last);
+    assert.equal(history[1]!.state, 'completed');
+  });
+
   it('reads a pending-only checkpoint using its Forge identity without companion artifacts', async () => {
     const root = await experimentRunRoot();
     const plan = createTestResolvedRunPlan();
