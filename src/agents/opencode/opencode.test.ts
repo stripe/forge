@@ -148,6 +148,54 @@ describe('OpenCode adapter', () => {
     assert.ok(test.calls.some(({ argv }) => argv.includes('--session')));
   });
 
+  it('routes listed models to their endpoint and credential, others to the default', () => {
+    const adapter = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+      credential: 'opencode.api-key',
+      modelRoutes: {
+        'qwen/qwen4-coder': {
+          baseUrl: 'https://openrouter.example/api/v1',
+          credential: 'opencode.endpoint.openrouter.api-key',
+        },
+      },
+    });
+    const endpointOf = (model: string) => {
+      const requirements = adapter.requirements({ ...selection, model });
+      return {
+        baseURL: JSON.parse(
+          requirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
+        ).provider.forge.options.baseURL,
+        credential:
+          requirements.environment.credentials!.OPENCODE_API_KEY!.reference,
+      };
+    };
+    assert.deepEqual(endpointOf('qwen/qwen4-coder'), {
+      baseURL: 'https://openrouter.example/api/v1',
+      credential: 'opencode.endpoint.openrouter.api-key',
+    });
+    assert.deepEqual(endpointOf(OPEN_CODE_MODEL), {
+      baseURL: 'https://gateway.example/v1',
+      credential: 'opencode.api-key',
+    });
+    // A routed model works without a default endpoint; an unrouted one does not.
+    const routedOnly = createOpenCodeAdapter({
+      modelRoutes: {
+        m: { baseUrl: 'https://openrouter.example/api/v1', credential: 'k' },
+      },
+    });
+    assert.doesNotThrow(() =>
+      routedOnly.requirements({ ...selection, model: 'm' }),
+    );
+    assert.throws(() => routedOnly.requirements(selection), /baseUrl/);
+    assert.throws(
+      () =>
+        createOpenCodeAdapter({
+          modelRoutes: { m: { baseUrl: 'ftp://bad', credential: 'k' } },
+        }),
+      /OpenCode baseUrl/,
+    );
+  });
+
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {
     const adapter = createOpenCodeAdapter({
       baseUrl: 'https://gateway.example/v1',

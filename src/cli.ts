@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
 import { createOpenCodeAdapter } from './agents/opencode/index.ts';
+import { parseOpenCodeModelRoutes } from './agents/opencode/routes.ts';
 import { resolveCliRuntime } from './cliRuntime.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
@@ -202,14 +203,17 @@ export async function createDefaultCliComposition(
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const opencodeBaseUrl = environment.OPENCODE_BASE_URL;
+  const opencodeRouting = parseOpenCodeModelRoutes(environment);
   const opencode = createOpenCodeAdapter({
     ...(opencodeBaseUrl === undefined ? {} : { baseUrl: opencodeBaseUrl }),
+    modelRoutes: opencodeRouting.routes,
   });
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
     [OPENAI_API_KEY_REFERENCE, CODEX_API_KEY_ENVIRONMENT],
     ['openai.completion-api-key', 'OPENAI_API_KEY'],
     ['opencode.api-key', 'OPENCODE_API_KEY'],
+    ...Object.entries(opencodeRouting.credentialBindings),
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
   const credentialResolver = createEnvironmentCredentialResolver({

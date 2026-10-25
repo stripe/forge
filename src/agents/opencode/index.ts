@@ -39,6 +39,20 @@ export interface OpenCodeAdapterOptions {
   readonly credential?: string | CredentialReference;
   /** Explicit Chat Completions API root, including /v1 when needed. Required when selected. */
   readonly baseUrl?: string;
+  /**
+   * Host-side endpoint overrides keyed by exact selected model name. A routed
+   * model uses its route's API root and credential; others use `baseUrl` and
+   * `credential`. Routes are host configuration and are not recorded in plans.
+   */
+  readonly modelRoutes?: Readonly<
+    Record<
+      string,
+      {
+        readonly baseUrl: string;
+        readonly credential: string | CredentialReference;
+      }
+    >
+  >;
 }
 
 /** API-key OpenCode execution inside a runtime providing Docker-equivalent isolation. */
@@ -67,6 +81,15 @@ export function createOpenCodeAdapter(
   const credential = credentialReference(
     options.credential ?? 'opencode.api-key',
   );
+  const modelRoutes = new Map(
+    Object.entries(options.modelRoutes ?? {}).map(([model, route]) => [
+      model,
+      {
+        baseUrl: validateBaseUrl(route.baseUrl),
+        credential: credentialReference(route.credential),
+      },
+    ]),
+  );
   const requirements = (
     selection: AgentSelectionV1,
   ): AgentRuntimeRequirements => {
@@ -74,12 +97,15 @@ export function createOpenCodeAdapter(
       throw new TypeError(
         'OpenCode requires the selected adapter and openai-compatible provider.',
       );
-    if (baseUrl === undefined)
-      throw new TypeError(
-        'OpenCode requires an explicit baseUrl (OPENCODE_BASE_URL in the CLI).',
-      );
     if (!selection.model || /[\u0000-\u001f\u007f]/.test(selection.model))
       throw new TypeError('OpenCode requires an explicit model.');
+    const route = modelRoutes.get(selection.model);
+    const endpoint = route?.baseUrl ?? baseUrl;
+    const endpointCredential = route?.credential ?? credential;
+    if (endpoint === undefined)
+      throw new TypeError(
+        'OpenCode requires an explicit baseUrl (OPENCODE_BASE_URL in the CLI) or a model route.',
+      );
     const model = `forge/${selection.model}`;
     return {
       executables: [executable, 'node'],
@@ -109,12 +135,15 @@ export function createOpenCodeAdapter(
                 npm: '@ai-sdk/openai-compatible',
                 name: 'Forge',
                 env: ['OPENCODE_API_KEY'],
-                options: { baseURL: baseUrl, apiKey: '{env:OPENCODE_API_KEY}' },
+                options: {
+                  baseURL: endpoint,
+                  apiKey: '{env:OPENCODE_API_KEY}',
+                },
               },
             },
           }),
         },
-        credentials: { OPENCODE_API_KEY: { reference: credential } },
+        credentials: { OPENCODE_API_KEY: { reference: endpointCredential } },
       },
       stateDirectories: [
         { id: OPENCODE_STATE_ID, containerPath: layout.stateDirectory },

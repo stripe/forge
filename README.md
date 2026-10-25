@@ -389,6 +389,23 @@ selected by the same official marketplace used for Codex. It does not load
 Claude-specific hooks or commands. See the [plugin contract](docs/plugin-action.md)
 for installation provenance and the catalog's rolling revision semantics.
 
+To send some OpenCode models to a different endpoint than the rest, set a
+host-side routing table. `OPENCODE_MODEL_ROUTES` maps exact experiment model
+names to endpoint names; each endpoint reads its API root from
+`OPENCODE_ENDPOINT_<NAME>_BASE_URL` and its key from
+`OPENCODE_ENDPOINT_<NAME>_API_KEY` (credential reference
+`opencode.endpoint.<name>.api-key`). Unlisted models keep `OPENCODE_BASE_URL`
+and `OPENCODE_API_KEY`:
+
+```sh
+export OPENCODE_MODEL_ROUTES='qwen/qwen4-coder=openrouter,kimi-k3=openrouter'
+export OPENCODE_ENDPOINT_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+export OPENCODE_ENDPOINT_OPENROUTER_API_KEY=your-openrouter-key
+```
+
+Routing is host configuration: experiment files and saved plans do not record
+which endpoint served a model, so keep the same routing when resuming.
+
 The CLI credential reference is `opencode.api-key`; use
 `--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment
 variable. Ava and judging keep their independent `models` configuration.
