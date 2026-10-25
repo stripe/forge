@@ -71,14 +71,16 @@ running or resuming pending work. Use restricted, short-lived keys with
 appropriate account limits: the evaluated agent receives its credential and
 outbound network access. Keep secrets outside dataset and experiment files.
 
-Select Ava and judge models independently with `models.role_player` and
-`models.judge`. Both accept `provider: anthropic` or `provider: openai`;
-selecting a coding agent does not change either host model. For example:
+Ava and the judge each default to `provider: openai`, `model: gpt-6.1-sol`
+when their model is omitted. Override either independently with
+`models.role_player` or `models.judge`; the other keeps its default. Both
+accept `provider: anthropic` or `provider: openai`. Selecting a coding agent
+does not change either host model. For example, to use Sonnet for both:
 
 ```yaml
 models:
-  role_player: { provider: openai, model: gpt-5.4 }
-  judge: { provider: openai, model: gpt-5.4 }
+  role_player: { provider: anthropic, model: claude-sonnet-4-6 }
+  judge: { provider: anthropic, model: claude-sonnet-4-6 }
 ```
 
 OpenAI host completions use the Responses API with strict JSON Schema,
@@ -207,7 +209,8 @@ my-eval/
 ```
 
 The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
-and a criterion judge. All three use the configured Anthropic credential.
+and a criterion judge. Claude Code uses the Anthropic credential; Ava and
+the judge use the default Sol model and the OpenAI completion credential.
 The release inputs are separate from the installed Forge package; preserve
 their bytes. The experiment's
 `dataset.path: ./datasets/stripe-integration-public-evals` resolves relative
@@ -215,11 +218,12 @@ to the experiment file. Copy the whole release directory so configuration
 needs no rewriting.
 
 Validate without Docker allocation or model credentials, then run with your
-Anthropic key configured:
+Anthropic and OpenAI keys configured:
 
 ```sh
 npx --no-install forge validate --experiment ./my-eval/experiment.yaml
 export ANTHROPIC_API_KEY=your-restricted-key
+export OPENAI_API_KEY=your-openai-key
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
   --output ./results --run-id payments-001 > run-summary.json
