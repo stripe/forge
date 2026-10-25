@@ -812,44 +812,74 @@ describe('experiment expansion and run planning', () => {
     );
   });
 
-  it('requires harness models only when their behavior is selected', () => {
-    const noModels = inputs({ experiment: experimentConfig({ models: {} }) });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...noModels,
-          selection: selection(
-            'case/a',
-            'baseline',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
-        }),
-      { code: 'missing_role_player' },
+  it('defaults omitted host models to Sol without changing authored inputs', () => {
+    const loaded = inputs({ experiment: experimentConfig({ models: {} }) });
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+    const plan = resolveRunPlan({ ...loaded, selection: selected });
+    const expected = { provider: 'openai', model: 'gpt-6.1-sol' };
+
+    assert.deepEqual(plan.role_player, expected);
+    assert.deepEqual(plan.evaluation.judge, expected);
+    assert.deepEqual(loaded.experiment.config.models, {});
+    assert.notEqual(plan.role_player, plan.evaluation.judge);
+    assert.equal(Object.isFrozen(plan.role_player), true);
+    assert.equal(Object.isFrozen(plan.evaluation.judge), true);
+    assert.deepEqual(
+      JSON.parse(serializeResolvedRunPlan(plan)).role_player,
+      expected,
     );
 
-    const noJudge = inputs({
+    const explicit = inputs({
       experiment: experimentConfig({
-        models: { role_player: { provider: 'anthropic', model: 'role-model' } },
+        models: { role_player: expected, judge: expected },
       }),
     });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...noJudge,
-          selection: selection(
-            'case/a',
-            'baseline',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
-        }),
-      { code: 'missing_judge' },
+    assert.equal(
+      resolvedRunPlanSha256(plan),
+      resolvedRunPlanSha256(
+        resolveRunPlan({ ...explicit, selection: selected }),
+      ),
     );
+  });
+
+  it.each(['role_player', 'judge'] as const)(
+    'allows an independent %s override while the other host model defaults',
+    (purpose) => {
+      const override = { provider: 'anthropic', model: 'claude-sonnet-4-6' };
+      const loaded = inputs({
+        experiment: experimentConfig({ models: { [purpose]: override } }),
+      });
+      const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+      const plan = resolveRunPlan({ ...loaded, selection: selected });
+      assert.deepEqual(
+        plan.role_player,
+        purpose === 'role_player'
+          ? override
+          : { provider: 'openai', model: 'gpt-6.1-sol' },
+      );
+      assert.deepEqual(
+        plan.evaluation.judge,
+        purpose === 'judge'
+          ? override
+          : { provider: 'openai', model: 'gpt-6.1-sol' },
+      );
+    },
+  );
+
+  it('omits unused default models from one-shot checks-only plans', () => {
+    const loaded = inputs({
+      experiment: experimentConfig({ models: {} }),
+      caseDefinition: {
+        ...evalCase(),
+        execution_mode: 'one_shot',
+        judging_criteria: [],
+        checks: { files_created: ['answer.txt'] },
+      },
+    });
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+    const plan = resolveRunPlan({ ...loaded, selection: selected });
+    assert.equal(plan.role_player, undefined);
+    assert.equal(plan.evaluation.judge, undefined);
   });
 
   it('requires every component of a programmatic selection to match the matrix', () => {

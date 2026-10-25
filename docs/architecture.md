@@ -380,8 +380,9 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 - checks dataset and experiment compatibility;
 - checks that the selection is present in the matrix;
-- requires `models.role_player` for a multi-turn case;
-- requires `models.judge` when judging criteria are non-empty;
+- resolves a role-player model for multi-turn cases and a judge model when
+  judging criteria are non-empty, using each experiment override or the
+  `openai` / `gpt-6.1-sol` default;
 - concatenates case and treatment setup;
 - validates built-in dataset sources against the available path index and
   action-bundle pins;
@@ -391,6 +392,11 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
   host-supplied platform selection; and
 - records the dataset, experiment, and case identities, installed
   Forge package, and action-bundle implementation pins.
+
+Unused host models are omitted from the plan. Used models are cloned and
+frozen in the plan before provider preflight or credential lookup; runtime
+execution and saved-plan parsing never infer a missing model. See the README
+for [model overrides and credentials](../README.md#requirements--credentials).
 
 Plans use canonical JSON with recursively sorted object keys and retained array
 order. The `plan.json` artifact descriptor binds these bytes to `result.json`.

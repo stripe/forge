@@ -32,10 +32,11 @@ every file inside it is dataset payload.
 
 The [baseline experiment](experiment.yaml) points at the dataset with
 `dataset.path` and pins the dataset ID and version. It selects one case
-(`payments-onetime`) once with Claude Code and Sonnet 4.6, using public
-Anthropic models for Ava and judging — the matrix picks a single
-representative case rather than running the whole dataset. Runtime and model
-choices belong to the experiment rather than the dataset.
+(`payments-onetime`) once with Claude Code and Sonnet 4.6, using the
+[default host models](../../README.md#requirements--credentials) for Ava and
+judging. The matrix picks a single representative case rather than running
+the whole dataset. Runtime and model choices belong to the experiment rather
+than the dataset.
 
 ## Validate and run
 
@@ -50,10 +51,12 @@ node dist/cli.js plan \
 ```
 
 Validation and planning verify the case inventory and experiment pin without
-Docker or credentials. To execute the evaluation, use Docker and an Anthropic key:
+Docker or credentials. To execute the evaluation, use Docker, an Anthropic key
+for Claude Code, and an OpenAI key for Ava and judging:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
+OPENAI_API_KEY=your-openai-key \
 node dist/cli.js run \
   --experiment experiments/stripe-integration-public-evals/experiment.yaml \
   --output ./results
@@ -73,9 +76,10 @@ node dist/cli.js validate --host \
 ```
 
 This check makes no model calls and does not test model authentication. To run
-the payment eval, export `ANTHROPIC_API_KEY` and `CODEX_API_KEY`, then use `run`
-with that experiment and `--output ./results`. Use `--agent claude-code` or
-`--agent codex` to select one. Ava and judging retain Anthropic configuration.
+the payment eval, export `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, and
+`OPENAI_API_KEY`, then use `run` with that experiment and `--output ./results`.
+Use `--agent claude-code` or `--agent codex` to select one. Ava and judging use the default host models;
+set `models.role_player` or `models.judge` in the experiment to override either.
 Prepare the account or merchant outside Forge; any account accepted by the
 plugin's endpoint uses the same credential interface.
 

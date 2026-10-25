@@ -88,8 +88,14 @@ describe('sample dataset release', () => {
     assert.equal(plan.interaction.mode, 'multi_turn');
     assert.equal(plan.interaction.max_turns, 10);
     assert.equal(plan.evaluation.judging_criteria.length, 8);
-    assert.equal(plan.role_player?.provider, 'anthropic');
-    assert.equal(plan.evaluation.judge?.provider, 'anthropic');
+    assert.deepEqual(plan.role_player, {
+      provider: 'openai',
+      model: 'gpt-6.1-sol',
+    });
+    assert.deepEqual(plan.evaluation.judge, {
+      provider: 'openai',
+      model: 'gpt-6.1-sol',
+    });
 
     for (const command of ['validate', 'plan']) {
       let stdout = '';
