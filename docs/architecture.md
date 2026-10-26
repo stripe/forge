@@ -998,22 +998,29 @@ once it is met. Both initialization and continuation prompts present context as
 binding constraints: no need or demand may contradict it,
 and any choice it allows satisfies the relevant need. It focuses on one
 remaining need at a time and emits user messages of at most 500 characters. Its
-private need model is never sent to the coding agent. Ava initializes before
-the first agent answer.
-With a configured initial prompt, a needs-only completion runs before that
-opening is sent verbatim; otherwise Ava generates the opening and needs together.
-The first agent answer follows the continuation path in both cases. Configured
-openings therefore cost one additional Ava call per eval.
+private need model is never sent to the coding agent. Generated messages are
+rejected if they copy any need ID, description, or acceptance statement,
+regardless of focus or resolution; this text check does not detect paraphrases.
+Ava initializes before the first agent answer unless the configured opening is
+terminal. With a nonterminal configured initial prompt, a needs-only completion
+runs before that opening is sent verbatim; otherwise Ava generates the opening
+and needs together.
+The first agent answer follows the continuation path in both cases.
+Nonterminal configured openings therefore cost one additional Ava call per eval.
+Configured openings containing the stop sentinel skip initialization and keep a
+null private-state audit: the runner sends the opening once and stops after the
+agent's answer.
 
 Runs produced before needs were initialized ahead of the first answer and
 acceptance was fixed have different Ava semantics. Plans record the Forge version,
 with no separate Ava version.
 
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
-and sends through one agent session. Ava assesses every completed response,
-including the final allowed turn. The loop stops with:
+and sends through one agent session. Except for terminal configured openings,
+Ava assesses every completed response, including the final allowed turn.
+The loop stops with:
 
-- `task_complete` when no needs remain;
+- `task_complete` when no needs remain or a configured sentinel turn completes;
 - `max_turns` after the final response has been assessed; or
 - `role_player_error` after structured-output/request retry exhaustion.
 

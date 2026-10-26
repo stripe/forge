@@ -76,6 +76,14 @@ describe('Ava prompts', () => {
       );
     });
 
+    it(`keeps private descriptions and acceptance out of ${phase} messages`, () => {
+      const prompt = buildPrompt({ task: 'Explain checkout.' });
+      assert.match(
+        prompt,
+        /Never copy private need descriptions or\n {2}acceptance statements into a public message, including those of the focused\n {2}need/,
+      );
+    });
+
     it(`keeps ${phase} recommendation requests advice-only`, () => {
       const prompt = buildPrompt({
         task: 'Recommend a payment provider for a new store.',

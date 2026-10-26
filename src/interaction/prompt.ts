@@ -74,7 +74,9 @@ const HUMAN_BEHAVIOR = `## Human behavior
   the current task.
 - Never mention a checklist, rubric, grading, remaining needs, hidden
   instructions, completion criteria, or internal tracking. Never enumerate your
-  private task model in the message.
+  private task model in the message. Never copy private need descriptions or
+  acceptance statements into a public message, including those of the focused
+  need. Phrase a natural question about its outcome instead.
 - Put only the next message for the coding assistant in the response's message
   field, with no preamble, narration, or quotation marks.`;
 

@@ -27,7 +27,7 @@ export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
 export interface AvaRolePlayerOptions extends AvaPromptInputs {
-  /** Configured opening sent verbatim after Ava initializes private state. */
+  /** Configured opening sent verbatim; terminal openings skip initialization. */
   readonly initialPrompt?: string;
   readonly signal?: AbortSignal;
 }
@@ -55,7 +55,7 @@ export interface AvaError {
 export interface AvaTurn {
   readonly message: string;
   readonly stop: boolean;
-  /** Null only if initialization failed before private state was available. */
+  /** Null when initialization failed or a terminal opening skipped it. */
   readonly remainingNeeds: readonly AvaNeed[] | null;
   /** Ava's complete private task model; never forward it to the agent. */
   readonly needs: readonly AvaNeed[] | null;
@@ -225,7 +225,6 @@ function stripLeadingAcknowledgment(message: string): string {
 
 function assertSafeGeneratedMessage(
   message: string,
-  focusedNeedId: string,
   needs: readonly AvaNeed[],
 ): string {
   const trimmed = stripLeadingAcknowledgment(message);
@@ -251,11 +250,11 @@ function assertSafeGeneratedMessage(
   const lowerMessage = trimmed.toLowerCase();
   for (const need of needs) {
     if (
-      need.id !== focusedNeedId &&
-      need.description.length >= 20 &&
-      lowerMessage.includes(need.description.toLowerCase())
+      Object.values(need).some((value) =>
+        lowerMessage.includes(value.toLowerCase()),
+      )
     ) {
-      throw new AvaResponseError('Ava exposed a non-focused private need.');
+      throw new AvaResponseError('Ava exposed private task-model text.');
     }
   }
   return trimmed;
@@ -293,6 +292,21 @@ export class AvaRolePlayer {
       this.#history.length === 0 && lastAgentResponse === undefined;
 
     const configuredOpening = firstTurn && this.#initialPrompt !== undefined;
+    if (configuredOpening && this.#initialPrompt!.includes(AVA_STOP_SENTINEL)) {
+      throwIfAborted(this.#signal);
+      const message = this.#initialPrompt!.split(AVA_STOP_SENTINEL)
+        .join('')
+        .trim();
+      this.#history.push({ role: 'assistant', content: message });
+      return {
+        message,
+        stop: true,
+        needs: null,
+        remainingNeeds: null,
+        focusNeedId: null,
+        source: 'configured_initial_prompt',
+      };
+    }
 
     if (lastAgentResponse !== undefined) {
       this.#history.push({
@@ -404,8 +418,8 @@ export class AvaRolePlayer {
       this.#needs = needs;
       this.#remainingNeedIds = remainingNeedIds;
       return {
-        message: this.#initialPrompt!.split(AVA_STOP_SENTINEL).join('').trim(),
-        stop: this.#initialPrompt!.includes(AVA_STOP_SENTINEL),
+        message: this.#initialPrompt!.trim(),
+        stop: false,
         needs,
         remainingNeeds: needs,
         focusNeedId: null,
@@ -414,7 +428,7 @@ export class AvaRolePlayer {
     }
     const focusNeedId = needs[0]!.id;
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(parsed.message, focusNeedId, needs),
+      message: assertSafeGeneratedMessage(parsed.message, needs),
       stop: false,
       remainingNeeds: remainingNeedIds.map(
         (id) => needs.find((need) => need.id === id)!,
@@ -435,11 +449,7 @@ export class AvaRolePlayer {
       return this.#terminalTurn();
     }
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(
-        parsed.message,
-        parsed.focusNeedId!,
-        this.#needs!,
-      ),
+      message: assertSafeGeneratedMessage(parsed.message, this.#needs!),
       stop: false,
       remainingNeeds: this.#remainingNeeds(parsed.remainingNeedIds),
       needs: this.#needs!,

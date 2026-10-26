@@ -523,18 +523,92 @@ describe('runConversation', () => {
     assert.doesNotMatch(JSON.stringify(result), /secret-token/);
   });
 
-  it('preserves configured stop-sentinel behavior and validates completed turns', async () => {
+  it('retries private-text leaks without sending them or retaining them in public history', async () => {
+    const acceptance = 'The requested outcome is complete.';
     const completion = completions(
-      JSON.stringify({
-        user_needs: [
-          {
-            description: 'Finish the request',
-            acceptance: 'The requested work is complete.',
-            status: 'remaining',
-          },
-        ],
-      }),
+      initialResponse(
+        ['Complete the access flow'],
+        `Could you confirm: ${acceptance}`,
+      ),
+      initialResponse(['Complete the access flow'], 'How should we proceed?'),
+      continuationResponse(['need_1'], `Could you confirm: ${acceptance}`),
+      continuationResponse(['need_1'], 'What should happen next?'),
+      continuationResponse([], ''),
     );
+    const agent = session([
+      {
+        text: 'Here is the first part.',
+        sessionId: 'persistent-session',
+        toolCalls: [],
+      },
+      {
+        text: 'Here is the rest.',
+        sessionId: 'persistent-session',
+        toolCalls: [],
+      },
+    ]);
+    const signal = new AbortController().signal;
+    const result = await runConversation({
+      session: agent.value,
+      ava: new AvaRolePlayer(
+        { task: 'Explain the access flow.', signal },
+        completion.invoke,
+        noRetryWait,
+      ),
+      maxTurns: 3,
+      signal,
+    });
+
+    assert.equal(result.stopReason, 'task_complete');
+    assert.equal(completion.calls.length, 5);
+    assert.deepEqual(
+      agent.sent.map(({ message }) => message),
+      ['How should we proceed?', 'What should happen next?'],
+    );
+    for (const request of completion.calls) {
+      assert.ok(!JSON.stringify(request.messages).includes(acceptance));
+    }
+    assert.ok(!JSON.stringify(result.turns).includes(acceptance));
+    assert.ok(!JSON.stringify(result.avaAudit.decisions).includes(acceptance));
+  });
+
+  for (const response of [new Error('Completion unavailable.'), '{invalid']) {
+    it(`records a zero-turn role-player failure for ${typeof response === 'string' ? 'invalid' : 'failed'} opening initialization`, async () => {
+      const completion = completions(response);
+      const agent = session([]);
+      const signal = new AbortController().signal;
+      const result = await runConversation({
+        session: agent.value,
+        ava: new AvaRolePlayer(
+          {
+            task: 'Do the work',
+            initialPrompt: 'Please inspect the repository.',
+            signal,
+          },
+          completion.invoke,
+          noRetryWait,
+        ),
+        maxTurns: 3,
+        signal,
+      });
+
+      assert.equal(agent.sent.length, 0);
+      assert.deepEqual(result.turns, []);
+      assert.equal(result.stopReason, 'role_player_error');
+      assert.equal(
+        result.failure?.errorType,
+        typeof response === 'string' ? 'parse_error' : 'request_error',
+      );
+      assert.equal(result.failure?.attempts, 3);
+      assert.equal(completion.calls.length, 3);
+      assert.equal(result.avaAudit.needs, null);
+      assert.equal(result.avaAudit.decisions[0]!.message, '');
+      assert.equal(result.avaAudit.decisions[0]!.codingAgentInvoked, false);
+    });
+  }
+
+  it('preserves configured stop-sentinel behavior and validates completed turns', async () => {
+    const completion = completions(new Error('Ava must not be called.'));
     const signal = new AbortController().signal;
     const agent = session([
       { text: 'Done.', sessionId: 'persistent-session', toolCalls: [] },
@@ -549,22 +623,19 @@ describe('runConversation', () => {
           signal,
         },
         completion.invoke,
+        noRetryWait,
       ),
       maxTurns: 3,
       signal,
       validateCompletedTurns: (turns) => validatedLengths.push(turns.length),
     });
 
-    assert.equal(completion.calls.length, 1);
+    assert.equal(completion.calls.length, 0);
     assert.equal(agent.sent.length, 1);
+    assert.equal(agent.sent[0]!.message, 'Finish this request.');
     assert.equal(result.stopReason, 'task_complete');
-    assert.deepEqual(result.avaAudit.needs, [
-      {
-        id: 'need_1',
-        description: 'Finish the request',
-        acceptance: 'The requested work is complete.',
-      },
-    ]);
+    assert.equal(result.avaAudit.needs, null);
+    assert.equal(result.avaAudit.decisions[0]!.remainingNeedIds, null);
     assert.deepEqual(validatedLengths, [1]);
   });
 

@@ -207,7 +207,11 @@ describe('AvaRolePlayer', () => {
       continuationResponse([], 'This closing prose is discarded.'),
     );
     const ava = new AvaRolePlayer(
-      { task: 'Do the work', initialPrompt: 'Please inspect the repository.' },
+      {
+        task: 'Do the work',
+        context: 'Keep the existing interface.',
+        initialPrompt: 'Please inspect the repository.',
+      },
       completion.invoke,
     );
 
@@ -220,6 +224,16 @@ describe('AvaRolePlayer', () => {
       source: 'configured_initial_prompt',
     });
     assert.equal(completion.calls.length, 1);
+    assert.match(completion.calls[0]!.systemPrompt, /Do the work/);
+    assert.match(
+      completion.calls[0]!.systemPrompt,
+      /Keep the existing interface/,
+    );
+    assert.ok(
+      !JSON.stringify(completion.calls[0]).includes(
+        'Please inspect the repository.',
+      ),
+    );
     assert.equal(completion.calls[0]!.responseSchema.name, 'ava_initial_needs');
     assert.deepEqual(completion.calls[0]!.responseSchema.schema.required, [
       'user_needs',
@@ -342,6 +356,70 @@ describe('AvaRolePlayer', () => {
         }
       }
     });
+  }
+
+  for (const phase of [
+    'initial',
+    'focused',
+    'non-focused',
+    'resolved',
+  ] as const) {
+    for (const field of ['id', 'description', 'acceptance'] as const) {
+      it(`rejects ${phase} private ${field} text without exposing it`, async () => {
+        const needs = [
+          { id: 'need_1', description: 'Blue key', acceptance: 'Green lock' },
+          { id: 'need_2', description: 'Red gate', acceptance: 'Gold path' },
+        ];
+        const leakedNeed = phase === 'non-focused' ? needs[1]! : needs[0]!;
+        const message = `Could you explain ${leakedNeed[field].toUpperCase()}?`;
+        const safeOpening = initialResponse(
+          needs.map(({ description, acceptance }) => ({
+            description,
+            acceptance,
+            status: 'remaining',
+          })),
+          phase === 'initial' ? message : 'How should we proceed?',
+        );
+        const remaining =
+          phase === 'resolved' ? ['need_2'] : ['need_1', 'need_2'];
+        const steps: CompletionStep[] = [safeOpening];
+        if (phase === 'resolved') {
+          steps.push(
+            continuationResponse(remaining, 'What should happen next?'),
+          );
+        }
+        if (phase !== 'initial') {
+          steps.push(continuationResponse(remaining, message));
+        }
+        const completion = scriptedCompletion(...steps);
+        const ava = new AvaRolePlayer(
+          { task: 'Explain the access flow.' },
+          completion.invoke,
+          noRetryWait,
+        );
+        if (phase !== 'initial') await ava.nextTurn();
+        if (phase === 'resolved')
+          await ava.nextTurn('The first outcome is covered.');
+        const turn = await ava.nextTurn(
+          phase === 'initial' ? undefined : 'Please continue.',
+        );
+
+        assert.equal(turn.message, '');
+        assert.equal(turn.stop, true);
+        assert.equal(turn.error?.errorType, 'parse_error');
+        assert.equal(turn.error?.attempts, MAX_AVA_ATTEMPTS);
+        assert.doesNotMatch(
+          JSON.stringify(turn.error),
+          new RegExp(leakedNeed[field], 'i'),
+        );
+        assert.equal(
+          completion.calls.length,
+          MAX_AVA_ATTEMPTS +
+            (phase === 'initial' ? 0 : phase === 'resolved' ? 2 : 1),
+        );
+        assert.deepEqual(turn.needs, phase === 'initial' ? null : needs);
+      });
+    }
   }
 
   it('fails before sending a configured opening if initialization is invalid', async () => {
@@ -566,7 +644,7 @@ describe('AvaRolePlayer', () => {
       list: 'Ava returned a list instead of one human-like message.',
       code: 'Ava returned implementation code in its message.',
       'private terminology': 'Ava exposed private task-model terminology.',
-      'non-focused need leakage': 'Ava exposed a non-focused private need.',
+      'non-focused need leakage': 'Ava exposed private task-model text.',
     };
     for (const [name, response] of invalidCases) {
       it(name, async () => {
