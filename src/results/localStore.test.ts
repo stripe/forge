@@ -969,6 +969,13 @@ describe('local artifact store', () => {
       parseRunResult({ ...result, completion_calls: calls }).completion_calls,
       calls,
     );
+    assert.equal(
+      parseRunResult({
+        ...result,
+        completion_calls: [{ ...call, retry_ordinal: 11 }],
+      }).completion_calls[0]!.retry_ordinal,
+      11,
+    );
     const observedCall = {
       ...calls[1]!,
       http_status: 429,
@@ -996,6 +1003,7 @@ describe('local artifact store', () => {
       { provider_error_code: 'arbitrary' },
       { retry_wait_ms: 64001 },
       { retry_ordinal: -1 },
+      { retry_ordinal: 12 },
       { disposition: 'arbitrary' },
       { body: 'not allowed' },
     ]) {

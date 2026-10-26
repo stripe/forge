@@ -6,6 +6,7 @@ import {
   waitForCompletionRetry,
 } from './completionRetry.ts';
 import { CompletionInvocationError } from './contracts/completion.ts';
+import { observeCompletionFailure } from './providers/transportObservation.ts';
 
 const failure = (status: number, retryAfter?: number) =>
   new CompletionInvocationError('http_error', 'HTTP failure', {
@@ -81,6 +82,180 @@ describe('completion retry policy', () => {
       ).decision.wait_ms,
       1500,
     );
+  });
+
+  it('never lets zero, past, or small Retry-After hints shorten scheduled backoff', async () => {
+    for (const status of [429, 503]) {
+      for (const header of ['0', '0.001', 'Wed, 31 Dec 2025 00:00:00 GMT']) {
+        const observation = await observeCompletionFailure(
+          new Response('{}', { status, headers: { 'retry-after': header } }),
+          'openai',
+          new AbortController().signal,
+          Date.parse('2026-01-01T00:00:00Z'),
+        );
+        const error = new CompletionInvocationError(
+          'http_error',
+          'Unavailable',
+          observation,
+        );
+        let state = INITIAL_COMPLETION_RETRY_STATE;
+        const waits = [];
+        for (let index = 0; index < 6; index += 1) {
+          const next = completionRetryDecision(state, error, false, 1);
+          waits.push(next.decision.wait_ms);
+          assert.equal(next.decision.disposition, 'rate_limit_retry');
+          state = next.state;
+        }
+        assert.deepEqual(waits, [2000, 4000, 8000, 16000, 32000, 64000]);
+        assert.equal(
+          completionRetryDecision(state, error, false, 1).decision.disposition,
+          'exhausted',
+        );
+      }
+    }
+  });
+
+  it('gives short and long failures independent budgets in either order', () => {
+    for (const shortFirst of [false, true]) {
+      const groups = [
+        { error: failure(502), parse: false, waits: [4000, 16000, 64000] },
+        { error: undefined, parse: true, waits: [1000, 5000] },
+      ];
+      if (shortFirst) groups.reverse();
+      let state = INITIAL_COMPLETION_RETRY_STATE;
+      for (const { error, parse, waits } of groups) {
+        for (const wait of waits) {
+          const next = completionRetryDecision(state, error, parse, 1);
+          assert.equal(next.decision.disposition, 'retry');
+          assert.equal(next.decision.wait_ms, wait);
+          state = next.state;
+        }
+        assert.equal(
+          completionRetryDecision(state, error, parse, 1).decision.disposition,
+          'exhausted',
+        );
+      }
+      assert.equal(state.ordinal, 5);
+    }
+  });
+
+  it('stops immediately for permanent quota failures even with Retry-After', () => {
+    for (const hint of [undefined, 64000]) {
+      const error = new CompletionInvocationError('http_error', 'Unavailable', {
+        origin: 'host_transport',
+        http_status: 429,
+        provider_error_code: 'insufficient_quota',
+        ...(hint === undefined ? {} : { retry_after_ms: hint }),
+      });
+      const next = completionRetryDecision(
+        INITIAL_COMPLETION_RETRY_STATE,
+        error,
+        false,
+        1,
+      );
+      assert.deepEqual(next.decision, { disposition: 'exhausted', wait_ms: 0 });
+      assert.equal(next.state, INITIAL_COMPLETION_RETRY_STATE);
+    }
+  });
+
+  it('uses a bounded fallback for invalid observations or non-finite random values', () => {
+    for (const random of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    ]) {
+      assert.equal(
+        completionRetryDecision(
+          INITIAL_COMPLETION_RETRY_STATE,
+          failure(429),
+          false,
+          random,
+        ).decision.wait_ms,
+        2000,
+      );
+    }
+    assert.equal(
+      completionRetryDecision(
+        INITIAL_COMPLETION_RETRY_STATE,
+        failure(429, Number.NaN),
+        false,
+        1,
+      ).decision.wait_ms,
+      4000,
+    );
+  });
+
+  it('keeps retry execution and abort reasons independent of failed observation callbacks', async () => {
+    const signal = new AbortController().signal;
+    for (const disposition of ['retry', 'exhausted'] as const) {
+      await waitForCompletionRetry(
+        undefined,
+        { disposition, wait_ms: 0 },
+        signal,
+        {
+          sleep: async () => {},
+          onRetryDecision:
+            disposition === 'retry'
+              ? async () => {
+                  throw new Error('observer unavailable');
+                }
+              : () => {
+                  throw new Error('observer unavailable');
+                },
+        },
+      );
+    }
+    const controller = new AbortController();
+    await assert.rejects(
+      waitForCompletionRetry(
+        undefined,
+        { disposition: 'retry', wait_ms: 1000 },
+        controller.signal,
+        {
+          sleep: async () => {
+            controller.abort(new Error('original abort'));
+          },
+          onRetryDecision: () => {
+            throw new Error('observer unavailable');
+          },
+        },
+      ),
+      /original abort/,
+    );
+  });
+
+  it('leaves wait measurements unknown when the observation clock fails or moves backward', async () => {
+    let backwardsClock = 10;
+    for (const now of [
+      () => {
+        const value = backwardsClock;
+        backwardsClock = 0;
+        return value;
+      },
+      () => Number.NaN,
+      () => {
+        throw new Error('clock unavailable');
+      },
+    ]) {
+      let slept = false;
+      let observations = 0;
+      await waitForCompletionRetry(
+        undefined,
+        { disposition: 'retry', wait_ms: 1000 },
+        new AbortController().signal,
+        {
+          now,
+          sleep: async () => {
+            slept = true;
+          },
+          onRetryDecision: () => {
+            observations += 1;
+          },
+        },
+      );
+      assert.equal(slept, true);
+      assert.equal(observations, 0);
+    }
   });
 
   it('aborts the shared sleep without waiting for another attempt', async () => {
