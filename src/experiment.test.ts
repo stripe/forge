@@ -136,6 +136,96 @@ describe('public experiment run API', () => {
     },
   );
 
+  it('shares one history deadline across many attempts on resume', async () => {
+    const root = await experimentRunRoot();
+    const events: RunEvent[] = [];
+    const options: ExperimentRunOptions = {
+      root,
+      engine: defaultForgeEngine,
+      plans: [createTestResolvedRunPlan()],
+      composition: makeComposition(root),
+      resume: false,
+      signal: new AbortController().signal,
+      runIdFactory: () => 'completed-attempt',
+      progress: () => undefined,
+      execute: (input) => defaultForgeEngine.executeEval(input),
+    };
+    const completed = await runExperiment(options);
+    const checkpoint = parseExperimentRunCheckpoint(
+      JSON.parse(await fs.readFile(completed.checkpoint, 'utf8')),
+    );
+    checkpoint.entries[0]!.attempts.unshift(
+      ...Array.from({ length: 31 }, (_, index) => ({
+        run_id: `failed-attempt-${index}`,
+        state: 'errored' as const,
+        error_code: 'execution_error' as const,
+      })),
+    );
+    await fs.writeFile(completed.checkpoint, JSON.stringify(checkpoint));
+    const resultPath = path.join(
+      root,
+      'runs',
+      'completed-attempt',
+      'result.json',
+    );
+    const resultBytes = await fs.readFile(resultPath);
+    const entered = createGate();
+    let reads = 0;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const resume = runExperiment({
+        ...options,
+        resume: true,
+        composition: {
+          ...options.composition,
+          observer: { observe: (event) => void events.push(event) },
+          attemptDiagnosticsStore: {
+            async write() {
+              throw new Error('Unexpected write');
+            },
+            async read() {
+              reads += 1;
+              entered.resolve();
+              return new Promise(() => undefined);
+            },
+          },
+        },
+        execute: async () => {
+          throw new Error('Must reuse completed run');
+        },
+      });
+      await entered.promise;
+      await vi.advanceTimersByTimeAsync(2000);
+      assert.equal(reads, 1, 'Expired history must not start further reads');
+      const resumed = await resume;
+      assert.equal(resumed.skipped, 1);
+      assert.equal(resumed.executed, 0);
+      const saved = parseExperimentRunCheckpoint(
+        JSON.parse(await fs.readFile(completed.checkpoint, 'utf8')),
+      );
+      assert.equal(saved.entries[0]!.attempts.length, 32);
+      assert.ok(
+        saved.entries[0]!.attempts.every(
+          (attempt) => attempt.diagnostics_status === 'unavailable',
+        ),
+      );
+      const report = parseExperimentRunReport(
+        JSON.parse(await fs.readFile(completed.report, 'utf8')),
+      );
+      assert.equal(report.runs.length, 1);
+      assert.ok(
+        report.runs.every((run) => run.diagnostics_status === 'unavailable'),
+      );
+      assert.deepEqual(await fs.readFile(resultPath), resultBytes);
+      assert.equal(events.length, 0);
+      await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {
+        code: 'ENOENT',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     'missing',
     'malformed',

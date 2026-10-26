@@ -1757,12 +1757,14 @@ snapshots ignore late observations and lifecycle updates. Abrupt host loss can
 lose pending observations.
 
 Resume preserves historical files and checks supported, readable records against
-the selected attempt identity, separately from scored artifacts. Each history
-read is bounded to two seconds and caller cancellation. Missing, malformed,
-newer-format, unsafe-permission, unreadable, or timed-out diagnostics become
-`unavailable` in checkpoints and reports. Resume continues with at most one
-generic history warning per invocation; it does not repair or relax file modes.
-A readable conflicting identity stops resume and releases the lock. Custom stores
+the selected attempt identity, separately from scored artifacts. All diagnostic
+history reads share one two-second deadline and caller cancellation. After the
+deadline, remaining attempts become unavailable without further store reads.
+Missing, malformed, newer-format, unsafe-permission, unreadable, or timed-out
+diagnostics become `unavailable` in checkpoints and reports. Resume continues
+with at most one generic history warning per invocation; it does not repair or
+relax file modes. An identity conflict in a readable record checked before the
+deadline stops resume and releases the lock. Custom stores
 signal that conflict with the exported `AttemptDiagnosticsIdentityError`; other
 read failures mean unavailable history. Returned host records are also parsed
 and identity-checked by the controller. Caller cancellation still stops resume.

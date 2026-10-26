@@ -326,34 +326,47 @@ export async function runExperiment(
       }
     }
     const runIds = new Set<string>();
-    for (const [index, entry] of experimentRun.entries.entries()) {
-      for (const [attemptIndex, attempt] of entry.attempts.entries()) {
-        options.signal.throwIfAborted();
-        if (runIds.has(attempt.run_id))
-          throw new Error('Experiment run contains duplicate run IDs.');
-        runIds.add(attempt.run_id);
-        const saved = await readAttemptHistory(
-          diagnosticsStore,
-          attemptDiagnosticsIdentity(
-            attempt.run_id,
-            options.plans[index]!,
-            experimentRun.experiment_run_id,
-          ),
-          options.signal,
-        );
-        Object.assign(attempt, saved ? timingFields(saved.timing) : {}, {
-          diagnostics_status: saved ? 'available' : 'unavailable',
-        });
-        if (saved?.primary_failure && attempt.state === 'running') {
-          const { error_code, ...diagnostic } = saved.primary_failure;
-          entry.attempts[attemptIndex] = {
-            ...attempt,
-            state: 'errored',
-            error_code,
-            diagnostic,
-          };
+    const historyTimeout = new AbortController();
+    const historyTimer = setTimeout(
+      () =>
+        historyTimeout.abort(
+          new Error('Attempt diagnostic history deadline exhausted.'),
+        ),
+      ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
+    );
+    try {
+      for (const [index, entry] of experimentRun.entries.entries()) {
+        for (const [attemptIndex, attempt] of entry.attempts.entries()) {
+          options.signal.throwIfAborted();
+          if (runIds.has(attempt.run_id))
+            throw new Error('Experiment run contains duplicate run IDs.');
+          runIds.add(attempt.run_id);
+          const saved = await readAttemptHistory(
+            diagnosticsStore,
+            attemptDiagnosticsIdentity(
+              attempt.run_id,
+              options.plans[index]!,
+              experimentRun.experiment_run_id,
+            ),
+            options.signal,
+            historyTimeout.signal,
+          );
+          Object.assign(attempt, saved ? timingFields(saved.timing) : {}, {
+            diagnostics_status: saved ? 'available' : 'unavailable',
+          });
+          if (saved?.primary_failure && attempt.state === 'running') {
+            const { error_code, ...diagnostic } = saved.primary_failure;
+            entry.attempts[attemptIndex] = {
+              ...attempt,
+              state: 'errored',
+              error_code,
+              diagnostic,
+            };
+          }
         }
       }
+    } finally {
+      clearTimeout(historyTimer);
     }
     reportReady = true;
 
@@ -983,14 +996,9 @@ async function readAttemptHistory(
   store: AttemptDiagnosticsStore,
   identity: AttemptDiagnosticsIdentity,
   callerSignal: AbortSignal,
+  historySignal: AbortSignal,
 ) {
-  const timeout = new AbortController();
-  const signal = AbortSignal.any([callerSignal, timeout.signal]);
-  const timer = setTimeout(
-    () =>
-      timeout.abort(new Error('Attempt diagnostic history read timed out.')),
-    ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
-  );
+  const signal = AbortSignal.any([callerSignal, historySignal]);
   let onAbort: () => void = () => undefined;
   try {
     signal.throwIfAborted();
@@ -1008,7 +1016,6 @@ async function readAttemptHistory(
     if (error instanceof AttemptDiagnosticsIdentityError) throw error;
     return undefined;
   } finally {
-    clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);
   }
 }
