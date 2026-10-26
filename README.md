@@ -661,8 +661,35 @@ a run; each regrade keeps the run's original check results. The judge sees
 only the bounded workspace excerpts captured at run time. Runs without judging
 criteria keep their checks-only evaluation. Runs that could not be regraded
 appear as pending in the regrade report, and the command exits with status 1.
-Library hosts can call `regradeCompletedRun` and `regradeExperimentRun` from
-`@stripe/forge/regrade`.
+
+Compare saved verdicts and scores with the source run without model calls or
+credentials:
+
+```sh
+npx --no-install forge regrade diff \
+  --experiment-run ./results/experiments/EXPERIMENT_RUN_ID \
+  --regrade ./regrades/opus-4-6
+```
+
+The diff prints verdict agreement overall and by MUST, SHOULD, and OPTIONAL,
+each run's score change (regrade minus source), the mean change, flipped
+criteria, and judge errors on either side. Agreement counts only criteria with
+pass/fail verdicts on both sides; two errors do not count as agreement. OPTIONAL
+verdicts count toward agreement but keep their usual exclusion from scores.
+Null scores do not enter the mean change. Empty denominators display as `n/a`
+(`null` in JSON). Add `--json` for structured output.
+
+Missing regrades are listed separately, and checks-only runs are not compared.
+The command reads the latest verified completed attempts and does not use the
+reports, which may be stale. Regrades must match their source result digest and
+ordered criterion definitions, and must all use the same judge. Differences,
+judge errors, and missing regrades still exit with status 0; invalid input or
+mismatched artifacts exit nonzero.
+
+Library hosts can call `regradeCompletedRun`, `regradeExperimentRun`, and
+`diffRegradeExperimentRun` from `@stripe/forge/regrade`. `compareRegradeResults`
+provides the pure comparison over loaded source evaluations, result digests,
+and regrades.
 
 ## Development
 

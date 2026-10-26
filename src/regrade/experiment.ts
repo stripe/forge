@@ -297,7 +297,7 @@ function isWithin(parent: string, candidate: string): boolean {
   );
 }
 
-async function readExistingRegrade(
+export async function readExistingRegrade(
   file: string,
 ): Promise<RegradeResultV1 | undefined> {
   let body: string;

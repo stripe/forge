@@ -1,4 +1,12 @@
 /** Regrade saved Forge runs from their committed artifacts, without re-running agents. */
+
+export {
+  compareRegradeResults,
+  diffRegradeExperimentRun,
+  type RegradeDiff,
+  type RegradeDiffSourceRun,
+  type VerdictAgreement,
+} from './diff.ts';
 export {
   REGRADE_SUMMARY_FORMAT,
   type RegradeExperimentSummaryV1,

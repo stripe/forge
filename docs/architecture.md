@@ -1553,6 +1553,16 @@ Resume retains committed judge-error evaluations, preserving the coding-agent
 execution and evidence. A CLI run can exit successfully with judge errors;
 consumers must inspect the report to establish grading completeness.
 
+Regrade comparison separates artifact loading from pure analysis.
+`diffRegradeExperimentRun` uses experiment inspection and completed-run
+verification to select the latest completed source attempts, then reads saved
+regrades. `compareRegradeResults` pairs evaluations by run ID and source result
+digest and requires matching ordered criterion definitions and a single regrade
+judge. Neither operation changes artifacts or invokes a model. Judge errors are
+reported separately from paired pass/fail agreement; source errors remain
+visible even when a regrade is missing. See the README's
+[regrade workflow](../README.md#regrade-saved-runs) for denominators and CLI output.
+
 ## Result and artifact architecture
 
 A completed run always contains:
@@ -1749,7 +1759,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
 | `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
 | `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
-| `@stripe/forge/regrade` | Judge verified saved runs again from their artifacts with a chosen judge, into a separate directory |
+| `@stripe/forge/regrade` | Regrade verified saved runs with a chosen judge, and compare saved verdicts and scores |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/agents/opencode` | Experimental OpenCode Chat Completions adapter, stream parser, and exact-session export loader |
@@ -1773,9 +1783,11 @@ engine APIs:
 
 - `validate` loads inputs, expands every selection, resolves plans, constructs
   the default composition, and runs pure preflight;
-- `plan` selects one entry and prints canonical plan JSON; and
+- `plan` selects one entry and prints canonical plan JSON;
 - `run` supplies its argument validation and input loader to the shared
-  experiment run command stage for bounded execution and explicit resume.
+  experiment run command stage for bounded execution and explicit resume;
+- `regrade` judges saved evidence again with a selected model; and
+- `regrade diff` compares saved evaluations without a host composition or credentials.
 
 Its default composition registers the built-in Docker runtime, Claude Code,
 Codex, and OpenCode agent adapters, Anthropic and OpenAI host completion
