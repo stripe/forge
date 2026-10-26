@@ -1556,9 +1556,10 @@ consumers must inspect the report to establish grading completeness.
 Regrade comparison separates artifact loading from pure analysis.
 `diffRegradeExperimentRun` uses experiment inspection and completed-run
 verification to select the latest completed source attempts, then reads saved
-regrades. `compareRegradeResults` pairs evaluations by run ID and source result
-digest and requires matching ordered criterion definitions and a single regrade
-judge. Neither operation changes artifacts or invokes a model. Judge errors are
+regrades. Source artifact verification failures abort loading. The shared saved
+regrade reader validates each judge identity before reuse or comparison.
+`compareRegradeResults` pairs evaluations by run ID and source result digest
+and requires matching ordered criterion definitions and a single regrade judge. Neither operation changes artifacts or invokes a model. Judge errors are
 reported separately from paired pass/fail agreement; source errors remain
 visible even when a regrade is missing. See the README's
 [regrade workflow](../README.md#regrade-saved-runs) for denominators and CLI output.

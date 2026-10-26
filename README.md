@@ -681,10 +681,12 @@ Null scores do not enter the mean change. Empty denominators display as `n/a`
 
 Missing regrades are listed separately, and checks-only runs are not compared.
 The command reads the latest verified completed attempts and does not use the
-reports, which may be stale. Regrades must match their source result digest and
-ordered criterion definitions, and must all use the same judge. Differences,
-judge errors, and missing regrades still exit with status 0; invalid input or
-mismatched artifacts exit nonzero.
+reports, which may be stale. Source artifact verification failures stop the diff,
+even when that run has no saved regrade. Each regrade must name a nonempty judge
+provider and model and match its source result digest and ordered criterion
+definitions. All regrades must use the same judge. Differences, judge errors,
+and missing regrades still exit with status 0; invalid input or mismatched
+artifacts exit nonzero.
 
 Library hosts can call `regradeCompletedRun`, `regradeExperimentRun`, and
 `diffRegradeExperimentRun` from `@stripe/forge/regrade`. `compareRegradeResults`

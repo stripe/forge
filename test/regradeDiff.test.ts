@@ -209,6 +209,98 @@ describe('regrade diff', () => {
     assert.match(result.stdout, /Missing regrades: 1\nregrade-source/);
   });
 
+  it('rejects a damaged completed source even when its regrade is missing', async () => {
+    const { source, output, file } = await fixture();
+    await fs.rm(file);
+    await fs.writeFile(path.join(source.runLocation, 'result.json'), '{}');
+    const result = await invoke([
+      'regrade',
+      'diff',
+      '--experiment-run',
+      source.experimentLocation,
+      '--regrade',
+      output,
+      '--json',
+    ]);
+    assert.equal(result.code, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(
+      result.stderr,
+      /Source run failed artifact verification: regrade-source/,
+    );
+  });
+
+  it('keeps pending and failed execution attempts outside agreement', async () => {
+    const { source, output, file } = await fixture();
+    await fs.rm(file);
+    const checkpointFile = path.join(
+      source.experimentLocation,
+      'experiment.json',
+    );
+    const checkpoint = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
+    const attempt = checkpoint.entries[0].attempts[0];
+    await fs.rm(source.runLocation, { recursive: true });
+    for (const attempts of [
+      [],
+      [{ ...attempt, state: 'errored', error_code: 'agent_failed' }],
+    ]) {
+      checkpoint.entries[0].attempts = attempts;
+      await fs.writeFile(checkpointFile, JSON.stringify(checkpoint));
+      const result = await invoke([
+        'regrade',
+        'diff',
+        '--experiment-run',
+        source.experimentLocation,
+        '--regrade',
+        output,
+        '--json',
+      ]);
+      assert.equal(result.code, 0, result.stderr);
+      const diff = JSON.parse(result.stdout) as RegradeDiff;
+      assert.deepEqual(diff.runs, []);
+      assert.deepEqual(diff.missing_regrades, []);
+      assert.equal(diff.agreement.total, 0);
+    }
+  });
+
+  it('rejects saved judge identities without a nonempty provider and model', async () => {
+    const { source, output, file } = await fixture();
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+    for (const judge of [
+      {},
+      { provider: 'anthropic' },
+      { model: 'example' },
+      { provider: '', model: 'example' },
+      { provider: 'anthropic', model: '' },
+      { provider: 1, model: 'example' },
+      { provider: 'anthropic', model: false },
+      { provider: 'anthropic', model: '   ' },
+      { provider: 'anthropic', model: 'example', extra: true },
+      null,
+    ]) {
+      await fs.writeFile(file, JSON.stringify({ ...saved, judge }));
+      await assert.rejects(
+        diffRegradeExperimentRun({
+          experimentRun: source.experimentLocation,
+          regrade: output,
+        }),
+        /invalid judge/,
+      );
+    }
+    const result = await invoke([
+      'regrade',
+      'diff',
+      '--experiment-run',
+      source.experimentLocation,
+      '--regrade',
+      output,
+      '--json',
+    ]);
+    assert.equal(result.code, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /invalid judge/);
+  });
+
   it('rejects stale, malformed and unrelated saved regrades', async () => {
     const { source, output, file } = await fixture();
     const original = JSON.parse(await fs.readFile(file, 'utf8'));

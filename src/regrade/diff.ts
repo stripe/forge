@@ -218,6 +218,10 @@ export async function diffRegradeExperimentRun(input: {
   const sources: RegradeDiffSourceRun[] = [];
   for (const outcome of inspection.outcomes) {
     input.signal?.throwIfAborted();
+    if (outcome.error_code === 'invalid_artifacts')
+      throw new Error(
+        `Source run failed artifact verification: ${outcome.run_id}.`,
+      );
     if (outcome.state !== 'completed' || outcome.artifact === null) continue;
     const completed = await engine.verifyCompletedRun(
       outcome.artifact.location,

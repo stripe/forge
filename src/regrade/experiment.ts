@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { z } from 'zod';
 import { defaultForgeEngine } from '../engine.ts';
 import { inspectExperimentRun } from '../experiment.ts';
 import {
@@ -10,6 +11,7 @@ import {
   summarizeReportEvaluation,
 } from '../experimentReport.ts';
 import { sha256Digest } from '../model/hashes.ts';
+import { isSafeMetadata, isSafeSimpleIdentifier } from '../model/paths.ts';
 import type { ModelRefV1 } from '../model/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
 import {
@@ -20,6 +22,15 @@ import {
 } from './run.ts';
 
 export const REGRADE_SUMMARY_FORMAT = 'forge-regrade-experiment-v1' as const;
+
+const savedRegradeJudgeSchema = z
+  .object({
+    provider: z.string().refine(isSafeSimpleIdentifier),
+    model: z
+      .string()
+      .refine((value) => value.trim().length > 0 && isSafeMetadata(value)),
+  })
+  .strict();
 
 /** Outcome of regrading one saved experiment run into a separate directory. */
 export interface RegradeExperimentSummaryV1 {
@@ -307,10 +318,23 @@ export async function readExistingRegrade(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  const value = JSON.parse(body) as RegradeResultV1;
-  if (value.format !== REGRADE_RESULT_FORMAT)
+  const value: unknown = JSON.parse(body);
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('format' in value) ||
+    value.format !== REGRADE_RESULT_FORMAT
+  )
     throw new Error('An existing regrade file has an unknown format.');
-  return value;
+  if (
+    !savedRegradeJudgeSchema.safeParse(
+      'judge' in value ? value.judge : undefined,
+    ).success
+  )
+    throw new Error(
+      'An existing regrade file has an invalid judge; provider and model must be nonempty strings.',
+    );
+  return value as RegradeResultV1;
 }
 
 async function writeAtomic(file: string, body: string): Promise<void> {
