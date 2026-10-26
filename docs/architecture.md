@@ -1018,18 +1018,18 @@ Bodies, arbitrary headers, and endpoint URLs are never retained. An unreadable
 or locked error body leaves the provider error code unknown while preserving
 validated headers and status. Cleanup does not wait for stream cancellation.
 
-`result.json.completion_calls` retains the first 1,024 provider calls per eval,
-including failures before a later success. Optional `http_status`, `request_id`,
-`provider_error_code`, `retry_ordinal`, `retry_wait_ms`, and `disposition` fields
-record each subattempt. Ordinals start at zero for each Ava decision or judge
-criterion. Dispositions are `succeeded`, `failed`, `retry`, `rate_limit_retry`,
-or `exhausted`; waits measure elapsed sleep, bounded by the selected delay,
-including interrupted waits. `completion_call_totals` counts all calls, failed
-calls, omitted summaries, and measured `rate_limit_wait_ms`, even after the cap.
-Regrades retain these records and counters for their new judge calls only;
-their reports do not include waits from the source run. Runs without judging
-criteria retain their source-run totals with the unchanged evaluation.
-Reused older regrades
+`result.json.completion_calls` retains the first 1,024 provider calls per
+eval, including failures before a later success. Optional `http_status`,
+`request_id`, `provider_error_code`, `retry_ordinal`, `retry_wait_ms`, and
+`disposition` fields record each subattempt. Ordinals start at zero for each
+Ava decision or judge criterion. Dispositions are `succeeded`, `failed`,
+`retry`, `rate_limit_retry`, or `exhausted`; waits measure elapsed sleep,
+bounded by the selected delay, including interrupted waits.
+`completion_call_totals` counts all calls, failed calls, omitted summaries,
+and measured `rate_limit_wait_ms`, even after the cap. Regrades retain these
+records and counters for their new judge calls only; their reports do not
+include waits from the source run. Runs without judging criteria retain
+their source-run totals with the unchanged evaluation. Reused older regrades
 without counters leave the wait total absent. Older results may omit the new
 fields. These are observations and do not change plan digests. Attempts that
 fail before result commit do not persist these records.
