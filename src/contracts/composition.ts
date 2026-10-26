@@ -26,6 +26,8 @@ export interface ForgeComposition {
   readonly inputProvider: RunInputProvider;
   readonly artifactStore: RunArtifactStore;
   readonly attemptDiagnosticsStore?: AttemptDiagnosticsStore;
+  /** Host opt-in; never an authored input or environment default. */
+  readonly restrictedDiagnosticExcerpts?: boolean;
   readonly observer?: RunObserver;
   readonly contributors?: readonly RunArtifactContributor[];
 }

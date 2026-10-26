@@ -1,10 +1,19 @@
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { RunPhase } from '../contracts/observability.ts';
 import type {
   CompletionCallSummaryV1,
   CompletionCallTotalsV1,
 } from '../results/types.ts';
+import { createRedactedTail } from '../security/diagnosticRedaction.ts';
+import { redactSecrets } from '../security/redaction.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
+import {
+  type AgentDiagnosticsCapture,
+  agentInvocationSchema,
+  MAX_AGENT_DIAGNOSTICS_BYTES,
+  type RestrictedAgentExcerpts,
+} from './agent.ts';
 import {
   type AttemptDiagnosticsIdentity,
   type AttemptDiagnosticsSnapshot,
@@ -13,9 +22,13 @@ import {
   reservedAttemptDiagnostics,
 } from './model.ts';
 
-export type AttemptDiagnosticsWriter = (
-  snapshot: AttemptDiagnosticsSnapshot,
-) => Promise<boolean>;
+export interface AttemptDiagnosticsWriter {
+  (
+    snapshot: AttemptDiagnosticsSnapshot,
+    excerpts?: RestrictedAgentExcerpts,
+  ): Promise<boolean>;
+  readonly supportsRestrictedExcerpts?: boolean;
+}
 
 /** Execution owns this state; the store owns serialized publication and revisions. */
 export function createAttemptRecorder(input: {
@@ -33,7 +46,13 @@ export function createAttemptRecorder(input: {
   let available = false;
   let terminalPublished = false;
   let writing: Promise<void> | undefined;
-  let pending: AttemptDiagnosticsSnapshot | undefined;
+  let pending:
+    | {
+        snapshot: AttemptDiagnosticsSnapshot;
+        excerpts?: RestrictedAgentExcerpts | undefined;
+      }
+    | undefined;
+  let excerpts: RestrictedAgentExcerpts | undefined;
   let snapshot = reservedAttemptDiagnostics(
     input.identity,
     input.reservedAt ?? now().toISOString(),
@@ -46,7 +65,7 @@ export function createAttemptRecorder(input: {
   }
   function flush(): Promise<void> {
     if (!input.write || terminalPublished) return Promise.resolve();
-    pending = structuredClone(snapshot);
+    pending = { snapshot: structuredClone(snapshot), excerpts };
     writing ??= drain().finally(() => {
       writing = undefined;
     });
@@ -58,8 +77,8 @@ export function createAttemptRecorder(input: {
       pending = undefined;
       if (terminalPublished) continue;
       try {
-        available = await input.write!(captured);
-        if (available && captured.timing.finished_at !== undefined)
+        available = await input.write!(captured.snapshot, captured.excerpts);
+        if (available && captured.snapshot.timing.finished_at !== undefined)
           terminalPublished = true;
         if (!available) warn();
       } catch {
@@ -91,6 +110,90 @@ export function createAttemptRecorder(input: {
     },
     get snapshot() {
       return structuredClone(snapshot);
+    },
+    agentCapture(
+      secrets: readonly string[],
+      restrictedExcerpts = false,
+    ): AgentDiagnosticsCapture {
+      const supported = input.write?.supportsRestrictedExcerpts === true;
+      if (snapshot.timing.finished_at === undefined)
+        snapshot = {
+          ...snapshot,
+          capture: {
+            ...snapshot.capture,
+            restricted: restrictedExcerpts
+              ? supported
+                ? 'enabled'
+                : 'unsupported'
+              : 'disabled',
+          },
+        };
+      restrictedExcerpts = restrictedExcerpts && supported;
+      return {
+        restrictedExcerpts,
+        redact: (text) => redactSecrets(text, secrets).value,
+        redactedTail: (maximumBytes) =>
+          createRedactedTail(secrets, maximumBytes),
+        async record(candidate, body) {
+          if (!input.write || snapshot.timing.finished_at !== undefined) return;
+          try {
+            const record = agentInvocationSchema.parse(candidate);
+            const records = [
+              ...(snapshot.agent_invocations ?? []).filter(
+                (item) => item.sequence !== record.sequence,
+              ),
+              record,
+            ];
+            records.sort((a, b) => a.sequence - b.sequence);
+            let omitted = snapshot.agent_invocations_omitted ?? 0;
+            while (
+              records.length > 64 ||
+              Buffer.byteLength(serializeCanonicalJson(records)) >
+                MAX_AGENT_DIAGNOSTICS_BYTES
+            ) {
+              records.shift();
+              omitted += 1;
+            }
+            if (body && restrictedExcerpts) {
+              excerpts = structuredClone(body);
+              const descriptor = (value: string) => ({
+                bytes: Buffer.byteLength(value),
+                sha256: createHash('sha256').update(value).digest('hex'),
+              });
+              snapshot = {
+                ...snapshot,
+                restricted: {
+                  invocation: record.sequence,
+                  cli_events: descriptor(body.cli_events),
+                  stderr: descriptor(body.stderr),
+                  redacted: true,
+                  events_truncated: body.events_truncated,
+                  stderr_truncated: body.stderr_truncated,
+                },
+              };
+            }
+            snapshot = {
+              ...snapshot,
+              agent_invocations: records,
+              agent_invocations_omitted: omitted,
+              capture: {
+                ...snapshot.capture,
+                process: record.capture,
+                protocol:
+                  record.event_count > 0
+                    ? record.capture === 'partial'
+                      ? 'partial'
+                      : 'observed'
+                    : 'unsupported',
+              },
+            };
+            await flush();
+          } catch {
+            available = false;
+            warn();
+          }
+        },
+      };
     },
     flush,
     reserve: flush,

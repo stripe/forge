@@ -3673,3 +3673,31 @@ limits:
     ...(options.includeUnselectedCase ? { unselectedCaseFilePath } : {}),
   };
 }
+
+it('enables restricted diagnostic capture only through the explicit run option', async () => {
+  const fixture = await createBenchmarkFixture();
+  for (const enabled of [false, true]) {
+    let observed: boolean | undefined;
+    const code = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--output',
+        path.join(fixture.root, enabled ? 'enabled' : 'disabled'),
+        ...(enabled ? ['--restricted-diagnostic-excerpts'] : []),
+      ],
+      {
+        environment: { FORGE_RESTRICTED_DIAGNOSTIC_EXCERPTS: '1' },
+        stdout() {},
+        stderr() {},
+        execute: async (input) => {
+          observed = input.composition.restrictedDiagnosticExcerpts;
+          return executeOffline(input);
+        },
+      },
+    );
+    assert.equal(code, 0);
+    assert.equal(observed, enabled ? true : undefined);
+  }
+});

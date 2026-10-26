@@ -15,7 +15,7 @@ export function createAttemptDiagnosticsWriter(
     failure: ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS / 4,
     terminal: ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS / 4,
   };
-  return async (snapshot) => {
+  const write: AttemptDiagnosticsWriter = async (snapshot, excerpts) => {
     const budget =
       snapshot.timing.finished_at !== undefined
         ? 'terminal'
@@ -28,7 +28,7 @@ export function createAttemptDiagnosticsWriter(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        store.write(snapshot, controller.signal),
+        store.write(snapshot, controller.signal, excerpts),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
             remaining[budget] = 0;
@@ -49,4 +49,7 @@ export function createAttemptDiagnosticsWriter(
       );
     }
   };
+  return Object.assign(write, {
+    supportsRestrictedExcerpts: store.supportsRestrictedExcerpts === true,
+  });
 }

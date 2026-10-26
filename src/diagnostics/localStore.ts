@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AttemptDiagnosticsStore } from '../contracts/attemptDiagnostics.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
+import type { RestrictedAgentExcerpts } from './agent.ts';
 import {
   type AttemptDiagnosticsIdentity,
   type AttemptDiagnosticsRecord,
@@ -77,6 +79,133 @@ export function createAttemptDiagnosticsStore(options: {
     }
     return target;
   }
+  async function restrictedDirectory(
+    target: string,
+    create: boolean,
+  ): Promise<string> {
+    const folder = path.join(target, 'restricted');
+    if (create)
+      await fs
+        .mkdir(folder, { mode: 0o700 })
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EEXIST') throw error;
+        });
+    const stat = await fs.lstat(folder);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      (stat.mode & 0o077) !== 0 ||
+      (process.getuid && stat.uid !== process.getuid())
+    )
+      throw new Error('Unsafe restricted diagnostics directory.');
+    return folder;
+  }
+  async function verifyExcerpt(
+    folder: string,
+    descriptor: { sha256: string; bytes: number },
+    extension: string,
+    signal: AbortSignal,
+  ) {
+    const file = await fs.open(
+      path.join(folder, `${descriptor.sha256}.${extension}`),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const stat = await file.stat();
+      if (
+        !stat.isFile() ||
+        stat.nlink !== 1 ||
+        stat.size !== descriptor.bytes ||
+        (stat.mode & 0o077) !== 0 ||
+        (process.getuid && stat.uid !== process.getuid())
+      )
+        throw new Error('Unsafe restricted diagnostics file.');
+      const bytes = Buffer.alloc(descriptor.bytes + 1);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+      signal.throwIfAborted();
+      if (
+        bytesRead !== descriptor.bytes ||
+        createHash('sha256')
+          .update(bytes.subarray(0, bytesRead))
+          .digest('hex') !== descriptor.sha256
+      )
+        throw new Error('Restricted diagnostics digest mismatch.');
+    } finally {
+      await file.close();
+    }
+  }
+  async function publishExcerpts(
+    target: string,
+    candidate: AttemptDiagnosticsRecord,
+    excerpts: RestrictedAgentExcerpts | undefined,
+    signal: AbortSignal,
+  ) {
+    if (!candidate.restricted) {
+      if (excerpts)
+        throw new Error('Restricted diagnostics require descriptors.');
+      return;
+    }
+    const folder = await restrictedDirectory(target, true);
+    for (const [key, extension] of [
+      ['cli_events', 'json'],
+      ['stderr', 'txt'],
+    ] as const) {
+      const descriptor = candidate.restricted[key];
+      if (excerpts) {
+        const body = excerpts[key];
+        if (
+          Buffer.byteLength(body) !== descriptor.bytes ||
+          createHash('sha256').update(body).digest('hex') !== descriptor.sha256
+        )
+          throw new Error('Restricted diagnostics descriptor mismatch.');
+        signal.throwIfAborted();
+        const destination = path.join(
+          folder,
+          `${descriptor.sha256}.${extension}`,
+        );
+        const existing = await fs
+          .lstat(destination)
+          .catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT') throw error;
+            return undefined;
+          });
+        if (!existing) {
+          const temporary = path.join(folder, `${descriptor.sha256}.pending`);
+          await fs.unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT') throw error;
+          });
+          const file = await fs.open(
+            temporary,
+            constants.O_WRONLY |
+              constants.O_CREAT |
+              constants.O_EXCL |
+              constants.O_NOFOLLOW,
+            0o600,
+          );
+          try {
+            await file.writeFile(body, { signal });
+            await file.sync();
+            await file.close();
+            signal.throwIfAborted();
+            await fs.rename(temporary, destination);
+          } finally {
+            await file.close().catch(() => undefined);
+            await fs.unlink(temporary).catch(() => undefined);
+          }
+        }
+      }
+      await verifyExcerpt(folder, descriptor, extension, signal);
+    }
+    const parent = await fs.open(
+      folder,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    try {
+      await parent.sync();
+    } finally {
+      await parent.close();
+    }
+  }
   async function read(
     identity: AttemptDiagnosticsIdentity,
     signal: AbortSignal,
@@ -107,6 +236,22 @@ export function createAttemptDiagnosticsStore(options: {
         JSON.parse(buffer.subarray(0, bytesRead).toString('utf8')),
       );
       assertAttemptDiagnosticsIdentity(record.identity, identity);
+      if (record.restricted) {
+        try {
+          const folder = await restrictedDirectory(target, false);
+          await verifyExcerpt(
+            folder,
+            record.restricted.cli_events,
+            'json',
+            signal,
+          );
+          await verifyExcerpt(folder, record.restricted.stderr, 'txt', signal);
+        } catch {
+          throw new Error(
+            'Restricted diagnostics are missing, unsafe or mismatched.',
+          );
+        }
+      }
       return record;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -117,9 +262,12 @@ export function createAttemptDiagnosticsStore(options: {
   }
   return {
     read,
-    async write(snapshot, signal) {
+    supportsRestrictedExcerpts: true,
+    async write(snapshot, signal, excerpts) {
       // Snapshot caller-owned data before waiting for another writer.
       const candidate = parseAttemptDiagnostics({ ...snapshot, revision: 1 });
+      const capturedExcerpts =
+        excerpts === undefined ? undefined : structuredClone(excerpts);
       const key = path.join(
         await resolveRoot(true),
         'diagnostics',
@@ -149,6 +297,7 @@ export function createAttemptDiagnosticsStore(options: {
             ...candidate,
             revision: (previous?.revision ?? 0) + 1,
           });
+          await publishExcerpts(target, candidate, capturedExcerpts, signal);
           const temporary = path.join(target, 'attempt.pending');
           // Unlink the fixed staging name left by an interrupted writer, never follow it.
           await fs.unlink(temporary).catch((error: NodeJS.ErrnoException) => {

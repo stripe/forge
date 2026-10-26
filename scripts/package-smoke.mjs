@@ -181,6 +181,9 @@ try {
       assert.equal(openCodeRequirements.environment.credentials.OPENCODE_API_KEY.reference, 'opencode.api-key');
       assert.equal(JSON.parse(openCodeRequirements.environment.variables.OPENCODE_CONFIG_CONTENT).model, 'forge/gateway/model');
       assert.equal(typeof codex.createCodexAdapter, 'function');
+      assert.throws(() => codex.parseCodexStream('{malformed'), (error) =>
+        error instanceof codex.CodexStreamError && error.rejection.code === 'invalid_json' && error.rejection.line_index === 1);
+      assert.equal(forge.createAttemptDiagnosticsStore({root: './diagnostic-smoke'}).supportsRestrictedExcerpts, true);
       assert.equal(typeof codex.parseCodexStream, 'function');
       assert.equal(typeof codex.loadCodexEvidence, 'function');
       assert.equal(codex.createCodexAdapter().version, forge.FORGE_VERSION);

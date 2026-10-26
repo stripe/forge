@@ -1,3 +1,4 @@
+import type { AgentDiagnosticsCapture } from '../diagnostics/agent.ts';
 import type { AgentSelectionV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import type { CommandRunner } from './command.ts';
 import type { EnvironmentSpecification } from './credentials.ts';
@@ -153,6 +154,7 @@ export interface AgentPrepareContext {
 }
 
 export interface AgentSessionContext {
+  readonly diagnostics?: AgentDiagnosticsCapture;
   readonly runId: string;
   readonly plan: ResolvedRunPlanV1;
   readonly selection: AgentSelectionV1;

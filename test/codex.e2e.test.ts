@@ -9,9 +9,11 @@ import {
 } from '../src/agents/codex/index.ts';
 import { parseAtifTrajectory } from '../src/atif/index.ts';
 import type { CommandResult } from '../src/contracts/command.ts';
+import { attemptDiagnosticsIdentity } from '../src/diagnostics/model.ts';
 import {
   type CompletedRunV1,
   createArtifactStore,
+  createAttemptDiagnosticsStore,
   createJudgeTranscriptProjection,
   credentialReference,
   executeEval,
@@ -1555,4 +1557,131 @@ describe('Codex engine integration', () => {
       { code: 'ENOENT' },
     );
   });
+});
+
+for (const restricted of [false, true]) {
+  it(`persists failed Codex invocations before cleanup with restricted excerpts ${restricted ? 'enabled' : 'disabled'}`, async () => {
+    const plan = createTestResolvedRunPlan({ agent: selection });
+    const stdout = [
+      { type: 'thread.started', thread_id: SESSION_ID },
+      { type: 'turn.started' },
+      { type: 'turn.failed', error: { message: `HTTP 502 ${AGENT_SECRET}` } },
+    ]
+      .map((value) => JSON.stringify(value))
+      .join('\n');
+    const test = await fixture(plan, {
+      agentCommand: async (call) => {
+        for (const line of stdout.split('\n'))
+          call.options.onStdoutLine?.(line);
+        return {
+          stdout,
+          stderr: `error ${AGENT_SECRET}`,
+          exitCode: 1,
+          durationMs: 1,
+        };
+      },
+    });
+    const store = createAttemptDiagnosticsStore({ root: test.resultsRoot });
+    const runId = 'codex-failed-diagnostics';
+    await assert.rejects(
+      executeEval({
+        runId,
+        plan,
+        composition: {
+          ...test.composition,
+          attemptDiagnosticsStore: store,
+          restrictedDiagnosticExcerpts: restricted,
+        },
+      }),
+      { code: 'agent_failed' },
+    );
+    const saved = (await store.read(
+      attemptDiagnosticsIdentity(runId, plan),
+      new AbortController().signal,
+    ))!;
+    assert.equal(saved.state, 'errored');
+    assert.equal(saved.primary_failure?.error_code, 'agent_failed');
+    assert.equal(
+      saved.agent_invocations?.[0]?.extraction_rejection?.code,
+      'turn_failed',
+    );
+    assert.equal(saved.agent_invocations?.[0]?.events.at(-1)?.http_status, 502);
+    assert.equal(saved.timing.cleanup_completed_at !== undefined, true);
+    assert.equal(test.runtime.runs[0]?.events.at(-1), 'dispose');
+    assert.equal(JSON.stringify(saved).includes(AGENT_SECRET), false);
+    await assert.rejects(fs.stat(path.join(test.resultsRoot, 'runs', runId)), {
+      code: 'ENOENT',
+    });
+    if (restricted) {
+      assert.ok(saved.restricted);
+      const directory = path.join(
+        test.resultsRoot,
+        'diagnostics',
+        runId,
+        'restricted',
+      );
+      assert.equal(
+        await fs.readFile(
+          path.join(directory, `${saved.restricted.stderr.sha256}.txt`),
+          'utf8',
+        ),
+        'error [REDACTED]',
+      );
+      assert.equal(
+        (
+          await fs.readFile(
+            path.join(directory, `${saved.restricted.cli_events.sha256}.json`),
+            'utf8',
+          )
+        ).includes(AGENT_SECRET),
+        false,
+      );
+    } else {
+      assert.equal(saved.restricted, undefined);
+      await assert.rejects(
+        fs.stat(
+          path.join(test.resultsRoot, 'diagnostics', runId, 'restricted'),
+        ),
+        { code: 'ENOENT' },
+      );
+    }
+  });
+}
+
+it('produces identical completed Codex artifacts with diagnostics disabled or enabled', async () => {
+  const plan = createTestResolvedRunPlan({ agent: selection });
+  const outputs: CompletedRunV1[] = [];
+  for (const enabled of [false, true]) {
+    const test = await fixture(plan);
+    const completed = await executeEval({
+      runId: 'codex-identical',
+      plan,
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+      composition: {
+        ...test.composition,
+        ...(enabled
+          ? {
+              attemptDiagnosticsStore: createAttemptDiagnosticsStore({
+                root: test.resultsRoot,
+              }),
+              restrictedDiagnosticExcerpts: true,
+            }
+          : {}),
+      },
+    });
+    await verifyCompletedRun(completed.location);
+    outputs.push(completed);
+  }
+  const [without, withCapture] = outputs;
+  assert.deepEqual(withCapture!.result.evaluation, without!.result.evaluation);
+  const files = await fs.readdir(without!.location, { recursive: true });
+  for (const name of files) {
+    const first = path.join(without!.location, name);
+    if ((await fs.stat(first)).isFile())
+      assert.deepEqual(
+        await fs.readFile(path.join(withCapture!.location, name)),
+        await fs.readFile(first),
+        name,
+      );
+  }
 });
