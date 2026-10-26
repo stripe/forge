@@ -515,7 +515,13 @@ describe('runConversation', () => {
   });
 
   it('preserves configured stop-sentinel behavior and validates completed turns', async () => {
-    const completion = completions(new Error('must not be called'));
+    const completion = completions(
+      JSON.stringify({
+        user_needs: [
+          { description: 'Finish the request', status: 'remaining' },
+        ],
+      }),
+    );
     const signal = new AbortController().signal;
     const agent = session([
       { text: 'Done.', sessionId: 'persistent-session', toolCalls: [] },
@@ -536,10 +542,12 @@ describe('runConversation', () => {
       validateCompletedTurns: (turns) => validatedLengths.push(turns.length),
     });
 
-    assert.equal(completion.calls.length, 0);
+    assert.equal(completion.calls.length, 1);
     assert.equal(agent.sent.length, 1);
     assert.equal(result.stopReason, 'task_complete');
-    assert.deepEqual(result.avaAudit.needs, null);
+    assert.deepEqual(result.avaAudit.needs, [
+      { id: 'need_1', description: 'Finish the request' },
+    ]);
     assert.deepEqual(validatedLengths, [1]);
   });
 

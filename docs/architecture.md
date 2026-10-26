@@ -993,9 +993,14 @@ structured completions.
 Ava privately derives up to six high-level needs, each at most 240 characters,
 from the case task and context. It focuses on one remaining need at a time and
 emits user messages of at most 500 characters. Its private need model is never
-sent to the coding agent. A configured
-initial prompt is sent verbatim before Ava initializes; otherwise Ava generates
-the opening turn.
+sent to the coding agent. Ava initializes before the first agent answer.
+With a configured initial prompt, a needs-only completion runs before that
+opening is sent verbatim; otherwise Ava generates the opening and needs together.
+The first agent answer follows the continuation path in both cases. Configured
+openings therefore cost one additional Ava call per eval.
+
+Runs produced before this initialization behavior changed have different Ava
+semantics. Plans record the Forge version, with no separate Ava version.
 
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
 and sends through one agent session. Ava assesses every completed response,

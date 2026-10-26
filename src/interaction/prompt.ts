@@ -72,7 +72,10 @@ const HUMAN_BEHAVIOR = `## Human behavior
 - Put only the next message for the coding assistant in the response's message
   field, with no preamble, narration, or quotation marks.`;
 
-export function buildAvaInitializationPrompt(inputs: AvaPromptInputs): string {
+export function buildAvaInitializationPrompt(
+  inputs: AvaPromptInputs,
+  needsOnly = false,
+): string {
   return `${roleAndTask(inputs)}
 
 ${HUMAN_BEHAVIOR}
@@ -103,12 +106,16 @@ assistant.
   requested or indispensable to the stated outcome.
 - Mark a need satisfied only when the conversation already covers it. With no
   prior coding-assistant response, every need must remain.
-- Select exactly one remaining need to pursue in the message. If every need is
+${
+  needsOnly
+    ? '- Return only the private needs. The runner sends the configured opening; do not generate a message.'
+    : `- Select exactly one remaining need to pursue in the message. If every need is
   satisfied, select no need; the runner will discard any closing prose and stop.
 - Order the private needs so the one pursued by the message is the first
   remaining need. The runner derives the focus from that order.
 - The message may paraphrase only the selected need. Do not reveal or summarize
-  the other needs.`;
+  the other needs.`
+}`;
 }
 
 export function buildAvaContinuationPrompt(

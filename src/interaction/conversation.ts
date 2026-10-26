@@ -14,7 +14,7 @@ export interface AvaDecisionAudit {
   readonly afterAgentTurn: number | null;
   readonly message: string;
   readonly stop: boolean;
-  /** Null until a configured opening is followed by a generated decision. */
+  /** Null if initialization failed before private state was available. */
   readonly remainingNeedIds: readonly string[] | null;
   readonly focusNeedId: string | null;
   readonly codingAgentInvoked: boolean;
@@ -23,7 +23,7 @@ export interface AvaDecisionAudit {
 }
 
 export interface AvaConversationAudit {
-  /** Null only if a configured stop opening ended before Ava initialized. */
+  /** Null if initialization failed before private state was available. */
   readonly needs: readonly AvaNeed[] | null;
   readonly decisions: readonly AvaDecisionAudit[];
 }

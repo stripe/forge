@@ -26,7 +26,7 @@ export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
 export interface AvaRolePlayerOptions extends AvaPromptInputs {
-  /** Configured opening sent verbatim before Ava initializes private state. */
+  /** Configured opening sent verbatim after Ava initializes private state. */
   readonly initialPrompt?: string;
   readonly signal?: AbortSignal;
 }
@@ -53,7 +53,7 @@ export interface AvaError {
 export interface AvaTurn {
   readonly message: string;
   readonly stop: boolean;
-  /** Null only while a configured opening has not initialized Ava. */
+  /** Null only if initialization failed before private state was available. */
   readonly remainingNeeds: readonly AvaNeed[] | null;
   /** Ava's complete private task model; never forward it to the agent. */
   readonly needs: readonly AvaNeed[] | null;
@@ -75,48 +75,64 @@ const InitialNeedResponse = z
   })
   .strict();
 
-const InitialAvaResponse = z
+const InitialAvaNeeds = z
   .object({
     user_needs: z.array(InitialNeedResponse).min(1).max(MAX_AVA_NEEDS),
-    message: z.string().max(MAX_AVA_MESSAGE_CHARACTERS),
   })
   .strict();
 
-const INITIAL_AVA_RESPONSE_SCHEMA: StrictCompletionResponseSchema = {
-  name: 'ava_initial_turn',
-  description: "Ava's compact private task model and first generated message.",
-  strict: true,
-  schema: {
-    type: 'object',
-    properties: {
-      user_needs: {
-        type: 'array',
-        minItems: 1,
-        maxItems: MAX_AVA_NEEDS,
-        items: {
-          type: 'object',
-          properties: {
-            description: {
-              type: 'string',
-              minLength: 1,
-              maxLength: MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
-              pattern: '\\S',
+const InitialAvaResponse = InitialAvaNeeds.extend({
+  message: z.string().max(MAX_AVA_MESSAGE_CHARACTERS),
+});
+
+function initializationResponseFormat(
+  needsOnly: boolean,
+): StrictCompletionResponseSchema {
+  return {
+    name: needsOnly ? 'ava_initial_needs' : 'ava_initial_turn',
+    description: needsOnly
+      ? "Ava's compact private task model before the configured opening."
+      : "Ava's compact private task model and first generated message.",
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        user_needs: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_AVA_NEEDS,
+          items: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                minLength: 1,
+                maxLength: MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
+                pattern: '\\S',
+              },
+              status: {
+                type: 'string',
+                enum: ['remaining', 'satisfied'],
+              },
             },
-            status: {
-              type: 'string',
-              enum: ['remaining', 'satisfied'],
-            },
+            required: ['description', 'status'],
+            additionalProperties: false,
           },
-          required: ['description', 'status'],
-          additionalProperties: false,
         },
+        ...(needsOnly
+          ? {}
+          : {
+              message: {
+                type: 'string',
+                maxLength: MAX_AVA_MESSAGE_CHARACTERS,
+              },
+            }),
       },
-      message: { type: 'string', maxLength: MAX_AVA_MESSAGE_CHARACTERS },
+      required: needsOnly ? ['user_needs'] : ['user_needs', 'message'],
+      additionalProperties: false,
     },
-    required: ['user_needs', 'message'],
-    additionalProperties: false,
-  },
-};
+  };
+}
 
 interface ContinuationAvaResponse {
   readonly remainingNeedIds: readonly string[];
@@ -263,22 +279,7 @@ export class AvaRolePlayer {
     const firstTurn =
       this.#history.length === 0 && lastAgentResponse === undefined;
 
-    if (firstTurn && this.#initialPrompt !== undefined) {
-      const stop = this.#initialPrompt.includes(AVA_STOP_SENTINEL);
-      const message = this.#initialPrompt
-        .split(AVA_STOP_SENTINEL)
-        .join('')
-        .trim();
-      this.#history.push({ role: 'assistant', content: message });
-      return {
-        message,
-        stop,
-        remainingNeeds: null,
-        needs: null,
-        focusNeedId: null,
-        source: 'configured_initial_prompt',
-      };
-    }
+    const configuredOpening = firstTurn && this.#initialPrompt !== undefined;
 
     if (lastAgentResponse !== undefined) {
       this.#history.push({
@@ -292,7 +293,7 @@ export class AvaRolePlayer {
     const initializing = this.#needs === undefined;
     const remainingNeedIds = this.#remainingNeedIds ?? [];
     const systemPrompt = initializing
-      ? buildAvaInitializationPrompt(this.#promptInputs)
+      ? buildAvaInitializationPrompt(this.#promptInputs, configuredOpening)
       : buildAvaContinuationPrompt(this.#promptInputs, {
           needs: this.#needs!,
           remainingNeedIds,
@@ -301,8 +302,9 @@ export class AvaRolePlayer {
     if (lastAgentResponse === undefined) {
       messages.push({
         role: 'user',
-        content:
-          'Start the conversation with one natural message about one high-level need.',
+        content: configuredOpening
+          ? 'Derive the private needs before the configured opening is sent. Return only the private task model.'
+          : 'Start the conversation with one natural message about one high-level need.',
       });
     }
 
@@ -311,7 +313,7 @@ export class AvaRolePlayer {
       messages,
       maxTokens: initializing ? 700 : 400,
       responseSchema: initializing
-        ? INITIAL_AVA_RESPONSE_SCHEMA
+        ? initializationResponseFormat(configuredOpening)
         : continuationResponseFormat(remainingNeedIds),
       signal: this.#signal,
     } as const;
@@ -349,7 +351,7 @@ export class AvaRolePlayer {
         }
         try {
           const turn = initializing
-            ? this.#initializeFromResponse(raw, lastAgentResponse === undefined)
+            ? this.#initializeFromResponse(raw, configuredOpening)
             : this.#continueFromResponse(raw);
           if (turn.message) {
             this.#history.push({ role: 'assistant', content: turn.message });
@@ -370,23 +372,29 @@ export class AvaRolePlayer {
     return this.#errorTurn(finalError!);
   }
 
-  #initializeFromResponse(raw: string, opening: boolean): AvaTurn {
-    const parsed = InitialAvaResponse.parse(JSON.parse(raw));
+  #initializeFromResponse(raw: string, configuredOpening: boolean): AvaTurn {
+    const parsed = configuredOpening
+      ? { ...InitialAvaNeeds.parse(JSON.parse(raw)), message: '' }
+      : InitialAvaResponse.parse(JSON.parse(raw));
     assertUniqueNeedDescriptions(parsed.user_needs);
     const needs = parsed.user_needs.map(({ description }, index) => ({
       id: `need_${index + 1}`,
       description,
     }));
-    const remainingIndexes = parsed.user_needs.flatMap(({ status }, index) =>
-      opening || status === 'remaining' ? [index] : [],
-    );
-    const remainingNeedIds = remainingIndexes.map((index) => needs[index]!.id);
-    if (remainingNeedIds.length === 0) {
+    const remainingNeedIds = needs.map(({ id }) => id);
+    if (configuredOpening) {
       this.#needs = needs;
       this.#remainingNeedIds = remainingNeedIds;
-      return this.#terminalTurn();
+      return {
+        message: this.#initialPrompt!.split(AVA_STOP_SENTINEL).join('').trim(),
+        stop: this.#initialPrompt!.includes(AVA_STOP_SENTINEL),
+        needs,
+        remainingNeeds: needs,
+        focusNeedId: null,
+        source: 'configured_initial_prompt',
+      };
     }
-    const focusNeedId = needs[remainingIndexes[0]!]!.id;
+    const focusNeedId = needs[0]!.id;
     const turn: AvaTurn = {
       message: assertSafeGeneratedMessage(parsed.message, focusNeedId, needs),
       stop: false,

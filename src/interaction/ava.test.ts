@@ -151,12 +151,13 @@ describe('AvaRolePlayer', () => {
     );
   });
 
-  it('uses a configured opening verbatim, then initializes from agent history', async () => {
+  it('initializes before a configured opening and continues after the first answer', async () => {
+    const need = { id: 'need_1', description: 'Finish the requested work' };
     const completion = scriptedCompletion(
-      initialResponse(
-        [{ description: 'Finish the requested work', status: 'satisfied' }],
-        'This closing prose is discarded.',
-      ),
+      JSON.stringify({
+        user_needs: [{ description: need.description, status: 'remaining' }],
+      }),
+      continuationResponse([], 'This closing prose is discarded.'),
     );
     const ava = new AvaRolePlayer(
       { task: 'Do the work', initialPrompt: 'Please inspect the repository.' },
@@ -166,21 +167,46 @@ describe('AvaRolePlayer', () => {
     assert.deepEqual(await ava.nextTurn(), {
       message: 'Please inspect the repository.',
       stop: false,
-      remainingNeeds: null,
-      needs: null,
+      remainingNeeds: [need],
+      needs: [need],
       focusNeedId: null,
       source: 'configured_initial_prompt',
     });
-    assert.equal(completion.calls.length, 0);
+    assert.equal(completion.calls.length, 1);
+    assert.equal(completion.calls[0]!.responseSchema.name, 'ava_initial_needs');
+    assert.deepEqual(completion.calls[0]!.responseSchema.schema.required, [
+      'user_needs',
+    ]);
+    assert.ok(
+      completion.calls[0]!.messages.every(({ role }) => role === 'user'),
+    );
+    assert.match(
+      completion.calls[0]!.systemPrompt,
+      /Return only the private needs/,
+    );
 
     const terminal = await ava.nextTurn('The repository is ready.');
     assert.equal(terminal.stop, true);
     assert.equal(terminal.message, '');
     assert.deepEqual(terminal.remainingNeeds, []);
-    assert.deepEqual(completion.calls[0]!.messages, [
+    assert.equal(completion.calls[1]!.responseSchema.name, 'ava_turn');
+    assert.deepEqual(completion.calls[1]!.messages, [
       { role: 'assistant', content: 'Please inspect the repository.' },
       { role: 'user', content: 'The repository is ready.' },
     ]);
+  });
+
+  it('fails before sending a configured opening if initialization is invalid', async () => {
+    const completion = scriptedCompletion('{invalid');
+    const turn = await new AvaRolePlayer(
+      { task: 'Do the work', initialPrompt: 'Please do the work.' },
+      completion.invoke,
+      noRetryWait,
+    ).nextTurn();
+    assert.equal(turn.message, '');
+    assert.equal(turn.error?.errorType, 'parse_error');
+    assert.equal(turn.needs, null);
+    assert.equal(completion.calls.length, MAX_AVA_ATTEMPTS);
   });
 
   it('keeps private state out of history, derives focus, strips recaps, and stops blank', async () => {

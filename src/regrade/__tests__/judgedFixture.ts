@@ -78,6 +78,9 @@ export async function runJudgedFixture(root: string) {
         user_needs: [
           { description: 'Create the release summary', status: 'remaining' },
         ],
+      }),
+      JSON.stringify({
+        remaining_need_ids: ['need_1'],
         message: `Use this exact status sentence: ${DELIVERABLE.trim()}`,
       }),
       JSON.stringify({ remaining_need_ids: [], message: '' }),

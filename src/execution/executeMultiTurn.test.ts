@@ -89,14 +89,18 @@ describe('executeEval multi-turn and judging integration', () => {
       id: 'test-provider',
       responses: [
         (request) => {
-          assert.deepEqual(agent.messages, [initialPrompt]);
-          assert.equal(request.messages[0]?.content, initialPrompt);
+          assert.deepEqual(agent.messages, []);
+          assert.ok(request.messages.every(({ role }) => role === 'user'));
           return JSON.stringify({
             user_needs: [
-              { description: 'Create the answer file', status: 'satisfied' },
+              { description: 'Create the answer file', status: 'remaining' },
             ],
-            message: '',
           });
+        },
+        (request) => {
+          assert.deepEqual(agent.messages, [initialPrompt]);
+          assert.equal(request.messages[0]?.content, initialPrompt);
+          return JSON.stringify({ remaining_need_ids: [], message: '' });
         },
       ],
     });
