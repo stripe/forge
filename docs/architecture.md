@@ -1020,10 +1020,18 @@ version, and subagent exclusions still apply. Actual user turns are distinguishe
 from injected AGENTS.md and environment context, which become system steps. Function and
 custom-tool calls retain native call IDs, arguments, and correlated outputs;
 tool-search calls and returned tool definitions remain correlated tool behavior.
+Web-search completion snapshots must match a completed `web_search_call` in the
+same turn. Search, page-open, and page-find actions become one `web_search` tool
+call with the recorded query and action. Image-view snapshots validate the path
+of their matching `view_image` call, including native file URLs; the existing
+call and output supply the evidence without adding a duplicate tool call.
 Every MCP call requires a matching `McpToolCall` completion snapshot verified
 against its call and result. A missing snapshot triggers fallback even if an
 output includes `is_error`; another completion type cannot substitute. A
-completed invocation does not override an MCP `isError` result.
+completed invocation does not override an MCP `isError` result. Built-in MCP
+resource listings may omit the namespace and render their result directly.
+Forge restores the server identity from the matching snapshot and requires the
+output to equal its single text block.
 
 Supported Codex MCP text and image blocks may carry opaque `annotations` and
 `_meta` objects under the existing JSON graph bounds. Metadata in recorded

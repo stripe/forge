@@ -3,7 +3,10 @@ import { describe, it } from 'vitest';
 
 import { parseAtifTrajectory } from '../../atif/index.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
-import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
+import {
+  createJudgeTranscriptProjection,
+  type JudgeVisibleStepV1,
+} from '../../evaluation/judgeTranscript.ts';
 import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
@@ -478,6 +481,371 @@ async function loadToolSequence(
 }
 
 describe('Codex exact rollout evidence', () => {
+  it('normalizes web search actions once in either native record order', async () => {
+    for (const action of [
+      {
+        type: 'search',
+        query: 'synthetic query',
+        queries: ['synthetic query'],
+      },
+      { type: 'open_page', url: 'https://example.com/guide' },
+      {
+        type: 'find_in_page',
+        url: 'https://example.com/guide',
+        pattern: 'sample',
+      },
+    ]) {
+      for (const reverse of [false, true]) {
+        const sequence = [
+          capturedItem({
+            type: 'WebSearch',
+            id: 'web-1',
+            query: 'lookup',
+            action,
+          }),
+          capturedResponse({
+            type: 'web_search_call',
+            id: 'web-1',
+            status: 'completed',
+            action,
+          }),
+        ];
+        const evidence = await loadToolSequence(
+          reverse ? sequence.reverse() : sequence,
+        );
+        assert.equal(evidence.kind, 'available');
+        if (evidence.kind !== 'available')
+          throw new Error('Expected web evidence.');
+        assert.deepEqual(evidence.warnings, []);
+        const trajectory = parseAtifTrajectory(evidence.trajectory);
+        assert.deepEqual(
+          trajectory.steps.flatMap((step) => step.tool_calls ?? []),
+          [
+            {
+              tool_call_id: 'web-1',
+              function_name: 'web_search',
+              arguments: { query: 'lookup', action },
+            },
+          ],
+        );
+        assert.equal(
+          trajectoryCoversCompletedTurns(
+            trajectory,
+            [
+              {
+                user: 'First prompt.',
+                assistant: 'First response.',
+                toolCalls: [
+                  {
+                    id: 'web-1',
+                    name: 'web_search',
+                    input: { query: 'lookup', action },
+                  },
+                ],
+              },
+            ],
+            { kind: 'native_log', format: 'codex-rollout-jsonl' },
+          ),
+          true,
+        );
+      }
+    }
+  });
+
+  it('rejects incomplete, duplicate, contradictory, and unknown web search records', async () => {
+    const action = { type: 'search', query: 'synthetic query' };
+    const completed = capturedItem({
+      type: 'WebSearch',
+      id: 'web-1',
+      query: 'synthetic query',
+      action,
+    });
+    const response = capturedResponse({
+      type: 'web_search_call',
+      id: 'web-1',
+      status: 'completed',
+      action,
+    });
+    for (const sequence of [
+      [completed],
+      [response],
+      [completed, response, response],
+      [completed, completed, response],
+      [
+        completed,
+        capturedResponse({ ...response.payload, status: 'in_progress' }),
+      ],
+      [
+        completed,
+        capturedResponse({
+          ...response.payload,
+          action: { ...action, query: 'other' },
+        }),
+      ],
+      [completed, capturedResponse({ ...response.payload, extra: true })],
+      [
+        capturedItem({
+          type: 'WebSearch',
+          id: 'web-1',
+          query: 'synthetic query',
+          action,
+          extra: true,
+        }),
+        response,
+      ],
+      [
+        capturedItem({ type: 'WebSearch', id: 'web-1', query: 1, action }),
+        response,
+      ],
+      [
+        completed,
+        capturedResponse({
+          ...response.payload,
+          action: { ...action, extra: true },
+        }),
+      ],
+      [
+        completed,
+        capturedResponse({
+          ...response.payload,
+          action: { ...action, queries: [1] },
+        }),
+      ],
+      [
+        completed,
+        capturedResponse({ ...response.payload, action: { type: 'unknown' } }),
+      ],
+      [completed, capturedResponse(response.payload, 'other-turn')],
+      [
+        capturedItem(
+          completed.payload.item as Record<string, unknown>,
+          'other-turn',
+        ),
+        response,
+      ],
+      ...[
+        { ...action, extra: true },
+        { ...action, queries: [1] },
+        { type: 'unknown' },
+        { type: 'open_page', url: 1 },
+        { type: 'find_in_page', url: 'https://example.com/guide', pattern: 1 },
+      ].map((invalidAction) => [
+        capturedItem({
+          type: 'WebSearch',
+          id: 'web-1',
+          query: 'lookup',
+          action: invalidAction,
+        }),
+        capturedResponse({ ...response.payload, action: invalidAction }),
+      ]),
+      [capturedItem({ type: 'UnknownItem', id: 'unknown' })],
+      [capturedResponse({ type: 'unknown_response', id: 'unknown' })],
+    ]) {
+      assert.equal((await loadToolSequence(sequence)).kind, 'unavailable');
+    }
+  });
+
+  it('correlates image view snapshots with their existing calls and marks omitted images', async () => {
+    for (const path of [
+      '/tmp/synthetic image.png',
+      'file:///tmp/synthetic%20image.png',
+    ]) {
+      const sequence = [
+        capturedResponse({
+          type: 'function_call',
+          call_id: 'image-1',
+          name: 'view_image',
+          arguments: JSON.stringify({ path: '/tmp/synthetic image.png' }),
+        }),
+        capturedItem({ type: 'ImageView', id: 'image-1', path }),
+        capturedResponse({
+          type: 'function_call_output',
+          call_id: 'image-1',
+          output: [
+            {
+              type: 'input_image',
+              image_url: `data:image/png;base64,${IMAGE_DATA}`,
+            },
+          ],
+        }),
+      ];
+      const evidence = await loadToolSequence(sequence);
+      if (evidence.kind !== 'available')
+        throw new Error('Expected image evidence.');
+      assert.equal(evidence.warnings.length, 1);
+      assert.equal(evidence.warnings[0]?.code, 'value_omitted');
+      const steps = parseAtifTrajectory(evidence.trajectory).steps.filter(
+        (step) => step.tool_calls?.length,
+      );
+      assert.equal(steps.length, 1);
+      assert.deepEqual(steps[0]?.tool_calls, [
+        {
+          tool_call_id: 'image-1',
+          function_name: 'view_image',
+          arguments: { path: '/tmp/synthetic image.png' },
+        },
+      ]);
+      assert.equal(
+        steps[0]?.observation?.results[0]?.source_call_id,
+        'image-1',
+      );
+      assert.equal(
+        JSON.stringify(evidence.trajectory).includes(IMAGE_DATA),
+        false,
+      );
+      for (const item of [
+        { type: 'ImageView', id: 'image-1', path: '/tmp/other.png' },
+        { type: 'ImageView', id: 'image-1', path, extra: true },
+        { type: 'ImageView', id: 'orphan', path },
+        {
+          type: 'ImageView',
+          id: 'image-1',
+          path: 'file://remote/tmp/synthetic.png',
+        },
+      ]) {
+        assert.equal(
+          (
+            await loadToolSequence([
+              sequence[0]!,
+              capturedItem(item),
+              sequence[2]!,
+            ])
+          ).kind,
+          'unavailable',
+        );
+      }
+    }
+  });
+
+  it('preserves web, image, and MCP activity together for judging and coverage', async () => {
+    const action = { type: 'search', query: 'synthetic query' };
+    const evidence = await loadToolSequence([
+      ...capturedMcp(),
+      capturedItem({
+        type: 'WebSearch',
+        id: 'web-1',
+        query: 'synthetic query',
+        action,
+      }),
+      capturedResponse({
+        type: 'web_search_call',
+        id: 'web-1',
+        status: 'completed',
+        action,
+      }),
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'image-1',
+        name: 'view_image',
+        arguments: '{"path":"/tmp/sample.png"}',
+      }),
+      capturedItem({
+        type: 'ImageView',
+        id: 'image-1',
+        path: 'file:///tmp/sample.png',
+      }),
+      capturedResponse({
+        type: 'function_call_output',
+        call_id: 'image-1',
+        output: [
+          {
+            type: 'input_image',
+            image_url: `data:image/png;base64,${IMAGE_DATA}`,
+          },
+        ],
+      }),
+    ]);
+    if (evidence.kind !== 'available')
+      throw new Error('Expected mixed evidence.');
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    const projection = createJudgeTranscriptProjection(trajectory);
+    const projectedSteps = JSON.parse(
+      projection.transcriptJson,
+    ) as JudgeVisibleStepV1[];
+    assert.deepEqual(
+      projectedSteps
+        .flatMap((step) =>
+          step.source === 'agent' ? (step.tool_calls ?? []) : [],
+        )
+        .map((call) => call.function_name),
+      ['tool_search', 'mcp__fixture.probe', 'web_search', 'view_image'],
+    );
+    assert.equal(
+      trajectoryCoversCompletedTurns(
+        trajectory,
+        [
+          {
+            user: 'First prompt.',
+            assistant: 'First response.',
+            toolCalls: [
+              { name: 'web_search' },
+              { name: 'mcp__fixture__probe' },
+            ],
+          },
+        ],
+        { kind: 'native_log', format: 'codex-rollout-jsonl' },
+      ),
+      true,
+    );
+  });
+
+  it('validates direct results for built-in MCP resource listings and restores their server identity', async () => {
+    for (const tool of ['list_mcp_resources', 'list_mcp_resource_templates']) {
+      const text = JSON.stringify(
+        tool === 'list_mcp_resources'
+          ? { resources: [] }
+          : { resourceTemplates: [] },
+      );
+      const makeSequence = () => {
+        const sequence = capturedMcp({
+          result: { content: [{ type: 'text', text }] },
+          output: text,
+        });
+        delete sequence[2]!.payload.namespace;
+        sequence[2]!.payload.name = tool;
+        (sequence[3]!.payload.item as Record<string, unknown>).tool = tool;
+        return sequence.slice(2);
+      };
+      const evidence = await loadToolSequence(makeSequence());
+      if (evidence.kind !== 'available')
+        throw new Error('Expected resource evidence.');
+      assert.deepEqual(evidence.warnings, []);
+      const step = parseAtifTrajectory(evidence.trajectory).steps.find(
+        (step) => step.tool_calls?.[0]?.tool_call_id === 'mcp-call',
+      );
+      assert.equal(
+        step?.tool_calls?.[0]?.function_name,
+        `mcp__fixture.${tool}`,
+      );
+      assert.equal(step?.observation?.results[0]?.content, text);
+      for (const mutate of [
+        (sequence: ReturnType<typeof capturedMcp>) => {
+          sequence.splice(1, 1);
+        },
+        (sequence: ReturnType<typeof capturedMcp>) => {
+          sequence[2]!.payload.output = '{"different":[]}';
+        },
+        (sequence: ReturnType<typeof capturedMcp>) => {
+          sequence[0]!.payload.namespace = 'mcp__other';
+        },
+        (sequence: ReturnType<typeof capturedMcp>) => {
+          sequence[0]!.payload.name = 'other';
+        },
+        (sequence: ReturnType<typeof capturedMcp>) => {
+          sequence[0]!.payload.arguments = '{"different":true}';
+        },
+        (sequence: ReturnType<typeof capturedMcp>) => {
+          (sequence[1]!.payload.item as Record<string, unknown>).status =
+            'failed';
+        },
+      ]) {
+        const sequence = makeSequence();
+        mutate(sequence);
+        assert.equal((await loadToolSequence(sequence)).kind, 'unavailable');
+      }
+    }
+  });
+
   it('accepts captured native plugin MCP attribution and rejects malformed identities', async () => {
     for (const pluginId of [
       'fixture@forge-fixture',
