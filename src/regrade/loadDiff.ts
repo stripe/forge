@@ -2,8 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
 import { inspectExperimentRun } from '../experiment.ts';
-import { experimentRunIdSchema } from '../experimentModel.ts';
+import {
+  type ExperimentRunCheckpoint,
+  experimentRunIdSchema,
+  parseExperimentRunCheckpoint,
+} from '../experimentModel.ts';
 import { sha256Digest } from '../model/hashes.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
 import {
   compareRegradeResults,
   type RegradeDiff,
@@ -49,12 +54,20 @@ export async function diffRegradeExperimentRun(input: {
   const load = async () => {
     signal.throwIfAborted();
     let inspection: Awaited<ReturnType<typeof inspectExperimentRun>>;
+    let checkpoint: ExperimentRunCheckpoint;
     try {
       inspection = await inspectExperimentRun({
         root: input.experimentRun,
         engine,
         signal,
       });
+      checkpoint = parseExperimentRunCheckpoint(
+        JSON.parse(
+          (await readRegradeArtifact(inspection.checkpoint)).toString('utf8'),
+        ),
+      );
+      if (checkpoint.experiment_run_id !== inspection.experiment_run_id)
+        throw new RegradeReadError('invalid_record');
     } catch {
       issue({
         side: 'source',
@@ -64,6 +77,13 @@ export async function diffRegradeExperimentRun(input: {
       });
       return;
     }
+    if (checkpoint.entries.length !== inspection.outcomes.length)
+      issue({
+        side: 'source',
+        run_id: null,
+        state: 'unavailable',
+        reason: 'source_changed',
+      });
     for (const [index, outcome] of inspection.outcomes.entries()) {
       signal.throwIfAborted();
       const identity = {
@@ -71,27 +91,31 @@ export async function diffRegradeExperimentRun(input: {
         run_id: outcome.run_id,
         selection_index: index,
       };
+      const entry = checkpoint.entries[index];
+      const attempt = entry?.attempts.at(-1);
+      if (
+        entry === undefined ||
+        (attempt?.run_id ?? null) !== outcome.run_id ||
+        entry.plan_sha256 !== outcome.plan_sha256 ||
+        serializeCanonicalJson(entry.selection) !==
+          serializeCanonicalJson(outcome.selection)
+      ) {
+        issue({ ...identity, state: 'unavailable', reason: 'source_changed' });
+        continue;
+      }
+      const checkpointState = attempt?.state ?? 'pending';
       if (outcome.state !== 'completed' || outcome.artifact === null) {
-        if (outcome.checkpoint_state === 'pending')
+        if (checkpointState === 'pending')
           issue({ ...identity, state: 'pending', reason: 'never_attempted' });
-        else if (
-          outcome.checkpoint_state === 'running' &&
-          outcome.artifact === null
-        )
+        else if (checkpointState === 'running' && outcome.artifact === null)
           issue({ ...identity, state: 'pending', reason: 'not_committed' });
-        else if (
-          outcome.checkpoint_state === 'completed' &&
-          outcome.artifact === null
-        )
+        else if (checkpointState === 'completed' && outcome.artifact === null)
           issue({
             ...identity,
             state: 'invalid',
             reason: 'source_verification_failed',
           });
-        else if (
-          outcome.checkpoint_state === 'errored' ||
-          outcome.artifact !== null
-        )
+        else if (checkpointState === 'errored' || outcome.artifact !== null)
           issue({ ...identity, state: 'errored', reason: 'execution_error' });
         else
           issue({

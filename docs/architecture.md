@@ -1555,13 +1555,16 @@ consumers must inspect the report to establish grading completeness.
 
 Regrade comparison separates artifact loading from pure analysis.
 `diffRegradeExperimentRun` uses experiment inspection and completed-run
-verification to select source attempts. Inspection exposes the optional
-`checkpoint_state` alongside each verified outcome; this is read-only metadata,
-not a saved checkpoint field. It distinguishes never-attempted selections,
+verification to select source attempts. The loader separately reads the checkpoint
+through its existing parser to distinguish never-attempted selections,
 uncommitted running attempts, recorded execution errors, and completed attempts
-that fail verification. Running without a verified commit means in progress or
-interrupted; inspection does not determine liveness. Verification failures
-exclude that source, without discarding valid pairs.
+that fail verification. Recorded state stays internal to the diff; public
+experiment outcomes are unchanged. The loader checks each recorded selection,
+plan digest, and latest attempt ID against the inspected outcome before using
+that state. A changed identity is unavailable; reads are not a transactional
+snapshot. Running without a verified commit means in progress or interrupted;
+inspection does not determine liveness. Verification failures exclude that
+source, without discarding valid pairs.
 
 The shared saved-regrade reader checks format, run ID, source digest, and judge
 identity before reuse or comparison. It reads only regular files without
