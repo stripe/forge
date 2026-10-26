@@ -6,6 +6,7 @@ import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
+import { appendExperimentRunEvent } from './experimentEvents.ts';
 import {
   type ExperimentRunAttempt as Attempt,
   type ExperimentRunCheckpoint,
@@ -270,6 +271,11 @@ export async function runExperiment(
     inspections.set(runId, { identity, inspected });
     return inspected;
   };
+  const progress = async (event: ExperimentRunProgressEvent): Promise<void> => {
+    // Progress recording is observational; a log failure cannot stop evaluations.
+    await appendExperimentRunEvent(root, event).catch(() => undefined);
+    options.progress(event);
+  };
   let reportReady = false;
   let succeeded = false;
   try {
@@ -341,7 +347,7 @@ export async function runExperiment(
             experimentRunOutcome(entry, recovered, inspected.artifact),
             index,
           );
-          options.progress({
+          await progress({
             selection: entry.selection,
             run_id: last.run_id,
             state: 'skipped',
@@ -360,7 +366,7 @@ export async function runExperiment(
       }
     }
     await writeExperimentRunCheckpoint(checkpoint, experimentRun);
-    options.progress({
+    await progress({
       state: options.resume ? 'resuming' : 'started',
       location: root,
     });
@@ -414,7 +420,7 @@ export async function runExperiment(
             runIds.add(runId);
             entry.attempts.push({ run_id: runId, state: 'running' });
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            options.progress({
+            await progress({
               selection: entry.selection,
               run_id: runId,
               state: 'running',
@@ -470,7 +476,7 @@ export async function runExperiment(
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            options.progress({ selection: entry.selection, ...attempt });
+            await progress({ selection: entry.selection, ...attempt });
             if (attempt.state === 'completed') completed += 1;
             else errored += 1;
             options.onOutcome?.(

@@ -277,7 +277,8 @@ npx --no-install forge run \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
-Execution uses Docker and makes model calls. Progress goes to stderr;
+Execution uses Docker and makes model calls. Progress goes to stderr and the
+experiment run's `events.jsonl`.
 `run-summary.json` contains the experiment run ID, output location, and
 checkpoint/report paths. Every invocation without `--resume` starts a new
 experiment run. See [Results and Scores](#results-and-scores) to inspect it.
@@ -442,6 +443,7 @@ Artifacts are saved under the experiment run ID:
 ```text
 results/experiments/<experiment-run-id>/
 ├── experiment.json
+├── events.jsonl
 ├── report.json
 └── runs/<eval-run-id>/
     ├── result.json
@@ -455,11 +457,19 @@ results/experiments/<experiment-run-id>/
 | --- | --- |
 | `experiment.json` | Checkpoint, selected plans, and attempt history used for resume. |
 | `report.json` | Scorecard across the saved experiment selections. |
+| `events.jsonl` | Timestamped progress history, appended on resume. |
 | `result.json` | Evaluation at `.evaluation`, provenance, and companion artifact descriptors. |
 | `plan.json` | Resolved input for one eval run. |
 | `setup.json` | Ordered, bounded setup receipts. |
 | `trajectory.json` | Normalized, credential-redacted ATIF transcript. |
 | `interaction.json` | Turn history and stop reason, including Ava's private audit data. |
+
+Each line in `events.jsonl` is one canonical JSON progress event with an
+`observed_at` UTC timestamp. Resume appends a `resumed` marker and further
+events to the same file. Follow it with `tail -f` while a run is active.
+Recording is best effort: disk errors or process interruption can leave gaps
+or a partial line. The log does not affect verification, scores, or regrade;
+older experiment folders may have no log.
 
 For the first experiment, print its evaluation:
 
@@ -581,8 +591,8 @@ Execution errors appear in the experiment's `experiment.json` attempt history
 and `report.json` run rows. When available, `diagnostic` records the phase,
 a timeout/cancellation/failure reason, and a bounded, credential-redacted message,
 even if the run failed before saving artifacts. The same detail appears in
-stderr progress events. Older attempts and custom host callback failures may
-have only `error_code`. For a committed Ava failure, `result.json.failure.message`
+stderr progress events and `events.jsonl`. Older attempts and custom host
+callback failures may have only `error_code`. For a committed Ava failure, `result.json.failure.message`
 records the final request or output rejection reason; raw rejected responses
 are not saved.
 
