@@ -30,6 +30,8 @@ import {
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   type ModelProbe,
   type ModelProbeOutcome,
+  type ModelProbeReason,
+  type ModelProbeResult,
   normalizeEnvironmentSpecification,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
@@ -54,7 +56,13 @@ describe('@stripe/forge package root', () => {
       model: 'example',
     });
     const outcome: ModelProbeOutcome = 'unknown_model';
-    assert.equal(outcome, 'unknown_model');
+    const reason: ModelProbeReason = 'http_error';
+    const result: ModelProbeResult = { outcome, reason, http_status: 404 };
+    assert.deepEqual(result, {
+      outcome: 'unknown_model',
+      reason: 'http_error',
+      http_status: 404,
+    });
     assert.equal(probe.endpoint, 'https://api.openai.com/v1/responses');
     assert.equal(typeof probe.run, 'function');
   });

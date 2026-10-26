@@ -110,6 +110,7 @@ export function createOpenAICompletionProvider(
       const request = modelProbeRequest(input.model);
       return createHttpModelProbe({
         endpoint,
+        model: input.model.model,
         credential,
         fetch: fetchImplementation,
         timeoutMs,
@@ -117,7 +118,7 @@ export function createOpenAICompletionProvider(
         body: serializeRequest(request),
         structured: true,
         accepts: (raw) => {
-          const response = parseResponse(raw, true);
+          const response = parseResponse(raw, false);
           return (
             response.stopReason === 'end_turn' &&
             isProbeObject(response.content)

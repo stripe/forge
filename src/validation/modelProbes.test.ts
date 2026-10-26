@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { afterEach, describe, it, vi } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 import { createClaudeCodeAdapter } from '../agents/claude-code/index.ts';
 import { createCodexAdapter } from '../agents/codex/index.ts';
 import { createOpenCodeAdapter } from '../agents/opencode/index.ts';
@@ -10,7 +11,8 @@ import type { ModelProbeOutcome } from '../contracts/modelProbe.ts';
 import { createAnthropicCompletionProvider } from '../providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from '../providers/openai/index.ts';
 import { createStaticCredentialResolver } from '../testing/index.ts';
-import { createHttpModelProbe } from './httpProbe.ts';
+import { classifyProbeHttpFailure, createHttpModelProbe } from './httpProbe.ts';
+import { runModelProbe } from './runProbe.ts';
 
 const signal = new AbortController().signal;
 const credential = credentialReference('test.key');
@@ -73,8 +75,9 @@ describe('model probes', () => {
         adapter: 'opencode',
         provider: 'openai-compatible',
         model: 'vendor/unknown-model',
+        model_profile: OPEN_CODE_MODEL_PROFILE,
       });
-      assert.equal(await probe.run(context), 'unknown_model');
+      assert.equal((await probe.run(context)).outcome, 'unknown_model');
       assert.equal(calls, 1);
     } finally {
       server.closeAllConnections();
@@ -112,11 +115,16 @@ describe('model probes', () => {
     ] as const) {
       vi.stubGlobal('fetch', fetchResponse(response));
       assert.equal(
-        await adapter.probeModel!({
-          adapter: adapter.id,
-          provider,
-          model: 'example',
-        }).run(context),
+        (
+          await adapter.probeModel!({
+            adapter: adapter.id,
+            provider,
+            model: 'example',
+            ...(adapter.id === 'opencode'
+              ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+              : {}),
+          }).run(context)
+        ).outcome,
         'ok',
       );
     }
@@ -136,11 +144,13 @@ describe('model probes', () => {
     });
     const adapter = createClaudeCodeAdapter({ credential });
     assert.equal(
-      await adapter.probeModel!({
-        adapter: 'claude-code',
-        provider: 'anthropic',
-        model: 'example',
-      }).run(context),
+      (
+        await adapter.probeModel!({
+          adapter: 'claude-code',
+          provider: 'anthropic',
+          model: 'example',
+        }).run(context)
+      ).outcome,
       'ok',
     );
   });
@@ -154,7 +164,7 @@ describe('model probes', () => {
     [
       400,
       { error: { message: 'example-code is not a valid model ID' } },
-      'unknown_model',
+      'other',
     ],
     [
       404,
@@ -166,12 +176,8 @@ describe('model probes', () => {
       },
       'unknown_model',
     ],
-    [
-      400,
-      { error: { message: 'Model example is not available' } },
-      'unknown_model',
-    ],
-    [404, { error: { type: 'not_found_error' } }, 'unknown_model'],
+    [400, { error: { message: 'Model example is not available' } }, 'other'],
+    [404, { error: { type: 'not_found_error' } }, 'other'],
     [401, {}, 'auth'],
     [403, {}, 'auth'],
     [429, {}, 'rate_limited'],
@@ -180,12 +186,12 @@ describe('model probes', () => {
     [504, {}, 'timeout'],
     [
       400,
-      { error: { message: 'response_format json_schema is unsupported' } },
+      { error: { code: 'unsupported_parameter', param: 'response_format' } },
       'missing_structured_output',
     ],
     [
       422,
-      { error: { message: 'output_config is unsupported' } },
+      { error: { code: 'unsupported_parameter', param: 'output_config' } },
       'missing_structured_output',
     ],
     [400, { error: { message: 'Unrelated bad request' } }, 'other'],
@@ -198,11 +204,144 @@ describe('model probes', () => {
         fetch: fetchResponse(body, status, headers),
       });
       assert.equal(
-        await provider.probeModel!({ model, purpose: 'judge' }).run(context),
+        (await provider.probeModel!({ model, purpose: 'judge' }).run(context))
+          .outcome,
         expected,
       );
     });
   }
+
+  it('requires model-specific signals and retains only bounded HTTP facts', () => {
+    const unknown = (raw: unknown, status = 404) =>
+      classifyProbeHttpFailure(
+        status,
+        false,
+        JSON.stringify(raw),
+        true,
+        'test-model',
+      );
+    for (const [status, error] of [
+      [404, { message: 'Invalid URL (POST /v1/chat/completions/models)' }],
+      [
+        400,
+        {
+          message:
+            "Unknown parameter: 'foo'. The model was not available for this feature",
+        },
+      ],
+      [404, { type: 'not_found_error' }],
+      [404, { type: 'not_found_error', message: 'model: another-model' }],
+      [400, { message: 'response_format is unsupported' }],
+      [400, { code: 'unsupported_parameter', param: 'max_tokens' }],
+      [500, { code: 'model_not_found' }],
+    ] as const) {
+      assert.deepEqual(unknown({ error }, status), {
+        outcome: 'other',
+        reason: 'http_error',
+        http_status: status,
+      });
+    }
+    for (const code of ['model_not_found', 'unknown_model', 'invalid_model']) {
+      assert.equal(unknown({ error: { code } }).outcome, 'unknown_model');
+    }
+    assert.equal(
+      unknown({
+        error: { type: 'not_found_error', message: 'model: test-model' },
+      }).outcome,
+      'unknown_model',
+    );
+  });
+
+  it('distinguishes malformed envelopes from a valid envelope with invalid structured content', async () => {
+    for (const raw of [
+      '<html>secret-value</html>',
+      '{}',
+      'null',
+      '{"output":[]}',
+    ]) {
+      for (const provider of [
+        createOpenAICompletionProvider({
+          credential,
+          fetch: async () => new Response(raw),
+        }),
+        createAnthropicCompletionProvider({
+          credential,
+          fetch: async () => new Response(raw),
+        }),
+      ]) {
+        const probe = provider.probeModel!({
+          purpose: 'judge',
+          model: {
+            provider: provider.id,
+            model:
+              provider.id === 'openai' ? 'test-model' : 'claude-sonnet-4-6',
+          },
+        });
+        assert.deepEqual(await probe.run(context), {
+          outcome: 'other',
+          reason: 'invalid_response',
+          http_status: 200,
+        });
+      }
+    }
+    const provider = createAnthropicCompletionProvider({
+      credential,
+      fetch: fetchResponse({
+        type: 'message',
+        role: 'assistant',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'plain text' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    });
+    assert.deepEqual(
+      await provider.probeModel!({
+        purpose: 'judge',
+        model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      }).run(context),
+      {
+        outcome: 'missing_structured_output',
+        reason: 'invalid_structured_output',
+        http_status: 200,
+      },
+    );
+  });
+
+  it('mirrors the compatible Chat Completions token field even for a reasoning-model alias', async () => {
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      assert.equal(body.model, 'o3');
+      assert.equal(body.max_tokens, 64);
+      assert.equal(body.max_completion_tokens, undefined);
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 'unsupported_parameter',
+            param: 'max_tokens',
+            message: 'Use max_completion_tokens instead for this model.',
+          },
+        }),
+        { status: 400 },
+      );
+    });
+    const adapter = createOpenCodeAdapter({
+      credential,
+      baseUrl: 'https://models.example/v1',
+    });
+    assert.deepEqual(
+      await adapter.probeModel!({
+        adapter: 'opencode',
+        provider: 'openai-compatible',
+        model: 'o3',
+        model_profile: OPEN_CODE_MODEL_PROFILE,
+      }).run(context),
+      {
+        outcome: 'other',
+        reason: 'http_error',
+        http_status: 400,
+      },
+    );
+  });
 
   it('sends one strict Responses request and validates the returned object', async () => {
     let calls = 0;
@@ -230,7 +369,7 @@ describe('model probes', () => {
     });
     const probe = provider.probeModel!({ model, purpose: 'judge' });
     assert.equal(calls, 0);
-    assert.equal(await probe.run(context), 'ok');
+    assert.equal((await probe.run(context)).outcome, 'ok');
     assert.equal(calls, 1);
     for (const text of [
       'plain text',
@@ -245,9 +384,11 @@ describe('model probes', () => {
         fetch: fetchResponse(response),
       });
       assert.equal(
-        await invalid.probeModel!({ model, purpose: 'role_player' }).run(
-          context,
-        ),
+        (
+          await invalid.probeModel!({ model, purpose: 'role_player' }).run(
+            context,
+          )
+        ).outcome,
         'missing_structured_output',
       );
     }
@@ -281,10 +422,12 @@ describe('model probes', () => {
       },
     });
     assert.equal(
-      await provider.probeModel!({
-        model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-        purpose: 'role_player',
-      }).run(context),
+      (
+        await provider.probeModel!({
+          model: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          purpose: 'role_player',
+        }).run(context)
+      ).outcome,
       'ok',
     );
   });
@@ -297,41 +440,17 @@ describe('model probes', () => {
       },
     });
     assert.equal(
-      await provider.probeModel!({ model, purpose: 'judge' }).run({
-        signal,
-        credentialResolver: createStaticCredentialResolver({}),
-      }),
+      (
+        await provider.probeModel!({ model, purpose: 'judge' }).run({
+          signal,
+          credentialResolver: createStaticCredentialResolver({}),
+        })
+      ).outcome,
       'auth',
     );
   });
 
-  it('bounds time, handles transport failures, and preserves caller cancellation', async () => {
-    vi.useFakeTimers();
-    // AbortSignal.timeout uses a native timer; inject a signal for a deterministic deadline.
-    const deadline = new AbortController();
-    vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(deadline.signal);
-    const probe = createHttpModelProbe({
-      endpoint: 'https://models.example',
-      credential,
-      headers: () => ({}),
-      body: '{}',
-      accepts: () => true,
-      fetch: async (_url, init) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener(
-            'abort',
-            () => reject(new Error('deadline')),
-            { once: true },
-          );
-        }),
-    });
-    const result = probe.run(context);
-    await vi.waitFor(() => {
-      assert.ok(vi.mocked(AbortSignal.timeout).mock.calls.length > 0);
-    });
-    await Promise.resolve();
-    deadline.abort();
-    assert.equal(await result, 'timeout');
+  it('handles transport failures without exposing their text', async () => {
     const broken = createHttpModelProbe({
       endpoint: 'https://models.example',
       credential,
@@ -342,12 +461,16 @@ describe('model probes', () => {
         throw new Error('secret-value');
       },
     });
-    assert.equal(await broken.run(context), 'other');
+    assert.deepEqual(await runModelProbe(broken, credentialResolver, signal), {
+      outcome: 'other',
+      reason: 'transport_error',
+    });
     const cancelled = new AbortController();
     cancelled.abort();
-    await assert.rejects(broken.run({ ...context, signal: cancelled.signal }), {
-      name: 'AbortError',
-    });
+    await assert.rejects(
+      runModelProbe(broken, credentialResolver, cancelled.signal),
+      { name: 'AbortError' },
+    );
   });
 
   it('bounds responses and never follows redirects', async () => {
@@ -366,7 +489,8 @@ describe('model probes', () => {
         },
       });
       assert.equal(
-        await provider.probeModel!({ model, purpose: 'judge' }).run(context),
+        (await provider.probeModel!({ model, purpose: 'judge' }).run(context))
+          .outcome,
         'other',
       );
     }
@@ -425,10 +549,13 @@ describe('model probes', () => {
         adapter: adapter.id,
         provider,
         model: 'vendor/example',
+        ...(adapter.id === 'opencode'
+          ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+          : {}),
       });
       assert.equal(calls, 0);
       assert.equal(probe.endpoint, endpoint);
-      assert.equal(await probe.run(context), 'ok');
+      assert.equal((await probe.run(context)).outcome, 'ok');
       assert.equal(calls, 1);
     }
   });
@@ -443,11 +570,14 @@ describe('model probes', () => {
       baseUrl: 'https://models.example/v1',
     });
     assert.equal(
-      await adapter.probeModel!({
-        adapter: 'opencode',
-        provider: 'openai-compatible',
-        model: 'unknown-example',
-      }).run(context),
+      (
+        await adapter.probeModel!({
+          adapter: 'opencode',
+          provider: 'openai-compatible',
+          model: 'unknown-example',
+          model_profile: OPEN_CODE_MODEL_PROFILE,
+        }).run(context)
+      ).outcome,
       'unknown_model',
     );
   });

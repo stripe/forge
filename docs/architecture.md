@@ -526,15 +526,25 @@ The separate opt-in `validate --probe-models` runs after all selected plans
 pass pure preflight. Agent adapters and completion providers may expose
 `probeModel`, a pure factory returning a `ModelProbe` with a credential-free
 endpoint and an authority-bearing `run` method. These contracts are exported
-from the package root. The CLI rejects selected implementations without this
-capability before credential lookup, prints all targets, then runs probes in
-order. Built-ins resolve only their model credential through the supplied
-resolver and send one fixed prompt directly to their configured API, with no
+from the package root, along with `ModelProbeResult` and its outcome and reason
+types. The CLI prints target names and roles without endpoint URLs, then runs
+probes in order. Missing capabilities and factory failures yield
+`other` / `probe_unavailable` for that target; other models still run. Built-ins
+resolve only their model credential through the supplied resolver and send one fixed prompt directly to their configured API, with no
 case content or runtime allocation. Ava and judge probes reuse each provider's
 structured request serialization and response parsing, and validate the test
-object locally. Results contain only bounded classifications, never provider
-bodies or credential errors; probes follow no redirects, read at most 64 KiB,
-and allow at most one minute per request (or a lower provider timeout).
+object locally. A malformed transport envelope yields `other`; a valid envelope
+with invalid structured content yields `missing_structured_output`. HTTP model
+errors require recognized model-specific codes or the provider's exact
+model-not-found signal. Ambiguous errors stay `other` with `http_error`.
+Results contain an outcome, optional allowlisted reason, and optional HTTP
+status, never URLs, provider bodies, or credential errors. The command validates
+and copies these fields even for custom probes. Built-ins follow no redirects
+and read at most 64 KiB. The command enforces a one-minute deadline (or a lower
+provider timeout) across credential lookup, transport, and custom capabilities,
+even when they ignore cancellation. A timed-out or throwing probe produces a
+bounded failure and the next model still runs. Caller cancellation stops the
+command. Embedding callers of `ModelProbe.run` own the same deadline duty.
 Probes do not change plans, artifacts, or scoring. They test model access and
 host structured output, not native CLI behavior or runtime connectivity; see
 the [validation workflow](../README.md#run-your-first-experiment).

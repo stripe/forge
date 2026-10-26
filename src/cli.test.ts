@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 
 import { createCodexAdapter } from './agents/codex/index.ts';
 import {
@@ -14,7 +14,7 @@ import type { AgentAdapter } from './contracts/agent.ts';
 import type { CompletionProvider } from './contracts/completion.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
-import type { ModelProbeOutcome } from './contracts/modelProbe.ts';
+import type { ModelProbeResult } from './contracts/modelProbe.ts';
 import { CredentialReferenceConflictError } from './credentialDeclarations.ts';
 import {
   createForgeEngine,
@@ -136,6 +136,8 @@ function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -201,7 +203,7 @@ describe('Forge CLI', () => {
                         assert.match(stderr, /small paid requests/);
                         assert.match(stderr, /claude-opus-4-6/);
                         assert.doesNotMatch(stderr, /claude-sonnet/);
-                        return 'ok' as const;
+                        return { outcome: 'ok' as const };
                       },
                     };
                   },
@@ -267,7 +269,9 @@ describe('Forge CLI', () => {
                       ...agent,
                       probeModel: () => ({
                         endpoint: 'https://models.example',
-                        run: async (): Promise<ModelProbeOutcome> => outcome,
+                        run: async (): Promise<ModelProbeResult> => ({
+                          outcome,
+                        }),
                       }),
                     },
                   ],
@@ -318,7 +322,7 @@ judging_criteria: [The task is complete.]
               assert.match(stderr, /"purpose":"role_player"/);
               assert.match(stderr, /"purpose":"judge"/);
               assert.doesNotMatch(stderr, /Synthetic private task/);
-              return 'ok' as const;
+              return { outcome: 'ok' as const };
             },
           };
           return {
@@ -353,16 +357,19 @@ judging_criteria: [The task is complete.]
     assert.equal(JSON.parse(stdout).run_count, 2);
   });
 
-  it('requires pure preflight and probe support before any credential lookup', async () => {
+  it('requires pure preflight and reports unavailable probe support without authority', async () => {
     const fixture = await createBenchmarkFixture();
     for (const unsupported of [true, false]) {
       let calls = 0;
       let stderr = '';
+      let stdout = '';
       const code = await runCli(
         ['validate', '--probe-models', '--experiment', fixture.experimentPath],
         {
           environment: {},
-          stdout: () => undefined,
+          stdout: (text) => {
+            stdout += text;
+          },
           stderr: (text) => {
             stderr += text;
           },
@@ -384,7 +391,7 @@ judging_criteria: [The task is complete.]
                           endpoint: 'https://models.example',
                           run: async () => {
                             calls++;
-                            return 'ok';
+                            return { outcome: 'ok' };
                           },
                         }),
                       },
@@ -409,11 +416,216 @@ judging_criteria: [The task is complete.]
       );
       assert.equal(code, 1);
       assert.equal(calls, 0);
-      assert.match(
-        stderr,
-        unsupported ? /does not support model probes/ : /could not execute/,
-      );
+      if (unsupported)
+        assert.equal(
+          JSON.parse(stdout).model_probes[0].reason,
+          'probe_unavailable',
+        );
+      else assert.match(stderr, /could not execute/);
     }
+  });
+
+  it('combines host readiness and model probes on the detected native platform', async () => {
+    const fixture = await createBenchmarkFixture();
+    await fs.writeFile(
+      fixture.experimentPath,
+      (await fs.readFile(fixture.experimentPath, 'utf8')).replace(
+        'platform: linux/amd64',
+        'platform: native',
+      ),
+    );
+    for (const hostFails of [false, true]) {
+      const events: string[] = [];
+      const platforms: string[] = [];
+      let stdout = '';
+      let detects = 0;
+      const code = await runCli(
+        [
+          'validate',
+          '--host',
+          '--probe-models',
+          '--experiment',
+          fixture.experimentPath,
+        ],
+        {
+          environment: {},
+          detectDockerPlatform: async () => {
+            detects++;
+            return 'linux/arm64';
+          },
+          engine: {
+            ...defaultForgeEngine,
+            validateRuntime: async (requests) => {
+              events.push('host');
+              platforms.push(
+                ...requests.map(({ plan }) => plan.runtime.platform),
+              );
+              if (hostFails) throw new Error('Host unavailable');
+              return [];
+            },
+          },
+          compositionFactory: async (options) => {
+            const base = await createDefaultCliComposition(options);
+            const agent = base.agents.get('claude-code')!;
+            return {
+              ...base,
+              agents: new Map([
+                [
+                  'claude-code',
+                  {
+                    ...agent,
+                    probeModel: () => ({
+                      endpoint: 'https://models.example',
+                      run: async () => {
+                        events.push('probe');
+                        return { outcome: 'ok' };
+                      },
+                    }),
+                  },
+                ],
+              ]),
+            };
+          },
+          stdout: (text) => {
+            stdout += text;
+          },
+        },
+      );
+      assert.equal(code, hostFails ? 1 : 0);
+      assert.equal(detects, 1);
+      assert.deepEqual(platforms, ['linux/arm64']);
+      assert.deepEqual(events, hostFails ? ['host'] : ['host', 'probe']);
+      if (!hostFails) {
+        const result = JSON.parse(stdout);
+        assert.deepEqual(result.host, {
+          docker_platform: 'linux/arm64',
+          runtime_platform: 'linux/arm64',
+          checks: [],
+        });
+        assert.equal(result.model_probes.length, 1);
+        assert.equal(result.model_probes[0].outcome, 'ok');
+        assert.equal(result.valid, true);
+      }
+    }
+  });
+
+  it('continues to later models after a failing factory, capability, malformed result, or enforced timeout', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    for (const failure of ['factory', 'call', 'result', 'hang'] as const) {
+      let stdout = '';
+      let stderr = '';
+      let started: () => void = () => undefined;
+      const firstStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let factories = 0;
+      vi.useFakeTimers();
+      const pending = runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: {},
+          compositionFactory: async (options) => {
+            const base = await createDefaultCliComposition(options);
+            const agent = base.agents.get('claude-code')!;
+            return {
+              ...base,
+              agents: new Map([
+                [
+                  'claude-code',
+                  {
+                    ...agent,
+                    probeModel: (selection) => {
+                      factories++;
+                      if (
+                        selection.model.includes('sonnet') &&
+                        failure === 'factory'
+                      )
+                        throw new Error('secret-value');
+                      return {
+                        endpoint: 'https://models.example',
+                        run: async () => {
+                          if (selection.model.includes('sonnet')) {
+                            started();
+                            if (failure === 'call')
+                              throw new Error('secret-value');
+                            if (failure === 'result')
+                              return {
+                                outcome: 'secret-value',
+                              } as unknown as ModelProbeResult;
+                            if (failure === 'hang')
+                              return new Promise(() => undefined);
+                          }
+                          return { outcome: 'ok' };
+                        },
+                      };
+                    },
+                  },
+                ],
+              ]),
+            };
+          },
+          stdout: (text) => {
+            stdout += text;
+          },
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      );
+      if (failure === 'hang') {
+        await firstStarted;
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      assert.equal(await pending, 1);
+      const results = JSON.parse(stdout).model_probes;
+      assert.ok(factories >= 2);
+      assert.equal(results.length, 2);
+      assert.equal(
+        results[0].reason,
+        {
+          factory: 'probe_unavailable',
+          call: 'probe_failed',
+          result: 'invalid_probe_result',
+          hang: 'deadline_exceeded',
+        }[failure],
+      );
+      assert.equal(results[1].outcome, 'ok');
+      assert.doesNotMatch(stdout + stderr, /secret-value|https:\/\/models/);
+      assert.equal(vi.getTimerCount(), 0);
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the default composition credential binding for a model-only check', async () => {
+    const fixture = await createBenchmarkFixture();
+    let calls = 0;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      calls++;
+      assert.equal(url, 'https://api.anthropic.com/v1/messages');
+      assert.equal(new Headers(init.headers).get('x-api-key'), 'synthetic-key');
+      return new Response(
+        JSON.stringify({
+          type: 'message',
+          content: [{ type: 'text', text: 'OK' }],
+        }),
+      );
+    });
+    let stdout = '';
+    assert.equal(
+      await runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: { ANTHROPIC_API_KEY: 'synthetic-key' },
+          stdout: (text) => {
+            stdout += text;
+          },
+        },
+      ),
+      0,
+    );
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(stdout).model_probes[0].outcome, 'ok');
+    assert.doesNotMatch(stdout, /synthetic-key/);
   });
 
   it('targets named groups, intersects selectors, and preserves saved group identity on resume', async () => {

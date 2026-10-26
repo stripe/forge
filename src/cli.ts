@@ -56,6 +56,7 @@ import {
 } from './runtime/docker/index.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import { selectedModelProbes } from './validation/models.ts';
+import { runModelProbe } from './validation/runProbe.ts';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
@@ -500,9 +501,9 @@ export async function runCli(
         stderr(
           'Model probes send small paid requests with no case content. They do not test agent CLIs or containers.\n',
         );
-        for (const { purpose, adapter, provider, model, probe } of probes) {
+        for (const { purpose, adapter, provider, model } of probes) {
           stderr(
-            `${JSON.stringify({ purpose, ...(adapter === undefined ? {} : { adapter }), provider, model, endpoint: probe.endpoint })}\n`,
+            `${JSON.stringify({ purpose, ...(adapter === undefined ? {} : { adapter }), provider, model })}\n`,
           );
         }
         for (const {
@@ -513,16 +514,17 @@ export async function runCli(
           probe,
           composition,
         } of probes) {
-          const outcome = await probe.run({
-            credentialResolver: composition.credentialResolver,
-            signal: options.signal ?? new AbortController().signal,
-          });
+          const result = await runModelProbe(
+            probe,
+            composition.credentialResolver,
+            options.signal ?? new AbortController().signal,
+          );
           probeResults.push({
             purpose,
             ...(adapter === undefined ? {} : { adapter }),
             provider,
             model,
-            outcome,
+            ...result,
           });
         }
       }

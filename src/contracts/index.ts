@@ -9,7 +9,12 @@ export type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
 } from './metadata.ts';
-export type { ModelProbe, ModelProbeOutcome } from './modelProbe.ts';
+export type {
+  ModelProbe,
+  ModelProbeOutcome,
+  ModelProbeReason,
+  ModelProbeResult,
+} from './modelProbe.ts';
 export * from './observability.ts';
 export * from './plugin.ts';
 export * from './pluginReceipt.ts';

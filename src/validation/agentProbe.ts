@@ -1,5 +1,6 @@
 import type { CredentialReference } from '../contracts/credentials.ts';
 import { createHttpModelProbe } from './httpProbe.ts';
+import { MODEL_PROBE_LIMITS } from './limits.ts';
 
 /** Each built-in agent selects its own wire protocol and credential binding. */
 export function createAgentModelProbe(options: {
@@ -13,10 +14,16 @@ export function createAgentModelProbe(options: {
   const messages = [{ role: 'user', content: 'Reply OK.' }];
   const body =
     protocol === 'responses'
-      ? { model, input: messages, max_output_tokens: 64, store: false }
-      : { model, messages, max_tokens: 64 };
+      ? {
+          model,
+          input: messages,
+          max_output_tokens: MODEL_PROBE_LIMITS.outputTokens,
+          store: false,
+        }
+      : { model, messages, max_tokens: MODEL_PROBE_LIMITS.outputTokens };
   return createHttpModelProbe({
     endpoint: options.endpoint,
+    model,
     credential: options.credential,
     headers: (secret) =>
       protocol === 'messages'

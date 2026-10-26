@@ -22,15 +22,13 @@ export function selectedModelProbes(
   const selected = new Map<string, SelectedModelProbe>();
   for (const { plan, composition } of requests) {
     const agent = composition.agents.get(plan.agent.adapter)!;
-    if (!agent.probeModel)
-      throw new Error(`Agent ${agent.id} does not support model probes.`);
     const candidates: SelectedModelProbe[] = [
       {
         purpose: 'agent',
         adapter: agent.id,
         provider: plan.agent.provider,
         model: plan.agent.model,
-        probe: agent.probeModel(plan.agent),
+        probe: availableProbe(() => agent.probeModel?.(plan.agent)),
         composition,
       },
     ];
@@ -38,14 +36,10 @@ export function selectedModelProbes(
       plan,
       composition,
     )) {
-      if (!provider.probeModel)
-        throw new Error(
-          `Provider ${provider.id} does not support model probes.`,
-        );
       candidates.push({
         purpose,
         ...model,
-        probe: provider.probeModel({ purpose, model }),
+        probe: availableProbe(() => provider.probeModel?.({ purpose, model })),
         composition,
       });
     }
@@ -61,4 +55,22 @@ export function selectedModelProbes(
     }
   }
   return [...selected.values()];
+}
+
+function availableProbe(create: () => ModelProbe | undefined): ModelProbe {
+  try {
+    const probe = create();
+    if (
+      probe &&
+      typeof probe.endpoint === 'string' &&
+      typeof probe.run === 'function'
+    )
+      return probe;
+  } catch {
+    // Factory failures are isolated to this selected model, just like call failures.
+  }
+  return {
+    endpoint: '',
+    run: async () => ({ outcome: 'other', reason: 'probe_unavailable' }),
+  };
 }

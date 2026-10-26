@@ -166,6 +166,13 @@ try {
       for (const provider of [anthropic.createAnthropicCompletionProvider(), openai.createOpenAICompletionProvider()]) {
         assert.equal(typeof provider.probeModel, 'function');
       }
+      const modelProbe = openai.createOpenAICompletionProvider({
+        fetch: async () => new Response(JSON.stringify({error: {code: 'model_not_found'}}), {status: 404}),
+      }).probeModel({purpose: 'judge', model: {provider: 'openai', model: 'test-model'}});
+      assert.deepEqual(await modelProbe.run({
+        credentialResolver: {resolve: async () => 'synthetic-key'},
+        signal: new AbortController().signal,
+      }), {outcome: 'unknown_model', reason: 'http_error', http_status: 404});
       let probeHelp = '';
       assert.equal(await cli.runCli(['--help'], {stdout: (text) => {probeHelp += text;}}), 0);
       assert.match(probeHelp, /--probe-models/);
