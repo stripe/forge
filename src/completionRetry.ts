@@ -61,7 +61,9 @@ export function completionRetryDecision(
     ].includes(observation?.provider_error_code ?? '') ||
     [400, 401, 403, 404].includes(status ?? 0) ||
     (error instanceof CompletionInvocationError &&
-      ['invalid_request', 'invalid_credentials'].includes(error.code));
+      ['invalid_request', 'invalid_credentials', 'invalid_output'].includes(
+        error.code,
+      ));
   const category = rateLimited ? 'rateLimitRetries' : 'otherRetries';
   const delays = rateLimited
     ? [2000, 4000, 8000, 16000, 32000, 64000]

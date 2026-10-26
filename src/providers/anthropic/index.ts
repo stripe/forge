@@ -69,6 +69,7 @@ export type AnthropicCompletionErrorCode =
   | 'aborted'
   | 'http_error'
   | 'invalid_credentials'
+  | 'invalid_output'
   | 'invalid_request'
   | 'invalid_response'
   | 'response_too_large'
@@ -613,13 +614,6 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
     text.push(block.text);
   }
   const content = text.join('');
-  if (structured) {
-    try {
-      JSON.parse(content);
-    } catch {
-      throw invalidResponse();
-    }
-  }
   const usage = value.usage;
   if (!isRecord(usage)) throw invalidResponse();
   const input = nonnegativeInteger(usage.input_tokens);
@@ -642,6 +636,16 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   if (stopReason === undefined) throw invalidResponse();
   const costUsd = optionalCost(usage.cost_usd);
   if (costUsd === null) throw invalidResponse();
+  if (structured) {
+    try {
+      JSON.parse(content);
+    } catch {
+      throw new AnthropicCompletionError(
+        'invalid_output',
+        'Anthropic completion returned malformed structured output.',
+      );
+    }
+  }
   return Object.freeze({
     content,
     stopReason,

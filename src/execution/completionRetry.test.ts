@@ -4,6 +4,8 @@ import { CompletionInvocationError } from '../contracts/completion.ts';
 import { judgeCriteria } from '../evaluation/criterionJudge.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
 import { AvaRolePlayer } from '../interaction/ava.ts';
+import { createAnthropicCompletionProvider } from '../providers/anthropic/index.ts';
+import { createOpenAICompletionProvider } from '../providers/openai/index.ts';
 import { MAX_COMPLETION_CALL_SUMMARIES } from '../results/types.ts';
 import {
   createScriptedCompletionProvider,
@@ -222,4 +224,117 @@ describe('completion retry integration', () => {
       rate_limit_wait_ms: (MAX_COMPLETION_CALL_SUMMARIES + 2) * 1000,
     });
   });
+});
+
+describe('built-in provider output retries through the completion runtime', () => {
+  for (const providerId of ['openai', 'anthropic'] as const) {
+    for (const purpose of ['role_player', 'judge'] as const) {
+      for (const invalidEnvelope of [false, true]) {
+        it(`${providerId} ${purpose} uses ${invalidEnvelope ? 'long waits for an invalid envelope' : 'short waits for malformed model JSON'}`, async () => {
+          let elapsed = 0;
+          let requests = 0;
+          const waits: number[] = [];
+          const content = '{"results":[';
+          const usage = {
+            input_tokens: invalidEnvelope ? -1 : 1,
+            output_tokens: 1,
+          };
+          const fetch: typeof globalThis.fetch = async () => {
+            requests += 1;
+            return Response.json(
+              providerId === 'openai'
+                ? {
+                    object: 'response',
+                    status: 'completed',
+                    output: [
+                      {
+                        type: 'message',
+                        role: 'assistant',
+                        content: [{ type: 'output_text', text: content }],
+                      },
+                    ],
+                    usage,
+                  }
+                : {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'text', text: content }],
+                    stop_reason: 'end_turn',
+                    usage,
+                  },
+            );
+          };
+          const provider =
+            providerId === 'openai'
+              ? createOpenAICompletionProvider({
+                  fetch,
+                  credential: 'test-key',
+                })
+              : createAnthropicCompletionProvider({
+                  fetch,
+                  credential: 'test-key',
+                });
+          const prepared = await prepareCompletionRuntime({
+            runId: 'output-retry-test',
+            bindings: [
+              completionBindingFor(new Map([[providerId, provider]]), purpose, {
+                provider: providerId,
+                model:
+                  providerId === 'openai' ? 'gpt-6.1-sol' : 'claude-sonnet-4-5',
+              }),
+            ],
+            credentialResolver: createStaticCredentialResolver({
+              'test-key': 'synthetic-secret',
+            }),
+            signal,
+          });
+          const options = {
+            now: () => elapsed,
+            random: () => 1,
+            sleep: async (ms: number) => {
+              elapsed += ms;
+              waits.push(ms);
+            },
+            onRetryDecision: prepared.recordRetryDecision,
+          };
+          const attempts = invalidEnvelope ? 4 : 3;
+          if (purpose === 'role_player') {
+            const turn = await new AvaRolePlayer(
+              { task: 'Do the task.', signal },
+              (request) => prepared.invoke(purpose, request, request.signal),
+              options,
+            ).nextTurn();
+            assert.equal(turn.error?.errorType, 'request_error');
+            assert.equal(turn.error?.attempts, attempts);
+          } else {
+            const results = await judgeCriteria(
+              { transcript, criteria: ['Done'], signal },
+              async (request) =>
+                (await prepared.invoke(purpose, request, request.signal))
+                  .content,
+              options,
+            );
+            assert.equal(results[0]!.error?.type, 'request_error');
+            assert.equal(results[0]!.error?.attempts, attempts);
+          }
+          assert.equal(requests, attempts);
+          assert.deepEqual(
+            waits,
+            invalidEnvelope ? [4000, 16000, 64000] : [1000, 5000],
+          );
+          assert.deepEqual(
+            prepared.calls.map((call) => call.error_code),
+            Array.from({ length: attempts }, () =>
+              invalidEnvelope ? 'invalid_response' : 'invalid_output',
+            ),
+          );
+          assert.deepEqual(
+            prepared.calls.map((call) => call.retry_ordinal),
+            Array.from({ length: attempts }, (_, index) => index),
+          );
+          assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+        });
+      }
+    }
+  }
 });
