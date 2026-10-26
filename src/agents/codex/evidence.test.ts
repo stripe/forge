@@ -2384,6 +2384,38 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
+  it('normalizes primary terminal sessions only when explicitly selected', async () => {
+    const raw = jsonl([
+      record('session_meta', { ...METADATA.payload, source: 'cli' }),
+      ...turn(),
+    ]);
+    const home = createMemoryWorkspace({ [PATH]: raw }).readonly;
+    const input = { ...context(home), sessionSource: 'cli' as const };
+    assert.equal((await loadCodexEvidence(input)).kind, 'available');
+    assert.equal(
+      Buffer.from((await loadCodexNativeArtifact(input))!.body).toString(),
+      raw,
+    );
+    assert.equal((await loadCodexEvidence(context(home))).kind, 'unavailable');
+  });
+
+  it('requires the exact primary session when terminal sessions are selected', async () => {
+    const metadata = { ...METADATA.payload, source: 'cli' };
+    for (const invalid of [
+      { ...metadata, source: 'exec' },
+      { ...metadata, id: OTHER_SESSION },
+      { ...metadata, parent_thread_id: OTHER_SESSION },
+      { ...metadata, forked_from_id: OTHER_SESSION },
+    ]) {
+      const home = createMemoryWorkspace({
+        [PATH]: jsonl([record('session_meta', invalid), ...turn()]),
+      }).readonly;
+      const input = { ...context(home), sessionSource: 'cli' as const };
+      assert.equal((await loadCodexEvidence(input)).kind, 'unavailable');
+      assert.equal(await loadCodexNativeArtifact(input), undefined);
+    }
+  });
+
   for (const [description, metadata] of [
     ['different session', { ...METADATA.payload, id: OTHER_SESSION }],
     ['TUI session', { ...METADATA.payload, source: 'cli' }],
