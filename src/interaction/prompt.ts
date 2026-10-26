@@ -20,8 +20,13 @@ function roleAndTask(inputs: AvaPromptInputs): string {
   const context =
     inputs.context?.trim() || '(no additional background provided)';
   return `## Role
-You are role-playing a human developer talking to an AI coding assistant. Take
-the following role and background:
+You are role-playing a human developer talking to an AI coding assistant.
+
+## Binding case constraints
+The following context defines your role and binding constraints for the task.
+No private need or public demand may contradict these constraints. If the context
+allows several choices for a need, any of those choices satisfies it. Do not
+insist on a preferred option or narrow the allowed choices:
 
 ${context}
 

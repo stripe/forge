@@ -10,6 +10,11 @@ describe('Ava prompts', () => {
   for (const [phase, buildPrompt] of [
     ['initialization', buildAvaInitializationPrompt],
     [
+      'needs-only initialization',
+      (inputs: Parameters<typeof buildAvaInitializationPrompt>[0]) =>
+        buildAvaInitializationPrompt(inputs, true),
+    ],
+    [
       'continuation',
       (inputs: Parameters<typeof buildAvaInitializationPrompt>[0]) =>
         buildAvaContinuationPrompt(inputs, {
@@ -39,6 +44,29 @@ describe('Ava prompts', () => {
       assert.match(
         prompt,
         /Do not invent an existing repository, payout implementation,\n {2}or prior integration, or promise to paste nonexistent code/,
+      );
+    });
+
+    it(`makes case constraints binding during ${phase}`, () => {
+      const context =
+        'Use either hosted or embedded checkout. No account login is required.';
+      const prompt = buildPrompt({ task: 'Add checkout.', context });
+      const constraints = prompt
+        .split('## Binding case constraints\n')[1]
+        ?.split('\n## Task')[0];
+      assert.ok(constraints);
+      assert.ok(constraints.includes(context));
+      assert.match(
+        constraints,
+        /No private need or public demand may contradict these constraints/,
+      );
+      assert.match(
+        constraints,
+        /allows several choices for a need, any of those choices satisfies it/,
+      );
+      assert.match(
+        constraints,
+        /Do not\ninsist on a preferred option or narrow the allowed choices/,
       );
     });
 

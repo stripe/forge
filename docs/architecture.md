@@ -991,9 +991,11 @@ not an adapter or completion-provider feature. The provider supplies only
 structured completions.
 
 Ava privately derives up to six high-level needs, each at most 240 characters,
-from the case task and context. It focuses on one remaining need at a time and
-emits user messages of at most 500 characters. Its private need model is never
-sent to the coding agent. Ava initializes before the first agent answer.
+from the case task and context. Both initialization and continuation prompts
+present context as binding constraints: no need or demand may contradict it,
+and any choice it allows satisfies the relevant need. It focuses on one
+remaining need at a time and emits user messages of at most 500 characters. Its
+private need model is never sent to the coding agent. Ava initializes before the first agent answer.
 With a configured initial prompt, a needs-only completion runs before that
 opening is sent verbatim; otherwise Ava generates the opening and needs together.
 The first agent answer follows the continuation path in both cases. Configured
