@@ -979,12 +979,15 @@ describe('unified live end-to-end suite', () => {
       name: 'illegal backtick escapes',
       content:
         '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}',
-      error: /invalid response/,
+      error: {
+        code: 'invalid_output',
+        message: /live JSON escape check returned malformed structured output/,
+      },
     },
     {
       name: 'whitespace explanation',
       content: '{"results":[{"index":0,"passed":true,"explanation":"   "}]}',
-      error: /valid completed judgment/,
+      error: { message: /valid completed judgment/ },
     },
   ]) {
     it(`checks the native judge schema and local parser for ${fixture.name} without exposing the reply`, async () => {
@@ -1039,9 +1042,21 @@ describe('unified live end-to-end suite', () => {
           },
         },
       });
-      if (fixture.error !== undefined)
-        await assert.rejects(pending, fixture.error);
-      else
+      if (fixture.error !== undefined) {
+        await assert.rejects(pending, (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, fixture.error.message);
+          if ('code' in fixture.error) {
+            assert.ok('code' in error);
+            assert.equal(error.code, fixture.error.code);
+          }
+          assert.doesNotMatch(
+            `${String(error)} ${JSON.stringify(error)}`,
+            /cancel_url|synthetic-private-key/,
+          );
+          return true;
+        });
+      } else
         assert.deepEqual(await pending, {
           verified: true,
           valid_json: true,
