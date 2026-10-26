@@ -92,6 +92,16 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(original.evaluation.score, 1);
     await assert.rejects(fs.access(path.join(output, '.regrade.lock')));
+    assert.ok(
+      saved.completion_calls.every(
+        (call: { purpose: string }) => call.purpose === 'judge',
+      ),
+    );
+    assert.equal(
+      report.runs[0]!.rate_limit_wait_ms,
+      saved.completion_call_totals.rate_limit_wait_ms,
+    );
+    assert.equal(report.summary.rate_limit_wait_ms, 0);
 
     // A rerun with the same judge reuses the saved regrade without judge calls.
     const second = dependencies([]);
@@ -101,6 +111,24 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(rerun.reused, 1);
     assert.equal(rerun.regraded, 0);
+    assert.equal(second.scripted.calls.length, 0);
+
+    // Reusing a legacy regrade cannot invent a measured wait total.
+    delete saved.completion_call_totals;
+    await fs.writeFile(
+      path.join(output, 'runs', 'regrade-source.json'),
+      JSON.stringify(saved),
+    );
+    const legacy = await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      second.dependencies,
+    );
+    assert.equal(legacy.reused, 1);
+    const legacyReport = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(legacyReport.runs[0]!.rate_limit_wait_ms, undefined);
+    assert.equal(legacyReport.summary.rate_limit_wait_ms, undefined);
     assert.equal(second.scripted.calls.length, 0);
 
     // The source experiment run is untouched and still has its original score.

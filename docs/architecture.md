@@ -1065,19 +1065,26 @@ Ava and criterion judging share one retry policy per logical request:
 
 - HTTP 429, and HTTP 503 with a valid `Retry-After`, have six retry waits.
   Their base delays are 2, 4, 8, 16, 32, and 64 seconds. Jitter scales each
-  delay to 75–100% of its base. `Retry-After` seconds or an HTTP date replaces
-  that single delay, clamped to 0–64 seconds.
+  delay to 75–100% of its base. `Retry-After` seconds or an HTTP date can
+  increase that single delay, capped at 64 seconds. Zero, past, or smaller
+  hints never shorten the scheduled backoff.
+- A recognized `insufficient_quota` error is permanent and ends the request
+  without another call or wait, including when HTTP 429 carries `Retry-After`.
 - HTTP 400, 401, 403, 404, recognized invalid-request/authentication errors,
   and malformed structured output use the short 1- and 5-second schedule.
 - Other failures, including unclassified custom-provider errors, HTTP 5xx
   without the rate-limit signal, transport errors, and timeouts, get three
   retries with 4-, 16-, and 64-second base delays and the same jitter.
 
-Rate-limit waits have a separate budget; all other failures share a retry
-count. Cancellation interrupts waits and prevents further calls. The plan's
-run timeout still bounds execution. Clock, random source, and sleep can be
+Rate-limit, short, and fallback retries each have a separate budget per logical
+request. Mixed failures can use at most 12 calls in total. Failures that cannot
+be classified use the bounded fallback schedule; non-finite random samples use
+the full scheduled delay. Cancellation interrupts waits and prevents further
+calls. The plan's run timeout still bounds execution. Clock, random source, and sleep can be
 supplied through Ava and judge execution options for deterministic hosts.
-The exported legacy attempt constants describe the short schedule.
+The exported legacy attempt constants describe the short schedule. Observation
+callbacks cannot change retry or cancellation outcomes. If the measurement
+clock fails, the per-call wait stays absent (unknown) rather than becoming zero.
 
 Built-in HTTP failures carry a `CompletionTransportObservation` with origin
 `host_transport` through the public `CompletionInvocationError`. It includes
@@ -1087,7 +1094,9 @@ reads only `request-id`. IDs must be at most 128 ASCII letters, digits,
 underscores, or hyphens and begin with a letter or digit. The error-envelope
 parser reads at most 16 KiB and accepts only the
 [recognized code/type values](https://github.com/stripe/forge/blob/main/src/contracts/completionObservation.ts).
-Bodies, arbitrary headers, and endpoint URLs are never retained.
+Bodies, arbitrary headers, and endpoint URLs are never retained. An unreadable
+or locked error body leaves the provider error code unknown while preserving
+validated headers and status. Cleanup does not wait for stream cancellation.
 
 `result.json.completion_calls` retains the first 1,024 provider calls per eval,
 including failures before a later success. Optional `http_status`, `request_id`,
@@ -1097,7 +1106,11 @@ criterion. Dispositions are `succeeded`, `failed`, `retry`, `rate_limit_retry`,
 or `exhausted`; waits measure elapsed sleep, bounded by the selected delay,
 including interrupted waits. `completion_call_totals` counts all calls, failed
 calls, omitted summaries, and measured `rate_limit_wait_ms`, even after the cap.
-Regrades retain the same records and counters. Older results may omit the new
+Regrades retain these records and counters for their new judge calls only;
+their reports do not include waits from the source run. Runs without judging
+criteria retain their source-run totals with the unchanged evaluation.
+Reused older regrades
+without counters leave the wait total absent. Older results may omit the new
 fields. These are observations and do not change plan digests. Attempts that
 fail before result commit do not persist these records.
 

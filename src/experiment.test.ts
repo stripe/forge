@@ -395,7 +395,7 @@ describe('public experiment run API', () => {
           },
         },
         responses: Array.from(
-          { length: 3 },
+          { length: 4 },
           () => new Error(`Provider rejected ${secret}: ${'x'.repeat(5000)}`),
         ),
       }).provider;

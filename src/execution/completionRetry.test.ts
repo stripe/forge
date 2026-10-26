@@ -3,9 +3,11 @@ import { describe, it } from 'vitest';
 import { CompletionInvocationError } from '../contracts/completion.ts';
 import { judgeCriteria } from '../evaluation/criterionJudge.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { scoreEvaluation } from '../evaluation/score.ts';
 import { AvaRolePlayer } from '../interaction/ava.ts';
 import { createAnthropicCompletionProvider } from '../providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from '../providers/openai/index.ts';
+import { parseEvaluationResult } from '../results/parse.ts';
 import { MAX_COMPLETION_CALL_SUMMARIES } from '../results/types.ts';
 import {
   createScriptedCompletionProvider,
@@ -200,6 +202,58 @@ describe('completion retry integration', () => {
     });
   }
 
+  for (const purpose of ['judge', 'role_player'] as const) {
+    it(`bounds all three retry budgets for ${purpose} and keeps the terminal result readable`, async () => {
+      const outputFailure = () =>
+        new CompletionInvocationError('invalid_output', 'Malformed output');
+      const { prepared } = await runtime(
+        [
+          ...Array.from({ length: 6 }, () => limited()),
+          ...Array.from({ length: 3 }, () => limited(502)),
+          ...Array.from({ length: 3 }, outputFailure),
+        ],
+        purpose,
+      );
+      let elapsed = 0;
+      const waits: number[] = [];
+      const options = {
+        now: () => elapsed,
+        random: () => 1,
+        sleep: async (ms: number) => {
+          elapsed += ms;
+          waits.push(ms);
+        },
+        onRetryDecision: prepared.recordRetryDecision,
+      };
+      if (purpose === 'judge') {
+        const results = await judgeCriteria(
+          { transcript, criteria: ['Done'], signal },
+          async (request) =>
+            (await prepared.invoke(purpose, request, request.signal)).content,
+          options,
+        );
+        assert.equal(results[0]!.error?.attempts, 12);
+        const evaluation = scoreEvaluation(results, []);
+        assert.deepEqual(parseEvaluationResult(evaluation), evaluation);
+      } else {
+        const turn = await new AvaRolePlayer(
+          { task: 'Do the task.', signal },
+          (request) => prepared.invoke(purpose, request, request.signal),
+          options,
+        ).nextTurn();
+        assert.equal(turn.error?.attempts, 12);
+      }
+      assert.deepEqual(
+        waits,
+        [2000, 4000, 8000, 16000, 32000, 64000, 4000, 16000, 64000, 1000, 5000],
+      );
+      assert.equal(prepared.calls.length, 12);
+      assert.equal(prepared.calls.at(-1)!.retry_ordinal, 11);
+      assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+      assert.equal(prepared.totals.rate_limit_wait_ms, 126000);
+    });
+  }
+
   it('bounds retained records while counting omitted calls and their waits', async () => {
     const { prepared } = await runtime(
       Array.from({ length: MAX_COMPLETION_CALL_SUMMARIES + 2 }, () =>
@@ -229,8 +283,14 @@ describe('completion retry integration', () => {
 describe('built-in provider output retries through the completion runtime', () => {
   for (const providerId of ['openai', 'anthropic'] as const) {
     for (const purpose of ['role_player', 'judge'] as const) {
-      for (const invalidEnvelope of [false, true]) {
-        it(`${providerId} ${purpose} uses ${invalidEnvelope ? 'long waits for an invalid envelope' : 'short waits for malformed model JSON'}`, async () => {
+      for (const failureKind of [
+        'invalid_output',
+        'invalid_response',
+        'insufficient_quota',
+      ] as const) {
+        const invalidEnvelope = failureKind === 'invalid_response';
+        const quotaExhausted = failureKind === 'insufficient_quota';
+        it(`${providerId} ${purpose} applies the retry policy to ${failureKind}`, async () => {
           let elapsed = 0;
           let requests = 0;
           const waits: number[] = [];
@@ -241,6 +301,14 @@ describe('built-in provider output retries through the completion runtime', () =
           };
           const fetch: typeof globalThis.fetch = async () => {
             requests += 1;
+            if (quotaExhausted)
+              return Response.json(
+                { error: { code: 'insufficient_quota' } },
+                {
+                  status: 429,
+                  headers: { 'retry-after': '64' },
+                },
+              );
             return Response.json(
               providerId === 'openai'
                 ? {
@@ -297,7 +365,7 @@ describe('built-in provider output retries through the completion runtime', () =
             },
             onRetryDecision: prepared.recordRetryDecision,
           };
-          const attempts = invalidEnvelope ? 4 : 3;
+          const attempts = quotaExhausted ? 1 : invalidEnvelope ? 4 : 3;
           if (purpose === 'role_player') {
             const turn = await new AvaRolePlayer(
               { task: 'Do the task.', signal },
@@ -320,12 +388,16 @@ describe('built-in provider output retries through the completion runtime', () =
           assert.equal(requests, attempts);
           assert.deepEqual(
             waits,
-            invalidEnvelope ? [4000, 16000, 64000] : [1000, 5000],
+            quotaExhausted
+              ? []
+              : invalidEnvelope
+                ? [4000, 16000, 64000]
+                : [1000, 5000],
           );
           assert.deepEqual(
             prepared.calls.map((call) => call.error_code),
             Array.from({ length: attempts }, () =>
-              invalidEnvelope ? 'invalid_response' : 'invalid_output',
+              quotaExhausted ? 'http_error' : failureKind,
             ),
           );
           assert.deepEqual(
@@ -333,6 +405,12 @@ describe('built-in provider output retries through the completion runtime', () =
             Array.from({ length: attempts }, (_, index) => index),
           );
           assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+          assert.equal(prepared.totals.rate_limit_wait_ms, 0);
+          if (quotaExhausted)
+            assert.equal(
+              prepared.calls[0]!.provider_error_code,
+              'insufficient_quota',
+            );
         });
       }
     }

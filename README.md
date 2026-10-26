@@ -665,17 +665,21 @@ report format, and `regrade.json` summarizes the invocation. In the regrade
 report, each regraded row's `regrade_path` (relative to the report's directory)
 points to the evaluation behind its scores. Its `result_path` still points to
 the original execution, relative to the report's `result_root`, which is the
-source experiment run. Rerunning the same command reuses regrades for the same
-judge and committed result, so an interrupted regrade can be continued. An
-output that already holds regrades from another judge reports those runs as
-failed instead of mixing judges. Only one regrade can write to an output at a
-time: a second concurrent invocation fails, naming the output, instead of
-interleaving its results.
+source experiment run. For runs with judging criteria, regrade reports count
+rate-limit waits from the new judge calls only; they do not add waits from the
+source run. Reused older regrades without wait records leave that value absent.
+Rerunning the same command reuses regrades for the same judge and committed
+result, so an interrupted regrade can be continued. An output that already
+holds regrades from another judge reports those runs as failed instead of
+mixing judges. Only one regrade can write to an output at a time: a second
+concurrent invocation fails, naming the output, instead of interleaving its
+results.
 
 Deterministic file checks are not re-run, because the workspace is gone after
 a run; each regrade keeps the run's original check results. The judge sees
 only the bounded workspace excerpts captured at run time. Runs without judging
-criteria keep their checks-only evaluation. Runs that could not be regraded
+criteria keep their checks-only evaluation and source-run wait totals.
+Runs that could not be regraded
 appear as pending in the regrade report, and the command exits with status 1.
 Library hosts can call `regradeCompletedRun` and `regradeExperimentRun` from
 `@stripe/forge/regrade`.

@@ -35,7 +35,7 @@ export async function observeCompletionFailure(
     provider === 'openai' ? 'x-request-id' : 'request-id',
   );
   let providerCode: CompletionTransportObservation['provider_error_code'];
-  const reader = response.body?.getReader();
+  const reader = response.body?.locked ? undefined : response.body?.getReader();
   if (reader !== undefined) {
     const onAbort = () => {
       void reader.cancel().catch(() => undefined);
@@ -82,7 +82,7 @@ export async function observeCompletionFailure(
       // Status and validated headers remain useful when the body is unreadable.
     } finally {
       signal.removeEventListener('abort', onAbort);
-      await reader.cancel().catch(() => undefined);
+      void reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   }

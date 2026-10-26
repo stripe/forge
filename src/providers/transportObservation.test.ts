@@ -103,6 +103,52 @@ describe('host transport observations', () => {
     }
   });
 
+  it('preserves status when an optional error body is already locked', async () => {
+    const response = new Response('{}', { status: 429 });
+    const reader = response.body!.getReader();
+    try {
+      assert.deepEqual(
+        await observeCompletionFailure(response, 'openai', signal),
+        {
+          origin: 'host_transport',
+          http_status: 429,
+        },
+      );
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+    }
+  });
+
+  it('does not wait for stalled cleanup after reaching the error-body byte cap', async () => {
+    let finishCancellation!: () => void;
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(16 * 1024 + 1));
+        },
+        cancel() {
+          return new Promise<void>((resolve) => {
+            finishCancellation = resolve;
+          });
+        },
+      }),
+      { status: 503 },
+    );
+    let settled = false;
+    const pending = observeCompletionFailure(response, 'openai', signal).then(
+      (value) => {
+        settled = true;
+        return value;
+      },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const completedBeforeCleanup = settled;
+    finishCancellation();
+    assert.equal((await pending).http_status, 503);
+    assert.equal(completedBeforeCleanup, true);
+  });
+
   it('cancels a stalled failure body on abort while preserving status', async () => {
     const controller = new AbortController();
     let cancelled = false;

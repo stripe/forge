@@ -501,7 +501,7 @@ describe('judgeCriteria', () => {
       noRetryWait,
     );
 
-    assert.equal(failedCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
+    assert.equal(failedCalls, 4);
     assert.deepEqual(results, [
       {
         criterion: 'unavailable',
@@ -509,11 +509,11 @@ describe('judgeCriteria', () => {
         passed: null,
         error: {
           type: 'parse_error',
-          attempts: 3,
+          attempts: 4,
           message: 'Judge response was not valid JSON.',
         },
         explanation:
-          'Judge response was not valid JSON. (unavailable after 3 attempts)',
+          'Judge response was not valid JSON. (unavailable after 4 attempts)',
       },
       {
         criterion: 'successful',

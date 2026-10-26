@@ -1,6 +1,7 @@
 import {
   CompletionInvocationError,
   type CompletionRetryDecision,
+  completionTransportObservationSchema,
   MAX_COMPLETION_RETRY_WAIT_MS,
 } from './contracts/completionObservation.ts';
 
@@ -8,16 +9,30 @@ export const SHORT_COMPLETION_RETRY_DELAYS_MS = Object.freeze([
   1000, 5000,
 ] as const);
 
+const RATE_LIMIT_RETRY_DELAYS_MS = Object.freeze([
+  2000, 4000, 8000, 16000, 32000, 64000,
+] as const);
+const LONG_COMPLETION_RETRY_DELAYS_MS = Object.freeze([
+  4000, 16000, 64000,
+] as const);
+export const MAX_COMPLETION_ATTEMPTS =
+  1 +
+  RATE_LIMIT_RETRY_DELAYS_MS.length +
+  SHORT_COMPLETION_RETRY_DELAYS_MS.length +
+  LONG_COMPLETION_RETRY_DELAYS_MS.length;
+
 export interface CompletionRetryState {
   readonly ordinal: number;
   readonly rateLimitRetries: number;
-  readonly otherRetries: number;
+  readonly shortRetries: number;
+  readonly longRetries: number;
 }
 export const INITIAL_COMPLETION_RETRY_STATE: CompletionRetryState =
   Object.freeze({
     ordinal: 0,
     rateLimitRetries: 0,
-    otherRetries: 0,
+    shortRetries: 0,
+    longRetries: 0,
   });
 
 export interface CompletionRetryOptions {
@@ -40,8 +55,13 @@ export function completionRetryDecision(
   readonly state: CompletionRetryState;
   readonly decision: CompletionRetryDecision;
 } {
-  const observation =
-    error instanceof CompletionInvocationError ? error.observation : undefined;
+  const parsed = completionTransportObservationSchema.safeParse(
+    error instanceof CompletionInvocationError ? error.observation : undefined,
+  );
+  const observation = parsed.success ? parsed.data : undefined;
+  if (observation?.provider_error_code === 'insufficient_quota') {
+    return { state, decision: { disposition: 'exhausted', wait_ms: 0 } };
+  }
   const status = observation?.http_status;
   const rateLimited =
     status === 429 ||
@@ -64,22 +84,27 @@ export function completionRetryDecision(
       ['invalid_request', 'invalid_credentials', 'invalid_output'].includes(
         error.code,
       ));
-  const category = rateLimited ? 'rateLimitRetries' : 'otherRetries';
+  const category = rateLimited
+    ? 'rateLimitRetries'
+    : short
+      ? 'shortRetries'
+      : 'longRetries';
   const delays = rateLimited
-    ? [2000, 4000, 8000, 16000, 32000, 64000]
+    ? RATE_LIMIT_RETRY_DELAYS_MS
     : short
       ? SHORT_COMPLETION_RETRY_DELAYS_MS
-      : [4000, 16000, 64000];
+      : LONG_COMPLETION_RETRY_DELAYS_MS;
   const base = delays[state[category]];
   if (base === undefined)
     return { state, decision: { disposition: 'exhausted', wait_ms: 0 } };
-  const jitter = 0.75 + Math.max(0, Math.min(1, random)) * 0.25;
-  const delay =
-    rateLimited && observation?.retry_after_ms !== undefined
-      ? observation.retry_after_ms
-      : short
-        ? base
-        : Math.round(base * jitter);
+  const sample = Number.isFinite(random) ? Math.max(0, Math.min(1, random)) : 1;
+  const scheduledDelay =
+    category === 'shortRetries'
+      ? base
+      : Math.round(base * (0.75 + sample * 0.25));
+  const delay = rateLimited
+    ? Math.max(scheduledDelay, observation?.retry_after_ms ?? 0)
+    : scheduledDelay;
   return {
     state: {
       ...state,
@@ -100,22 +125,49 @@ export async function waitForCompletionRetry(
   options: CompletionRetryOptions,
 ): Promise<void> {
   if (decision.disposition === 'exhausted') {
-    options.onRetryDecision?.(error, decision);
+    notifyRetryDecision(error, decision, options);
     return;
   }
   const now = options.now ?? Date.now;
-  const start = now();
+  let start: number | undefined;
+  try {
+    start = now();
+  } catch {
+    // A failed observation clock leaves the measured wait unknown.
+  }
   try {
     await (options.sleep ?? sleep)(decision.wait_ms, signal);
     signal.throwIfAborted();
   } finally {
-    options.onRetryDecision?.(error, {
-      ...decision,
-      wait_ms: Math.min(
-        decision.wait_ms,
-        Math.max(0, Math.round(now() - start)),
-      ),
-    });
+    try {
+      const elapsed = start === undefined ? Number.NaN : now() - start;
+      if (Number.isFinite(elapsed) && elapsed >= 0) {
+        notifyRetryDecision(
+          error,
+          {
+            ...decision,
+            wait_ms: Math.min(decision.wait_ms, Math.round(elapsed)),
+          },
+          options,
+        );
+      }
+    } catch {
+      // A failed observation clock leaves the measured wait unknown.
+    }
+  }
+}
+
+function notifyRetryDecision(
+  error: unknown,
+  decision: CompletionRetryDecision,
+  options: CompletionRetryOptions,
+): void {
+  try {
+    void Promise.resolve(options.onRetryDecision?.(error, decision)).catch(
+      () => undefined,
+    );
+  } catch {
+    // An unavailable observer must not change completion or cancellation semantics.
   }
 }
 
