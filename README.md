@@ -477,9 +477,13 @@ results/experiments/<experiment-run-id>/
 Each line in `events.jsonl` is one canonical JSON progress event with an
 `observed_at` UTC timestamp. Resume appends a `resumed` marker and further
 events to the same file. Follow it with `tail -f` while a run is active.
-Recording is best effort: disk errors or process interruption can leave gaps
-or a partial line. The log does not affect verification, scores, or regrade;
-older experiment folders may have no log.
+Recording runs in the background with bounded memory and waits. Disk errors,
+slow writes, or a full queue can leave gaps: `run-summary.json` then includes
+`progress_log` with `state: unavailable`, a reason, and the affected event count.
+The next saved event carries `recording_gap` if recording recovers. A crash can
+leave a partial line. The last event alone does not prove a run is alive or
+finished. The log does not affect verification, scores, or regrade; older
+experiment folders may have no log.
 
 For the first experiment, print its evaluation:
 

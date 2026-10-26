@@ -147,7 +147,61 @@ describe('resumable CLI experiment runs', () => {
     const completed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(completed.code, 0);
     assert.equal(completed.summary.completed, 1);
+    assert.deepEqual(completed.summary.progress_log, {
+      state: 'unavailable',
+      reason: 'io_error',
+      affected_events: 3,
+    });
     await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-3'));
+  });
+
+  it('finishes evals and releases the lock when event-log I/O never settles', async () => {
+    const fixture = await createFixture({ repetitions: 1 });
+    const originalOpen = fsPromises.open;
+    const callbacks: string[] = [];
+    vi.spyOn(fsPromises, 'open').mockImplementation(
+      (...args: Parameters<typeof originalOpen>) =>
+        path.basename(String(args[0])) === 'events.jsonl'
+          ? new Promise(() => {})
+          : originalOpen(...args),
+    );
+    syncBuiltinESMExports();
+    try {
+      const result = await waitFor(
+        fixture.run([], {
+          stderr: (body) => {
+            callbacks.push(JSON.parse(body).state);
+          },
+          execute: async (input) => {
+            assert.deepEqual(callbacks, ['started', 'running']);
+            return defaultForgeEngine.executeEval(input);
+          },
+        }),
+      );
+      assert.equal(result.code, 0);
+      assert.deepEqual(callbacks, ['started', 'running', 'completed']);
+      assert.deepEqual(result.summary.progress_log, {
+        state: 'unavailable',
+        reason: 'io_timeout',
+        affected_events: 3,
+      });
+      await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-1'));
+      await assert.rejects(
+        fs.stat(path.join(fixture.root, '.experiment.lock')),
+        { code: 'ENOENT' },
+      );
+      const resumed = await waitFor(fixture.run(['--resume', 'exp-1']));
+      assert.equal(resumed.code, 0);
+      assert.equal(resumed.summary.skipped, 1);
+      assert.deepEqual(resumed.summary.progress_log, {
+        state: 'unavailable',
+        reason: 'io_timeout',
+        affected_events: 2,
+      });
+    } finally {
+      vi.restoreAllMocks();
+      syncBuiltinESMExports();
+    }
   });
 
   it('records the execution boundary redaction in progress diagnostics', async () => {
