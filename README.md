@@ -287,7 +287,8 @@ npx --no-install forge run \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
-Execution uses Docker and makes model calls. Progress goes to stderr;
+Execution uses Docker and makes model calls. Progress goes to stderr and the
+experiment run's `events.jsonl`.
 `run-summary.json` contains the experiment run ID, output location, and
 checkpoint/report paths. Every invocation without `--resume` starts a new
 experiment run. See [Results and Scores](#results-and-scores) to inspect it.
@@ -452,6 +453,7 @@ Artifacts are saved under the experiment run ID:
 ```text
 results/experiments/<experiment-run-id>/
 ├── experiment.json
+├── events.jsonl
 ├── report.json
 └── runs/<eval-run-id>/
     ├── result.json
@@ -465,11 +467,19 @@ results/experiments/<experiment-run-id>/
 | --- | --- |
 | `experiment.json` | Checkpoint, selected plans, and attempt history used for resume. |
 | `report.json` | Scorecard across the saved experiment selections. |
+| `events.jsonl` | Timestamped progress history, appended on resume. |
 | `result.json` | Evaluation at `.evaluation`, provenance, and companion artifact descriptors. |
 | `plan.json` | Resolved input for one eval run. |
 | `setup.json` | Ordered, bounded setup receipts. |
 | `trajectory.json` | Normalized, credential-redacted ATIF transcript. |
 | `interaction.json` | Turn history and stop reason, including Ava's private audit data. |
+
+Each line in `events.jsonl` is one canonical JSON progress event with an
+`observed_at` UTC timestamp. Resume appends a `resumed` marker and further
+events to the same file. Follow it with `tail -f` while a run is active.
+Recording is best effort: disk errors or process interruption can leave gaps
+or a partial line. The log does not affect verification, scores, or regrade;
+older experiment folders may have no log.
 
 For the first experiment, print its evaluation:
 
@@ -597,7 +607,7 @@ are ignored, and malformed diagnostics are dropped before checkpoint writes.
 After credentials are resolved, any `Error.message` can become a redacted
 diagnostic. Custom adapters and providers must keep sensitive data other than
 resolved credentials out of error messages.
-Attempt diagnostics and stderr progress can include role-player provider error
+Attempt diagnostics, stderr progress, and `events.jsonl` can include role-player provider error
 text. Report rows retain only the stable `error_code` and `diagnostic.phase`,
 without diagnostic messages or reasons. Older attempts and plain host callback
 failures may have only `error_code`; host-thrown Forge errors also retain a valid

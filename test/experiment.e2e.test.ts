@@ -8,17 +8,21 @@ import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
 
 import { type RunCliOptions, runCli } from '../src/cli.ts';
+import { credentialReference } from '../src/contracts/credentials.ts';
 import { defaultForgeEngine } from '../src/engine.ts';
 import { ForgeExecutionError } from '../src/execution/errors.ts';
 import { executeEvalWithTestHooks } from '../src/execution/execute.ts';
 import { parseExperimentRunReport } from '../src/experiment.ts';
+import { parseExperimentRunEvent } from '../src/experimentEvents.ts';
 import { sha256Digest } from '../src/model/hashes.ts';
 import { parseExperimentConfigYaml } from '../src/model/parse.ts';
 import type { DatasetManifestV1, RunSelection } from '../src/model/types.ts';
+import { regradeExperimentRun } from '../src/regrade/experiment.ts';
 import {
   createArtifactStore,
   verifyCompletedRun,
 } from '../src/results/index.ts';
+import { serializeCanonicalJson } from '../src/serialization.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -37,6 +41,168 @@ afterEach(async () => {
 });
 
 describe('resumable CLI experiment runs', () => {
+  it('appends timestamped progress across execution and resume while artifacts verify and regrade', async () => {
+    const fixture = await createFixture();
+    const first = await fixture.run(['--jobs', '2']);
+    assert.equal(first.code, 0);
+    const file = path.join(fixture.root, 'events.jsonl');
+    const before = await fs.readFile(file, 'utf8');
+    const initial = before
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const event = parseExperimentRunEvent(JSON.parse(line));
+        assert.equal(serializeCanonicalJson(event), `${line}\n`);
+        assert.equal(
+          new Date(event.observed_at).toISOString(),
+          event.observed_at,
+        );
+        const { observed_at: _, ...payload } = event;
+        return payload;
+      });
+    assert.deepEqual(
+      initial,
+      first.stderr
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line)),
+    );
+    assert.equal(initial.length, 7);
+    const resumed = await fixture.run(['--resume', 'exp-1']);
+    assert.equal(resumed.code, 0);
+    const after = await fs.readFile(file, 'utf8');
+    assert.ok(after.startsWith(before));
+    const appended = after
+      .slice(before.length)
+      .trimEnd()
+      .split('\n')
+      .map((line) => parseExperimentRunEvent(JSON.parse(line)));
+    assert.deepEqual(
+      appended.map((event) => event.state),
+      ['skipped', 'skipped', 'skipped', 'resumed'],
+    );
+    for (const event of appended)
+      assert.equal(
+        new Date(event.observed_at).toISOString(),
+        event.observed_at,
+      );
+    assert.equal(
+      JSON.parse(resumed.stderr.trimEnd().split('\n').at(-1)!).state,
+      'resuming',
+    );
+    for (const entry of (await fixture.readCheckpoint()).entries) {
+      await verifyCompletedRun(
+        path.join(fixture.root, 'runs', entry.attempts[0]!.run_id),
+      );
+    }
+    const regrade = await regradeExperimentRun(
+      {
+        experimentRun: fixture.root,
+        output: path.join(fixture.output, 'regrade'),
+        judge: { provider: 'scripted', model: 'judge' },
+      },
+      {
+        completionProviders: new Map(),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    assert.deepEqual(regrade.failed, []);
+    assert.equal(regrade.not_judged, 3);
+    assert.equal(
+      (await readReport(path.join(fixture.output, 'regrade'))).summary
+        .completed,
+      3,
+    );
+    assert.equal(await fs.readFile(file, 'utf8'), after);
+  });
+
+  it('resumes an old folder without a log and keeps evaluating if log writes fail', async () => {
+    const fixture = await createFixture({ repetitions: 1 });
+    assert.equal(
+      (
+        await fixture.run([], {
+          execute: async () => {
+            throw new Error('interrupted');
+          },
+        })
+      ).code,
+      1,
+    );
+    const file = path.join(fixture.root, 'events.jsonl');
+    await fs.unlink(file);
+    const resumed = await fixture.run(['--resume', 'exp-1'], {
+      execute: async () => {
+        throw new Error('interrupted again');
+      },
+    });
+    assert.equal(resumed.code, 1);
+    assert.equal(
+      parseExperimentRunEvent(
+        JSON.parse((await fs.readFile(file, 'utf8')).split('\n')[0]!),
+      ).state,
+      'resumed',
+    );
+    await fs.unlink(file);
+    await fs.mkdir(file);
+    const completed = await fixture.run(['--resume', 'exp-1']);
+    assert.equal(completed.code, 0);
+    assert.equal(completed.summary.completed, 1);
+    await verifyCompletedRun(path.join(fixture.root, 'runs', 'attempt-3'));
+  });
+
+  it('records the execution boundary redaction in progress diagnostics', async () => {
+    const fixture = await createFixture({ repetitions: 1 });
+    const secret = 'synthetic-agent-key';
+    const result = await fixture.run([], {
+      compositionFactory: async ({ resultsRoot }) => {
+        const runtime = createFakeRuntimeAdapter();
+        const agent = createScriptedAgentAdapter({
+          id: 'claude-code',
+          requirements: {
+            executables: [],
+            stateDirectories: [],
+            environment: {
+              credentials: {
+                API_KEY: { reference: credentialReference('test.agent') },
+              },
+            },
+          },
+        });
+        return {
+          runtime: runtime.adapter,
+          agents: new Map([
+            [
+              agent.adapter.id,
+              {
+                ...agent.adapter,
+                async openSession() {
+                  throw new Error(`Unable to use ${secret}`);
+                },
+              },
+            ],
+          ]),
+          credentialResolver: createStaticCredentialResolver({
+            'test.agent': secret,
+          }),
+          inputProvider: createMemoryRunInputProvider(),
+          artifactStore: createArtifactStore({ root: resultsRoot }),
+        };
+      },
+    });
+    assert.equal(result.code, 1);
+    const body = await fs.readFile(
+      path.join(fixture.root, 'events.jsonl'),
+      'utf8',
+    );
+    assert.equal(body.includes(secret), false);
+    const event = parseExperimentRunEvent(
+      JSON.parse(body.trimEnd().split('\n').at(-1)!),
+    );
+    assert.equal(event.state, 'errored');
+    if (event.state === 'errored')
+      assert.equal(event.diagnostic?.message, 'Unable to use [REDACTED]');
+  });
+
   it('defaults to one active execution at a time', async () => {
     const fixture = await createFixture();
     const started = Array.from({ length: 3 }, createGate);
@@ -764,6 +930,19 @@ describe('resumable CLI experiment runs', () => {
       false,
     );
     assert.equal(first.stderr.includes('secret-adapter-detail'), false);
+    const logged = await fs.readFile(
+      path.join(fixture.root, 'events.jsonl'),
+      'utf8',
+    );
+    assert.equal(logged.includes('secret-adapter-detail'), false);
+    const failureEvent = logged
+      .trimEnd()
+      .split('\n')
+      .map((line) => parseExperimentRunEvent(JSON.parse(line)))
+      .find((event) => event.state === 'errored');
+    assert.equal(failureEvent?.state, 'errored');
+    if (failureEvent?.state === 'errored')
+      assert.equal(failureEvent.error_code, 'agent_failed');
     const initialReport = await readReport(fixture.root);
     assert.equal(initialReport.summary.completed, 2);
     assert.equal(initialReport.summary.errored, 1);

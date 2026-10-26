@@ -46,6 +46,9 @@ describe('regradeExperimentRun', () => {
     const root = await temporaryRoot('forge-regrade-exp-');
     roots.push(root);
     const source = await runJudgedFixture(root);
+    const log = path.join(source.experimentLocation, 'events.jsonl');
+    const events = await fs.readFile(log);
+    assert.ok(events.byteLength > 0);
     const output = path.join(root, 'regrade-opus');
     const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
     const first = dependencies([failingJudgment]);
@@ -97,6 +100,7 @@ describe('regradeExperimentRun', () => {
       ),
     );
     assert.equal(sourceReport.runs[0]!.evaluation!.score, 1);
+    assert.deepEqual(await fs.readFile(log), events);
   });
 
   it('refuses to mix judges in one output and leaves that run unscored', async () => {

@@ -330,6 +330,25 @@ owner's marker and an empty lock directory, so delayed cleanup cannot remove
 a replacement owner's lock. Committed artifact locations are compared after
 resolving filesystem aliases, including symlinked output directories.
 
+Alongside `experiment.json` and `report.json`, the experiment root holds
+`events.jsonl`. Under the same lock, the controller appends each progress event
+as canonical JSON with `experiment_run_id` and an `observed_at` UTC observation
+time. The states are `started`, `resumed`, `running`, `completed`, `skipped`,
+and `errored`; selection events retain `selection` and `run_id`, and errors
+retain the same stable code and optional credential-redacted diagnostic as
+stderr. Resume appends a `resumed` marker after inspecting prior attempts
+and before scheduling pending work.
+The callback and stderr keep their existing `resuming` state name.
+
+The log format belongs to the checkpoint's Forge release. Records are bounded
+to 64 KiB and new logs use mode `0600`. Log I/O is best effort and cannot stop
+evaluations; writes are not synced, so interruption can leave gaps or an
+incomplete line. A later append separates a partial line from new records.
+The bounded tail reader ignores an unfinished final line and rejects malformed
+complete records. The log is optional for older folders and is never an input
+to resume decisions, judging, scoring, verification, or regrade. Completed-run
+file inventories apply only within `runs/<eval-run-id>/`.
+
 `--resume <experiment-run-id>` requires an explicit ID and loads that
 experiment run's saved selections. Bare `--resume` is rejected. The resolved
 plans must retain their original checksums. Resume independently verifies prior eval run
