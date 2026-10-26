@@ -1,8 +1,9 @@
 import * as assert from 'node:assert/strict';
-import * as fs from 'node:fs/promises';
+import fsPromises, * as fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
@@ -24,7 +25,7 @@ import {
   runExperiment,
 } from './experiment.ts';
 import { parseExperimentRunCheckpoint } from './experimentModel.ts';
-import { createArtifactStore } from './results/index.ts';
+import { createArtifactStore, verifyCompletedRun } from './results/index.ts';
 import { defineSetupActionBundle } from './setup/index.ts';
 import {
   createFakeRuntimeAdapter,
@@ -38,6 +39,8 @@ import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from './version.ts';
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -65,6 +68,51 @@ describe('public experiment run API', () => {
       return event.run_id;
     };
   });
+
+  for (const primaryFailure of [false, true]) {
+    it(`preserves ${primaryFailure ? 'the primary error' : 'successful results'} when background recording has a programming error`, async () => {
+      const root = await experimentRunRoot();
+      const originalOpen = fsPromises.open;
+      const bug = new TypeError('private recorder detail');
+      const primary = new Error('outcome callback failed');
+      vi.spyOn(fsPromises, 'open').mockImplementation(
+        (...args: Parameters<typeof originalOpen>) =>
+          path.basename(String(args[0])) === 'events.jsonl'
+            ? Promise.reject(bug)
+            : originalOpen(...args),
+      );
+      syncBuiltinESMExports();
+      const running = runExperiment({
+        root,
+        plans: [createTestResolvedRunPlan()],
+        composition: makeComposition(root),
+        engine: defaultForgeEngine,
+        resume: false,
+        signal: new AbortController().signal,
+        runIdFactory: () => 'recording-test',
+        progress: () => undefined,
+        execute: (input) => defaultForgeEngine.executeEval(input),
+        onOutcome: () => {
+          if (primaryFailure) throw primary;
+        },
+      });
+      if (primaryFailure) {
+        await assert.rejects(running, (error) => error === primary);
+      } else {
+        const result = await running;
+        assert.equal(result.completed, 1);
+        assert.deepEqual(result.progress_log, {
+          state: 'unavailable',
+          reason: 'recording_error',
+          affected_events: 3,
+        });
+      }
+      await verifyCompletedRun(path.join(root, 'runs', 'recording-test'));
+      await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {
+        code: 'ENOENT',
+      });
+    });
+  }
 
   it('persists execution diagnostics without run artifacts and retains them in retry history', async () => {
     const root = await experimentRunRoot();

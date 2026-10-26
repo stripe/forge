@@ -161,7 +161,7 @@ describe('experiment controller progress recording', () => {
     assert.equal(callbacks, 3);
   });
 
-  it('surfaces schema drift and unexpected programming errors instead of disguising them as I/O', async () => {
+  it('rejects schema drift and reports background programming errors as distinct gaps', async () => {
     const recorder = createExperimentProgress({
       root: '/example',
       progress: () => undefined,
@@ -176,6 +176,12 @@ describe('experiment controller progress recording', () => {
       } as ExperimentRunProgressEvent),
     );
     recorder.record(event);
-    await assert.rejects(recorder.finish(), /recorder bug/);
+    const expected = {
+      state: 'unavailable',
+      reason: 'recording_error',
+      affected_events: 1,
+    };
+    assert.deepEqual(await recorder.finish(), expected);
+    assert.deepEqual(await recorder.finish(), expected);
   });
 });
