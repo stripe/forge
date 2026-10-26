@@ -1555,14 +1555,35 @@ consumers must inspect the report to establish grading completeness.
 
 Regrade comparison separates artifact loading from pure analysis.
 `diffRegradeExperimentRun` uses experiment inspection and completed-run
-verification to select the latest completed source attempts, then reads saved
-regrades. Source artifact verification failures abort loading. The shared saved
-regrade reader validates each judge identity before reuse or comparison.
-`compareRegradeResults` pairs evaluations by run ID and source result digest
-and requires matching ordered criterion definitions and a single regrade judge. Neither operation changes artifacts or invokes a model. Judge errors are
-reported separately from paired pass/fail agreement; source errors remain
-visible even when a regrade is missing. See the README's
-[regrade workflow](../README.md#regrade-saved-runs) for denominators and CLI output.
+verification to select source attempts. Inspection exposes the optional
+`checkpoint_state` alongside each verified outcome; this is read-only metadata,
+not a saved checkpoint field. It distinguishes never-attempted selections,
+uncommitted running attempts, recorded execution errors, and completed attempts
+that fail verification. Running without a verified commit means in progress or
+interrupted; inspection does not determine liveness. Verification failures
+exclude that source, without discarding valid pairs.
+
+The shared saved-regrade reader checks format, run ID, source digest, and judge
+identity before reuse or comparison. It reads only regular files without
+following a final symlink, up to 16 MiB per file, including growth during reads.
+The diff loader accepts at most 64 MiB of result and regrade file bodies for
+analysis, with at most one additional bounded read before reporting the limit.
+It visits at most 100,000 regrade directory entries. Its 30-second read deadline
+and caller cancellation return an unavailable summary even if a dependency does
+not settle. They do not cancel an underlying filesystem operation. Inspection
+uses the existing checkpoint parser and artifact verifier; these comparison
+limits do not replace those components' bounds.
+
+`compareRegradeResults` pairs evaluations by run ID and source result digest,
+validates evaluation scores and statuses, and requires matching ordered criterion
+definitions and deterministic checks. Invalid pairs produce typed issues;
+remaining eligible pairs must share one regrade judge before aggregation. Judge
+errors are separate from paired pass/fail agreement, with source errors visible
+even when a regrade is missing. Output contains criterion indexes and error
+categories, excluding rubric text, explanations, and raw error messages. Neither
+operation changes artifacts, scores, plans, or judge inputs, or invokes a model.
+See the README's [regrade workflow](../README.md#regrade-saved-runs) for coverage,
+denominators, and exit codes.
 
 ## Result and artifact architecture
 

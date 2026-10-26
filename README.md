@@ -672,21 +672,31 @@ npx --no-install forge regrade diff \
 ```
 
 The diff prints verdict agreement overall and by MUST, SHOULD, and OPTIONAL,
-each run's score change (regrade minus source), the mean change, flipped
-criteria, and judge errors on either side. Agreement counts only criteria with
-pass/fail verdicts on both sides; two errors do not count as agreement. OPTIONAL
-verdicts count toward agreement but keep their usual exclusion from scores.
-Null scores do not enter the mean change. Empty denominators display as `n/a`
-(`null` in JSON). Add `--json` for structured output.
+each run's score and status changes, the mean score change (regrade minus
+source), flipped criteria, and judge errors on either side. Agreement counts
+only criteria with pass/fail verdicts on both sides; two errors do not count as
+agreement. OPTIONAL verdicts count toward agreement but keep their usual
+exclusion from scores. Null scores do not enter the mean change. Empty
+denominators display as `n/a` (`null` in JSON). Add `--json` for structured
+output. Criteria are identified by run ID and index; prompt text and raw error
+messages stay in the saved artifacts.
 
-Missing regrades are listed separately, and checks-only runs are not compared.
-The command reads the latest verified completed attempts and does not use the
-reports, which may be stale. Source artifact verification failures stop the diff,
-even when that run has no saved regrade. Each regrade must name a nonempty judge
-provider and model and match its source result digest and ordered criterion
-definitions. All regrades must use the same judge. Differences, judge errors,
-and missing regrades still exit with status 0; invalid input or mismatched
-artifacts exit nonzero.
+The command reads the latest verified completed attempts, without using reports
+that may be stale. Missing regrades are listed separately; checks-only runs are
+not compared. Excluded sources include never-attempted selections (`pending`),
+uncommitted attempts recorded as running (`pending`, in progress or interrupted),
+execution failures (`errored`), and completed attempts that fail verification
+(`invalid`). The command cannot establish whether a recorded running attempt is
+still active. Each exclusion has a bounded reason in text and JSON.
+
+Saved regrades must name a nonempty judge provider and model and match the source
+result digest, ordered criterion definitions, and deterministic checks. Invalid
+or unavailable records are excluded while valid pairs remain in the summary.
+Pairs from different regrade judges are excluded rather than pooled. Coverage is
+`incomplete` when there are excluded records, missing regrades, or judge errors.
+The command exits 1 in that case, 0 for complete coverage (even when verdicts
+differ), and 2 for usage errors. Read limits and failure handling are described
+in the [architecture guide](docs/architecture.md#evaluation-and-scoring).
 
 Library hosts can call `regradeCompletedRun`, `regradeExperimentRun`, and
 `diffRegradeExperimentRun` from `@stripe/forge/regrade`. `compareRegradeResults`

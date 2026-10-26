@@ -498,6 +498,7 @@ describe('public experiment run API', () => {
       engine: defaultForgeEngine,
     });
     assert.equal(inspected.outcomes[0]!.state, 'pending');
+    assert.equal(inspected.outcomes[0]!.checkpoint_state, 'pending');
     assert.equal(inspected.outcomes[0]!.artifact, null);
     assert.deepEqual(
       parseExperimentRunCheckpoint(checkpoint).forge,

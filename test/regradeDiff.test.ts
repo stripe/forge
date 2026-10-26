@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 import { runCli } from '../src/cli.ts';
+import { defaultForgeEngine } from '../src/engine.ts';
 import { scoreEvaluation } from '../src/evaluation/score.ts';
 import {
   ORIGINAL_JUDGMENT,
@@ -14,6 +15,7 @@ import {
   type RegradeDiff,
   regradeExperimentRun,
 } from '../src/regrade/index.ts';
+import { MAX_REGRADE_READ_BYTES } from '../src/regrade/read.ts';
 import type { RegradeResultV1 } from '../src/regrade/run.ts';
 import {
   createScriptedCompletionProvider,
@@ -22,6 +24,7 @@ import {
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     roots
       .splice(0)
@@ -136,6 +139,9 @@ describe('regrade diff', () => {
         source_score: 1,
         regrade_score: 0,
         score_change: -1,
+        source_status: 'passed',
+        regrade_status: 'partial',
+        status_changed: true,
       },
     ]);
     assert.deepEqual(
@@ -182,14 +188,14 @@ describe('regrade diff', () => {
       '--regrade',
       output,
     ]);
-    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.code, 1, result.stderr);
     assert.match(result.stdout, /Verdict agreement: 0\/0 \(n\/a\)/);
     assert.match(result.stdout, /Mean score change.*: n\/a/);
     assert.match(result.stdout, /Flipped criteria: 0/);
     assert.match(result.stdout, /Judge errors: 1/);
     assert.match(
       result.stdout,
-      /regrade regrade-source \[0\].*request_error: "Judge unavailable\."/,
+      /regrade regrade-source \[0\].*request_error \(3 attempts\)/,
     );
   });
 
@@ -204,12 +210,12 @@ describe('regrade diff', () => {
       '--regrade',
       output,
     ]);
-    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.code, 1, result.stderr);
     assert.match(result.stdout, /Verdict agreement: 0\/0 \(n\/a\)/);
     assert.match(result.stdout, /Missing regrades: 1\nregrade-source/);
   });
 
-  it('rejects a damaged completed source even when its regrade is missing', async () => {
+  it('reports a damaged completed source even when its regrade is missing', async () => {
     const { source, output, file } = await fixture();
     await fs.rm(file);
     await fs.writeFile(path.join(source.runLocation, 'result.json'), '{}');
@@ -223,11 +229,11 @@ describe('regrade diff', () => {
       '--json',
     ]);
     assert.equal(result.code, 1, result.stderr);
-    assert.equal(result.stdout, '');
-    assert.match(
-      result.stderr,
-      /Source run failed artifact verification: regrade-source/,
-    );
+    const diff = JSON.parse(result.stdout) as RegradeDiff;
+    assert.equal(diff.coverage, 'incomplete');
+    assert.equal(diff.issues[0]!.state, 'invalid');
+    assert.equal(diff.issues[0]!.reason, 'source_verification_failed');
+    assert.equal(result.stderr, '');
   });
 
   it('keeps pending and failed execution attempts outside agreement', async () => {
@@ -240,10 +246,18 @@ describe('regrade diff', () => {
     const checkpoint = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
     const attempt = checkpoint.entries[0].attempts[0];
     await fs.rm(source.runLocation, { recursive: true });
-    for (const attempts of [
-      [],
-      [{ ...attempt, state: 'errored', error_code: 'agent_failed' }],
-    ]) {
+    for (const [attempts, reason] of [
+      [[], 'never_attempted'],
+      [[{ run_id: attempt.run_id, state: 'running' }], 'not_committed'],
+      [
+        [{ ...attempt, state: 'errored', error_code: 'agent_failed' }],
+        'execution_error',
+      ],
+      [
+        [{ ...attempt, state: 'errored', error_code: 'invalid_artifacts' }],
+        'execution_error',
+      ],
+    ] as const) {
       checkpoint.entries[0].attempts = attempts;
       await fs.writeFile(checkpointFile, JSON.stringify(checkpoint));
       const result = await invoke([
@@ -255,15 +269,20 @@ describe('regrade diff', () => {
         output,
         '--json',
       ]);
-      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.code, 1, result.stderr);
       const diff = JSON.parse(result.stdout) as RegradeDiff;
       assert.deepEqual(diff.runs, []);
       assert.deepEqual(diff.missing_regrades, []);
       assert.equal(diff.agreement.total, 0);
+      assert.equal(diff.issues[0]!.reason, reason);
+      assert.equal(
+        diff.issues[0]!.state,
+        reason === 'execution_error' ? 'errored' : 'pending',
+      );
     }
   });
 
-  it('rejects saved judge identities without a nonempty provider and model', async () => {
+  it('excludes saved judge identities without a nonempty provider and model', async () => {
     const { source, output, file } = await fixture();
     const saved = JSON.parse(await fs.readFile(file, 'utf8'));
     for (const judge of [
@@ -279,13 +298,13 @@ describe('regrade diff', () => {
       null,
     ]) {
       await fs.writeFile(file, JSON.stringify({ ...saved, judge }));
-      await assert.rejects(
-        diffRegradeExperimentRun({
-          experimentRun: source.experimentLocation,
-          regrade: output,
-        }),
-        /invalid judge/,
-      );
+      const diff = await diffRegradeExperimentRun({
+        experimentRun: source.experimentLocation,
+        regrade: output,
+      });
+      assert.equal(diff.coverage, 'incomplete');
+      assert.equal(diff.issues[0]!.reason, 'regrade_invalid');
+      assert.deepEqual(diff.runs, []);
     }
     const result = await invoke([
       'regrade',
@@ -297,11 +316,14 @@ describe('regrade diff', () => {
       '--json',
     ]);
     assert.equal(result.code, 1, result.stderr);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /invalid judge/);
+    assert.equal(
+      (JSON.parse(result.stdout) as RegradeDiff).issues[0]!.reason,
+      'regrade_invalid',
+    );
+    assert.equal(result.stderr, '');
   });
 
-  it('rejects stale, malformed and unrelated saved regrades', async () => {
+  it('reports stale, malformed and unrelated saved regrades', async () => {
     const { source, output, file } = await fixture();
     const original = JSON.parse(await fs.readFile(file, 'utf8'));
     const load = () =>
@@ -309,29 +331,254 @@ describe('regrade diff', () => {
         experimentRun: source.experimentLocation,
         regrade: output,
       });
-    for (const [changed, pattern] of [
+    for (const [changed, reason] of [
       [
         {
           ...original,
-          source: { ...original.source, result_sha256: 'c'.repeat(64) },
+          source: {
+            ...original.source,
+            result_sha256: `sha256:${'c'.repeat(64)}`,
+          },
         },
-        /digest does not match/,
+        'source_digest_mismatch',
       ],
-      [{ ...original, format: 'unknown' }, /unknown format/],
+      [{ ...original, format: 'unknown' }, 'regrade_unavailable'],
       [
         { ...original, evaluation: { ...original.evaluation, score: 2 } },
-        /Evaluation score and status do not match/,
+        'evaluation_invalid',
       ],
     ] as const) {
       await fs.writeFile(file, JSON.stringify(changed));
-      await assert.rejects(load(), pattern);
+      assert.equal((await load()).issues[0]!.reason, reason);
     }
     await fs.rm(file);
     await fs.writeFile(
       path.join(output, 'runs', 'other.json'),
       JSON.stringify({ ...original, run_id: 'other' }),
     );
-    await assert.rejects(load(), /no completed source run/);
+    assert.equal((await load()).issues[0]!.reason, 'no_completed_source');
+  });
+
+  it('keeps valid pairs when other sources are unfinished, never attempted, failed or corrupt', async () => {
+    const { source, output } = await fixture();
+    const checkpointFile = path.join(
+      source.experimentLocation,
+      'experiment.json',
+    );
+    const checkpoint = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
+    const original = checkpoint.entries[0];
+    checkpoint.entries.push(
+      ...[
+        [{ run_id: 'unfinished', state: 'running' }],
+        [],
+        [{ run_id: 'broken', state: 'completed' }],
+        [
+          {
+            run_id: 'failed',
+            state: 'errored',
+            error_code: 'invalid_artifacts',
+          },
+        ],
+      ].map((attempts, index) => ({
+        ...original,
+        selection: { ...original.selection, repetition: index + 1 },
+        attempts,
+      })),
+    );
+    await fs.writeFile(checkpointFile, JSON.stringify(checkpoint));
+    const args = [
+      'regrade',
+      'diff',
+      '--experiment-run',
+      source.experimentLocation,
+      '--regrade',
+      output,
+    ];
+    const result = await invoke([...args, '--json']);
+    assert.equal(result.code, 1, result.stderr);
+    const diff = JSON.parse(result.stdout) as RegradeDiff;
+    assert.equal(diff.coverage, 'incomplete');
+    assert.deepEqual(
+      diff.runs.map((run) => run.run_id),
+      ['regrade-source'],
+    );
+    assert.deepEqual(diff.agreement, { total: 1, matched: 1, rate: 1 });
+    assert.deepEqual(
+      diff.issues.map((issue) => [
+        issue.selection_index,
+        issue.run_id,
+        issue.state,
+        issue.reason,
+      ]),
+      [
+        [1, 'unfinished', 'pending', 'not_committed'],
+        [2, null, 'pending', 'never_attempted'],
+        [3, 'broken', 'invalid', 'source_verification_failed'],
+        [4, 'failed', 'errored', 'execution_error'],
+      ],
+    );
+    const text = await invoke(args);
+    assert.equal(text.code, 1);
+    assert.match(text.stdout, /Verdict agreement: 1\/1/);
+    assert.match(text.stdout, /unfinished: pending \(not_committed\)/);
+    assert.match(text.stdout, /selection 2: pending \(never_attempted\)/);
+    assert.match(text.stdout, /broken: invalid \(source_verification_failed\)/);
+  });
+
+  it('compares a verified commit even when its checkpoint still records running', async () => {
+    const { source, output } = await fixture();
+    const checkpointFile = path.join(
+      source.experimentLocation,
+      'experiment.json',
+    );
+    const checkpoint = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
+    checkpoint.entries[0].attempts[0].state = 'running';
+    await fs.writeFile(checkpointFile, JSON.stringify(checkpoint));
+    const diff = await diffRegradeExperimentRun({
+      experimentRun: source.experimentLocation,
+      regrade: output,
+    });
+    assert.equal(diff.coverage, 'complete');
+    assert.equal(diff.agreement.rate, 1);
+    assert.deepEqual(diff.issues, []);
+  });
+
+  it('reports unavailable files without printing their contents or raw errors', async () => {
+    const { source, output, file } = await fixture();
+    const saved = JSON.parse(
+      await fs.readFile(file, 'utf8'),
+    ) as RegradeResultV1;
+    const args = [
+      'regrade',
+      'diff',
+      '--experiment-run',
+      source.experimentLocation,
+      '--regrade',
+      output,
+    ];
+    await fs.writeFile(file, '{"private":"PRIVATE_PAYLOAD"');
+    const malformed = await invoke([...args, '--json']);
+    assert.equal(malformed.code, 1);
+    assert.equal(malformed.stdout.includes('PRIVATE_PAYLOAD'), false);
+    assert.equal(malformed.stderr, '');
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...saved,
+        evaluation: scoreEvaluation(
+          saved.evaluation.judging_criteria.map((criterion) => ({
+            ...criterion,
+            passed: null,
+            error: {
+              type: 'request_error',
+              attempts: 3,
+              message: 'PRIVATE_PAYLOAD',
+            },
+          })),
+          saved.evaluation.checks,
+        ),
+      }),
+    );
+    for (const flags of [[], ['--json']]) {
+      const result = await invoke([...args, ...flags]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout.includes('PRIVATE_PAYLOAD'), false);
+      assert.equal(
+        result.stdout.includes(saved.evaluation.judging_criteria[0]!.criterion),
+        false,
+      );
+      assert.equal(result.stderr, '');
+    }
+    await fs.rm(path.join(output, 'runs'), { recursive: true });
+    const unavailable = await diffRegradeExperimentRun({
+      experimentRun: source.experimentLocation,
+      regrade: output,
+    });
+    assert.equal(
+      unavailable.issues[0]!.reason,
+      'regrade_directory_unavailable',
+    );
+  });
+
+  it('bounds saved reads and refuses symbolic links', async () => {
+    const { source, output, file, root } = await fixture();
+    await fs.truncate(file, MAX_REGRADE_READ_BYTES + 1);
+    const load = () =>
+      diffRegradeExperimentRun({
+        experimentRun: source.experimentLocation,
+        regrade: output,
+      });
+    assert.equal((await load()).issues[0]!.reason, 'read_limit');
+    await fs.rm(file);
+    const target = path.join(root, 'private.json');
+    await fs.writeFile(target, 'PRIVATE_PAYLOAD');
+    await fs.symlink(target, file);
+    const diff = await load();
+    assert.equal(diff.coverage, 'incomplete');
+    assert.equal(JSON.stringify(diff).includes('PRIVATE_PAYLOAD'), false);
+  });
+
+  it('bounds the total saved bytes retained for comparison', async () => {
+    const { source, output, file } = await fixture();
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+    for (let index = 0; index < 5; index++) {
+      const run_id = `heavy-${index}`;
+      await fs.writeFile(
+        path.join(output, 'runs', `${run_id}.json`),
+        JSON.stringify({ ...saved, run_id }).padEnd(14 * 1024 * 1024),
+      );
+    }
+    const diff = await diffRegradeExperimentRun({
+      experimentRun: source.experimentLocation,
+      regrade: output,
+    });
+    assert.equal(diff.coverage, 'incomplete');
+    assert.equal(
+      diff.issues.some((issue) => issue.reason === 'read_limit'),
+      true,
+    );
+  });
+
+  it('returns unavailable for a missing checkpoint and caller cancellation', async () => {
+    const { source, output } = await fixture();
+    const load = (signal?: AbortSignal) =>
+      diffRegradeExperimentRun({
+        experimentRun: source.experimentLocation,
+        regrade: output,
+        ...(signal ? { signal } : {}),
+      });
+    const cancelled = await load(AbortSignal.abort());
+    assert.equal(cancelled.issues[0]!.reason, 'cancelled');
+    await fs.rm(path.join(source.experimentLocation, 'experiment.json'));
+    const missing = await load();
+    assert.equal(missing.issues[0]!.reason, 'checkpoint_unavailable');
+    assert.equal(missing.coverage, 'incomplete');
+  });
+
+  it('enforces a read deadline even when source verification never settles', async () => {
+    const { source, output } = await fixture();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.useFakeTimers();
+    const reading = diffRegradeExperimentRun({
+      experimentRun: source.experimentLocation,
+      regrade: output,
+      engine: {
+        ...defaultForgeEngine,
+        verifyCompletedRun: async () => {
+          started();
+          return new Promise(() => {});
+        },
+      },
+    });
+    await ready;
+    await vi.runOnlyPendingTimersAsync();
+    const diff = await reading;
+    assert.equal(diff.coverage, 'incomplete');
+    assert.equal(diff.issues[0]!.reason, 'timeout');
+    assert.deepEqual(diff.runs, []);
   });
 
   it('rejects missing options, extra arguments and model options as usage errors', async () => {

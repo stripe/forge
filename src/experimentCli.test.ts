@@ -337,7 +337,13 @@ describe('shared experiment command', () => {
       root: `${first.location}/.`,
       engine: defaultForgeEngine,
     });
-    assert.deepEqual(inspected.outcomes, first.outcomes);
+    assert.deepEqual(
+      inspected.outcomes,
+      first.outcomes.map((outcome) => ({
+        ...outcome,
+        checkpoint_state: 'completed',
+      })),
+    );
     assert.deepEqual(await fs.readFile(first.checkpoint), checkpoint);
     const resumed = await fixture.run(['--resume', 'exp-1']);
     assert.equal(resumed.executed, 0);
@@ -397,7 +403,13 @@ describe('shared experiment command', () => {
       root: result.location,
       engine,
     });
-    assert.deepEqual(inspected.outcomes, result.outcomes);
+    assert.deepEqual(
+      inspected.outcomes,
+      result.outcomes.map((outcome) => ({
+        ...outcome,
+        checkpoint_state: 'completed',
+      })),
+    );
     const wrongEngine = await inspectExperimentRun({
       root: result.location,
       engine: defaultForgeEngine,
@@ -508,7 +520,13 @@ describe('shared experiment command', () => {
       root: first.location,
       engine: defaultForgeEngine,
     });
-    assert.deepEqual(inspected.outcomes, first.outcomes);
+    assert.deepEqual(
+      inspected.outcomes,
+      first.outcomes.map((outcome) => ({
+        ...outcome,
+        checkpoint_state: 'errored',
+      })),
+    );
     const resumed = await fixture.run(['--resume', 'exp-1'], options);
     assert.equal(resumed.executed, 1);
     assert.equal(resumed.skipped, 0);

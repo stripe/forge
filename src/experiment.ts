@@ -76,6 +76,8 @@ export interface ExperimentRunOutcome {
   readonly error_phase?: Extract<Attempt, { state: 'errored' }>['error_phase'];
   readonly diagnostic?: Extract<Attempt, { state: 'errored' }>['diagnostic'];
   readonly artifact: ExperimentRunArtifact | null;
+  /** Recorded checkpoint state, before recovery or artifact verification. */
+  readonly checkpoint_state?: 'pending' | Attempt['state'];
 }
 
 export interface ExperimentRunInspection {
@@ -147,6 +149,7 @@ export async function inspectExperimentRun(options: {
         state: 'pending',
         error_code: null,
         artifact: null,
+        checkpoint_state: 'pending',
       });
       continue;
     }
@@ -161,7 +164,10 @@ export async function inspectExperimentRun(options: {
       inspected.artifact === null && last.state === 'errored'
         ? last
         : inspected.attempt;
-    outcomes.push(experimentRunOutcome(entry, attempt, inspected.artifact));
+    outcomes.push({
+      ...experimentRunOutcome(entry, attempt, inspected.artifact),
+      checkpoint_state: last.state,
+    });
   }
   options.signal?.throwIfAborted();
   return {

@@ -4,16 +4,18 @@ import * as path from 'node:path';
 import { z } from 'zod';
 import { defaultForgeEngine } from '../engine.ts';
 import { inspectExperimentRun } from '../experiment.ts';
+import { experimentRunIdSchema } from '../experimentModel.ts';
 import {
   buildExperimentRunReport,
   type ExperimentRunReportRunV1,
   serializeExperimentRunReport,
   summarizeReportEvaluation,
 } from '../experimentReport.ts';
-import { sha256Digest } from '../model/hashes.ts';
+import { isSha256Digest, sha256Digest } from '../model/hashes.ts';
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../model/paths.ts';
 import type { ModelRefV1 } from '../model/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
+import { RegradeReadError, readRegradeArtifact } from './read.ts';
 import {
   REGRADE_RESULT_FORMAT,
   type RegradeDependencies,
@@ -311,29 +313,49 @@ function isWithin(parent: string, candidate: string): boolean {
 export async function readExistingRegrade(
   file: string,
 ): Promise<RegradeResultV1 | undefined> {
-  let body: string;
+  let body: Buffer;
   try {
-    body = await fs.readFile(file, 'utf8');
+    body = await readRegradeArtifact(file);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    if (error instanceof RegradeReadError && error.reason === 'missing')
+      return undefined;
     throw error;
   }
-  const value: unknown = JSON.parse(body);
+  return parseSavedRegrade(body);
+}
+
+export function parseSavedRegrade(body: Buffer): RegradeResultV1 {
+  let value: unknown;
+  try {
+    value = JSON.parse(body.toString('utf8'));
+  } catch {
+    throw new RegradeReadError('invalid_record');
+  }
   if (
     typeof value !== 'object' ||
     value === null ||
     !('format' in value) ||
     value.format !== REGRADE_RESULT_FORMAT
   )
-    throw new Error('An existing regrade file has an unknown format.');
+    throw new RegradeReadError('unsupported_format');
   if (
     !savedRegradeJudgeSchema.safeParse(
       'judge' in value ? value.judge : undefined,
     ).success
   )
-    throw new Error(
-      'An existing regrade file has an invalid judge; provider and model must be nonempty strings.',
-    );
+    throw new RegradeReadError('invalid_judge');
+  if (
+    !z
+      .object({
+        run_id: experimentRunIdSchema,
+        source: z
+          .object({ result_sha256: z.string().refine(isSha256Digest) })
+          .passthrough(),
+      })
+      .passthrough()
+      .safeParse(value).success
+  )
+    throw new RegradeReadError('invalid_record');
   return value as RegradeResultV1;
 }
 

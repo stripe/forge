@@ -2,8 +2,8 @@
 
 export {
   compareRegradeResults,
-  diffRegradeExperimentRun,
   type RegradeDiff,
+  type RegradeDiffIssue,
   type RegradeDiffSourceRun,
   type VerdictAgreement,
 } from './diff.ts';
@@ -12,6 +12,7 @@ export {
   type RegradeExperimentSummaryV1,
   regradeExperimentRun,
 } from './experiment.ts';
+export { diffRegradeExperimentRun } from './loadDiff.ts';
 export {
   judgeInputFromSavedRun,
   REGRADE_RESULT_FORMAT,

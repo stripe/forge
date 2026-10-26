@@ -99,6 +99,9 @@ describe('compareRegradeResults', () => {
         source_score: 1,
         regrade_score: 17 / 20,
         score_change: 17 / 20 - 1,
+        source_status: 'passed',
+        regrade_status: 'partial',
+        status_changed: true,
       },
     ]);
     assert.equal(diff.mean_score_change, 17 / 20 - 1);
@@ -144,7 +147,12 @@ describe('compareRegradeResults', () => {
         ['third', 'source', 0],
       ],
     );
-    assert.equal(diff.judge_errors[0]!.error.message, 'Judge unavailable.');
+    assert.deepEqual(diff.judge_errors[0]!.error, {
+      type: 'request_error',
+      attempts: 3,
+    });
+    assert.equal(JSON.stringify(diff).includes('Judge unavailable.'), false);
+    assert.equal(JSON.stringify(diff).includes('The answer MUST'), false);
     assert.deepEqual(
       diff.runs.map((run) => run.score_change),
       [-1, -1, null, 1],
@@ -169,66 +177,125 @@ describe('compareRegradeResults', () => {
     assert.equal(compare([]).agreement.rate, null);
   });
 
-  it('rejects unrelated, duplicate, stale, and mismatched judgments', () => {
+  it('isolates unrelated, duplicate, stale, and mismatched judgments', () => {
     const value = pair('run', [criterion(0, true)], [criterion(0, false)]);
-    assert.throws(() => compare([value, value]), /Duplicate source/);
-    assert.throws(
-      () =>
-        compareRegradeResults({
-          sourceRuns: [value.source],
-          regrades: [value.regrade, value.regrade],
-        }),
-      /Duplicate regrade/,
+    const valid = pair('valid', [criterion(0, true)], [criterion(0, true)]);
+    assert.equal(compare([value, value]).issues[0]!.reason, 'duplicate_source');
+    assert.equal(
+      compareRegradeResults({
+        sourceRuns: [value.source],
+        regrades: [value.regrade, value.regrade],
+      }).issues[0]!.reason,
+      'duplicate_regrade',
     );
-    assert.throws(
-      () =>
-        compareRegradeResults({ sourceRuns: [], regrades: [value.regrade] }),
-      /no completed source/,
+    assert.equal(
+      compareRegradeResults({ sourceRuns: [], regrades: [value.regrade] })
+        .issues[0]!.reason,
+      'no_completed_source',
     );
-    assert.throws(
-      () =>
-        compare([
-          {
-            ...value,
-            source: { ...value.source, result_sha256: 'c'.repeat(64) },
-          },
-        ]),
-      /digest does not match/,
+    const stale = compare([
+      { ...value, source: { ...value.source, result_sha256: 'c'.repeat(64) } },
+      valid,
+    ]);
+    assert.equal(stale.issues[0]!.reason, 'source_digest_mismatch');
+    assert.deepEqual(
+      stale.runs.map((run) => run.run_id),
+      ['valid'],
     );
+    assert.equal(stale.agreement.rate, 1);
+    assert.equal(stale.coverage, 'incomplete');
     for (const changed of [
       [],
       [criterion(1, false)],
       [criterion(0, false, 'OPTIONAL')],
       [{ ...criterion(0, false), label: 'different' }],
     ]) {
-      assert.throws(
-        () =>
-          compare([
-            {
-              ...value,
-              regrade: {
-                ...value.regrade,
-                evaluation: scoreEvaluation(changed, []),
-              },
-            },
-          ]),
-        /criteri.*do.*not match/,
+      const diff = compare([
+        {
+          ...value,
+          regrade: {
+            ...value.regrade,
+            evaluation: scoreEvaluation(changed, []),
+          },
+        },
+        valid,
+      ]);
+      assert.equal(diff.issues[0]!.reason, 'criterion_mismatch');
+      assert.deepEqual(
+        diff.runs.map((run) => run.run_id),
+        ['valid'],
       );
     }
-    const other = pair('other', [criterion(0, true)], [criterion(0, true)]);
-    assert.throws(
-      () =>
-        compare([
-          value,
-          {
-            ...other,
-            regrade: {
-              ...other.regrade,
-              judge: { provider: 'example', model: 'other' },
-            },
-          },
-        ]),
-      /different judges/,
+    const mixed = compare([
+      value,
+      {
+        ...valid,
+        regrade: {
+          ...valid.regrade,
+          judge: { provider: 'example', model: 'other' },
+        },
+      },
+    ]);
+    assert.deepEqual(
+      mixed.issues.map((issue) => issue.reason),
+      ['mixed_judges', 'mixed_judges'],
     );
+    assert.deepEqual(mixed.runs, []);
+  });
+
+  it('keeps an unrelated or invalid different judge from discarding valid pairs', () => {
+    const valid = pair('valid', [criterion(0, true)], [criterion(0, true)]);
+    const stale = pair('stale', [criterion(0, true)], [criterion(0, true)]);
+    const other = {
+      ...stale.regrade,
+      judge: { provider: 'example', model: 'other' },
+      source: { ...stale.regrade.source, result_sha256: 'c'.repeat(64) },
+    };
+    for (const sources of [[valid.source], [valid.source, stale.source]]) {
+      const diff = compareRegradeResults({
+        sourceRuns: sources,
+        regrades: [valid.regrade, other],
+      });
+      assert.deepEqual(
+        diff.runs.map((run) => run.run_id),
+        ['valid'],
+      );
+      assert.equal(diff.agreement.rate, 1);
+      assert.equal(diff.coverage, 'incomplete');
+      assert.equal(
+        diff.issues[0]!.reason,
+        sources.length === 1 ? 'no_completed_source' : 'source_digest_mismatch',
+      );
+    }
+  });
+
+  it('excludes changed deterministic checks and reports status changes on valid pairs', () => {
+    const value = pair(
+      'changed-checks',
+      [criterion(0, true)],
+      [criterion(0, true)],
+    );
+    const valid = pair('valid', [criterion(0, true)], [criterion(0, false)]);
+    const changed = {
+      ...value,
+      regrade: {
+        ...value.regrade,
+        evaluation: scoreEvaluation(value.regrade.evaluation.judging_criteria, [
+          { name: 'file_exists', passed: false },
+        ]),
+      },
+    };
+    const diff = compare([changed, valid]);
+    assert.equal(diff.issues[0]!.reason, 'checks_mismatch');
+    assert.deepEqual(
+      diff.runs.map((run) => [
+        run.run_id,
+        run.source_status,
+        run.regrade_status,
+        run.status_changed,
+      ]),
+      [['valid', 'passed', 'failed', true]],
+    );
+    assert.equal(diff.mean_score_change, -1);
   });
 });

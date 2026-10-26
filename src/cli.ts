@@ -49,8 +49,9 @@ import {
   createAnthropicCompletionProvider,
 } from './providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from './providers/openai/index.ts';
-import { diffRegradeExperimentRun, type RegradeDiff } from './regrade/diff.ts';
+import type { RegradeDiff } from './regrade/diff.ts';
 import { regradeExperimentRun } from './regrade/experiment.ts';
+import { diffRegradeExperimentRun } from './regrade/loadDiff.ts';
 import { createArtifactStore } from './results/index.ts';
 import {
   createDockerRuntimeAdapter,
@@ -329,7 +330,7 @@ export async function runCli(
           ? `${JSON.stringify(diff)}\n`
           : renderRegradeDiff(diff),
       );
-      return 0;
+      return diff.coverage === 'complete' ? 0 : 1;
     }
     if (parsed.positionals.length !== 1 || !isCommand(command)) {
       throw new CliUsageError(
@@ -1147,6 +1148,7 @@ function renderRegradeDiff(diff: RegradeDiff): string {
   const agreement = (value: RegradeDiff['agreement']) =>
     `${value.matched}/${value.total} (${value.rate === null ? 'n/a' : `${(100 * value.rate).toFixed(1)}%`})`;
   return [
+    `Coverage: ${diff.coverage}`,
     `Verdict agreement: ${agreement(diff.agreement)}`,
     ...Object.entries(diff.agreement_by_requirement).map(
       ([level, value]) => `${level}: ${agreement(value)}`,
@@ -1154,20 +1156,25 @@ function renderRegradeDiff(diff: RegradeDiff): string {
     `Mean score change (regrade - source): ${number(diff.mean_score_change)}`,
     ...diff.runs.map(
       (run) =>
-        `${run.run_id}: ${number(run.source_score)} -> ${number(run.regrade_score)} (change ${number(run.score_change)})`,
+        `${run.run_id}: ${number(run.source_score)} -> ${number(run.regrade_score)} (change ${number(run.score_change)}); status ${run.source_status} -> ${run.regrade_status}`,
     ),
     `Flipped criteria: ${diff.flipped_criteria.length}`,
     ...diff.flipped_criteria.map(
       (criterion) =>
-        `${criterion.run_id} [${criterion.criterion_index}] ${criterion.requirement_level} ${JSON.stringify(criterion.criterion)}: ${criterion.source_passed} -> ${criterion.regrade_passed}`,
+        `${criterion.run_id} [${criterion.criterion_index}] ${criterion.requirement_level}: ${criterion.source_passed} -> ${criterion.regrade_passed}`,
     ),
     `Judge errors: ${diff.judge_errors.length}`,
     ...diff.judge_errors.map(
       (criterion) =>
-        `${criterion.side} ${criterion.run_id} [${criterion.criterion_index}] ${criterion.requirement_level} ${JSON.stringify(criterion.criterion)}: ${criterion.error.type}: ${JSON.stringify(criterion.error.message)}`,
+        `${criterion.side} ${criterion.run_id} [${criterion.criterion_index}] ${criterion.requirement_level}: ${criterion.error.type} (${criterion.error.attempts} attempts)`,
     ),
     `Missing regrades: ${diff.missing_regrades.length}`,
     ...diff.missing_regrades,
+    `Excluded records: ${diff.issues.length}`,
+    ...diff.issues.map(
+      (issue) =>
+        `${issue.side} ${issue.run_id ?? `selection ${issue.selection_index ?? 'unknown'}`}: ${issue.state} (${issue.reason})`,
+    ),
     `Runs without judging criteria: ${diff.not_judged.length}`,
     ...diff.not_judged,
     '',
