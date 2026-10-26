@@ -488,6 +488,13 @@ describe('Codex exact rollout evidence', () => {
         query: 'synthetic query',
         queries: ['synthetic query'],
       },
+      { type: 'search', queries: ['synthetic query', 'second query'] },
+      { type: 'search', query: 'synthetic query' },
+      { type: 'search' },
+      { type: 'open_page' },
+      { type: 'find_in_page' },
+      { type: 'find_in_page', url: 'https://example.com/guide' },
+      { type: 'find_in_page', pattern: 'sample' },
       { type: 'open_page', url: 'https://example.com/guide' },
       {
         type: 'find_in_page',
@@ -625,9 +632,14 @@ describe('Codex exact rollout evidence', () => {
       ],
       ...[
         { ...action, extra: true },
+        { ...action, query: 1 },
         { ...action, queries: [1] },
+        { ...action, queries: 'synthetic query' },
+        { type: 'open_page', extra: true },
+        { type: 'find_in_page', extra: true },
         { type: 'unknown' },
         { type: 'open_page', url: 1 },
+        { type: 'find_in_page', url: 1 },
         { type: 'find_in_page', url: 'https://example.com/guide', pattern: 1 },
       ].map((invalidAction) => [
         capturedItem({
@@ -646,16 +658,24 @@ describe('Codex exact rollout evidence', () => {
   });
 
   it('correlates image view snapshots with their existing calls and marks omitted images', async () => {
-    for (const path of [
-      '/tmp/synthetic image.png',
-      'file:///tmp/synthetic%20image.png',
+    for (const { argumentPath, path } of [
+      {
+        argumentPath: '/tmp/synthetic image.png',
+        path: '/tmp/synthetic image.png',
+      },
+      {
+        argumentPath: '/tmp/synthetic image.png',
+        path: 'file:///tmp/synthetic%20image.png',
+      },
+      { argumentPath: 'image.png', path: 'file:///workspace/image.png' },
+      { argumentPath: './image.png', path: 'file:///workspace/image.png' },
     ]) {
       const sequence = [
         capturedResponse({
           type: 'function_call',
           call_id: 'image-1',
           name: 'view_image',
-          arguments: JSON.stringify({ path: '/tmp/synthetic image.png' }),
+          arguments: JSON.stringify({ path: argumentPath }),
         }),
         capturedItem({ type: 'ImageView', id: 'image-1', path }),
         capturedResponse({
@@ -682,7 +702,7 @@ describe('Codex exact rollout evidence', () => {
         {
           tool_call_id: 'image-1',
           function_name: 'view_image',
-          arguments: { path: '/tmp/synthetic image.png' },
+          arguments: { path: argumentPath },
         },
       ]);
       assert.equal(
@@ -714,6 +734,58 @@ describe('Codex exact rollout evidence', () => {
           'unavailable',
         );
       }
+    }
+  });
+
+  it('resolves image arguments against the current turn cwd only', async () => {
+    const image = (turnId: string) => [
+      capturedResponse(
+        {
+          type: 'function_call',
+          call_id: `image-${turnId}`,
+          name: 'view_image',
+          arguments: '{"path":"./image.png"}',
+        },
+        turnId,
+      ),
+      capturedItem(
+        {
+          type: 'ImageView',
+          id: `image-${turnId}`,
+          path: 'file:///workspace/second/image.png',
+        },
+        turnId,
+      ),
+      capturedResponse(
+        {
+          type: 'function_call_output',
+          call_id: `image-${turnId}`,
+          output: 'Image unavailable.',
+        },
+        turnId,
+      ),
+    ];
+    const first = capturedTurn();
+    first[1]!.payload.cwd = '/workspace/second';
+    for (const cwd of [
+      '/workspace/second',
+      '/workspace',
+      undefined,
+      'relative',
+    ]) {
+      const second = capturedTurn(
+        'Second prompt.',
+        'Second response.',
+        'turn-2',
+      );
+      if (cwd === undefined) delete second[1]!.payload.cwd;
+      else second[1]!.payload.cwd = cwd;
+      second.splice(4, 0, ...image('turn-2'));
+      const evidence = await load([METADATA, ...first, ...second]);
+      assert.equal(
+        evidence.kind,
+        cwd === '/workspace/second' ? 'available' : 'unavailable',
+      );
     }
   });
 

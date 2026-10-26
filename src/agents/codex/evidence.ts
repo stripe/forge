@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -258,6 +259,7 @@ function normalizeRecords(
   const completedWebSearches = new Set<string>();
   const turns = new Set<string>();
   let activeTurn: string | undefined;
+  let turnCwd: string | undefined;
   let completeTurns = 0;
   let userInTurn = false;
   let assistantInTurn = false;
@@ -315,6 +317,7 @@ function normalizeRecords(
         payload.model !== input.model
       )
         throw new Error('Codex turn context differs from the selected turn.');
+      turnCwd = payload.cwd === undefined ? undefined : string(payload.cwd);
       continue;
     }
     if (record.type === 'event_msg') {
@@ -324,6 +327,7 @@ function normalizeRecords(
         activeTurn = nonempty(payload.turn_id);
         if (turns.has(activeTurn)) throw new IncompleteRolloutError();
         turns.add(activeTurn);
+        turnCwd = undefined;
         userInTurn = false;
         assistantInTurn = false;
         lastAssistantMessage = undefined;
@@ -368,7 +372,7 @@ function normalizeRecords(
         const itemId = nonempty(object(payload.item).id);
         if (completedItems.has(itemId)) throw new IncompleteRolloutError();
         completedItems.add(itemId);
-        validateCompletedItem(payload, activeTurn, itemResponses);
+        validateCompletedItem(payload, activeTurn, itemResponses, turnCwd);
         const item = object(payload.item);
         if (item.type === 'WebSearch') {
           completedWebSearches.add(itemId);
@@ -840,6 +844,7 @@ function validateCompletedItem(
   payload: RecordValue,
   turn: string,
   responses: ItemResponses,
+  cwd: string | undefined,
 ): void {
   assertKeys(payload, [
     'type',
@@ -911,10 +916,18 @@ function validateCompletedItem(
       call.payload.type !== 'function_call' ||
       call.payload.name !== 'view_image' ||
       (call.payload.namespace !== undefined && call.payload.namespace !== '') ||
-      functionArguments(call.payload.arguments).path !== path ||
       output.payload.type !== 'function_call_output'
     )
       throw new IncompleteRolloutError();
+    const argumentPath = nonempty(
+      functionArguments(call.payload.arguments).path,
+    );
+    const resolvedPath = posix.isAbsolute(argumentPath)
+      ? posix.normalize(argumentPath)
+      : cwd !== undefined && posix.isAbsolute(cwd)
+        ? posix.resolve(cwd, argumentPath)
+        : undefined;
+    if (resolvedPath !== path) throw new IncompleteRolloutError();
   } else if (item.type === 'McpToolCall') {
     const snapshot = responses.mcpSnapshots.get(id);
     if (snapshot?.turn !== turn || snapshot.payload !== item)
@@ -1014,15 +1027,15 @@ function validateWebSearchAction(value: unknown): void {
   const action = object(value);
   if (action.type === 'search') {
     assertKeys(action, ['type', 'query', 'queries']);
-    string(action.query);
+    if (action.query !== undefined) string(action.query);
     if (action.queries !== undefined) array(action.queries).forEach(string);
   } else if (action.type === 'open_page') {
     assertKeys(action, ['type', 'url']);
-    string(action.url);
+    if (action.url !== undefined) string(action.url);
   } else if (action.type === 'find_in_page') {
     assertKeys(action, ['type', 'url', 'pattern']);
-    string(action.url);
-    string(action.pattern);
+    if (action.url !== undefined) string(action.url);
+    if (action.pattern !== undefined) string(action.pattern);
   } else throw new IncompleteRolloutError();
 }
 
