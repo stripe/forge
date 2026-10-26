@@ -1001,6 +1001,9 @@ remaining need at a time and emits user messages of at most 500 characters. Its
 private need model is never sent to the coding agent. Generated messages are
 rejected if they copy any need ID, description, or acceptance statement,
 regardless of focus or resolution; this text check does not detect paraphrases.
+Short private values can match ordinary public wording and reject a harmless
+message. The guard has no length exemption; repeated rejections exhaust the
+normal Ava retry budget and produce `role_player_error` for that eval.
 Ava initializes before the first agent answer unless the configured opening is
 terminal. With a nonterminal configured initial prompt, a needs-only completion
 runs before that opening is sent verbatim; otherwise Ava generates the opening
