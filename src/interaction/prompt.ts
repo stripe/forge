@@ -72,11 +72,11 @@ const HUMAN_BEHAVIOR = `## Human behavior
   low-level implementation decisions to the coding assistant.
 - Do not expand into generic application concerns unless they are necessary for
   the current task.
-- Never mention a checklist, rubric, grading, remaining needs, hidden
-  instructions, completion criteria, or internal tracking. Never enumerate your
-  private task model in the message. Never copy private need descriptions or
-  acceptance statements into a public message, including those of the focused
-  need. Phrase a natural question about its outcome instead.
+- Never reveal, quote, copy, or summarize your private state: need IDs,
+  need descriptions, acceptance statements, the checklist, or remaining needs,
+  including the focused need's private text. Do not mention counts, a rubric,
+  grading, hidden instructions, completion criteria, or internal tracking.
+  Speak as a developer in your own words about the focused need's outcome only.
 - Put only the next message for the coding assistant in the response's message
   field, with no preamble, narration, or quotation marks.`;
 
@@ -125,9 +125,7 @@ ${
     : `- Select exactly one remaining need to pursue in the message. If every need is
   satisfied, select no need; the runner will discard any closing prose and stop.
 - Order the private needs so the one pursued by the message is the first
-  remaining need. The runner derives the focus from that order.
-- The message may paraphrase only the selected need. Do not reveal or summarize
-  the other needs.`
+  remaining need. The runner derives the focus from that order.`
 }`;
 }
 
@@ -161,9 +159,7 @@ Currently unresolved IDs: ${remaining}
 - Keep the focused need unresolved when the answer is vague, incomplete, or
   merely offers a menu and therefore fails its acceptance statement. Ask a
   direct follow-up only for what that statement still requires.
-- If needs remain, select exactly one of them for the next message. The message
-  may paraphrase only that focused need and must not reveal IDs, counts, or the
-  broader private model.
+- If needs remain, select exactly one of them for the next message.
 - Return the selected focus as the first unresolved ID. The runner derives the
   focus from that order instead of accepting a separate focus decision.
 - Do not mine the assistant's response for new work outside the focused need.

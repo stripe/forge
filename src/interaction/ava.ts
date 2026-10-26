@@ -24,6 +24,9 @@ export const MAX_AVA_NEED_DESCRIPTION_CHARACTERS = 240;
 export const MAX_AVA_NEED_ACCEPTANCE_CHARACTERS = 240;
 export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 
+const MIN_AVA_DESCRIPTION_MATCH_WORDS = 4;
+const MIN_AVA_DESCRIPTION_MATCH_CHARACTERS = 24;
+
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
 export interface AvaRolePlayerOptions extends AvaPromptInputs {
@@ -223,8 +226,13 @@ function stripLeadingAcknowledgment(message: string): string {
     .trim();
 }
 
-function assertSafeGeneratedMessage(
+function normalizeAvaText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function validateGeneratedMessage(
   message: string,
+  focusedNeedId: string,
   needs: readonly AvaNeed[],
 ): string {
   const trimmed = stripLeadingAcknowledgment(message);
@@ -240,21 +248,19 @@ function assertSafeGeneratedMessage(
       'Ava returned a list instead of one human-like message.',
     );
   }
-  if (
-    /\b(?:checklist|rubric|grading|remaining needs?|completion criteria|need_\d+)\b/i.test(
-      trimmed,
-    )
-  ) {
-    throw new AvaResponseError('Ava exposed private task-model terminology.');
+  if (/\bneed_\d+\b/i.test(trimmed)) {
+    throw new AvaResponseError('Ava exposed an internal need ID.');
   }
-  const lowerMessage = trimmed.toLowerCase();
+  const normalizedMessage = normalizeAvaText(trimmed);
   for (const need of needs) {
+    if (need.id === focusedNeedId) continue;
+    const description = normalizeAvaText(need.description);
     if (
-      Object.values(need).some((value) =>
-        lowerMessage.includes(value.toLowerCase()),
-      )
+      description.length >= MIN_AVA_DESCRIPTION_MATCH_CHARACTERS &&
+      description.split(' ').length >= MIN_AVA_DESCRIPTION_MATCH_WORDS &&
+      normalizedMessage.includes(description)
     ) {
-      throw new AvaResponseError('Ava exposed private task-model text.');
+      throw new AvaResponseError('Ava exposed a non-focused private need.');
     }
   }
   return trimmed;
@@ -428,7 +434,7 @@ export class AvaRolePlayer {
     }
     const focusNeedId = needs[0]!.id;
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(parsed.message, needs),
+      message: validateGeneratedMessage(parsed.message, focusNeedId, needs),
       stop: false,
       remainingNeeds: remainingNeedIds.map(
         (id) => needs.find((need) => need.id === id)!,
@@ -449,7 +455,11 @@ export class AvaRolePlayer {
       return this.#terminalTurn();
     }
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(parsed.message, this.#needs!),
+      message: validateGeneratedMessage(
+        parsed.message,
+        parsed.focusNeedId!,
+        this.#needs!,
+      ),
       stop: false,
       remainingNeeds: this.#remainingNeeds(parsed.remainingNeedIds),
       needs: this.#needs!,

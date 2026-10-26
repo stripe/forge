@@ -523,16 +523,14 @@ describe('runConversation', () => {
     assert.doesNotMatch(JSON.stringify(result), /secret-token/);
   });
 
-  it('retries private-text leaks without sending them or retaining them in public history', async () => {
+  it('continues when generated messages overlap private text without retrying', async () => {
     const acceptance = 'The requested outcome is complete.';
     const completion = completions(
       initialResponse(
         ['Complete the access flow'],
         `Could you confirm: ${acceptance}`,
       ),
-      initialResponse(['Complete the access flow'], 'How should we proceed?'),
       continuationResponse(['need_1'], `Could you confirm: ${acceptance}`),
-      continuationResponse(['need_1'], 'What should happen next?'),
       continuationResponse([], ''),
     );
     const agent = session([
@@ -560,16 +558,18 @@ describe('runConversation', () => {
     });
 
     assert.equal(result.stopReason, 'task_complete');
-    assert.equal(completion.calls.length, 5);
+    assert.equal(result.failure, null);
+    assert.equal(completion.calls.length, 3);
+    const message = `Could you confirm: ${acceptance}`;
     assert.deepEqual(
       agent.sent.map(({ message }) => message),
-      ['How should we proceed?', 'What should happen next?'],
+      [message, message],
     );
-    for (const request of completion.calls) {
-      assert.ok(!JSON.stringify(request.messages).includes(acceptance));
-    }
-    assert.ok(!JSON.stringify(result.turns).includes(acceptance));
-    assert.ok(!JSON.stringify(result.avaAudit.decisions).includes(acceptance));
+    assert.deepEqual(completion.calls[1]!.messages, [
+      { role: 'assistant', content: message },
+      { role: 'user', content: 'Here is the first part.' },
+    ]);
+    assert.equal(result.turns.length, 2);
   });
 
   for (const response of [new Error('Completion unavailable.'), '{invalid']) {

@@ -76,11 +76,22 @@ describe('Ava prompts', () => {
       );
     });
 
-    it(`keeps private descriptions and acceptance out of ${phase} messages`, () => {
+    it(`instructs Ava not to disclose private state during ${phase}`, () => {
       const prompt = buildPrompt({ task: 'Explain checkout.' });
+      const rule = prompt
+        .split(
+          '- Never reveal, quote, copy, or summarize your private state:',
+        )[1]
+        ?.split('\n- ')[0];
+      assert.ok(rule);
       assert.match(
-        prompt,
-        /Never copy private need descriptions or\n {2}acceptance statements into a public message, including those of the focused\n {2}need/,
+        rule,
+        /need IDs,\n {2}need descriptions, acceptance statements, the checklist, or remaining needs/,
+      );
+      assert.match(rule, /including the focused need's private text/);
+      assert.match(
+        rule,
+        /Speak as a developer in your own words about the focused need's outcome only/,
       );
     });
 
