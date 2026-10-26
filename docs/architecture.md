@@ -342,11 +342,14 @@ failures, such as a permission error, also disable recording. Transient failures
 are not retried for the same event; later events may record recovery. Log I/O
 failures and queue overflow are counted as gaps. Returned summaries include optional
 `progress_log: {state: "unavailable", reason, affected_events}` when gaps occurred.
-Reasons are `io_error`, `io_timeout`, and `buffer_full` (the first observed reason
-is kept). The next successfully saved event includes optional `recording_gap`
+Reasons are `io_error`, `io_timeout`, `buffer_full`, and `recording_error`
+(the first observed reason is kept). The next successfully saved event includes optional `recording_gap`
 with the same shape for preceding gaps. Counts include dropped events and
-writes whose completion is unknown after failure or timeout. Schema and other programming errors
-are surfaced rather than disguised as disk errors.
+writes whose completion is unknown after failure or timeout. Unexpected background
+writer errors disable recording with `recording_error`; they cannot reject a
+completed experiment or replace its primary error. Direct validation of progress
+contracts still throws for schema drift, and low-level parser/writer functions
+still surface programming errors to their callers.
 
 Writes are not synced. Separator and body use one write, and short writes count
 as I/O failures. Interruption can leave a torn line. The read-only tail reader

@@ -20,7 +20,12 @@ const MAX_EVENT_BYTES = EXPERIMENT_OBSERVATION_LIMITS.eventBytes;
 export const experimentLogGapSchema = z
   .object({
     state: z.literal('unavailable'),
-    reason: z.enum(['io_error', 'io_timeout', 'buffer_full']),
+    reason: z.enum([
+      'io_error',
+      'io_timeout',
+      'buffer_full',
+      'recording_error',
+    ]),
     affected_events: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   })
   .strict();

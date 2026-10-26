@@ -9,7 +9,12 @@ import {
   EXPERIMENT_OBSERVATION_LIMITS,
   observeWithin,
 } from './experimentObservation.ts';
-import { serializeCanonicalJson } from './serialization.ts';
+import {
+  accumulateExperimentProgressGap,
+  acknowledgeExperimentProgressGap,
+  type ExperimentProgressGaps,
+  prepareExperimentProgressRecord,
+} from './experimentProgressState.ts';
 
 /** The experiment controller owns queue admission, append deadlines and shutdown. */
 export function createExperimentProgress(options: {
@@ -25,10 +30,7 @@ export function createExperimentProgress(options: {
   let disabled = false;
   let closed = false;
   let draining: Promise<void> | undefined;
-  let bug: unknown;
-  let hasBug = false;
-  let totalGap: ExperimentLogGap | undefined;
-  let pendingGap: ExperimentLogGap | undefined;
+  let gaps: ExperimentProgressGaps = { total: undefined, pending: undefined };
   let finishing: Promise<ExperimentLogGap | undefined> | undefined;
   const append =
     options.append ??
@@ -36,17 +38,7 @@ export function createExperimentProgress(options: {
       appendExperimentRunEventBody(options.root, body, signal));
 
   function gap(reason: ExperimentLogGap['reason'], count: number) {
-    if (count === 0) return;
-    const add = (previous: ExperimentLogGap | undefined): ExperimentLogGap => ({
-      state: 'unavailable',
-      reason: previous?.reason ?? reason,
-      affected_events: Math.min(
-        Number.MAX_SAFE_INTEGER,
-        (previous?.affected_events ?? 0) + count,
-      ),
-    });
-    totalGap = add(totalGap);
-    pendingGap = add(pendingGap);
+    gaps = accumulateExperimentProgressGap(gaps, reason, count);
   }
   function stop(reason: ExperimentLogGap['reason']) {
     disabled = true;
@@ -62,22 +54,17 @@ export function createExperimentProgress(options: {
       if (next === undefined) return;
       pendingBytes -= next.bytes;
       active = true;
-      const previousGap = pendingGap;
-      const body =
-        previousGap === undefined
-          ? next.body
-          : serializeCanonicalJson({
-              ...JSON.parse(next.body),
-              recording_gap: previousGap,
-            });
-      if (Buffer.byteLength(body) > EXPERIMENT_OBSERVATION_LIMITS.eventBytes) {
+      const previousGap = gaps.pending;
+      const record = prepareExperimentProgressRecord(next.body, previousGap);
+      if (record.state === 'unavailable') {
         active = false;
-        gap('buffer_full', 1);
+        gap(record.reason, 1);
         continue;
       }
       try {
         const result = await observeWithin(
-          (signal) => append(body, AbortSignal.any([signal, lifetime.signal])),
+          (signal) =>
+            append(record.body, AbortSignal.any([signal, lifetime.signal])),
           EXPERIMENT_OBSERVATION_LIMITS.appendMs,
         );
         if (disabled) return;
@@ -85,14 +72,7 @@ export function createExperimentProgress(options: {
           stop('io_timeout');
           return;
         }
-        if (previousGap !== undefined && pendingGap !== undefined) {
-          const remaining =
-            pendingGap.affected_events - previousGap.affected_events;
-          pendingGap =
-            remaining === 0
-              ? undefined
-              : { ...pendingGap, affected_events: remaining };
-        }
+        gaps = acknowledgeExperimentProgressGap(gaps, previousGap);
       } catch (error) {
         if (disabled) return;
         if (!(error instanceof ExperimentEventLogIoError)) throw error;
@@ -108,10 +88,8 @@ export function createExperimentProgress(options: {
   function start() {
     if (draining !== undefined || disabled) return;
     draining = drain()
-      .catch((error: unknown) => {
-        hasBug = true;
-        bug = error;
-        stop('io_error');
+      .catch(() => {
+        stop('recording_error');
       })
       .finally(() => {
         draining = undefined;
@@ -129,7 +107,7 @@ export function createExperimentProgress(options: {
       );
       options.progress(event);
       if (disabled) {
-        gap('io_timeout', 1);
+        gap(gaps.total?.reason ?? 'io_timeout', 1);
         return;
       }
       const bytes = Buffer.byteLength(body);
@@ -148,8 +126,7 @@ export function createExperimentProgress(options: {
           while (draining !== undefined) await draining;
         }, EXPERIMENT_OBSERVATION_LIMITS.drainMs);
         if (result.state === 'unavailable') stop('io_timeout');
-        if (hasBug) throw bug;
-        return totalGap;
+        return gaps.total;
       })();
       return finishing;
     },
