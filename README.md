@@ -675,13 +675,13 @@ mixing judges. Only one regrade can write to an output at a time: a second
 concurrent invocation fails, naming the output, instead of interleaving its
 results.
 
-Deterministic file checks are not re-run, because the workspace is gone after
-a run; each regrade keeps the run's original check results. The judge sees
-only the bounded workspace excerpts captured at run time. Runs without judging
-criteria keep their checks-only evaluation and source-run wait totals.
-Runs that could not be regraded
-appear as pending in the regrade report, and the command exits with status 1.
-Library hosts can call `regradeCompletedRun` and `regradeExperimentRun` from
+Deterministic file checks are not re-run, because the workspace is gone
+after a run; each regrade keeps the run's original check results. The judge
+sees only the bounded workspace excerpts captured at run time. Runs without
+judging criteria keep their checks-only evaluation and source-run wait
+totals. Runs that could not be regraded appear as pending in the regrade
+report, and the command exits with status 1. Library hosts can call
+`regradeCompletedRun` and `regradeExperimentRun` from
 `@stripe/forge/regrade`.
 
 ## Development
