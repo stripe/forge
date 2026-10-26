@@ -17,7 +17,6 @@ import type {
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
 import {
-  CODEX_MCP_RESOURCE_LIST_TOOLS,
   CodexToolEvidenceError,
   codexToolSearchArguments,
   codexToolSearchOutput,
@@ -317,7 +316,7 @@ function normalizeRecords(
         payload.model !== input.model
       )
         throw new Error('Codex turn context differs from the selected turn.');
-      turnCwd = payload.cwd === undefined ? undefined : string(payload.cwd);
+      turnCwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
       continue;
     }
     if (record.type === 'event_msg') {
@@ -747,14 +746,7 @@ function indexItemResponses(records: readonly RolloutRecord[]): ItemResponses {
       payload.namespace.startsWith('mcp__');
     const qualifiedMcp =
       typeof payload.name === 'string' && payload.name.startsWith('mcp__');
-    const resourceListing =
-      (payload.namespace === undefined || payload.namespace === '') &&
-      typeof payload.name === 'string' &&
-      CODEX_MCP_RESOURCE_LIST_TOOLS.includes(payload.name);
-    if (
-      (namespacedMcp || qualifiedMcp || resourceListing) &&
-      !mcpSnapshots.has(id)
-    )
+    if ((namespacedMcp || qualifiedMcp) && !mcpSnapshots.has(id))
       throw new IncompleteRolloutError();
   }
   for (const [id, snapshot] of mcpSnapshots) {
@@ -912,7 +904,7 @@ function validateCompletedItem(
     const output = responses.outputs.get(id);
     if (
       call?.turn !== turn ||
-      output?.turn !== turn ||
+      output === undefined ||
       call.payload.type !== 'function_call' ||
       call.payload.name !== 'view_image' ||
       (call.payload.namespace !== undefined && call.payload.namespace !== '') ||

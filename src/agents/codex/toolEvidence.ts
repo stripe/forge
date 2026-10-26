@@ -11,7 +11,7 @@ type NativeOutputBlock =
   | { type: 'input_text'; text: string }
   | { type: 'input_image'; image_url: string; detail?: string };
 
-export const CODEX_MCP_RESOURCE_LIST_TOOLS: readonly string[] = [
+const CODEX_MCP_RESOURCE_LIST_TOOLS: readonly string[] = [
   'list_mcp_resources',
   'list_mcp_resource_templates',
 ];

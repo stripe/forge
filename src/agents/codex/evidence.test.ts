@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { posix } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, it } from 'vitest';
 
 import { parseAtifTrajectory } from '../../atif/index.ts';
@@ -789,6 +791,140 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
+  it('rejects a relative image cwd even when host resolution would match the snapshot', async () => {
+    const records = capturedTurn();
+    records[1]!.payload.cwd = 'relative';
+    records.splice(
+      4,
+      0,
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'image-1',
+        name: 'view_image',
+        arguments: '{"path":"image.png"}',
+      }),
+      capturedItem({
+        type: 'ImageView',
+        id: 'image-1',
+        path: pathToFileURL(posix.resolve('relative', 'image.png')).href,
+      }),
+      capturedResponse({
+        type: 'function_call_output',
+        call_id: 'image-1',
+        output: 'Image unavailable.',
+      }),
+    );
+    const evidence = await load([METADATA, ...records]);
+    assert.equal(evidence.kind, 'unavailable');
+    if (evidence.kind === 'unavailable')
+      assert.equal(evidence.reason.code, 'source_incomplete');
+  });
+
+  it('requires usable cwd data only when resolving relative image arguments', async () => {
+    for (const cwd of [undefined, null, 1, {}, 'relative']) {
+      for (const argumentPath of [
+        undefined,
+        '/workspace/image.png',
+        'image.png',
+      ]) {
+        const records = capturedTurn();
+        records[1]!.payload.cwd = cwd;
+        if (argumentPath !== undefined) {
+          records.splice(
+            4,
+            0,
+            capturedResponse({
+              type: 'function_call',
+              call_id: 'image-1',
+              name: 'view_image',
+              arguments: JSON.stringify({ path: argumentPath }),
+            }),
+            capturedItem({
+              type: 'ImageView',
+              id: 'image-1',
+              path: 'file:///workspace/image.png',
+            }),
+            capturedResponse({
+              type: 'function_call_output',
+              call_id: 'image-1',
+              output: 'Image unavailable.',
+            }),
+          );
+        }
+        const evidence = await load([METADATA, ...records]);
+        assert.equal(
+          evidence.kind,
+          argumentPath === 'image.png' ? 'unavailable' : 'available',
+        );
+        if (evidence.kind === 'unavailable')
+          assert.equal(evidence.reason.code, 'source_incomplete');
+      }
+    }
+  });
+
+  it('does not treat a namespaced view_image as the built-in image tool', async () => {
+    const evidence = await loadToolSequence([
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'image-1',
+        name: 'view_image',
+        namespace: 'custom',
+        arguments: '{"path":"/workspace/image.png"}',
+      }),
+      capturedItem({
+        type: 'ImageView',
+        id: 'image-1',
+        path: 'file:///workspace/image.png',
+      }),
+      capturedResponse({
+        type: 'function_call_output',
+        call_id: 'image-1',
+        output: 'Image unavailable.',
+      }),
+    ]);
+    assert.equal(evidence.kind, 'unavailable');
+    if (evidence.kind === 'unavailable')
+      assert.equal(evidence.reason.code, 'source_incomplete');
+  });
+
+  it('rejects an image output missing or moved to another turn', async () => {
+    const first = capturedTurn();
+    first.splice(
+      4,
+      0,
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'image-1',
+        name: 'view_image',
+        arguments: '{"path":"/workspace/image.png"}',
+      }),
+      capturedItem({
+        type: 'ImageView',
+        id: 'image-1',
+        path: 'file:///workspace/image.png',
+      }),
+    );
+    const second = capturedTurn('Second prompt.', 'Second response.', 'turn-2');
+    second.splice(
+      4,
+      0,
+      capturedResponse(
+        {
+          type: 'function_call_output',
+          call_id: 'image-1',
+          output: 'Image unavailable.',
+        },
+        'turn-2',
+      ),
+    );
+    for (const records of [first, [...first, ...second]]) {
+      const evidence = await load([METADATA, ...records]);
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_incomplete');
+    }
+  });
+
   it('preserves web, image, and MCP activity together for judging and coverage', async () => {
     const action = { type: 'search', query: 'synthetic query' };
     const evidence = await loadToolSequence([
@@ -890,9 +1026,23 @@ describe('Codex exact rollout evidence', () => {
         `mcp__fixture.${tool}`,
       );
       assert.equal(step?.observation?.results[0]?.content, text);
+      const bare = makeSequence().filter((entry) => entry.type !== 'event_msg');
+      const bareEvidence = await loadToolSequence(bare);
+      assert.equal(bareEvidence.kind, 'available');
+      if (bareEvidence.kind !== 'available')
+        throw new Error('Expected ordinary function evidence.');
+      assert.deepEqual(bareEvidence.warnings, []);
+      const bareStep = parseAtifTrajectory(bareEvidence.trajectory).steps.find(
+        (step) => step.tool_calls?.[0]?.tool_call_id === 'mcp-call',
+      );
+      assert.equal(bareStep?.tool_calls?.[0]?.function_name, tool);
+      assert.equal(bareStep?.observation?.results[0]?.content, text);
       for (const mutate of [
         (sequence: ReturnType<typeof capturedMcp>) => {
-          sequence.splice(1, 1);
+          const item = sequence[1]!.payload.item as Record<string, unknown>;
+          (item.result as Record<string, unknown>).structuredContent = {
+            hidden: 'Snapshot-only data.',
+          };
         },
         (sequence: ReturnType<typeof capturedMcp>) => {
           sequence[2]!.payload.output = '{"different":[]}';
