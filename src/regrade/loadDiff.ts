@@ -40,13 +40,7 @@ export async function diffRegradeExperimentRun(input: {
   const sources: RegradeDiffSourceRun[] = [];
   const regrades: RegradeResultV1[] = [];
   const issues: RegradeDiffIssue[] = [];
-  let totalBytes = 0;
-  const retain = (body: Buffer, side: RegradeDiffIssue['side']) => {
-    totalBytes += body.byteLength;
-    if (totalBytes <= MAX_DIFF_TOTAL_BYTES) return true;
-    issue({ side, run_id: null, state: 'unavailable', reason: 'read_limit' });
-    return false;
-  };
+  const readBudget = { remainingBytes: MAX_DIFF_TOTAL_BYTES };
   const issue = (value: RegradeDiffIssue) => {
     signal.throwIfAborted();
     issues.push(value);
@@ -131,15 +125,27 @@ export async function diffRegradeExperimentRun(input: {
         );
         const body = await readRegradeArtifact(
           path.join(completed.location, 'result.json'),
+          readBudget,
         );
         signal.throwIfAborted();
-        if (!retain(body, 'source')) return;
         sources.push({
           run_id: completed.result.run_id,
           result_sha256: sha256Digest(body),
           evaluation: completed.result.evaluation,
         });
       } catch (error) {
+        if (
+          error instanceof RegradeReadError &&
+          error.reason === 'budget_exceeded'
+        ) {
+          issue({
+            side: 'source',
+            run_id: null,
+            state: 'unavailable',
+            reason: 'read_limit',
+          });
+          return;
+        }
         issue(
           error instanceof RegradeReadError
             ? {
@@ -191,9 +197,9 @@ export async function diffRegradeExperimentRun(input: {
         try {
           const body = await readRegradeArtifact(
             path.join(directory, entry.name),
+            readBudget,
           );
           signal.throwIfAborted();
-          if (!retain(body, 'regrade')) break;
           const regrade = parseSavedRegrade(body);
           if (regrade.run_id !== runId) {
             issue({
@@ -204,6 +210,18 @@ export async function diffRegradeExperimentRun(input: {
             });
           } else regrades.push(regrade);
         } catch (error) {
+          if (
+            error instanceof RegradeReadError &&
+            error.reason === 'budget_exceeded'
+          ) {
+            issue({
+              side: 'regrade',
+              run_id: null,
+              state: 'unavailable',
+              reason: 'read_limit',
+            });
+            break;
+          }
           const unavailable =
             error instanceof RegradeReadError &&
             [
@@ -211,6 +229,7 @@ export async function diffRegradeExperimentRun(input: {
               'unreadable',
               'unsupported_format',
               'too_large',
+              'changed',
             ].includes(error.reason);
           issue({
             side: 'regrade',

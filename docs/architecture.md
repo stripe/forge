@@ -1568,9 +1568,13 @@ source, without discarding valid pairs.
 
 The shared saved-regrade reader checks format, run ID, source digest, and judge
 identity before reuse or comparison. It reads only regular files without
-following a final symlink, up to 16 MiB per file, including growth during reads.
-The diff loader accepts at most 64 MiB of result and regrade file bodies for
-analysis, with at most one additional bounded read before reporting the limit.
+following a final symlink, up to 16 MiB per file. Before reading, it allocates
+from the reported file size plus one probe byte; growth beyond that reported
+size makes the record unavailable. The diff loader reserves at most 64 MiB for
+its result and regrade read buffers, including probe bytes and failed reads.
+Per-file and shared limits are checked before allocation or reading. Exhausting
+the shared budget stops loading with a read-limit issue and retains loaded
+pairs. Checkpoint reads and the existing verifier have separate bounds.
 It visits at most 100,000 regrade directory entries. Its 30-second read deadline
 and caller cancellation return an unavailable summary even if a dependency does
 not settle. They do not cancel an underlying filesystem operation. Inspection

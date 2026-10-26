@@ -443,43 +443,49 @@ describe('regrade diff', () => {
     assert.deepEqual(diff.issues, []);
   });
 
-  it('excludes a source whose checkpoint identity changes during inspection', async () => {
-    const { source, output } = await fixture();
-    const checkpointFile = path.join(
-      source.experimentLocation,
-      'experiment.json',
-    );
-    const checkpoint = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
-    const diff = await diffRegradeExperimentRun({
-      experimentRun: source.experimentLocation,
-      regrade: output,
-      engine: {
-        ...defaultForgeEngine,
-        verifyCompletedRun: async (location) => {
-          const completed =
-            await defaultForgeEngine.verifyCompletedRun(location);
-          checkpoint.entries[0].attempts.push({
-            run_id: 'new-attempt',
-            state: 'running',
-          });
-          await fs.writeFile(checkpointFile, JSON.stringify(checkpoint));
-          return completed;
+  it.each(['attempt', 'plan', 'selection'] as const)(
+    'excludes a source whose checkpoint %s changes during inspection',
+    async (field) => {
+      const { source, output } = await fixture();
+      const checkpointFile = path.join(
+        source.experimentLocation,
+        'experiment.json',
+      );
+      const checkpoint = JSON.parse(await fs.readFile(checkpointFile, 'utf8'));
+      const diff = await diffRegradeExperimentRun({
+        experimentRun: source.experimentLocation,
+        regrade: output,
+        engine: {
+          ...defaultForgeEngine,
+          verifyCompletedRun: async (location) => {
+            const completed =
+              await defaultForgeEngine.verifyCompletedRun(location);
+            const entry = checkpoint.entries[0];
+            if (field === 'attempt')
+              entry.attempts.push({ run_id: 'new-attempt', state: 'running' });
+            else if (field === 'plan')
+              entry.plan_sha256 = `sha256:${'c'.repeat(64)}`;
+            else entry.selection.repetition++;
+
+            await fs.writeFile(checkpointFile, JSON.stringify(checkpoint));
+            return completed;
+          },
         },
-      },
-    });
-    assert.equal(diff.coverage, 'incomplete');
-    assert.deepEqual(diff.runs, []);
-    assert.equal(diff.agreement.total, 0);
-    assert.deepEqual(diff.issues, [
-      {
-        side: 'source',
-        run_id: 'regrade-source',
-        selection_index: 0,
-        state: 'unavailable',
-        reason: 'source_changed',
-      },
-    ]);
-  });
+      });
+      assert.equal(diff.coverage, 'incomplete');
+      assert.deepEqual(diff.runs, []);
+      assert.equal(diff.agreement.total, 0);
+      assert.deepEqual(diff.issues, [
+        {
+          side: 'source',
+          run_id: 'regrade-source',
+          selection_index: 0,
+          state: 'unavailable',
+          reason: 'source_changed',
+        },
+      ]);
+    },
+  );
 
   it('reports unavailable files without printing their contents or raw errors', async () => {
     const { source, output, file } = await fixture();

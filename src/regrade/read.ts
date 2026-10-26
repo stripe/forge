@@ -4,6 +4,11 @@ import * as fs from 'node:fs/promises';
 /** Bounds comparison reads, including a file that grows after it is opened. */
 export const MAX_REGRADE_READ_BYTES = 16 * 1024 * 1024;
 
+/** Allocation capacity shared across reads, including their growth probes. */
+export interface RegradeReadBudget {
+  remainingBytes: number;
+}
+
 export class RegradeReadError extends Error {
   constructor(
     readonly reason:
@@ -11,6 +16,8 @@ export class RegradeReadError extends Error {
       | 'unreadable'
       | 'not_regular'
       | 'too_large'
+      | 'budget_exceeded'
+      | 'changed'
       | 'invalid_record'
       | 'unsupported_format'
       | 'invalid_judge',
@@ -20,7 +27,10 @@ export class RegradeReadError extends Error {
   }
 }
 
-export async function readRegradeArtifact(file: string): Promise<Buffer> {
+export async function readRegradeArtifact(
+  file: string,
+  budget?: RegradeReadBudget,
+): Promise<Buffer> {
   let handle: fs.FileHandle;
   try {
     handle = await fs.open(
@@ -40,7 +50,13 @@ export async function readRegradeArtifact(file: string): Promise<Buffer> {
       if (!stat.isFile()) throw new RegradeReadError('not_regular');
       if (stat.size > MAX_REGRADE_READ_BYTES)
         throw new RegradeReadError('too_large');
-      const buffer = Buffer.alloc(MAX_REGRADE_READ_BYTES + 1);
+      const capacity = stat.size + 1;
+      if (budget !== undefined) {
+        if (capacity > budget.remainingBytes)
+          throw new RegradeReadError('budget_exceeded');
+        budget.remainingBytes -= capacity;
+      }
+      const buffer = Buffer.alloc(capacity);
       let length = 0;
       while (length < buffer.length) {
         const { bytesRead } = await handle.read(
@@ -49,12 +65,10 @@ export async function readRegradeArtifact(file: string): Promise<Buffer> {
           buffer.length - length,
           null,
         );
-        if (bytesRead === 0) return Buffer.from(buffer.subarray(0, length));
+        if (bytesRead === 0) return buffer.subarray(0, length);
         length += bytesRead;
-        if (length > MAX_REGRADE_READ_BYTES)
-          throw new RegradeReadError('too_large');
       }
-      throw new RegradeReadError('too_large');
+      throw new RegradeReadError('changed');
     } finally {
       await handle.close();
     }
