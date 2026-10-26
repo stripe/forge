@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { performance } from 'node:perf_hooks';
+import { afterEach, describe, it, vi } from 'vitest';
 import {
   CODEX_HOME_STATE_ID,
   createCodexAdapter,
@@ -379,6 +380,7 @@ async function fixture(
     responses?: readonly string[];
     native?: (turns: readonly Turn[]) => string | undefined;
     stdout?: (response: string) => string;
+    beforeAgentCommand?: (call: RecordedTestCommand) => Promise<void>;
     agentCommand?: (call: RecordedTestCommand) => Promise<CommandResult>;
     versionOutput?: string;
   } = {},
@@ -412,6 +414,7 @@ async function fixture(
       assert.deepEqual(call.credentialEnvironmentNames, ['CODEX_API_KEY']);
       assert.equal(call.argv[0], 'codex');
       assert.equal(call.argv[1], 'exec');
+      await options.beforeAgentCommand?.(call);
       if (options.agentCommand) return options.agentCommand(call);
       const response =
         options.responses?.[turns.length] ?? 'Completed the answer.';
@@ -1685,3 +1688,102 @@ it('produces identical completed Codex artifacts with diagnostics disabled or en
       );
   }
 });
+
+it.each([
+  { state: 'running', commandMs: 400 },
+  { state: 'completed', commandMs: 400 },
+  { state: 'running', commandMs: 600 },
+] as const)(
+  'excludes delayed $state publication while charging $commandMs ms of Codex execution',
+  async ({ state, commandMs }) => {
+    const plan = createTestResolvedRunPlan({ agent: selection });
+    const limitedPlan = {
+      ...plan,
+      limits: { ...plan.limits, run_timeout_ms: 500 },
+    };
+    const baseline = await fixture(limitedPlan);
+    const withoutCapture = await executeEval({
+      runId: 'codex-delayed-store',
+      plan: limitedPlan,
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+      composition: baseline.composition,
+    });
+    let enterWrite!: () => void;
+    const writeEntered = new Promise<void>((resolve) => {
+      enterWrite = resolve;
+    });
+    let enterCommand!: () => void;
+    const commandEntered = new Promise<void>((resolve) => {
+      enterCommand = resolve;
+    });
+    let elapsed = 0;
+    const test = await fixture(limitedPlan, {
+      async beforeAgentCommand(call) {
+        enterCommand();
+        await new Promise((resolve) => setTimeout(resolve, commandMs));
+        assert.equal(call.options.signal?.aborted, commandMs > 500);
+        call.options.signal?.throwIfAborted();
+      },
+    });
+    const store = createAttemptDiagnosticsStore({ root: test.resultsRoot });
+    let delayed = false;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    try {
+      const outcome = executeEval({
+        runId: 'codex-delayed-store',
+        plan: limitedPlan,
+        now: () => new Date('2026-01-01T00:00:00.000Z'),
+        composition: {
+          ...test.composition,
+          attemptDiagnosticsStore: {
+            ...store,
+            async write(snapshot, signal, excerpts) {
+              if (
+                !delayed &&
+                snapshot.agent_invocations?.[0]?.state === state
+              ) {
+                delayed = true;
+                enterWrite();
+                await new Promise((resolve) => setTimeout(resolve, 750));
+              }
+              return store.write(snapshot, signal, excerpts);
+            },
+          },
+        },
+      }).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+      if (state === 'running') {
+        await writeEntered;
+        elapsed += 750;
+        await vi.advanceTimersByTimeAsync(750);
+      }
+      await commandEntered;
+      elapsed += commandMs;
+      await vi.advanceTimersByTimeAsync(commandMs);
+      if (state === 'completed') {
+        await writeEntered;
+        elapsed += 750;
+        await vi.advanceTimersByTimeAsync(750);
+      }
+      const settled = await outcome;
+      if (commandMs > 500) {
+        assert.ok('error' in settled);
+        assert.match(String(settled.error), /timed out after 500ms/);
+        return;
+      }
+      assert.ok(
+        'result' in settled,
+        'diagnostic waits must preserve a successful Codex eval',
+      );
+      assert.equal(delayed, true);
+      assert.deepEqual(settled.result.result, withoutCapture.result);
+      await verifyCompletedRun(settled.result.location);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  },
+);

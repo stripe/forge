@@ -196,11 +196,16 @@ export function createCodexAdapter(
               throw new TypeError('Codex run-owned state is unavailable.');
             await prepareCodexPluginConfiguration(home);
             const automation = context.selection.hook_trust === 'automation';
+            const streamOptions = {
+              hookAutomation: automation,
+              workspacePath: layout.workspace,
+            };
             const capture = createCodexInvocationCapture({
               sequence: ++invocationSequence,
               resume: currentSessionId !== undefined,
               cliVersion: expectedVersion,
               capture: context.diagnostics,
+              streamOptions,
             });
             if (context.diagnostics) await capture.start();
             let result: CommandResult;
@@ -240,10 +245,7 @@ export function createCodexAdapter(
                   parseCodexStream(
                     error.capture?.stdout ?? '',
                     currentSessionId,
-                    {
-                      hookAutomation: automation,
-                      workspacePath: layout.workspace,
-                    },
+                    streamOptions,
                   );
                 } catch (extractionError) {
                   extractionRejection = codexRejection(extractionError);
@@ -266,10 +268,11 @@ export function createCodexAdapter(
             let turn: AgentTurn | undefined;
             let parserError: unknown;
             try {
-              turn = parseCodexStream(result.stdout, currentSessionId, {
-                hookAutomation: automation,
-                workspacePath: layout.workspace,
-              });
+              turn = parseCodexStream(
+                result.stdout,
+                currentSessionId,
+                streamOptions,
+              );
             } catch (error) {
               parserError = error;
             }

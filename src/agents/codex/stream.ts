@@ -18,14 +18,47 @@ interface StreamItem {
   readonly toolCall?: AgentToolCall;
 }
 
+export interface CodexStreamOptions {
+  readonly hookAutomation?: boolean;
+  readonly workspacePath?: string;
+}
+
+export function isCodexAdvisory(
+  event: JsonRecord | undefined,
+  options: CodexStreamOptions,
+  state: {
+    readonly threadStarted: boolean;
+    readonly turnStarted: boolean;
+    readonly turnCompleted: boolean;
+  },
+): boolean {
+  if (
+    !state.threadStarted ||
+    state.turnStarted ||
+    state.turnCompleted ||
+    event?.type !== 'item.completed'
+  )
+    return false;
+  const item = event.item;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const raw = item as JsonRecord;
+  if (raw.type !== 'error') return false;
+  // The pinned CLI emits these advisories before starting the selected turn.
+  return Boolean(
+    (options.hookAutomation &&
+      raw.message ===
+        '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.') ||
+      (options.workspacePath !== undefined &&
+        raw.message ===
+          `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`),
+  );
+}
+
 /** Parse one completed `codex exec --json` or `codex exec resume --json` invocation. */
 function parseStream(
   stdout: string,
   expectedSessionId: string | undefined,
-  options: {
-    readonly hookAutomation?: boolean;
-    readonly workspacePath?: string;
-  },
+  options: CodexStreamOptions,
   location: { line_index: number },
 ): AgentTurn {
   if (
@@ -116,22 +149,12 @@ function parseStream(
           /[^A-Za-z0-9._-]/.test(id)
         )
           invalidStream();
-        // The pinned CLI emits this advisory twice before turn.started. It is
-        // accepted only for an invocation which explicitly selected automation.
-        const hookAdvisory =
-          options.hookAutomation &&
-          raw.message ===
-            '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.';
-        const configAdvisory =
-          options.workspacePath !== undefined &&
-          raw.message ===
-            `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`;
         if (
-          (hookAdvisory || configAdvisory) &&
-          sessionId !== undefined &&
-          !started &&
-          event.type === 'item.completed' &&
-          raw.type === 'error'
+          isCodexAdvisory(event, options, {
+            threadStarted: sessionId !== undefined,
+            turnStarted: started,
+            turnCompleted: completed,
+          })
         ) {
           onlyKeys(raw, ['id', 'type', 'message']);
           if (completedItems.has(id)) invalidStream('invalid_event_order');
@@ -215,11 +238,7 @@ function parseStream(
 export function parseCodexStream(
   stdout: string,
   expectedSessionId?: string,
-  options: {
-    readonly hookAutomation?: boolean;
-    readonly workspacePath?: string;
-    readonly model?: string;
-  } = {},
+  options: CodexStreamOptions = {},
 ): AgentTurn {
   const location = { line_index: 0 };
   try {

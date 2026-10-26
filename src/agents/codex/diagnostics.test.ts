@@ -12,9 +12,12 @@ import {
 import { createRedactedTail } from '../../security/diagnosticRedaction.ts';
 import { redactSecrets } from '../../security/redaction.ts';
 import {
+  codexRejection,
   createCodexInvocationCapture,
   summarizeCodexLine,
 } from './diagnostics.ts';
+
+import { parseCodexStream } from './stream.ts';
 
 const time = new Date('2026-01-01T00:00:00.000Z');
 
@@ -22,6 +25,7 @@ describe('bounded Codex diagnostic capture', () => {
   it('keeps the first failure and final 20 events, with periodic durable observations', async () => {
     let elapsed = 0;
     const records: AgentInvocationRecord[] = [];
+    const publications: Array<'invocation_boundary' | undefined> = [];
     let body: RestrictedAgentExcerpts | undefined;
     const capture = createCodexInvocationCapture({
       sequence: 1,
@@ -34,8 +38,9 @@ describe('bounded Codex diagnostic capture', () => {
         redact: (text) => redactSecrets(text, ['secret-value']).value,
         redactedTail: (maximumBytes) =>
           createRedactedTail(['secret-value'], maximumBytes),
-        async record(record, excerpts) {
+        async record(record, excerpts, publication) {
           records.push(record);
+          publications.push(publication);
           body = excerpts;
         },
       },
@@ -67,6 +72,9 @@ describe('bounded Codex diagnostic capture', () => {
       },
       rejection: { code: 'process_nonzero_exit' },
     });
+    assert.equal(publications[0], 'invocation_boundary');
+    assert.equal(publications.at(-1), 'invocation_boundary');
+    assert.ok(publications.slice(1, -1).every((entry) => entry === undefined));
     const final = records.at(-1)!;
     assert.equal(final.events.length, 20);
     assert.equal(final.events[0]!.sequence, 12);
@@ -258,4 +266,125 @@ it('does not serialize raw command capture into ordinary error JSON', () => {
   );
   assert.equal(error.capture!.stdout, 'private stdout');
   assert.equal(JSON.stringify(error).includes('private'), false);
+});
+
+const streamOptions = {
+  workspacePath: '/workspace',
+  hookAutomation: true,
+};
+const advisories = [
+  '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.',
+  'Ignored unsupported project-local config keys in /workspace/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.',
+];
+
+it.each(advisories)(
+  'keeps accepted advisories out of the first-failure slot: %s',
+  async (message) => {
+    for (const rejected of [false, true]) {
+      const events = [
+        {
+          type: 'thread.started',
+          thread_id: '0199a213-81c0-7800-8aa1-bbab2a035a53',
+        },
+        {
+          type: 'item.completed',
+          item: { id: 'notice', type: 'error', message },
+        },
+        { type: 'turn.started' },
+        ...Array.from({ length: 26 }, (_, index) => ({
+          type: 'item.completed',
+          item: {
+            id: `answer-${index}`,
+            type: 'agent_message',
+            text: 'answer',
+            ...(rejected && index === 0
+              ? { extra: 'rejected-event-marker' }
+              : {}),
+          },
+        })),
+        {
+          type: 'turn.completed',
+          usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
+        },
+      ];
+      const stdout = events.map((event) => JSON.stringify(event)).join('\n');
+      let final: AgentInvocationRecord | undefined;
+      let excerpts: RestrictedAgentExcerpts | undefined;
+      const capture = createCodexInvocationCapture({
+        sequence: 1,
+        resume: false,
+        cliVersion: '1',
+        streamOptions,
+        capture: {
+          restrictedExcerpts: true,
+          redact: (text) => text,
+          redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+          async record(record, body) {
+            final = record;
+            excerpts = body;
+          },
+        },
+      });
+      for (const line of stdout.split('\n')) capture.onStdoutLine(line);
+      let rejection: ReturnType<typeof codexRejection> | undefined;
+      try {
+        parseCodexStream(stdout, undefined, streamOptions);
+        assert.equal(rejected, false);
+      } catch (error) {
+        assert.equal(rejected, true);
+        rejection = codexRejection(error);
+        assert.equal(rejection.code, 'unexpected_field');
+        assert.equal(rejection.line_index, 4);
+      }
+      await capture.finish({
+        result: { stdout, stderr: '', exitCode: 0, durationMs: 1 },
+        ...(rejection ? { rejection } : {}),
+      });
+      assert.ok(final);
+      if (rejected) {
+        assert.equal(final.first_failure?.sequence, 4);
+        assert.ok(final.events.every((event) => event.sequence > 4));
+        assert.equal(JSON.parse(excerpts!.cli_events).failure.line_index, 4);
+        assert.ok(
+          JSON.parse(excerpts!.cli_events).failure.text.includes(
+            'rejected-event-marker',
+          ),
+        );
+      } else {
+        assert.equal(final.state, 'completed');
+        assert.equal(final.first_failure, undefined);
+        assert.equal(excerpts, undefined);
+      }
+    }
+  },
+);
+
+it('treats advisory text as a failure outside its accepted context', async () => {
+  for (const midTurn of [false, true]) {
+    let final: AgentInvocationRecord | undefined;
+    const capture = createCodexInvocationCapture({
+      sequence: 1,
+      resume: false,
+      cliVersion: '1',
+      streamOptions: midTurn ? streamOptions : {},
+      capture: {
+        restrictedExcerpts: false,
+        redact: (text) => text,
+        redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+        async record(record) {
+          final = record;
+        },
+      },
+    });
+    capture.onStdoutLine(JSON.stringify({ type: 'thread.started' }));
+    if (midTurn) capture.onStdoutLine(JSON.stringify({ type: 'turn.started' }));
+    capture.onStdoutLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'notice', type: 'error', message: advisories[0] },
+      }),
+    );
+    await capture.finish({ rejection: { code: 'item_error' } });
+    assert.equal(final!.first_failure!.sequence, midTurn ? 3 : 2);
+  }
 });

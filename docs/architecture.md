@@ -1754,7 +1754,8 @@ Custom runners may omit partial capture.
 The final 20 structural stdout event summaries and first failure survive parser
 rejection. They include known event/item types, observation times, safe status,
 and tool exit codes, without messages, reasoning, commands, arguments, or output.
-Unknown names become `unknown`. Optional HTTP statuses from typed error fields
+Unknown names become `unknown`. Pre-turn advisories accepted by the parser do
+not reserve the first-failure slot. Optional HTTP statuses from typed error fields
 or recognized HTTP/status text carry origin `agent_reported`, not direct
 transport attribution. Nonzero tool exits are recorded without making the turn
 fatal. A nonzero process exit remains fatal even if its stdout parses; a parser
@@ -1770,10 +1771,11 @@ settles. Boundary records pass `'invocation_boundary'` as the capture callback's
 third argument so the engine excludes those waits from the execution timeout.
 Adapters must not mark observations made while the command is running as
 boundaries. New structural observations trigger background flushes at most once
-per five seconds; the execution clock keeps running during those writes. At most 64 invocation records fit within
-64 KiB, dropping the oldest with an omitted count. Process capture is partial
-when the command output cap drops bytes, and unsupported when a rejecting
-custom runner provides no metadata. Claude Code and OpenCode do not yet supply
+per five seconds; the execution clock keeps running during those writes. At most
+64 invocation records fit within 64 KiB, dropping the oldest with an omitted
+count. Process capture is partial when the command output cap drops bytes, and
+unsupported when a rejecting custom runner provides no metadata. Claude Code
+and OpenCode do not yet supply
 these invocation records.
 
 Restricted failure excerpts default to off. Hosts enable

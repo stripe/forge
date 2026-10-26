@@ -13,7 +13,11 @@ import {
   MAX_STDERR_EXCERPT_BYTES,
   type ProtocolRejection,
 } from '../../diagnostics/agent.ts';
-import { CodexStreamError } from './stream.ts';
+import {
+  CodexStreamError,
+  type CodexStreamOptions,
+  isCodexAdvisory,
+} from './stream.ts';
 
 const MAX_LINE_BYTES = 1024 * 1024;
 
@@ -23,11 +27,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export function summarizeCodexLine(
-  line: string,
-  sequence: number,
-  observedAt: string,
-): AgentEventSummary {
+function parseEvent(line: string): Record<string, unknown> | undefined {
   let event: Record<string, unknown> | undefined;
   if (Buffer.byteLength(line) <= MAX_LINE_BYTES) {
     try {
@@ -36,6 +36,22 @@ export function summarizeCodexLine(
       /* Malformed lines still get a location. */
     }
   }
+  return event;
+}
+
+export function summarizeCodexLine(
+  line: string,
+  sequence: number,
+  observedAt: string,
+): AgentEventSummary {
+  return summarizeCodexEvent(parseEvent(line), sequence, observedAt);
+}
+
+function summarizeCodexEvent(
+  event: Record<string, unknown> | undefined,
+  sequence: number,
+  observedAt: string,
+): AgentEventSummary {
   const item = record(event?.item);
   const eventType = eventSummarySchema.shape.event_type.safeParse(event?.type);
   const itemType = eventSummarySchema.shape.item_type.safeParse(item?.type);
@@ -99,6 +115,7 @@ export function createCodexInvocationCapture(input: {
   resume: boolean;
   cliVersion: string;
   capture?: AgentDiagnosticsCapture | undefined;
+  streamOptions?: CodexStreamOptions;
   now?: () => Date;
   monotonicNow?: () => number;
 }) {
@@ -117,6 +134,11 @@ export function createCodexInvocationCapture(input: {
     tool_failure_count: 0,
     last_completed_turn: 0,
     events: [],
+  };
+  const streamState = {
+    threadStarted: false,
+    turnStarted: false,
+    turnCompleted: false,
   };
   let lastFlush = monotonic();
   const excerpts: Array<{ line_index: number; text: string }> = [];
@@ -154,11 +176,21 @@ export function createCodexInvocationCapture(input: {
       invocation = { ...invocation, event_count: invocation.event_count + 1 };
       return;
     }
-    const summary = summarizeCodexLine(
-      line,
+    const event = parseEvent(line);
+    const advisory = isCodexAdvisory(
+      event,
+      input.streamOptions ?? {},
+      streamState,
+    );
+    const summary = summarizeCodexEvent(
+      event,
       invocation.event_count + 1,
       now().toISOString(),
     );
+    const isFailure = failed(summary) && !advisory;
+    if (event?.type === 'thread.started') streamState.threadStarted = true;
+    if (event?.type === 'turn.started') streamState.turnStarted = true;
+    if (event?.type === 'turn.completed') streamState.turnCompleted = true;
     invocation = {
       ...invocation,
       event_count: summary.sequence,
@@ -172,13 +204,13 @@ export function createCodexInvocationCapture(input: {
         summary.event_type === 'turn.completed'
           ? summary.sequence
           : invocation.last_completed_turn,
-      ...(invocation.first_failure === undefined && failed(summary)
+      ...(invocation.first_failure === undefined && isFailure
         ? { first_failure: summary }
         : {}),
     };
     if (enabled) {
       const next = excerpt(line, summary.sequence);
-      if (!firstExcerpt && failed(summary)) firstExcerpt = next;
+      if (!firstExcerpt && isFailure) firstExcerpt = next;
       excerpts.push(next);
       while (
         excerpts.length > 20 ||
