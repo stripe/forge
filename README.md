@@ -466,7 +466,9 @@ results/experiments/<experiment-run-id>/
 
 Each line in `events.jsonl` is one canonical JSON progress event with an
 `observed_at` UTC timestamp. Resume appends a `resumed` marker and further
-events to the same file. Follow it with `tail -f` while a run is active.
+events to the same file. `agent_usage` adds a record after each completed turn
+with counters, in stderr progress and in this log. It also advances the last-event
+time. Follow the log with `tail -f` while a run is active.
 Recording runs in the background with bounded memory and waits. Disk errors,
 slow writes, or a full queue can leave gaps: `run-summary.json` then includes
 `progress_log` with `state: unavailable`, a reason, and the affected event count.
@@ -494,8 +496,10 @@ checkpoint summary; an unavailable event has a null `last_event_at`.
 Status also shows agent tokens per minute from turn usage reported in the trailing
 60 seconds. It adds input and output tokens; cached input and reasoning are
 already included. Rates include attempts that later fail. Missing counters make
-a model's rate unavailable with a reason. Missing, malformed, unreadable, or
-mismatched logs also make the rate unavailable, as do an interrupted tail,
+a model's rate unavailable with a reason. A model with no usage in the past
+minute also shows unavailable; a recent report of zero tokens shows zero.
+Missing, malformed, unreadable, or mismatched logs also make the rate unavailable,
+as do an interrupted tail,
 a bounded read that omits earlier records, and saved recording gaps. Without
 usage events, no rate is inferred from completed evals. Undetected gaps can
 undercount. Counters arrive when an agent invocation finishes, so long

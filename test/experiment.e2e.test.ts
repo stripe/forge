@@ -283,6 +283,13 @@ describe('resumable CLI experiment runs', () => {
     const fixture = await createFixture({ repetitions: 2, usage: true });
     const first = await fixture.run(['--jobs', '2']);
     assert.equal(first.code, 0);
+    assert.ok(
+      first.stderr
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .some((event) => event.state === 'agent_usage'),
+    );
     const events = (
       await fs.readFile(path.join(fixture.root, 'events.jsonl'), 'utf8')
     )

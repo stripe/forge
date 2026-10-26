@@ -11,6 +11,31 @@ export const agentTokenUsageSchema = z
   })
   .strict();
 
+const unknownUsage: AgentTokenUsage = Object.freeze({
+  input_tokens: null,
+  cached_input_tokens: null,
+  output_tokens: null,
+  reasoning_tokens: null,
+});
+
+/** Untrusted telemetry cannot invalidate the completed work it describes. */
+export function observeAgentTokenUsage(value: unknown): AgentTokenUsage {
+  const parsed = agentTokenUsageSchema.safeParse(value);
+  return parsed.success ? parsed.data : unknownUsage;
+}
+
+/** Native counters and their sums must be nonnegative safe integers. */
+export function sumObservedTokens(...values: unknown[]): number | null {
+  let sum = 0;
+  for (const value of values) {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
+      return null;
+    sum += value;
+    if (!Number.isSafeInteger(sum)) return null;
+  }
+  return sum;
+}
+
 /** A missing counter in any turn leaves that eval's total unknown. */
 export function sumAgentTokenUsage(
   usages: readonly (AgentTokenUsage | undefined)[],

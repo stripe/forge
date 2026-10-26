@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
-import { agentTokenUsageSchema, sumAgentTokenUsage } from '../../agentUsage.ts';
+import {
+  observeAgentTokenUsage,
+  sumAgentTokenUsage,
+  sumObservedTokens,
+} from '../../agentUsage.ts';
 import type {
   AgentTokenUsage,
   AgentToolCall,
@@ -109,38 +113,7 @@ export function parseOpenCodeStream(
           completed = terminal(part.reason) && !stepHasTools;
           cost += nonnegative(part.cost);
           if (part.tokens === undefined) usages.push(undefined);
-          else {
-            const tokens = record(part.tokens);
-            const cache =
-              tokens.cache === undefined ? {} : record(tokens.cache);
-            const write =
-              cache.write === undefined ? 0 : nonnegative(cache.write);
-            if (!Number.isSafeInteger(write)) throw new Error();
-            const usage = agentTokenUsageSchema.parse({
-              input_tokens: tokens.input ?? null,
-              cached_input_tokens: cache.read ?? null,
-              output_tokens: tokens.output ?? null,
-              reasoning_tokens: tokens.reasoning ?? null,
-            });
-            const output =
-              usage.output_tokens === null || usage.reasoning_tokens === null
-                ? null
-                : usage.output_tokens + usage.reasoning_tokens;
-            usages.push(
-              agentTokenUsageSchema.parse({
-                ...usage,
-                output_tokens:
-                  output !== null && Number.isSafeInteger(output)
-                    ? output
-                    : null,
-                input_tokens:
-                  usage.input_tokens === null ||
-                  usage.cached_input_tokens === null
-                    ? null
-                    : usage.input_tokens + usage.cached_input_tokens + write,
-              }),
-            );
-          }
+          else usages.push(openCodeUsage(part.tokens));
           activeMessage = undefined;
           finishedMessage = message;
         } else if (event.type === 'text' && part.type === 'text') {
@@ -169,6 +142,28 @@ export function parseOpenCodeStream(
   } catch {
     throw new OpenCodeStreamError();
   }
+}
+
+function openCodeUsage(value: unknown): AgentTokenUsage {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return observeAgentTokenUsage(null);
+  const tokens = value as Record<string, unknown>;
+  const cache =
+    tokens.cache !== null &&
+    typeof tokens.cache === 'object' &&
+    !Array.isArray(tokens.cache)
+      ? (tokens.cache as Record<string, unknown>)
+      : {};
+  return {
+    input_tokens: sumObservedTokens(
+      tokens.input,
+      cache.read,
+      cache.write === undefined ? 0 : cache.write,
+    ),
+    cached_input_tokens: sumObservedTokens(cache.read),
+    output_tokens: sumObservedTokens(tokens.output, tokens.reasoning),
+    reasoning_tokens: sumObservedTokens(tokens.reasoning),
+  };
 }
 
 export class OpenCodeStreamError extends Error {

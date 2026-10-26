@@ -88,7 +88,7 @@ export interface ExperimentRunStatus {
     readonly models: readonly {
       readonly agent: AgentModel;
       readonly tokens_per_minute: number | null;
-      readonly reason?: 'missing_counters' | 'overflow';
+      readonly reason?: 'missing_counters' | 'overflow' | 'no_recent_usage';
       readonly turns: number;
       readonly turns_with_total: number;
     }[];
@@ -400,7 +400,7 @@ export function summarizeTokenRates(
     {
       agent: AgentModel;
       tokens_per_minute: number | null;
-      reason?: 'missing_counters' | 'overflow';
+      reason?: 'missing_counters' | 'overflow' | 'no_recent_usage';
       turns: number;
       turns_with_total: number;
     }
@@ -421,7 +421,7 @@ export function summarizeTokenRates(
     const group: {
       agent: AgentModel;
       tokens_per_minute: number | null;
-      reason?: 'missing_counters' | 'overflow';
+      reason?: 'missing_counters' | 'overflow' | 'no_recent_usage';
       turns: number;
       turns_with_total: number;
     } = models.get(key) ?? {
@@ -433,7 +433,12 @@ export function summarizeTokenRates(
     models.set(key, group);
     const age = now.getTime() - Date.parse(event.observed_at);
     const identity = `${event.run_id}:${event.turn}`;
-    if (age < 0 || age >= 60_000 || seen.has(identity)) continue;
+    if (
+      age < 0 ||
+      age >= EXPERIMENT_OBSERVATION_LIMITS.tokenRateWindowMs ||
+      seen.has(identity)
+    )
+      continue;
     seen.add(identity);
     group.turns += 1;
     const { input_tokens, output_tokens } = event.usage;
@@ -450,6 +455,12 @@ export function summarizeTokenRates(
     }
   }
   if (models.size === 0) return unavailable('no_usage');
+  for (const group of models.values()) {
+    if (group.turns === 0) {
+      group.tokens_per_minute = null;
+      group.reason = 'no_recent_usage';
+    }
+  }
   return {
     state: 'available',
     basis: 'per_turn',

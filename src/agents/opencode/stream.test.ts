@@ -265,10 +265,9 @@ it('sums OpenCode steps once and preserves unknown usage in a step', () => {
   ]) {
     const invalid = structuredClone(events);
     invalid[3]!.part.tokens = tokens;
-    assert.throws(
-      () => parseOpenCodeStream(encode(invalid)),
-      OpenCodeStreamError,
-    );
+    const observed = parseOpenCodeStream(encode(invalid));
+    assert.equal(observed.text, turn.response);
+    assert.equal(observed.usage!.input_tokens, null);
   }
 });
 
@@ -291,4 +290,23 @@ it('leaves inclusive OpenCode output unknown when a component is missing or over
     if (event.type === 'step_finish')
       event.part.tokens = { output: 0, reasoning: 0 };
   assert.equal(parseOpenCodeStream(encode(events)).usage!.output_tokens, 0);
+});
+
+it('keeps a completed OpenCode turn when native usage blocks are malformed', () => {
+  for (const tokens of [
+    null,
+    [],
+    2,
+    { input: 1.5, output: 2, reasoning: 1, cache: { read: 0 } },
+    { input: Number.MAX_SAFE_INTEGER, cache: { read: 1 } },
+    { input: 5, output: 2, reasoning: 1, cache: { read: 3, write: null } },
+    { cache: 'invalid' },
+  ]) {
+    const events = structuredClone(openCodeEvents(turn));
+    for (const event of events)
+      if (event.type === 'step_finish') event.part.tokens = tokens;
+    const observed = parseOpenCodeStream(encode(events));
+    assert.equal(observed.text, turn.response);
+    assert.equal(observed.usage!.input_tokens, null);
+  }
 });

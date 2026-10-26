@@ -1,4 +1,4 @@
-import { agentTokenUsageSchema } from '../../agentUsage.ts';
+import { observeAgentTokenUsage, sumObservedTokens } from '../../agentUsage.ts';
 import type {
   AgentTokenUsage,
   AgentToolCall,
@@ -14,7 +14,7 @@ interface ClaudeStreamEvent {
   result?: string;
   session_id?: string;
   total_cost_usd?: number;
-  usage?: Record<string, unknown>;
+  usage?: unknown;
   message?: {
     content?: Array<{
       type?: string;
@@ -73,36 +73,12 @@ export function parseClaudeStream(stdout: string): AgentTurn {
     } else if (event.type === 'result') {
       if (event.usage !== undefined) {
         const native = event.usage;
-        if (
-          native === null ||
-          typeof native !== 'object' ||
-          Array.isArray(native)
-        )
-          throw new ClaudeStreamError('Claude returned invalid token usage.');
-        const parsed = agentTokenUsageSchema.safeParse({
-          input_tokens: native.input_tokens ?? null,
-          cached_input_tokens: native.cache_read_input_tokens ?? null,
-          output_tokens: native.output_tokens ?? null,
-          reasoning_tokens: null,
-        });
-        const write = native.cache_creation_input_tokens ?? 0;
-        if (
-          !parsed.success ||
-          typeof write !== 'number' ||
-          !Number.isSafeInteger(write) ||
-          write < 0
-        )
-          throw new ClaudeStreamError('Claude returned invalid token usage.');
-        usage = parsed.data;
-        if (usage.input_tokens !== null && usage.cached_input_tokens !== null) {
-          usage = {
-            ...usage,
-            input_tokens:
-              usage.input_tokens + usage.cached_input_tokens + write,
-          };
-          if (!agentTokenUsageSchema.safeParse(usage).success)
-            throw new ClaudeStreamError('Claude returned invalid token usage.');
-        } else usage = { ...usage, input_tokens: null };
+        usage =
+          native !== null &&
+          typeof native === 'object' &&
+          !Array.isArray(native)
+            ? claudeUsage(native as Record<string, unknown>)
+            : observeAgentTokenUsage(null);
       }
       if (typeof event.result === 'string') resultText = event.result;
       if (typeof event.session_id === 'string') sessionId = event.session_id;
@@ -127,6 +103,21 @@ export function parseClaudeStream(stdout: string): AgentTurn {
     toolCalls,
     ...(costUsd === undefined ? {} : { costUsd }),
     ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function claudeUsage(native: Record<string, unknown>): AgentTokenUsage {
+  return {
+    input_tokens: sumObservedTokens(
+      native.input_tokens,
+      native.cache_read_input_tokens,
+      native.cache_creation_input_tokens === undefined
+        ? 0
+        : native.cache_creation_input_tokens,
+    ),
+    cached_input_tokens: sumObservedTokens(native.cache_read_input_tokens),
+    output_tokens: sumObservedTokens(native.output_tokens),
+    reasoning_tokens: null,
   };
 }
 

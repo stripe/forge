@@ -657,3 +657,33 @@ it('converts cumulative snapshots to invocation deltas and recovers after resets
     },
   ]);
 });
+
+it('invalidates the usage baseline after a failed resumed send and recovers after a new snapshot', async () => {
+  let invocation = 0;
+  const test = fixture({
+    command() {
+      invocation += 1;
+      if (invocation === 2) return result(completed(), 1);
+      const events = completed()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      events.at(-1).usage = {
+        input_tokens: invocation * 100,
+        cached_input_tokens: 0,
+        output_tokens: invocation * 10,
+      };
+      return result(events.map((event) => JSON.stringify(event)).join('\n'));
+    },
+  });
+  const session = await test.adapter.openSession(test.sessionContext);
+  const send = () =>
+    session.send('Continue', { signal: test.sessionContext.signal });
+  assert.equal((await send()).usage!.input_tokens, 100);
+  await assert.rejects(send(), /exited/);
+  const afterFailure = await send();
+  assert.equal(afterFailure.text, 'Done');
+  assert.equal(afterFailure.usage!.input_tokens, null);
+  assert.equal(afterFailure.usage!.output_tokens, null);
+  assert.ok(test.calls[2]!.argv.includes('resume'));
+  assert.equal((await send()).usage!.input_tokens, 100);
+});

@@ -21,6 +21,7 @@ import { sha256Digest } from '../model/hashes.ts';
 import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
 import type {
+  CompletedRunV1,
   CompletionCallSummaryV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
@@ -103,8 +104,18 @@ export async function regradeCompletedRun(
   dependencies: RegradeDependencies,
 ): Promise<RegradeResultV1 | undefined> {
   const engine = dependencies.engine ?? defaultForgeEngine;
-  const signal = input.signal ?? new AbortController().signal;
   const completed = await engine.verifyCompletedRun(input.location);
+  return regradeVerifiedRun(completed, input, dependencies);
+}
+
+/** Internal worker path: reuse a source already verified for this regrade. */
+export async function regradeVerifiedRun(
+  completed: CompletedRunV1,
+  input: Parameters<typeof regradeCompletedRun>[0],
+  dependencies: RegradeDependencies,
+): Promise<RegradeResultV1 | undefined> {
+  const engine = dependencies.engine ?? defaultForgeEngine;
+  const signal = input.signal ?? new AbortController().signal;
   const result = completed.result;
   if (result.evaluation.judging_criteria.length === 0) return undefined;
 

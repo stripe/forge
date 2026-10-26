@@ -240,6 +240,9 @@ export function createCodexAdapter(
             previousUsage = turn.usage;
             currentSessionId = turn.sessionId;
             return { ...turn, ...(usage === undefined ? {} : { usage }) };
+          } catch (error) {
+            previousUsage = undefined;
+            throw error;
           } finally {
             sending = false;
           }

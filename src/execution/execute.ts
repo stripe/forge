@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { agentTokenUsageSchema, sumAgentTokenUsage } from '../agentUsage.ts';
+import { observeAgentTokenUsage, sumAgentTokenUsage } from '../agentUsage.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -939,7 +939,7 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
     ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
     ...(turn.usage === undefined
       ? {}
-      : { usage: Object.freeze(agentTokenUsageSchema.parse(turn.usage)) }),
+      : { usage: Object.freeze(observeAgentTokenUsage(turn.usage)) }),
   });
 }
 

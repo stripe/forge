@@ -606,7 +606,7 @@ describe('Codex exec stream', () => {
     }
   });
 
-  it('rejects malformed JSON, banners, payloads, statuses, and terminal usage', () => {
+  it('rejects malformed transcript structure while degrading invalid terminal usage', () => {
     for (const line of [
       'null',
       '[]',
@@ -669,7 +669,16 @@ describe('Codex exec stream', () => {
       { ...completed.usage, cache_write_input_tokens: -1 },
       { ...completed.usage, cache_write_input_tokens: '0' },
     ])
-      assertInvalid(jsonl(started, turnStarted, { ...completed, usage }));
+      assert.deepEqual(
+        parseCodexStream(jsonl(started, turnStarted, { ...completed, usage }))
+          .usage,
+        {
+          input_tokens: null,
+          cached_input_tokens: null,
+          output_tokens: null,
+          reasoning_tokens: null,
+        },
+      );
     assertInvalid(
       stream(
         item('mcp_tool_call', {
@@ -773,5 +782,23 @@ describe('Codex exec stream', () => {
         .toolCalls.length,
       1,
     );
+  });
+});
+
+it('keeps a completed Codex transcript when a native usage counter is malformed', () => {
+  const turn = parseCodexStream(
+    jsonl(
+      started,
+      turnStarted,
+      item('agent_message', { id: 'kept', text: 'Kept response' }),
+      { ...completed, usage: { ...completed.usage, input_tokens: 1.5 } },
+    ),
+  );
+  assert.equal(turn.text, 'Kept response');
+  assert.deepEqual(turn.usage, {
+    input_tokens: null,
+    cached_input_tokens: null,
+    output_tokens: null,
+    reasoning_tokens: null,
   });
 });

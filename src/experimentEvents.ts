@@ -384,7 +384,10 @@ async function readRecentEventTail(
     signal.throwIfAborted();
     if (!stat.isFile()) return unavailable('unsafe_file');
     if (stat.size === 0) return unavailable('empty');
-    const length = Math.min(stat.size, 8 * 1024 * 1024);
+    const length = Math.min(
+      stat.size,
+      EXPERIMENT_OBSERVATION_LIMITS.recentEventBytes,
+    );
     const tail = Buffer.alloc(length);
     const { bytesRead } = await handle.read(
       tail,

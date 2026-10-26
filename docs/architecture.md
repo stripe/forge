@@ -332,7 +332,10 @@ retain `selection` and `run_id`, and errors
 retain the same stable code and optional credential-redacted diagnostic as
 stderr. Resume appends a `resumed` marker after inspecting prior attempts
 and before scheduling pending work.
-The callback and stderr keep their existing `resuming` state name.
+The callback and stderr keep their existing `resuming` state name. Both stderr
+and `events.jsonl` also receive `agent_usage` records, one per reported completed
+turn. A saved usage event advances `last_event_at`. Readers from older Forge
+releases may classify this new state as unavailable.
 
 The log format belongs to the checkpoint's Forge release. Records are bounded
 to 64 KiB and new logs use mode `0600`. Controller observation policy bounds the
@@ -386,7 +389,8 @@ duplicate run/turn records count once. Future and expired records do not
 contribute. Each group records `turns` and `turns_with_total`; an unknown input
 or output makes its rate null with reason `missing_counters`. An unsafe sum
 makes it null with reason `overflow`. No usage events means unavailable with
-reason `no_usage`, while expired usage reports give zero.
+reason `no_usage`. A model with only expired or future usage reports has a null
+rate with reason `no_recent_usage`; a recent turn reporting zero tokens gives zero.
 
 The recent-rate reader shares the event reader's fixed unavailability reasons
 and 250 ms wait budget. It allocates from the file size, up to an 8 MiB tail.
@@ -732,12 +736,20 @@ reasoning is a subset of output. Codex's stream parser returns cumulative thread
 snapshots. Its agent session subtracts the prior snapshot to report each invocation;
 a new thread starts from zero. An unknown counter or baseline, or a counter reset,
 makes that delta null. Each snapshot becomes the next baseline, so known counters
-can recover on the following invocation. Claude Code supplies per-invocation
+can recover on the following invocation. A failed Codex send invalidates the
+baseline: the next resumed invocation has unknown deltas and establishes a new
+baseline, so failed-invocation spend is not attributed to a later turn.
+Claude Code supplies per-invocation
 `result.usage` for the main agent loop, with cache reads and creation added to
 input. Its output already includes reasoning; the reasoning breakdown stays null.
 OpenCode sums unique step-finish usage with cache reads and writes added to input,
 and adds native reasoning to native output to make output inclusive. Missing output
 or reasoning leaves inclusive output null; an unsafe sum also becomes null.
+Malformed optional native counters degrade to null without invalidating a
+completed transcript. OpenCode native evidence omits malformed optional metrics
+with a fixed `value_omitted` warning. Execution converts malformed third-party
+usage blocks to all-null counters. Saved result and report schemas remain strict;
+invalid stored contracts are not silently rewritten.
 Unsupported counters remain null. Execution clones and freezes counters, sums
 them across completed turns into optional `result.agent.usage`, and emits an
 `agent_usage` observer event with a one-based turn index. An absent turn counter

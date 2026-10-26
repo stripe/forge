@@ -17,6 +17,7 @@ import {
 import { EXPERIMENT_OBSERVATION_LIMITS } from './experimentObservation.ts';
 import {
   readExperimentRunStatus,
+  renderExperimentRunStatus,
   summarizeExperimentRun,
   summarizeTokenRates,
 } from './experimentStatus.ts';
@@ -639,7 +640,27 @@ it('uses reported turn deltas in the trailing minute, with no cache or reasoning
   assert.equal(rates.models[0]!.turns_with_total, 2);
   assert.deepEqual(summarizeTokenRates(saved, [], now).models, []);
   const stale = summarizeTokenRates(saved, [event('first', 0, 61)], now);
-  assert.equal(stale.models[0]!.tokens_per_minute, 0);
+  assert.equal(stale.models[0]!.tokens_per_minute, null);
+  assert.equal(stale.models[0]!.reason, 'no_recent_usage');
+  assert.match(
+    renderExperimentRunStatus({
+      ...summarizeExperimentRun(
+        saved,
+        { state: 'unavailable', reason: 'missing' },
+        noLock,
+      ),
+      token_rates: stale,
+    }),
+    /unavailable \(no_recent_usage\)/,
+  );
+  const zero = {
+    ...recent,
+    usage: { ...usage, input_tokens: 0, output_tokens: 0 },
+  };
+  assert.equal(
+    summarizeTokenRates(saved, [zero], now).models[0]!.tokens_per_minute,
+    0,
+  );
   const unknown = { ...recent, usage: { ...usage, output_tokens: null } };
   assert.equal(
     summarizeTokenRates(saved, [unknown], now).models[0]!.tokens_per_minute,
@@ -738,4 +759,27 @@ it('isolates an unexpected recent-usage observation failure from the checkpoint 
   assert.equal(status.token_rates!.state, 'unavailable');
   assert.equal(status.token_rates!.reason, 'observation_error');
   assert.ok(!JSON.stringify(status).includes('private observation detail'));
+});
+
+it('advances the last observation time for a saved agent_usage progress event', async () => {
+  const { root } = await fixture();
+  const saved = checkpoint([[]]);
+  const time = '2026-01-02T03:04:00.000Z';
+  await appendExperimentRunEvent(
+    root,
+    {
+      state: 'agent_usage',
+      run_id: 'usage-run',
+      selection: saved.entries[0]!.selection,
+      turn: 1,
+      usage: {
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_tokens: null,
+      },
+    },
+    () => new Date(time),
+  );
+  assert.equal((await readExperimentRunStatus(root)).last_event_at, time);
 });

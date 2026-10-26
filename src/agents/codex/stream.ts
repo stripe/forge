@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { observeAgentTokenUsage } from '../../agentUsage.ts';
 
 import type {
   AgentTokenUsage,
@@ -328,28 +329,36 @@ function parseItem(item: JsonRecord): StreamItem {
 }
 
 function validateUsage(value: unknown): AgentTokenUsage {
-  const usage = requiredRecord(value);
-  onlyKeys(usage, [
-    'input_tokens',
-    'cached_input_tokens',
-    'cache_write_input_tokens',
-    'output_tokens',
-    'reasoning_output_tokens',
-  ]);
-  for (const key of ['input_tokens', 'cached_input_tokens', 'output_tokens']) {
-    nonnegativeInteger(usage[key]);
+  try {
+    const usage = requiredRecord(value);
+    onlyKeys(usage, [
+      'input_tokens',
+      'cached_input_tokens',
+      'cache_write_input_tokens',
+      'output_tokens',
+      'reasoning_output_tokens',
+    ]);
+    for (const key of [
+      'input_tokens',
+      'cached_input_tokens',
+      'output_tokens',
+    ]) {
+      nonnegativeInteger(usage[key]);
+    }
+    if (usage.reasoning_output_tokens !== undefined)
+      nonnegativeInteger(usage.reasoning_output_tokens);
+    if (usage.cache_write_input_tokens !== undefined)
+      nonnegativeInteger(usage.cache_write_input_tokens);
+    return {
+      input_tokens: usage.input_tokens as number,
+      cached_input_tokens: usage.cached_input_tokens as number,
+      output_tokens: usage.output_tokens as number,
+      reasoning_tokens:
+        (usage.reasoning_output_tokens as number | undefined) ?? null,
+    };
+  } catch {
+    return observeAgentTokenUsage(null);
   }
-  if (usage.reasoning_output_tokens !== undefined)
-    nonnegativeInteger(usage.reasoning_output_tokens);
-  if (usage.cache_write_input_tokens !== undefined)
-    nonnegativeInteger(usage.cache_write_input_tokens);
-  return {
-    input_tokens: usage.input_tokens as number,
-    cached_input_tokens: usage.cached_input_tokens as number,
-    output_tokens: usage.output_tokens as number,
-    reasoning_tokens:
-      (usage.reasoning_output_tokens as number | undefined) ?? null,
-  };
 }
 
 function validateStatus(value: unknown): void {

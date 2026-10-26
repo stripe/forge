@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { it } from 'vitest';
-import { agentTokenUsageSchema, sumAgentTokenUsage } from './agentUsage.ts';
+import {
+  agentTokenUsageSchema,
+  observeAgentTokenUsage,
+  sumAgentTokenUsage,
+  sumObservedTokens,
+} from './agentUsage.ts';
 
 it('distinguishes absent usage, unknown counters and recorded zero across turns', () => {
   const usage = {
@@ -39,4 +44,30 @@ it('distinguishes absent usage, unknown counters and recorded zero across turns'
     agentTokenUsageSchema.safeParse({ ...usage, extra: 1 }).success,
     false,
   );
+});
+
+it('degrades untrusted usage and unsafe native sums without weakening the saved schema', () => {
+  for (const value of [
+    null,
+    [],
+    1,
+    { input_tokens: 1.5 },
+    {
+      input_tokens: 1,
+      cached_input_tokens: 0,
+      output_tokens: 1,
+      reasoning_tokens: null,
+      extra: true,
+    },
+  ])
+    assert.deepEqual(observeAgentTokenUsage(value), {
+      input_tokens: null,
+      cached_input_tokens: null,
+      output_tokens: null,
+      reasoning_tokens: null,
+    });
+  for (const value of [-1, 1.5, Infinity, '2', null, undefined])
+    assert.equal(sumObservedTokens(0, value), null);
+  assert.equal(sumObservedTokens(Number.MAX_SAFE_INTEGER, 1), null);
+  assert.equal(sumObservedTokens(1, 2), 3);
 });

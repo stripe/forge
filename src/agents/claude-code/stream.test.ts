@@ -177,9 +177,43 @@ it('uses terminal invocation usage once, includes cache reads and writes in inpu
     { output_tokens: 0.5 },
     { cache_creation_input_tokens: '2' },
   ]) {
-    assert.throws(
-      () => parseClaudeStream(JSON.stringify({ ...terminal, usage: invalid })),
-      ClaudeStreamError,
+    const observed = parseClaudeStream(
+      JSON.stringify({ ...terminal, usage: invalid }),
     );
+    assert.equal(observed.text, 'done');
+    assert.equal(observed.sessionId, 'selected');
+    assert.equal(observed.usage!.input_tokens, null);
+    assert.equal(observed.usage!.output_tokens, null);
+  }
+});
+
+it('keeps a completed Claude turn when native token counters are malformed', () => {
+  for (const usage of [
+    null,
+    [],
+    2,
+    { input_tokens: 1.5, cache_read_input_tokens: 0, output_tokens: 3 },
+    {
+      input_tokens: 5,
+      cache_read_input_tokens: 3,
+      cache_creation_input_tokens: null,
+      output_tokens: 3,
+    },
+    {
+      input_tokens: Number.MAX_SAFE_INTEGER,
+      cache_read_input_tokens: 1,
+      output_tokens: 3,
+    },
+  ]) {
+    const turn = parseClaudeStream(
+      JSON.stringify({
+        type: 'result',
+        session_id: 'selected',
+        result: 'Kept response',
+        usage,
+      }),
+    );
+    assert.equal(turn.text, 'Kept response');
+    assert.equal(turn.usage!.input_tokens, null);
   }
 });
