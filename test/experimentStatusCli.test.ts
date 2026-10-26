@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 import { runCli } from '../src/cli.ts';
+import { serializeCanonicalJson } from '../src/serialization.ts';
 import { createTestResolvedRunPlan } from '../src/testing/index.ts';
 import { FORGE_BUILD_IDENTITY } from '../src/version.ts';
 
@@ -68,12 +69,27 @@ describe('forge status', () => {
     assert.equal(result.stderr, '');
     assert.equal(
       result.stdout,
-      'Experiment run: example\nLiveness: no lock\nLast event: unavailable (missing)\nSelections: pending=1, running=0, completed=0, errored=0\nIn flight by agent model (checkpoint):\n  none\nFailures (all attempts):\n  none\n',
+      'Experiment run: example\nLiveness: no lock\nLast event: unavailable (missing)\nSelections: pending=1, running=0, completed=0, errored=0\nIn flight by agent model (checkpoint):\n  none\nAgent tokens/min (per-turn reports, trailing 60s):\n  unavailable (missing)\nFailures (all attempts):\n  none\n',
     );
     const json = await invoke(['status', '--experiment-run', run, '--json']);
     assert.equal(json.code, 0, json.stderr);
     assert.equal(json.stderr, '');
-    assert.deepEqual(JSON.parse(json.stdout), {
+    const { token_rates, ...summary } = JSON.parse(json.stdout);
+    assert.deepEqual(token_rates, {
+      state: 'unavailable',
+      reason: 'missing',
+      basis: 'per_turn',
+      window_seconds: 60,
+      observed_at: token_rates.observed_at,
+      truncated: false,
+      invalid_records: 0,
+      models: [],
+    });
+    assert.equal(
+      new Date(token_rates.observed_at).toISOString(),
+      token_rates.observed_at,
+    );
+    assert.deepEqual(summary, {
       experiment_run_id: 'example',
       event_log: { state: 'unavailable', reason: 'missing' },
       counts: { pending: 1, running: 0, completed: 0, errored: 0 },
@@ -82,10 +98,7 @@ describe('forge status', () => {
       last_event_at: null,
       liveness: { state: 'no_lock', pid: null },
     });
-    assert.equal(
-      json.stdout,
-      '{"counts":{"completed":0,"errored":0,"pending":1,"running":0},"event_log":{"reason":"missing","state":"unavailable"},"experiment_run_id":"example","failures":[],"in_flight":[],"last_event_at":null,"liveness":{"pid":null,"state":"no_lock"}}\n',
-    );
+    assert.equal(json.stdout, serializeCanonicalJson(JSON.parse(json.stdout)));
     assert.deepEqual(await fs.readFile(file), before);
     assert.deepEqual(await fs.readdir(run), ['experiment.json']);
     await fs.writeFile(
@@ -104,6 +117,12 @@ describe('forge status', () => {
       reason: 'invalid_record',
     });
     assert.equal(JSON.parse(degraded.stdout).counts.pending, 1);
+    assert.equal(JSON.parse(degraded.stdout).token_rates.state, 'unavailable');
+    assert.equal(
+      JSON.parse(degraded.stdout).token_rates.reason,
+      'invalid_record',
+    );
+    assert.deepEqual(JSON.parse(degraded.stdout).token_rates.models, []);
     const text = await invoke(['status', '--experiment-run', run]);
     assert.equal(text.code, 0, text.stderr);
     assert.match(text.stdout, /Last event: unavailable \(invalid_record\)/);

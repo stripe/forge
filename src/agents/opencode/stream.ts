@@ -1,5 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import { agentTokenUsageSchema, sumAgentTokenUsage } from '../../agentUsage.ts';
+import type {
+  AgentTokenUsage,
+  AgentToolCall,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 import {
   identifier,
   MAX_NATIVE_BYTES,
@@ -29,6 +34,7 @@ export function parseOpenCodeStream(
     let messageHasTools = false;
     let completed = false;
     let cost = 0;
+    const usages: (AgentTokenUsage | undefined)[] = [];
     const parts = new Map<string, NativeRecord>();
     const calls = new Map<string, AgentToolCall>();
     const messages = new Set<string>();
@@ -102,6 +108,31 @@ export function parseOpenCodeStream(
         if (event.type === 'step_finish' && part.type === 'step-finish') {
           completed = terminal(part.reason) && !stepHasTools;
           cost += nonnegative(part.cost);
+          if (part.tokens === undefined) usages.push(undefined);
+          else {
+            const tokens = record(part.tokens);
+            const cache =
+              tokens.cache === undefined ? {} : record(tokens.cache);
+            const write =
+              cache.write === undefined ? 0 : nonnegative(cache.write);
+            if (!Number.isSafeInteger(write)) throw new Error();
+            const usage = agentTokenUsageSchema.parse({
+              input_tokens: tokens.input ?? null,
+              cached_input_tokens: cache.read ?? null,
+              output_tokens: tokens.output ?? null,
+              reasoning_tokens: tokens.reasoning ?? null,
+            });
+            usages.push(
+              agentTokenUsageSchema.parse({
+                ...usage,
+                input_tokens:
+                  usage.input_tokens === null ||
+                  usage.cached_input_tokens === null
+                    ? null
+                    : usage.input_tokens + usage.cached_input_tokens + write,
+              }),
+            );
+          }
           activeMessage = undefined;
           finishedMessage = message;
         } else if (event.type === 'text' && part.type === 'text') {
@@ -119,11 +150,13 @@ export function parseOpenCodeStream(
     }
     if (!completed || id === undefined || !Number.isFinite(cost))
       throw new Error();
+    const usage = sumAgentTokenUsage(usages);
     return {
       text: [...texts.values()].flat().join('\n\n'),
       sessionId: id,
       toolCalls: [...calls.values()],
       costUsd: cost,
+      ...(usage === undefined ? {} : { usage }),
     };
   } catch {
     throw new OpenCodeStreamError();

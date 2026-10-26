@@ -4,7 +4,10 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
-import { appendExperimentRunEvent } from './experimentEvents.ts';
+import {
+  appendExperimentRunEvent,
+  parseExperimentRunEvent,
+} from './experimentEvents.ts';
 import {
   type ExperimentRunAttempt,
   type ExperimentRunCheckpoint,
@@ -15,6 +18,7 @@ import { EXPERIMENT_OBSERVATION_LIMITS } from './experimentObservation.ts';
 import {
   readExperimentRunStatus,
   summarizeExperimentRun,
+  summarizeTokenRates,
 } from './experimentStatus.ts';
 import { createTestResolvedRunPlan } from './testing/index.ts';
 import { FORGE_BUILD_IDENTITY } from './version.ts';
@@ -325,6 +329,13 @@ describe('experiment status summary', () => {
       reason: 'identity_mismatch',
     });
     assert.equal(status.last_event_at, null);
+    assert.equal(status.token_rates!.state, 'unavailable');
+    assert.equal(
+      status.token_rates!.reason,
+      status.event_log.state === 'unavailable'
+        ? status.event_log.reason
+        : undefined,
+    );
     assert.equal(status.counts.pending, 1);
   });
 
@@ -381,6 +392,9 @@ describe('experiment status summary', () => {
       await fsPromises.writeFile(path.join(root, 'events.jsonl'), body);
       const status = await readExperimentRunStatus(root);
       assert.deepEqual(status.event_log, { state: 'unavailable', reason });
+      assert.equal(status.token_rates!.state, 'unavailable');
+      assert.equal(status.token_rates!.reason, reason);
+      assert.deepEqual(status.token_rates!.models, []);
       assert.equal(status.last_event_at, null);
       assert.equal(status.counts.pending, 1);
       assert.deepEqual(status.liveness, noLock);
@@ -407,6 +421,13 @@ describe('experiment status summary', () => {
       reason: 'io_error',
     });
     assert.equal(status.last_event_at, null);
+    assert.equal(status.token_rates!.state, 'unavailable');
+    assert.equal(
+      status.token_rates!.reason,
+      status.event_log.state === 'unavailable'
+        ? status.event_log.reason
+        : undefined,
+    );
     assert.equal(status.counts.pending, 1);
     assert.deepEqual(status.liveness, { state: 'alive', pid: process.pid });
     assert.ok(!JSON.stringify(status).includes('private detail'));
@@ -558,12 +579,14 @@ describe('experiment status summary', () => {
       else {
         const status = await reading;
         assert.equal(status.counts.pending, 1);
-        if (name === 'events.jsonl')
+        if (name === 'events.jsonl') {
+          assert.equal(status.token_rates!.state, 'unavailable');
+          assert.equal(status.token_rates!.reason, 'io_timeout');
           assert.deepEqual(status.event_log, {
             state: 'unavailable',
             reason: 'io_timeout',
           });
-        else
+        } else
           assert.deepEqual(status.liveness, {
             state: 'unknown',
             pid: null,
@@ -572,4 +595,147 @@ describe('experiment status summary', () => {
       }
     },
   );
+});
+
+it('uses reported turn deltas in the trailing minute, with no cache or reasoning double count', () => {
+  const saved = checkpoint([
+    [{ run_id: 'first', state: 'running' }],
+    [{ run_id: 'failed', state: 'errored', error_code: 'agent_failed' }],
+  ]);
+  const now = new Date('2026-01-02T03:04:00Z');
+  const usage = {
+    input_tokens: 100,
+    cached_input_tokens: 80,
+    output_tokens: 20,
+    reasoning_tokens: 10,
+  };
+  const event = (run_id: string, index: number, seconds: number, turn = 1) =>
+    parseExperimentRunEvent({
+      state: 'agent_usage',
+      experiment_run_id: 'example',
+      run_id,
+      selection: saved.entries[index]!.selection,
+      turn,
+      usage,
+      observed_at: new Date(now.getTime() - seconds * 1000).toISOString(),
+    });
+  const recent = event('first', 0, 30);
+  const rates = summarizeTokenRates(
+    saved,
+    [
+      recent,
+      recent,
+      event('failed', 1, 10),
+      event('first', 0, 60, 2),
+      event('first', 0, -1, 3),
+      event('unrelated', 0, 5),
+    ],
+    now,
+  );
+  assert.equal(rates.basis, 'per_turn');
+  assert.equal(rates.window_seconds, 60);
+  assert.equal(rates.models[0]!.tokens_per_minute, 240);
+  assert.equal(rates.models[0]!.turns, 2);
+  assert.equal(rates.models[0]!.turns_with_total, 2);
+  assert.deepEqual(summarizeTokenRates(saved, [], now).models, []);
+  const stale = summarizeTokenRates(saved, [event('first', 0, 61)], now);
+  assert.equal(stale.models[0]!.tokens_per_minute, 0);
+  const unknown = { ...recent, usage: { ...usage, output_tokens: null } };
+  assert.equal(
+    summarizeTokenRates(saved, [unknown], now).models[0]!.tokens_per_minute,
+    null,
+  );
+  const mismatched = summarizeTokenRates(
+    saved,
+    [{ ...recent, experiment_run_id: 'another' }],
+    now,
+  );
+  assert.equal(mismatched.state, 'unavailable');
+  assert.equal(mismatched.reason, 'identity_mismatch');
+  assert.deepEqual(mismatched.models, []);
+  assert.equal(summarizeTokenRates(saved, [], now).reason, 'no_usage');
+  assert.equal(
+    summarizeTokenRates(saved, [unknown], now).models[0]!.reason,
+    'missing_counters',
+  );
+});
+
+it.each([
+  'invalid_record',
+  'identity_mismatch',
+  'interrupted',
+  'recording_gap',
+  'oversized_record',
+] as const)(
+  'keeps checkpoint and last event observations when recent usage is unavailable (%s)',
+  async (reason) => {
+    const { root, file } = await fixture();
+    const saved = checkpoint([[{ run_id: 'usage-run', state: 'running' }]]);
+    await fsPromises.writeFile(file, JSON.stringify(saved));
+    const event = {
+      state: 'agent_usage',
+      experiment_run_id: 'example',
+      run_id: 'usage-run',
+      selection: saved.entries[0]!.selection,
+      turn: 1,
+      observed_at: '2026-01-02T03:04:00Z',
+      usage: {
+        input_tokens: 10,
+        cached_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_tokens: null,
+      },
+    };
+    const gap = {
+      state: 'unavailable',
+      reason: 'buffer_full',
+      affected_events: 1,
+    };
+    let body = `${JSON.stringify(
+      reason === 'recording_gap' ? { ...event, recording_gap: gap } : event,
+    )}\n`;
+    if (reason === 'invalid_record') body = `{"state":\n${body}`;
+    if (reason === 'oversized_record')
+      body = `${'x'.repeat(64 * 1024 + 1)}\n${body}`;
+    if (reason === 'identity_mismatch')
+      body = `${JSON.stringify({
+        state: 'started',
+        location: root,
+        experiment_run_id: 'another',
+        observed_at: event.observed_at,
+      })}\n${body}`;
+    if (reason === 'interrupted') body += '{"unfinished":';
+    const log = path.join(root, 'events.jsonl');
+    await fsPromises.writeFile(log, body);
+    const status = await readExperimentRunStatus(
+      root,
+      () => new Date(event.observed_at),
+    );
+    assert.equal(status.counts.running, 1);
+    assert.equal(status.last_event_at, event.observed_at);
+    assert.equal(status.event_log.state, 'available');
+    assert.equal(status.token_rates!.state, 'unavailable');
+    assert.equal(status.token_rates!.reason, reason);
+    assert.deepEqual(status.token_rates!.models, []);
+    assert.equal(await fsPromises.readFile(log, 'utf8'), body);
+  },
+);
+
+it('isolates an unexpected recent-usage observation failure from the checkpoint summary', async () => {
+  const { root } = await fixture();
+  await appendExperimentRunEvent(root, { state: 'started', location: root });
+  const open = fsPromises.open;
+  let logReads = 0;
+  vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+    if (args[0] === path.join(root, 'events.jsonl') && ++logReads === 2)
+      throw new TypeError('private observation detail');
+    return open(...args);
+  });
+  syncBuiltinESMExports();
+  const status = await readExperimentRunStatus(root);
+  assert.equal(status.counts.pending, 1);
+  assert.equal(status.event_log.state, 'available');
+  assert.equal(status.token_rates!.state, 'unavailable');
+  assert.equal(status.token_rates!.reason, 'observation_error');
+  assert.ok(!JSON.stringify(status).includes('private observation detail'));
 });

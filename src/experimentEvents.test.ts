@@ -11,6 +11,7 @@ import {
   parseExperimentRunEvent,
   readExperimentRunEventStatus,
   readLastExperimentRunEvent,
+  readRecentExperimentRunEvents,
 } from './experimentEvents.ts';
 import { EXPERIMENT_OBSERVATION_LIMITS } from './experimentObservation.ts';
 
@@ -340,4 +341,46 @@ describe('experiment progress log', () => {
     );
     assert.equal(await readLastExperimentRunEvent(root), undefined);
   });
+});
+
+it('reads a bounded complete event window without consuming the unfinished tail', async () => {
+  const { root, file } = await fixture();
+  const body = `${JSON.stringify({
+    state: 'started',
+    location: 'x'.repeat(1000),
+    observed_at: now().toISOString(),
+    experiment_run_id: path.basename(root),
+  })}\n`;
+  await fs.writeFile(file, body.repeat(9000));
+  await fs.appendFile(file, '{"state":');
+  const before = (await fs.stat(file)).size;
+  const recent = await readRecentExperimentRunEvents(root);
+  assert.equal(recent.state, 'unavailable');
+  assert.equal(
+    recent.state === 'unavailable' ? recent.reason : undefined,
+    'interrupted',
+  );
+  assert.equal(recent.truncated, true);
+  assert.ok(recent.events.length > 0 && recent.events.length < 9000);
+  assert.ok(recent.events.every((event) => event.state === 'started'));
+  assert.equal((await fs.stat(file)).size, before);
+});
+
+it('keeps a recovered log usable while marking malformed historical records', async () => {
+  const { root, file } = await fixture();
+  await fs.writeFile(file, '{"state":');
+  await appendExperimentRunEvent(
+    root,
+    { state: 'resuming', location: root },
+    now,
+  );
+  const recent = await readRecentExperimentRunEvents(root);
+  assert.equal(recent.state, 'unavailable');
+  assert.equal(
+    recent.state === 'unavailable' ? recent.reason : undefined,
+    'invalid_record',
+  );
+  assert.equal(recent.invalid_records, 1);
+  assert.equal(recent.events[0]!.state, 'resumed');
+  assert.equal(recent.truncated, false);
 });

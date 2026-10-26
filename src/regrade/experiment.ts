@@ -207,11 +207,13 @@ export async function regradeExperimentRun(
       });
       continue;
     }
+    const sourceResult = (
+      await engine.verifyCompletedRun(outcome.artifact!.location)
+    ).result;
     const evaluation =
       regraded?.kind === 'regraded' || regraded?.kind === 'reused'
         ? regraded.regrade.evaluation
-        : (await engine.verifyCompletedRun(outcome.artifact!.location)).result
-            .evaluation;
+        : sourceResult.evaluation;
     runs.push({
       ...base,
       run_id: outcome.run_id,
@@ -219,6 +221,9 @@ export async function regradeExperimentRun(
       error_code: null,
       result_path: resultPath,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(sourceResult.agent.usage === undefined
+        ? {}
+        : { agent_usage: sourceResult.agent.usage }),
     });
   }
   const generatedAt = now().toISOString();

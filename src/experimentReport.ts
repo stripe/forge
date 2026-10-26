@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentTokenUsageSchema, sumAgentTokenUsage } from './agentUsage.ts';
 
 import {
   experimentRunDiagnosticSchema,
@@ -148,6 +149,7 @@ const runSchema = z
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
+    agent_usage: agentTokenUsageSchema.optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -160,6 +162,7 @@ const runSchema = z
       completed !== (run.evaluation !== null) ||
       (run.state === 'errored') !== (run.error_code !== null) ||
       (run.state !== 'errored' && run.diagnostic !== undefined) ||
+      (!completed && run.agent_usage !== undefined) ||
       (completed && run.result_path === null) ||
       (run.result_path !== null &&
         run.result_path !== `runs/${run.run_id}/result.json`)
@@ -219,6 +222,18 @@ const coordinates = z
   })
   .strict();
 const caseSchema = coordinates.merge(statisticsSchema);
+const modelUsageSchema = z
+  .object({
+    agent: coordinates.shape.agent.pick({
+      adapter: true,
+      provider: true,
+      model: true,
+    }),
+    evaluations: count,
+    evaluations_with_usage: count,
+    usage: agentTokenUsageSchema,
+  })
+  .strict();
 const reportSchema = z
   .object({
     forge: z.unknown().transform(parseForgeBuildIdentity),
@@ -226,6 +241,7 @@ const reportSchema = z
     generated_at: z.string().datetime(),
     checkpoint_sha256: digest,
     summary: statisticsSchema,
+    agent_usage_by_model: z.array(modelUsageSchema).max(100_000).optional(),
     cases: z.array(caseSchema).min(1).max(100_000),
     runs: z.array(runSchema).min(1).max(100_000),
   })
@@ -290,6 +306,12 @@ export function parseExperimentRunReport(
     throw new Error('Report contains duplicate run IDs.');
   const aggregate = aggregateRuns(report.runs);
   if (
+    report.agent_usage_by_model !== undefined &&
+    serializeCanonicalJson(report.agent_usage_by_model) !==
+      serializeCanonicalJson(aggregate.agent_usage_by_model ?? null)
+  )
+    throw new Error('Report token usage does not match its run rows.');
+  if (
     serializeCanonicalJson(report.summary) !==
       serializeCanonicalJson(aggregate.summary) ||
     serializeCanonicalJson(report.cases) !==
@@ -334,6 +356,7 @@ function assertReportBytes(body: string): void {
 
 function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
   summary: ExperimentRunReportStatisticsV1;
+  agent_usage_by_model?: z.infer<typeof modelUsageSchema>[];
   cases: ExperimentRunReportCaseV1[];
 } {
   const groups = new Map<
@@ -354,7 +377,39 @@ function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
     }
     group.runs.push(run);
   }
+  const models = new Map<
+    string,
+    {
+      agent: z.infer<typeof modelUsageSchema>['agent'];
+      runs: ExperimentRunReportRunV1[];
+    }
+  >();
+  for (const run of runs) {
+    if (run.state !== 'completed') continue;
+    const { adapter, provider, model } = run.selection.agent;
+    const agent = { adapter, provider, model };
+    const key = serializeCanonicalJson(agent);
+    const group = models.get(key) ?? { agent, runs: [] };
+    group.runs.push(run);
+    models.set(key, group);
+  }
+  const usages = [...models.values()].flatMap(({ agent, runs }) => {
+    const usage = sumAgentTokenUsage(runs.map((run) => run.agent_usage));
+    return usage === undefined
+      ? []
+      : [
+          {
+            agent,
+            evaluations: runs.length,
+            evaluations_with_usage: runs.filter(
+              (run) => run.agent_usage !== undefined,
+            ).length,
+            usage,
+          },
+        ];
+  });
   return {
+    ...(usages.length === 0 ? {} : { agent_usage_by_model: usages }),
     summary: statistics(runs),
     cases: [...groups.values()].map((group) => ({
       ...group.coordinates,

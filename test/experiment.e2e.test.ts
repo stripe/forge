@@ -14,6 +14,7 @@ import { ForgeExecutionError } from '../src/execution/errors.ts';
 import { executeEvalWithTestHooks } from '../src/execution/execute.ts';
 import { parseExperimentRunReport } from '../src/experiment.ts';
 import { parseExperimentRunEvent } from '../src/experimentEvents.ts';
+import { readExperimentRunStatus } from '../src/experimentStatus.ts';
 import { sha256Digest } from '../src/model/hashes.ts';
 import { parseExperimentConfigYaml } from '../src/model/parse.ts';
 import type { DatasetManifestV1, RunSelection } from '../src/model/types.ts';
@@ -41,6 +42,90 @@ afterEach(async () => {
 });
 
 describe('resumable CLI experiment runs', () => {
+  it('isolates throwing usage progress callbacks from eval outcomes', async () => {
+    const fixture = await createFixture({ repetitions: 1, usage: true });
+    let observed = 0;
+    const result = await fixture.run([], {
+      stderr(line) {
+        if (JSON.parse(line).state === 'agent_usage') {
+          observed += 1;
+          throw new Error('Progress unavailable');
+        }
+      },
+    });
+    assert.equal(observed, 1);
+    const events = (
+      await fs.readFile(path.join(fixture.root, 'events.jsonl'), 'utf8')
+    )
+      .trim()
+      .split('\n')
+      .map((line) => parseExperimentRunEvent(JSON.parse(line)));
+    assert.equal(
+      events.filter((event) => event.state === 'agent_usage').length,
+      1,
+    );
+    assert.equal(result.code, 0);
+    assert.equal((await readReport(fixture.root)).summary.completed, 1);
+  });
+  it('records turn usage before completion, keeps totals through resume and regrade, and shows recent rates', async () => {
+    const fixture = await createFixture({ repetitions: 2, usage: true });
+    const first = await fixture.run(['--jobs', '2']);
+    assert.equal(first.code, 0);
+    const events = (
+      await fs.readFile(path.join(fixture.root, 'events.jsonl'), 'utf8')
+    )
+      .trim()
+      .split('\n')
+      .map((line) => parseExperimentRunEvent(JSON.parse(line)));
+    assert.equal(
+      events.filter((event) => event.state === 'agent_usage').length,
+      2,
+    );
+    for (const event of events.filter(
+      (event) => event.state === 'agent_usage',
+    )) {
+      const completion = events.findIndex(
+        (item) => item.state === 'completed' && item.run_id === event.run_id,
+      );
+      assert.ok(events.indexOf(event) < completion);
+    }
+    const report = await readReport(fixture.root);
+    assert.equal(report.agent_usage_by_model![0]!.usage.input_tokens, 20);
+    assert.equal(report.agent_usage_by_model![0]!.usage.output_tokens, 8);
+    for (const entry of (await fixture.readCheckpoint()).entries) {
+      const completed = await verifyCompletedRun(
+        path.join(fixture.root, 'runs', entry.attempts[0]!.run_id),
+      );
+      assert.equal(completed.result.agent.usage!.input_tokens, 10);
+    }
+    const status = await readExperimentRunStatus(
+      fixture.root,
+      () => new Date(events.at(-1)!.observed_at),
+    );
+    assert.equal(status.token_rates!.models[0]!.tokens_per_minute, 28);
+    assert.equal((await fixture.run(['--resume', 'exp-1'])).code, 0);
+    assert.deepEqual(
+      (await readReport(fixture.root)).agent_usage_by_model,
+      report.agent_usage_by_model,
+    );
+    const regrade = await regradeExperimentRun(
+      {
+        experimentRun: fixture.root,
+        output: path.join(fixture.output, 'regrade'),
+        judge: { provider: 'scripted', model: 'judge' },
+      },
+      {
+        completionProviders: new Map(),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    assert.deepEqual(regrade.failed, []);
+    assert.deepEqual(
+      (await readReport(path.join(fixture.output, 'regrade')))
+        .agent_usage_by_model,
+      report.agent_usage_by_model,
+    );
+  });
   it('appends timestamped progress across execution and resume while artifacts verify and regrade', async () => {
     const fixture = await createFixture();
     const first = await fixture.run(['--jobs', '2']);
@@ -1657,6 +1742,7 @@ async function createFixture(
   options: {
     anotherCase?: boolean;
     repetitions?: number;
+    usage?: boolean;
     initialFiles?: Readonly<Record<string, string>>;
   } = {},
 ) {
@@ -1674,6 +1760,7 @@ async function createFixture(
   assert.ok(config.matrix.groups === undefined);
   config.matrix.repetitions = options.repetitions ?? 3;
   const initialFiles = options.initialFiles;
+  const includeUsage = options.usage;
   const dataset = path.join(temporary, 'dataset');
   await fs.cp(path.join(fixtureRoot, 'dataset'), dataset, { recursive: true });
   config.dataset.path = './dataset';
@@ -1721,6 +1808,16 @@ async function createFixture(
           text: 'Done',
           sessionId: 'experiment-run-session',
           toolCalls: [],
+          ...(includeUsage
+            ? {
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 5,
+                  output_tokens: 4,
+                  reasoning_tokens: null,
+                },
+              }
+            : {}),
         })),
       });
       const code = await runCli(

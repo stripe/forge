@@ -235,3 +235,39 @@ describe('OpenCode live stream', () => {
       assert.throws(() => parseOpenCodeStream(text), OpenCodeStreamError);
   });
 });
+
+it('sums OpenCode steps once and preserves unknown usage in a step', () => {
+  const events = openCodeEvents(turn);
+  const expected = {
+    input_tokens: 16,
+    cached_input_tokens: 6,
+    output_tokens: 4,
+    reasoning_tokens: 2,
+  };
+  assert.deepEqual(parseOpenCodeStream(encode(events)).usage, expected);
+  assert.deepEqual(
+    parseOpenCodeStream(encode(events.flatMap((event) => [event, event])))
+      .usage,
+    expected,
+  );
+  const missing = events.map((event) => structuredClone(event));
+  delete missing[3]!.part.tokens;
+  assert.deepEqual(parseOpenCodeStream(encode(missing)).usage, {
+    input_tokens: null,
+    cached_input_tokens: null,
+    output_tokens: null,
+    reasoning_tokens: null,
+  });
+  for (const tokens of [
+    { input: -1 },
+    { output: 1.5 },
+    { cache: { read: '3' } },
+  ]) {
+    const invalid = structuredClone(events);
+    invalid[3]!.part.tokens = tokens;
+    assert.throws(
+      () => parseOpenCodeStream(encode(invalid)),
+      OpenCodeStreamError,
+    );
+  }
+});

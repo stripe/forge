@@ -1,6 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type {
+  AgentTokenUsage,
+  AgentToolCall,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;
@@ -39,6 +43,7 @@ export function parseCodexStream(
   let sessionId: string | undefined;
   let started = false;
   let completed = false;
+  let usage: AgentTokenUsage | undefined;
   let lineStart = 0;
   let lineCount = 0;
   let toolCount = 0;
@@ -151,7 +156,7 @@ export function parseCodexStream(
       case 'turn.completed':
         onlyKeys(event, ['type', 'usage']);
         if (!started) invalidStream();
-        validateUsage(event.usage);
+        usage = validateUsage(event.usage);
         completed = true;
         break;
       default:
@@ -173,6 +178,7 @@ export function parseCodexStream(
       )
       .join('\n\n'),
     sessionId,
+    ...(usage === undefined ? {} : { usage }),
     toolCalls: [...items.values()].flatMap((item) =>
       item.toolCall === undefined ? [] : [item.toolCall],
     ),
@@ -318,7 +324,7 @@ function parseItem(item: JsonRecord): StreamItem {
   }
 }
 
-function validateUsage(value: unknown): void {
+function validateUsage(value: unknown): AgentTokenUsage {
   const usage = requiredRecord(value);
   onlyKeys(usage, [
     'input_tokens',
@@ -334,6 +340,13 @@ function validateUsage(value: unknown): void {
     nonnegativeInteger(usage.reasoning_output_tokens);
   if (usage.cache_write_input_tokens !== undefined)
     nonnegativeInteger(usage.cache_write_input_tokens);
+  return {
+    input_tokens: usage.input_tokens as number,
+    cached_input_tokens: usage.cached_input_tokens as number,
+    output_tokens: usage.output_tokens as number,
+    reasoning_tokens:
+      (usage.reasoning_output_tokens as number | undefined) ?? null,
+  };
 }
 
 function validateStatus(value: unknown): void {

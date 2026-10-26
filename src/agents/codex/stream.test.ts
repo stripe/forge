@@ -145,6 +145,7 @@ describe('Codex exec stream', () => {
       {
         text: 'Repo contains docs and examples.',
         sessionId: SESSION_ID,
+        usage: { ...completed.usage, reasoning_tokens: 0 },
         toolCalls: [
           {
             id: 'item_1',
@@ -189,6 +190,7 @@ describe('Codex exec stream', () => {
       {
         text: 'I will inspect the project.\n\nFinished.',
         sessionId: SESSION_ID,
+        usage: { ...completed.usage, reasoning_tokens: null },
         toolCalls: [
           {
             id: 'item_1',
@@ -237,11 +239,23 @@ describe('Codex exec stream', () => {
     assert.deepEqual(firstTurn, {
       text: 'First response.',
       sessionId: SESSION_ID,
+      usage: {
+        input_tokens: 10,
+        cached_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_tokens: 0,
+      },
       toolCalls: [],
     });
     assert.deepEqual(parseCodexStream(resumed, firstTurn.sessionId), {
       text: 'Second response.',
       sessionId: SESSION_ID,
+      usage: {
+        input_tokens: 20,
+        cached_input_tokens: 0,
+        output_tokens: 10,
+        reasoning_tokens: 0,
+      },
       toolCalls: [],
     });
     assertInvalid(resumed, OTHER_SESSION_ID);
@@ -318,6 +332,12 @@ describe('Codex exec stream', () => {
       {
         text: 'Created codex-tool.txt and checked its size.',
         sessionId: SESSION_ID,
+        usage: {
+          input_tokens: 50,
+          cached_input_tokens: 0,
+          output_tokens: 25,
+          reasoning_tokens: 0,
+        },
         toolCalls: [
           ...changes.map((change, index) => ({
             id: `item_${index + 1}`,
@@ -354,6 +374,12 @@ describe('Codex exec stream', () => {
       text: 'Done.',
       sessionId: SESSION_ID,
       toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+      usage: {
+        input_tokens: 24763,
+        cached_input_tokens: 24448,
+        output_tokens: 122,
+        reasoning_tokens: null,
+      },
     });
   });
 
@@ -375,6 +401,12 @@ describe('Codex exec stream', () => {
         text: '',
         sessionId: SESSION_ID,
         toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+        usage: {
+          input_tokens: 24763,
+          cached_input_tokens: 24448,
+          output_tokens: 122,
+          reasoning_tokens: null,
+        },
       });
     }
   });

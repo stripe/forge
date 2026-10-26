@@ -326,7 +326,9 @@ Alongside `experiment.json` and `report.json`, the experiment root holds
 `events.jsonl`. The controller sends progress to its callback immediately and
 queues each validated event for one background writer as canonical JSON with
 `experiment_run_id` and an `observed_at` UTC observation time. The states are `started`, `resumed`, `running`, `completed`, `skipped`,
-and `errored`; selection events retain `selection` and `run_id`, and errors
+and `errored`, plus `agent_usage` after each completed agent turn with counters.
+Usage events carry a one-based `turn` and per-invocation `usage`; selection events
+retain `selection` and `run_id`, and errors
 retain the same stable code and optional credential-redacted diagnostic as
 stderr. Resume appends a `resumed` marker after inspecting prior attempts
 and before scheduling pending work.
@@ -370,13 +372,33 @@ completed. Group keys are error code and optional diagnostic phase, reason,
 and message; absent diagnostics form their own group. In-flight groups use
 adapter, provider, and model and list the latest `running` eval IDs.
 The JSON summary contains `experiment_run_id`, `counts`, `failures`,
-`in_flight`, `last_event_at` (null without an event), `event_log`, and
+`in_flight`, `last_event_at` (null without an event), `event_log`, `token_rates`, and
 `liveness`. `event_log` preserves the tail reader's bounded unavailability
 reason or reports `available` with a `complete` or `interrupted` tail. It never
 copies the raw event payload. Liveness records `state` (`alive`, `stale`,
 `no_lock`, or `unknown`) and `pid` (null without a known owner). Unknown
 liveness adds a fixed reason: `invalid_lock`, `io_error`, `io_timeout`,
 `probe_error`, or `observation_error`.
+`token_rates` uses a trailing 60-second window at `observed_at`, with basis
+`per_turn` and a typed availability state. Its model groups sum input plus output
+for exact checkpoint attempts and selections, including errored attempts;
+duplicate run/turn records count once. Future and expired records do not
+contribute. Each group records `turns` and `turns_with_total`; an unknown input
+or output makes its rate null with reason `missing_counters`. An unsafe sum
+makes it null with reason `overflow`. No usage events means unavailable with
+reason `no_usage`, while expired usage reports give zero.
+
+The recent-rate reader shares the event reader's fixed unavailability reasons
+and 250 ms wait budget. It allocates from the file size, up to an 8 MiB tail.
+Missing, invalid, unsafe, unreadable, timed-out, or identity-mismatched logs make
+rates unavailable. Interrupted tails, an omitted prefix (`truncated`), and saved
+`recording_gap` markers also make rates unavailable; partial totals are not
+presented as a current rate. It retains `truncated` and `invalid_records`
+metadata for coverage. Unexpected recent-reader failures degrade to bounded
+`observation_error`. Undetectable recording gaps can still undercount. Completed
+eval totals are never treated as recent turn deltas. Usage arrives after
+`AgentSession.send`, not during a CLI invocation.
+
 Bounded checkpoint reads use one open file handle, so an atomic replacement
 does not mix versions. Buffers use the observed file size plus one byte;
 growth during the read is rejected instead of parsing a truncated prefix.
@@ -511,7 +533,7 @@ contains:
 | `CredentialResolver` | Resolve opaque references | Secret lookup only for explicitly requested references |
 | `RunInputProvider` | Read dataset payloads | Read-only access below one dataset root |
 | `RunArtifactStore` | Stage and atomically commit results | One run namespace in the result store |
-| `RunObserver` | Receive lifecycle events | No control; failures are ignored |
+| `RunObserver` | Receive lifecycle and agent usage events | No control; failures are ignored |
 | `RunArtifactContributor` list | Add supplemental files | Only below `extensions/<contributor-id>/` |
 
 The composition does not define setup semantics. Conversely, the engine's
@@ -699,9 +721,31 @@ immutable for interaction.
 
 Forge opens one persistent `AgentSession`. Every completed turn must report a
 safe, stable session ID; changing identity between turns is a contract
-violation. Agent text, tool calls, tool inputs, optional cost, and session
-identity are snapshotted at the boundary so later adapter mutation cannot
+violation. Agent text, tool calls, tool inputs, optional cost and usage, and
+session identity are snapshotted at the boundary so later adapter mutation cannot
 change the driver ledger.
+
+`AgentTurn.usage` optionally supplies `AgentTokenUsage`: strict nonnegative safe
+integer or null counters named `input_tokens`, `cached_input_tokens`,
+`output_tokens`, and `reasoning_tokens`. Input includes cache reads and writes;
+reasoning is a subset of output. Codex supplies terminal invocation usage;
+Claude Code supplies result usage with cache reads and creation added to input;
+OpenCode sums unique step-finish usage with cache reads and writes added to input.
+Unsupported counters remain null. Execution clones and freezes counters, sums
+them across completed turns into optional `result.agent.usage`, and emits an
+`agent_usage` observer event with a one-based turn index. An absent turn counter
+makes that total null; wholly absent usage omits the result field. Overflowing
+sums become null. `ExecuteEvalInput.observer` adds a per-run observer alongside
+the composition observer; experiments use it without replacing host compositions.
+Observer failures cannot change interaction outcomes. These
+observations do not enter plans, digests, scoring, or transcript selection.
+
+Reports retain optional `agent_usage` in completed run rows and validate optional
+`agent_usage_by_model` sums against those rows. Groups span cases and treatments
+by adapter, provider, and model, with eval counts and counts with usage; missing
+counters propagate null. Only latest completed effective outcomes contribute.
+Regrade reports keep source agent usage. Results and reports without usage
+remain valid. Host completion usage stays in `completion_calls`.
 
 One-shot and multi-turn interaction are described separately below.
 

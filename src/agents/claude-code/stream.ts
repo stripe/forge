@@ -1,4 +1,9 @@
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import { agentTokenUsageSchema } from '../../agentUsage.ts';
+import type {
+  AgentTokenUsage,
+  AgentToolCall,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 
 const MAX_STREAM_LINES = 100_000;
 const MAX_STREAM_LINE_BYTES = 1024 * 1024;
@@ -9,6 +14,7 @@ interface ClaudeStreamEvent {
   result?: string;
   session_id?: string;
   total_cost_usd?: number;
+  usage?: Record<string, unknown>;
   message?: {
     content?: Array<{
       type?: string;
@@ -27,6 +33,7 @@ export function parseClaudeStream(stdout: string): AgentTurn {
   let lastAssistantText = '';
   let sessionId: string | undefined;
   let costUsd: number | undefined;
+  let usage: AgentTokenUsage | undefined;
   let lineStart = 0;
   let lineCount = 0;
 
@@ -64,6 +71,39 @@ export function parseClaudeStream(stdout: string): AgentTurn {
         }
       }
     } else if (event.type === 'result') {
+      if (event.usage !== undefined) {
+        const native = event.usage;
+        if (
+          native === null ||
+          typeof native !== 'object' ||
+          Array.isArray(native)
+        )
+          throw new ClaudeStreamError('Claude returned invalid token usage.');
+        const parsed = agentTokenUsageSchema.safeParse({
+          input_tokens: native.input_tokens ?? null,
+          cached_input_tokens: native.cache_read_input_tokens ?? null,
+          output_tokens: native.output_tokens ?? null,
+          reasoning_tokens: null,
+        });
+        const write = native.cache_creation_input_tokens ?? 0;
+        if (
+          !parsed.success ||
+          typeof write !== 'number' ||
+          !Number.isSafeInteger(write) ||
+          write < 0
+        )
+          throw new ClaudeStreamError('Claude returned invalid token usage.');
+        usage = parsed.data;
+        if (usage.input_tokens !== null && usage.cached_input_tokens !== null) {
+          usage = {
+            ...usage,
+            input_tokens:
+              usage.input_tokens + usage.cached_input_tokens + write,
+          };
+          if (!agentTokenUsageSchema.safeParse(usage).success)
+            throw new ClaudeStreamError('Claude returned invalid token usage.');
+        } else usage = { ...usage, input_tokens: null };
+      }
       if (typeof event.result === 'string') resultText = event.result;
       if (typeof event.session_id === 'string') sessionId = event.session_id;
       if (
@@ -86,6 +126,7 @@ export function parseClaudeStream(stdout: string): AgentTurn {
     sessionId,
     toolCalls,
     ...(costUsd === undefined ? {} : { costUsd }),
+    ...(usage === undefined ? {} : { usage }),
   };
 }
 
