@@ -370,13 +370,26 @@ completed. Group keys are error code and optional diagnostic phase, reason,
 and message; absent diagnostics form their own group. In-flight groups use
 adapter, provider, and model and list the latest `running` eval IDs.
 The JSON summary contains `experiment_run_id`, `counts`, `failures`,
-`in_flight`, `last_event_at` (null without an event), and `liveness` with
-`state` (`alive`, `stale`, or `no_lock`) and `pid` (null without an owner).
+`in_flight`, `last_event_at` (null without an event), `event_log`, and
+`liveness`. `event_log` preserves the tail reader's bounded unavailability
+reason or reports `available` with a `complete` or `interrupted` tail. It never
+copies the raw event payload. Liveness records `state` (`alive`, `stale`,
+`no_lock`, or `unknown`) and `pid` (null without a known owner). Unknown
+liveness adds a fixed reason: `invalid_lock`, `io_error`, `io_timeout`,
+`probe_error`, or `observation_error`.
 Bounded checkpoint reads use one open file handle, so an atomic replacement
-does not mix versions. Other files are separate observations; no consistent
+does not mix versions. Buffers use the observed file size plus one byte;
+growth during the read is rejected instead of parsing a truncated prefix.
+Each file observation uses the shared 250 ms read budget. Timeout stops the
+command waiting and prevents new reads once an issued operation settles;
+already-issued filesystem calls can settle later. Other files are separate
+observations; no consistent
 cross-file snapshot or artifact verification is implied. Empty lock directories
-are stale, a disappearing owner is reported as no lock, and malformed lock
-owners fail inspection. PID probes use signal zero on this host; permission
+are stale and a disappearing owner is reported as no lock. Lock enumeration
+reads at most two entries. Malformed or unreadable locks report unknown;
+missing, torn, invalid, newer-format, or mismatched event logs report their
+availability without failing the checkpoint summary. Only an unreadable or
+invalid checkpoint or a checkpoint/directory identity mismatch fails status. PID probes use signal zero on this host; permission
 denied still indicates a live process. Locks record no host or process start
 identity, so copied folders and PID reuse can mislead liveness. See the README's
 [status workflow](../README.md#results-and-scores) for usage and exit codes.

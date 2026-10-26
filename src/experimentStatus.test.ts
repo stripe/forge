@@ -11,6 +11,7 @@ import {
   MAX_EXPERIMENT_RUN_BYTES,
   parseExperimentRunCheckpoint,
 } from './experimentModel.ts';
+import { EXPERIMENT_OBSERVATION_LIMITS } from './experimentObservation.ts';
 import {
   readExperimentRunStatus,
   summarizeExperimentRun,
@@ -21,6 +22,7 @@ import { FORGE_BUILD_IDENTITY } from './version.ts';
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   syncBuiltinESMExports();
   await Promise.all(
     roots
@@ -115,7 +117,11 @@ describe('experiment status summary', () => {
     saved.entries[10]!.selection.agent.provider = 'second-provider';
     saved.entries[11]!.selection.agent.adapter = 'second-adapter';
     const before = structuredClone(saved);
-    const summary = summarizeExperimentRun(saved, null, noLock);
+    const summary = summarizeExperimentRun(
+      saved,
+      { state: 'unavailable', reason: 'missing' },
+      noLock,
+    );
     assert.deepEqual(summary.counts, {
       pending: 1,
       running: 5,
@@ -161,6 +167,10 @@ describe('experiment status summary', () => {
     ]);
     assert.deepEqual(saved, before);
     assert.equal(summary.last_event_at, null);
+    assert.deepEqual(summary.event_log, {
+      state: 'unavailable',
+      reason: 'missing',
+    });
     assert.deepEqual(summary.liveness, noLock);
   });
 
@@ -179,6 +189,10 @@ describe('experiment status summary', () => {
       { error_code: 'execution_error', count: 1 },
     ]);
     assert.equal(summary.last_event_at, null);
+    assert.deepEqual(summary.event_log, {
+      state: 'unavailable',
+      reason: 'missing',
+    });
     assert.deepEqual(summary.liveness, noLock);
   });
 
@@ -213,6 +227,10 @@ describe('experiment status summary', () => {
     const summary = await readExperimentRunStatus(root);
     assert.deepEqual(summary.liveness, { state: 'alive', pid: process.pid });
     assert.equal(summary.last_event_at, '2026-01-02T03:04:05.678Z');
+    assert.deepEqual(summary.event_log, {
+      state: 'available',
+      tail: 'interrupted',
+    });
     assert.deepEqual(await snapshot(), before);
   });
 
@@ -301,10 +319,16 @@ describe('experiment status summary', () => {
         observed_at: '2026-01-02T03:04:05.678Z',
       })}\n`,
     );
-    await assert.rejects(readExperimentRunStatus(root), /another run/);
+    const status = await readExperimentRunStatus(root);
+    assert.deepEqual(status.event_log, {
+      state: 'unavailable',
+      reason: 'identity_mismatch',
+    });
+    assert.equal(status.last_event_at, null);
+    assert.equal(status.counts.pending, 1);
   });
 
-  it('rejects symlinks, oversized checkpoints and malformed lock owners', async () => {
+  it('rejects unsafe checkpoints but reports malformed lock owners as unknown', async () => {
     const { root, file, lock } = await fixture();
     const target = path.join(root, 'target');
     await fsPromises.rename(file, target);
@@ -315,19 +339,237 @@ describe('experiment status summary', () => {
     await fsPromises.truncate(file, MAX_EXPERIMENT_RUN_BYTES + 1);
     await assert.rejects(
       readExperimentRunStatus(root),
-      /Invalid experiment status file/,
+      /Cannot read a compatible Forge experiment.json/,
     );
     await fsPromises.rename(target, file);
     await lockOwner(lock, -1);
-    await assert.rejects(readExperimentRunStatus(root));
+    assert.deepEqual((await readExperimentRunStatus(root)).liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'invalid_lock',
+    });
     await fsPromises.unlink(path.join(lock, ownerName));
     await fsPromises.symlink(file, path.join(lock, ownerName));
-    await assert.rejects(readExperimentRunStatus(root));
+    assert.deepEqual((await readExperimentRunStatus(root)).liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'io_error',
+    });
     await fsPromises.unlink(path.join(lock, ownerName));
     await fsPromises.writeFile(path.join(lock, 'unexpected.json'), '{}');
-    await assert.rejects(
-      readExperimentRunStatus(root),
-      /Invalid experiment run lock owner/,
+    assert.deepEqual((await readExperimentRunStatus(root)).liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'invalid_lock',
+    });
+  });
+  it.each([
+    ['{"unfinished":', 'interrupted'],
+    ['not json\n', 'interrupted'],
+    [
+      `${JSON.stringify({
+        state: 'future_state',
+        observed_at: '2026-01-02T03:04:05.678Z',
+        experiment_run_id: 'example',
+      })}\n`,
+      'invalid_record',
+    ],
+  ] as const)(
+    'keeps counts when the event log is unavailable (%s)',
+    async (body, reason) => {
+      const { root } = await fixture();
+      await fsPromises.writeFile(path.join(root, 'events.jsonl'), body);
+      const status = await readExperimentRunStatus(root);
+      assert.deepEqual(status.event_log, { state: 'unavailable', reason });
+      assert.equal(status.last_event_at, null);
+      assert.equal(status.counts.pending, 1);
+      assert.deepEqual(status.liveness, noLock);
+      assert.equal(
+        await fsPromises.readFile(path.join(root, 'events.jsonl'), 'utf8'),
+        body,
+      );
+    },
+  );
+
+  it('keeps counts and liveness when the event log cannot be opened', async () => {
+    const { root, lock } = await fixture();
+    await lockOwner(lock, process.pid);
+    const open = fsPromises.open;
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      if (args[0] === path.join(root, 'events.jsonl'))
+        throw Object.assign(new Error('private detail'), { code: 'EACCES' });
+      return open(...args);
+    });
+    syncBuiltinESMExports();
+    const status = await readExperimentRunStatus(root);
+    assert.deepEqual(status.event_log, {
+      state: 'unavailable',
+      reason: 'io_error',
+    });
+    assert.equal(status.last_event_at, null);
+    assert.equal(status.counts.pending, 1);
+    assert.deepEqual(status.liveness, { state: 'alive', pid: process.pid });
+    assert.ok(!JSON.stringify(status).includes('private detail'));
+  });
+
+  it('rejects out-of-range owner PIDs before probing a process', async () => {
+    const { root, lock } = await fixture();
+    await lockOwner(lock, 2_147_483_648);
+    const probe = vi.spyOn(process, 'kill');
+    assert.deepEqual((await readExperimentRunStatus(root)).liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'invalid_lock',
+    });
+    assert.equal(probe.mock.calls.length, 0);
+  });
+
+  it('bounds lock directory enumeration and rejects multiple owners as unknown', async () => {
+    const { root, lock } = await fixture();
+    await lockOwner(lock, process.pid);
+    await fsPromises.writeFile(path.join(lock, 'extra-a'), '{}');
+    await fsPromises.writeFile(path.join(lock, 'extra-b'), '{}');
+    const opendir = fsPromises.opendir;
+    let reads = 0;
+    vi.spyOn(fsPromises, 'opendir').mockImplementation(async (...args) => {
+      assert.deepEqual(args[1], { bufferSize: 2 });
+      const directory = await opendir(...args);
+      const read = directory.read.bind(directory);
+      vi.spyOn(directory, 'read').mockImplementation(async () => {
+        reads += 1;
+        return read();
+      });
+      return directory;
+    });
+    syncBuiltinESMExports();
+    const status = await readExperimentRunStatus(root);
+    assert.deepEqual(status.liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'invalid_lock',
+    });
+    assert.equal(reads, 2);
+  });
+
+  it('keeps counts when lock access fails without leaking the error', async () => {
+    const { root, lock } = await fixture();
+    const lstat = fsPromises.lstat;
+    vi.spyOn(fsPromises, 'lstat').mockImplementation(async (...args) => {
+      if (args[0] === lock)
+        throw Object.assign(new Error('private lock detail'), {
+          code: 'EACCES',
+        });
+      return lstat(...args);
+    });
+    syncBuiltinESMExports();
+    const status = await readExperimentRunStatus(root);
+    assert.deepEqual(status.liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'io_error',
+    });
+    assert.equal(status.counts.pending, 1);
+    assert.ok(!JSON.stringify(status).includes('private lock detail'));
+  });
+
+  it('allocates checkpoint and owner reads from their file sizes', async () => {
+    const { root, file, lock } = await fixture();
+    await lockOwner(lock, process.pid);
+    const checkpointBytes = (await fsPromises.stat(file)).size;
+    const ownerBytes = (await fsPromises.stat(path.join(lock, ownerName))).size;
+    const allocations = vi.spyOn(Buffer, 'alloc');
+    await readExperimentRunStatus(root);
+    assert.deepEqual(
+      allocations.mock.calls.map(([size]) => size),
+      [checkpointBytes + 1, ownerBytes + 1],
     );
   });
+
+  it('rejects a checkpoint that grows after stat instead of parsing a truncated prefix', async () => {
+    const { root, file } = await fixture();
+    const open = fsPromises.open;
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      if (args[0] === file) {
+        const stat = handle.stat.bind(handle);
+        vi.spyOn(handle, 'stat').mockImplementation(async () => {
+          const before = await stat();
+          await fsPromises.appendFile(file, ' \n');
+          return before;
+        });
+      }
+      return handle;
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(
+      readExperimentRunStatus(root),
+      /Cannot read a compatible/,
+    );
+  });
+
+  it('reports a failed PID probe as unknown', async () => {
+    const { root, lock } = await fixture();
+    await lockOwner(lock, process.pid);
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw new Error('private probe detail');
+    });
+    const status = await readExperimentRunStatus(root);
+    assert.deepEqual(status.liveness, {
+      state: 'unknown',
+      pid: null,
+      reason: 'probe_error',
+    });
+    assert.equal(status.counts.pending, 1);
+  });
+
+  it.each(['events.jsonl', '.experiment.lock', 'experiment.json'])(
+    'bounds stalled %s reads',
+    async (name) => {
+      const { root } = await fixture();
+      vi.useFakeTimers();
+      let entered!: () => void;
+      const reached = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const stalled = () => {
+        entered();
+        return new Promise<never>(() => {});
+      };
+      if (name === '.experiment.lock') {
+        const lstat = fsPromises.lstat;
+        vi.spyOn(fsPromises, 'lstat').mockImplementation((...args) =>
+          args[0] === path.join(root, name) ? stalled() : lstat(...args),
+        );
+      } else {
+        const open = fsPromises.open;
+        vi.spyOn(fsPromises, 'open').mockImplementation((...args) =>
+          args[0] === path.join(root, name) ? stalled() : open(...args),
+        );
+      }
+      syncBuiltinESMExports();
+      const reading = readExperimentRunStatus(root);
+      const checked =
+        name === 'experiment.json'
+          ? assert.rejects(reading, /checkpoint read timed out/)
+          : reading;
+      await reached;
+      await vi.advanceTimersByTimeAsync(EXPERIMENT_OBSERVATION_LIMITS.readMs);
+      if (name === 'experiment.json') await checked;
+      else {
+        const status = await reading;
+        assert.equal(status.counts.pending, 1);
+        if (name === 'events.jsonl')
+          assert.deepEqual(status.event_log, {
+            state: 'unavailable',
+            reason: 'io_timeout',
+          });
+        else
+          assert.deepEqual(status.liveness, {
+            state: 'unknown',
+            pid: null,
+            reason: 'io_timeout',
+          });
+      }
+    },
+  );
 });

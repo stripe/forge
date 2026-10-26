@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { z } from 'zod';
 import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
@@ -9,7 +8,10 @@ import type { ExecuteEvalInput } from './execution/execute.ts';
 import type { ExperimentLogGap } from './experimentEvents.ts';
 import {
   type ExperimentRunAttempt as Attempt,
+  EXPERIMENT_LOCK_OWNER_NAME,
   type ExperimentRunCheckpoint,
+  experimentRunLockOwnerSchema,
+  MAX_EXPERIMENT_LOCK_OWNER_BYTES,
   MAX_EXPERIMENT_RUN_BYTES,
   parseExperimentRunCheckpoint,
   experimentRunIdSchema as runIdSchema,
@@ -819,7 +821,7 @@ async function reclaimExperimentRunLock(lock: string): Promise<void> {
     return;
   }
   const ownerName = entries[0]!;
-  if (entries.length !== 1 || !/^owner-[0-9a-f-]{36}\.json$/.test(ownerName)) {
+  if (entries.length !== 1 || !EXPERIMENT_LOCK_OWNER_NAME.test(ownerName)) {
     throw new Error('Invalid experiment run lock owner.');
   }
   const ownerFile = path.join(lock, ownerName);
@@ -827,14 +829,13 @@ async function reclaimExperimentRunLock(lock: string): Promise<void> {
   if (
     !ownerStat.isFile() ||
     ownerStat.isSymbolicLink() ||
-    ownerStat.size > 128
+    ownerStat.size > MAX_EXPERIMENT_LOCK_OWNER_BYTES
   ) {
     throw new Error('Invalid experiment run lock owner.');
   }
-  const owner = z
-    .object({ pid: z.number().int().positive() })
-    .strict()
-    .parse(JSON.parse(await fs.readFile(ownerFile, 'utf8')));
+  const owner = experimentRunLockOwnerSchema.parse(
+    JSON.parse(await fs.readFile(ownerFile, 'utf8')),
+  );
   try {
     process.kill(owner.pid, 0);
   } catch (error) {

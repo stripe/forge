@@ -486,18 +486,23 @@ Status counts selections by their latest checkpoint state (`pending`, `running`,
 `completed`, or `errored`). It groups failures across all attempts by error code
 and, when present, diagnostic phase, reason, and message. In-flight eval IDs
 are grouped by agent adapter, provider, and model. The last-event time comes
-from the last complete `events.jsonl` record; old folders without a log show
-it as unavailable.
+from the last readable `events.jsonl` record. `event_log` reports whether it
+is available, has an interrupted tail, or is unavailable with a fixed reason.
+Missing, torn, unreadable, newer-format, or mismatched logs do not hide the
+checkpoint summary; an unavailable event has a null `last_event_at`.
 
 Liveness checks the `.experiment.lock` owner PID on this host: alive, stale,
-or no lock. Run status on the host that owns the run. A live PID does not prove
+or no lock. An unreadable or invalid lock reports `unknown` with a fixed
+reason. Run status on the host that owns the run. A live PID does not prove
 progress, and PID reuse can make a stale lock appear alive. Status takes no
 lock and writes nothing. Its file reads are separate observations, so they can
 briefly disagree while work advances; a `running` checkpoint can remain after
 a process dies. Status does not verify completed eval artifacts or scores.
 `--json` prints the same summary as canonical JSON. Exit code 0 means it read
-the status, even when failures or a stale lock are present; unreadable or
-invalid files return 1, and invalid arguments return 2.
+the checkpoint, even when observations are unavailable. An unreadable, invalid,
+or identity-mismatched checkpoint returns 1; invalid arguments return 2.
+File observations have bounded waits; a timed-out checkpoint read returns 1,
+while an event or lock timeout leaves that observation unavailable or unknown.
 
 For the first experiment, print its evaluation:
 

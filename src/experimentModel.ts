@@ -8,6 +8,11 @@ import {
 } from './version.ts';
 
 export const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
+export const MAX_EXPERIMENT_LOCK_OWNER_BYTES = 128;
+export const EXPERIMENT_LOCK_OWNER_NAME = /^owner-[0-9a-f-]{36}\.json$/;
+export const experimentRunLockOwnerSchema = z
+  .object({ pid: z.number().int().positive().max(2_147_483_647) })
+  .strict();
 
 export const experimentRunIdSchema = z
   .string()

@@ -68,13 +68,14 @@ describe('forge status', () => {
     assert.equal(result.stderr, '');
     assert.equal(
       result.stdout,
-      'Experiment run: example\nLiveness: no lock\nLast event: unavailable\nSelections: pending=1, running=0, completed=0, errored=0\nIn flight by agent model (checkpoint):\n  none\nFailures (all attempts):\n  none\n',
+      'Experiment run: example\nLiveness: no lock\nLast event: unavailable (missing)\nSelections: pending=1, running=0, completed=0, errored=0\nIn flight by agent model (checkpoint):\n  none\nFailures (all attempts):\n  none\n',
     );
     const json = await invoke(['status', '--experiment-run', run, '--json']);
     assert.equal(json.code, 0, json.stderr);
     assert.equal(json.stderr, '');
     assert.deepEqual(JSON.parse(json.stdout), {
       experiment_run_id: 'example',
+      event_log: { state: 'unavailable', reason: 'missing' },
       counts: { pending: 1, running: 0, completed: 0, errored: 0 },
       failures: [],
       in_flight: [],
@@ -83,10 +84,47 @@ describe('forge status', () => {
     });
     assert.equal(
       json.stdout,
-      '{"counts":{"completed":0,"errored":0,"pending":1,"running":0},"experiment_run_id":"example","failures":[],"in_flight":[],"last_event_at":null,"liveness":{"pid":null,"state":"no_lock"}}\n',
+      '{"counts":{"completed":0,"errored":0,"pending":1,"running":0},"event_log":{"reason":"missing","state":"unavailable"},"experiment_run_id":"example","failures":[],"in_flight":[],"last_event_at":null,"liveness":{"pid":null,"state":"no_lock"}}\n',
     );
     assert.deepEqual(await fs.readFile(file), before);
     assert.deepEqual(await fs.readdir(run), ['experiment.json']);
+    await fs.writeFile(
+      path.join(run, 'events.jsonl'),
+      '{"state":"future_state"}\n',
+    );
+    const degraded = await invoke([
+      'status',
+      '--experiment-run',
+      run,
+      '--json',
+    ]);
+    assert.equal(degraded.code, 0, degraded.stderr);
+    assert.deepEqual(JSON.parse(degraded.stdout).event_log, {
+      state: 'unavailable',
+      reason: 'invalid_record',
+    });
+    assert.equal(JSON.parse(degraded.stdout).counts.pending, 1);
+    const text = await invoke(['status', '--experiment-run', run]);
+    assert.equal(text.code, 0, text.stderr);
+    assert.match(text.stdout, /Last event: unavailable \(invalid_record\)/);
+    await fs.mkdir(path.join(run, '.experiment.lock'));
+    await fs.writeFile(
+      path.join(run, '.experiment.lock', 'private-field.json'),
+      '{}',
+    );
+    const unknown = await invoke(['status', '--experiment-run', run]);
+    assert.equal(unknown.code, 0, unknown.stderr);
+    assert.match(unknown.stdout, /Liveness: unknown \(invalid_lock\)/);
+    await fs.writeFile(
+      file,
+      JSON.stringify({ private_checkpoint_field: 'private payload' }),
+    );
+    const invalid = await invoke(['status', '--experiment-run', run]);
+    assert.equal(invalid.code, 1);
+    assert.equal(
+      invalid.stderr,
+      'forge: Cannot read a compatible Forge experiment.json.\n',
+    );
   });
 
   it('prints running models and full failure diagnostics as escaped text', async () => {
