@@ -475,6 +475,30 @@ leave a partial line. The last event alone does not prove a run is alive or
 finished. The log does not affect verification, scores, or regrade; older
 experiment folders may have no log.
 
+Inspect an active or saved experiment run without Docker or credentials:
+
+```sh
+npx --no-install forge status --experiment-run ./results/experiments/EXPERIMENT_RUN_ID
+npx --no-install forge status --experiment-run ./results/experiments/EXPERIMENT_RUN_ID --json
+```
+
+Status counts selections by their latest checkpoint state (`pending`, `running`,
+`completed`, or `errored`). It groups failures across all attempts by error code
+and, when present, diagnostic phase, reason, and message. In-flight eval IDs
+are grouped by agent adapter, provider, and model. The last-event time comes
+from the last complete `events.jsonl` record; old folders without a log show
+it as unavailable.
+
+Liveness checks the `.experiment.lock` owner PID on this host: alive, stale,
+or no lock. Run status on the host that owns the run. A live PID does not prove
+progress, and PID reuse can make a stale lock appear alive. Status takes no
+lock and writes nothing. Its file reads are separate observations, so they can
+briefly disagree while work advances; a `running` checkpoint can remain after
+a process dies. Status does not verify completed eval artifacts or scores.
+`--json` prints the same summary as canonical JSON. Exit code 0 means it read
+the status, even when failures or a stale lock are present; unreadable or
+invalid files return 1, and invalid arguments return 2.
+
 For the first experiment, print its evaluation:
 
 ```sh

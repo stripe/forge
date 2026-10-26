@@ -10,6 +10,7 @@ import type { ExperimentLogGap } from './experimentEvents.ts';
 import {
   type ExperimentRunAttempt as Attempt,
   type ExperimentRunCheckpoint,
+  MAX_EXPERIMENT_RUN_BYTES,
   parseExperimentRunCheckpoint,
   experimentRunIdSchema as runIdSchema,
   type SettledExperimentRunAttempt as SettledAttempt,
@@ -36,8 +37,6 @@ export {
   type ExperimentRunReportV1,
   parseExperimentRunReport,
 } from './experimentReport.ts';
-
-const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
 
 /** A report failure does not invalidate committed evaluations or their checkpoint. */
 export class ExperimentRunReportError extends Error {

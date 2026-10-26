@@ -7,6 +7,8 @@ import {
   parseForgeBuildIdentity,
 } from './version.ts';
 
+export const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
+
 export const experimentRunIdSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);

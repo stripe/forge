@@ -30,6 +30,10 @@ import {
   runExperimentCommand,
 } from './experimentCli.ts';
 import {
+  readExperimentRunStatus,
+  renderExperimentRunStatus,
+} from './experimentStatus.ts';
+import {
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
   getMatrixGroups,
@@ -94,6 +98,7 @@ const HOST_CLI_OPTIONS = {
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
   host: { type: 'boolean' },
+  json: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
 } as const;
@@ -117,6 +122,7 @@ const USAGE = `Usage:
   forge plan --experiment <file> [selection options]
   forge run --experiment <file> [selection options] [run options]
   forge run --experiment <file> --resume <experiment-run-id> [run options]
+  forge status --experiment-run <directory> [--json]
   forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--jobs <count>]
 
 Selection options:
@@ -141,6 +147,10 @@ Run options:
 
 Validation options:
   --host                Build and inspect the selected Docker runtime image
+
+Status options:
+  --experiment-run <directory>  Experiment run to inspect without locking or writing
+  --json                        Print the status as JSON
 
 Regrade options:
   --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
@@ -293,8 +303,23 @@ export async function runCli(
     }
     if (parsed.positionals.length !== 1 || !isCommand(command)) {
       throw new CliUsageError(
-        'Expected one command: validate, plan, run, or regrade.',
+        'Expected one command: validate, plan, run, status, or regrade.',
       );
+    }
+    if (command === 'status') {
+      assertAllowedOptions(parsed.values, ['experiment-run', 'json']);
+      const root = resolveRequiredPath(
+        parsed.values['experiment-run'],
+        'experiment-run',
+        path.resolve(options.cwd ?? process.cwd()),
+      );
+      const status = await readExperimentRunStatus(root);
+      stdout(
+        parsed.values.json
+          ? serializeCanonicalJson(status)
+          : renderExperimentRunStatus(status),
+      );
+      return 0;
     }
     if (command === 'regrade') {
       assertAllowedOptions(parsed.values, [
@@ -1025,12 +1050,13 @@ function credentialDiagnostic(
 
 function isCommand(
   value: string | undefined,
-): value is 'validate' | 'plan' | 'run' | 'regrade' {
+): value is 'validate' | 'plan' | 'run' | 'status' | 'regrade' {
   return (
     value === 'validate' ||
     value === 'plan' ||
     value === 'run' ||
-    value === 'regrade'
+    value === 'regrade' ||
+    value === 'status'
   );
 }
 
