@@ -4,9 +4,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
 import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
-
 import { parseAtifTrajectory } from '../atif/index.ts';
+import { CompletionInvocationError } from '../contracts/completionObservation.ts';
 import { credentialReference } from '../contracts/credentials.ts';
+import { createAttemptDiagnosticsStore } from '../diagnostics/localStore.ts';
+import { attemptDiagnosticsIdentity } from '../diagnostics/model.ts';
 import {
   createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -62,6 +64,73 @@ const JUDGE_MODEL = {
 } as const;
 
 describe('executeEval multi-turn and judging integration', () => {
+  it('retains recovered completion subattempts when the agent later fails without a result', async (t) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-failed-completions-'),
+    );
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({ turns: [] });
+    const provider = createScriptedCompletionProvider({
+      responses: [
+        new CompletionInvocationError('http_error', 'Unavailable', {
+          origin: 'host_transport',
+          http_status: 429,
+          request_id: 'synthetic_request',
+        }),
+        JSON.stringify({
+          user_needs: [
+            { description: 'Create the answer', status: 'remaining' },
+          ],
+          message: 'Create the answer.',
+        }),
+      ],
+    });
+    const plan = createTestResolvedRunPlan({
+      mode: 'multi_turn',
+      maxTurns: 1,
+      rolePlayer: ROLE_MODEL,
+    });
+    const store = createAttemptDiagnosticsStore({ root });
+    await assert.rejects(
+      executeEvalWithTestHooks(
+        {
+          runId: 'failed-after-retry',
+          plan,
+          composition: {
+            runtime: runtime.adapter,
+            agents: new Map([[agent.adapter.id, agent.adapter]]),
+            completionProviders: new Map([
+              [provider.provider.id, provider.provider],
+            ]),
+            credentialResolver: createStaticCredentialResolver(),
+            inputProvider: createMemoryRunInputProvider(),
+            artifactStore: createArtifactStore({ root }),
+            attemptDiagnosticsStore: store,
+          },
+        },
+        { waitBeforeCompletionRetry: async () => undefined },
+      ),
+    );
+    const record = (await store.read(
+      attemptDiagnosticsIdentity('failed-after-retry', plan),
+      new AbortController().signal,
+    ))!;
+    assert.equal(record.state, 'errored');
+    assert.deepEqual(
+      record.completion_calls.map(({ status }) => status),
+      ['failed', 'succeeded'],
+    );
+    assert.equal(record.completion_calls[0]!.http_status, 429);
+    assert.equal(record.completion_calls[0]!.disposition, 'rate_limit_retry');
+    assert.equal(record.completion_calls[0]!.request_id, 'synthetic_request');
+    assert.equal(record.completion_call_totals.calls, 2);
+    await assert.rejects(
+      fs.stat(path.join(root, 'runs', 'failed-after-retry')),
+      { code: 'ENOENT' },
+    );
+  });
+
   it('preserves a long configured opening through execution and completed-run verification', async (t) => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-long-opening-'),

@@ -1,5 +1,6 @@
 import type { AgentAdapter } from './agent.ts';
 import type { RunArtifactContributor, RunArtifactStore } from './artifacts.ts';
+import type { AttemptDiagnosticsStore } from './attemptDiagnostics.ts';
 import type {
   CompletionProvider,
   CompletionProviderResolver,
@@ -24,6 +25,7 @@ export interface ForgeComposition {
   readonly credentialResolver: CredentialResolver;
   readonly inputProvider: RunInputProvider;
   readonly artifactStore: RunArtifactStore;
+  readonly attemptDiagnosticsStore?: AttemptDiagnosticsStore;
   readonly observer?: RunObserver;
   readonly contributors?: readonly RunArtifactContributor[];
 }

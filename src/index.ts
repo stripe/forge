@@ -1,6 +1,19 @@
 /** Stable package-root surface for the portable Forge engine and contracts. */
 
 export * from './contracts/index.ts';
+export { createAttemptDiagnosticsStore } from './diagnostics/localStore.ts';
+export {
+  type AttemptCompletionSummary,
+  type AttemptDiagnosticsIdentity,
+  type AttemptDiagnosticsRecord,
+  type AttemptDiagnosticsSnapshot,
+  MAX_ATTEMPT_COMPLETION_SUMMARIES,
+  MAX_ATTEMPT_DIAGNOSTICS_BYTES,
+  parseAttemptDiagnostics,
+  serializeAttemptDiagnostics,
+} from './diagnostics/model.ts';
+export type { AttemptDiagnosticsRecorder } from './diagnostics/recorder.ts';
+export type { AttemptTiming } from './diagnostics/timing.ts';
 export {
   createForgeEngine,
   defaultForgeEngine,

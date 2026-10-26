@@ -141,8 +141,51 @@ describe('public experiment run API', () => {
         }),
       );
     }
+    await fs.mkdir(path.join(root, 'diagnostics', 'orphan-attempt'), {
+      mode: 0o700,
+    });
+    await assert.rejects(
+      runExperiment({
+        ...options,
+        resume: true,
+        runIdFactory: () => 'orphan-attempt',
+      }),
+      /Eval run ID already exists/,
+    );
+    const diagnosticPath = path.join(
+      root,
+      'diagnostics',
+      last.run_id,
+      'attempt.json',
+    );
+    const savedDiagnostic = await fs.readFile(diagnosticPath, 'utf8');
+    const record = JSON.parse(savedDiagnostic);
+    assert.equal(record.state, 'errored');
+    assert.equal(record.timing.started_at, last.started_at);
+    assert.equal(record.timing.finished_at, report.runs[0]!.finished_at);
+    record.identity.plan_sha256 = `sha256:${'f'.repeat(64)}`;
+    await fs.writeFile(diagnosticPath, JSON.stringify(record), { mode: 0o600 });
+    await assert.rejects(
+      runExperiment({ ...options, resume: true }),
+      /identity/,
+    );
+    await fs.writeFile(diagnosticPath, savedDiagnostic, { mode: 0o600 });
+    const interruptedCheckpoint = structuredClone(checkpoint);
+    interruptedCheckpoint.entries[0]!.attempts[0] = {
+      run_id: last.run_id,
+      state: 'running',
+      reserved_at: last.reserved_at,
+      started_at: last.started_at,
+      finished_at: last.finished_at,
+      diagnostics_status: last.diagnostics_status,
+    };
+    await fs.writeFile(
+      result.checkpoint,
+      JSON.stringify(interruptedCheckpoint),
+    );
     fail = false;
     const resumed = await runExperiment({ ...options, resume: true });
+    assert.equal(await fs.readFile(diagnosticPath, 'utf8'), savedDiagnostic);
     assert.equal(resumed.completed, 1);
     const history = parseExperimentRunCheckpoint(
       JSON.parse(await fs.readFile(result.checkpoint, 'utf8')),

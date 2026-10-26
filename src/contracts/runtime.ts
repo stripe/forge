@@ -144,7 +144,8 @@ export interface PreparedRuntime {
   finalizeSetup(): Promise<void>;
   /** Stop all mutation, await active commands, then expose stable evidence. */
   quiesce(): Promise<SealedRuntime>;
-  /** Idempotent cleanup for failures before or after quiescence. */
+  /** Stop mutation, await active commands, and dispose resources idempotently.
+   * Teardown authority must remain usable after the execution signal aborts. */
   dispose(): Promise<void>;
 }
 

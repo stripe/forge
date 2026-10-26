@@ -474,6 +474,7 @@ implementations.
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, `CredentialSourceContext`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Defines secret resolution and optional pure source proof; used by agent/setup/provider declarations and execution |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
+| [`attemptDiagnostics.ts`](https://github.com/stripe/forge/blob/main/src/contracts/attemptDiagnostics.ts) | `AttemptDiagnosticsStore` | Independent bounded attempt snapshots; supplied by the experiment controller or an embedding host |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEventType`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code, Codex, and OpenCode; selected by `setup/forgePlugin.ts` |
@@ -784,6 +785,17 @@ The verifier deliberately imports:
 
 Those dependencies make verification a second semantic boundary rather than a
 generic checksum utility.
+
+## `src/diagnostics`: observations outside results
+
+`model.ts` owns the strict attempt parser, identity checks, and size limits;
+`timing.ts` supplies UTC timing schemas shared with checkpoints and reports.
+`localStore.ts` serializes atomic, private snapshot writes independently of result
+transactions. `recorder.ts` owns the shared I/O budget and bounded completion
+projection. `experiment.ts` reserves attempts before dispatch and checks all saved
+diagnostic identities on resume; `execute.ts` flushes start, phases, first failure,
+and cleanup. Recording failures must not change results. See the
+[attempt contract](architecture.md#attempt-diagnostics) for bounds and capture gaps.
 
 ## `src/security`: secret handling
 

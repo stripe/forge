@@ -59,6 +59,14 @@ import {
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
 import {
+  assertAttemptDiagnosticsIdentity,
+  attemptDiagnosticsIdentity,
+} from '../diagnostics/model.ts';
+import {
+  type AttemptDiagnosticsRecorder,
+  createAttemptRecorder,
+} from '../diagnostics/recorder.ts';
+import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
   evaluateRunEvidence,
@@ -161,6 +169,8 @@ export interface ExecuteEvalInput {
   readonly plan: ResolvedRunPlanV1;
   readonly composition: ForgeComposition;
   readonly signal?: AbortSignal;
+  /** Supplied by the scheduler after persisting reservation, before dispatch. */
+  readonly attemptDiagnostics?: AttemptDiagnosticsRecorder;
   /** Test seam; production uses the wall clock. */
   readonly now?: () => Date;
 }
@@ -321,6 +331,22 @@ export async function executeEvalWithTestHooks(
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
   );
+  assertRunId(input.runId);
+  const diagnostics =
+    input.attemptDiagnostics ??
+    createAttemptRecorder({
+      identity: attemptDiagnosticsIdentity(input.runId, input.plan),
+      reservedAt: startedAt.toISOString(),
+      store: input.composition.attemptDiagnosticsStore,
+    });
+  assertAttemptDiagnosticsIdentity(
+    diagnostics.snapshot.identity,
+    attemptDiagnosticsIdentity(
+      input.runId,
+      input.plan,
+      diagnostics.snapshot.identity.experiment_run_id,
+    ),
+  );
   let phase: RunPhase = 'preflight';
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
@@ -333,6 +359,7 @@ export async function executeEvalWithTestHooks(
     });
   let diagnosticSecrets: readonly string[] | undefined;
 
+  await diagnostics.start(startedAt.toISOString(), false);
   try {
     const preflight = await step('preflight', async () => {
       throwIfAborted(signal, phase);
@@ -344,6 +371,8 @@ export async function executeEvalWithTestHooks(
           createSetupExecutorForRegistry(setupActions, true),
       );
     });
+
+    await diagnostics.flush();
 
     const environment = await resolveEnvironment(
       input,
@@ -357,6 +386,7 @@ export async function executeEvalWithTestHooks(
         runId: input.runId,
         bindings: preflight.completionBindings,
         credentialResolver: input.composition.credentialResolver,
+        onObservation: diagnostics.completions,
         redactionSecrets: credentialValues(environment),
         signal,
       });
@@ -376,6 +406,7 @@ export async function executeEvalWithTestHooks(
     diagnosticSecrets = secrets;
 
     prepared = await step('runtime_prepare', async () => {
+      await diagnostics.phase('runtime_prepare');
       throwIfAborted(signal, phase);
       return input.composition.runtime.prepare({
         runId: input.runId,
@@ -399,6 +430,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const setupArtifact = await step('setup', async () => {
+      await diagnostics.phase('setup');
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
         runId: input.runId,
@@ -422,6 +454,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const interaction = await step('interaction', async () => {
+      await diagnostics.phase('interaction');
       throwIfAborted(signal, phase);
       const session = await preflight.agent.openSession({
         runId: input.runId,
@@ -441,10 +474,12 @@ export async function executeEvalWithTestHooks(
     });
 
     sealed = await step('quiesce', async () => {
+      await diagnostics.phase('quiesce');
       return prepared!.quiesce();
     });
 
     const selectedEvidence = await step('evidence', async () => {
+      await diagnostics.phase('evidence');
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
         return {
@@ -499,6 +534,7 @@ export async function executeEvalWithTestHooks(
     );
 
     const evaluated = await step('evaluation', async () => {
+      await diagnostics.phase('evaluation');
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
@@ -695,6 +731,7 @@ export async function executeEvalWithTestHooks(
     ];
 
     await step('artifact_stage', async () => {
+      await diagnostics.phase('artifact_stage');
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
@@ -703,6 +740,7 @@ export async function executeEvalWithTestHooks(
 
     const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
     await step('runtime_dispose', async () => {
+      await diagnostics.phase('runtime_dispose');
       try {
         await prepared!.dispose();
       } catch {
@@ -711,9 +749,11 @@ export async function executeEvalWithTestHooks(
           message:
             'Runtime cleanup failed after canonical artifacts were staged.',
         };
+        diagnostics.cleanupFailure('runtime_dispose_failed');
         warnings.push(cleanupWarning);
       } finally {
         runtimeDisposed = true;
+        diagnostics.cleanupCompleted();
       }
     });
 
@@ -737,12 +777,14 @@ export async function executeEvalWithTestHooks(
     assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
     const committed = await step('result_commit', async () => {
+      await diagnostics.phase('result_commit');
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
     });
     transaction = undefined;
     const committedResult = parseRunResult(committed.result);
+    await diagnostics.finish('completed');
     return {
       runId: committed.runId,
       location: committed.location,
@@ -755,29 +797,41 @@ export async function executeEvalWithTestHooks(
       aborted &&
       timeoutSignal.aborted &&
       signal.reason === timeoutSignal.reason;
-    await transaction?.rollback().catch(() => undefined);
-    if (prepared && !runtimeDisposed) {
-      await prepared.dispose().catch(() => undefined);
-    }
-    if (aborted) {
-      throw new ForgeExecutionError(
-        'aborted',
-        phase,
-        timedOut
-          ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
-          : 'The Forge run was cancelled by the caller.',
-        {
-          cause: signal.reason,
-          diagnostic: {
-            reason: timedOut ? 'timeout' : 'cancelled',
-            message: timedOut
-              ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
-              : 'Caller cancellation stopped the run.',
+    const primary = aborted
+      ? new ForgeExecutionError(
+          'aborted',
+          phase,
+          timedOut
+            ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
+            : 'The Forge run was cancelled by the caller.',
+          {
+            cause: signal.reason,
+            diagnostic: {
+              reason: timedOut ? 'timeout' : 'cancelled',
+              message: timedOut
+                ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
+                : 'Caller cancellation stopped the run.',
+            },
           },
-        },
-      );
+        )
+      : mapExecutionError(error, phase, diagnosticSecrets);
+    await diagnostics.failure({
+      error_code: primary.code,
+      phase: primary.phase,
+      reason: primary.diagnostic?.reason ?? 'failure',
+      message: primary.diagnostic?.message ?? primary.message,
+    });
+    await transaction
+      ?.rollback()
+      .catch(() => diagnostics.cleanupFailure('rollback_failed'));
+    if (prepared && !runtimeDisposed) {
+      await prepared
+        .dispose()
+        .catch(() => diagnostics.cleanupFailure('runtime_dispose_failed'));
     }
-    throw mapExecutionError(error, phase, diagnosticSecrets);
+    diagnostics.cleanupCompleted();
+    await diagnostics.finish('errored');
+    throw primary;
   }
 }
 
