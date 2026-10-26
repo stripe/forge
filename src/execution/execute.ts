@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -324,8 +325,6 @@ export async function executeEvalWithTestHooks(
     );
   }
   const externalSignal = input.signal ?? new AbortController().signal;
-  const timeoutSignal = AbortSignal.timeout(input.plan.limits.run_timeout_ms);
-  const signal = AbortSignal.any([externalSignal, timeoutSignal]);
   const now = input.now ?? (() => new Date());
   const startedAt = now();
   const events = createRunEventEmitter(
@@ -360,6 +359,11 @@ export async function executeEvalWithTestHooks(
   let diagnosticSecrets: readonly string[] | undefined;
 
   await diagnostics.start(startedAt.toISOString(), false);
+  const executionTimeout = createExecutionTimeout(
+    input.plan.limits.run_timeout_ms,
+  );
+  const timeoutSignal = executionTimeout.signal;
+  const signal = AbortSignal.any([externalSignal, timeoutSignal]);
   try {
     const preflight = await step('preflight', async () => {
       throwIfAborted(signal, phase);
@@ -372,7 +376,7 @@ export async function executeEvalWithTestHooks(
       );
     });
 
-    await diagnostics.flush();
+    await executionTimeout.withoutRecordingTime(() => diagnostics.flush());
 
     const environment = await resolveEnvironment(
       input,
@@ -406,7 +410,9 @@ export async function executeEvalWithTestHooks(
     diagnosticSecrets = secrets;
 
     prepared = await step('runtime_prepare', async () => {
-      await diagnostics.phase('runtime_prepare');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('runtime_prepare'),
+      );
       throwIfAborted(signal, phase);
       return input.composition.runtime.prepare({
         runId: input.runId,
@@ -430,7 +436,9 @@ export async function executeEvalWithTestHooks(
     });
 
     const setupArtifact = await step('setup', async () => {
-      await diagnostics.phase('setup');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('setup'),
+      );
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
         runId: input.runId,
@@ -454,7 +462,9 @@ export async function executeEvalWithTestHooks(
     });
 
     const interaction = await step('interaction', async () => {
-      await diagnostics.phase('interaction');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('interaction'),
+      );
       throwIfAborted(signal, phase);
       const session = await preflight.agent.openSession({
         runId: input.runId,
@@ -474,12 +484,16 @@ export async function executeEvalWithTestHooks(
     });
 
     sealed = await step('quiesce', async () => {
-      await diagnostics.phase('quiesce');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('quiesce'),
+      );
       return prepared!.quiesce();
     });
 
     const selectedEvidence = await step('evidence', async () => {
-      await diagnostics.phase('evidence');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('evidence'),
+      );
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
         return {
@@ -534,7 +548,9 @@ export async function executeEvalWithTestHooks(
     );
 
     const evaluated = await step('evaluation', async () => {
-      await diagnostics.phase('evaluation');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('evaluation'),
+      );
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
@@ -731,7 +747,9 @@ export async function executeEvalWithTestHooks(
     ];
 
     await step('artifact_stage', async () => {
-      await diagnostics.phase('artifact_stage');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('artifact_stage'),
+      );
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
@@ -740,7 +758,9 @@ export async function executeEvalWithTestHooks(
 
     const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
     await step('runtime_dispose', async () => {
-      await diagnostics.phase('runtime_dispose');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('runtime_dispose'),
+      );
       try {
         await prepared!.dispose();
       } catch {
@@ -777,7 +797,9 @@ export async function executeEvalWithTestHooks(
     assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
     const committed = await step('result_commit', async () => {
-      await diagnostics.phase('result_commit');
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('result_commit'),
+      );
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
@@ -832,7 +854,50 @@ export async function executeEvalWithTestHooks(
     diagnostics.cleanupCompleted();
     await diagnostics.finish('errored');
     throw primary;
+  } finally {
+    executionTimeout.dispose();
   }
+}
+
+function createExecutionTimeout(durationMs: number) {
+  const controller = new AbortController();
+  let remaining = durationMs;
+  let resumedAt = performance.now();
+  let timer: ReturnType<typeof setTimeout>;
+  const expire = () =>
+    controller.abort(
+      new DOMException(
+        'The operation was aborted due to timeout',
+        'TimeoutError',
+      ),
+    );
+  function resume() {
+    resumedAt = performance.now();
+    if (!controller.signal.aborted) {
+      if (remaining <= 0) expire();
+      else {
+        timer = setTimeout(expire, remaining);
+        timer.unref();
+      }
+    }
+  }
+  resume();
+  return {
+    signal: controller.signal,
+    async withoutRecordingTime(record: () => Promise<void>) {
+      clearTimeout(timer);
+      remaining -= performance.now() - resumedAt;
+      if (remaining <= 0) expire();
+      try {
+        await record();
+      } finally {
+        resume();
+      }
+    },
+    dispose() {
+      clearTimeout(timer);
+    },
+  };
 }
 
 interface ExecutedInteraction {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 import type {
   AgentAdapter,
   AgentNativeEvidenceResult,
@@ -155,6 +155,95 @@ describe('executeEval', () => {
         );
     }
   });
+
+  it.each(['start', 'interaction', 'hung'] as const)(
+    'keeps %s diagnostic I/O outside the execution timeout',
+    async (mode) => {
+      const fixture = await executionFixture();
+      const plan = { ...fixture.plan, limits: { run_timeout_ms: 500 } };
+      const baseline = await executeEval({
+        runId: 'same-run',
+        plan,
+        composition: fixture.composition(
+          createArtifactStore({ root: path.join(fixture.root, 'baseline') }),
+        ),
+        now: monotonicClock(),
+      });
+      let enter!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      let delayed = false;
+      let writeSignal: AbortSignal | undefined;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      // Node's native timeout signal does not use the fake timer queue.
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+        const controller = new AbortController();
+        setTimeout(
+          () => controller.abort(new DOMException('Timeout', 'TimeoutError')),
+          delay,
+        );
+        return controller.signal;
+      });
+      try {
+        const outcome = executeEval({
+          runId: 'same-run',
+          plan,
+          composition: {
+            ...fixture.composition(
+              createArtifactStore({
+                root: path.join(fixture.root, 'recorded'),
+              }),
+            ),
+            attemptDiagnosticsStore: {
+              async read() {
+                return undefined;
+              },
+              async write(snapshot, signal) {
+                if (
+                  !delayed &&
+                  (mode !== 'interaction' ||
+                    snapshot.location?.phase === 'interaction')
+                ) {
+                  delayed = true;
+                  writeSignal = signal;
+                  enter();
+                  if (mode === 'hung') await new Promise(() => undefined);
+                  else await new Promise((resolve) => setTimeout(resolve, 750));
+                }
+                return { ...snapshot, revision: 1 };
+              },
+            },
+          },
+          now: monotonicClock(),
+        }).then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+        await entered;
+        await vi.advanceTimersByTimeAsync(mode === 'hung' ? 2000 : 750);
+        const settled = await outcome;
+        assert.ok(
+          'result' in settled,
+          'diagnostic latency must not fail execution',
+        );
+        assert.equal(writeSignal!.aborted, mode === 'hung');
+        assert.deepEqual(settled.result.result, baseline.result);
+        for (const filename of [
+          'result.json',
+          ...baseline.result.artifacts.map(({ path }) => path),
+        ]) {
+          assert.deepEqual(
+            await fs.readFile(path.join(settled.result.location, filename)),
+            await fs.readFile(path.join(baseline.location, filename)),
+          );
+        }
+      } finally {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+      }
+    },
+  );
 
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
     const fixture = await executionFixture();

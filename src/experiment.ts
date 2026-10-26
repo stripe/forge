@@ -2,10 +2,17 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import type { AttemptDiagnosticsStore } from './contracts/attemptDiagnostics.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createAttemptDiagnosticsStore } from './diagnostics/localStore.ts';
-import { attemptDiagnosticsIdentity } from './diagnostics/model.ts';
-import { createAttemptRecorder } from './diagnostics/recorder.ts';
+import {
+  type AttemptDiagnosticsIdentity,
+  attemptDiagnosticsIdentity,
+} from './diagnostics/model.ts';
+import {
+  ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
+  createAttemptRecorder,
+} from './diagnostics/recorder.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
@@ -321,13 +328,14 @@ export async function runExperiment(
         if (runIds.has(attempt.run_id))
           throw new Error('Experiment run contains duplicate run IDs.');
         runIds.add(attempt.run_id);
-        const saved = await diagnosticsStore.read(
+        const saved = await readAttemptHistory(
+          diagnosticsStore,
           attemptDiagnosticsIdentity(
             attempt.run_id,
             options.plans[index]!,
             experimentRun.experiment_run_id,
           ),
-          AbortSignal.any([options.signal, AbortSignal.timeout(2000)]),
+          options.signal,
         );
         if (saved)
           Object.assign(attempt, timingFields(saved.timing), {
@@ -966,4 +974,30 @@ function timingFields(timing: {
       ? {}
       : { finished_at: timing.finished_at }),
   };
+}
+
+async function readAttemptHistory(
+  store: AttemptDiagnosticsStore,
+  identity: AttemptDiagnosticsIdentity,
+  callerSignal: AbortSignal,
+) {
+  const timeout = new AbortController();
+  const signal = AbortSignal.any([callerSignal, timeout.signal]);
+  const timer = setTimeout(
+    () =>
+      timeout.abort(new Error('Attempt diagnostic history read timed out.')),
+    ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
+  );
+  let onAbort: () => void = () => undefined;
+  try {
+    signal.throwIfAborted();
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    return await Promise.race([store.read(identity, signal), aborted]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
 }

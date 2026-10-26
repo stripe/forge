@@ -2,7 +2,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import * as experimentRunExports from './experiment.ts';
@@ -58,6 +58,72 @@ describe('public experiment run API', () => {
       return event.run_id;
     };
   });
+
+  it.each(['timeout', 'cancelled'] as const)(
+    'releases the resume lock when a stalled history read is %s',
+    async (mode) => {
+      const root = await experimentRunRoot();
+      const options: ExperimentRunOptions = {
+        root,
+        engine: defaultForgeEngine,
+        plans: [createTestResolvedRunPlan()],
+        composition: makeComposition(root),
+        resume: false,
+        signal: new AbortController().signal,
+        runIdFactory: () => 'saved-attempt',
+        progress: () => undefined,
+        execute: (input) => defaultForgeEngine.executeEval(input),
+      };
+      const completed = await runExperiment(options);
+      assert.equal(completed.completed, 1);
+      const before = await fs.readFile(completed.checkpoint);
+      const controller = new AbortController();
+      const entered = createGate();
+      let readSignal: AbortSignal | undefined;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const resume = runExperiment({
+          ...options,
+          resume: true,
+          signal: controller.signal,
+          composition: {
+            ...options.composition,
+            attemptDiagnosticsStore: {
+              async write() {
+                throw new Error('Unexpected write');
+              },
+              async read(_identity, signal) {
+                readSignal = signal;
+                entered.resolve();
+                return new Promise(() => undefined);
+              },
+            },
+          },
+        });
+        const rejected = assert.rejects(
+          resume,
+          mode === 'timeout'
+            ? /history read timed out/
+            : /Caller stopped resume/,
+        );
+        await entered.promise;
+        await fs.stat(path.join(root, '.experiment.lock'));
+        if (mode === 'timeout') await vi.advanceTimersByTimeAsync(2000);
+        else controller.abort(new Error('Caller stopped resume'));
+        await rejected;
+        assert.equal(readSignal!.aborted, true);
+        await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {
+          code: 'ENOENT',
+        });
+        assert.deepEqual(await fs.readFile(completed.checkpoint), before);
+      } finally {
+        vi.useRealTimers();
+      }
+      const retried = await runExperiment({ ...options, resume: true });
+      assert.equal(retried.skipped, 1);
+      assert.equal(retried.executed, 0);
+    },
+  );
 
   it('persists execution diagnostics without run artifacts and retains them in retry history', async () => {
     const root = await experimentRunRoot();
