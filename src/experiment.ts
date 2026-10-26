@@ -6,7 +6,7 @@ import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
-import { appendExperimentRunEvent } from './experimentEvents.ts';
+import type { ExperimentLogGap } from './experimentEvents.ts';
 import {
   type ExperimentRunAttempt as Attempt,
   type ExperimentRunCheckpoint,
@@ -14,6 +14,7 @@ import {
   experimentRunIdSchema as runIdSchema,
   type SettledExperimentRunAttempt as SettledAttempt,
 } from './experimentModel.ts';
+import { createExperimentProgress } from './experimentProgress.ts';
 import {
   buildExperimentRunReport,
   type ExperimentRunReportEvaluationV1,
@@ -100,6 +101,8 @@ export type ExperimentRunProgressEvent =
     };
 
 export interface ExperimentRunSummary {
+  /** Optional recording gaps; evaluation outcomes remain authoritative. */
+  readonly progress_log?: ExperimentLogGap;
   readonly checkpoint: string;
   readonly report: string;
   readonly total: number;
@@ -271,11 +274,11 @@ export async function runExperiment(
     inspections.set(runId, { identity, inspected });
     return inspected;
   };
-  const progress = async (event: ExperimentRunProgressEvent): Promise<void> => {
-    // Progress recording is observational; a log failure cannot stop evaluations.
-    await appendExperimentRunEvent(root, event).catch(() => undefined);
-    options.progress(event);
-  };
+  const recording = createExperimentProgress({
+    root,
+    progress: options.progress,
+  });
+  const progress = recording.record;
   let reportReady = false;
   let succeeded = false;
   try {
@@ -347,7 +350,7 @@ export async function runExperiment(
             experimentRunOutcome(entry, recovered, inspected.artifact),
             index,
           );
-          await progress({
+          progress({
             selection: entry.selection,
             run_id: last.run_id,
             state: 'skipped',
@@ -366,7 +369,7 @@ export async function runExperiment(
       }
     }
     await writeExperimentRunCheckpoint(checkpoint, experimentRun);
-    await progress({
+    progress({
       state: options.resume ? 'resuming' : 'started',
       location: root,
     });
@@ -420,7 +423,7 @@ export async function runExperiment(
             runIds.add(runId);
             entry.attempts.push({ run_id: runId, state: 'running' });
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            await progress({
+            progress({
               selection: entry.selection,
               run_id: runId,
               state: 'running',
@@ -476,7 +479,7 @@ export async function runExperiment(
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            await progress({ selection: entry.selection, ...attempt });
+            progress({ selection: entry.selection, ...attempt });
             if (attempt.state === 'completed') completed += 1;
             else errored += 1;
             options.onOutcome?.(
@@ -496,8 +499,10 @@ export async function runExperiment(
     );
     if (failed) throw failure;
     options.signal.throwIfAborted();
+    const progressLog = await recording.finish();
     succeeded = true;
     return {
+      ...(progressLog === undefined ? {} : { progress_log: progressLog }),
       checkpoint,
       report: reportPath,
       total: experimentRun.entries.length,
@@ -585,7 +590,11 @@ export async function runExperiment(
       }
       if (succeeded) options.signal.throwIfAborted();
     } finally {
-      await release();
+      try {
+        await recording.finish();
+      } finally {
+        await release();
+      }
     }
   }
 }
