@@ -160,6 +160,15 @@ try {
       assert.equal(typeof regrade.judgeInputFromSavedRun, 'function');
       assert.equal('regradeCompletedRun' in forge, false);
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
+      for (const adapter of [claude.createClaudeCodeAdapter(), codex.createCodexAdapter(), opencode.createOpenCodeAdapter()]) {
+        assert.equal(typeof adapter.probeModel, 'function');
+      }
+      for (const provider of [anthropic.createAnthropicCompletionProvider(), openai.createOpenAICompletionProvider()]) {
+        assert.equal(typeof provider.probeModel, 'function');
+      }
+      let probeHelp = '';
+      assert.equal(await cli.runCli(['--help'], {stdout: (text) => {probeHelp += text;}}), 0);
+      assert.match(probeHelp, /--probe-models/);
       assert.equal(typeof opencode.createOpenCodeAdapter, 'function');
       assert.equal(typeof opencode.parseOpenCodeStream, 'function');
       assert.equal(typeof opencode.loadOpenCodeEvidence, 'function');

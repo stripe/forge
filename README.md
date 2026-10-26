@@ -303,6 +303,30 @@ MCP and discovers tools without invoking them or making model calls. It requires
 an explicit `--credential-env` grant for each required MCP key and reports model
 authentication as untested. Failures name the stage; temporary runtimes are disposed after success or failure.
 
+Use `validate --probe-models` to test model IDs, keys, and host structured output
+before starting an eval. It uses the same selection filters as `run` and prints
+the full list of model requests and endpoints to stderr before sending them:
+
+```sh
+npx --no-install forge validate --probe-models --experiment ./my-eval/experiment.yaml
+```
+
+This opt-in check makes paid requests: one small request per distinct agent
+adapter/provider/model, plus one strict structured-output request per used Ava
+and judge model, separately for each role. It uses the same endpoint routing
+as execution and requires the same explicit `--credential-env` grants for the
+selected agent and Ava/judge models. It sends fixed test prompts with no case content. JSON on stdout includes
+`model_probes` with each `outcome`: `ok`, `unknown_model`, `auth`,
+`missing_structured_output`, `rate_limited`, `timeout`, or `other`.
+Any failed probe sets `valid: false` and exits with status 1; probes do not retry.
+
+This tests models from the host. It does not exercise an agent CLI, container,
+setup, tools, or container connectivity. Use `validate --host` for runtime
+readiness. The flags can be combined; a successful model probe does not prove
+that an eval will succeed. Agent tests allow a truncated response from their
+small token budget; host tests require a valid structured response. Host
+providers may raise the output budget to allow for model reasoning.
+
 For a payment case with Stripe MCP and both agents, use the
 [plugin experiment](https://github.com/stripe/forge/blob/main/release/plugin-experiment.yaml)
 beside its `datasets/` directory:

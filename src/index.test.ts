@@ -28,6 +28,8 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeEvidenceV1,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
+  type ModelProbe,
+  type ModelProbeOutcome,
   normalizeEnvironmentSpecification,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
@@ -44,6 +46,19 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('exports optional model-probe contracts used by built-in subpaths', async () => {
+    const { createCodexAdapter } = await import('./agents/codex/index.ts');
+    const probe: ModelProbe = createCodexAdapter().probeModel!({
+      adapter: 'codex',
+      provider: 'openai',
+      model: 'example',
+    });
+    const outcome: ModelProbeOutcome = 'unknown_model';
+    assert.equal(outcome, 'unknown_model');
+    assert.equal(probe.endpoint, 'https://api.openai.com/v1/responses');
+    assert.equal(typeof probe.run, 'function');
+  });
+
   it('keeps the OpenAI provider on its documented implementation subpath', async () => {
     assert.equal('createOpenAICompletionProvider' in rootExports, false);
     const openai = await import('./providers/openai/index.ts');

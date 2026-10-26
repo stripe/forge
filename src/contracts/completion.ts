@@ -2,6 +2,7 @@ import type { ModelRefV1 } from '../model/types.ts';
 
 import type { CredentialRequirement } from './credentials.ts';
 import type { CompletionProviderMetadata } from './metadata.ts';
+import type { ModelProbe } from './modelProbe.ts';
 
 /** Score-affecting reason a host completion is requested. */
 export type CompletionPurpose = 'role_player' | 'judge';
@@ -91,6 +92,8 @@ export interface CompletionProvider {
   requirements(
     input: CompletionProviderRequirementInput,
   ): CompletionProviderRequirements;
+  /** Purely describe a strict structured-output model test. */
+  probeModel?(input: CompletionProviderRequirementInput): ModelProbe;
   preflight?(input: CompletionProviderPreflightInput): Promise<void>;
   complete(
     request: CompletionRequest,

@@ -55,6 +55,7 @@ import {
   detectDockerRuntimePlatform,
 } from './runtime/docker/index.ts';
 import { serializeCanonicalJson } from './serialization.ts';
+import { selectedModelProbes } from './validation/models.ts';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
@@ -95,6 +96,7 @@ const HOST_CLI_OPTIONS = {
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
   host: { type: 'boolean' },
+  'probe-models': { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
 } as const;
@@ -114,7 +116,7 @@ const SELECTOR_OPTIONS: readonly (keyof typeof HOST_CLI_OPTIONS)[] = [
 ];
 
 const USAGE = `Usage:
-  forge validate --experiment <file> [--host]
+  forge validate --experiment <file> [selection options] [--host] [--probe-models]
   forge plan --experiment <file> [selection options]
   forge run --experiment <file> [selection options] [run options]
   forge run --experiment <file> --resume <experiment-run-id> [run options]
@@ -141,6 +143,7 @@ Run options:
                         Bind one credential reference for scoped access or separate keys
 
 Validation options:
+  --probe-models        Send small paid model tests with no case content; no CLI or container
   --host                Apply setup and check native MCP connections without model calls
   --credential-env <environment-name>
                         With --host, authorize the host variables used by native MCP checks
@@ -322,7 +325,10 @@ export async function runCli(
       ...(command === 'validate'
         ? ([
             'host',
-            ...(parsed.values.host ? ['credential-env' as const] : []),
+            'probe-models',
+            ...(parsed.values.host || parsed.values['probe-models']
+              ? ['credential-env' as const]
+              : []),
           ] as const)
         : []),
       ...(command === 'run'
@@ -423,7 +429,7 @@ export async function runCli(
         parsed.values['credential-env'],
       );
       const credentials =
-        hostSelection === undefined
+        hostSelection === undefined && !parsed.values['probe-models']
           ? undefined
           : createCliCredentialBindingSession(
               grants,
@@ -476,6 +482,9 @@ export async function runCli(
           ),
         );
       }
+      const probes = parsed.values['probe-models']
+        ? selectedModelProbes(readinessRequests)
+        : undefined;
       const host =
         hostSelection === undefined
           ? undefined
@@ -486,6 +495,38 @@ export async function runCli(
                 options.signal,
               ),
             };
+      const probeResults = [];
+      if (probes !== undefined) {
+        stderr(
+          'Model probes send small paid requests with no case content. They do not test agent CLIs or containers.\n',
+        );
+        for (const { purpose, adapter, provider, model, probe } of probes) {
+          stderr(
+            `${JSON.stringify({ purpose, ...(adapter === undefined ? {} : { adapter }), provider, model, endpoint: probe.endpoint })}\n`,
+          );
+        }
+        for (const {
+          purpose,
+          adapter,
+          provider,
+          model,
+          probe,
+          composition,
+        } of probes) {
+          const outcome = await probe.run({
+            credentialResolver: composition.credentialResolver,
+            signal: options.signal ?? new AbortController().signal,
+          });
+          probeResults.push({
+            purpose,
+            ...(adapter === undefined ? {} : { adapter }),
+            provider,
+            model,
+            outcome,
+          });
+        }
+      }
+      const valid = probeResults.every(({ outcome }) => outcome === 'ok');
       stdout(
         serializeCanonicalJson({
           dataset: dataset.manifest.dataset,
@@ -495,10 +536,11 @@ export async function runCli(
           },
           ...(host === undefined ? {} : { host }),
           run_count: selections.length,
-          valid: true,
+          ...(probes === undefined ? {} : { model_probes: probeResults }),
+          valid,
         }),
       );
-      return 0;
+      return valid ? 0 : 1;
     }
 
     let caseId = parsed.values.case;

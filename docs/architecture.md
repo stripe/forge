@@ -522,6 +522,23 @@ separately from untested model auth and dispose temporary runtimes on all paths.
 Setup can have external side effects, so host validation is explicit. Ordinary
 validation stays pure; host validation supports the same selection filters.
 
+The separate opt-in `validate --probe-models` runs after all selected plans
+pass pure preflight. Agent adapters and completion providers may expose
+`probeModel`, a pure factory returning a `ModelProbe` with a credential-free
+endpoint and an authority-bearing `run` method. These contracts are exported
+from the package root. The CLI rejects selected implementations without this
+capability before credential lookup, prints all targets, then runs probes in
+order. Built-ins resolve only their model credential through the supplied
+resolver and send one fixed prompt directly to their configured API, with no
+case content or runtime allocation. Ava and judge probes reuse each provider's
+structured request serialization and response parsing, and validate the test
+object locally. Results contain only bounded classifications, never provider
+bodies or credential errors; probes follow no redirects, read at most 64 KiB,
+and allow at most one minute per request (or a lower provider timeout).
+Probes do not change plans, artifacts, or scoring. They test model access and
+host structured output, not native CLI behavior or runtime connectivity; see
+the [validation workflow](../README.md#run-your-first-experiment).
+
 The Claude agent coordinate `disable_experimental_betas: true` opts into its
 native compatibility environment setting. The CLI can resolve it from
 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` (`0` clears it). It participates in
@@ -1684,7 +1701,8 @@ The public CLI in [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/c
 engine APIs:
 
 - `validate` loads inputs, expands every selection, resolves plans, constructs
-  the default composition, and runs pure preflight;
+  the default composition, and runs pure preflight; optional model probes test
+  selected endpoints, while `--host` checks runtime readiness;
 - `plan` selects one entry and prints canonical plan JSON; and
 - `run` supplies its argument validation and input loader to the shared
   experiment run command stage for bounded execution and explicit resume.

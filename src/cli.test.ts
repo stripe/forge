@@ -14,6 +14,7 @@ import type { AgentAdapter } from './contracts/agent.ts';
 import type { CompletionProvider } from './contracts/completion.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
+import type { ModelProbeOutcome } from './contracts/modelProbe.ts';
 import { CredentialReferenceConflictError } from './credentialDeclarations.ts';
 import {
   createForgeEngine,
@@ -143,6 +144,278 @@ afterEach(async () => {
 });
 
 describe('Forge CLI', () => {
+  it('prints all distinct selected probes before authority and returns their outcomes', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    let stderr = '';
+    let stdout = '';
+    let calls = 0;
+    const targets: string[] = [];
+    const code = await runCli(
+      [
+        'validate',
+        '--probe-models',
+        '--experiment',
+        fixture.experimentPath,
+        '--agent',
+        'claude-code',
+        '--model',
+        'claude-opus-4-6',
+        '--treatment',
+        'enhanced',
+      ],
+      {
+        environment: {},
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        compositionFactory: async (options) => {
+          const base = await createDefaultCliComposition(options);
+          const agent = base.agents.get('claude-code')!;
+          return {
+            ...base,
+            credentialResolver: {
+              resolve: async () => {
+                assert.fail('no real credentials');
+              },
+            },
+            runtime: {
+              ...base.runtime,
+              prepare: async () => {
+                assert.fail('no runtime');
+              },
+            },
+            agents: new Map([
+              [
+                'claude-code',
+                {
+                  ...agent,
+                  probeModel: (selection) => {
+                    targets.push(selection.model);
+                    return {
+                      endpoint: 'https://models.example/v1/messages',
+                      run: async () => {
+                        calls++;
+                        assert.match(stderr, /small paid requests/);
+                        assert.match(stderr, /claude-opus-4-6/);
+                        assert.doesNotMatch(stderr, /claude-sonnet/);
+                        return 'ok' as const;
+                      },
+                    };
+                  },
+                },
+              ],
+            ]),
+          };
+        },
+      },
+    );
+    assert.equal(code, 0, stderr);
+    assert.ok(targets.length > 0);
+    assert.ok(targets.every((target) => target === 'claude-opus-4-6'));
+    assert.equal(calls, 1);
+    const result = JSON.parse(stdout);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.model_probes, [
+      {
+        purpose: 'agent',
+        adapter: 'claude-code',
+        provider: 'anthropic',
+        model: 'claude-opus-4-6',
+        outcome: 'ok',
+      },
+    ]);
+    assert.equal(result.run_count, 1);
+  });
+
+  for (const outcome of [
+    'unknown_model',
+    'auth',
+    'missing_structured_output',
+    'rate_limited',
+    'timeout',
+    'other',
+  ] as const) {
+    it(`exits nonzero for ${outcome} without exposing raw failures`, async () => {
+      const fixture = await createBenchmarkFixture();
+      let stdout = '';
+      assert.equal(
+        await runCli(
+          [
+            'validate',
+            '--probe-models',
+            '--experiment',
+            fixture.experimentPath,
+          ],
+          {
+            environment: {},
+            stdout: (text) => {
+              stdout += text;
+            },
+            stderr: () => undefined,
+            compositionFactory: async (options) => {
+              const base = await createDefaultCliComposition(options);
+              const agent = base.agents.get('claude-code')!;
+              return {
+                ...base,
+                agents: new Map([
+                  [
+                    'claude-code',
+                    {
+                      ...agent,
+                      probeModel: () => ({
+                        endpoint: 'https://models.example',
+                        run: async (): Promise<ModelProbeOutcome> => outcome,
+                      }),
+                    },
+                  ],
+                ]),
+              };
+            },
+          },
+        ),
+        1,
+      );
+      assert.equal(JSON.parse(stdout).valid, false);
+      assert.equal(JSON.parse(stdout).model_probes[0].outcome, outcome);
+    });
+  }
+
+  it('probes Ava and judge separately, deduplicating cases and repetitions', async () => {
+    const fixture = await createBenchmarkFixture({ repetitions: 2 });
+    await fs.writeFile(
+      fixture.caseFilePath,
+      `id: case/example
+version: 0.1.0
+task: Synthetic private task
+execution_mode: multi_turn
+setup: []
+judging_criteria: [The task is complete.]
+`,
+    );
+    let calls = 0;
+    let stderr = '';
+    let stdout = '';
+    const code = await runCli(
+      ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+      {
+        environment: {},
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        compositionFactory: async (options) => {
+          const base = await createDefaultCliComposition(options);
+          const probe = {
+            endpoint: 'https://models.example',
+            run: async () => {
+              calls++;
+              assert.match(stderr, /"purpose":"agent"/);
+              assert.match(stderr, /"purpose":"role_player"/);
+              assert.match(stderr, /"purpose":"judge"/);
+              assert.doesNotMatch(stderr, /Synthetic private task/);
+              return 'ok' as const;
+            },
+          };
+          return {
+            ...base,
+            agents: new Map(
+              [...base.agents].map(([id, agent]) => [
+                id,
+                { ...agent, probeModel: () => probe },
+              ]),
+            ),
+            completionProviders: new Map([
+              [
+                'openai',
+                {
+                  id: 'openai',
+                  version: FORGE_VERSION,
+                  requirements: () => ({ credentials: {} }),
+                  complete: async () => {
+                    assert.fail('not an eval');
+                  },
+                  probeModel: () => probe,
+                },
+              ],
+            ]),
+          };
+        },
+      },
+    );
+    assert.equal(code, 0, stderr);
+    assert.equal(calls, 3);
+    assert.equal(JSON.parse(stdout).model_probes.length, 3);
+    assert.equal(JSON.parse(stdout).run_count, 2);
+  });
+
+  it('requires pure preflight and probe support before any credential lookup', async () => {
+    const fixture = await createBenchmarkFixture();
+    for (const unsupported of [true, false]) {
+      let calls = 0;
+      let stderr = '';
+      const code = await runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: {},
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          compositionFactory: async (options) => {
+            const base = await createDefaultCliComposition(options);
+            const original = base.agents.get('claude-code')!;
+            const agent: AgentAdapter = { ...original };
+            delete (agent as { probeModel?: unknown }).probeModel;
+            return {
+              ...base,
+              agents: new Map([
+                [
+                  'claude-code',
+                  unsupported
+                    ? agent
+                    : {
+                        ...original,
+                        probeModel: () => ({
+                          endpoint: 'https://models.example',
+                          run: async () => {
+                            calls++;
+                            return 'ok';
+                          },
+                        }),
+                      },
+                ],
+              ]),
+              credentialResolver: {
+                resolve: async () => {
+                  calls++;
+                  return 'secret';
+                },
+              },
+              runtime: {
+                ...base.runtime,
+                preflight: (input) => {
+                  if (!unsupported) throw new Error('Invalid runtime');
+                  return base.runtime.preflight(input);
+                },
+              },
+            };
+          },
+        },
+      );
+      assert.equal(code, 1);
+      assert.equal(calls, 0);
+      assert.match(
+        stderr,
+        unsupported ? /does not support model probes/ : /could not execute/,
+      );
+    }
+  });
+
   it('targets named groups, intersects selectors, and preserves saved group identity on resume', async () => {
     const fixture = await createGroupedBenchmarkFixture();
     const config = parseExperimentConfigYaml(
