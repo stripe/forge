@@ -959,8 +959,11 @@ semantics can be normalized faithfully.
 
 Codex selects a single matching root UUID rollout under its isolated
 `CODEX_HOME/sessions`, validates session metadata, and records source format
-`codex-rollout-jsonl`. Actual user turns are distinguished from injected
-AGENTS.md and environment context, which become system steps. Function and
+`codex-rollout-jsonl`. The exported evidence loader defaults to primary `exec`
+sessions; embedding hosts can explicitly set `sessionSource: 'cli'` to normalize
+primary terminal sessions without changing their native bytes. Session identity,
+version, and subagent exclusions still apply. Actual user turns are distinguished
+from injected AGENTS.md and environment context, which become system steps. Function and
 custom-tool calls retain native call IDs, arguments, and correlated outputs;
 tool-search calls and returned tool definitions remain correlated tool behavior.
 Every MCP call requires a matching `McpToolCall` completion snapshot verified
