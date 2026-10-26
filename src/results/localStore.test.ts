@@ -969,6 +969,43 @@ describe('local artifact store', () => {
       parseRunResult({ ...result, completion_calls: calls }).completion_calls,
       calls,
     );
+    const observedCall = {
+      ...calls[1]!,
+      http_status: 429,
+      request_id: 'req_synthetic',
+      provider_error_code: 'rate_limit_error',
+      retry_ordinal: 0,
+      retry_wait_ms: 2000,
+      disposition: 'rate_limit_retry',
+    };
+    const observed = parseRunResult({
+      ...result,
+      completion_calls: [call, observedCall],
+      completion_call_totals: {
+        calls: 2,
+        failed: 1,
+        omitted: 0,
+        rate_limit_wait_ms: 2000,
+      },
+    });
+    assert.equal(observed.completion_calls[1]!.retry_wait_ms, 2000);
+    assert.equal(observed.completion_call_totals!.rate_limit_wait_ms, 2000);
+    for (const extra of [
+      { http_status: 999 },
+      { request_id: 'bad request id' },
+      { provider_error_code: 'arbitrary' },
+      { retry_wait_ms: 64001 },
+      { retry_ordinal: -1 },
+      { disposition: 'arbitrary' },
+      { body: 'not allowed' },
+    ]) {
+      assert.throws(() =>
+        parseRunResult({
+          ...result,
+          completion_calls: [call, { ...observedCall, ...extra }],
+        }),
+      );
+    }
     assert.throws(
       () =>
         parseRunResult({

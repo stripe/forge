@@ -154,6 +154,8 @@ try {
       for (const removed of ['@stripe/forge/campaign', '@stripe/forge/campaign/cli']) {
         await assert.rejects(import(removed), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
       }
+      assert.equal(typeof forge.CompletionInvocationError, 'function');
+      assert.equal(forge.MAX_COMPLETION_CALL_SUMMARIES, 1024);
       assert.equal(typeof regrade.regradeCompletedRun, 'function');
       assert.equal(typeof regrade.regradeExperimentRun, 'function');
       assert.equal(typeof regrade.judgeInputFromSavedRun, 'function');

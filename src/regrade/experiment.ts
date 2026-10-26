@@ -207,11 +207,17 @@ export async function regradeExperimentRun(
       });
       continue;
     }
-    const evaluation =
+    const regrade =
       regraded?.kind === 'regraded' || regraded?.kind === 'reused'
-        ? regraded.regrade.evaluation
-        : (await engine.verifyCompletedRun(outcome.artifact!.location)).result
-            .evaluation;
+        ? regraded.regrade
+        : undefined;
+    const saved =
+      regrade === undefined
+        ? (await engine.verifyCompletedRun(outcome.artifact!.location)).result
+        : undefined;
+    const evaluation = regrade?.evaluation ?? saved!.evaluation;
+    const totals =
+      regrade?.completion_call_totals ?? saved?.completion_call_totals;
     runs.push({
       ...base,
       run_id: outcome.run_id,
@@ -219,6 +225,9 @@ export async function regradeExperimentRun(
       error_code: null,
       result_path: resultPath,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(totals === undefined
+        ? {}
+        : { rate_limit_wait_ms: totals.rate_limit_wait_ms }),
     });
   }
   const generatedAt = now().toISOString();

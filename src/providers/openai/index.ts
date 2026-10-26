@@ -8,6 +8,7 @@ import type {
   CompletionStopReason,
   StrictCompletionResponseSchema,
 } from '../../contracts/completion.ts';
+import type { CompletionTransportObservation } from '../../contracts/completionObservation.ts';
 import {
   type CredentialReference,
   credentialReference,
@@ -15,6 +16,7 @@ import {
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type { ModelRefV1 } from '../../model/types.ts';
 import { FORGE_VERSION } from '../../version.ts';
+import { observeCompletionFailure } from '../transportObservation.ts';
 
 export const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1' as const;
 export const OPENAI_MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -53,6 +55,7 @@ export class OpenAICompletionError extends Error {
   constructor(
     readonly code: OpenAICompletionErrorCode,
     message: string,
+    readonly observation?: CompletionTransportObservation,
   ) {
     super(message);
     this.name = 'OpenAICompletionError';
@@ -134,10 +137,15 @@ export function createOpenAICompletionProvider(
         throw transportError(request.signal, timeoutSignal);
       }
       if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
+        const observation = await observeCompletionFailure(
+          response,
+          'openai',
+          signal,
+        );
         throw new OpenAICompletionError(
           'http_error',
           `OpenAI completion request failed with HTTP ${response.status}.`,
+          observation,
         );
       }
       let raw: string;

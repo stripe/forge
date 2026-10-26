@@ -22,6 +22,7 @@ import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
 import type {
   CompletionCallSummaryV1,
+  CompletionCallTotalsV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
   RunResultV1,
@@ -46,6 +47,7 @@ export interface RegradeResultV1 {
   /** Regraded criteria plus the run's original deterministic check results. */
   readonly evaluation: EvaluationResultV1;
   readonly completion_calls: readonly CompletionCallSummaryV1[];
+  readonly completion_call_totals?: CompletionCallTotalsV1;
   readonly regraded_at: string;
   readonly forge: ForgeBuildIdentity;
 }
@@ -144,6 +146,7 @@ export async function regradeCompletedRun(
         .content,
     {
       redactionSecrets: completions.secrets,
+      onRetryDecision: completions.recordRetryDecision,
       ...(input.waitBeforeJudgeRetry === undefined
         ? {}
         : { waitBeforeRetry: input.waitBeforeJudgeRetry }),
@@ -169,6 +172,7 @@ export async function regradeCompletedRun(
     }),
     evaluation,
     completion_calls: completions.calls,
+    completion_call_totals: completions.totals,
     regraded_at: (input.now ?? (() => new Date()))().toISOString(),
     forge: FORGE_BUILD_IDENTITY,
   });

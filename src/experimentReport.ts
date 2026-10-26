@@ -147,6 +147,7 @@ const runSchema = z
     diagnostic: experimentRunDiagnosticSchema.optional(),
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
+    rate_limit_wait_ms: count.optional(),
     evaluation: evaluationSchema.nullable(),
   })
   .strict()
@@ -172,6 +173,7 @@ const runSchema = z
   });
 const statisticsSchema = z
   .object({
+    rate_limit_wait_ms: count.optional(),
     selections: count,
     completed: count,
     errored: count,
@@ -403,6 +405,14 @@ function statistics(
     }
   }
   return {
+    ...(runs.some((run) => run.rate_limit_wait_ms !== undefined)
+      ? {
+          rate_limit_wait_ms: runs.reduce(
+            (total, run) => total + (run.rate_limit_wait_ms ?? 0),
+            0,
+          ),
+        }
+      : {}),
     selections: runs.length,
     completed,
     errored,

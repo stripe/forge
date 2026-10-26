@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { assertBoundedJsonValue } from '../atif/parser.ts';
 import {
+  completionTransportObservationSchema,
+  MAX_COMPLETION_RETRY_WAIT_MS,
+} from '../contracts/completionObservation.ts';
+import {
   agentAdapterMetadataSchema,
   completionProviderMetadataSchema,
 } from '../contracts/metadata.ts';
@@ -226,7 +230,7 @@ const criterionResult = z
         error: z
           .object({
             type: z.enum(['parse_error', 'request_error']),
-            attempts: z.number().int().min(1).max(3),
+            attempts: z.number().int().min(1).max(10),
             message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
           })
           .strict(),
@@ -495,6 +499,21 @@ const completionCallSummary = z
     cached_tokens: z.number().int().nonnegative().nullable(),
     cost_usd: z.number().finite().nonnegative().nullable(),
     error_code: safeText.nullable(),
+    http_status:
+      completionTransportObservationSchema.shape.http_status.optional(),
+    request_id: completionTransportObservationSchema.shape.request_id,
+    provider_error_code:
+      completionTransportObservationSchema.shape.provider_error_code,
+    retry_ordinal: z.number().int().nonnegative().max(9).optional(),
+    retry_wait_ms: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_COMPLETION_RETRY_WAIT_MS)
+      .optional(),
+    disposition: z
+      .enum(['succeeded', 'failed', 'retry', 'rate_limit_retry', 'exhausted'])
+      .optional(),
   })
   .strict();
 
@@ -697,6 +716,15 @@ const runResultFields = {
       cost_usd: z.number().finite().nonnegative().nullable(),
     })
     .strict(),
+  completion_call_totals: z
+    .object({
+      calls: z.number().int().nonnegative().safe(),
+      failed: z.number().int().nonnegative().safe(),
+      omitted: z.number().int().nonnegative().safe(),
+      rate_limit_wait_ms: z.number().int().nonnegative().safe(),
+    })
+    .strict()
+    .optional(),
   completion_calls: z
     .array(completionCallSummary)
     .superRefine((calls, context) => {
@@ -759,6 +787,30 @@ const runResultSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    const totals = value.completion_call_totals;
+    if (
+      totals !== undefined &&
+      (totals.calls !== value.completion_calls.length + totals.omitted ||
+        totals.failed > totals.calls ||
+        totals.failed <
+          value.completion_calls.filter((call) => call.status === 'failed')
+            .length ||
+        totals.rate_limit_wait_ms <
+          value.completion_calls.reduce(
+            (sum, call) =>
+              sum +
+              (call.disposition === 'rate_limit_retry'
+                ? (call.retry_wait_ms ?? 0)
+                : 0),
+            0,
+          ))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['completion_call_totals'],
+        message: 'Completion-call totals disagree with retained records.',
+      });
+    }
     if (value.stop_reason === 'role_player_error' && value.failure === null) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

@@ -1272,6 +1272,7 @@ describe('resumable CLI experiment runs', () => {
             new Error('unavailable'),
             new Error('unavailable'),
             new Error('unavailable'),
+            new Error('unavailable'),
           ],
         });
         return {
