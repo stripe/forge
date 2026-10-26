@@ -1761,7 +1761,9 @@ transport attribution. Nonzero tool exits are recorded without making the turn
 fatal. A nonzero process exit remains fatal even if its stdout parses; a parser
 rejection is retained alongside the process rejection. Rejections carry an
 adapter-owned code, a one-based line index when available, and a fixed schema
-path, never an untrusted field name. See the
+path, never an untrusted field name. An incomplete stream is rejected at end of
+stream without a line index; it does not make the last event a failure. Capture
+only reconstructs a rejected event at an observed, nonblank line. See the
 [typed record schemas](https://github.com/stripe/forge/blob/main/src/diagnostics/agent.ts).
 This diagnoses `codex exec --json` stdout; the native rollout reader in
 `evidence.ts` remains a separate source.
@@ -1783,9 +1785,9 @@ Restricted failure excerpts default to off. Hosts enable
 [run option](../README.md#results-and-scores). This policy never enters authored
 inputs, plans, or their digests. Stores must advertise `supportsRestrictedExcerpts`
 and honor the optional excerpt argument to `write`; otherwise restricted capture
-is marked unsupported. Only failed invocations retain excerpts: at most 128 KiB
-of the last 20 event excerpts plus the first failure/rejected event, and a 32 KiB
-stderr tail. Event text is individually bounded; truncation is explicit even
+is marked unsupported. Only the latest saved failed Codex invocation has excerpt
+references: at most 128 KiB of the last 20 event excerpts plus the first
+failure/rejected event, and a 32 KiB stderr tail. Event text is individually bounded; truncation is explicit even
 when fewer than 20 fit. Failure text gets space before preceding events. Each
 excerpt includes its line index, including malformed JSON. The operation label
 replaces argv. Redaction precedes truncation and retains overlap across stderr
@@ -1800,9 +1802,12 @@ a write is active. Restricted excerpts are synced and atomically renamed below
 `restricted/<sha256>.json` (CLI events) and `restricted/<sha256>.txt` (stderr)
 before their descriptors enter `attempt.json`. Reads verify their size and digest;
 missing or mismatched excerpts reject that diagnostic record independently of
-completed results. An interrupted write can leave unreferenced private files.
-The local store uses fixed or digest-derived filenames, private directories
-(`0700`), private files (`0600`), and rejects symlinks. One host process owns the
+completed results. Superseded excerpts and interrupted writes can leave
+unreferenced private files. The store keeps earlier digest files so readers
+holding older snapshots can still verify them; hosts own retention and deletion.
+The retained-byte cap covers the current snapshot and its references, not all
+historical files in the directory. The local store uses fixed or digest-derived
+filenames, private directories (`0700`), private files (`0600`), and rejects symlinks. One host process owns the
 root; the experiment lock supplies process exclusion. As with the result store,
 trusted host code must not replace ancestor directories during I/O.
 

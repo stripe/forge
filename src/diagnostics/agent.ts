@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 const count = z.number().int().nonnegative().safe();
+export const MAX_INVOCATION_RECORDS = 64;
+export const MAX_INVOCATION_EVENTS = 20;
+export const MAX_CLI_EVENT_EXCERPT_BYTES = 8192;
 export const MAX_AGENT_DIAGNOSTICS_BYTES = 64 * 1024;
 export const MAX_CLI_EXCERPT_BYTES = 128 * 1024;
 export const MAX_STDERR_EXCERPT_BYTES = 32 * 1024;
@@ -110,7 +113,7 @@ export const agentInvocationSchema = z
     event_count: count,
     tool_failure_count: count,
     last_completed_turn: count,
-    events: z.array(eventSummarySchema).max(20),
+    events: z.array(eventSummarySchema).max(MAX_INVOCATION_EVENTS),
     first_failure: eventSummarySchema.optional(),
     rejection: protocolRejectionSchema.optional(),
     extraction_rejection: protocolRejectionSchema.optional(),

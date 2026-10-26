@@ -12,6 +12,7 @@ import {
   type AgentDiagnosticsCapture,
   agentInvocationSchema,
   MAX_AGENT_DIAGNOSTICS_BYTES,
+  MAX_INVOCATION_RECORDS,
   type RestrictedAgentExcerpts,
 } from './agent.ts';
 import {
@@ -147,7 +148,7 @@ export function createAttemptRecorder(input: {
             records.sort((a, b) => a.sequence - b.sequence);
             let omitted = snapshot.agent_invocations_omitted ?? 0;
             while (
-              records.length > 64 ||
+              records.length > MAX_INVOCATION_RECORDS ||
               Buffer.byteLength(serializeCanonicalJson(records)) >
                 MAX_AGENT_DIAGNOSTICS_BYTES
             ) {

@@ -9,7 +9,9 @@ import {
   type AgentInvocationRecord,
   agentInvocationSchema,
   eventSummarySchema,
+  MAX_CLI_EVENT_EXCERPT_BYTES,
   MAX_CLI_EXCERPT_BYTES,
+  MAX_INVOCATION_EVENTS,
   MAX_STDERR_EXCERPT_BYTES,
   type ProtocolRejection,
 } from '../../diagnostics/agent.ts';
@@ -17,9 +19,11 @@ import {
   CodexStreamError,
   type CodexStreamOptions,
   isCodexAdvisory,
+  MAX_CODEX_STREAM_LINE_BYTES,
 } from './stream.ts';
 
-const MAX_LINE_BYTES = 1024 * 1024;
+const CLI_EXCERPT_METADATA_BYTES = 512;
+const MAX_ERROR_MESSAGE_CHARACTERS = 8192;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -29,7 +33,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function parseEvent(line: string): Record<string, unknown> | undefined {
   let event: Record<string, unknown> | undefined;
-  if (Buffer.byteLength(line) <= MAX_LINE_BYTES) {
+  if (Buffer.byteLength(line) <= MAX_CODEX_STREAM_LINE_BYTES) {
     try {
       event = record(JSON.parse(line));
     } catch {
@@ -78,7 +82,7 @@ function summarizeCodexEvent(
     if (typeof message === 'string') {
       const match =
         /\b(?:HTTP(?:\/\d(?:\.\d)?)?\s+|status(?:\s+code)?[ :]+)([1-5]\d\d)\b/i.exec(
-          message.slice(0, 8192),
+          message.slice(0, MAX_ERROR_MESSAGE_CHARACTERS),
         );
       if (match) httpStatus = Number(match[1]);
     }
@@ -144,6 +148,7 @@ export function createCodexInvocationCapture(input: {
   const excerpts: Array<{ line_index: number; text: string }> = [];
   let firstExcerpt: { line_index: number; text: string } | undefined;
   let eventsTruncated = false;
+  let observedStderr = false;
   const stderr = enabled
     ? input.capture!.redactedTail(MAX_STDERR_EXCERPT_BYTES)
     : undefined;
@@ -165,11 +170,11 @@ export function createCodexInvocationCapture(input: {
     const redacted = input.capture?.redact(line) ?? line;
     // JSON escaping can expand a text excerpt by six times.
     const bytes = Buffer.from(redacted);
-    if (bytes.length > 8192) eventsTruncated = true;
-    return {
-      line_index: lineIndex,
-      text: bytes.subarray(0, 8192).toString('utf8'),
-    };
+    if (bytes.length > MAX_CLI_EVENT_EXCERPT_BYTES) eventsTruncated = true;
+    let text = bytes.subarray(0, MAX_CLI_EVENT_EXCERPT_BYTES).toString('utf8');
+    while (Buffer.byteLength(text) > MAX_CLI_EVENT_EXCERPT_BYTES)
+      text = text.slice(0, -1);
+    return { line_index: lineIndex, text };
   }
   function onStdoutLine(line: string) {
     if (!line.trim()) {
@@ -194,7 +199,7 @@ export function createCodexInvocationCapture(input: {
     invocation = {
       ...invocation,
       event_count: summary.sequence,
-      events: [...invocation.events, summary].slice(-20),
+      events: [...invocation.events, summary].slice(-MAX_INVOCATION_EVENTS),
       tool_failure_count:
         invocation.tool_failure_count +
         (summary.tool_exit_code !== undefined && summary.tool_exit_code !== 0
@@ -213,11 +218,11 @@ export function createCodexInvocationCapture(input: {
       if (!firstExcerpt && isFailure) firstExcerpt = next;
       excerpts.push(next);
       while (
-        excerpts.length > 20 ||
+        excerpts.length > MAX_INVOCATION_EVENTS ||
         Buffer.byteLength(
           JSON.stringify({ failure: firstExcerpt, events: excerpts }),
         ) >
-          MAX_CLI_EXCERPT_BYTES - 512
+          MAX_CLI_EXCERPT_BYTES - CLI_EXCERPT_METADATA_BYTES
       ) {
         excerpts.shift();
         eventsTruncated = true;
@@ -232,7 +237,10 @@ export function createCodexInvocationCapture(input: {
     start: () => safeRecord(undefined, 'invocation_boundary'),
     onStdoutLine,
     onStderrChunk(chunk: string) {
-      stderr?.push(chunk);
+      if (stderr && chunk) {
+        observedStderr = true;
+        stderr.push(chunk);
+      }
     },
     async finish(details: {
       result?: CommandResult;
@@ -245,9 +253,11 @@ export function createCodexInvocationCapture(input: {
       const partial: CommandCapture | undefined =
         details.commandError?.capture ?? result?.capture;
       const stdout = details.stdout ?? partial?.stdout ?? result?.stdout ?? '';
+      const lines = stdout.split(/\r?\n/);
+      if (stdout.endsWith('\n')) lines.pop();
       // Older/custom runners may not deliver observation callbacks.
       if (invocation.event_count === 0 && stdout) {
-        for (const line of stdout.split(/\r?\n/)) onStdoutLine(line);
+        for (const line of lines) onStdoutLine(line);
       }
       if (
         enabled &&
@@ -255,9 +265,8 @@ export function createCodexInvocationCapture(input: {
         stdout &&
         !stdout.endsWith('\n')
       ) {
-        const lines = stdout.split(/\r?\n/);
         const lineIndex = lines.length;
-        const safe = input.capture!.redactedTail(8192);
+        const safe = input.capture!.redactedTail(MAX_CLI_EVENT_EXCERPT_BYTES);
         safe.push(lines.at(-1) ?? '');
         const replacement = {
           line_index: lineIndex,
@@ -274,11 +283,12 @@ export function createCodexInvocationCapture(input: {
       const parserFailure = details.extractionRejection ?? rejection;
       if (
         parserFailure?.line_index !== undefined &&
+        parserFailure.line_index <= invocation.event_count &&
         (invocation.first_failure === undefined ||
           parserFailure.line_index < invocation.first_failure.sequence)
       ) {
-        const line = stdout.split(/\r?\n/)[parserFailure.line_index - 1];
-        if (line !== undefined) {
+        const line = lines[parserFailure.line_index - 1];
+        if (line?.trim()) {
           invocation = {
             ...invocation,
             first_failure: summarizeCodexLine(
@@ -354,22 +364,14 @@ export function createCodexInvocationCapture(input: {
         await safeRecord(undefined, 'invocation_boundary');
         return;
       }
-      // Use the complete bounded stderr for overlap-safe redaction even for old runners.
-      const fallbackTail = input.capture!.redactedTail(
-        MAX_STDERR_EXCERPT_BYTES,
-      );
-      fallbackTail.push(partial?.stderr ?? result?.stderr ?? '');
-      const tail = (partial || result ? fallbackTail : stderr)?.finish(
-        process?.stderrTruncated,
-      ) ?? {
-        text: '',
-        truncated: false,
-      };
+      if (!observedStderr)
+        stderr!.push(partial?.stderr ?? result?.stderr ?? '');
+      const tail = stderr!.finish(process?.stderrTruncated);
       while (
         Buffer.byteLength(
           JSON.stringify({ failure: firstExcerpt, events: excerpts }),
         ) >
-        MAX_CLI_EXCERPT_BYTES - 512
+        MAX_CLI_EXCERPT_BYTES - CLI_EXCERPT_METADATA_BYTES
       ) {
         if (excerpts.length === 0) break;
         excerpts.shift();

@@ -21,6 +21,7 @@ import {
 import {
   agentInvocationSchema,
   MAX_AGENT_DIAGNOSTICS_BYTES,
+  MAX_INVOCATION_RECORDS,
   restrictedDescriptorSchema,
 } from './agent.ts';
 import { attemptTimingSchema } from './timing.ts';
@@ -77,7 +78,10 @@ const recordSchema = z
         restricted: z.enum(['disabled', 'enabled', 'unsupported']),
       })
       .strict(),
-    agent_invocations: z.array(agentInvocationSchema).max(64).optional(),
+    agent_invocations: z
+      .array(agentInvocationSchema)
+      .max(MAX_INVOCATION_RECORDS)
+      .optional(),
     agent_invocations_omitted: count.optional(),
     restricted: restrictedDescriptorSchema.optional(),
     completion_calls: z

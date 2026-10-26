@@ -653,8 +653,10 @@ To retain redacted failure excerpts, pass `--restricted-diagnostic-excerpts` to
 `forge run`, including on resume. It defaults to off and has no environment or
 benchmark setting. Excerpts of CLI events and stderr live under
 `diagnostics/<eval-run-id>/restricted/`; `attempt.json` names their size and
-SHA-256. They stay out of reports and progress output. Treat them as sensitive:
-exact credential redaction cannot remove all private data. Hosts own deletion.
+SHA-256. Only the latest saved failed Codex call has excerpt references. Older
+digest files can remain on disk for readers holding prior snapshots; hosts own
+deletion. Excerpts stay out of reports and progress output. Treat them as sensitive:
+exact credential redaction cannot remove all private data.
 See the [capture contract](docs/architecture.md#attempt-diagnostics) for bounds,
 embedding options, and capture gaps.
 

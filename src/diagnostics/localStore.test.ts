@@ -418,3 +418,57 @@ it('rejects missing excerpt companions instead of treating the attempt as absent
   );
   await assert.rejects(f.store.read(f.identity, f.signal), /missing/);
 });
+
+it('references only the latest failed invocation and preserves older digest files for prior snapshots', async () => {
+  const f = await fixture();
+  const recorder = createAttemptRecorder({
+    identity: f.identity,
+    write: createAttemptDiagnosticsWriter(f.store),
+  });
+  const capture = recorder.agentCapture([], true);
+  const bodies: RestrictedAgentExcerpts[] = [
+    {
+      cli_events: '{"failure":1}',
+      stderr: 'first tail',
+      events_truncated: false,
+      stderr_truncated: false,
+    },
+    {
+      cli_events: '{"failure":2}',
+      stderr: 'second tail',
+      events_truncated: false,
+      stderr_truncated: false,
+    },
+  ];
+  await recorder.start();
+  await capture.record(invocation, bodies[0]);
+  const first = (await f.store.read(f.identity, f.signal))!;
+  await capture.record({ ...invocation, sequence: 2 }, bodies[1]);
+  const latest = (await f.store.read(f.identity, f.signal))!;
+  assert.equal(latest.restricted!.invocation, 2);
+  assert.equal(latest.agent_invocations!.length, 2);
+  assert.notDeepEqual(latest.restricted, first.restricted);
+  const folder = path.join(
+    f.root,
+    'diagnostics',
+    f.identity.run_id,
+    'restricted',
+  );
+  for (const [record, body] of [
+    [first, bodies[0]!],
+    [latest, bodies[1]!],
+  ] as const) {
+    for (const [key, extension] of [
+      ['cli_events', 'json'],
+      ['stderr', 'txt'],
+    ] as const)
+      assert.equal(
+        await fs.readFile(
+          path.join(folder, `${record.restricted![key].sha256}.${extension}`),
+          'utf8',
+        ),
+        body[key],
+      );
+  }
+  assert.equal((await fs.readdir(folder)).length, 4);
+});

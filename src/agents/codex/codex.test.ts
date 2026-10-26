@@ -894,3 +894,75 @@ it('records the typed command failure and capture gap for a custom runner withou
   assert.equal(records.at(-1)!.capture, 'unsupported');
   assert.deepEqual(records.at(-1)!.process, { error_code: 'command_timeout' });
 });
+
+it.each([
+  { failure: 'command_timeout', ending: '' },
+  { failure: 'command_timeout', ending: '\n' },
+  { failure: 'command_aborted', ending: '' },
+  { failure: 'command_aborted', ending: '\n' },
+  { failure: 'nonzero_exit', ending: '' },
+  { failure: 'nonzero_exit', ending: '\n' },
+  { failure: 'command_start_failed', ending: '' },
+] as const)(
+  'keeps $failure with clean incomplete output unlocated (ending $ending)',
+  async ({ failure, ending }) => {
+    for (const callbacks of [false, true]) {
+      const lines =
+        failure === 'command_start_failed'
+          ? []
+          : completed().split('\n').slice(0, 2);
+      const stdout = lines.join('\n') + ending;
+      const records: AgentInvocationRecord[] = [];
+      let body: RestrictedAgentExcerpts | undefined;
+      const f = fixture({
+        command(call) {
+          if (callbacks)
+            for (const line of lines) call.options.onStdoutLine?.(line);
+          if (failure === 'nonzero_exit') return result(stdout, 1);
+          throw new CommandExecutionError('Command failed.', failure, {
+            capture: {
+              stdout,
+              stderr: '',
+              durationMs: 1,
+              stdoutBytes: Buffer.byteLength(stdout),
+              stderrBytes: 0,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            },
+          });
+        },
+      });
+      const session = await f.adapter.openSession({
+        ...f.sessionContext,
+        diagnostics: {
+          restrictedExcerpts: true,
+          redact: (text) => text,
+          redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+          async record(record, excerpts) {
+            records.push(record);
+            body = excerpts;
+          },
+        },
+      });
+      await assert.rejects(
+        session.send('task', { signal: new AbortController().signal }),
+      );
+      const last = records.at(-1)!;
+      assert.equal(last.state, 'failed');
+      assert.equal(session.sessionId(), undefined);
+      assert.equal(last.event_count, lines.length);
+      assert.equal(last.events.length, lines.length);
+      assert.equal(last.first_failure, undefined);
+      assert.equal(last.extraction_rejection?.code, 'invalid_event_order');
+      assert.equal(last.extraction_rejection?.line_index, undefined);
+      assert.equal(JSON.parse(body!.cli_events).failure, null);
+      if (failure === 'nonzero_exit') {
+        assert.equal(last.process?.exit_code, 1);
+        assert.equal(last.rejection?.code, 'process_nonzero_exit');
+      } else {
+        assert.equal(last.process?.error_code, failure);
+        assert.equal(last.rejection?.code, 'unknown');
+      }
+    }
+  },
+);

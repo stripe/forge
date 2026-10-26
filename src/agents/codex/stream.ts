@@ -5,7 +5,7 @@ import type { ProtocolRejection } from '../../diagnostics/agent.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;
-const MAX_STREAM_LINE_BYTES = 1024 * 1024;
+export const MAX_CODEX_STREAM_LINE_BYTES = 1024 * 1024;
 const MAX_GRAPH_NODES = 100_000;
 const MAX_GRAPH_DEPTH = 64;
 const MAX_TOOL_CALLS = 2_000;
@@ -59,7 +59,7 @@ function parseStream(
   stdout: string,
   expectedSessionId: string | undefined,
   options: CodexStreamOptions,
-  location: { line_index: number },
+  location: { line_index?: number },
 ): AgentTurn {
   if (
     expectedSessionId !== undefined &&
@@ -86,6 +86,7 @@ function parseStream(
 
   for (let end = 0; end <= stdout.length; end += 1) {
     if (end !== stdout.length && stdout.charCodeAt(end) !== 10) continue;
+    if (end === stdout.length && lineStart === end) break;
     lineCount += 1;
     location.line_index = lineCount;
     if (lineCount > MAX_STREAM_LINES) {
@@ -96,7 +97,7 @@ function parseStream(
     }
     const line = stdout.slice(lineStart, end);
     lineStart = end + 1;
-    if (Buffer.byteLength(line, 'utf8') > MAX_STREAM_LINE_BYTES) {
+    if (Buffer.byteLength(line, 'utf8') > MAX_CODEX_STREAM_LINE_BYTES) {
       throw new CodexStreamError(
         'Codex output contained an oversized line.',
         'output_limit',
@@ -216,9 +217,10 @@ function parseStream(
     }
   }
 
+  delete location.line_index;
   if (!completed || sessionId === undefined) {
     throw new CodexStreamError(
-      'Codex produced no completed turn with a valid session ID.',
+      'Codex stream ended without a completed turn with a valid session ID.',
       'invalid_event_order',
     );
   }
@@ -240,11 +242,11 @@ export function parseCodexStream(
   expectedSessionId?: string,
   options: CodexStreamOptions = {},
 ): AgentTurn {
-  const location = { line_index: 0 };
+  const location: { line_index?: number } = {};
   try {
     return parseStream(stdout, expectedSessionId, options, location);
   } catch (error) {
-    if (error instanceof CodexStreamError && location.line_index > 0)
+    if (error instanceof CodexStreamError && location.line_index !== undefined)
       Object.assign(error.rejection, location);
     throw error;
   }

@@ -388,3 +388,121 @@ it('treats advisory text as a failure outside its accepted context', async () =>
     assert.equal(final!.first_failure!.sequence, midTurn ? 3 : 2);
   }
 });
+
+it.each([
+  { stdout: '{"type":"turn.started"}', line: 2 },
+  { stdout: '{"type":"turn.started"}\n{"type":"turn.completed"}', line: 2 },
+  { stdout: '{"type":"turn.started"}\n\n', line: 2 },
+  { stdout: '{"type":"turn.started"}\n', line: 2 },
+])(
+  'does not synthesize a failed event at a blank or unobserved rejection line: $stdout',
+  async ({ stdout, line }) => {
+    let final: AgentInvocationRecord | undefined;
+    let body: RestrictedAgentExcerpts | undefined;
+    const capture = createCodexInvocationCapture({
+      sequence: 1,
+      resume: false,
+      cliVersion: '1',
+      capture: {
+        restrictedExcerpts: true,
+        redact: (text) => text,
+        redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+        async record(record, excerpts) {
+          final = record;
+          body = excerpts;
+        },
+      },
+    });
+    capture.onStdoutLine('{"type":"turn.started"}');
+    if (stdout.endsWith('\n\n')) capture.onStdoutLine('');
+    await capture.finish({
+      result: { stdout, stderr: '', exitCode: 1, durationMs: 1 },
+      rejection: { code: 'invalid_event_order', line_index: line },
+    });
+    assert.equal(final!.first_failure, undefined);
+    assert.equal(JSON.parse(body!.cli_events).failure, null);
+  },
+);
+
+it.each(['live', 'fallback', 'live_without_capture', 'truncated'] as const)(
+  'uses one overlap-safe stderr tail for %s output',
+  async (source) => {
+    let tails = 0;
+    let body: RestrictedAgentExcerpts | undefined;
+    const secret = 'credential-value';
+    const stderr =
+      source === 'truncated' ? 'prefix credential-' : `prefix ${secret}`;
+    const capture = createCodexInvocationCapture({
+      sequence: 1,
+      resume: false,
+      cliVersion: '1',
+      capture: {
+        restrictedExcerpts: true,
+        redact: (text) => redactSecrets(text, [secret]).value,
+        redactedTail: (maximumBytes) => {
+          tails++;
+          return createRedactedTail([secret], maximumBytes);
+        },
+        async record(_record, excerpts) {
+          body = excerpts;
+        },
+      },
+    });
+    if (source !== 'fallback') {
+      capture.onStderrChunk('prefix credential-');
+      if (source !== 'truncated') capture.onStderrChunk('value');
+    }
+    const partial = {
+      stdout: '',
+      stderr,
+      durationMs: 1,
+      stdoutBytes: 0,
+      stderrBytes: Buffer.byteLength(stderr),
+      stdoutTruncated: false,
+      stderrTruncated: source === 'truncated',
+    };
+    await capture.finish({
+      rejection: { code: 'unknown' },
+      ...(source === 'live_without_capture'
+        ? {}
+        : {
+            commandError: new CommandExecutionError(
+              'Command failed.',
+              'command_timeout',
+              { capture: partial },
+            ),
+          }),
+    });
+    assert.equal(tails, 1);
+    if (source === 'truncated') {
+      assert.ok('prefix '.startsWith(body!.stderr));
+      assert.equal(body!.stderr.includes('credential-'), false);
+    } else assert.equal(body!.stderr, 'prefix [REDACTED]');
+    assert.equal(body!.stderr_truncated, source === 'truncated');
+  },
+);
+
+it('keeps event excerpts within the byte cap when truncation splits a UTF-8 character', async () => {
+  let body: RestrictedAgentExcerpts | undefined;
+  const capture = createCodexInvocationCapture({
+    sequence: 1,
+    resume: false,
+    cliVersion: '1',
+    capture: {
+      restrictedExcerpts: true,
+      redact: (text) => text,
+      redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+      async record(_record, excerpts) {
+        body = excerpts;
+      },
+    },
+  });
+  const prefix = '{"type":"error","message":"';
+  const line = `${prefix}${'a'.repeat(8192 - Buffer.byteLength(prefix) - 1)}€"}`;
+  capture.onStdoutLine(line);
+  await capture.finish({ rejection: { code: 'turn_failed' } });
+  const excerpts = JSON.parse(body!.cli_events);
+  assert.equal(excerpts.truncated, true);
+  for (const entry of [excerpts.failure, ...excerpts.events])
+    assert.ok(Buffer.byteLength(entry.text) <= 8192);
+});
