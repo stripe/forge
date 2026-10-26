@@ -21,7 +21,10 @@ interface StreamItem {
   readonly toolCall?: AgentToolCall;
 }
 
-/** Parse one completed `codex exec --json` or `codex exec resume --json` invocation. */
+/**
+ * Parse one completed exec invocation. Usage is the native cumulative thread
+ * snapshot; AgentSession converts it to per-invocation counters before delivery.
+ */
 export function parseCodexStream(
   stdout: string,
   expectedSessionId?: string,

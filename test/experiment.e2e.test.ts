@@ -7,6 +7,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
 
+import { createClaudeCodeAdapter } from '../src/agents/claude-code/index.ts';
+import { createCodexAdapter } from '../src/agents/codex/index.ts';
+import { createOpenCodeAdapter } from '../src/agents/opencode/index.ts';
 import { type RunCliOptions, runCli } from '../src/cli.ts';
 import { credentialReference } from '../src/contracts/credentials.ts';
 import { defaultForgeEngine } from '../src/engine.ts';
@@ -31,6 +34,11 @@ import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
 } from '../src/testing/index.ts';
+import {
+  OPEN_CODE_MODEL,
+  OPEN_CODE_MODEL_PROFILE,
+  openCodeStream,
+} from './support/opencode.ts';
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
@@ -42,6 +50,210 @@ afterEach(async () => {
 });
 
 describe('resumable CLI experiment runs', () => {
+  for (const kind of ['codex', 'opencode', 'claude-code'] as const) {
+    it(`saves ${kind} invocation usage through resumed turns, reports and status`, async () => {
+      const fixture = await createFixture({ repetitions: 1 });
+      const config = parseExperimentConfigYaml(
+        await fs.readFile(fixture.experiment, 'utf8'),
+      );
+      assert.ok(config.matrix.groups === undefined);
+      const agent =
+        kind === 'codex'
+          ? createCodexAdapter()
+          : kind === 'opencode'
+            ? createOpenCodeAdapter({ baseUrl: 'https://api.example/v1' })
+            : createClaudeCodeAdapter({
+                sessionIdFactory: () => 'usage-session',
+              });
+      config.matrix.agents = [
+        {
+          adapter: kind,
+          provider:
+            kind === 'codex'
+              ? 'openai'
+              : kind === 'opencode'
+                ? 'openai-compatible'
+                : 'anthropic',
+          model: kind === 'opencode' ? OPEN_CODE_MODEL : 'test-model',
+          ...(kind === 'opencode'
+            ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+            : {}),
+        },
+      ];
+      config.models.role_player = { provider: 'scripted', model: 'role' };
+      await fs.writeFile(fixture.experiment, JSON.stringify(config));
+      const casePath = path.join(
+        path.dirname(fixture.experiment),
+        'dataset/cases/examples/hello-file.case.yaml',
+      );
+      await fs.writeFile(
+        casePath,
+        (await fs.readFile(casePath, 'utf8'))
+          .replace(/^initial_prompt:.*\n/m, '')
+          .replace(
+            'execution_mode: one_shot',
+            'execution_mode: multi_turn\nmax_turns: 3\ntask: Complete both parts.\ncontext: Ask for both parts.',
+          ),
+      );
+      let calls = 0;
+      const runtime = createFakeRuntimeAdapter({
+        async command(call) {
+          if (call.scope === 'uncredentialed')
+            return {
+              stdout:
+                kind === 'codex'
+                  ? 'codex-cli 0.149.0'
+                  : kind === 'opencode'
+                    ? '1.19.0'
+                    : '2.1.273 (Claude Code)',
+              stderr: '',
+              exitCode: 0,
+              durationMs: 1,
+            };
+          if (call.argv[1] === 'export')
+            return { stdout: '', stderr: '', exitCode: 1, durationMs: 1 };
+          calls += 1;
+          if (calls === 2)
+            assert.ok(
+              call.argv.includes(
+                kind === 'codex'
+                  ? 'resume'
+                  : kind === 'opencode'
+                    ? '--session'
+                    : '--resume',
+              ),
+            );
+          await runtime.runs[0]!.workspace.mutable.writeFile(
+            'hello.txt',
+            Buffer.from('hello, forge!\n'),
+          );
+          const stdout =
+            kind === 'codex'
+              ? [
+                  {
+                    type: 'thread.started',
+                    thread_id: '0199a213-81c0-7800-8aa1-bbab2a035a53',
+                  },
+                  { type: 'turn.started' },
+                  {
+                    type: 'item.completed',
+                    item: { id: 'answer', type: 'agent_message', text: 'Done' },
+                  },
+                  {
+                    type: 'turn.completed',
+                    usage: {
+                      input_tokens: calls === 1 ? 100 : 180,
+                      cached_input_tokens: calls === 1 ? 40 : 60,
+                      output_tokens: calls === 1 ? 20 : 35,
+                    },
+                  },
+                ]
+                  .map((event) => JSON.stringify(event))
+                  .join('\n')
+              : kind === 'opencode'
+                ? openCodeStream(
+                    { prompt: 'Continue', response: 'Done' },
+                    calls,
+                  )
+                : JSON.stringify({
+                    type: 'result',
+                    result: 'Done',
+                    session_id: 'usage-session',
+                    usage: {
+                      input_tokens: 60,
+                      cache_read_input_tokens: calls === 1 ? 40 : 20,
+                      output_tokens: calls === 1 ? 20 : 15,
+                      output_tokens_details: { thinking_tokens: 5 },
+                    },
+                  });
+          return { stdout, stderr: '', exitCode: 0, durationMs: 1 };
+        },
+      });
+      const completion = createScriptedCompletionProvider({
+        id: 'scripted',
+        responses: [
+          JSON.stringify({
+            user_needs: [{ description: 'Both parts', status: 'remaining' }],
+            message: 'Part one',
+          }),
+          JSON.stringify({
+            remaining_need_ids: ['need_1'],
+            message: 'Part two',
+          }),
+          JSON.stringify({ remaining_need_ids: [], message: '' }),
+        ],
+      });
+      const result = await fixture.run([], {
+        compositionFactory: async ({ resultsRoot }) => ({
+          runtime: runtime.adapter,
+          agents: new Map([[agent.id, agent]]),
+          completionProviders: new Map([
+            [completion.provider.id, completion.provider],
+          ]),
+          credentialResolver: createStaticCredentialResolver({
+            'openai.api-key': 'test-key',
+            'anthropic.api-key': 'test-key',
+            'opencode.api-key': 'test-key',
+          }),
+          inputProvider: createMemoryRunInputProvider(),
+          artifactStore: createArtifactStore({ root: resultsRoot }),
+        }),
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(calls, 2);
+      const events = (
+        await fs.readFile(path.join(fixture.root, 'events.jsonl'), 'utf8')
+      )
+        .trim()
+        .split('\n')
+        .map((line) => parseExperimentRunEvent(JSON.parse(line)));
+      const usageEvents = events.filter(
+        (event) => event.state === 'agent_usage',
+      );
+      assert.equal(usageEvents.length, 2);
+      assert.deepEqual(
+        usageEvents.map((event) => [
+          event.usage.input_tokens,
+          event.usage.output_tokens,
+        ]),
+        kind === 'opencode'
+          ? [
+              [16, 6],
+              [16, 6],
+            ]
+          : [
+              [100, 20],
+              [80, 15],
+            ],
+      );
+      const expected = {
+        input_tokens: kind === 'opencode' ? 32 : 180,
+        cached_input_tokens: kind === 'opencode' ? 12 : 60,
+        output_tokens: kind === 'opencode' ? 12 : 35,
+        reasoning_tokens: kind === 'opencode' ? 4 : null,
+      };
+      const checkpoint = await fixture.readCheckpoint();
+      const completed = await verifyCompletedRun(
+        path.join(
+          fixture.root,
+          'runs',
+          checkpoint.entries[0]!.attempts[0]!.run_id,
+        ),
+      );
+      assert.deepEqual(completed.result.agent.usage, expected);
+      const report = await readReport(fixture.root);
+      assert.deepEqual(report.agent_usage_by_model![0]!.usage, expected);
+      const status = await readExperimentRunStatus(
+        fixture.root,
+        () => new Date(events.at(-1)!.observed_at),
+      );
+      assert.equal(
+        status.token_rates!.models[0]!.tokens_per_minute,
+        kind === 'opencode' ? 44 : 215,
+      );
+    });
+  }
+
   it('isolates throwing usage progress callbacks from eval outcomes', async () => {
     const fixture = await createFixture({ repetitions: 1, usage: true });
     let observed = 0;

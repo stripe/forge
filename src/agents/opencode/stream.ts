@@ -122,9 +122,17 @@ export function parseOpenCodeStream(
               output_tokens: tokens.output ?? null,
               reasoning_tokens: tokens.reasoning ?? null,
             });
+            const output =
+              usage.output_tokens === null || usage.reasoning_tokens === null
+                ? null
+                : usage.output_tokens + usage.reasoning_tokens;
             usages.push(
               agentTokenUsageSchema.parse({
                 ...usage,
+                output_tokens:
+                  output !== null && Number.isSafeInteger(output)
+                    ? output
+                    : null,
                 input_tokens:
                   usage.input_tokens === null ||
                   usage.cached_input_tokens === null

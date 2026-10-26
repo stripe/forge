@@ -728,9 +728,16 @@ change the driver ledger.
 `AgentTurn.usage` optionally supplies `AgentTokenUsage`: strict nonnegative safe
 integer or null counters named `input_tokens`, `cached_input_tokens`,
 `output_tokens`, and `reasoning_tokens`. Input includes cache reads and writes;
-reasoning is a subset of output. Codex supplies terminal invocation usage;
-Claude Code supplies result usage with cache reads and creation added to input;
-OpenCode sums unique step-finish usage with cache reads and writes added to input.
+reasoning is a subset of output. Codex's stream parser returns cumulative thread
+snapshots. Its agent session subtracts the prior snapshot to report each invocation;
+a new thread starts from zero. An unknown counter or baseline, or a counter reset,
+makes that delta null. Each snapshot becomes the next baseline, so known counters
+can recover on the following invocation. Claude Code supplies per-invocation
+`result.usage` for the main agent loop, with cache reads and creation added to
+input. Its output already includes reasoning; the reasoning breakdown stays null.
+OpenCode sums unique step-finish usage with cache reads and writes added to input,
+and adds native reasoning to native output to make output inclusive. Missing output
+or reasoning leaves inclusive output null; an unsafe sum also becomes null.
 Unsupported counters remain null. Execution clones and freezes counters, sums
 them across completed turns into optional `result.agent.usage`, and emits an
 `agent_usage` observer event with a one-based turn index. An absent turn counter

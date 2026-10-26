@@ -591,3 +591,69 @@ http_headers={"X-Wrong"="synthetic-secret"}
     );
   });
 });
+
+it('converts cumulative snapshots to invocation deltas and recovers after resets or missing counters', async () => {
+  const snapshots = [
+    { input_tokens: 100, cached_input_tokens: 40, output_tokens: 20 },
+    {
+      input_tokens: 180,
+      cached_input_tokens: 60,
+      output_tokens: 35,
+      reasoning_output_tokens: 9,
+    },
+    {
+      input_tokens: 10,
+      cached_input_tokens: 2,
+      output_tokens: 3,
+      reasoning_output_tokens: 1,
+    },
+    {
+      input_tokens: 30,
+      cached_input_tokens: 8,
+      output_tokens: 10,
+      reasoning_output_tokens: 3,
+    },
+  ];
+  const test = fixture({
+    command() {
+      const events = completed()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      events.at(-1).usage = snapshots.shift();
+      return result(events.map((event) => JSON.stringify(event)).join('\n'));
+    },
+  });
+  const session = await test.adapter.openSession(test.sessionContext);
+  const usages = [];
+  for (let i = 0; i < 4; i++)
+    usages.push(
+      (await session.send('Continue', { signal: test.sessionContext.signal }))
+        .usage,
+    );
+  assert.deepEqual(usages, [
+    {
+      input_tokens: 100,
+      cached_input_tokens: 40,
+      output_tokens: 20,
+      reasoning_tokens: null,
+    },
+    {
+      input_tokens: 80,
+      cached_input_tokens: 20,
+      output_tokens: 15,
+      reasoning_tokens: null,
+    },
+    {
+      input_tokens: null,
+      cached_input_tokens: null,
+      output_tokens: null,
+      reasoning_tokens: null,
+    },
+    {
+      input_tokens: 20,
+      cached_input_tokens: 6,
+      output_tokens: 7,
+      reasoning_tokens: 2,
+    },
+  ]);
+});

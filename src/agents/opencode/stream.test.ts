@@ -241,7 +241,7 @@ it('sums OpenCode steps once and preserves unknown usage in a step', () => {
   const expected = {
     input_tokens: 16,
     cached_input_tokens: 6,
-    output_tokens: 4,
+    output_tokens: 6,
     reasoning_tokens: 2,
   };
   assert.deepEqual(parseOpenCodeStream(encode(events)).usage, expected);
@@ -270,4 +270,25 @@ it('sums OpenCode steps once and preserves unknown usage in a step', () => {
       OpenCodeStreamError,
     );
   }
+});
+
+it('leaves inclusive OpenCode output unknown when a component is missing or overflows', () => {
+  for (const tokens of [
+    { output: 2 },
+    { reasoning: 1 },
+    { output: Number.MAX_SAFE_INTEGER, reasoning: 1 },
+  ]) {
+    const events = structuredClone(openCodeEvents(turn));
+    for (const event of events)
+      if (event.type === 'step_finish') event.part.tokens = tokens;
+    assert.equal(
+      parseOpenCodeStream(encode(events)).usage!.output_tokens,
+      null,
+    );
+  }
+  const events = structuredClone(openCodeEvents(turn));
+  for (const event of events)
+    if (event.type === 'step_finish')
+      event.part.tokens = { output: 0, reasoning: 0 };
+  assert.equal(parseOpenCodeStream(encode(events)).usage!.output_tokens, 0);
 });
