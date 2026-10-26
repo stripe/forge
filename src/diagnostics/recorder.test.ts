@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
 import { afterEach, describe, it, vi } from 'vitest';
 import type { AttemptDiagnosticsStore } from '../contracts/attemptDiagnostics.ts';
+import { createAttemptDiagnosticsWriter } from '../execution/diagnosticsIO.ts';
 import type { CompletionCallSummaryV1 } from '../results/types.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
 import {
@@ -9,7 +11,19 @@ import {
   MAX_ATTEMPT_COMPLETION_SUMMARIES,
   parseAttemptDiagnostics,
 } from './model.ts';
-import { createAttemptRecorder } from './recorder.ts';
+import { createAttemptRecorder as createRecorder } from './recorder.ts';
+
+function createAttemptRecorder(
+  input: Omit<Parameters<typeof createRecorder>[0], 'write'> & {
+    store?: AttemptDiagnosticsStore;
+  },
+) {
+  const { store, ...options } = input;
+  return createRecorder({
+    ...options,
+    write: createAttemptDiagnosticsWriter(store),
+  });
+}
 
 afterEach(() => vi.useRealTimers());
 const identity = attemptDiagnosticsIdentity(
@@ -65,7 +79,7 @@ describe('attempt recorder', () => {
     assert.deepEqual(final.cleanup_failures, ['runtime_dispose_failed']);
   });
 
-  it('bounds hung storage to one shared two-second budget and reports a generic warning once', async () => {
+  it('bounds hung progress and terminal storage separately within two seconds and warns once', async () => {
     vi.useFakeTimers();
     let writes = 0;
     let warnings = 0;
@@ -85,14 +99,116 @@ describe('attempt recorder', () => {
       },
     });
     const reserving = recorder.reserve();
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(1000);
     await reserving;
     await recorder.start();
-    await recorder.finish('completed');
-    assert.equal(writes, 1);
+    const failing = recorder.failure({
+      error_code: 'agent_failed',
+      phase: 'interaction',
+      reason: 'failure',
+      message: 'Agent failed.',
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await failing;
+    const finishing = recorder.finish('errored');
+    await vi.advanceTimersByTimeAsync(500);
+    await finishing;
+    assert.equal(writes, 3);
     assert.equal(warnings, 1);
     assert.equal(signal!.aborted, true);
     assert.equal(recorder.available, false);
+  });
+
+  it('reserves failure and terminal writes after slow progress exhausts its allowance', async () => {
+    let elapsed = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    const writes: AttemptDiagnosticsSnapshot[] = [];
+    const recorder = createAttemptRecorder({
+      identity,
+      store: {
+        async read() {
+          return undefined;
+        },
+        async write(snapshot) {
+          elapsed += 300;
+          writes.push(snapshot);
+          return parseAttemptDiagnostics({
+            ...snapshot,
+            revision: writes.length,
+          });
+        },
+      },
+    });
+    try {
+      await recorder.start();
+      for (let index = 0; index < 8; index++)
+        await recorder.phase('interaction');
+      assert.equal(writes.length, 4);
+      await recorder.failure({
+        error_code: 'agent_failed',
+        phase: 'interaction',
+        reason: 'failure',
+        message: 'Agent failed.',
+      });
+      assert.equal(writes.at(-1)!.primary_failure!.error_code, 'agent_failed');
+      recorder.cleanupCompleted();
+      await recorder.finish('errored');
+      assert.equal(writes.at(-1)!.state, 'errored');
+      assert.equal(writes.length, 6);
+      assert.equal(recorder.available, true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('ignores observations and lifecycle mutations after terminal publication', async () => {
+    let terminal: AttemptDiagnosticsSnapshot | undefined;
+    let writes = 0;
+    const recorder = createAttemptRecorder({
+      identity,
+      store: {
+        async read() {
+          return undefined;
+        },
+        async write(snapshot) {
+          writes++;
+          if (terminal) assert.deepEqual(snapshot, terminal);
+          if (snapshot.timing.finished_at) terminal = snapshot;
+          return parseAttemptDiagnostics({ ...snapshot, revision: writes });
+        },
+      },
+    });
+    await recorder.start();
+    await recorder.failure({
+      error_code: 'agent_failed',
+      phase: 'interaction',
+      reason: 'failure',
+      message: 'Agent failed.',
+    });
+    recorder.cleanupCompleted();
+    await recorder.finish('errored');
+    const saved = recorder.snapshot;
+    recorder.completions([], {
+      calls: 1,
+      failed: 1,
+      omitted: 1,
+      rate_limit_wait_ms: 0,
+    });
+    await recorder.start();
+    await recorder.phase('evidence');
+    await recorder.failure({
+      error_code: 'runtime_failed',
+      phase: 'evidence',
+      reason: 'failure',
+      message: 'Late failure.',
+    });
+    recorder.cleanupFailure('runtime_dispose_failed');
+    recorder.cleanupCompleted();
+    await recorder.flush();
+    assert.deepEqual(recorder.snapshot, saved);
+    assert.equal(writes, 3);
+    assert.equal(recorder.available, true);
+    assert.equal(recorder.recordingFailed, false);
   });
 
   it('preserves the first observed failure and terminal timestamp across repeated recording', async () => {

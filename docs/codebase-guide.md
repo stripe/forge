@@ -791,9 +791,11 @@ generic checksum utility.
 `model.ts` owns the strict attempt parser, identity checks, and size limits;
 `timing.ts` supplies UTC timing schemas shared with checkpoints and reports.
 `localStore.ts` serializes atomic, private snapshot writes independently of result
-transactions. `recorder.ts` owns the shared I/O budget and bounded completion
-projection. `experiment.ts` reserves attempts before dispatch and checks all saved
-diagnostic identities on resume; `execute.ts` flushes start, phases, first failure,
+transactions. `recorder.ts` owns the bounded completion projection and freezes
+finished state. `execution/diagnosticsIO.ts` owns the engine write budget, with
+reserved failure and terminal allowances. `experiment.ts` reserves attempts before
+dispatch and degrades unavailable history on resume while rejecting readable
+identity conflicts; `execute.ts` flushes start, phases, first failure,
 and cleanup. Recording failures must not change results. See the
 [attempt contract](architecture.md#attempt-diagnostics) for bounds and capture gaps.
 

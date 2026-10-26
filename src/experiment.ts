@@ -7,13 +7,17 @@ import type { ForgeComposition } from './contracts/composition.ts';
 import { createAttemptDiagnosticsStore } from './diagnostics/localStore.ts';
 import {
   type AttemptDiagnosticsIdentity,
+  AttemptDiagnosticsIdentityError,
+  assertAttemptDiagnosticsIdentity,
   attemptDiagnosticsIdentity,
+  parseAttemptDiagnostics,
 } from './diagnostics/model.ts';
+import { createAttemptRecorder } from './diagnostics/recorder.ts';
+import type { ForgeEngine } from './engine.ts';
 import {
   ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
-  createAttemptRecorder,
-} from './diagnostics/recorder.ts';
-import type { ForgeEngine } from './engine.ts';
+  createAttemptDiagnosticsWriter,
+} from './execution/diagnosticsIO.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import {
@@ -337,10 +341,9 @@ export async function runExperiment(
           ),
           options.signal,
         );
-        if (saved)
-          Object.assign(attempt, timingFields(saved.timing), {
-            diagnostics_status: 'available',
-          });
+        Object.assign(attempt, saved ? timingFields(saved.timing) : {}, {
+          diagnostics_status: saved ? 'available' : 'unavailable',
+        });
         if (saved?.primary_failure && attempt.state === 'running') {
           const { error_code, ...diagnostic } = saved.primary_failure;
           entry.attempts[attemptIndex] = {
@@ -462,7 +465,7 @@ export async function runExperiment(
                 options.plans[index]!,
                 experimentRun!.experiment_run_id,
               ),
-              store: diagnosticsStore,
+              write: createAttemptDiagnosticsWriter(diagnosticsStore),
               reservedAt,
             });
             await recorder.reserve();
@@ -995,7 +998,15 @@ async function readAttemptHistory(
       onAbort = () => reject(signal.reason);
       signal.addEventListener('abort', onAbort, { once: true });
     });
-    return await Promise.race([store.read(identity, signal), aborted]);
+    const input = await Promise.race([store.read(identity, signal), aborted]);
+    if (input === undefined) return undefined;
+    const record = parseAttemptDiagnostics(input);
+    assertAttemptDiagnosticsIdentity(record.identity, identity);
+    return record;
+  } catch (error) {
+    callerSignal.throwIfAborted();
+    if (error instanceof AttemptDiagnosticsIdentityError) throw error;
+    return undefined;
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);

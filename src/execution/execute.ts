@@ -151,6 +151,7 @@ import {
   type PreparedCompletionRuntime,
   prepareCompletionRuntime,
 } from './completionRuntime.ts';
+import { createAttemptDiagnosticsWriter } from './diagnosticsIO.ts';
 import {
   executionError,
   ForgeExecutionError,
@@ -336,7 +337,9 @@ export async function executeEvalWithTestHooks(
     createAttemptRecorder({
       identity: attemptDiagnosticsIdentity(input.runId, input.plan),
       reservedAt: startedAt.toISOString(),
-      store: input.composition.attemptDiagnosticsStore,
+      write: createAttemptDiagnosticsWriter(
+        input.composition.attemptDiagnosticsStore,
+      ),
     });
   assertAttemptDiagnosticsIdentity(
     diagnostics.snapshot.identity,

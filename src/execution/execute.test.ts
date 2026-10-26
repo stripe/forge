@@ -221,7 +221,7 @@ describe('executeEval', () => {
           (error: unknown) => ({ error }),
         );
         await entered;
-        await vi.advanceTimersByTimeAsync(mode === 'hung' ? 2000 : 750);
+        await vi.advanceTimersByTimeAsync(mode === 'hung' ? 1000 : 750);
         const settled = await outcome;
         assert.ok(
           'result' in settled,

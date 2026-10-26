@@ -153,6 +153,10 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof resolveManifestCaseIdFromFile, 'function');
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof rootExports.createAttemptDiagnosticsStore, 'function');
+    assert.equal(
+      typeof rootExports.AttemptDiagnosticsIdentityError,
+      'function',
+    );
     assert.equal(typeof rootExports.parseAttemptDiagnostics, 'function');
     assert.equal(typeof rootExports.serializeAttemptDiagnostics, 'function');
     assert.equal(typeof createForgeEngine, 'function');

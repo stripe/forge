@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
 import type { ForgeComposition } from './contracts/composition.ts';
+import type { RunEvent } from './contracts/observability.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import * as experimentRunExports from './experiment.ts';
 import {
@@ -100,22 +101,32 @@ describe('public experiment run API', () => {
             },
           },
         });
-        const rejected = assert.rejects(
-          resume,
-          mode === 'timeout'
-            ? /history read timed out/
-            : /Caller stopped resume/,
-        );
+        const settled =
+          mode === 'cancelled'
+            ? assert.rejects(resume, /Caller stopped resume/)
+            : resume.then((result) => {
+                assert.equal(result.skipped, 1);
+              });
         await entered.promise;
         await fs.stat(path.join(root, '.experiment.lock'));
         if (mode === 'timeout') await vi.advanceTimersByTimeAsync(2000);
         else controller.abort(new Error('Caller stopped resume'));
-        await rejected;
+        await settled;
         assert.equal(readSignal!.aborted, true);
         await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {
           code: 'ENOENT',
         });
-        assert.deepEqual(await fs.readFile(completed.checkpoint), before);
+        if (mode === 'cancelled')
+          assert.deepEqual(await fs.readFile(completed.checkpoint), before);
+        else {
+          const saved = JSON.parse(
+            await fs.readFile(completed.checkpoint, 'utf8'),
+          );
+          assert.equal(
+            saved.entries[0].attempts[0].diagnostics_status,
+            'unavailable',
+          );
+        }
       } finally {
         vi.useRealTimers();
       }
@@ -124,6 +135,209 @@ describe('public experiment run API', () => {
       assert.equal(retried.executed, 0);
     },
   );
+
+  it.each([
+    'missing',
+    'malformed',
+    'newer-schema',
+    'newer-producer',
+    'loose-file',
+    'loose-directory',
+    'another-user',
+    'permission-denied',
+    'hardlink',
+    'host-error',
+    'host-malformed',
+  ])('resumes verified work with unavailable %s diagnostics', async (mode) => {
+    const root = await experimentRunRoot();
+    const events: RunEvent[] = [];
+    const options: ExperimentRunOptions = {
+      root,
+      engine: defaultForgeEngine,
+      plans: [createTestResolvedRunPlan()],
+      composition: makeComposition(root),
+      resume: false,
+      signal: new AbortController().signal,
+      runIdFactory: () => 'saved-attempt',
+      progress: () => undefined,
+      execute: (input) => defaultForgeEngine.executeEval(input),
+    };
+    const completed = await runExperiment(options);
+    const resultPath = path.join(root, 'runs', 'saved-attempt', 'result.json');
+    const resultBytes = await fs.readFile(resultPath);
+    const file = path.join(
+      root,
+      'diagnostics',
+      'saved-attempt',
+      'attempt.json',
+    );
+    const record = JSON.parse(await fs.readFile(file, 'utf8'));
+    if (mode === 'missing') await fs.unlink(file);
+    if (mode === 'malformed') await fs.writeFile(file, '{"private":"truncated');
+    if (mode === 'newer-schema')
+      await fs.writeFile(
+        file,
+        JSON.stringify({ ...record, schema_version: 'forge-attempt-v99' }),
+      );
+    if (mode === 'newer-producer')
+      await fs.writeFile(
+        file,
+        JSON.stringify({
+          ...record,
+          identity: { ...record.identity, forge: { version: '99.0.0' } },
+        }),
+      );
+    if (mode === 'loose-file') await fs.chmod(file, 0o644);
+    if (mode === 'loose-directory') await fs.chmod(path.dirname(file), 0o755);
+    if (mode === 'permission-denied') await fs.chmod(file, 0o000);
+    if (mode === 'hardlink') await fs.link(file, path.join(root, 'copy.json'));
+    if (mode === 'another-user')
+      vi.spyOn(process, 'getuid').mockReturnValue(process.getuid!() + 1);
+    const composition = {
+      ...options.composition,
+      observer: {
+        observe(event: RunEvent) {
+          events.push(event);
+          return new Promise(() => undefined);
+        },
+      },
+      ...(mode.startsWith('host-')
+        ? {
+            attemptDiagnosticsStore: {
+              async read() {
+                if (mode === 'host-error')
+                  throw new Error('private storage detail');
+                return { private: 'invalid' } as never;
+              },
+              async write() {
+                throw new Error('Unexpected write');
+              },
+            },
+          }
+        : {}),
+    };
+    try {
+      const resumed = await runExperiment({
+        ...options,
+        composition,
+        resume: true,
+        execute: async () => {
+          throw new Error('Must reuse completed run');
+        },
+      });
+      assert.equal(resumed.skipped, 1);
+      assert.equal(resumed.executed, 0);
+      assert.deepEqual(await fs.readFile(resultPath), resultBytes);
+      const checkpoint = JSON.parse(
+        await fs.readFile(completed.checkpoint, 'utf8'),
+      );
+      const report = parseExperimentRunReport(
+        JSON.parse(await fs.readFile(completed.report, 'utf8')),
+      );
+      assert.equal(
+        checkpoint.entries[0].attempts[0].diagnostics_status,
+        'unavailable',
+      );
+      assert.equal(report.runs[0]!.diagnostics_status, 'unavailable');
+      assert.equal(events.length, 0);
+      assert.doesNotMatch(JSON.stringify(events), /private|truncated/);
+      await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {
+        code: 'ENOENT',
+      });
+    } finally {
+      vi.restoreAllMocks();
+      await fs.chmod(file, 0o600).catch(() => undefined);
+    }
+  });
+
+  it('retries failed work when its diagnostic history is malformed', async () => {
+    const root = await experimentRunRoot();
+    let id = 0;
+    let fail = true;
+    const options: ExperimentRunOptions = {
+      root,
+      engine: defaultForgeEngine,
+      plans: [createTestResolvedRunPlan()],
+      composition: makeComposition(root),
+      resume: false,
+      signal: new AbortController().signal,
+      runIdFactory: () => `attempt-${++id}`,
+      progress: () => undefined,
+      execute: async (input) => {
+        if (fail) throw new Error('Host execution failed');
+        return defaultForgeEngine.executeEval(input);
+      },
+    };
+    const failed = await runExperiment(options);
+    assert.equal(failed.errored, 1);
+    const file = path.join(root, 'diagnostics', 'attempt-1', 'attempt.json');
+    await fs.writeFile(file, '{');
+    fail = false;
+    const resumed = await runExperiment({ ...options, resume: true });
+    assert.equal(resumed.completed, 1);
+    assert.equal(resumed.executed, 1);
+    const saved = parseExperimentRunCheckpoint(
+      JSON.parse(await fs.readFile(failed.checkpoint, 'utf8')),
+    );
+    assert.equal(
+      saved.entries[0]!.attempts[0]!.diagnostics_status,
+      'unavailable',
+    );
+    assert.equal(saved.entries[0]!.attempts[0]!.state, 'errored');
+    assert.equal(await fs.readFile(file, 'utf8'), '{');
+    await fs.writeFile(
+      path.join(root, 'diagnostics', 'attempt-2', 'attempt.json'),
+      '{',
+    );
+    const skipped = await runExperiment({ ...options, resume: true });
+    assert.equal(skipped.skipped, 1);
+  });
+
+  it('rejects a readable conflicting host record and releases the lock', async () => {
+    const root = await experimentRunRoot();
+    const options: ExperimentRunOptions = {
+      root,
+      engine: defaultForgeEngine,
+      plans: [createTestResolvedRunPlan()],
+      composition: makeComposition(root),
+      resume: false,
+      signal: new AbortController().signal,
+      runIdFactory: () => 'saved-attempt',
+      progress: () => undefined,
+      execute: (input) => defaultForgeEngine.executeEval(input),
+    };
+    const completed = await runExperiment(options);
+    const before = await fs.readFile(completed.checkpoint);
+    const record = JSON.parse(
+      await fs.readFile(
+        path.join(root, 'diagnostics', 'saved-attempt', 'attempt.json'),
+        'utf8',
+      ),
+    );
+    record.identity.plan_sha256 = `sha256:${'f'.repeat(64)}`;
+    await assert.rejects(
+      runExperiment({
+        ...options,
+        resume: true,
+        composition: {
+          ...options.composition,
+          attemptDiagnosticsStore: {
+            async read() {
+              return record;
+            },
+            async write() {
+              throw new Error('Unexpected write');
+            },
+          },
+        },
+      }),
+      /identity does not match/,
+    );
+    await assert.rejects(fs.stat(path.join(root, '.experiment.lock')), {
+      code: 'ENOENT',
+    });
+    assert.deepEqual(await fs.readFile(completed.checkpoint), before);
+  });
 
   it('persists execution diagnostics without run artifacts and retains them in retry history', async () => {
     const root = await experimentRunRoot();

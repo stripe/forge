@@ -78,6 +78,7 @@ try {
       import * as testing from '@stripe/forge/testing';
       import packageMetadata from '@stripe/forge/package.json' with {type: 'json'};
       assert.equal(typeof forge.createAttemptDiagnosticsStore, 'function');
+      assert.equal(typeof forge.AttemptDiagnosticsIdentityError, 'function');
       assert.equal(typeof forge.parseAttemptDiagnostics, 'function');
       assert.equal(typeof forge.serializeAttemptDiagnostics, 'function');
 

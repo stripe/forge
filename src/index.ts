@@ -5,6 +5,7 @@ export { createAttemptDiagnosticsStore } from './diagnostics/localStore.ts';
 export {
   type AttemptCompletionSummary,
   type AttemptDiagnosticsIdentity,
+  AttemptDiagnosticsIdentityError,
   type AttemptDiagnosticsRecord,
   type AttemptDiagnosticsSnapshot,
   MAX_ATTEMPT_COMPLETION_SUMMARIES,

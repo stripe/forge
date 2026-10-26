@@ -1746,17 +1746,28 @@ a write is active. The local store uses fixed filenames, private directories
 root; the experiment lock supplies process exclusion. As with the result store,
 trusted host code must not replace ancestor directories during I/O.
 
-Reservation and execution share a fixed two-second total diagnostic I/O budget,
-independent of the run timeout. Awaited diagnostic writes pause the execution
-time allowance; caller cancellation remains active. Capture/storage failures yield a
-generic recording warning and never replace the execution failure or change committed artifacts or
-scores. Stores must honor cancellation before publishing a snapshot. Abrupt host
-loss can lose pending observations. Resume preserves historical diagnostics and
-verifies their identity separately from completed artifacts. Each history read is
-bounded to two seconds and caller cancellation. A read failure or identity mismatch
-stops resume and releases the experiment lock, leaving saved state intact.
-Diagnostics cannot satisfy completed-run verification and are never used for judging, fallback
-evidence, scoring, or regrade. Plan digests do not include observations.
+The engine partitions a fixed two-second total write allowance: one second for
+reservation and progress, half a second for the first failure, and half a second
+for terminal publication. Exhausted progress cannot consume the failure or
+terminal allowance. Awaited diagnostic writes pause the execution time allowance;
+caller cancellation remains active. Recording failures yield a generic warning
+without changing committed artifacts or scores. Diagnostic warnings do not await
+observers. Stores must honor cancellation before publishing a snapshot. Finished
+snapshots ignore late observations and lifecycle updates. Abrupt host loss can
+lose pending observations.
+
+Resume preserves historical files and checks supported, readable records against
+the selected attempt identity, separately from scored artifacts. Each history
+read is bounded to two seconds and caller cancellation. Missing, malformed,
+newer-format, unsafe-permission, unreadable, or timed-out diagnostics become
+`unavailable` in checkpoints and reports. Resume continues with at most one
+generic history warning per invocation; it does not repair or relax file modes.
+A readable conflicting identity stops resume and releases the lock. Custom stores
+signal that conflict with the exported `AttemptDiagnosticsIdentityError`; other
+read failures mean unavailable history. Returned host records are also parsed
+and identity-checked by the controller. Caller cancellation still stops resume.
+Diagnostics cannot satisfy completed-run verification and are never used for
+judging, fallback evidence, scoring, or regrade. Plan digests exclude observations.
 
 ### Completed-run verification
 

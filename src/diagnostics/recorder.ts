@@ -1,5 +1,4 @@
 import { performance } from 'node:perf_hooks';
-import type { AttemptDiagnosticsStore } from '../contracts/attemptDiagnostics.ts';
 import type { RunPhase } from '../contracts/observability.ts';
 import type {
   CompletionCallSummaryV1,
@@ -14,12 +13,14 @@ import {
   reservedAttemptDiagnostics,
 } from './model.ts';
 
-export const ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS = 2000;
+export type AttemptDiagnosticsWriter = (
+  snapshot: AttemptDiagnosticsSnapshot,
+) => Promise<boolean>;
 
 /** Execution owns this state; the store owns serialized publication and revisions. */
 export function createAttemptRecorder(input: {
   identity: AttemptDiagnosticsIdentity;
-  store?: AttemptDiagnosticsStore | undefined;
+  write?: AttemptDiagnosticsWriter | undefined;
   reservedAt?: string | undefined;
   now?: () => Date;
   monotonicNow?: () => number;
@@ -28,9 +29,9 @@ export function createAttemptRecorder(input: {
   const now = input.now ?? (() => new Date());
   const monotonicNow = input.monotonicNow ?? (() => performance.now());
   let start = monotonicNow();
-  let remaining = ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS;
   let warned = false;
   let available = false;
+  let terminalPublished = false;
   let writing: Promise<void> | undefined;
   let pending: AttemptDiagnosticsSnapshot | undefined;
   let snapshot = reservedAttemptDiagnostics(
@@ -44,7 +45,7 @@ export function createAttemptRecorder(input: {
     }
   }
   function flush(): Promise<void> {
-    if (warned || !input.store) return Promise.resolve();
+    if (!input.write || terminalPublished) return Promise.resolve();
     pending = structuredClone(snapshot);
     writing ??= drain().finally(() => {
       writing = undefined;
@@ -52,34 +53,18 @@ export function createAttemptRecorder(input: {
     return writing;
   }
   async function drain(): Promise<void> {
-    while (pending && !warned) {
+    while (pending) {
       const captured = pending;
       pending = undefined;
-      if (remaining <= 0) {
-        warn();
-        return;
-      }
-      const before = performance.now();
-      const controller = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (terminalPublished) continue;
       try {
-        await Promise.race([
-          input.store!.write(captured, controller.signal),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              remaining = 0;
-              controller.abort();
-              reject(new Error('Diagnostic I/O budget exhausted.'));
-            }, remaining);
-          }),
-        ]);
-        available = true;
+        available = await input.write!(captured);
+        if (available && captured.timing.finished_at !== undefined)
+          terminalPublished = true;
+        if (!available) warn();
       } catch {
         available = false;
         warn();
-      } finally {
-        clearTimeout(timer);
-        remaining = Math.max(0, remaining - (performance.now() - before));
       }
     }
     pending = undefined;
@@ -110,6 +95,7 @@ export function createAttemptRecorder(input: {
     flush,
     reserve: flush,
     async start(startedAt?: string, persist = true) {
+      if (snapshot.timing.finished_at !== undefined) return;
       start = monotonicNow();
       snapshot = {
         ...snapshot,
@@ -122,6 +108,7 @@ export function createAttemptRecorder(input: {
       if (persist) await flush();
     },
     async phase(phase: RunPhase) {
+      if (snapshot.timing.finished_at !== undefined) return;
       snapshot = { ...snapshot, location: { phase } };
       await flush();
     },
@@ -129,6 +116,7 @@ export function createAttemptRecorder(input: {
       calls: readonly CompletionCallSummaryV1[],
       totals: CompletionCallTotalsV1,
     ) {
+      if (snapshot.timing.finished_at !== undefined) return;
       const retained = calls
         .slice(0, MAX_ATTEMPT_COMPLETION_SUMMARIES)
         .map(
@@ -180,6 +168,7 @@ export function createAttemptRecorder(input: {
     async failure(
       failure: NonNullable<AttemptDiagnosticsSnapshot['primary_failure']>,
     ) {
+      if (snapshot.timing.finished_at !== undefined) return;
       if (snapshot.primary_failure) return flush();
       // The failure is flushed as active state before cleanup starts.
       mark('failure_observed');
@@ -189,6 +178,7 @@ export function createAttemptRecorder(input: {
     cleanupFailure(
       code: AttemptDiagnosticsSnapshot['cleanup_failures'][number],
     ) {
+      if (snapshot.timing.finished_at !== undefined) return;
       if (!snapshot.cleanup_failures.includes(code))
         snapshot = {
           ...snapshot,
@@ -196,6 +186,7 @@ export function createAttemptRecorder(input: {
         };
     },
     cleanupCompleted() {
+      if (snapshot.timing.finished_at !== undefined) return;
       mark('cleanup_completed');
     },
     async finish(state: 'completed' | 'errored') {

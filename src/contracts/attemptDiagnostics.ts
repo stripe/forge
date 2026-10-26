@@ -13,7 +13,10 @@ export interface AttemptDiagnosticsStore {
     snapshot: AttemptDiagnosticsSnapshot,
     signal: AbortSignal,
   ): Promise<AttemptDiagnosticsRecord>;
-  /** Missing records are supported. Existing records must match the entire supplied identity. */
+  /** Missing records are supported. Existing records must match the entire supplied identity.
+   * Throw AttemptDiagnosticsIdentityError for a readable conflicting record; other read
+   * failures degrade to unavailable history during resume.
+   */
   read(
     identity: AttemptDiagnosticsIdentity,
     signal: AbortSignal,

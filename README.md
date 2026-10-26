@@ -637,8 +637,11 @@ experiment run. It records reservation and execution start separately, the first
 failure, cleanup outcome, and finish time. Checkpoint attempts and report rows
 include known start/finish times and `diagnostics_status`. Missing times stay
 unknown. A killed process may leave a `reserved` or `running` snapshot; resume
-keeps it and checks its identity before retrying with a new ID. Recording can
-fail or time out, so absence of detail does not establish success. These records
+keeps it and checks its identity before retrying with a new ID. Unreadable or
+unsupported diagnostics, including files moved with different owners or modes,
+become `unavailable` without blocking resume. A readable identity conflict still
+stops resume. Recording can fail or time out, so absence of detail does not
+establish success. These records
 are owner-only, contain no raw process output, and never enter scoring or regrade.
 
 Ava and the judge back off through rate limits and temporary provider failures;

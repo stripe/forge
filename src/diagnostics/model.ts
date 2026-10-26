@@ -183,14 +183,22 @@ export function attemptDiagnosticsIdentity(
     forge: FORGE_BUILD_IDENTITY,
   });
 }
+/** A readable diagnostic record belongs to a different attempt. */
+export class AttemptDiagnosticsIdentityError extends Error {
+  constructor() {
+    super(
+      'Attempt diagnostic identity does not match the selected run and plan.',
+    );
+    this.name = 'AttemptDiagnosticsIdentityError';
+  }
+}
+
 export function assertAttemptDiagnosticsIdentity(
   actual: AttemptDiagnosticsIdentity,
   expected: AttemptDiagnosticsIdentity,
 ): void {
   if (serializeCanonicalJson(actual) !== serializeCanonicalJson(expected))
-    throw new Error(
-      'Attempt diagnostic identity does not match the selected run and plan.',
-    );
+    throw new AttemptDiagnosticsIdentityError();
 }
 export function reservedAttemptDiagnostics(
   identity: AttemptDiagnosticsIdentity,
