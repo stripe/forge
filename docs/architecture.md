@@ -990,19 +990,24 @@ later require a judge.
 not an adapter or completion-provider feature. The provider supplies only
 structured completions.
 
-Ava privately derives up to six high-level needs, each at most 240 characters,
-from the case task and context. Both initialization and continuation prompts
-present context as binding constraints: no need or demand may contradict it,
+Ava privately derives up to six high-level needs from the case task and context.
+Each has a description and an `acceptance` statement, each at most 240 characters.
+The runner freezes both at initialization. Continuation prompts judge against
+that acceptance statement and forbid adding conditions or requiring more detail
+once it is met. Both initialization and continuation prompts present context as
+binding constraints: no need or demand may contradict it,
 and any choice it allows satisfies the relevant need. It focuses on one
 remaining need at a time and emits user messages of at most 500 characters. Its
-private need model is never sent to the coding agent. Ava initializes before the first agent answer.
+private need model is never sent to the coding agent. Ava initializes before
+the first agent answer.
 With a configured initial prompt, a needs-only completion runs before that
 opening is sent verbatim; otherwise Ava generates the opening and needs together.
 The first agent answer follows the continuation path in both cases. Configured
 openings therefore cost one additional Ava call per eval.
 
-Runs produced before this initialization behavior changed have different Ava
-semantics. Plans record the Forge version, with no separate Ava version.
+Runs produced before needs were initialized ahead of the first answer and
+acceptance was fixed have different Ava semantics. Plans record the Forge version,
+with no separate Ava version.
 
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
 and sends through one agent session. Ava assesses every completed response,
@@ -1027,9 +1032,9 @@ using the same policy as criterion judging. Standalone Ava callers can provide
 `redactionSecrets` in execution options for custom invokers. These diagnostics
 do not change retries or stop semantics.
 
-`interaction.json` is a post-run audit of public turns plus Ava's need and
-decision history. It is never an execution input and is never supplied to the
-criterion judge.
+`interaction.json` is a post-run audit of public turns plus Ava's needs, their
+acceptance statements, and decision history. Older records may omit `acceptance`.
+It is never an execution input and is never supplied to the criterion judge.
 
 ### Host-side completion providers
 

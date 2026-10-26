@@ -203,7 +203,11 @@ export async function runCodexPluginIntegrationSuite({
         responses: [
           JSON.stringify({
             user_needs: [
-              { description: 'Complete two turns', status: 'remaining' },
+              {
+                description: 'Complete two turns',
+                acceptance: 'The fixture has run and been checked again.',
+                status: 'remaining',
+              },
             ],
             message: 'Run the fixture once.',
           }),

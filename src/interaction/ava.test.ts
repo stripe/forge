@@ -6,6 +6,7 @@ import {
   AvaRolePlayer,
   MAX_AVA_ATTEMPTS,
   MAX_AVA_MESSAGE_CHARACTERS,
+  MAX_AVA_NEED_ACCEPTANCE_CHARACTERS,
   MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
   MAX_AVA_NEEDS,
 } from './ava.ts';
@@ -53,10 +54,17 @@ function initialResponse(
   needs: Array<{
     description: string;
     status: 'remaining' | 'satisfied';
+    acceptance?: string;
   }>,
   message: string,
 ): string {
-  return JSON.stringify({ user_needs: needs, message });
+  return JSON.stringify({
+    user_needs: needs.map((need) => ({
+      acceptance: 'The requested outcome is complete.',
+      ...need,
+    })),
+    message,
+  });
 }
 
 function continuationResponse(
@@ -69,10 +77,12 @@ function continuationResponse(
 const TWO_NEEDS = [
   {
     description: 'Understand the desired checkout experience',
+    acceptance: 'The checkout flow is explained at a design level.',
     status: 'remaining' as const,
   },
   {
     description: 'Confirm the implementation was verified',
+    acceptance: 'The assistant reports a verification result.',
     status: 'remaining' as const,
   },
 ];
@@ -98,12 +108,28 @@ describe('AvaRolePlayer', () => {
       message: 'What should the checkout feel like?',
       stop: false,
       remainingNeeds: [
-        { id: 'need_1', description: TWO_NEEDS[0]!.description },
-        { id: 'need_2', description: TWO_NEEDS[1]!.description },
+        {
+          id: 'need_1',
+          description: TWO_NEEDS[0]!.description,
+          acceptance: TWO_NEEDS[0]!.acceptance,
+        },
+        {
+          id: 'need_2',
+          description: TWO_NEEDS[1]!.description,
+          acceptance: TWO_NEEDS[1]!.acceptance,
+        },
       ],
       needs: [
-        { id: 'need_1', description: TWO_NEEDS[0]!.description },
-        { id: 'need_2', description: TWO_NEEDS[1]!.description },
+        {
+          id: 'need_1',
+          description: TWO_NEEDS[0]!.description,
+          acceptance: TWO_NEEDS[0]!.acceptance,
+        },
+        {
+          id: 'need_2',
+          description: TWO_NEEDS[1]!.description,
+          acceptance: TWO_NEEDS[1]!.acceptance,
+        },
       ],
       focusNeedId: 'need_1',
       source: 'generated',
@@ -112,7 +138,7 @@ describe('AvaRolePlayer', () => {
     assert.equal(completion.calls.length, 1);
     const request = completion.calls[0]!;
     assert.equal(Object.hasOwn(request, 'temperature'), false);
-    assert.equal(request.maxTokens, 700);
+    assert.equal(request.maxTokens, 1400);
     assert.match(request.systemPrompt, /Add Checkout/);
     assert.match(request.systemPrompt, /Embrace reasonable human uncertainty/);
     assert.match(request.systemPrompt, /Never mention a checklist/);
@@ -130,7 +156,11 @@ describe('AvaRolePlayer', () => {
         user_needs: {
           maxItems: number;
           items: {
-            properties: { description: { maxLength: number; pattern: string } };
+            properties: {
+              description: { maxLength: number; pattern: string };
+              acceptance: { maxLength: number; pattern: string };
+            };
+            required: string[];
           };
         };
         message: { maxLength: number };
@@ -146,16 +176,33 @@ describe('AvaRolePlayer', () => {
       '\\S',
     );
     assert.equal(
+      schema.properties.user_needs.items.properties.acceptance.maxLength,
+      MAX_AVA_NEED_ACCEPTANCE_CHARACTERS,
+    );
+    assert.ok(
+      schema.properties.user_needs.items.required.includes('acceptance'),
+    );
+    assert.equal(
       schema.properties.message.maxLength,
       MAX_AVA_MESSAGE_CHARACTERS,
     );
   });
 
   it('initializes before a configured opening and continues after the first answer', async () => {
-    const need = { id: 'need_1', description: 'Finish the requested work' };
+    const need = {
+      id: 'need_1',
+      description: 'Finish the requested work',
+      acceptance: 'The requested work is complete.',
+    };
     const completion = scriptedCompletion(
       JSON.stringify({
-        user_needs: [{ description: need.description, status: 'remaining' }],
+        user_needs: [
+          {
+            description: need.description,
+            acceptance: need.acceptance,
+            status: 'remaining',
+          },
+        ],
       }),
       continuationResponse([], 'This closing prose is discarded.'),
     );
@@ -196,6 +243,107 @@ describe('AvaRolePlayer', () => {
     ]);
   });
 
+  for (const initialPrompt of [undefined, 'Please finish the work.']) {
+    const mode = initialPrompt === undefined ? 'generated' : 'configured';
+    it(`keeps acceptance frozen through a ${mode} conversation`, async () => {
+      const need = {
+        description: 'Complete the requested work',
+        acceptance: 'The requested output is present.',
+        status: 'remaining' as const,
+      };
+      const completion = scriptedCompletion(
+        JSON.stringify({
+          user_needs: [need],
+          ...(initialPrompt === undefined
+            ? { message: 'Please finish the work.' }
+            : {}),
+        }),
+        JSON.stringify({
+          remaining_need_ids: ['need_1'],
+          message: 'Please add the output.',
+          acceptance: 'Also publish the output.',
+        }),
+        continuationResponse(['need_1'], 'Please add the output.'),
+        continuationResponse([], ''),
+      );
+      const ava = new AvaRolePlayer(
+        {
+          task: 'Finish the work',
+          ...(initialPrompt === undefined ? {} : { initialPrompt }),
+        },
+        completion.invoke,
+        noRetryWait,
+      );
+      const opening = await ava.nextTurn();
+      assert.throws(() => {
+        (opening.needs![0] as { acceptance: string }).acceptance =
+          'Also publish the output.';
+      }, TypeError);
+      const followUp = await ava.nextTurn('The output is not present yet.');
+      const terminal = await ava.nextTurn('The output is present.');
+      assert.equal(terminal.stop, true);
+      assert.deepEqual(followUp.needs, opening.needs);
+      assert.deepEqual(terminal.needs, opening.needs);
+      assert.deepEqual(followUp.remainingNeeds, opening.needs);
+      assert.equal(completion.calls.length, 4);
+      for (const request of completion.calls.slice(1)) {
+        assert.ok(
+          request.systemPrompt.includes(`Acceptance: ${need.acceptance}`),
+        );
+        assert.match(request.systemPrompt, /Do not add conditions/);
+        assert.doesNotMatch(request.systemPrompt, /Also publish the output/);
+        assert.doesNotMatch(
+          JSON.stringify(request.messages),
+          /acceptance|requested output is present/,
+        );
+      }
+    });
+
+    it(`requires bounded acceptance in ${mode} initialization`, async () => {
+      for (const acceptance of [
+        undefined,
+        '',
+        '  ',
+        'x'.repeat(MAX_AVA_NEED_ACCEPTANCE_CHARACTERS + 1),
+        'x'.repeat(MAX_AVA_NEED_ACCEPTANCE_CHARACTERS),
+      ]) {
+        const completion = scriptedCompletion(
+          JSON.stringify({
+            user_needs: [
+              {
+                description: 'Complete the work',
+                status: 'remaining',
+                ...(acceptance === undefined ? {} : { acceptance }),
+              },
+            ],
+            ...(initialPrompt === undefined
+              ? { message: 'Please finish the work.' }
+              : {}),
+          }),
+        );
+        const turn = await new AvaRolePlayer(
+          {
+            task: 'Finish the work',
+            ...(initialPrompt === undefined ? {} : { initialPrompt }),
+          },
+          completion.invoke,
+          noRetryWait,
+        ).nextTurn();
+        if (acceptance?.length === MAX_AVA_NEED_ACCEPTANCE_CHARACTERS) {
+          assert.equal(turn.error, undefined);
+          assert.equal(turn.needs?.[0]?.acceptance, acceptance);
+        } else {
+          assert.equal(turn.error?.errorType, 'parse_error');
+          assert.match(
+            turn.error!.message!,
+            /response.user_needs\[0\].acceptance/,
+          );
+          assert.equal(turn.needs, null);
+        }
+      }
+    });
+  }
+
   it('fails before sending a configured opening if initialization is invalid', async () => {
     const completion = scriptedCompletion('{invalid');
     const turn = await new AvaRolePlayer(
@@ -225,7 +373,11 @@ describe('AvaRolePlayer', () => {
     const followUp = await ava.nextTurn('I implemented hosted Checkout.');
     assert.equal(followUp.focusNeedId, 'need_2');
     assert.deepEqual(followUp.remainingNeeds, [
-      { id: 'need_2', description: TWO_NEEDS[1]!.description },
+      {
+        id: 'need_2',
+        description: TWO_NEEDS[1]!.description,
+        acceptance: TWO_NEEDS[1]!.acceptance,
+      },
     ]);
     assert.equal(completion.calls[1]!.maxTokens, 400);
     assert.equal(completion.calls[1]!.responseSchema.name, 'ava_turn');
@@ -264,7 +416,11 @@ describe('AvaRolePlayer', () => {
     const followUp = await ava.nextTurn('Implemented checkout.');
     assert.equal(followUp.focusNeedId, 'need_2');
     assert.deepEqual(followUp.remainingNeeds, [
-      { id: 'need_2', description: TWO_NEEDS[1]!.description },
+      {
+        id: 'need_2',
+        description: TWO_NEEDS[1]!.description,
+        acceptance: TWO_NEEDS[1]!.acceptance,
+      },
     ]);
     const retried = await ava.nextTurn('I have not verified it yet.');
     assert.equal(retried.message, 'Could you verify the result?');
@@ -477,14 +633,26 @@ describe('AvaRolePlayer', () => {
       ['{secret-response', 'Ava response was not valid JSON.'],
       [
         JSON.stringify({
-          user_needs: [{ description: 'safe', status: 'secret-status' }],
+          user_needs: [
+            {
+              description: 'safe',
+              acceptance: 'The requested outcome is complete.',
+              status: 'secret-status',
+            },
+          ],
           message: 'Hi',
         }),
         'Ava response did not match the required schema at response.user_needs[0].status (invalid_value).',
       ],
       [
         JSON.stringify({
-          user_needs: [{ description: 'safe', status: 'remaining' }],
+          user_needs: [
+            {
+              description: 'safe',
+              acceptance: 'The requested outcome is complete.',
+              status: 'remaining',
+            },
+          ],
           message: 'Hi',
           'secret-key': true,
         }),

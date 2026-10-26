@@ -21,6 +21,7 @@ import {
 export const MAX_AVA_ATTEMPTS = 3;
 export const MAX_AVA_NEEDS = 6;
 export const MAX_AVA_NEED_DESCRIPTION_CHARACTERS = 240;
+export const MAX_AVA_NEED_ACCEPTANCE_CHARACTERS = 240;
 export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
@@ -39,6 +40,7 @@ export interface AvaRolePlayerExecutionOptions extends CompletionRetryOptions {
 export interface AvaNeed {
   readonly id: string;
   readonly description: string;
+  readonly acceptance: string;
 }
 
 export interface AvaError {
@@ -71,6 +73,11 @@ const InitialNeedResponse = z
       .trim()
       .min(1)
       .max(MAX_AVA_NEED_DESCRIPTION_CHARACTERS),
+    acceptance: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_AVA_NEED_ACCEPTANCE_CHARACTERS),
     status: z.enum(['remaining', 'satisfied']),
   })
   .strict();
@@ -110,12 +117,18 @@ function initializationResponseFormat(
                 maxLength: MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
                 pattern: '\\S',
               },
+              acceptance: {
+                type: 'string',
+                minLength: 1,
+                maxLength: MAX_AVA_NEED_ACCEPTANCE_CHARACTERS,
+                pattern: '\\S',
+              },
               status: {
                 type: 'string',
                 enum: ['remaining', 'satisfied'],
               },
             },
-            required: ['description', 'status'],
+            required: ['description', 'acceptance', 'status'],
             additionalProperties: false,
           },
         },
@@ -311,7 +324,7 @@ export class AvaRolePlayer {
     const request = {
       systemPrompt,
       messages,
-      maxTokens: initializing ? 700 : 400,
+      maxTokens: initializing ? 1400 : 400,
       responseSchema: initializing
         ? initializationResponseFormat(configuredOpening)
         : continuationResponseFormat(remainingNeedIds),
@@ -377,10 +390,15 @@ export class AvaRolePlayer {
       ? { ...InitialAvaNeeds.parse(JSON.parse(raw)), message: '' }
       : InitialAvaResponse.parse(JSON.parse(raw));
     assertUniqueNeedDescriptions(parsed.user_needs);
-    const needs = parsed.user_needs.map(({ description }, index) => ({
-      id: `need_${index + 1}`,
-      description,
-    }));
+    const needs = Object.freeze(
+      parsed.user_needs.map(({ description, acceptance }, index) =>
+        Object.freeze({
+          id: `need_${index + 1}`,
+          description,
+          acceptance,
+        }),
+      ),
+    );
     const remainingNeedIds = needs.map(({ id }) => id);
     if (configuredOpening) {
       this.#needs = needs;

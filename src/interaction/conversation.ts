@@ -201,7 +201,9 @@ function decisionAudit(
 
 function snapshotNeeds(needs: readonly AvaNeed[]): readonly AvaNeed[] {
   return Object.freeze(
-    needs.map(({ id, description }) => Object.freeze({ id, description })),
+    needs.map(({ id, description, acceptance }) =>
+      Object.freeze({ id, description, acceptance }),
+    ),
   );
 }
 

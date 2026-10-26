@@ -306,6 +306,7 @@ const avaNeed = z
   .object({
     id: safeText,
     description: z.string().trim().min(1).max(240),
+    acceptance: z.string().trim().min(1).max(240).optional(),
   })
   .strict();
 

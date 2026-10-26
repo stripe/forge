@@ -76,7 +76,11 @@ export async function runJudgedFixture(root: string) {
     responses: [
       JSON.stringify({
         user_needs: [
-          { description: 'Create the release summary', status: 'remaining' },
+          {
+            description: 'Create the release summary',
+            acceptance: 'The file contains the supplied status sentence.',
+            status: 'remaining',
+          },
         ],
       }),
       JSON.stringify({

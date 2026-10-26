@@ -18,7 +18,13 @@ describe('Ava prompts', () => {
       'continuation',
       (inputs: Parameters<typeof buildAvaInitializationPrompt>[0]) =>
         buildAvaContinuationPrompt(inputs, {
-          needs: [{ id: 'need_1', description: 'Complete the requested task' }],
+          needs: [
+            {
+              id: 'need_1',
+              description: 'Complete the requested task',
+              acceptance: 'The requested work is complete.',
+            },
+          ],
           remainingNeedIds: ['need_1'],
         }),
     ],
@@ -82,6 +88,24 @@ describe('Ava prompts', () => {
     });
   }
 
+  it('sets fixed acceptance from the task and constraints in both initialization formats', () => {
+    for (const needsOnly of [false, true]) {
+      const prompt = buildAvaInitializationPrompt(
+        { task: 'Add checkout.' },
+        needsOnly,
+      );
+      assert.match(prompt, /acceptance statement of at most 240 characters/);
+      assert.match(
+        prompt,
+        /Base it only on\n {2}the task and binding case constraints, preserving every allowed choice/,
+      );
+      assert.match(
+        prompt,
+        /Freeze this acceptance statement at initialization/,
+      );
+    }
+  });
+
   it('binds the trimmed task and context, with a fallback for blank background', () => {
     const inputs = Object.freeze({
       task: '  Add a receipt link\nwithout changing checkout.  ',
@@ -116,8 +140,13 @@ describe('Ava prompts', () => {
         Object.freeze({
           id: 'need_1',
           description: 'Choose the checkout experience',
+          acceptance: 'Either hosted or embedded checkout is chosen.',
         }),
-        Object.freeze({ id: 'need_2', description: 'Verify the receipt link' }),
+        Object.freeze({
+          id: 'need_2',
+          description: 'Verify the receipt link',
+          acceptance: 'A receipt link verification result is reported.',
+        }),
       ]),
       remainingNeedIds: Object.freeze(['need_2']),
     });
@@ -133,7 +162,7 @@ describe('Ava prompts', () => {
     );
     assert.ok(
       prompt.includes(
-        '\n\n- need_1: Choose the checkout experience\n- need_2: Verify the receipt link\n\nCurrently unresolved IDs: need_2\n',
+        '\n\n- need_1: Choose the checkout experience\n  Acceptance: Either hosted or embedded checkout is chosen.\n- need_2: Verify the receipt link\n  Acceptance: A receipt link verification result is reported.\n\nCurrently unresolved IDs: need_2\n',
       ),
     );
     assert.match(

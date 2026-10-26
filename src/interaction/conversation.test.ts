@@ -17,6 +17,7 @@ function initialResponse(
   return JSON.stringify({
     user_needs: descriptions.map((description) => ({
       description,
+      acceptance: 'The requested outcome is complete.',
       status: 'remaining',
     })),
     message,
@@ -146,8 +147,16 @@ describe('runConversation', () => {
     ]);
     assert.deepEqual(result.avaAudit, {
       needs: [
-        { id: 'need_1', description: needs[0] },
-        { id: 'need_2', description: needs[1] },
+        {
+          id: 'need_1',
+          description: needs[0],
+          acceptance: 'The requested outcome is complete.',
+        },
+        {
+          id: 'need_2',
+          description: needs[1],
+          acceptance: 'The requested outcome is complete.',
+        },
       ],
       decisions: [
         {
@@ -518,7 +527,11 @@ describe('runConversation', () => {
     const completion = completions(
       JSON.stringify({
         user_needs: [
-          { description: 'Finish the request', status: 'remaining' },
+          {
+            description: 'Finish the request',
+            acceptance: 'The requested work is complete.',
+            status: 'remaining',
+          },
         ],
       }),
     );
@@ -546,7 +559,11 @@ describe('runConversation', () => {
     assert.equal(agent.sent.length, 1);
     assert.equal(result.stopReason, 'task_complete');
     assert.deepEqual(result.avaAudit.needs, [
-      { id: 'need_1', description: 'Finish the request' },
+      {
+        id: 'need_1',
+        description: 'Finish the request',
+        acceptance: 'The requested work is complete.',
+      },
     ]);
     assert.deepEqual(validatedLengths, [1]);
   });

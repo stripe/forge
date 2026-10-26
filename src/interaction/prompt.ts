@@ -9,6 +9,7 @@ export interface AvaPromptInputs {
 export interface AvaPromptNeed {
   readonly id: string;
   readonly description: string;
+  readonly acceptance: string;
 }
 
 export interface AvaPrivatePromptState {
@@ -109,6 +110,11 @@ assistant.
   into adjacent implementation work such as schema design, caching strategy,
   generic UI, authentication, deployment, or operations unless explicitly
   requested or indispensable to the stated outcome.
+- Give each need an acceptance statement of at most 240 characters describing
+  the minimum observable answer or outcome that satisfies it. Base it only on
+  the task and binding case constraints, preserving every allowed choice.
+- Freeze this acceptance statement at initialization. Later turns must judge
+  against it without adding conditions or demanding more detail.
 - Mark a need satisfied only when the conversation already covers it. With no
   prior coding-assistant response, every need must remain.
 ${
@@ -128,7 +134,10 @@ export function buildAvaContinuationPrompt(
   state: AvaPrivatePromptState,
 ): string {
   const needs = state.needs
-    .map(({ id, description }) => `- ${id}: ${description}`)
+    .map(
+      ({ id, description, acceptance }) =>
+        `- ${id}: ${description}\n  Acceptance: ${acceptance}`,
+    )
     .join('\n');
   const remaining = state.remainingNeedIds.join(', ') || '(none)';
   return `${roleAndTask(inputs)}
@@ -143,11 +152,13 @@ ${needs}
 Currently unresolved IDs: ${remaining}
 
 - Reassess only the currently unresolved needs against the latest response and
-  conversation. Return the IDs that still need attention; never reintroduce a
+  conversation using their frozen acceptance statements. Do not add conditions,
+  tighten acceptance, or require extra detail once acceptance is met.
+  Return the IDs that still need attention; never reintroduce a
   need that is no longer unresolved.
 - Keep the focused need unresolved when the answer is vague, incomplete, or
-  merely offers a menu without connecting its recommendation to the task. Ask
-  a direct follow-up on that same need rather than advancing.
+  merely offers a menu and therefore fails its acceptance statement. Ask a
+  direct follow-up only for what that statement still requires.
 - If needs remain, select exactly one of them for the next message. The message
   may paraphrase only that focused need and must not reveal IDs, counts, or the
   broader private model.

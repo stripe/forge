@@ -102,7 +102,13 @@ describe('retry evidence through executeEval', () => {
       [
         limited(),
         JSON.stringify({
-          user_needs: [{ description: 'Finish the task', status: 'remaining' }],
+          user_needs: [
+            {
+              description: 'Finish the task',
+              acceptance: 'The task is done.',
+              status: 'remaining',
+            },
+          ],
           message: 'Please do the task.',
         }),
         JSON.stringify({ remaining_need_ids: [], message: '' }),

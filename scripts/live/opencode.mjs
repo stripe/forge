@@ -208,6 +208,8 @@ export async function runOpenCodeIntegrationSuite(options) {
               user_needs: [
                 {
                   description: 'Create and verify the output',
+                  acceptance:
+                    'The output file exists and its contents have been checked.',
                   status: 'remaining',
                 },
               ],

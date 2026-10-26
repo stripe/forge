@@ -49,7 +49,11 @@ describe('multi-turn CLI end to end', () => {
         const answers: Record<string, unknown> = {
           ava_initial_turn: {
             user_needs: [
-              { description: 'Complete the task', status: 'remaining' },
+              {
+                description: 'Complete the task',
+                acceptance: 'The task is reported as done.',
+                status: 'remaining',
+              },
             ],
             message: 'Please complete the task.',
           },
@@ -224,6 +228,7 @@ describe('multi-turn CLI end to end', () => {
           user_needs: [
             {
               description: 'Create the requested release summary',
+              acceptance: 'The file contains the supplied status sentence.',
               status: 'remaining',
             },
           ],
@@ -337,7 +342,11 @@ describe('multi-turn CLI end to end', () => {
     );
     assert.equal(interaction.turns.length, 2);
     assert.deepEqual(interaction.role_player?.needs, [
-      { id: 'need_1', description: 'Create the requested release summary' },
+      {
+        id: 'need_1',
+        description: 'Create the requested release summary',
+        acceptance: 'The file contains the supplied status sentence.',
+      },
     ]);
     assert.equal(interaction.role_player?.decisions[0]?.after_agent_turn, null);
     assert.deepEqual(
