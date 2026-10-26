@@ -568,6 +568,9 @@ export async function runExperiment(
               ...(errorPhase !== undefined
                 ? { diagnostic: { phase: errorPhase } }
                 : {}),
+              ...(inspected.rateLimitWaitMs === undefined
+                ? {}
+                : { rate_limit_wait_ms: inspected.rateLimitWaitMs }),
               attempt_count: entry.attempts.length,
               result_path:
                 inspected.artifact === null
@@ -607,6 +610,7 @@ interface AttemptInspection {
   attempt: SettledAttempt;
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
+  rateLimitWaitMs?: number;
 }
 interface CachedInspection {
   identity: string;
@@ -653,6 +657,12 @@ async function inspectAttempt(
     return {
       attempt,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(completed.result.completion_call_totals === undefined
+        ? {}
+        : {
+            rateLimitWaitMs:
+              completed.result.completion_call_totals.rate_limit_wait_ms,
+          }),
       artifact: {
         location,
         evaluation: {

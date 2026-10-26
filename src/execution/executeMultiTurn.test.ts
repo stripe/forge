@@ -883,6 +883,7 @@ describe('executeEval multi-turn and judging integration', () => {
         new Error('private transport detail one'),
         new Error('private transport detail two'),
         new Error('private transport detail three'),
+        new Error('private transport detail four'),
       ],
     });
     const artifacts = createMemoryArtifactStore();
@@ -920,6 +921,7 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.deepEqual(waits, [
       { purpose: 'role_player', attempt: 1 },
       { purpose: 'role_player', attempt: 2 },
+      { purpose: 'role_player', attempt: 3 },
     ]);
     assert.deepEqual(agent.messages, []);
     assert.ok(!agent.events.includes('collect-evidence'));
@@ -930,7 +932,7 @@ describe('executeEval multi-turn and judging integration', () => {
     });
     assert.equal(completed.result.agent.session_id, null);
     assert.equal(completed.result.failure?.error_type, 'request_error');
-    assert.equal(completed.result.completion_calls.length, 3);
+    assert.equal(completed.result.completion_calls.length, 4);
     assert.ok(
       completed.result.completion_calls.every(
         ({ status }) => status === 'failed',

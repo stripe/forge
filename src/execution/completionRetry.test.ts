@@ -1,0 +1,225 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
+import { CompletionInvocationError } from '../contracts/completion.ts';
+import { judgeCriteria } from '../evaluation/criterionJudge.ts';
+import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { AvaRolePlayer } from '../interaction/ava.ts';
+import { MAX_COMPLETION_CALL_SUMMARIES } from '../results/types.ts';
+import {
+  createScriptedCompletionProvider,
+  createStaticCredentialResolver,
+  type ScriptedCompletionStep,
+} from '../testing/index.ts';
+import {
+  completionBindingFor,
+  prepareCompletionRuntime,
+} from './completionRuntime.ts';
+
+const model = { provider: 'scripted', model: 'test' };
+const transcript = createJudgeTranscriptProjection({
+  schema_version: 'ATIF-v1.8',
+  agent: { name: 'fake', version: '1' },
+  steps: [{ step_id: 1, source: 'user', message: 'Do the task.' }],
+});
+const answer = {
+  content: '{"results":[{"index":0,"passed":true,"explanation":"Done."}]}',
+  stopReason: 'end_turn' as const,
+  usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+};
+const signal = new AbortController().signal;
+const limited = (status = 429, wait?: number) =>
+  new CompletionInvocationError('http_error', 'Unavailable', {
+    origin: 'host_transport',
+    http_status: status,
+    request_id: 'request_synthetic',
+    provider_error_code: 'rate_limit_error',
+    ...(wait === undefined ? {} : { retry_after_ms: wait }),
+  });
+
+async function runtime(
+  responses: readonly ScriptedCompletionStep[],
+  purpose: 'judge' | 'role_player' = 'judge',
+) {
+  const scripted = createScriptedCompletionProvider({
+    id: model.provider,
+    responses,
+  });
+  const prepared = await prepareCompletionRuntime({
+    runId: 'retry-test',
+    bindings: [
+      completionBindingFor(
+        new Map([[model.provider, scripted.provider]]),
+        purpose,
+        model,
+      ),
+    ],
+    credentialResolver: createStaticCredentialResolver(),
+    signal,
+  });
+  return { prepared, scripted };
+}
+
+describe('completion retry integration', () => {
+  for (const retryAfter of [undefined, 20000]) {
+    it(`recovers after the first simulated minute of 429s (Retry-After ${retryAfter})`, async () => {
+      let elapsed = 0;
+      const { prepared } = await runtime(
+        Array.from({ length: 7 }, () => () => {
+          throw limited(429, retryAfter);
+        }),
+      );
+      const binding = prepared.provider('judge');
+      const complete = binding.complete;
+      const scriptedProvider = {
+        ...binding,
+        complete: (...args: Parameters<typeof complete>) =>
+          elapsed < 60000 ? complete(...args) : Promise.resolve(answer),
+      };
+      const observed = await prepareCompletionRuntime({
+        runId: 'minute-test',
+        bindings: [
+          completionBindingFor(
+            new Map([[model.provider, scriptedProvider]]),
+            'judge',
+            model,
+          ),
+        ],
+        credentialResolver: createStaticCredentialResolver(),
+        signal,
+      });
+      const result = await judgeCriteria(
+        { transcript, criteria: ['Done'], signal },
+        async (request) =>
+          (await observed.invoke('judge', request, request.signal)).content,
+        {
+          now: () => elapsed,
+          random: () => 1,
+          sleep: async (milliseconds) => {
+            elapsed += milliseconds;
+          },
+          onRetryDecision: observed.recordRetryDecision,
+        },
+      );
+      assert.equal(result[0]!.passed, true);
+      assert.equal(elapsed, retryAfter === undefined ? 62000 : 60000);
+      assert.equal(observed.totals.rate_limit_wait_ms, elapsed);
+      assert.equal(observed.calls[0]!.http_status, 429);
+      assert.equal(observed.calls[0]!.request_id, 'request_synthetic');
+      assert.equal(observed.calls[0]!.provider_error_code, 'rate_limit_error');
+      assert.equal(observed.calls[0]!.disposition, 'rate_limit_retry');
+      assert.equal(observed.calls.at(-1)!.status, 'succeeded');
+      assert.deepEqual(
+        observed.calls.map((call) => call.retry_ordinal),
+        observed.calls.map((_, index) => index),
+      );
+    });
+  }
+
+  it('keeps concurrent judge ordinals independent and measures 503 waits', async () => {
+    let elapsed = 0;
+    const { prepared } = await runtime([limited(503, 23000), answer, answer]);
+    const judgments = await judgeCriteria(
+      { transcript, criteria: ['First', 'Second'], signal },
+      async (request) =>
+        (await prepared.invoke('judge', request, request.signal)).content,
+      {
+        now: () => elapsed,
+        random: () => 1,
+        sleep: async (ms) => {
+          elapsed += ms;
+        },
+        onRetryDecision: prepared.recordRetryDecision,
+      },
+    );
+    assert.equal(
+      judgments.every((result) => result.passed),
+      true,
+    );
+    assert.deepEqual(
+      prepared.calls.map((call) => call.retry_ordinal),
+      [0, 0, 1],
+    );
+    assert.equal(prepared.totals.rate_limit_wait_ms, 23000);
+  });
+
+  it('commits the same Ava error outcome when the rate-limit budget runs out', async () => {
+    let elapsed = 0;
+    const { prepared, scripted } = await runtime(
+      Array.from({ length: 7 }, () => limited()),
+      'role_player',
+    );
+    const turn = await new AvaRolePlayer(
+      { task: 'Do the task.', signal },
+      (request) => prepared.invoke('role_player', request, request.signal),
+      {
+        now: () => elapsed,
+        random: () => 1,
+        sleep: async (ms) => {
+          elapsed += ms;
+        },
+        onRetryDecision: prepared.recordRetryDecision,
+      },
+    ).nextTurn();
+    assert.equal(turn.error?.errorType, 'request_error');
+    assert.equal(turn.error?.attempts, 7);
+    assert.equal(scripted.calls.length, 7);
+    assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+    assert.equal(prepared.totals.rate_limit_wait_ms, 126000);
+  });
+
+  for (const [status, attempts, elapsedMs] of [
+    [502, 4, 84000],
+    [503, 4, 84000],
+    [400, 3, 6000],
+  ] as const) {
+    it(`exhausts HTTP ${status} with the expected waits and a criterion error`, async () => {
+      let elapsed = 0;
+      const { prepared } = await runtime(
+        Array.from({ length: attempts }, () => limited(status)),
+      );
+      const results = await judgeCriteria(
+        { transcript, criteria: ['Done'], signal },
+        async (request) =>
+          (await prepared.invoke('judge', request, request.signal)).content,
+        {
+          now: () => elapsed,
+          random: () => 1,
+          sleep: async (ms) => {
+            elapsed += ms;
+          },
+          onRetryDecision: prepared.recordRetryDecision,
+        },
+      );
+      assert.equal(results[0]!.error?.type, 'request_error');
+      assert.equal(results[0]!.error?.attempts, attempts);
+      assert.equal(elapsed, elapsedMs);
+      assert.equal(prepared.totals.rate_limit_wait_ms, 0);
+      assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+    });
+  }
+
+  it('bounds retained records while counting omitted calls and their waits', async () => {
+    const { prepared } = await runtime(
+      Array.from({ length: MAX_COMPLETION_CALL_SUMMARIES + 2 }, () =>
+        limited(),
+      ),
+    );
+    for (let index = 0; index < MAX_COMPLETION_CALL_SUMMARIES + 2; index += 1) {
+      try {
+        await prepared.invoke('judge', { messages: [] }, signal);
+      } catch (error) {
+        prepared.recordRetryDecision(error, {
+          disposition: 'rate_limit_retry',
+          wait_ms: 1000,
+        });
+      }
+    }
+    assert.equal(prepared.calls.length, MAX_COMPLETION_CALL_SUMMARIES);
+    assert.deepEqual(prepared.totals, {
+      calls: MAX_COMPLETION_CALL_SUMMARIES + 2,
+      failed: MAX_COMPLETION_CALL_SUMMARIES + 2,
+      omitted: 2,
+      rate_limit_wait_ms: (MAX_COMPLETION_CALL_SUMMARIES + 2) * 1000,
+    });
+  });
+});

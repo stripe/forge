@@ -8,6 +8,12 @@ import type {
   CompletionStopReason,
   StrictCompletionResponseSchema,
 } from '../contracts/completion.ts';
+import {
+  CompletionInvocationError,
+  type CompletionRetryDecision,
+  type CompletionTransportObservation,
+  completionTransportObservationSchema,
+} from '../contracts/completionObservation.ts';
 import type {
   CompletionProviderCollection,
   ForgeComposition,
@@ -21,7 +27,11 @@ import {
   completionProviderMetadataSchema,
 } from '../contracts/metadata.ts';
 import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
-import type { CompletionCallSummaryV1 } from '../results/types.ts';
+import {
+  type CompletionCallSummaryV1,
+  type CompletionCallTotalsV1,
+  MAX_COMPLETION_CALL_SUMMARIES,
+} from '../results/types.ts';
 import { boundedErrorMessage } from '../security/errorMessage.ts';
 import { redactSecrets } from '../security/redaction.ts';
 
@@ -40,6 +50,7 @@ const COMPLETION_STOP_REASONS = new Set<CompletionStopReason>([
 ]);
 
 export interface CompletionPromptInput {
+  readonly retryOrdinal?: number;
   readonly systemPrompt?: string;
   readonly messages: CompletionRequest['messages'];
   readonly maxTokens?: number;
@@ -61,6 +72,8 @@ export interface CompletionBinding {
 export interface PreparedCompletionRuntime {
   readonly secrets: readonly string[];
   readonly calls: readonly CompletionCallSummaryV1[];
+  readonly totals: CompletionCallTotalsV1;
+  recordRetryDecision(error: unknown, decision: CompletionRetryDecision): void;
   has(purpose: CompletionPurpose): boolean;
   model(purpose: CompletionPurpose): ModelRefV1;
   provider(purpose: CompletionPurpose): CompletionProvider;
@@ -200,6 +213,10 @@ export async function prepareCompletionRuntime(input: {
   }
 
   const callSlots: Array<CompletionCallSummaryV1 | undefined> = [];
+  const failures = new WeakMap<CompletionInvocationError, number>();
+  let totalCalls = 0;
+  let failedCalls = 0;
+  let rateLimitWaitMs = 0;
   const required = (purpose: CompletionPurpose) => {
     const selected = prepared.get(purpose);
     if (selected === undefined) {
@@ -222,6 +239,29 @@ export async function prepareCompletionRuntime(input: {
         }),
       );
     },
+    get totals() {
+      return Object.freeze({
+        calls: totalCalls,
+        failed: failedCalls,
+        omitted: Math.max(0, totalCalls - MAX_COMPLETION_CALL_SUMMARIES),
+        rate_limit_wait_ms: rateLimitWaitMs,
+      });
+    },
+    recordRetryDecision(error: unknown, decision: CompletionRetryDecision) {
+      if (!(error instanceof CompletionInvocationError)) return;
+      const index = failures.get(error);
+      if (index === undefined) return;
+      failures.delete(error);
+      if (decision.disposition === 'rate_limit_retry')
+        rateLimitWaitMs += decision.wait_ms;
+      const call = callSlots[index];
+      if (call !== undefined)
+        callSlots[index] = Object.freeze({
+          ...call,
+          retry_wait_ms: decision.wait_ms,
+          disposition: decision.disposition,
+        });
+    },
     has: (purpose: CompletionPurpose) => prepared.has(purpose),
     model: (purpose: CompletionPurpose) => required(purpose).binding.model,
     provider: (purpose: CompletionPurpose) =>
@@ -233,9 +273,13 @@ export async function prepareCompletionRuntime(input: {
     ) {
       signal.throwIfAborted();
       const selected = required(purpose);
-      const redactedPrompt = redactCompletionPrompt(prompt, secrets);
-      const sequence = callSlots.length + 1;
-      callSlots.push(undefined);
+      const { retryOrdinal, ...redactedPrompt } = redactCompletionPrompt(
+        prompt,
+        secrets,
+      );
+      const sequence = ++totalCalls;
+      const retained = sequence <= MAX_COMPLETION_CALL_SUMMARIES;
+      if (retained) callSlots.push(undefined);
       try {
         const completed = await selected.binding.provider.complete(
           {
@@ -254,44 +298,52 @@ export async function prepareCompletionRuntime(input: {
           ...response,
           content: redactedResponse.value,
         });
-        callSlots[sequence - 1] = completionCallSummary(
-          sequence,
-          selected.binding,
-          'succeeded',
-          safeResponse,
-        );
+        if (retained)
+          callSlots[sequence - 1] = completionCallSummary(
+            sequence,
+            selected.binding,
+            'succeeded',
+            safeResponse,
+            undefined,
+            retryOrdinal,
+          );
         return safeResponse;
       } catch (error) {
         const errorCode = completionErrorCode(error, secrets);
-        callSlots[sequence - 1] = completionCallSummary(
-          sequence,
-          selected.binding,
-          'failed',
-          undefined,
-          errorCode,
+        failedCalls += 1;
+        const parsed = completionTransportObservationSchema.safeParse(
+          typeof error === 'object' && error !== null && 'observation' in error
+            ? error.observation
+            : undefined,
         );
+        const observation = parsed.success
+          ? redactObservation(parsed.data, secrets)
+          : undefined;
+        if (retained)
+          callSlots[sequence - 1] = completionCallSummary(
+            sequence,
+            selected.binding,
+            'failed',
+            undefined,
+            errorCode,
+            retryOrdinal,
+            observation,
+          );
         if (signal.aborted) throw abortReason(signal);
-        throw new CompletionInvocationError(
+        const invocationError = new CompletionInvocationError(
           errorCode,
           boundedErrorMessage(
             error,
             'Completion provider call failed.',
             secrets,
           ),
+          observation,
         );
+        failures.set(invocationError, sequence - 1);
+        throw invocationError;
       }
     },
   });
-}
-
-class CompletionInvocationError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'CompletionInvocationError';
-  }
 }
 
 function resolveProvider(
@@ -444,9 +496,24 @@ function completionCallSummary(
   status: 'succeeded' | 'failed',
   response?: CompletionResponse,
   errorCode?: string,
+  retryOrdinal?: number,
+  observation?: CompletionTransportObservation,
 ): CompletionCallSummaryV1 {
   return Object.freeze({
     sequence,
+    ...(observation === undefined
+      ? {}
+      : {
+          http_status: observation.http_status,
+          ...(observation.request_id === undefined
+            ? {}
+            : { request_id: observation.request_id }),
+          ...(observation.provider_error_code === undefined
+            ? {}
+            : { provider_error_code: observation.provider_error_code }),
+        }),
+    ...(retryOrdinal === undefined ? {} : { retry_ordinal: retryOrdinal }),
+    disposition: status,
     purpose: binding.purpose,
     provider: binding.identity.id,
     provider_version: binding.identity.version,
@@ -501,5 +568,26 @@ function defineRecordValue<T>(
     enumerable: true,
     value,
     writable: true,
+  });
+}
+
+function redactObservation(
+  observation: CompletionTransportObservation,
+  secrets: readonly string[],
+): CompletionTransportObservation {
+  return Object.freeze({
+    origin: 'host_transport',
+    http_status: observation.http_status,
+    ...(observation.retry_after_ms === undefined
+      ? {}
+      : { retry_after_ms: observation.retry_after_ms }),
+    ...(observation.request_id === undefined ||
+    secrets.some((secret) => observation.request_id!.includes(secret))
+      ? {}
+      : { request_id: observation.request_id }),
+    ...(observation.provider_error_code === undefined ||
+    secrets.some((secret) => observation.provider_error_code!.includes(secret))
+      ? {}
+      : { provider_error_code: observation.provider_error_code }),
   });
 }

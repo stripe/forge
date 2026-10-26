@@ -150,6 +150,7 @@ const runSchema = z
     result_path: z.string().max(160).nullable(),
     /** Regrade reports only: the evaluation behind this row's scores, relative to the report's directory. */
     regrade_path: z.string().max(160).optional(),
+    rate_limit_wait_ms: count.optional(),
     evaluation: evaluationSchema.nullable(),
   })
   .strict()
@@ -186,6 +187,7 @@ const runSchema = z
   });
 const statisticsSchema = z
   .object({
+    rate_limit_wait_ms: count.optional(),
     selections: count,
     completed: count,
     errored: count,
@@ -423,6 +425,14 @@ function statistics(
     }
   }
   return {
+    ...(runs.some((run) => run.rate_limit_wait_ms !== undefined)
+      ? {
+          rate_limit_wait_ms: runs.reduce(
+            (total, run) => total + (run.rate_limit_wait_ms ?? 0),
+            0,
+          ),
+        }
+      : {}),
     selections: runs.length,
     completed,
     errored,

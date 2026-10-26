@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  type CompletionRetryOptions,
+  completionRetryDecision,
+  INITIAL_COMPLETION_RETRY_STATE,
+  waitForCompletionRetry,
+} from '../completionRetry.ts';
 import type {
   CompletionMessage,
   StrictCompletionResponseSchema,
@@ -16,10 +22,11 @@ import {
 } from './judgeTranscript.ts';
 
 export const MAX_CONCURRENT_CRITERION_JUDGMENTS = 4;
+/** Attempt limit for the short structured-output/client-error schedule. */
 export const MAX_CRITERION_JUDGE_ATTEMPTS = 3;
 export const MAX_CRITERION_EXPLANATION_CHARACTERS = 64 * 1024;
 export const MAX_CRITERION_JUDGE_PROMPT_BYTES = 1024 * 1024;
-export const CRITERION_JUDGE_RETRY_DELAYS_MS = [1_000, 5_000] as const;
+export { SHORT_COMPLETION_RETRY_DELAYS_MS as CRITERION_JUDGE_RETRY_DELAYS_MS } from '../completionRetry.ts';
 
 export const CRITERION_JUDGMENT_RESPONSE_SCHEMA: StrictCompletionResponseSchema =
   Object.freeze({
@@ -62,6 +69,7 @@ export interface CriterionCompletionRequest {
   readonly maxTokens: number;
   readonly responseSchema: StrictCompletionResponseSchema;
   readonly signal: AbortSignal;
+  readonly retryOrdinal?: number;
 }
 
 /** Prompt-only callback; the lifecycle binds run, purpose, model, and credentials. */
@@ -79,12 +87,12 @@ export interface CriterionJudgeInput {
   readonly signal?: AbortSignal;
 }
 
-export interface CriterionJudgeExecutionOptions {
+export interface CriterionJudgeExecutionOptions extends CompletionRetryOptions {
   /** Credentials to redact from request-error diagnostics for custom invokers. */
   readonly redactionSecrets?: readonly string[];
   /** Validate dispatch invariants outside the retryable provider invocation. */
   readonly validateRequest?: (request: CriterionCompletionRequest) => void;
-  /** Test seam for the fixed one-second and five-second retry waits. */
+  /** Legacy test seam that overrides each retry wait. */
   readonly waitBeforeRetry?: (
     failedAttempt: number,
     signal: AbortSignal | undefined,
@@ -275,15 +283,20 @@ async function judgeOneCriterion(
   invoke: CriterionCompletionInvoker,
   options: CriterionJudgeExecutionOptions,
 ): Promise<CriterionResultV1> {
-  const waitBeforeRetry = options.waitBeforeRetry ?? waitBeforeJudgeRetry;
+  let retryState = INITIAL_COMPLETION_RETRY_STATE;
+  let attempt = 0;
   const systemPrompt = renderCriterionJudgePrompt(input, criterion.value);
   let finalParseExplanation = 'Judge response was unavailable.';
   let finalParseMessage = finalParseExplanation;
 
-  for (let attempt = 1; attempt <= MAX_CRITERION_JUDGE_ATTEMPTS; attempt += 1) {
+  while (true) {
+    attempt += 1;
+    let failure: unknown;
+    let parseFailure = false;
     input.signal?.throwIfAborted();
     const request: CriterionCompletionRequest = {
       systemPrompt,
+      retryOrdinal: retryState.ordinal,
       messages: [
         { role: 'user', content: 'Return the requested structured judgment.' },
       ],
@@ -299,38 +312,54 @@ async function judgeOneCriterion(
       if (outcome.valid) return outcome.result;
       finalParseExplanation = outcome.explanation;
       finalParseMessage = outcome.message;
+      parseFailure = true;
     } catch (error) {
       if (isAbort(error, input.signal)) throw error;
-      if (attempt === MAX_CRITERION_JUDGE_ATTEMPTS) {
-        return criterionResult(criterion, {
-          passed: null,
-          error: {
-            type: 'request_error',
-            attempts: attempt,
-            message: boundedErrorMessage(
-              error,
-              'Judge request failed.',
-              options.redactionSecrets,
-            ),
-          },
-          explanation: `Judge request failed after ${attempt} attempts.`,
-        });
-      }
+      failure = error;
     }
 
-    if (attempt < MAX_CRITERION_JUDGE_ATTEMPTS) {
-      await waitBeforeRetry(attempt, input.signal);
+    const next = completionRetryDecision(
+      retryState,
+      failure,
+      parseFailure,
+      (options.random ?? Math.random)(),
+    );
+    retryState = next.state;
+    await waitForCompletionRetry(failure, next.decision, input.signal!, {
+      ...options,
+      ...(options.waitBeforeRetry === undefined
+        ? {}
+        : {
+            sleep: () => options.waitBeforeRetry!(attempt, input.signal),
+          }),
+    });
+    if (next.decision.disposition !== 'exhausted') continue;
+    if (!parseFailure) {
+      return criterionResult(criterion, {
+        passed: null,
+        error: {
+          type: 'request_error',
+          attempts: attempt,
+          message: boundedErrorMessage(
+            failure,
+            'Judge request failed.',
+            options.redactionSecrets,
+          ),
+        },
+        explanation: `Judge request failed after ${attempt} attempts.`,
+      });
     }
+    break;
   }
 
   return criterionResult(criterion, {
     passed: null,
     error: {
       type: 'parse_error',
-      attempts: MAX_CRITERION_JUDGE_ATTEMPTS,
+      attempts: attempt,
       message: finalParseMessage,
     },
-    explanation: `${finalParseExplanation} (unavailable after ${MAX_CRITERION_JUDGE_ATTEMPTS} attempts)`,
+    explanation: `${finalParseExplanation} (unavailable after ${attempt} attempts)`,
   });
 }
 
@@ -408,35 +437,5 @@ function isAbort(error: unknown, signal: AbortSignal | undefined): boolean {
   return (
     'code' in error &&
     (error.code === 'ABORT_ERR' || error.code === 'execution_aborted')
-  );
-}
-
-function waitBeforeJudgeRetry(
-  failedAttempt: number,
-  signal: AbortSignal | undefined,
-): Promise<void> {
-  const delayMs = CRITERION_JUDGE_RETRY_DELAYS_MS[failedAttempt - 1];
-  if (delayMs === undefined) return Promise.resolve();
-  signal?.throwIfAborted();
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, delayMs);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(abortReason(signal));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-    if (signal?.aborted) onAbort();
-  });
-}
-
-function abortReason(signal: AbortSignal | undefined): unknown {
-  return (
-    signal?.reason ??
-    new DOMException('The operation was aborted.', 'AbortError')
   );
 }

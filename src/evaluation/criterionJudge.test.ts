@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, vi } from 'vitest';
+import { CompletionInvocationError } from '../contracts/completion.ts';
 import { REQUIREMENT_LEVELS } from '../model/types.ts';
 import { parseEvaluationResult } from '../results/parse.ts';
 import {
@@ -409,13 +410,13 @@ describe('judgeCriteria', () => {
         passed: null,
         error: {
           type: 'request_error',
-          attempts: 3,
-          message: 'transport failed on attempt 3',
+          attempts: 4,
+          message: 'transport failed on attempt 4',
         },
-        explanation: 'Judge request failed after 3 attempts.',
+        explanation: 'Judge request failed after 4 attempts.',
       },
     ]);
-    assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
+    assert.equal(calls, 4);
   });
 
   it('preserves peer judgments after one transport failure is exhausted', async () => {
@@ -437,7 +438,7 @@ describe('judgeCriteria', () => {
       noRetryWait,
     );
 
-    assert.equal(failingCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
+    assert.equal(failingCalls, 4);
     assert.equal(peerCalls, 1);
     assert.equal(results[0]!.passed, null);
     assert.deepEqual(results[1], {
@@ -533,7 +534,10 @@ describe('judgeCriteria', () => {
   });
 
   it('classifies a final request failure after earlier malformed responses', async () => {
-    const failure = new Error('final transport failure');
+    const failure = new CompletionInvocationError(
+      'invalid_request',
+      'final transport failure',
+    );
     let calls = 0;
     const results = await judgeCriteria(
       { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },

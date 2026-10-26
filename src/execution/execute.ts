@@ -108,6 +108,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.ts';
+import type { CompletionCallTotalsV1 } from '../results/types.ts';
 import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   assertNoSecrets,
@@ -585,6 +586,7 @@ export async function executeEvalWithTestHooks(
           },
           {
             redactionSecrets: secrets,
+            onRetryDecision: completions.recordRetryDecision,
             validateRequest: (request) =>
               assertJudgePromptWillRemainUnchanged(request, secrets),
             ...(hooks.waitBeforeCompletionRetry === undefined
@@ -659,6 +661,7 @@ export async function executeEvalWithTestHooks(
         runtime: sealed,
         interaction,
         completionCalls: completions.calls,
+        completionCallTotals: completions.totals,
         evidence: evaluated.redacted.evidence,
         redactionCount: evaluated.redacted.replacements,
         evaluation: evaluated.evaluation,
@@ -711,6 +714,7 @@ export async function executeEvalWithTestHooks(
       runtime: sealed,
       interaction,
       completionCalls: completions.calls,
+      completionCallTotals: completions.totals,
       evidence: evaluated.redacted.evidence,
       redactionCount: evaluated.redacted.replacements,
       evaluation: evaluated.evaluation,
@@ -866,6 +870,7 @@ async function executeInteraction(
     (request) => completions.invoke('role_player', request, signal),
     {
       redactionSecrets: completions.secrets,
+      onRetryDecision: completions.recordRetryDecision,
       ...(waitBeforeCompletionRetry === undefined
         ? {}
         : {
@@ -1929,6 +1934,7 @@ function buildResult(input: {
   runtime: SealedRuntime;
   interaction: ExecutedInteraction;
   completionCalls: readonly CompletionCallSummaryV1[];
+  completionCallTotals: CompletionCallTotalsV1;
   evidence: NormalizedTrajectory;
   redactionCount: number;
   evaluation: EvaluationResultV1;
@@ -1973,6 +1979,7 @@ function buildResult(input: {
       cost_usd: input.interaction.totalCostUsd,
     },
     completion_calls: input.completionCalls.map((call) => ({ ...call })),
+    completion_call_totals: input.completionCallTotals,
     interaction: {
       mode: input.input.plan.interaction.mode,
       turn_count: input.interaction.turns.length,

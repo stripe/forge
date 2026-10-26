@@ -605,6 +605,16 @@ phase, without trusting host-authored diagnostic text. For a committed Ava failu
 `result.json.failure.message` records the final request or output rejection
 reason; raw rejected responses are not saved.
 
+Ava and the judge back off through rate limits and temporary provider failures;
+see the [host completion retry policy](docs/architecture.md#host-side-completion-providers).
+`result.json.completion_calls` keeps bounded records of failed calls even when
+retry succeeds. `completion_call_totals` continues counting after that cap.
+When available, `report.json` includes `rate_limit_wait_ms` in run rows, case
+groups, and the summary. It sums measured host-completion retry waits from the
+latest verified results, including waits from calls omitted by the cap. Parallel
+waits are added, so this total can exceed wall-clock run time. Older records and
+attempts without a committed result have no measured value.
+
 ### Inspect evidence
 
 Runs may also contain `workspace-evidence.json`, `judge-evidence.json`, and
