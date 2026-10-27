@@ -1423,7 +1423,62 @@ Its hard bounds are 10,000 listed entries,
 depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
 rendered characters total. Truncation and unavailable evidence are recorded
 explicitly. `judge-evidence.json` records the redacted workspace subset and
-exact projected transcript for audit; it is not an input to a later judge call.
+exact projected transcript for audit and regrade.
+
+Criterion judging uses the public `DecisionModel` contract from
+`@stripe/forge`: `decide` takes a text `state`, typed `questions` keyed by
+caller IDs, a signal, and an optional retry ordinal. The response carries
+`model`, `answers` keyed by those IDs, and token `usage`. Choice is the only
+question and answer primitive. A question has `instructions` and `criteria`
+mapping each option name to its meaning. An answer has `type: choice`,
+`choice`, `probabilities`, `confidence`, and a nonblank explanation bounded to
+65,536 characters. Confidence is the largest probability, measuring
+concentration rather than correctness.
+
+`createCompletionDecisionModel` adapts an explicit completion callback to this
+contract. It requests strict `{answers: {<id>: <choice answer>}}` output and
+adds the bound model and completion usage to the response envelope. Text-only
+responses have `usage: null`; the prompt-only `judgeCriteria` callback form
+also has `model: null`. No separate
+decision endpoint is built in. `judgeCriteria` accepts a decision model or the
+prompt-only callback form; callbacks must return the current choice schema.
+Each criterion uses the stable question ID `criterion` and these options:
+
+| Choice | Meaning |
+| --- | --- |
+| `met` | The supplied evidence establishes that the criterion was met. |
+| `not_met` | The supplied evidence establishes that it was not met. |
+| `insufficient_evidence` | The evidence cannot establish either outcome, for example because relevant code was not captured. |
+
+Local validation requires exactly the declared options, finite probabilities
+in [0, 1], and a sum within 0.000001 of 1. The selected choice must have the
+largest probability; any tied maximum is valid. Confidence must match that
+maximum within the same tolerance. Invalid answers use the malformed-output
+retry budget. Forge then applies `CRITERION_DECISION_THRESHOLDS` in code: a
+`met` or `not_met` choice needs probability at least 0.80. Otherwise the outcome
+is `insufficient_evidence`. Thresholds are release policy, not prompt text or
+experiment configuration.
+
+New criterion results record `decision` with the validated answer fields
+except explanation (kept at the result's existing `explanation`), plus the
+derived `outcome` and `thresholds`. Only `met` maps to `passed: true`;
+`not_met` and `insufficient_evidence` map to `false`. Insufficient evidence
+remains in scored denominators. `passed: null` still means a judge error and
+has no decision. Result parsing verifies the distribution, outcome, thresholds,
+and passed flag together. Old results without these optional fields retain
+their original shape and scores; older strict readers cannot read new fields.
+
+`evidence_warnings` on each new criterion records trajectory normalization and
+workspace collection warnings, tagged by source, with explicit warnings when
+either evidence set is incomplete. Copies are capped at 64 warnings and
+16 KiB per criterion, with an explicit `evidence_warnings_truncated` marker
+when the full warning list does not fit. Full source warnings remain in the
+saved evidence. These facts do not change the decision rule or plan digest. Completed-run verification checks recorded warnings
+against the saved evidence. Regrades reconstruct them from the source result
+and judge evidence, and apply the current decision rule to the saved evidence.
+`judgeInputFromSavedRun` accepts optional `evidence` provenance; omitting it
+marks trajectory completeness as unknown. Direct `judgeCriteria` callers
+supply `evidenceWarnings` when available.
 
 At most four criteria run concurrently, with temperature 0, a 1,024-token
 response limit, and a strict one-criterion JSON schema. Each uses the shared
@@ -1440,15 +1495,24 @@ Custom completion providers must keep messages free of sensitive
 non-credential data such as request/response bodies. The same policy applies
 to role-player request errors. Standalone `judgeCriteria` callers can supply
 `redactionSecrets` in execution options for their custom invoker's diagnostics.
-Parse diagnostics identify invalid JSON or the first schema violation's path
-and category, never raw responses, unknown keys, or received values.
+Parse diagnostics identify invalid JSON or a schema mismatch, never raw
+responses, caller question IDs, unknown keys, or received values.
 `parseCriterionJudgment` reports malformed input as a one-attempt parse error.
 
 Cancellation, oversized prompts, and dispatch invariant failures remain fatal.
-The execution controller supplies `validateRequest` to the judge's execution
-options to ensure final defensive redaction cannot change the already-audited
+The execution controller binds `validateRequest` on the completion decision
+adapter to ensure final defensive redaction cannot change the already-audited
 evidence. This validation runs outside the retryable provider call; failure
 cancels peer judgments and prevents commit.
+
+Reports add optional `judging_criteria_insufficient_evidence` counts and
+`criterion_failures` in run evaluations. Failure entries retain criterion text,
+label, requirement level, outcome, and the recorded evidence warnings, including
+OPTIONAL criteria. Missing warning records produce an explicit unknown marker.
+Summary and case groups count affected evaluations and criteria under
+`insufficient_evidence`; those counts overlap existing failed or partial
+evaluation statuses and do not alter score views. Older reports may omit the
+new fields.
 
 ### Score and status
 
@@ -1695,7 +1759,7 @@ be committed; failures before that point remain fatal.
 
 | Entry point | Purpose |
 | --- | --- |
-| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation (including choice decisions and the completion adapter), results, setup, and composition contracts |
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |

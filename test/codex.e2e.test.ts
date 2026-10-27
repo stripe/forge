@@ -32,6 +32,7 @@ import {
   createTestResolvedRunPlan,
   type RecordedTestCommand,
 } from '../src/testing/index.ts';
+import { criterionJudgment } from './fixtures/criterionJudgment.ts';
 
 const roots: string[] = [];
 const SESSION_ID = '0199a213-81c0-7800-8aa1-bbab2a035a53';
@@ -642,11 +643,9 @@ describe('Codex engine integration', () => {
             JSON.stringify(request),
             new RegExp(AGENT_SECRET),
           );
-          return JSON.stringify({
-            results: [
-              { index: 0, passed: true, explanation: 'Both parts completed.' },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(true, 'Both parts completed.'),
+          );
         },
       ],
     });
@@ -775,11 +774,7 @@ describe('Codex engine integration', () => {
         const provider = createScriptedCompletionProvider({
           id: JUDGE_MODEL.provider,
           responses: [
-            JSON.stringify({
-              results: [
-                { index: 0, passed: true, explanation: 'Synthetic judge.' },
-              ],
-            }),
+            JSON.stringify(criterionJudgment(true, 'Synthetic judge.')),
           ],
         });
         const completed = await executeEval({
@@ -935,15 +930,9 @@ describe('Codex engine integration', () => {
           () => {
             sealedAtJudgeDispatch =
               test.runtime.runs[0]!.events.includes('quiesce');
-            return JSON.stringify({
-              results: [
-                {
-                  index: 0,
-                  passed: true,
-                  explanation: 'Synthetic evidence check.',
-                },
-              ],
-            });
+            return JSON.stringify(
+              criterionJudgment(true, 'Synthetic evidence check.'),
+            );
           },
         ],
       });
@@ -1105,15 +1094,12 @@ describe('Codex engine integration', () => {
     const provider = createScriptedCompletionProvider({
       id: JUDGE_MODEL.provider,
       responses: [
-        JSON.stringify({
-          results: [
-            {
-              index: 0,
-              passed: false,
-              explanation: 'Synthetic incomplete-source evidence check.',
-            },
-          ],
-        }),
+        JSON.stringify(
+          criterionJudgment(
+            false,
+            'Synthetic incomplete-source evidence check.',
+          ),
+        ),
       ],
     });
     const completed = await executeEval({
@@ -1207,15 +1193,9 @@ describe('Codex engine integration', () => {
     const provider = createScriptedCompletionProvider({
       id: JUDGE_MODEL.provider,
       responses: [
-        JSON.stringify({
-          results: [
-            {
-              index: 0,
-              passed: false,
-              explanation: 'Synthetic metadata fallback check.',
-            },
-          ],
-        }),
+        JSON.stringify(
+          criterionJudgment(false, 'Synthetic metadata fallback check.'),
+        ),
       ],
     });
     const completed = await executeEval({
@@ -1277,15 +1257,9 @@ describe('Codex engine integration', () => {
       const provider = createScriptedCompletionProvider({
         id: JUDGE_MODEL.provider,
         responses: [
-          JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: true,
-                explanation: 'Synthetic truncation evidence check.',
-              },
-            ],
-          }),
+          JSON.stringify(
+            criterionJudgment(true, 'Synthetic truncation evidence check.'),
+          ),
         ],
       });
       const completed = await executeEval({
@@ -1395,15 +1369,9 @@ describe('Codex engine integration', () => {
     const provider = createScriptedCompletionProvider({
       id: JUDGE_MODEL.provider,
       responses: [
-        JSON.stringify({
-          results: [
-            {
-              index: 0,
-              passed: false,
-              explanation: 'Synthetic fallback evidence check.',
-            },
-          ],
-        }),
+        JSON.stringify(
+          criterionJudgment(false, 'Synthetic fallback evidence check.'),
+        ),
       ],
     });
     const completed = await executeEval({

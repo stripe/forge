@@ -593,6 +593,45 @@ describe('local artifact store', () => {
     }
   });
 
+  it('checks recorded criterion warnings against the saved evidence while accepting their absence', async () => {
+    const location = await commitArtifacts(
+      [
+        { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+        { path: 'trajectory.json', body: oneShotTrajectory },
+        { path: 'judge-evidence.json', body: judgeEvidenceBody() },
+      ],
+      withPassingCriterion,
+    );
+    const verified = await verifyCompletedRun(location);
+    const changed = structuredClone(verified.result);
+    const criterion = changed.evaluation.judging_criteria[0]!;
+    await fs.writeFile(
+      path.join(location, 'result.json'),
+      jsonBody({
+        ...changed,
+        evaluation: {
+          ...changed.evaluation,
+          judging_criteria: [
+            {
+              ...criterion,
+              evidence_warnings: [
+                {
+                  source: 'workspace',
+                  code: 'workspace_file_truncated',
+                  message: 'File text was truncated.',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    await assert.rejects(
+      verifyCompletedRun(location),
+      /Criterion evidence warnings do not match the saved evidence/,
+    );
+  });
+
   it('rejects unclaimed files and symlinks even when the claimed artifact bytes match', async () => {
     const location = await commitArtifacts([
       { path: 'interaction.json', body: jsonBody(oneShotInteraction) },

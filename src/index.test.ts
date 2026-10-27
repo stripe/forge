@@ -5,17 +5,23 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type ChoiceAnswer,
+  type ChoiceQuestion,
   type CompletionCallTotalsV1,
   CompletionInvocationError,
   type CompletionSubattemptRecordV1,
   type CompletionTransportObservation,
+  CRITERION_DECISION_THRESHOLDS,
   createArtifactStore,
+  createCompletionDecisionModel,
   createForgeEngine,
   createJudgeTranscriptProjection,
   createSetupExecutor,
   credentialReference,
   credentialsSetupHandler,
   criterionResultMatchesDefinition,
+  DECISION_PROBABILITY_TOLERANCE,
+  type DecisionModel,
   defineSetupActionBundle,
   evaluateRunEvidence,
   executeEval,
@@ -101,6 +107,33 @@ describe('@stripe/forge package root', () => {
       assert.equal(removed in rootExports, false);
     }
     assert.equal(typeof CompletionInvocationError, 'function');
+    assert.equal(typeof createCompletionDecisionModel, 'function');
+    assert.deepEqual(CRITERION_DECISION_THRESHOLDS, {
+      minimum_probability: 0.8,
+    });
+    assert.equal(DECISION_PROBABILITY_TOLERANCE, 0.000001);
+    const question: ChoiceQuestion<'yes' | 'no'> = {
+      type: 'choice',
+      instructions: 'Choose.',
+      criteria: { yes: 'Yes.', no: 'No.' },
+    };
+    const answer: ChoiceAnswer<'yes' | 'no'> = {
+      type: 'choice',
+      choice: 'yes',
+      probabilities: { yes: 1, no: 0 },
+      confidence: 1,
+      explanation: 'Yes.',
+    };
+    const model: DecisionModel = {
+      decide: async () => ({
+        model: null,
+        usage: null,
+        answers: { check: answer },
+      }),
+    };
+    assert.equal(question.type, 'choice');
+    assert.equal(typeof model.decide, 'function');
+
     assert.equal(MAX_COMPLETION_CALL_SUMMARIES, 1024);
     assert.equal(typeof FORGE_VERSION, 'string');
     assert.equal(FORGE_BUILD_IDENTITY.version, FORGE_VERSION);

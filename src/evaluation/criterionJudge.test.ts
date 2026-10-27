@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, vi } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import { CompletionInvocationError } from '../contracts/completion.ts';
 import { REQUIREMENT_LEVELS } from '../model/types.ts';
 import { parseEvaluationResult } from '../results/parse.ts';
@@ -35,8 +36,18 @@ function visibleTranscript(message: string) {
   });
 }
 
+function expectedDecision(passed: boolean) {
+  const { explanation: _explanation, ...answer } =
+    criterionJudgment(passed).answers.criterion;
+  return {
+    ...answer,
+    outcome: passed ? 'met' : 'not_met',
+    thresholds: { minimum_probability: 0.8 },
+  };
+}
+
 function valid(passed = true, explanation = 'yes'): string {
-  return JSON.stringify({ results: [{ index: 0, passed, explanation }] });
+  return JSON.stringify(criterionJudgment(passed, explanation));
 }
 
 describe('judgeCriteria', () => {
@@ -131,6 +142,7 @@ describe('judgeCriteria', () => {
         criterion: 'THE_CRITERION',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
     ]);
@@ -138,7 +150,10 @@ describe('judgeCriteria', () => {
     const request = requests[0]!;
     assert.equal(request.temperature, 0);
     assert.equal(request.maxTokens, 1024);
-    assert.equal(request.responseSchema, CRITERION_JUDGMENT_RESPONSE_SCHEMA);
+    assert.deepEqual(
+      request.responseSchema,
+      CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+    );
     assert.deepEqual(request.messages, [
       { role: 'user', content: 'Return the requested structured judgment.' },
     ]);
@@ -205,6 +220,7 @@ describe('judgeCriteria', () => {
         label: 'correctness',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
       {
@@ -212,6 +228,7 @@ describe('judgeCriteria', () => {
         label: 'source',
         requirement_level: 'OPTIONAL' as const,
         passed: false,
+        decision: expectedDecision(false),
         explanation: 'yes',
       },
       {
@@ -219,12 +236,14 @@ describe('judgeCriteria', () => {
         label: 'source',
         requirement_level: 'OPTIONAL' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
       {
         criterion: 'Optional behavior',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
     ]);
@@ -240,7 +259,7 @@ describe('judgeCriteria', () => {
     assert.doesNotMatch(prompt, /## Workspace Files/);
     assert.match(
       prompt,
-      /Only mark the criterion as passed if the assistant explicitly addressed it/,
+      /Only choose met if the assistant explicitly addressed it/,
     );
     assert.match(prompt, /TRANSCRIPT[\s\S]*CRITERION/);
   });
@@ -313,6 +332,7 @@ describe('judgeCriteria', () => {
         criterion: criterion.value,
         requirement_level: 'SHOULD' as const,
         passed: index % 2 === 0,
+        decision: expectedDecision(index % 2 === 0),
         explanation: `result ${index}`,
       })),
     );
@@ -347,6 +367,7 @@ describe('judgeCriteria', () => {
         criterion,
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: criterion,
       })),
     );
@@ -383,6 +404,7 @@ describe('judgeCriteria', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'recovered',
       },
     ]);
@@ -445,6 +467,7 @@ describe('judgeCriteria', () => {
       criterion: 'peer',
       requirement_level: 'SHOULD',
       passed: true,
+      decision: expectedDecision(true),
       explanation: 'Peer passed.',
     });
   });
@@ -519,6 +542,7 @@ describe('judgeCriteria', () => {
         criterion: 'successful',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'completed',
       },
     ]);
@@ -580,8 +604,7 @@ describe('judgeCriteria', () => {
         error: {
           type: 'parse_error',
           attempts: 3,
-          message:
-            'Judge response did not match the required schema at response.results[0].explanation (too_big).',
+          message: 'Judge response did not match the required schema.',
         },
         explanation:
           'Judge response did not match the required schema. (unavailable after 3 attempts)',
@@ -775,6 +798,7 @@ describe('parseCriterionJudgment', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: false,
+        decision: expectedDecision(false),
         explanation: explanation.trim(),
       },
     );
@@ -815,44 +839,26 @@ describe('parseCriterionJudgment', () => {
     }
   });
 
-  it('reports parse errors for extra fields, the wrong index, blank explanations, and wrong result counts', () => {
-    const entry = { index: 0, passed: true, explanation: 'ok' };
-    for (const [response, diagnostic] of [
-      [
-        { results: [{ ...entry, extra: true }] },
-        'response.results[0] (unrecognized_keys)',
-      ],
-      [
-        { results: [{ ...entry, index: 1 }] },
-        'response.results[0].index (invalid_value)',
-      ],
-      [
-        { results: [{ ...entry, explanation: '' }] },
-        'response.results[0].explanation (too_small)',
-      ],
-      [
-        { results: [{ ...entry, explanation: '   ' }] },
-        'response.results[0].explanation (too_small)',
-      ],
-      [
-        { results: [{ ...entry, explanation: '\t\r\n' }] },
-        'response.results[0].explanation (too_small)',
-      ],
-      [{ results: [entry], extra: true }, 'response (unrecognized_keys)'],
-      [{ results: [] }, 'response.results (too_small)'],
-      [{ results: [entry, entry] }, 'response.results (too_big)'],
-    ] as const) {
-      assert.deepEqual(parseCriterionJudgment(JSON.stringify(response), 'g'), {
-        criterion: 'g',
-        requirement_level: 'SHOULD' as const,
-        passed: null,
-        error: {
-          type: 'parse_error',
-          attempts: 1,
-          message: `Judge response did not match the required schema at ${diagnostic}.`,
-        },
-        explanation: 'Judge response did not match the required schema.',
-      });
+  it('rejects missing answers, extra fields, blank explanations, and unknown question IDs', () => {
+    const response = criterionJudgment(true, 'ok');
+    const answer = response.answers.criterion;
+    for (const invalid of [
+      { answers: { criterion: { ...answer, extra: true } } },
+      { answers: { criterion: { ...answer, explanation: '' } } },
+      { answers: { criterion: { ...answer, explanation: '   ' } } },
+      { answers: { criterion: { ...answer, explanation: '\t\r\n' } } },
+      { ...response, extra: true },
+      { answers: {} },
+      { answers: { ...response.answers, unknown: answer } },
+      { results: [{ index: 0, passed: true, explanation: 'old model reply' }] },
+    ]) {
+      const result = parseCriterionJudgment(JSON.stringify(invalid), 'g');
+      assert.equal(result.passed, null);
+      assert.equal(result.error?.type, 'parse_error');
+      assert.equal(
+        result.error?.message,
+        'Judge response did not match the required schema.',
+      );
     }
   });
 
@@ -870,10 +876,7 @@ describe('parseCriterionJudgment', () => {
         JSON.stringify(response),
         'criterion',
       );
-      assert.match(
-        result.error!.message,
-        /required schema at response.results\[0\]/,
-      );
+      assert.match(result.error!.message, /required schema/);
       assert.doesNotMatch(JSON.stringify(result), /secret/);
     }
   });

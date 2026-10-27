@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
+import { criterionJudgment } from '../test/fixtures/criterionJudgment.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
 import {
   createDefaultCliComposition,
@@ -73,9 +74,7 @@ function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
   const respond: ScriptedCompletionHandler = (request, context) => {
     completionCalls.push({ request, context });
     if (request.purpose === 'judge') {
-      return JSON.stringify({
-        results: [{ index: 0, passed: true, explanation: 'Task completed.' }],
-      });
+      return JSON.stringify(criterionJudgment(true, 'Task completed.'));
     }
     return request.responseSchema?.name === 'ava_initial_turn'
       ? JSON.stringify({

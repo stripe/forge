@@ -25,6 +25,7 @@ import {
   createTestResolvedRunPlan,
 } from '../src/testing/index.ts';
 import { FORGE_VERSION } from '../src/version.ts';
+import { criterionJudgment } from './fixtures/criterionJudgment.ts';
 
 const repositoryRoot = process.cwd();
 const liveScript = path.join(repositoryRoot, 'scripts', 'live-e2e.mjs');
@@ -59,15 +60,7 @@ describe('unified live end-to-end suite', () => {
         message: 'Please reply with HELLO.',
       },
       { remaining_need_ids: [], message: '' },
-      {
-        results: [
-          {
-            index: 0,
-            passed: true,
-            explanation: 'The assistant replied HELLO.',
-          },
-        ],
-      },
+      criterionJudgment(true, 'The assistant replied HELLO.'),
     ];
     let calls = 0;
     try {
@@ -111,7 +104,7 @@ describe('unified live end-to-end suite', () => {
       assert.deepEqual(report.schemas, [
         'ava_initial_turn',
         'ava_turn',
-        'criterion_judgment',
+        'choice_decision',
       ]);
       const verified = await forge.verifyCompletedRun(report.location);
       assert.equal(
@@ -972,13 +965,13 @@ describe('unified live end-to-end suite', () => {
     {
       name: 'valid backticks',
       content:
-        '{"results":[{"index":0,"passed":true,"explanation":"Missing `cancel_url`."}]}',
+        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Missing `cancel_url`."}}}',
       error: undefined,
     },
     {
       name: 'illegal backtick escapes',
       content:
-        '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}',
+        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Missing \\`cancel_url\\`."}}}',
       error: {
         code: 'invalid_output',
         message: /live JSON escape check returned malformed structured output/,
@@ -986,7 +979,8 @@ describe('unified live end-to-end suite', () => {
     },
     {
       name: 'whitespace explanation',
-      content: '{"results":[{"index":0,"passed":true,"explanation":"   "}]}',
+      content:
+        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"   "}}}',
       error: { message: /valid completed judgment/ },
     },
   ]) {
@@ -998,8 +992,8 @@ describe('unified live end-to-end suite', () => {
           const request = JSON.parse(String(init?.body));
           assert.equal(request.output_config.format.type, 'json_schema');
           assert.equal(
-            request.output_config.format.schema.properties.results.items
-              .properties.explanation.pattern,
+            request.output_config.format.schema.properties.answers.properties
+              .criterion.properties.explanation.pattern,
             undefined,
           );
           assert.equal(request.messages[0].content.match(/\\`/g)?.length, 2);

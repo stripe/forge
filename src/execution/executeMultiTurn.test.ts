@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 
 import { parseAtifTrajectory } from '../atif/index.ts';
 import { credentialReference } from '../contracts/credentials.ts';
@@ -240,15 +241,9 @@ describe('executeEval multi-turn and judging integration', () => {
             },
           ]);
           judgeSystemPrompt = request.systemPrompt ?? '';
-          return JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: true,
-                explanation: 'answer.txt is complete.',
-              },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(true, 'answer.txt is complete.'),
+          );
         },
       ],
     });
@@ -450,15 +445,9 @@ describe('executeEval multi-turn and judging integration', () => {
         (request) => {
           assert.equal(request.purpose, 'judge');
           judgeSystemPrompt = request.systemPrompt ?? '';
-          return JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: true,
-                explanation: 'Both completed turns are present.',
-              },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(true, 'Both completed turns are present.'),
+          );
         },
       ],
     });
@@ -682,11 +671,9 @@ describe('executeEval multi-turn and judging integration', () => {
       );
       assert.ok((request.systemPrompt ?? '').includes('"is_error":false'));
       judgePrompts.push(request.systemPrompt ?? '');
-      return JSON.stringify({
-        results: [
-          { index: 0, passed: true, explanation: 'Visible evidence passed.' },
-        ],
-      });
+      return JSON.stringify(
+        criterionJudgment(true, 'Visible evidence passed.'),
+      );
     };
     const provider = createScriptedCompletionProvider({
       id: 'test-provider',
@@ -816,11 +803,7 @@ describe('executeEval multi-turn and judging integration', () => {
         },
       },
       responses: [
-        JSON.stringify({
-          results: [
-            { index: 0, passed: true, explanation: 'Visible evidence passed.' },
-          ],
-        }),
+        JSON.stringify(criterionJudgment(true, 'Visible evidence passed.')),
       ],
     });
     const artifacts = createMemoryArtifactStore();

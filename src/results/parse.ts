@@ -9,6 +9,11 @@ import {
   agentAdapterMetadataSchema,
   completionProviderMetadataSchema,
 } from '../contracts/metadata.ts';
+import { criterionDecisionSchema } from '../evaluation/criterionDecision.ts';
+import {
+  MAX_CRITERION_EVIDENCE_WARNING_BYTES,
+  MAX_CRITERION_EVIDENCE_WARNINGS,
+} from '../evaluation/criterionEvidence.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -207,6 +212,28 @@ const interactionTurn = z
     tool_calls: z.array(interactionToolCall).max(100_000),
   })
   .strict();
+export const criterionEvidenceWarningSchema = z
+  .object({
+    source: z.enum(['trajectory', 'workspace']),
+    code: z.string().min(1).max(4096),
+    message: z
+      .string()
+      .min(1)
+      .max(64 * 1024),
+    path: safeText.optional(),
+  })
+  .strict();
+
+export const criterionEvidenceWarningsSchema = z
+  .array(criterionEvidenceWarningSchema)
+  .max(MAX_CRITERION_EVIDENCE_WARNINGS)
+  .refine(
+    (warnings) =>
+      Buffer.byteLength(JSON.stringify(warnings)) <=
+      MAX_CRITERION_EVIDENCE_WARNING_BYTES,
+    'Criterion evidence warnings exceed their byte limit.',
+  );
+
 const criterionFields = {
   label: z
     .string()
@@ -220,10 +247,17 @@ const criterionFields = {
     .min(1)
     .max(64 * 1024),
   explanation: z.string().max(64 * 1024),
+  evidence_warnings: criterionEvidenceWarningsSchema.optional(),
 };
 const criterionResult = z
   .union([
-    z.object({ ...criterionFields, passed: z.boolean() }).strict(),
+    z
+      .object({
+        ...criterionFields,
+        passed: z.boolean(),
+        decision: criterionDecisionSchema.optional(),
+      })
+      .strict(),
     z
       .object({
         ...criterionFields,
@@ -239,6 +273,16 @@ const criterionResult = z
       .strict(),
   ])
   .superRefine((criterion, context) => {
+    if (
+      'decision' in criterion &&
+      criterion.decision !== undefined &&
+      criterion.passed !== (criterion.decision.outcome === 'met')
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Criterion passed flag disagrees with its decision.',
+      });
+    }
     const wordingIssue = criterionRequirementWordingIssue(
       criterion.criterion,
       criterion.requirement_level,
@@ -265,10 +309,22 @@ export const evaluationResultSchema = z
   .strict()
   .superRefine((value, context) => {
     const expected = scoreEvaluation(
-      value.judging_criteria.map(({ label, ...criterion }) => ({
-        ...criterion,
-        ...(label === undefined ? {} : { label }),
-      })),
+      value.judging_criteria.map(
+        ({ label, evidence_warnings, ...criterion }) => ({
+          ...criterion,
+          ...(label === undefined ? {} : { label }),
+          ...(evidence_warnings === undefined
+            ? {}
+            : {
+                evidence_warnings: evidence_warnings.map(
+                  ({ path, ...warning }) => ({
+                    ...warning,
+                    ...(path === undefined ? {} : { path }),
+                  }),
+                ),
+              }),
+        }),
+      ),
       value.checks.map(
         ({ label, requirement_level, detail, tool_calls, ...check }) => ({
           ...check,

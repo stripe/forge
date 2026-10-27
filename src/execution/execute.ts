@@ -51,6 +51,8 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
+import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type RuntimeCredentialDeclaration,
   resolveCredentialDeclarations,
@@ -570,6 +572,10 @@ export async function executeEvalWithTestHooks(
           {
             transcript: judgeTranscript,
             criteria,
+            evidenceWarnings: criterionEvidenceWarnings({
+              trajectory: redacted.evidence,
+              workspace: safeWorkspace!,
+            }),
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
               : { exampleAnswer: input.plan.evaluation.example_answer }),
@@ -578,15 +584,16 @@ export async function executeEvalWithTestHooks(
               : { workspaceText: safeWorkspaceText }),
             signal,
           },
-          async (request) => {
-            return (await completions.invoke('judge', request, request.signal))
-              .content;
-          },
+          createCompletionDecisionModel({
+            model: input.plan.evaluation.judge!,
+            invoke: (request) =>
+              completions.invoke('judge', request, request.signal),
+            validateRequest: (request) =>
+              assertJudgePromptWillRemainUnchanged(request, secrets),
+          }),
           {
             redactionSecrets: secrets,
             onRetryDecision: completions.recordRetryDecision,
-            validateRequest: (request) =>
-              assertJudgePromptWillRemainUnchanged(request, secrets),
             ...(hooks.waitBeforeCompletionRetry === undefined
               ? {}
               : {

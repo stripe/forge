@@ -56,11 +56,33 @@ export function scoreEvaluation(
     judging_criteria_passed: criteriaPassed,
     judging_criteria_total: criteriaTotal,
     judging_criteria_errored: criteriaErrored,
-    judging_criteria: criteria.map((criterion) =>
-      criterion.passed === null
-        ? { ...criterion, error: { ...criterion.error } }
-        : { ...criterion },
-    ),
+    judging_criteria: criteria.map((criterion): CriterionResultV1 => {
+      const result =
+        criterion.passed === null
+          ? { ...criterion, error: { ...criterion.error } }
+          : {
+              ...criterion,
+              ...(criterion.decision === undefined
+                ? {}
+                : {
+                    decision: {
+                      ...criterion.decision,
+                      probabilities: { ...criterion.decision.probabilities },
+                      thresholds: { ...criterion.decision.thresholds },
+                    },
+                  }),
+            };
+      return {
+        ...result,
+        ...(criterion.evidence_warnings === undefined
+          ? {}
+          : {
+              evidence_warnings: criterion.evidence_warnings.map((warning) => ({
+                ...warning,
+              })),
+            }),
+      };
+    }),
     checks: checks.map((check) => ({
       ...check,
       ...(check.tool_calls === undefined

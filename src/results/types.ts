@@ -7,6 +7,7 @@ import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
 } from '../contracts/metadata.ts';
+import type { CriterionDecisionV1 } from '../evaluation/criterionDecision.ts';
 import type {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -65,16 +66,29 @@ export interface CheckResultV1 {
   readonly tool_calls?: ToolCallCheckEvidenceV1;
 }
 
+export interface CriterionEvidenceWarningV1 {
+  readonly source: 'trajectory' | 'workspace';
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}
+
 export type CriterionResultV1 = {
   readonly label?: string;
   /** Always present after parsing; omitted input defaults to SHOULD. */
   readonly requirement_level: RequirementLevelV1;
   readonly criterion: string;
   readonly explanation: string;
+  readonly evidence_warnings?: readonly CriterionEvidenceWarningV1[];
 } & (
-  | { readonly passed: boolean; readonly error?: never }
+  | {
+      readonly passed: boolean;
+      readonly decision?: CriterionDecisionV1 | undefined;
+      readonly error?: never;
+    }
   | {
       readonly passed: null;
+      readonly decision?: never;
       readonly error: {
         readonly type: 'parse_error' | 'request_error';
         readonly attempts: number;

@@ -32,13 +32,13 @@ export async function runCriterionJudgmentRegression(
         purpose: 'judge',
         model,
         systemPrompt:
-          'Return one structured judgment. Set index to 0 and passed to true.',
+          'Return one structured choice answer for criterion. Choose met with probability 1 and confidence 1; set the other probabilities to 0.',
         messages: [
           {
             role: 'user',
             content:
               'Copy this object exactly, including every backslash in the explanation: ' +
-              '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}',
+              '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Missing \\`cancel_url\\`."}}}',
           },
         ],
         temperature: 0,

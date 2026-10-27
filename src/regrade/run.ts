@@ -5,6 +5,8 @@ import type { AtifTrajectoryV1_8 } from '../atif/types.ts';
 import type { CompletionProviderCollection } from '../contracts/composition.ts';
 import type { CredentialResolver } from '../contracts/credentials.ts';
 import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
+import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionJudgeExecutionOptions,
   type CriterionJudgeInput,
@@ -25,6 +27,7 @@ import type {
   CompletionCallTotalsV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
+  RunEvidenceV1,
   RunResultV1,
 } from '../results/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
@@ -64,6 +67,7 @@ export interface SavedJudgeInputs {
   readonly plan: ResolvedRunPlanV1;
   readonly trajectory: AtifTrajectoryV1_8;
   readonly judgeEvidence: JudgeEvidenceV1;
+  readonly evidence?: Pick<RunEvidenceV1, 'completeness' | 'warnings'>;
 }
 
 /**
@@ -80,6 +84,18 @@ export function judgeInputFromSavedRun(
   return {
     transcript: createJudgeTranscriptProjection(saved.trajectory),
     criteria: saved.plan.evaluation.judging_criteria,
+    evidenceWarnings: criterionEvidenceWarnings({
+      trajectory: saved.evidence ?? {
+        completeness: 'partial',
+        warnings: [
+          {
+            code: 'source_unavailable',
+            message: 'Trajectory completeness was not supplied.',
+          },
+        ],
+      },
+      workspace: saved.judgeEvidence.workspace,
+    }),
     ...(saved.plan.evaluation.example_answer === undefined
       ? {}
       : { exampleAnswer: saved.plan.evaluation.example_answer }),
@@ -140,10 +156,19 @@ export async function regradeCompletedRun(
     signal,
   });
   const criteria = await judgeCriteria(
-    { ...judgeInputFromSavedRun({ plan, trajectory, judgeEvidence }), signal },
-    async (request) =>
-      (await completions.invoke('judge', request, request.signal ?? signal))
-        .content,
+    {
+      ...judgeInputFromSavedRun({
+        plan,
+        trajectory,
+        judgeEvidence,
+        evidence: result.evidence,
+      }),
+      signal,
+    },
+    createCompletionDecisionModel({
+      model: input.judge,
+      invoke: (request) => completions.invoke('judge', request, request.signal),
+    }),
     {
       redactionSecrets: completions.secrets,
       onRetryDecision: completions.recordRetryDecision,

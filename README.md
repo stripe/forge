@@ -502,6 +502,13 @@ For nine scored criteria, six passes, two failures, and one judge error give a
 score of `0.75` and status `judge_error`. Each errored criterion records
 `passed: null` and an `error` with its type, attempt count, and diagnostic
 message; `judging_criteria_errored` counts MUST and SHOULD errors.
+
+New judgments also record a `decision`: the model's choice, probabilities,
+confidence, Forge's derived outcome, and the thresholds used. An outcome of
+`insufficient_evidence` means the supplied evidence could not support a firm
+verdict. It keeps `passed: false` and counts against scored criteria; it is
+separate from a judge error. See the [decision rule](docs/architecture.md#criterion-judging).
+
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
@@ -521,7 +528,15 @@ runs contribute to pass rate. `judge_errors` separately counts affected
 evaluations and errored criteria in the summary and each case/configuration,
 including errors on OPTIONAL criteria.
 These errors remain committed outcomes on resume; they do not rerun the coding
-agent. Ratios range from 0 to 1. Only the latest verified effective outcome
+agent.
+
+`insufficient_evidence` counts affected evaluations and criteria separately in
+the summary and each case group, including OPTIONAL criteria. Run evaluations
+carry `judging_criteria_insufficient_evidence` and `criterion_failures`; each
+failed or insufficient criterion lists its evidence warnings. A warning flags
+capture limits, not proof of a failure. Older records may omit these fields;
+failed judgments without recorded warnings report completeness as unknown.
+Ratios range from 0 to 1. Only the latest verified effective outcome
 contributes for each selection, so retries do not add scores. Compare treatments
 on matched cases and agent configurations. See
 [scoring semantics](docs/architecture.md#evaluation-and-scoring).
@@ -625,7 +640,7 @@ for verification, judge-visible projections, and fidelity limits.
 without re-running any coding agent or Ava turn. Each completed run is verified
 first. Its transcript is projected from the saved `trajectory.json`, and its
 workspace text comes from the saved `judge-evidence.json`, so the new judge
-receives the same evidence and prompt as the original judge:
+receives the saved evidence under the current Forge judge contract:
 
 ```sh
 npx --no-install forge regrade \
@@ -637,7 +652,8 @@ npx --no-install forge regrade \
 The source experiment run is only read; `--output` must be a new location
 outside it. Each regrade is written to `runs/<run-id>.json` there, with the
 judge, the new evaluation, its completion calls, and digests of the saved
-inputs. `report.json` aggregates the regraded evaluations with the standard
+inputs. Regraded criteria use the same decision rule and warning fields as
+new runs. `report.json` aggregates the regraded evaluations with the standard
 report format, and `regrade.json` summarizes the invocation. For runs with
 judging criteria, regrade reports count rate-limit waits from the new judge
 calls only; they do not add waits from the source run. Reused older regrades

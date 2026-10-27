@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
 import {
   createScriptedCompletionProvider,
@@ -23,9 +24,7 @@ afterEach(async () => {
   );
 });
 
-const failingJudgment = JSON.stringify({
-  results: [{ index: 0, passed: false, explanation: 'Not shown.' }],
-});
+const failingJudgment = JSON.stringify(criterionJudgment(false, 'Not shown.'));
 
 function dependencies(responses: string[]) {
   const scripted = createScriptedCompletionProvider({

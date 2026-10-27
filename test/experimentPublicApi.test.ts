@@ -27,6 +27,7 @@ import type {
 } from '../src/experimentCli.ts';
 import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
+import { criterionJudgment } from './fixtures/criterionJudgment.ts';
 
 describe('experiment public entry points', () => {
   it('exports versioned dataset case entries with their paths', () => {
@@ -58,9 +59,7 @@ describe('experiment public entry points', () => {
     assert.equal(typeof root.buildCriterionJudgePrompt, 'function');
     assert.equal(typeof root.parseCriterionJudgment, 'function');
     const criterion: root.CriterionResultV1 = root.parseCriterionJudgment(
-      JSON.stringify({
-        results: [{ index: 0, passed: true, explanation: 'Done.' }],
-      }),
+      JSON.stringify(criterionJudgment(true, 'Done.')),
       {
         requirement_level: 'SHOULD' as const,
         value: 'The task is complete.',
@@ -106,15 +105,21 @@ describe('experiment public entry points', () => {
     ];
     for (const input of inputs) {
       const result = root.parseCriterionJudgment(
-        JSON.stringify({
-          results: [{ index: 0, passed: true, explanation: 'Done.' }],
-        }),
+        JSON.stringify(criterionJudgment(true, 'Done.')),
         input,
       );
       assert.deepEqual(result, {
         criterion: text,
         requirement_level: 'SHOULD',
         passed: true,
+        decision: {
+          type: 'choice',
+          choice: 'met',
+          probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
+          confidence: 1,
+          outcome: 'met',
+          thresholds: { minimum_probability: 0.8 },
+        },
         explanation: 'Done.',
       });
       assert.equal(root.criterionResultMatchesDefinition(result, input), true);

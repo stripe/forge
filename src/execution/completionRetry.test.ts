@@ -26,7 +26,8 @@ const transcript = createJudgeTranscriptProjection({
   steps: [{ step_id: 1, source: 'user', message: 'Do the task.' }],
 });
 const answer = {
-  content: '{"results":[{"index":0,"passed":true,"explanation":"Done."}]}',
+  content:
+    '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Done."}}}',
   stopReason: 'end_turn' as const,
   usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
 };

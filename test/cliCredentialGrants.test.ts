@@ -18,6 +18,7 @@ import {
   createScriptedAgentAdapter,
   createScriptedCompletionProvider,
 } from '../src/testing/index.ts';
+import { criterionJudgment } from './fixtures/criterionJudgment.ts';
 
 const temporaryDirectories: string[] = [];
 const sharedReference = credentialReference('shared.token');
@@ -72,9 +73,7 @@ describe('CLI credential grant scopes', () => {
         },
       },
       responses: [
-        JSON.stringify({
-          results: [{ index: 0, passed: true, explanation: 'Task completed.' }],
-        }),
+        JSON.stringify(criterionJudgment(true, 'Task completed.')),
       ],
     });
     let secretReads = 0;

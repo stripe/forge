@@ -1,21 +1,42 @@
-import { z } from 'zod';
 import {
   type CompletionRetryOptions,
   completionRetryDecision,
   INITIAL_COMPLETION_RETRY_STATE,
   waitForCompletionRetry,
 } from '../completionRetry.ts';
-import type {
-  CompletionMessage,
-  StrictCompletionResponseSchema,
-} from '../contracts/completion.ts';
+import type { StrictCompletionResponseSchema } from '../contracts/completion.ts';
+import type { ChoiceAnswer, DecisionModel } from '../contracts/decision.ts';
 import { JudgingCriterionSchema } from '../model/criteria.ts';
 import type {
   JudgingCriterionInputV1,
   JudgingCriterionV1,
 } from '../model/types.ts';
-import type { CriterionResultV1 } from '../results/types.ts';
+import type {
+  CriterionEvidenceWarningV1,
+  CriterionResultV1,
+} from '../results/types.ts';
 import { boundedErrorMessage } from '../security/errorMessage.ts';
+import {
+  buildDecisionPrompt,
+  createCompletionDecisionModel,
+  type DecisionCompletionRequest,
+  DecisionDispatchError,
+  MAX_DECISION_PROMPT_BYTES,
+} from './completionDecisionModel.ts';
+import {
+  CRITERION_DECISION_QUESTIONS,
+  CRITERION_DECISION_THRESHOLDS,
+  type CriterionDecisionOption,
+  type CriterionDecisionV1,
+  criterionDecisionOutcome,
+} from './criterionDecision.ts';
+import { boundCriterionEvidenceWarnings } from './criterionEvidence.ts';
+import {
+  decisionResponseSchema,
+  InvalidDecisionResponseError,
+  MAX_DECISION_EXPLANATION_CHARACTERS,
+  parseDecisionAnswers,
+} from './decision.ts';
 import {
   type JudgeTranscriptProjectionV1,
   parseJudgeTranscriptProjection,
@@ -24,54 +45,16 @@ import {
 export const MAX_CONCURRENT_CRITERION_JUDGMENTS = 4;
 /** Attempt limit for the short structured-output/client-error schedule. */
 export const MAX_CRITERION_JUDGE_ATTEMPTS = 3;
-export const MAX_CRITERION_EXPLANATION_CHARACTERS = 64 * 1024;
-export const MAX_CRITERION_JUDGE_PROMPT_BYTES = 1024 * 1024;
+export const MAX_CRITERION_EXPLANATION_CHARACTERS =
+  MAX_DECISION_EXPLANATION_CHARACTERS;
+export const MAX_CRITERION_JUDGE_PROMPT_BYTES = MAX_DECISION_PROMPT_BYTES;
+
 export { SHORT_COMPLETION_RETRY_DELAYS_MS as CRITERION_JUDGE_RETRY_DELAYS_MS } from '../completionRetry.ts';
 
 export const CRITERION_JUDGMENT_RESPONSE_SCHEMA: StrictCompletionResponseSchema =
-  Object.freeze({
-    name: 'criterion_judgment',
-    description: 'One pass/fail judgment for one success criterion.',
-    strict: true,
-    schema: {
-      type: 'object',
-      properties: {
-        results: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 1,
-          items: {
-            type: 'object',
-            properties: {
-              index: { type: 'integer', const: 0 },
-              passed: { type: 'boolean' },
-              explanation: {
-                // Validate non-whitespace locally in StructuredJudgeEntry. Native
-                // regex-constrained strings can contain invalid JSON escapes.
-                type: 'string',
-                minLength: 1,
-                maxLength: MAX_CRITERION_EXPLANATION_CHARACTERS,
-              },
-            },
-            required: ['index', 'passed', 'explanation'],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ['results'],
-      additionalProperties: false,
-    },
-  });
+  Object.freeze(decisionResponseSchema(CRITERION_DECISION_QUESTIONS));
 
-export interface CriterionCompletionRequest {
-  readonly systemPrompt: string;
-  readonly messages: readonly CompletionMessage[];
-  readonly temperature: number;
-  readonly maxTokens: number;
-  readonly responseSchema: StrictCompletionResponseSchema;
-  readonly signal: AbortSignal;
-  readonly retryOrdinal?: number;
-}
+export type CriterionCompletionRequest = DecisionCompletionRequest;
 
 /** Prompt-only callback; the lifecycle binds run, purpose, model, and credentials. */
 export type CriterionCompletionInvoker = (
@@ -86,12 +69,13 @@ export interface CriterionJudgeInput {
   /** Exact rendered text returned by collectJudgeWorkspaceEvidence(). */
   readonly workspaceText?: string;
   readonly signal?: AbortSignal;
+  readonly evidenceWarnings?: readonly CriterionEvidenceWarningV1[];
 }
 
 export interface CriterionJudgeExecutionOptions extends CompletionRetryOptions {
   /** Credentials to redact from request-error diagnostics for custom invokers. */
   readonly redactionSecrets?: readonly string[];
-  /** Validate dispatch invariants outside the retryable provider invocation. */
+  /** Prompt-only invokers: validate dispatch outside retryable provider calls. */
   readonly validateRequest?: (request: CriterionCompletionRequest) => void;
   /** Legacy test seam that overrides each retry wait. */
   readonly waitBeforeRetry?: (
@@ -99,30 +83,6 @@ export interface CriterionJudgeExecutionOptions extends CompletionRetryOptions {
     signal: AbortSignal | undefined,
   ) => Promise<void>;
 }
-
-const StructuredJudgeEntry = z
-  .object({
-    index: z.literal(0),
-    passed: z.boolean(),
-    explanation: z
-      .string()
-      .trim()
-      .min(1)
-      .max(MAX_CRITERION_EXPLANATION_CHARACTERS),
-  })
-  .strict();
-
-const StructuredJudgeResponse = z
-  .object({ results: z.array(StructuredJudgeEntry).length(1) })
-  .strict();
-
-type JudgeParseOutcome =
-  | { readonly valid: true; readonly result: CriterionResultV1 }
-  | {
-      readonly valid: false;
-      readonly explanation: string;
-      readonly message: string;
-    };
 
 /** Build the complete, transport-neutral prompt for one authored criterion. */
 export function buildCriterionJudgePrompt(
@@ -132,9 +92,15 @@ export function buildCriterionJudgePrompt(
   >,
   criterion: string,
 ): string {
-  return renderCriterionJudgePrompt(
-    { ...input, transcript: parseJudgeTranscriptProjection(input.transcript) },
-    criterion,
+  return buildDecisionPrompt(
+    renderCriterionJudgePrompt(
+      {
+        ...input,
+        transcript: parseJudgeTranscriptProjection(input.transcript),
+      },
+      criterion,
+    ),
+    CRITERION_DECISION_QUESTIONS,
   );
 }
 
@@ -150,7 +116,7 @@ function renderCriterionJudgePrompt(
     : input.transcript.transcriptJson;
   const exampleAnswerSection = input.exampleAnswer
     ? `Use the following example answer to calibrate what a correct response looks like, then evaluate the success criterion against the coding assistant's responses and any workspace files produced (not what a role player asked or implied). Be objective and concise.\n\nExample correct answer: ${input.exampleAnswer}\n`
-    : `Evaluate the success criterion against the coding assistant's responses and any workspace files produced (not what a role player asked or implied). Be objective and concise. Only mark the criterion as passed if the assistant explicitly addressed it — do not give credit for clarifying questions, vague mentions, or implied intent.\n`;
+    : `Evaluate the success criterion against the coding assistant's responses and any workspace files produced (not what a role player asked or implied). Be objective and concise. Only choose met if the assistant explicitly addressed it — do not give credit for clarifying questions, vague mentions, or implied intent.\n`;
 
   const prompt = `You are a strict evaluator grading whether an AI coding assistant satisfied one success criterion during an evaluation conversation.
 
@@ -219,15 +185,32 @@ export function parseCriterionJudgment(
 /** Grade each criterion independently with stable output order. */
 export async function judgeCriteria(
   input: CriterionJudgeInput,
-  invoke: CriterionCompletionInvoker,
+  model: DecisionModel | CriterionCompletionInvoker,
   options: CriterionJudgeExecutionOptions = {},
 ): Promise<CriterionResultV1[]> {
   const validatedInput: CriterionJudgeInput = {
     ...input,
     transcript: parseJudgeTranscriptProjection(input.transcript),
+    ...(input.evidenceWarnings === undefined
+      ? {}
+      : {
+          evidenceWarnings: boundCriterionEvidenceWarnings(
+            input.evidenceWarnings,
+          ),
+        }),
   };
   if (input.criteria.length === 0) return [];
 
+  const decisionModel =
+    typeof model === 'function'
+      ? createCompletionDecisionModel({
+          model: null,
+          invoke: model,
+          ...(options.validateRequest === undefined
+            ? {}
+            : { validateRequest: options.validateRequest }),
+        })
+      : model;
   const criteria = validatedInput.criteria.map((criterion) =>
     JudgingCriterionSchema.parse(criterion),
   );
@@ -253,7 +236,7 @@ export async function judgeCriteria(
         results[criterionIndex] = await judgeOneCriterion(
           workerInput,
           criterion,
-          invoke,
+          decisionModel,
           options,
         );
       } catch (error) {
@@ -275,13 +258,24 @@ export async function judgeCriteria(
   );
   await Promise.all(Array.from({ length: workerCount }, judgeNext));
   if (failed) throw firstError;
-  return results;
+  return results.map((result) =>
+    validatedInput.evidenceWarnings === undefined
+      ? result
+      : {
+          ...result,
+          evidence_warnings: validatedInput.evidenceWarnings!.map(
+            (warning) => ({
+              ...warning,
+            }),
+          ),
+        },
+  );
 }
 
 async function judgeOneCriterion(
   input: CriterionJudgeInput,
   criterion: JudgingCriterionV1,
-  invoke: CriterionCompletionInvoker,
+  model: DecisionModel,
   options: CriterionJudgeExecutionOptions,
 ): Promise<CriterionResultV1> {
   let retryState = INITIAL_COMPLETION_RETRY_STATE;
@@ -295,29 +289,27 @@ async function judgeOneCriterion(
     let failure: unknown;
     let parseFailure = false;
     input.signal?.throwIfAborted();
-    const request: CriterionCompletionRequest = {
-      systemPrompt,
-      retryOrdinal: retryState.ordinal,
-      messages: [
-        { role: 'user', content: 'Return the requested structured judgment.' },
-      ],
-      temperature: 0,
-      maxTokens: 1024,
-      responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
-      signal: input.signal ?? new AbortController().signal,
-    };
-    options.validateRequest?.(request);
     try {
-      const raw = await invoke(request);
+      const response = await model.decide({
+        state: systemPrompt,
+        questions: CRITERION_DECISION_QUESTIONS,
+        signal: input.signal ?? new AbortController().signal,
+        retryOrdinal: retryState.ordinal,
+      });
       input.signal?.throwIfAborted();
-      const outcome = parseJudgeResponse(raw, criterion);
-      if (outcome.valid) return outcome.result;
-      finalParseExplanation = outcome.explanation;
-      finalParseMessage = outcome.message;
-      parseFailure = true;
+      const answer = parseDecisionAnswers(
+        { answers: response?.answers },
+        CRITERION_DECISION_QUESTIONS,
+      ).criterion!;
+      return resultFromAnswer(criterion, answer);
     } catch (error) {
       if (isAbort(error, input.signal)) throw error;
-      failure = error;
+      if (error instanceof DecisionDispatchError) throw error.failure;
+      if (error instanceof InvalidDecisionResponseError) {
+        parseFailure = true;
+        finalParseExplanation = error.message;
+        finalParseMessage = error.message;
+      } else failure = error;
     }
 
     const next = completionRetryDecision(
@@ -368,55 +360,65 @@ async function judgeOneCriterion(
 function parseJudgeResponse(
   raw: unknown,
   criterion: JudgingCriterionV1,
-): JudgeParseOutcome {
-  if (typeof raw !== 'string') {
-    return {
-      valid: false,
-      explanation: 'Judge response was not valid JSON.',
-      message: 'Judge response was not valid JSON.',
-    };
-  }
-  let decoded: unknown;
+):
+  | { readonly valid: true; readonly result: CriterionResultV1 }
+  | {
+      readonly valid: false;
+      readonly explanation: string;
+      readonly message: string;
+    } {
   try {
-    decoded = JSON.parse(raw);
-  } catch {
-    return {
-      valid: false,
-      explanation: 'Judge response was not valid JSON.',
-      message: 'Judge response was not valid JSON.',
-    };
+    if (typeof raw !== 'string')
+      throw new InvalidDecisionResponseError('invalid_json');
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      throw new InvalidDecisionResponseError('invalid_json');
+    }
+    const answer = parseDecisionAnswers(decoded, CRITERION_DECISION_QUESTIONS)
+      .criterion!;
+    return { valid: true, result: resultFromAnswer(criterion, answer) };
+  } catch (error) {
+    if (!(error instanceof InvalidDecisionResponseError)) throw error;
+    return { valid: false, explanation: error.message, message: error.message };
   }
+}
 
-  const parsed = StructuredJudgeResponse.safeParse(decoded);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0]!;
-    // Paths come only from this fixed schema. Never copy validator messages,
-    // unknown keys, received values, or raw output into persisted diagnostics.
-    const path = issue.path
-      .map((part) =>
-        typeof part === 'number' ? `[${part}]` : `.${String(part)}`,
-      )
-      .join('');
-    return {
-      valid: false,
-      explanation: 'Judge response did not match the required schema.',
-      message: `Judge response did not match the required schema at response${path} (${issue.code}).`,
-    };
-  }
-  const entry = parsed.data.results[0]!;
-  return {
-    valid: true,
-    result: criterionResult(criterion, {
-      passed: entry.passed,
-      explanation: entry.explanation,
-    }),
-  };
+function resultFromAnswer(
+  criterion: JudgingCriterionV1,
+  answer: ChoiceAnswer,
+): CriterionResultV1 {
+  const { explanation, ...fields } = answer;
+  const choice = fields.choice as CriterionDecisionOption;
+  const probabilities = {
+    ...fields.probabilities,
+  } as CriterionDecisionV1['probabilities'];
+  const outcome = criterionDecisionOutcome(
+    { choice, probabilities },
+    CRITERION_DECISION_THRESHOLDS,
+  );
+  return criterionResult(criterion, {
+    passed: outcome === 'met',
+    explanation,
+    decision: {
+      ...fields,
+      choice,
+      probabilities,
+      outcome,
+      thresholds: { ...CRITERION_DECISION_THRESHOLDS },
+    },
+  });
 }
 
 function criterionResult(
   criterion: JudgingCriterionV1,
   judgment:
-    | { readonly passed: boolean; readonly explanation: string }
+    | {
+        readonly passed: boolean;
+        readonly explanation: string;
+        readonly decision: CriterionDecisionV1;
+      }
     | {
         readonly passed: null;
         readonly explanation: string;

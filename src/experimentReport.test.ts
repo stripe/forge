@@ -4,6 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
+import { criterionJudgment } from '../test/fixtures/criterionJudgment.ts';
 import { OPEN_CODE_MODEL_PROFILE } from '../test/support/opencode.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { defaultForgeEngine } from './engine.ts';
@@ -48,6 +49,87 @@ afterEach(async () => {
 });
 
 describe('experiment run scorecards', () => {
+  it('counts insufficient evidence next to failures and keeps warnings on each failed criterion', () => {
+    const warning = {
+      source: 'workspace' as const,
+      code: 'workspace_file_truncated',
+      message: 'File text was truncated.',
+      path: 'app.ts',
+    };
+    const insufficient = parseCriterionJudgment(
+      JSON.stringify({
+        answers: {
+          criterion: {
+            type: 'choice',
+            choice: 'met',
+            probabilities: {
+              met: 0.6,
+              not_met: 0.1,
+              insufficient_evidence: 0.3,
+            },
+            confidence: 0.6,
+            explanation: 'The code is incomplete in the capture.',
+          },
+        },
+      }),
+      'Creates a file.',
+    );
+    const failed = parseCriterionJudgment(
+      JSON.stringify(criterionJudgment(false)),
+      'Answers.',
+    );
+    const run = row(0);
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          { ...insufficient, evidence_warnings: [warning] },
+          { ...failed, evidence_warnings: [warning] },
+          parseCriterionJudgment('{}', 'Checks.'),
+        ],
+        [],
+      ),
+    );
+    const report = build([run]);
+    assert.equal(report.summary.failed, 0);
+    assert.equal(report.summary.judge_errors.criteria, 1);
+    assert.deepEqual(report.summary.insufficient_evidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.deepEqual(report.cases[0]!.insufficient_evidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.equal(
+      report.runs[0]!.evaluation!.judging_criteria_insufficient_evidence,
+      1,
+    );
+    assert.deepEqual(report.runs[0]!.evaluation!.criterion_failures, [
+      {
+        criterion: 'Creates a file.',
+        requirement_level: 'SHOULD',
+        outcome: 'insufficient_evidence',
+        evidence_warnings: [warning],
+      },
+      {
+        criterion: 'Answers.',
+        requirement_level: 'SHOULD',
+        outcome: 'not_met',
+        evidence_warnings: [warning],
+      },
+    ]);
+    assert.equal(report.runs[0]!.evaluation!.score, 0);
+    assert.deepEqual(
+      parseExperimentRunReport(
+        JSON.parse(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+    const forged = structuredClone(report);
+    forged.runs[0]!.evaluation!.judging_criteria_insufficient_evidence = 0;
+    assert.throws(() => parseExperimentRunReport(forged));
+  });
+
   it('records the producing Forge build and reads standalone pending scorecards', () => {
     const pending = row(0);
     Object.assign(pending, {
@@ -792,9 +874,7 @@ describe('experiment run scorecards', () => {
       const raw =
         passed === null
           ? '{}'
-          : JSON.stringify({
-              results: [{ index: 0, passed, explanation: 'Judged.' }],
-            });
+          : JSON.stringify(criterionJudgment(passed, 'Judged.'));
       return parseCriterionJudgment(raw, {
         value: 'The answer MUST be complete.',
         requirement_level,
@@ -1261,14 +1341,8 @@ describe('experiment run scorecards', () => {
       const provider = createScriptedCompletionProvider({
         id: 'scripted',
         responses: [
-          JSON.stringify({
-            results: [{ index: 0, passed, explanation: 'Scripted judgment.' }],
-          }),
-          JSON.stringify({
-            results: [
-              { index: 0, passed: !passed, explanation: 'Source observation.' },
-            ],
-          }),
+          JSON.stringify(criterionJudgment(passed, 'Scripted judgment.')),
+          JSON.stringify(criterionJudgment(!passed, 'Source observation.')),
         ],
       }).provider;
       return defaultForgeEngine.executeEval({
@@ -1301,6 +1375,34 @@ describe('experiment run scorecards', () => {
       [
         {
           status: 'partial',
+          judging_criteria_insufficient_evidence: 0,
+          criterion_failures: [
+            {
+              criterion: 'Read docs',
+              label: 'source',
+              requirement_level: 'OPTIONAL',
+              outcome: 'not_met',
+              evidence_warnings: [
+                {
+                  source: 'trajectory',
+                  code: 'trajectory_incomplete',
+                  message:
+                    'The selected trajectory is partial or uses driver fallback.',
+                },
+                {
+                  source: 'trajectory',
+                  code: 'source_unavailable',
+                  message: 'The scripted agent has no native evidence.',
+                },
+                {
+                  source: 'trajectory',
+                  code: 'fallback_used',
+                  message:
+                    'Canonical ATIF was built from completed driver turns.',
+                },
+              ],
+            },
+          ],
           score: 1,
           judging_criteria_passed: 1,
           judging_criteria_total: 1,
@@ -1321,6 +1423,34 @@ describe('experiment run scorecards', () => {
         },
         {
           status: 'failed',
+          judging_criteria_insufficient_evidence: 0,
+          criterion_failures: [
+            {
+              criterion: 'The answer MUST be complete.',
+              label: 'correctness',
+              requirement_level: 'MUST',
+              outcome: 'not_met',
+              evidence_warnings: [
+                {
+                  source: 'trajectory',
+                  code: 'trajectory_incomplete',
+                  message:
+                    'The selected trajectory is partial or uses driver fallback.',
+                },
+                {
+                  source: 'trajectory',
+                  code: 'source_unavailable',
+                  message: 'The scripted agent has no native evidence.',
+                },
+                {
+                  source: 'trajectory',
+                  code: 'fallback_used',
+                  message:
+                    'Canonical ATIF was built from completed driver turns.',
+                },
+              ],
+            },
+          ],
           score: 0,
           judging_criteria_passed: 0,
           judging_criteria_total: 1,
@@ -1412,15 +1542,9 @@ describe('experiment run scorecards', () => {
             )
           )
             return '{}';
-          return JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: repetition !== 3,
-                explanation: 'Valid judgment.',
-              },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(repetition !== 3, 'Valid judgment.'),
+          );
         }),
       }).provider;
       return executeEvalWithTestHooks(
@@ -1485,8 +1609,7 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(malformed.result.evaluation.judging_criteria[1]!.error, {
       type: 'parse_error',
       attempts: 3,
-      message:
-        'Judge response did not match the required schema at response.results (invalid_type).',
+      message: 'Judge response did not match the required schema.',
     });
     assert.equal(stored.result.completion_calls.length, 12);
     assert.ok(

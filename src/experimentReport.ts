@@ -8,6 +8,7 @@ import {
 import { sha256Digest } from './model/hashes.ts';
 import { ModelProfileSchema, parseRunSelection } from './model/parse.ts';
 import type { RequirementLevelV1 } from './model/types.ts';
+import { criterionEvidenceWarningsSchema } from './results/parse.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import {
@@ -73,12 +74,73 @@ const evaluationSchema = z
     criterion_scores: criterionScoresSchema,
     judging_criteria_errored: count,
     judging_criteria_excluded_errored: count,
+    judging_criteria_insufficient_evidence: count.optional(),
+    criterion_failures: z
+      .array(
+        z
+          .object({
+            criterion: z
+              .string()
+              .min(1)
+              .max(64 * 1024),
+            label: z
+              .string()
+              .regex(/^[a-z][a-z0-9_]*$/)
+              .optional(),
+            requirement_level: z.enum(['MUST', 'SHOULD', 'OPTIONAL']),
+            outcome: z.enum(['not_met', 'insufficient_evidence']),
+            evidence_warnings: criterionEvidenceWarningsSchema,
+          })
+          .strict(),
+      )
+      .max(100_000)
+      .optional(),
     checks_passed: count,
     checks_total: count,
   })
   .strict()
   .superRefine((value, context) => {
     const { MUST, SHOULD, OPTIONAL } = value.criteria_by_requirement;
+    if (
+      value.criterion_failures !== undefined &&
+      (value.criterion_failures.length !==
+        MUST.total +
+          SHOULD.total +
+          OPTIONAL.total -
+          MUST.passed -
+          SHOULD.passed -
+          OPTIONAL.passed -
+          MUST.errored -
+          SHOULD.errored -
+          OPTIONAL.errored ||
+        value.judging_criteria_insufficient_evidence !==
+          value.criterion_failures.filter(
+            (criterion) => criterion.outcome === 'insufficient_evidence',
+          ).length)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Criterion failure details disagree with counts.',
+      });
+    }
+    if (
+      value.judging_criteria_insufficient_evidence !== undefined &&
+      value.judging_criteria_insufficient_evidence >
+        MUST.total +
+          SHOULD.total +
+          OPTIONAL.total -
+          MUST.passed -
+          SHOULD.passed -
+          OPTIONAL.passed -
+          MUST.errored -
+          SHOULD.errored -
+          OPTIONAL.errored
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Insufficient evidence count exceeds failed criteria.',
+      });
+    }
     if (
       value.judging_criteria_passed !== MUST.passed + SHOULD.passed ||
       value.judging_criteria_total !== MUST.total + SHOULD.total ||
@@ -181,6 +243,10 @@ const statisticsSchema = z
     passed: count,
     partial: count,
     failed: count,
+    insufficient_evidence: z
+      .object({ evaluations: count, criteria: count })
+      .strict()
+      .optional(),
     judge_errors: z.object({ evaluations: count, criteria: count }).strict(),
     attempts_total: count,
     retry_attempts: count,
@@ -264,6 +330,41 @@ export function summarizeReportEvaluation(
     judging_criteria_total: evaluation.judging_criteria_total,
     judging_criteria_errored: evaluation.judging_criteria_errored,
     judging_criteria_excluded_errored: criteriaByRequirement.OPTIONAL.errored,
+    judging_criteria_insufficient_evidence: evaluation.judging_criteria.filter(
+      (criterion) =>
+        criterion.passed === false &&
+        criterion.decision?.outcome === 'insufficient_evidence',
+    ).length,
+    criterion_failures: evaluation.judging_criteria.flatMap((criterion) =>
+      criterion.passed !== false
+        ? []
+        : [
+            {
+              criterion: criterion.criterion,
+              ...(criterion.label === undefined
+                ? {}
+                : { label: criterion.label }),
+              requirement_level: criterion.requirement_level,
+              outcome:
+                criterion.decision?.outcome === 'insufficient_evidence'
+                  ? ('insufficient_evidence' as const)
+                  : ('not_met' as const),
+              evidence_warnings:
+                criterion.evidence_warnings === undefined
+                  ? [
+                      {
+                        source: 'trajectory' as const,
+                        code: 'evidence_completeness_unknown',
+                        message:
+                          'Evidence completeness was not recorded for this judgment.',
+                      },
+                    ]
+                  : criterion.evidence_warnings.map((warning) => ({
+                      ...warning,
+                    })),
+            },
+          ],
+    ),
     criteria_by_requirement: criteriaByRequirement,
     criterion_scores: criterionScores(criteriaByRequirement),
     // OPTIONAL checks are telemetry in result.json and do not gate status.
@@ -420,6 +521,26 @@ function statistics(
     passed,
     partial,
     failed,
+    ...(runs.some(
+      (run) =>
+        run.evaluation?.judging_criteria_insufficient_evidence !== undefined,
+    )
+      ? {
+          insufficient_evidence: {
+            evaluations: runs.filter(
+              (run) =>
+                (run.evaluation?.judging_criteria_insufficient_evidence ?? 0) >
+                0,
+            ).length,
+            criteria: runs.reduce(
+              (total, run) =>
+                total +
+                (run.evaluation?.judging_criteria_insufficient_evidence ?? 0),
+              0,
+            ),
+          },
+        }
+      : {}),
     judge_errors: {
       evaluations: judgeErrorEvaluations,
       criteria: judgeErrorCriteria,

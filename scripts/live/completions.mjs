@@ -80,7 +80,7 @@ export async function runOpenAICompletionSuite(options, suppliedForge) {
     result.evaluation.score !== 1 ||
     result.completion_calls.length !== 3 ||
     !result.completion_calls.every((call) => call.status === 'succeeded') ||
-    schemas.join(',') !== 'ava_initial_turn,ava_turn,criterion_judgment'
+    schemas.join(',') !== 'ava_initial_turn,ava_turn,choice_decision'
   ) {
     throw new Error(
       `Live host completion validation failed; inspect ${path.join(completed.location, 'result.json')}.`,

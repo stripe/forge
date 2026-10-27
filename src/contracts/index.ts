@@ -4,6 +4,7 @@ export * from './command.ts';
 export * from './completion.ts';
 export * from './composition.ts';
 export * from './credentials.ts';
+export * from './decision.ts';
 export * from './inputs.ts';
 export type {
   AgentAdapterMetadata,
