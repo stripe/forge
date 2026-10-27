@@ -65,6 +65,18 @@ const OMITTED_ATTACHMENT_TYPES = new Set([
   'skill_listing',
   'task_reminder',
 ]);
+const BOOKKEEPING_OMISSION_MESSAGES = {
+  batching_reminder_sent:
+    'Claude batching reminder bookkeeping was omitted from ATIF',
+  api_error: 'Claude API retry metadata was omitted from ATIF',
+} as const;
+
+type BookkeepingRecordType = keyof typeof BOOKKEEPING_OMISSION_MESSAGES;
+interface BookkeepingOmission {
+  count: number;
+  firstLine: number;
+}
+type BookkeepingOmissions = Map<BookkeepingRecordType, BookkeepingOmission>;
 
 interface SessionBlock {
   type?: string;
@@ -214,6 +226,7 @@ function recordsToAtif(
 ): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
   const steps: AtifStep[] = [];
   const warnings: AgentNativeEvidenceWarning[] = [];
+  const bookkeepingOmissions: BookkeepingOmissions = new Map();
   let reportedSessionId: string | undefined;
   let lastAgentStep: AtifAgentStep | undefined;
   const toolStepsByCallId = new Map<string, AtifAgentStep>();
@@ -374,6 +387,7 @@ function recordsToAtif(
         record,
         records[position + 1]?.record,
         warnings,
+        bookkeepingOmissions,
         recordIndex,
         addStep,
       );
@@ -407,7 +421,17 @@ function recordsToAtif(
       },
       steps,
     },
-    warnings,
+    warnings: [
+      ...warnings,
+      ...Array.from(
+        bookkeepingOmissions,
+        ([kind, { count, firstLine }]): AgentNativeEvidenceWarning => ({
+          code: 'unsupported_native_event',
+          message: `${BOOKKEEPING_OMISSION_MESSAGES[kind]} (records: ${count}).`,
+          path: `line:${firstLine}`,
+        }),
+      ),
+    ],
   };
 }
 
@@ -601,6 +625,7 @@ function handleNonConversationRecord(
   record: SessionRecord,
   nextRecord: SessionRecord | undefined,
   warnings: AgentNativeEvidenceWarning[],
+  bookkeepingOmissions: BookkeepingOmissions,
   recordIndex: number,
   addStep: (step: Omit<AtifStep, 'step_id'>) => void,
 ): void {
@@ -634,11 +659,11 @@ function handleNonConversationRecord(
     record.subtype === 'api_error' &&
     record.source === 'request_retry'
   ) {
-    warnings.push({
-      code: 'unsupported_native_event',
-      message: 'Claude API retry metadata was omitted from ATIF.',
-      path: `line:${recordIndex + 1}`,
-    });
+    recordBookkeepingOmission(
+      bookkeepingOmissions,
+      'api_error',
+      recordIndex + 1,
+    );
     return;
   }
   if (record.type === 'attachment') {
@@ -679,11 +704,11 @@ function handleNonConversationRecord(
           'A Claude batching reminder had unrepresented content.',
         );
       }
-      warnings.push({
-        code: 'unsupported_native_event',
-        message: 'Claude batching reminder bookkeeping was omitted from ATIF.',
-        path: `line:${recordIndex + 1}`,
-      });
+      recordBookkeepingOmission(
+        bookkeepingOmissions,
+        'batching_reminder_sent',
+        recordIndex + 1,
+      );
       return;
     }
     if (attachmentType === 'hook_success') {
@@ -770,6 +795,18 @@ function handleNonConversationRecord(
   );
 }
 
+function recordBookkeepingOmission(
+  omissions: BookkeepingOmissions,
+  kind: BookkeepingRecordType,
+  line: number,
+): void {
+  const previous = omissions.get(kind);
+  omissions.set(kind, {
+    count: (previous?.count ?? 0) + 1,
+    firstLine: previous?.firstLine ?? line,
+  });
+}
+
 function addQueuedCommand(
   record: SessionRecord,
   attachment: Readonly<Record<string, unknown>>,
@@ -807,27 +844,35 @@ function addQueuedCommand(
   const timestamp = timestampField(record.timestamp, warnings, recordIndex);
   if (
     attachment.commandMode === 'task-notification' &&
-    rendered[0]?.includes(attachment.prompt)
+    rendered[0] !== undefined &&
+    isRenderedTaskNotification(attachment.prompt, rendered[0])
   ) {
     addStep({ source: 'system', message: rendered[0], extra, ...timestamp });
-    return;
-  }
-  if (
-    attachment.commandMode === 'prompt' &&
-    rendered[0] === attachment.prompt
-  ) {
-    addStep({
-      source: 'user',
-      message: attachment.prompt,
-      extra,
-      ...timestamp,
-    });
     return;
   }
   throw incompleteRecord(
     record,
     recordIndex,
     'A Claude queued command could not be represented faithfully.',
+  );
+}
+
+function isRenderedTaskNotification(prompt: string, rendered: string): boolean {
+  const reminderStart = '<system-reminder>\n';
+  const reminderEnd = '\n</system-reminder>';
+  const notificationStart = '<task-notification>';
+  const notificationEnd = '</task-notification>';
+  const start = rendered.indexOf(notificationStart);
+  const end = rendered.indexOf(notificationEnd, start);
+  return (
+    rendered.startsWith(reminderStart) &&
+    start >= reminderStart.length &&
+    rendered[start - 1] === '\n' &&
+    rendered.indexOf(notificationStart, start + notificationStart.length) ===
+      -1 &&
+    end >= start &&
+    rendered.slice(start, end + notificationEnd.length) === prompt &&
+    rendered.slice(end + notificationEnd.length) === reminderEnd
   );
 }
 

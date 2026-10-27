@@ -314,7 +314,7 @@ it('commits native evidence with batching bookkeeping, queued task context, and 
     agent: selection,
     prompt: 'Complete the answer.',
   });
-  const notification = `Background task finished: ${SECRET}`;
+  const notification = `<task-notification>Background task finished: ${SECRET}</task-notification>`;
   const test = await fixture(root, plan, false, [
     {
       type: 'attachment',
@@ -334,7 +334,9 @@ it('commits native evidence with batching bookkeeping, queued task context, and 
         timestamp: '2026-09-17T16:02:50.000Z',
       },
       rendered: [
-        { content: `<system-reminder>${notification}</system-reminder>` },
+        {
+          content: `<system-reminder>\nSynthetic background event.\n${notification}\n</system-reminder>`,
+        },
       ],
     },
     {
@@ -368,7 +370,7 @@ it('commits native evidence with batching bookkeeping, queued task context, and 
   assert.equal(trajectory.steps[1]?.source, 'system');
   assert.equal(
     trajectory.steps[1]?.message,
-    '<system-reminder>Background task finished: [REDACTED]</system-reminder>',
+    '<system-reminder>\nSynthetic background event.\n<task-notification>Background task finished: [REDACTED]</task-notification>\n</system-reminder>',
   );
   assert.doesNotMatch(JSON.stringify(trajectory), new RegExp(SECRET));
   assert.equal(

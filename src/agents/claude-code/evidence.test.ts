@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { parseAtifTrajectory } from '../../atif/index.ts';
+import {
+  createNormalizedTrajectory,
+  parseAtifTrajectory,
+} from '../../atif/index.ts';
 import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
 import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
@@ -57,8 +60,10 @@ async function nativeEvidence(raw: string) {
   });
 }
 
-function queuedCommandRecord(commandMode = 'task-notification') {
-  const prompt = 'Background task finished.';
+function queuedCommandRecord(
+  commandMode = 'task-notification',
+  prompt = '<task-notification>Background task finished.</task-notification>',
+) {
   return {
     type: 'attachment',
     sessionId: 'session-1',
@@ -73,7 +78,7 @@ function queuedCommandRecord(commandMode = 'task-notification') {
       {
         content:
           commandMode === 'task-notification'
-            ? `<system-reminder>${prompt}</system-reminder>`
+            ? `<system-reminder>\nSynthetic background event.\n${prompt}\n</system-reminder>`
             : prompt,
       },
     ],
@@ -667,7 +672,8 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, [
       {
         code: 'unsupported_native_event',
-        message: 'Claude batching reminder bookkeeping was omitted from ATIF.',
+        message:
+          'Claude batching reminder bookkeeping was omitted from ATIF (records: 1).',
         path: 'line:2',
       },
     ]);
@@ -711,36 +717,32 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, []);
   });
 
-  it('retains a queued prompt as a user step visible to judging and turn coverage', async () => {
+  it('fails closed on an unsupported queued prompt even when its rendering matches', async () => {
     const record = queuedCommandRecord('prompt');
+    const evidence = await conversationEvidence([record]);
+    assert.deepEqual(evidence, {
+      kind: 'unavailable',
+      reason: {
+        code: 'source_incomplete',
+        message:
+          'Claude session evidence could not be normalized safely (attachment/queued_command at line 2).',
+      },
+    });
+  });
+
+  it('retains a short notification only when its whole delimited payload matches', async () => {
     const evidence = await conversationEvidence([
-      { type: 'assistant', message: { content: 'First response' } },
-      record,
+      queuedCommandRecord(
+        'task-notification',
+        '<task-notification>a</task-notification>',
+      ),
     ]);
     assert.equal(evidence.kind, 'available');
     if (evidence.kind !== 'available') return;
-    const trajectory = parseAtifTrajectory(evidence.trajectory);
-    const projected = JSON.parse(
-      createJudgeTranscriptProjection(trajectory).transcriptJson,
-    );
-    assert.deepEqual(projected, [
-      { step_id: 1, source: 'user', message: 'Do the task' },
-      { step_id: 2, source: 'agent', message: 'First response' },
-      { step_id: 3, source: 'user', message: record.attachment.prompt },
-      { step_id: 4, source: 'agent', message: 'Done' },
-    ]);
     assert.equal(
-      trajectoryCoversCompletedTurns(
-        trajectory,
-        [
-          { user: 'Do the task', assistant: 'First response', toolCalls: [] },
-          { user: record.attachment.prompt, assistant: 'Done', toolCalls: [] },
-        ],
-        evidence.source,
-      ),
-      true,
+      parseAtifTrajectory(evidence.trajectory).steps[1]?.message,
+      '<system-reminder>\nSynthetic background event.\n<task-notification>a</task-notification>\n</system-reminder>',
     );
-    assert.equal(trajectory.steps[2]?.timestamp, record.timestamp);
     assert.deepEqual(evidence.warnings, []);
   });
 
@@ -763,12 +765,86 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, [
       {
         code: 'unsupported_native_event',
-        message: 'Claude API retry metadata was omitted from ATIF.',
+        message:
+          'Claude API retry metadata was omitted from ATIF (records: 1).',
         path: 'line:2',
       },
     ]);
     assert.doesNotMatch(JSON.stringify(evidence), /Synthetic response body/);
   });
+
+  it('summarizes repeated bookkeeping with counts and first locations under normalization bounds', async () => {
+    const evidence = await conversationEvidence(
+      Array.from({ length: 300 }, () => [
+        {
+          type: 'attachment',
+          attachment: {
+            type: 'batching_reminder_sent',
+            model: 'claude-test',
+            text: 'Synthetic bookkeeping',
+          },
+        },
+        {
+          type: 'system',
+          subtype: 'api_error',
+          source: 'request_retry',
+          error: { message: 'Synthetic error body' },
+        },
+      ]).flat(),
+    );
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    const normalized = createNormalizedTrajectory({
+      trajectory: evidence.trajectory,
+      provenance: {
+        source: evidence.source,
+        adapter: { id: 'claude-code', version: 'test' },
+      },
+      completeness: 'partial',
+      warnings: evidence.warnings,
+    });
+    assert.deepEqual(normalized.warnings, [
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Claude batching reminder bookkeeping was omitted from ATIF (records: 300).',
+        path: 'line:2',
+      },
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Claude API retry metadata was omitted from ATIF (records: 300).',
+        path: 'line:3',
+      },
+    ]);
+    assert.equal(normalized.trajectory.steps.length, 2);
+    assert.doesNotMatch(
+      JSON.stringify(normalized),
+      /Synthetic bookkeeping|Synthetic error body/,
+    );
+  });
+
+  for (const mode of ['task-notification', 'prompt']) {
+    for (const parts of [0, 2, 3]) {
+      it(`rejects ${parts} rendered parts for queued ${mode} with its type and line`, async () => {
+        const record = queuedCommandRecord(mode);
+        const evidence = await conversationEvidence([
+          {
+            ...record,
+            rendered: Array.from({ length: parts }, () => record.rendered[0]),
+          },
+        ]);
+        assert.deepEqual(evidence, {
+          kind: 'unavailable',
+          reason: {
+            code: 'source_incomplete',
+            message:
+              'Claude session evidence could not be normalized safely (attachment/queued_command at line 2).',
+          },
+        });
+      });
+    }
+  }
 
   for (const { description, record } of [
     {
@@ -791,6 +867,42 @@ describe('Claude native evidence', () => {
       record: {
         ...queuedCommandRecord('prompt'),
         rendered: [{ content: 'Different prompt' }],
+      },
+    },
+    {
+      description: 'short prompt embedded in unrelated task text',
+      record: {
+        ...queuedCommandRecord(),
+        attachment: { ...queuedCommandRecord().attachment, prompt: 'a' },
+      },
+    },
+    {
+      description: 'extra text after a matching notification payload',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [
+          {
+            content: `<system-reminder>\n${queuedCommandRecord().attachment.prompt}\nUnexpected extra text\n</system-reminder>`,
+          },
+        ],
+      },
+    },
+    {
+      description: 'duplicate notification payloads',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [
+          {
+            content: `<system-reminder>\n${queuedCommandRecord().attachment.prompt}\n${queuedCommandRecord().attachment.prompt}\n</system-reminder>`,
+          },
+        ],
+      },
+    },
+    {
+      description: 'notification without its outer system reminder',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [{ content: queuedCommandRecord().attachment.prompt }],
       },
     },
     {
