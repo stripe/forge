@@ -304,7 +304,7 @@ export interface ExperimentConfigV1 {
   matrix: ExperimentMatrixV1;
   limits: {
     run_timeout_ms: number;
-    /** Evidence and evaluation allowance after quiescence; defaults during planning. */
+    /** Evaluation and finalization allowance after quiescence; defaults during planning. */
     evaluation_timeout_ms?: number;
   };
 }

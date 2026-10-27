@@ -84,7 +84,7 @@ describe('executeEval', () => {
             ...composition,
             artifactStore: {
               async begin(runId) {
-                await vi.advanceTimersByTimeAsync(2000);
+                await vi.advanceTimersByTimeAsync(10);
                 assert.equal(runSignal!.aborted, false);
                 return composition.artifactStore.begin(runId);
               },
@@ -173,9 +173,15 @@ describe('executeEval', () => {
     },
   );
 
-  it.each(['evidence', 'evaluation', 'checks'] as const)(
+  it.each(['evidence', 'evaluation', 'checks', 'contributor'] as const)(
     'bounds stalled %s work and retains timeout or caller cancellation through cleanup',
     async (phase) => {
+      const failurePhase =
+        phase === 'checks'
+          ? 'evaluation'
+          : phase === 'contributor'
+            ? 'artifact_stage'
+            : phase;
       for (const cancelled of [false, true]) {
         const fixture = await executionFixture();
         const composition = fixture.composition(inertStore());
@@ -211,6 +217,21 @@ describe('executeEval', () => {
                 completionProviders: new Map([
                   [judge.provider.id, judge.provider],
                 ]),
+                contributors:
+                  phase === 'contributor'
+                    ? [
+                        {
+                          id: 'stalled',
+                          contribute: ({ signal }) => stall(signal),
+                        },
+                        {
+                          id: 'unreachable',
+                          async contribute() {
+                            assert.fail('Later contributors must not run.');
+                          },
+                        },
+                      ]
+                    : [],
                 attemptDiagnosticsStore: {
                   async read() {
                     return undefined;
@@ -265,10 +286,7 @@ describe('executeEval', () => {
             (error: unknown) => {
               assert.ok(error instanceof ForgeExecutionError);
               assert.equal(error.code, 'aborted');
-              assert.equal(
-                error.phase,
-                phase === 'checks' ? 'evaluation' : phase,
-              );
+              assert.equal(error.phase, failurePhase);
               assert.equal(
                 error.diagnostic!.reason,
                 cancelled ? 'cancelled' : 'timeout',
@@ -287,10 +305,7 @@ describe('executeEval', () => {
             },
           );
           const saved = snapshots.at(-1)!;
-          assert.equal(
-            saved.primary_failure!.phase,
-            phase === 'checks' ? 'evaluation' : phase,
-          );
+          assert.equal(saved.primary_failure!.phase, failurePhase);
           assert.equal(
             saved.primary_failure!.reason,
             cancelled ? 'cancelled' : 'timeout',
@@ -304,6 +319,139 @@ describe('executeEval', () => {
       }
     },
   );
+
+  it.each(['begin', 'write', 'runtime_dispose', 'result_commit'] as const)(
+    'does not commit when the evaluation budget expires during %s',
+    async (stage) => {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(inertStore());
+      let writes = 0;
+      let commits = 0;
+      let rollbacks = 0;
+      let disposals = 0;
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'performance'],
+      });
+      try {
+        await assert.rejects(
+          executeEval({
+            runId: 'finalization-timeout',
+            plan: {
+              ...fixture.plan,
+              limits: { run_timeout_ms: 1000, evaluation_timeout_ms: 500 },
+            },
+            composition: {
+              ...composition,
+              observer: {
+                async observe(event) {
+                  if (
+                    stage === 'result_commit' &&
+                    event.type === 'phase_started' &&
+                    event.phase === stage
+                  )
+                    await vi.advanceTimersByTimeAsync(500);
+                },
+              },
+              artifactStore: {
+                async begin() {
+                  if (stage === 'begin') await vi.advanceTimersByTimeAsync(500);
+                  return {
+                    async write() {
+                      writes++;
+                      if (stage === 'write')
+                        await vi.advanceTimersByTimeAsync(500);
+                    },
+                    async commit() {
+                      commits++;
+                      assert.fail('An expired budget must prevent commit.');
+                    },
+                    async rollback() {
+                      rollbacks++;
+                    },
+                  };
+                },
+              },
+              runtime: {
+                ...composition.runtime,
+                async prepare(context) {
+                  const runtime = await composition.runtime.prepare(context);
+                  return {
+                    ...runtime,
+                    async dispose() {
+                      disposals++;
+                      if (stage === 'runtime_dispose')
+                        await vi.advanceTimersByTimeAsync(500);
+                      await runtime.dispose();
+                    },
+                  };
+                },
+              },
+            },
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ForgeExecutionError);
+            const phase =
+              stage === 'begin' || stage === 'write' ? 'artifact_stage' : stage;
+            assert.equal(error.phase, phase);
+            assert.equal(error.diagnostic!.reason, 'timeout');
+            assert.match(
+              error.diagnostic!.message,
+              new RegExp(
+                `Evaluation timeout of 500ms exceeded during ${phase}`,
+              ),
+            );
+            return true;
+          },
+        );
+        assert.equal(commits, 0);
+        assert.equal(rollbacks, 1);
+        assert.equal(disposals, 1);
+        if (stage === 'begin') assert.equal(writes, 0);
+        if (stage === 'write') assert.equal(writes, 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('awaits an atomic commit already in progress when the budget expires', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({ root: fixture.root });
+    let rollbacks = 0;
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'performance'],
+    });
+    try {
+      const completed = await executeEval({
+        runId: 'atomic-commit',
+        plan: {
+          ...fixture.plan,
+          limits: { run_timeout_ms: 1000, evaluation_timeout_ms: 500 },
+        },
+        composition: fixture.composition({
+          async begin(runId) {
+            const transaction = await store.begin(runId);
+            return {
+              write: (artifact) => transaction.write(artifact),
+              async commit(result) {
+                await vi.advanceTimersByTimeAsync(600);
+                return transaction.commit(result);
+              },
+              async rollback() {
+                rollbacks++;
+                await transaction.rollback();
+              },
+            };
+          },
+        }),
+      });
+      assert.equal(completed.result.evaluation.status, 'passed');
+      assert.equal(rollbacks, 0);
+      await verifyCompletedRun(completed.location);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it.each(['interaction', 'quiesce'] as const)(
     'does not renew a run budget that expired during %s',

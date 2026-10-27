@@ -405,10 +405,12 @@ limits:
 
 The run budget covers preflight, setup, interaction (including Ava), and
 quiescence. After mutation stops, the evaluation budget covers evidence
-collection, judge calls and retries, and file checks. Staging and cleanup
-follow outside those budgets. Both limits accept positive whole milliseconds,
-up to 24 hours each. Caller cancellation stays active across both budgets.
-Timeout diagnostics name the budget and phase that expired.
+collection, judge calls and retries, file checks, and finalization up to the
+start of atomic commit. Contributors share this deadline. Store calls and
+runtime cleanup must settle before Forge handles expiry; a commit already in
+progress is awaited. Both limits accept positive whole milliseconds, up to
+24 hours each. Caller cancellation stays active across both budgets. Timeout
+diagnostics name the budget and phase that expired.
 
 Saved plans without `evaluation_timeout_ms` keep their shared run timeout.
 Resolving an experiment with this build adds the new default to its plans,
