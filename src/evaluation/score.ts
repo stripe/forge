@@ -2,17 +2,22 @@ import {
   DEFAULT_REQUIREMENT_LEVEL,
   type JudgingCriterionInputV1,
 } from '../model/types.ts';
-
 import type {
   CheckResultV1,
+  CriterionEvidenceWarningV1,
   CriterionResultV1,
   EvaluationResultV1,
 } from '../results/index.ts';
+import {
+  boundCriterionEvidenceWarnings,
+  UNKNOWN_EVIDENCE_WARNINGS,
+} from './criterionEvidence.ts';
 
 /** Use a criterion-ratio score and gate a clean pass on scored checks. */
 export function scoreEvaluation(
   criteria: readonly CriterionResultV1[],
   checks: readonly CheckResultV1[],
+  evidenceWarnings?: readonly CriterionEvidenceWarningV1[],
 ): EvaluationResultV1 {
   const included = criteria.filter(
     (criterion) => criterion.requirement_level !== 'OPTIONAL',
@@ -51,6 +56,14 @@ export function scoreEvaluation(
   }
 
   return {
+    ...(evidenceWarnings === undefined &&
+    !criteria.some((criterion) => criterion.evidence_warnings_ref !== undefined)
+      ? {}
+      : {
+          evidence_warnings: boundCriterionEvidenceWarnings(
+            evidenceWarnings ?? UNKNOWN_EVIDENCE_WARNINGS,
+          ),
+        }),
     score,
     status,
     judging_criteria_passed: criteriaPassed,
@@ -72,16 +85,7 @@ export function scoreEvaluation(
                     },
                   }),
             };
-      return {
-        ...result,
-        ...(criterion.evidence_warnings === undefined
-          ? {}
-          : {
-              evidence_warnings: criterion.evidence_warnings.map((warning) => ({
-                ...warning,
-              })),
-            }),
-      };
+      return result;
     }),
     checks: checks.map((check) => ({
       ...check,

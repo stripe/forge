@@ -505,6 +505,9 @@ export async function executeEvalWithTestHooks(
         | Awaited<ReturnType<typeof judgeCriteria>>
         | undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
+      let evidenceWarnings:
+        | ReturnType<typeof criterionEvidenceWarnings>
+        | undefined;
       const safeWorkspace =
         criteria.length === 0
           ? undefined
@@ -568,14 +571,15 @@ export async function executeEvalWithTestHooks(
       if (resolved !== undefined && prompt !== undefined) {
         const judgeTranscript = resolved.transcript;
         const safeWorkspaceText = prompt.workspaceText;
+        evidenceWarnings = criterionEvidenceWarnings({
+          trajectory: redacted.evidence,
+          workspace: safeWorkspace!,
+        });
         criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
             criteria,
-            evidenceWarnings: criterionEvidenceWarnings({
-              trajectory: redacted.evidence,
-              workspace: safeWorkspace!,
-            }),
+            evidenceWarnings,
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
               : { exampleAnswer: input.plan.evaluation.example_answer }),
@@ -630,6 +634,7 @@ export async function executeEvalWithTestHooks(
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
         ...(criterionResults === undefined ? {} : { criterionResults }),
+        ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
         signal,
       });
       return { ...result, judgeEvidence, redacted };

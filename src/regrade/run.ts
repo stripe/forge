@@ -89,7 +89,7 @@ export function judgeInputFromSavedRun(
         completeness: 'partial',
         warnings: [
           {
-            code: 'source_unavailable',
+            code: 'evidence_completeness_unknown',
             message: 'Trajectory completeness was not supplied.',
           },
         ],
@@ -155,16 +155,14 @@ export async function regradeCompletedRun(
     credentialResolver: dependencies.credentialResolver,
     signal,
   });
+  const judgeInput = judgeInputFromSavedRun({
+    plan,
+    trajectory,
+    judgeEvidence,
+    evidence: result.evidence,
+  });
   const criteria = await judgeCriteria(
-    {
-      ...judgeInputFromSavedRun({
-        plan,
-        trajectory,
-        judgeEvidence,
-        evidence: result.evidence,
-      }),
-      signal,
-    },
+    { ...judgeInput, signal },
     createCompletionDecisionModel({
       model: input.judge,
       invoke: (request) => completions.invoke('judge', request, request.signal),
@@ -177,7 +175,11 @@ export async function regradeCompletedRun(
         : { waitBeforeRetry: input.waitBeforeJudgeRetry }),
     },
   );
-  const evaluation = scoreEvaluation(criteria, result.evaluation.checks);
+  const evaluation = scoreEvaluation(
+    criteria,
+    result.evaluation.checks,
+    judgeInput.evidenceWarnings,
+  );
   // The same strict validator committed results pass through.
   parseEvaluationResult(evaluation);
   return Object.freeze({

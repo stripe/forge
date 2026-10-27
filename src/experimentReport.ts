@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UNKNOWN_EVIDENCE_WARNINGS } from './evaluation/criterionEvidence.ts';
 
 import {
   experimentRunDiagnosticSchema,
@@ -18,6 +19,8 @@ import {
 } from './version.ts';
 
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
+const MAX_REPORT_CRITERION_FAILURES = 100;
+const MAX_REPORT_CRITERION_FAILURE_BYTES = 64 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -75,6 +78,9 @@ const evaluationSchema = z
     judging_criteria_errored: count,
     judging_criteria_excluded_errored: count,
     judging_criteria_insufficient_evidence: count.optional(),
+    judging_criteria_low_confidence: count.optional(),
+    evidence_warnings: criterionEvidenceWarningsSchema.optional(),
+    criterion_failures_omitted: count.optional(),
     criterion_failures: z
       .array(
         z
@@ -89,7 +95,7 @@ const evaluationSchema = z
               .optional(),
             requirement_level: z.enum(['MUST', 'SHOULD', 'OPTIONAL']),
             outcome: z.enum(['not_met', 'insufficient_evidence']),
-            evidence_warnings: criterionEvidenceWarningsSchema,
+            evidence_warnings_ref: z.literal('evaluation'),
           })
           .strict(),
       )
@@ -101,26 +107,49 @@ const evaluationSchema = z
   .strict()
   .superRefine((value, context) => {
     const { MUST, SHOULD, OPTIONAL } = value.criteria_by_requirement;
+    if (value.criterion_failures !== undefined) {
+      const omitted = value.criterion_failures_omitted ?? 0;
+      const failed =
+        MUST.total +
+        SHOULD.total +
+        OPTIONAL.total -
+        MUST.passed -
+        SHOULD.passed -
+        OPTIONAL.passed -
+        MUST.errored -
+        SHOULD.errored -
+        OPTIONAL.errored;
+      const insufficient = value.criterion_failures.filter(
+        (criterion) => criterion.outcome === 'insufficient_evidence',
+      ).length;
+      if (
+        value.evidence_warnings === undefined ||
+        value.criterion_failures.length + omitted !== failed ||
+        value.judging_criteria_insufficient_evidence === undefined ||
+        insufficient > value.judging_criteria_insufficient_evidence ||
+        insufficient + omitted < value.judging_criteria_insufficient_evidence
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'Criterion failure details disagree with counts or warning references.',
+        });
+      }
+    }
     if (
-      value.criterion_failures !== undefined &&
-      (value.criterion_failures.length !==
+      value.judging_criteria_low_confidence !== undefined &&
+      value.judging_criteria_low_confidence >
         MUST.total +
           SHOULD.total +
           OPTIONAL.total -
-          MUST.passed -
-          SHOULD.passed -
-          OPTIONAL.passed -
           MUST.errored -
           SHOULD.errored -
-          OPTIONAL.errored ||
-        value.judging_criteria_insufficient_evidence !==
-          value.criterion_failures.filter(
-            (criterion) => criterion.outcome === 'insufficient_evidence',
-          ).length)
+          OPTIONAL.errored -
+          (value.judging_criteria_insufficient_evidence ?? 0)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Criterion failure details disagree with counts.',
+        message: 'Low-confidence count exceeds firm choices.',
       });
     }
     if (
@@ -247,6 +276,10 @@ const statisticsSchema = z
       .object({ evaluations: count, criteria: count })
       .strict()
       .optional(),
+    low_confidence: z
+      .object({ evaluations: count, criteria: count })
+      .strict()
+      .optional(),
     judge_errors: z.object({ evaluations: count, criteria: count }).strict(),
     attempts_total: count,
     retry_attempts: count,
@@ -294,8 +327,16 @@ const reportSchema = z
     generated_at: z.string().datetime(),
     checkpoint_sha256: digest,
     summary: statisticsSchema,
-    cases: z.array(caseSchema).min(1).max(100_000),
-    runs: z.array(runSchema).min(1).max(100_000),
+    cases: z.array(caseSchema).max(100_000),
+    runs: z.array(runSchema).max(100_000),
+    details_unavailable: z
+      .object({
+        reason: z.literal('size_limit'),
+        runs: count.positive().max(100_000),
+        cases: count.positive().max(100_000),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -331,40 +372,18 @@ export function summarizeReportEvaluation(
     judging_criteria_errored: evaluation.judging_criteria_errored,
     judging_criteria_excluded_errored: criteriaByRequirement.OPTIONAL.errored,
     judging_criteria_insufficient_evidence: evaluation.judging_criteria.filter(
-      (criterion) =>
-        criterion.passed === false &&
-        criterion.decision?.outcome === 'insufficient_evidence',
+      (criterion) => criterion.decision?.choice === 'insufficient_evidence',
     ).length,
-    criterion_failures: evaluation.judging_criteria.flatMap((criterion) =>
-      criterion.passed !== false
-        ? []
-        : [
-            {
-              criterion: criterion.criterion,
-              ...(criterion.label === undefined
-                ? {}
-                : { label: criterion.label }),
-              requirement_level: criterion.requirement_level,
-              outcome:
-                criterion.decision?.outcome === 'insufficient_evidence'
-                  ? ('insufficient_evidence' as const)
-                  : ('not_met' as const),
-              evidence_warnings:
-                criterion.evidence_warnings === undefined
-                  ? [
-                      {
-                        source: 'trajectory' as const,
-                        code: 'evidence_completeness_unknown',
-                        message:
-                          'Evidence completeness was not recorded for this judgment.',
-                      },
-                    ]
-                  : criterion.evidence_warnings.map((warning) => ({
-                      ...warning,
-                    })),
-            },
-          ],
-    ),
+    judging_criteria_low_confidence: evaluation.judging_criteria.filter(
+      (criterion) =>
+        criterion.decision !== undefined &&
+        criterion.decision.choice !== 'insufficient_evidence' &&
+        criterion.decision.thresholded_outcome === 'insufficient_evidence',
+    ).length,
+    evidence_warnings: (
+      evaluation.evidence_warnings ?? UNKNOWN_EVIDENCE_WARNINGS
+    ).map((warning) => ({ ...warning })),
+    ...summarizeCriterionFailures(evaluation),
     criteria_by_requirement: criteriaByRequirement,
     criterion_scores: criterionScores(criteriaByRequirement),
     // OPTIONAL checks are telemetry in result.json and do not gate status.
@@ -373,7 +392,44 @@ export function summarizeReportEvaluation(
   };
 }
 
-/** Check the producing release, then verify every aggregate against its run rows. */
+function summarizeCriterionFailures(
+  evaluation: EvaluationResultV1,
+): Pick<
+  ExperimentRunReportEvaluationV1,
+  'criterion_failures' | 'criterion_failures_omitted'
+> {
+  const failures: NonNullable<
+    ExperimentRunReportEvaluationV1['criterion_failures']
+  > = [];
+  let omitted = 0;
+  let bytes = 2;
+  for (const criterion of evaluation.judging_criteria) {
+    if (criterion.passed !== false) continue;
+    const failure = {
+      criterion: criterion.criterion,
+      ...(criterion.label === undefined ? {} : { label: criterion.label }),
+      requirement_level: criterion.requirement_level,
+      outcome:
+        criterion.decision?.choice === 'insufficient_evidence'
+          ? ('insufficient_evidence' as const)
+          : ('not_met' as const),
+      evidence_warnings_ref: 'evaluation' as const,
+    };
+    const size = Buffer.byteLength(JSON.stringify(failure)) + 1;
+    if (
+      failures.length >= MAX_REPORT_CRITERION_FAILURES ||
+      bytes + size > MAX_REPORT_CRITERION_FAILURE_BYTES
+    )
+      omitted += 1;
+    else {
+      failures.push(failure);
+      bytes += size;
+    }
+  }
+  return { criterion_failures: failures, criterion_failures_omitted: omitted };
+}
+
+/** Verify complete row aggregates; summary-only reports declare detail loss. */
 export function parseExperimentRunReport(
   input: unknown,
 ): ExperimentRunReportV1 {
@@ -391,6 +447,36 @@ export function parseExperimentRunReport(
   );
   if (new Set(runIds).size !== runIds.length)
     throw new Error('Report contains duplicate run IDs.');
+  if (report.details_unavailable !== undefined) {
+    const scored =
+      report.summary.passed + report.summary.partial + report.summary.failed;
+    if (
+      report.runs.length !== 0 ||
+      report.cases.length !== 0 ||
+      report.details_unavailable.runs !== report.summary.selections ||
+      report.details_unavailable.cases > report.details_unavailable.runs ||
+      report.summary.completed +
+        report.summary.errored +
+        report.summary.pending !==
+        report.summary.selections ||
+      scored > report.summary.completed ||
+      report.summary.judge_errors.evaluations > report.summary.completed ||
+      report.summary.pass_rate !==
+        (scored === 0 ? null : report.summary.passed / scored) ||
+      report.summary.coverage !==
+        report.summary.completed / report.summary.selections
+    ) {
+      throw new Error(
+        'Unavailable report details disagree with retained rows or counts.',
+      );
+    }
+    assertReportBytes(serializeCanonicalJson(report));
+    return report;
+  }
+  if (report.runs.length === 0 || report.cases.length === 0)
+    throw new Error(
+      'Report details must be present or explicitly unavailable.',
+    );
   const aggregate = aggregateRuns(report.runs);
   if (
     serializeCanonicalJson(report.summary) !==
@@ -400,8 +486,7 @@ export function parseExperimentRunReport(
   ) {
     throw new Error('Report statistics do not match its run rows.');
   }
-  assertReportBytes(serializeCanonicalJson(report));
-  return report;
+  return boundExperimentReportDetails(report);
 }
 
 /** Internal construction from bounded, verified latest-selection metadata. */
@@ -425,9 +510,101 @@ export function buildExperimentRunReport(input: {
 export function serializeExperimentRunReport(
   report: ExperimentRunReportV1,
 ): string {
-  const body = `${JSON.stringify(JSON.parse(serializeCanonicalJson(report)), null, 2)}\n`;
-  assertReportBytes(body);
-  return body;
+  return reportBody(boundExperimentReportDetails(report));
+}
+
+function reportBody(report: ExperimentRunReportV1): string {
+  return `${JSON.stringify(JSON.parse(serializeCanonicalJson(report)), null, 2)}\n`;
+}
+
+/** Count pretty JSON bytes before allocating a complete serialized report. */
+function reportFitsBudget(
+  report: ExperimentRunReportV1,
+  budget: number,
+): boolean {
+  let remaining = budget - 1; // trailing newline
+  function spend(bytes: number): boolean {
+    remaining -= bytes;
+    return remaining >= 0;
+  }
+  function visit(value: unknown, depth: number): boolean {
+    if (typeof value !== 'object' || value === null)
+      return spend(Buffer.byteLength(JSON.stringify(value)));
+    const entries = Array.isArray(value) ? value : Object.entries(value);
+    if (!spend(2)) return false;
+    if (entries.length === 0) return true;
+    if (!spend(1 + depth * 2)) return false;
+    for (let index = 0; index < entries.length; index += 1) {
+      if (!spend((depth + 1) * 2 + 1 + (index > 0 ? 1 : 0))) return false;
+      if (Array.isArray(value)) {
+        if (!visit(entries[index], depth + 1)) return false;
+      } else {
+        const [key, child] = entries[index] as [string, unknown];
+        if (
+          !spend(Buffer.byteLength(JSON.stringify(key)) + 2) ||
+          !visit(child, depth + 1)
+        )
+          return false;
+      }
+    }
+    return true;
+  }
+  return visit(report, 0);
+}
+
+/** Preserve scores and counts; optional detail loss is explicit and deterministic. */
+export function boundExperimentReportDetails(
+  report: ExperimentRunReportV1,
+  maxBytes = MAX_REPORT_BYTES,
+): ExperimentRunReportV1 {
+  if (reportFitsBudget(report, maxBytes)) return report;
+  const withoutDetails: ExperimentRunReportV1 = {
+    ...report,
+    runs: report.runs.map((run) => ({
+      ...run,
+      evaluation:
+        run.evaluation === null
+          ? null
+          : {
+              ...run.evaluation,
+              ...(run.evaluation.criterion_failures === undefined
+                ? {}
+                : {
+                    criterion_failures: [],
+                    criterion_failures_omitted:
+                      (run.evaluation.criterion_failures_omitted ?? 0) +
+                      run.evaluation.criterion_failures.length,
+                  }),
+              ...(run.evaluation.evidence_warnings === undefined ||
+              run.evaluation.evidence_warnings.length === 0
+                ? {}
+                : {
+                    evidence_warnings: [
+                      {
+                        source: 'trajectory' as const,
+                        code: 'report_evidence_warnings_omitted',
+                        message:
+                          'Evidence warning details were omitted to bound the report; see the saved evaluation.',
+                      },
+                    ],
+                  }),
+            },
+    })),
+  };
+  if (reportFitsBudget(withoutDetails, maxBytes)) return withoutDetails;
+  const unavailable: ExperimentRunReportV1 = {
+    ...report,
+    runs: [],
+    cases: [],
+    details_unavailable: report.details_unavailable ?? {
+      reason: 'size_limit',
+      runs: report.runs.length,
+      cases: report.cases.length,
+    },
+  };
+  if (!reportFitsBudget(unavailable, maxBytes))
+    throw new RangeError('Report byte budget cannot hold its summary.');
+  return unavailable;
 }
 
 function assertReportBytes(body: string): void {
@@ -536,6 +713,23 @@ function statistics(
               (total, run) =>
                 total +
                 (run.evaluation?.judging_criteria_insufficient_evidence ?? 0),
+              0,
+            ),
+          },
+        }
+      : {}),
+    ...(runs.some(
+      (run) => run.evaluation?.judging_criteria_low_confidence !== undefined,
+    )
+      ? {
+          low_confidence: {
+            evaluations: runs.filter(
+              (run) =>
+                (run.evaluation?.judging_criteria_low_confidence ?? 0) > 0,
+            ).length,
+            criteria: runs.reduce(
+              (total, run) =>
+                total + (run.evaluation?.judging_criteria_low_confidence ?? 0),
               0,
             ),
           },

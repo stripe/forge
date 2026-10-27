@@ -13,7 +13,7 @@ export function boundCriterionEvidenceWarnings(
       source: warning.source,
       code: 'evidence_warnings_truncated',
       message:
-        'Additional evidence warnings were omitted from this criterion; see the saved evidence.',
+        'Additional evidence warnings were omitted from this evaluation; see the saved evidence.',
     };
     const size = Buffer.byteLength(JSON.stringify(warning)) + 1;
     const reserve =
@@ -83,3 +83,33 @@ export function criterionEvidenceWarnings(input: {
     })),
   ]);
 }
+
+/** Only fixed capture facts enter the prompt; warning text and paths stay out. */
+export function renderTrajectoryCaptureStatus(
+  warnings: readonly CriterionEvidenceWarningV1[] | undefined,
+): string {
+  if (warnings === undefined)
+    return 'Trajectory capture status: unknown. Missing steps may not be inferred.';
+  const trajectory = warnings.filter(
+    (warning) => warning.source === 'trajectory',
+  );
+  if (
+    trajectory.some(
+      (warning) => warning.code === 'evidence_completeness_unknown',
+    )
+  )
+    return 'Trajectory capture status: unknown. Missing steps may not be inferred.';
+  if (trajectory.length === 0) return 'Trajectory capture status: complete.';
+  if (trajectory.some((warning) => warning.code === 'source_unavailable'))
+    return 'Trajectory capture status: native evidence unavailable; the supplied transcript may use driver fallback. Missing steps may not be inferred.';
+  return 'Trajectory capture status: partial or fallback evidence with capture warnings. Missing steps may not be inferred.';
+}
+
+export const UNKNOWN_EVIDENCE_WARNINGS: readonly CriterionEvidenceWarningV1[] =
+  Object.freeze([
+    Object.freeze({
+      source: 'trajectory' as const,
+      code: 'evidence_completeness_unknown',
+      message: 'Evidence completeness was not recorded for this judgment.',
+    }),
+  ]);

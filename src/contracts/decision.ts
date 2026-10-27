@@ -29,11 +29,11 @@ export interface DecisionRequest {
 }
 
 export interface DecisionResponse {
-  /** Null when a prompt-only completion callback does not expose its model. */
-  readonly model: ModelRefV1 | null;
+  /** Optional host information; criterion judging does not consume or record it. */
+  readonly model?: ModelRefV1 | null;
   readonly answers: Readonly<Record<string, DecisionAnswer>>;
-  /** Null when the underlying callback returns text only. */
-  readonly usage: CompletionUsage | null;
+  /** Optional host information; execution records usage through its completion runtime. */
+  readonly usage?: CompletionUsage | null;
 }
 
 /** Independent of completion transports, credentials, and Forge scoring. */

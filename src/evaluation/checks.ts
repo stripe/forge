@@ -17,6 +17,7 @@ import {
 } from '../model/types.ts';
 import {
   type CheckResultV1,
+  type CriterionEvidenceWarningV1,
   type CriterionResultV1,
   type EvaluationResultV1,
   MAX_MATCHED_TOOL_CALLS,
@@ -35,6 +36,7 @@ export interface EvaluateRunEvidenceInput {
   readonly workspace: ReadonlyWorkspace;
   /** Results produced by the configured judge for the plan's exact criteria. */
   readonly criterionResults?: readonly CriterionResultV1[];
+  readonly evidenceWarnings?: readonly CriterionEvidenceWarningV1[];
   readonly signal?: AbortSignal;
 }
 
@@ -82,7 +84,11 @@ export async function evaluateRunEvidence(
   ];
   return {
     workspaceEvidence,
-    evaluation: scoreEvaluation(criterionResults, checks),
+    evaluation: scoreEvaluation(
+      criterionResults,
+      checks,
+      input.evidenceWarnings,
+    ),
   };
 }
 

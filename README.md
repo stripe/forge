@@ -503,17 +503,19 @@ score of `0.75` and status `judge_error`. Each errored criterion records
 `passed: null` and an `error` with its type, attempt count, and diagnostic
 message; `judging_criteria_errored` counts MUST and SHOULD errors.
 
-New judgments also record a `decision`: the model's choice, probabilities,
-confidence, Forge's derived outcome, and the thresholds used. An outcome of
-`insufficient_evidence` means the supplied evidence could not support a firm
-verdict. It keeps `passed: false` and counts against scored criteria; it is
-separate from a judge error. See the [decision rule](docs/architecture.md#criterion-judging).
+New judgments also record a `decision`: the choice, normalized probabilities,
+derived confidence, thresholds, and a separate `thresholded_outcome`. The choice
+sets `passed`: a `met` choice at 0.75 still passes, while a choice of
+`insufficient_evidence` counts as not passed. Thresholding flags weak verdicts
+without changing the headline score. Judge errors remain separate. See the
+[decision rule](docs/architecture.md#criterion-judging).
 
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
-`report.json` contains an overall `summary`, per-case/configuration `cases`,
-and one `runs` row per saved selection. With optional `jq`:
+`report.json` contains an overall `summary`. When detail fits its size limit,
+it also has per-case/configuration `cases` and one `runs` row per saved selection.
+With optional `jq`:
 
 ```sh
 jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
@@ -530,12 +532,15 @@ including errors on OPTIONAL criteria.
 These errors remain committed outcomes on resume; they do not rerun the coding
 agent.
 
-`insufficient_evidence` counts affected evaluations and criteria separately in
-the summary and each case group, including OPTIONAL criteria. Run evaluations
-carry `judging_criteria_insufficient_evidence` and `criterion_failures`; each
-failed or insufficient criterion lists its evidence warnings. A warning flags
-capture limits, not proof of a failure. Older records may omit these fields;
-failed judgments without recorded warnings report completeness as unknown.
+`insufficient_evidence` and `low_confidence` separately count affected
+evaluations and criteria in the summary and case groups, including OPTIONAL
+criteria. Run evaluations carry the same counts and bounded `criterion_failures`.
+Failed criteria reference one shared list of evidence warnings per evaluation.
+Warnings flag capture limits, not proof of failure; missing records show
+completeness as unknown. Omitted failure details have an explicit count. If a
+report cannot retain run and case details within its size limit, it marks them
+as `details_unavailable` while keeping the summary. Saved runs and the checkpoint
+remain complete. See [report bounds](docs/architecture.md#criterion-judging).
 Ratios range from 0 to 1. Only the latest verified effective outcome
 contributes for each selection, so retries do not add scores. Compare treatments
 on matched cases and agent configurations. See

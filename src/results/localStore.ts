@@ -680,16 +680,14 @@ function verifyJudgeEvidence(
     trajectory: result.evidence,
     workspace: judgeEvidence.workspace,
   });
-  for (const criterion of result.evaluation.judging_criteria) {
-    if (
-      criterion.evidence_warnings !== undefined &&
-      serializeCanonicalJson(criterion.evidence_warnings) !==
-        serializeCanonicalJson(warnings)
-    ) {
-      throw new ArtifactStoreError(
-        'Criterion evidence warnings do not match the saved evidence.',
-      );
-    }
+  if (
+    result.evaluation.evidence_warnings !== undefined &&
+    serializeCanonicalJson(result.evaluation.evidence_warnings) !==
+      serializeCanonicalJson(warnings)
+  ) {
+    throw new ArtifactStoreError(
+      'Evaluation evidence warnings do not match the saved evidence.',
+    );
   }
   if (judgeEvidence.transcript.omitted !== undefined) {
     let budget: JudgeEvidenceBudgetSelection;

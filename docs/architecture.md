@@ -1427,22 +1427,24 @@ exact projected transcript for audit and regrade.
 
 Criterion judging uses the public `DecisionModel` contract from
 `@stripe/forge`: `decide` takes a text `state`, typed `questions` keyed by
-caller IDs, a signal, and an optional retry ordinal. The response carries
-`model`, `answers` keyed by those IDs, and token `usage`. Choice is the only
-question and answer primitive. A question has `instructions` and `criteria`
-mapping each option name to its meaning. An answer has `type: choice`,
-`choice`, `probabilities`, `confidence`, and a nonblank explanation bounded to
-65,536 characters. Confidence is the largest probability, measuring
-concentration rather than correctness.
+caller IDs, a signal, and an optional retry ordinal. Its response requires
+`answers` keyed by those IDs. Optional `model` and `usage` annotations are for
+embedding hosts; `judgeCriteria` does not consume, verify, or persist them.
+Execution and regrade bind the judge independently and record usage through
+the completion runtime. Choice is the only question and answer primitive.
+A question has `instructions` and `criteria` mapping each option to its meaning.
+An answer has `type: choice`, `choice`, `probabilities`, a derived `confidence`,
+and a nonblank explanation bounded to 65,536 characters.
 
 `createCompletionDecisionModel` adapts an explicit completion callback to this
-contract. It requests strict `{answers: {<id>: <choice answer>}}` output and
-adds the bound model and completion usage to the response envelope. Text-only
-responses have `usage: null`; the prompt-only `judgeCriteria` callback form
-also has `model: null`. No separate
-decision endpoint is built in. `judgeCriteria` accepts a decision model or the
-prompt-only callback form; callbacks must return the current choice schema.
-Each criterion uses the stable question ID `criterion` and these options:
+contract. Its strict wire schema requests `{answers: {<id>: <choice answer>}}`
+with choice, probabilities and explanation; it does not request confidence.
+Forge derives confidence as the largest normalized probability, measuring
+concentration rather than correctness. The adapter may supply optional model
+and usage annotations. No separate decision endpoint is built in.
+`judgeCriteria` accepts a decision model or a prompt-only callback; callbacks
+must return the current choice wire schema. Each criterion uses the stable
+question ID `criterion` and these options:
 
 | Choice | Meaning |
 | --- | --- |
@@ -1450,35 +1452,45 @@ Each criterion uses the stable question ID `criterion` and these options:
 | `not_met` | The supplied evidence establishes that it was not met. |
 | `insufficient_evidence` | The evidence cannot establish either outcome, for example because relevant code was not captured. |
 
-Local validation requires exactly the declared options, finite probabilities
-in [0, 1], and a sum within 0.000001 of 1. The selected choice must have the
-largest probability; any tied maximum is valid. Confidence must match that
-maximum within the same tolerance. Invalid answers use the malformed-output
-retry budget. Forge then applies `CRITERION_DECISION_THRESHOLDS` in code: a
-`met` or `not_met` choice needs probability at least 0.80. Otherwise the outcome
-is `insufficient_evidence`. Thresholds are release policy, not prompt text or
-experiment configuration.
+Local validation requires exactly the declared options and finite probabilities
+in [0, 1]. Sums from 0.98 through 1.02 are accepted and normalized to 1; larger
+errors are rejected. The selected choice must be a maximum or within 0.000001
+of one. Accepted ties and near ties resolve to the first actual maximum in
+question option order. Typed decision-model answers are checked through the
+same rule, and their confidence is recomputed. Saved distributions use a
+0.000001 numerical tolerance and must agree with stored confidence. Invalid
+answers use the malformed-output retry budget and record a fixed rejection
+`reason`, without caller IDs, field paths, or received values.
 
-New criterion results record `decision` with the validated answer fields
-except explanation (kept at the result's existing `explanation`), plus the
-derived `outcome` and `thresholds`. Only `met` maps to `passed: true`;
-`not_met` and `insufficient_evidence` map to `false`. Insufficient evidence
-remains in scored denominators. `passed: null` still means a judge error and
-has no decision. Result parsing verifies the distribution, outcome, thresholds,
-and passed flag together. Old results without these optional fields retain
-their original shape and scores; older strict readers cannot read new fields.
+New criterion results record `decision` with the canonical answer fields
+except explanation (kept in the existing `explanation`), plus
+`thresholded_outcome` and `thresholds`. The choice sets `passed`: `met` is
+true; `not_met` and `insufficient_evidence` are false. A `met` choice at 0.75
+therefore still passes. Independently, `CRITERION_DECISION_THRESHOLDS` derives
+`thresholded_outcome`: a `met` or `not_met` choice needs at least 0.80, otherwise
+it yields `insufficient_evidence`. This release policy is stored as data and
+does not set the headline score. Insufficient-evidence choices remain in
+scored denominators. `passed: null` still means a judge error and has no
+decision. Result parsing verifies the distribution, thresholded outcome,
+thresholds, and passed flag together. Old results without the optional fields
+retain their shape and scores; older strict readers cannot read new fields.
 
-`evidence_warnings` on each new criterion records trajectory normalization and
-workspace collection warnings, tagged by source, with explicit warnings when
-either evidence set is incomplete. Copies are capped at 64 warnings and
-16 KiB per criterion, with an explicit `evidence_warnings_truncated` marker
-when the full warning list does not fit. Full source warnings remain in the
-saved evidence. These facts do not change the decision rule or plan digest. Completed-run verification checks recorded warnings
-against the saved evidence. Regrades reconstruct them from the source result
-and judge evidence, and apply the current decision rule to the saved evidence.
+Evaluation-level `evidence_warnings` records trajectory normalization and
+workspace collection warnings once, tagged by source. Criteria use
+`evidence_warnings_ref: evaluation` to refer to that shared list. It is capped
+at 64 warnings and 16 KiB, with an explicit `evidence_warnings_truncated` marker;
+full source warnings remain in saved evidence. These observations do not affect
+plan digests or force a verdict. The prompt shows fixed trajectory capture
+status (complete, partial/fallback, unavailable, or unknown), with no warning
+messages or paths. Workspace warnings remain in the existing workspace text.
+Completed-run verification checks the shared warning list against saved evidence.
+Regrades reconstruct it from the source result and judge evidence.
 `judgeInputFromSavedRun` accepts optional `evidence` provenance; omitting it
-marks trajectory completeness as unknown. Direct `judgeCriteria` callers
-supply `evidenceWarnings` when available.
+marks trajectory completeness as unknown. Direct judging callers can pass
+`evidenceWarnings` to `judgeCriteria` and as the optional third argument of
+`scoreEvaluation`; `evaluateRunEvidence` accepts the same optional input.
+Unresolved warning references get an explicit unknown record when scored;
+artifact parsing rejects a reference without its shared list.
 
 At most four criteria run concurrently, with temperature 0, a 1,024-token
 response limit, and a strict one-criterion JSON schema. Each uses the shared
@@ -1495,7 +1507,7 @@ Custom completion providers must keep messages free of sensitive
 non-credential data such as request/response bodies. The same policy applies
 to role-player request errors. Standalone `judgeCriteria` callers can supply
 `redactionSecrets` in execution options for their custom invoker's diagnostics.
-Parse diagnostics identify invalid JSON or a schema mismatch, never raw
+Parse diagnostics identify invalid JSON or a fixed rejection reason, never raw
 responses, caller question IDs, unknown keys, or received values.
 `parseCriterionJudgment` reports malformed input as a one-attempt parse error.
 
@@ -1505,14 +1517,24 @@ adapter to ensure final defensive redaction cannot change the already-audited
 evidence. This validation runs outside the retryable provider call; failure
 cancels peer judgments and prevents commit.
 
-Reports add optional `judging_criteria_insufficient_evidence` counts and
-`criterion_failures` in run evaluations. Failure entries retain criterion text,
-label, requirement level, outcome, and the recorded evidence warnings, including
-OPTIONAL criteria. Missing warning records produce an explicit unknown marker.
-Summary and case groups count affected evaluations and criteria under
-`insufficient_evidence`; those counts overlap existing failed or partial
-evaluation statuses and do not alter score views. Older reports may omit the
-new fields.
+Reports count choices of `insufficient_evidence` separately from
+`judging_criteria_low_confidence` (firm choices below the stored threshold).
+Summary and case groups carry corresponding `insufficient_evidence` and
+`low_confidence` counts of evaluations and criteria, including OPTIONAL criteria.
+They overlap existing statuses without changing score views. Run evaluations
+store warnings once; failed-criterion entries reference that list. Missing
+warning records produce an explicit unknown marker. Failure details are capped
+at 100 entries and 64 KiB of compact JSON per evaluation; `criterion_failures_omitted` records
+missing entries without changing counts.
+
+Reports remain bounded to 64 MiB. Before serialization, Forge counts JSON bytes
+without building an oversized string. It first omits failure details and warning
+text, with counts and a fixed omission marker. If run and case rows still do not
+fit, the report retains its summary and checkpoint digest with empty detail
+arrays and `details_unavailable: {reason: size_limit, runs, cases}`. Readers can
+check summary consistency but cannot recompute its aggregates from missing rows.
+The checkpoint and saved runs remain the complete source; inspection and regrade
+use them independently of report detail. Old reports may omit the new fields.
 
 ### Score and status
 

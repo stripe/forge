@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ChoiceAnswer, ChoiceQuestion } from '../contracts/decision.ts';
-import { choiceAnswerSchema, choiceDistributionIsValid } from './decision.ts';
+import { choiceDistributionIsValid } from './decision.ts';
 
 export const CRITERION_DECISION_OPTIONS = [
   'met',
@@ -25,7 +25,7 @@ export type CriterionDecisionV1 = Omit<
   ChoiceAnswer<CriterionDecisionOption>,
   'explanation'
 > & {
-  readonly outcome: CriterionDecisionOption;
+  readonly thresholded_outcome: CriterionDecisionOption;
   readonly thresholds: CriterionDecisionThresholdsV1;
 };
 
@@ -53,12 +53,10 @@ export const CRITERION_DECISION_QUESTIONS = Object.freeze({
   criterion: CRITERION_DECISION_QUESTION,
 });
 
-export const criterionDecisionSchema = choiceAnswerSchema(
-  CRITERION_DECISION_OPTIONS,
-)
-  .innerType()
-  .omit({ explanation: true })
-  .extend({
+export const criterionDecisionSchema = z
+  .object({
+    type: z.literal('choice'),
+    confidence: z.number().finite().min(0).max(1),
     choice: z.enum(CRITERION_DECISION_OPTIONS),
     probabilities: z
       .object({
@@ -67,17 +65,17 @@ export const criterionDecisionSchema = choiceAnswerSchema(
         insufficient_evidence: z.number().finite().min(0).max(1),
       })
       .strict(),
-    outcome: z.enum(CRITERION_DECISION_OPTIONS),
+    thresholded_outcome: z.enum(CRITERION_DECISION_OPTIONS),
     thresholds: z
       .object({ minimum_probability: z.number().finite().min(0).max(1) })
       .strict(),
   })
   .strict()
   .superRefine((decision, context) => {
-    const { outcome, thresholds, ...fields } = decision;
     if (
-      !choiceDistributionIsValid(fields) ||
-      outcome !== criterionDecisionOutcome(decision, thresholds)
+      !choiceDistributionIsValid(decision) ||
+      decision.thresholded_outcome !==
+        criterionDecisionOutcome(decision, decision.thresholds)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

@@ -34,9 +34,11 @@ const completedCriterionJudgment = JSON.stringify({
       type: 'choice',
       choice: 'met',
       probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
-      confidence: 1,
       explanation: 'Done.',
-    } satisfies root.ChoiceAnswer<root.CriterionDecisionOption>,
+    } satisfies Omit<
+      root.ChoiceAnswer<root.CriterionDecisionOption>,
+      'confidence'
+    >,
   },
 });
 
@@ -126,9 +128,9 @@ describe('experiment public entry points', () => {
         decision: {
           type: 'choice',
           choice: 'met',
-          probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
           confidence: 1,
-          outcome: 'met',
+          probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
+          thresholded_outcome: 'met',
           thresholds: { minimum_probability: 0.8 },
         },
         explanation: 'Done.',

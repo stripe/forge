@@ -3,14 +3,32 @@ import type { StrictCompletionResponseSchema } from '../contracts/completion.ts'
 import type { ChoiceAnswer, DecisionRequest } from '../contracts/decision.ts';
 
 export const MAX_DECISION_EXPLANATION_CHARACTERS = 64 * 1024;
+/** Canonical saved distributions and near-tie comparisons. */
 export const DECISION_PROBABILITY_TOLERANCE = 0.000001;
+/** Rounded wire distributions are normalized within this band around 1. */
+export const DECISION_PROBABILITY_SUM_TOLERANCE = 0.02;
+
+export const DECISION_REJECTION_REASONS = [
+  'invalid_json',
+  'invalid_schema',
+  'unknown_key',
+  'missing_answer',
+  'missing_option',
+  'probability_range',
+  'probabilities_sum',
+  'choice_not_argmax',
+  'unknown_choice',
+  'explanation',
+] as const;
+export type DecisionRejectionReason =
+  (typeof DECISION_REJECTION_REASONS)[number];
 
 export class InvalidDecisionResponseError extends Error {
-  constructor(kind: 'invalid_json' | 'invalid_schema' = 'invalid_schema') {
+  constructor(readonly reason: DecisionRejectionReason = 'invalid_schema') {
     super(
-      kind === 'invalid_json'
+      reason === 'invalid_json'
         ? 'Judge response was not valid JSON.'
-        : 'Judge response did not match the required schema.',
+        : `Judge response rejected: ${reason}.`,
     );
     this.name = 'InvalidDecisionResponseError';
   }
@@ -22,67 +40,87 @@ export function choiceDistributionIsValid(
   const values = Object.values(answer.probabilities);
   const maximum = Math.max(...values);
   return (
+    values.length > 0 &&
+    values.every(
+      (value) => Number.isFinite(value) && value >= 0 && value <= 1,
+    ) &&
     Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) <=
       DECISION_PROBABILITY_TOLERANCE &&
+    Object.hasOwn(answer.probabilities, answer.choice) &&
     answer.probabilities[answer.choice] === maximum &&
     Math.abs(answer.confidence - maximum) <= DECISION_PROBABILITY_TOLERANCE
   );
 }
 
-function hasExactKeys(
-  value: unknown,
-  keys: readonly string[],
-): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.keys(value).length === keys.length &&
-    keys.every((key) => Object.hasOwn(value, key))
-  );
+function isDecisionRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function choiceAnswerSchema(options: readonly [string, ...string[]]) {
-  const probability = z.number().finite().min(0).max(1);
-  return z
-    .object({
-      type: z.literal('choice'),
-      choice: z.enum(options),
-      probabilities: z
-        .unknown()
-        .transform((value, context): Record<string, number> => {
-          if (
-            !hasExactKeys(value, options) ||
-            options.some(
-              (option) => !probability.safeParse(value[option]).success,
-            )
-          ) {
-            context.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: 'Invalid option probabilities.',
-            });
-            return z.NEVER;
-          }
-          return Object.fromEntries(
-            options.map((option) => [option, value[option] as number]),
-          );
-        }),
-      confidence: probability,
-      explanation: z
-        .string()
-        .trim()
-        .min(1)
-        .max(MAX_DECISION_EXPLANATION_CHARACTERS),
-    })
-    .strict()
-    .superRefine((answer, context) => {
-      if (!choiceDistributionIsValid(answer)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Invalid choice distribution or confidence.',
-        });
-      }
-    });
+function requireDecisionKeys(
+  value: unknown,
+  required: readonly string[],
+  allowed = required,
+  missing: DecisionRejectionReason = 'invalid_schema',
+): asserts value is Record<string, unknown> {
+  if (!isDecisionRecord(value)) throw new InvalidDecisionResponseError();
+  if (Object.keys(value).some((key) => !allowed.includes(key)))
+    throw new InvalidDecisionResponseError('unknown_key');
+  if (required.some((key) => !Object.hasOwn(value, key)))
+    throw new InvalidDecisionResponseError(missing);
+}
+
+function parseChoiceAnswer(
+  value: unknown,
+  options: readonly string[],
+  allowDerivedConfidence: boolean,
+): ChoiceAnswer {
+  const keys = ['type', 'choice', 'probabilities', 'explanation'];
+  requireDecisionKeys(
+    value,
+    keys,
+    allowDerivedConfidence ? [...keys, 'confidence'] : keys,
+  );
+  if (value.type !== 'choice') throw new InvalidDecisionResponseError();
+  if (typeof value.choice !== 'string' || !options.includes(value.choice))
+    throw new InvalidDecisionResponseError('unknown_choice');
+  requireDecisionKeys(value.probabilities, options, options, 'missing_option');
+  const weights = value.probabilities;
+  const values = options.map((option) => weights[option]);
+  if (
+    !values.every(
+      (p): p is number =>
+        typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1,
+    )
+  )
+    throw new InvalidDecisionResponseError('probability_range');
+  const sum = values.reduce((total, p) => total + p, 0);
+  if (Math.abs(sum - 1) > DECISION_PROBABILITY_SUM_TOLERANCE + Number.EPSILON)
+    throw new InvalidDecisionResponseError('probabilities_sum');
+  const maximum = Math.max(...values);
+  if (
+    maximum - (weights[value.choice] as number) >
+    DECISION_PROBABILITY_TOLERANCE
+  )
+    throw new InvalidDecisionResponseError('choice_not_argmax');
+  const explanation = z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_DECISION_EXPLANATION_CHARACTERS)
+    .safeParse(value.explanation);
+  if (!explanation.success)
+    throw new InvalidDecisionResponseError('explanation');
+  // Declare-order tie breaking is stable, including a reported near-maximum choice.
+  const choice = options[values.indexOf(maximum)]!;
+  return {
+    type: 'choice',
+    choice,
+    probabilities: Object.fromEntries(
+      options.map((option, index) => [option, values[index]! / sum]),
+    ),
+    confidence: maximum / sum,
+    explanation: explanation.data,
+  };
 }
 
 export function decisionResponseSchema(
@@ -118,20 +156,13 @@ export function decisionResponseSchema(
                       required: options,
                       additionalProperties: false,
                     },
-                    confidence: { type: 'number', minimum: 0, maximum: 1 },
                     explanation: {
                       type: 'string',
                       minLength: 1,
                       maxLength: MAX_DECISION_EXPLANATION_CHARACTERS,
                     },
                   },
-                  required: [
-                    'type',
-                    'choice',
-                    'probabilities',
-                    'confidence',
-                    'explanation',
-                  ],
+                  required: ['type', 'choice', 'probabilities', 'explanation'],
                   additionalProperties: false,
                 },
               ];
@@ -150,24 +181,29 @@ export function decisionResponseSchema(
 export function parseDecisionAnswers(
   value: unknown,
   questions: DecisionRequest['questions'],
+  options: { readonly allowDerivedConfidence?: boolean } = {},
 ): Record<string, ChoiceAnswer> {
-  const envelope = z.object({ answers: z.unknown() }).strict().safeParse(value);
-  if (
-    !envelope.success ||
-    !hasExactKeys(envelope.data.answers, Object.keys(questions))
-  )
-    throw new InvalidDecisionResponseError();
-  const answers = envelope.data.answers;
+  requireDecisionKeys(value, ['answers']);
+  requireDecisionKeys(
+    value.answers,
+    Object.keys(questions),
+    undefined,
+    'missing_answer',
+  );
+  const answers = value.answers;
   return Object.fromEntries(
     Object.entries(questions).map(([id, question]) => {
-      const options = Object.keys(question.criteria);
-      if (options.length === 0)
+      const choices = Object.keys(question.criteria);
+      if (choices.length === 0)
         throw new TypeError('Choice questions require options.');
-      const parsed = choiceAnswerSchema(
-        options as [string, ...string[]],
-      ).safeParse(answers[id]);
-      if (!parsed.success) throw new InvalidDecisionResponseError();
-      return [id, parsed.data];
+      return [
+        id,
+        parseChoiceAnswer(
+          answers[id],
+          choices,
+          options.allowDerivedConfidence === true,
+        ),
+      ];
     }),
   );
 }

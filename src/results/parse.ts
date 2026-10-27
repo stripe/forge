@@ -14,6 +14,7 @@ import {
   MAX_CRITERION_EVIDENCE_WARNING_BYTES,
   MAX_CRITERION_EVIDENCE_WARNINGS,
 } from '../evaluation/criterionEvidence.ts';
+import { DECISION_REJECTION_REASONS } from '../evaluation/decision.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -247,7 +248,7 @@ const criterionFields = {
     .min(1)
     .max(64 * 1024),
   explanation: z.string().max(64 * 1024),
-  evidence_warnings: criterionEvidenceWarningsSchema.optional(),
+  evidence_warnings_ref: z.literal('evaluation').optional(),
 };
 const criterionResult = z
   .union([
@@ -265,6 +266,7 @@ const criterionResult = z
         error: z
           .object({
             type: z.enum(['parse_error', 'request_error']),
+            reason: z.enum(DECISION_REJECTION_REASONS).optional(),
             attempts: z.number().int().min(1).max(MAX_COMPLETION_ATTEMPTS),
             message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
           })
@@ -276,11 +278,21 @@ const criterionResult = z
     if (
       'decision' in criterion &&
       criterion.decision !== undefined &&
-      criterion.passed !== (criterion.decision.outcome === 'met')
+      criterion.passed !== (criterion.decision.choice === 'met')
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Criterion passed flag disagrees with its decision.',
+      });
+    }
+    if (
+      criterion.passed === null &&
+      criterion.error.type === 'request_error' &&
+      criterion.error.reason !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Decision rejection reasons apply only to parse errors.',
       });
     }
     const wordingIssue = criterionRequirementWordingIssue(
@@ -305,24 +317,18 @@ export const evaluationResultSchema = z
     judging_criteria_errored: z.number().int().nonnegative(),
     judging_criteria: z.array(criterionResult),
     checks: z.array(checkResult),
+    evidence_warnings: criterionEvidenceWarningsSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
     const expected = scoreEvaluation(
       value.judging_criteria.map(
-        ({ label, evidence_warnings, ...criterion }) => ({
+        ({ label, evidence_warnings_ref, ...criterion }) => ({
           ...criterion,
           ...(label === undefined ? {} : { label }),
-          ...(evidence_warnings === undefined
+          ...(evidence_warnings_ref === undefined
             ? {}
-            : {
-                evidence_warnings: evidence_warnings.map(
-                  ({ path, ...warning }) => ({
-                    ...warning,
-                    ...(path === undefined ? {} : { path }),
-                  }),
-                ),
-              }),
+            : { evidence_warnings_ref }),
         }),
       ),
       value.checks.map(
@@ -334,7 +340,23 @@ export const evaluationResultSchema = z
           ...(tool_calls === undefined ? {} : { tool_calls }),
         }),
       ),
+      value.evidence_warnings?.map(({ path, ...warning }) => ({
+        ...warning,
+        ...(path === undefined ? {} : { path }),
+      })),
     );
+    if (
+      value.evidence_warnings === undefined &&
+      value.judging_criteria.some(
+        (criterion) => criterion.evidence_warnings_ref !== undefined,
+      )
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Criterion warning reference has no evaluation warning record.',
+      });
+    }
     if (
       value.judging_criteria_total !== expected.judging_criteria_total ||
       value.judging_criteria_passed !== expected.judging_criteria_passed ||

@@ -27,7 +27,7 @@ const transcript = createJudgeTranscriptProjection({
 });
 const answer = {
   content:
-    '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Done."}}}',
+    '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"explanation":"Done."}}}',
   stopReason: 'end_turn' as const,
   usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
 };

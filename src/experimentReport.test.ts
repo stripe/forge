@@ -19,6 +19,7 @@ import {
 } from './experiment.ts';
 import { parseExperimentRunCheckpoint } from './experimentModel.ts';
 import {
+  boundExperimentReportDetails,
   buildExperimentRunReport,
   type ExperimentRunReportRunV1,
   serializeExperimentRunReport,
@@ -49,76 +50,84 @@ afterEach(async () => {
 });
 
 describe('experiment run scorecards', () => {
-  it('counts insufficient evidence next to failures and keeps warnings on each failed criterion', () => {
-    const warning = {
-      source: 'workspace' as const,
-      code: 'workspace_file_truncated',
-      message: 'File text was truncated.',
-      path: 'app.ts',
-    };
-    const insufficient = parseCriterionJudgment(
+  it('counts low-confidence passes separately from insufficient evidence and failures', () => {
+    const low = parseCriterionJudgment(
       JSON.stringify({
         answers: {
           criterion: {
             type: 'choice',
             choice: 'met',
             probabilities: {
-              met: 0.6,
-              not_met: 0.1,
-              insufficient_evidence: 0.3,
+              met: 0.75,
+              not_met: 0.2,
+              insufficient_evidence: 0.05,
             },
-            confidence: 0.6,
-            explanation: 'The code is incomplete in the capture.',
+            explanation: 'Work is likely complete.',
           },
         },
       }),
       'Creates a file.',
     );
+    const insufficient = parseCriterionJudgment(
+      JSON.stringify({
+        answers: {
+          criterion: {
+            type: 'choice',
+            choice: 'insufficient_evidence',
+            probabilities: {
+              met: 0.1,
+              not_met: 0.1,
+              insufficient_evidence: 0.8,
+            },
+            explanation: 'The file was not captured.',
+          },
+        },
+      }),
+      { value: 'Shows the file.', requirement_level: 'OPTIONAL' },
+    );
     const failed = parseCriterionJudgment(
       JSON.stringify(criterionJudgment(false)),
       'Answers.',
     );
+    const warning = {
+      source: 'workspace' as const,
+      code: 'workspace_file_truncated',
+      message: 'File text was truncated.',
+      path: 'app.ts',
+    };
     const run = row(0);
     run.evaluation = summarizeReportEvaluation(
-      scoreEvaluation(
-        [
-          { ...insufficient, evidence_warnings: [warning] },
-          { ...failed, evidence_warnings: [warning] },
-          parseCriterionJudgment('{}', 'Checks.'),
-        ],
-        [],
-      ),
+      scoreEvaluation([low, insufficient, failed], [], [warning]),
     );
     const report = build([run]);
-    assert.equal(report.summary.failed, 0);
-    assert.equal(report.summary.judge_errors.criteria, 1);
+    assert.equal(report.runs[0]!.evaluation!.score, 0.5);
+    assert.deepEqual(report.summary.low_confidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
     assert.deepEqual(report.summary.insufficient_evidence, {
       evaluations: 1,
       criteria: 1,
     });
-    assert.deepEqual(report.cases[0]!.insufficient_evidence, {
+    assert.deepEqual(report.cases[0]!.low_confidence, {
       evaluations: 1,
       criteria: 1,
     });
+    assert.deepEqual(report.runs[0]!.evaluation!.evidence_warnings, [warning]);
+    assert.deepEqual(
+      report.runs[0]!.evaluation!.criterion_failures?.map((failure) => [
+        failure.outcome,
+        failure.evidence_warnings_ref,
+      ]),
+      [
+        ['insufficient_evidence', 'evaluation'],
+        ['not_met', 'evaluation'],
+      ],
+    );
     assert.equal(
-      report.runs[0]!.evaluation!.judging_criteria_insufficient_evidence,
+      JSON.stringify(report.runs).split('File text was truncated.').length - 1,
       1,
     );
-    assert.deepEqual(report.runs[0]!.evaluation!.criterion_failures, [
-      {
-        criterion: 'Creates a file.',
-        requirement_level: 'SHOULD',
-        outcome: 'insufficient_evidence',
-        evidence_warnings: [warning],
-      },
-      {
-        criterion: 'Answers.',
-        requirement_level: 'SHOULD',
-        outcome: 'not_met',
-        evidence_warnings: [warning],
-      },
-    ]);
-    assert.equal(report.runs[0]!.evaluation!.score, 0);
     assert.deepEqual(
       parseExperimentRunReport(
         JSON.parse(serializeExperimentRunReport(report)),
@@ -128,6 +137,101 @@ describe('experiment run scorecards', () => {
     const forged = structuredClone(report);
     forged.runs[0]!.evaluation!.judging_criteria_insufficient_evidence = 0;
     assert.throws(() => parseExperimentRunReport(forged));
+  });
+
+  it('bounds failure details and degrades large reports without changing score counts', () => {
+    const run = row(0);
+    const failed = {
+      criterion: 'A'.repeat(1300),
+      requirement_level: 'SHOULD' as const,
+      passed: false,
+      explanation: 'Not met.',
+    };
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        Array.from({ length: 150 }, () => failed),
+        [],
+        [
+          {
+            source: 'workspace',
+            code: 'workspace_file_truncated',
+            message: 'File text was truncated.',
+          },
+        ],
+      ),
+    );
+    const shortDetails = summarizeReportEvaluation(
+      scoreEvaluation(
+        Array.from({ length: 150 }, () => ({
+          ...failed,
+          criterion: 'Answers.',
+        })),
+        [],
+      ),
+    );
+    assert.equal(shortDetails.criterion_failures!.length, 100);
+    assert.equal(shortDetails.criterion_failures_omitted, 50);
+    const report = build([run]);
+    const details = report.runs[0]!.evaluation!;
+    assert.ok(details.criterion_failures!.length < 100);
+    assert.equal(
+      details.criterion_failures!.length + details.criterion_failures_omitted!,
+      150,
+    );
+    assert.ok(
+      Buffer.byteLength(JSON.stringify(details.criterion_failures)) <=
+        64 * 1024,
+    );
+    const bounded = boundExperimentReportDetails(report, 20_000);
+    assert.equal(bounded.runs[0]!.evaluation!.criterion_failures_omitted, 150);
+    assert.equal(
+      bounded.runs[0]!.evaluation!.evidence_warnings?.[0]?.code,
+      'report_evidence_warnings_omitted',
+    );
+    assert.deepEqual(bounded.summary, report.summary);
+    assert.deepEqual(parseExperimentRunReport(bounded), bounded);
+    const summaryOnly = {
+      ...report,
+      runs: [],
+      cases: [],
+      details_unavailable: { reason: 'size_limit' as const, runs: 1, cases: 1 },
+    };
+    const limit = Buffer.byteLength(serializeExperimentRunReport(summaryOnly));
+    const unavailable = boundExperimentReportDetails(report, limit);
+    assert.deepEqual(unavailable, summaryOnly);
+    assert.throws(
+      () => boundExperimentReportDetails(summaryOnly, limit - 1),
+      RangeError,
+    );
+    assert.equal(
+      boundExperimentReportDetails(
+        report,
+        Buffer.byteLength(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+    assert.deepEqual(parseExperimentRunReport(unavailable), unavailable);
+    const oversizedSelectionCount = {
+      ...unavailable,
+      details_unavailable: { reason: 'size_limit', runs: 100_001, cases: 1 },
+      summary: {
+        ...unavailable.summary,
+        selections: 100_001,
+        completed: 100_001,
+        failed: 100_001,
+      },
+    };
+    assert.throws(() => parseExperimentRunReport(oversizedSelectionCount));
+    for (const invalid of [
+      {
+        ...unavailable,
+        details_unavailable: { ...unavailable.details_unavailable!, runs: 2 },
+      },
+      { ...unavailable, summary: { ...unavailable.summary, coverage: 0 } },
+      { ...unavailable, summary: { ...unavailable.summary, pass_rate: 1 } },
+      { ...unavailable, summary: { ...unavailable.summary, completed: 2 } },
+    ])
+      assert.throws(() => parseExperimentRunReport(invalid));
   });
 
   it('records the producing Forge build and reads standalone pending scorecards', () => {
@@ -1376,31 +1480,33 @@ describe('experiment run scorecards', () => {
         {
           status: 'partial',
           judging_criteria_insufficient_evidence: 0,
+          judging_criteria_low_confidence: 0,
+          criterion_failures_omitted: 0,
+          evidence_warnings: [
+            {
+              source: 'trajectory',
+              code: 'trajectory_incomplete',
+              message:
+                'The selected trajectory is partial or uses driver fallback.',
+            },
+            {
+              source: 'trajectory',
+              code: 'source_unavailable',
+              message: 'The scripted agent has no native evidence.',
+            },
+            {
+              source: 'trajectory',
+              code: 'fallback_used',
+              message: 'Canonical ATIF was built from completed driver turns.',
+            },
+          ],
           criterion_failures: [
             {
               criterion: 'Read docs',
               label: 'source',
               requirement_level: 'OPTIONAL',
               outcome: 'not_met',
-              evidence_warnings: [
-                {
-                  source: 'trajectory',
-                  code: 'trajectory_incomplete',
-                  message:
-                    'The selected trajectory is partial or uses driver fallback.',
-                },
-                {
-                  source: 'trajectory',
-                  code: 'source_unavailable',
-                  message: 'The scripted agent has no native evidence.',
-                },
-                {
-                  source: 'trajectory',
-                  code: 'fallback_used',
-                  message:
-                    'Canonical ATIF was built from completed driver turns.',
-                },
-              ],
+              evidence_warnings_ref: 'evaluation',
             },
           ],
           score: 1,
@@ -1424,31 +1530,33 @@ describe('experiment run scorecards', () => {
         {
           status: 'failed',
           judging_criteria_insufficient_evidence: 0,
+          judging_criteria_low_confidence: 0,
+          criterion_failures_omitted: 0,
+          evidence_warnings: [
+            {
+              source: 'trajectory',
+              code: 'trajectory_incomplete',
+              message:
+                'The selected trajectory is partial or uses driver fallback.',
+            },
+            {
+              source: 'trajectory',
+              code: 'source_unavailable',
+              message: 'The scripted agent has no native evidence.',
+            },
+            {
+              source: 'trajectory',
+              code: 'fallback_used',
+              message: 'Canonical ATIF was built from completed driver turns.',
+            },
+          ],
           criterion_failures: [
             {
               criterion: 'The answer MUST be complete.',
               label: 'correctness',
               requirement_level: 'MUST',
               outcome: 'not_met',
-              evidence_warnings: [
-                {
-                  source: 'trajectory',
-                  code: 'trajectory_incomplete',
-                  message:
-                    'The selected trajectory is partial or uses driver fallback.',
-                },
-                {
-                  source: 'trajectory',
-                  code: 'source_unavailable',
-                  message: 'The scripted agent has no native evidence.',
-                },
-                {
-                  source: 'trajectory',
-                  code: 'fallback_used',
-                  message:
-                    'Canonical ATIF was built from completed driver turns.',
-                },
-              ],
+              evidence_warnings_ref: 'evaluation',
             },
           ],
           score: 0,
@@ -1609,7 +1717,8 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(malformed.result.evaluation.judging_criteria[1]!.error, {
       type: 'parse_error',
       attempts: 3,
-      message: 'Judge response did not match the required schema.',
+      message: 'Judge response rejected: invalid_schema.',
+      reason: 'invalid_schema',
     });
     assert.equal(stored.result.completion_calls.length, 12);
     assert.ok(

@@ -92,6 +92,7 @@ try {
       assert.equal(typeof forge.criterionDecisionOutcome, 'function');
       assert.equal(forge.CRITERION_DECISION_THRESHOLDS.minimum_probability, 0.8);
       assert.equal(forge.DECISION_PROBABILITY_TOLERANCE, 0.000001);
+      assert.equal(forge.DECISION_PROBABILITY_SUM_TOLERANCE, 0.02);
       assert.equal(typeof forge.criterionResultMatchesDefinition, 'function');
       assert.equal(typeof forge.buildCriterionJudgePrompt, 'function');
       assert.equal(typeof forge.parseCriterionJudgment, 'function');
@@ -99,11 +100,11 @@ try {
         assert.equal(removed in forge, false);
       }
       const criterion = forge.parseCriterionJudgment(
-        JSON.stringify({answers: {criterion: {type: 'choice', choice: 'met', probabilities: {met: 1, not_met: 0, insufficient_evidence: 0}, confidence: 1, explanation: 'Done.'}}}),
+        JSON.stringify({answers: {criterion: {type: 'choice', choice: 'met', probabilities: {met: 1, not_met: 0, insufficient_evidence: 0}, explanation: 'Done.'}}}),
         {value: 'The task is complete.'},
       );
       assert.equal(criterion.requirement_level, 'SHOULD');
-      assert.equal(criterion.decision.outcome, 'met');
+      assert.equal(criterion.decision.thresholded_outcome, 'met');
       const evaluation = forge.parseEvaluationResult(forge.scoreEvaluation([criterion], []));
       assert.equal(evaluation.judging_criteria_passed, 1);
       assert.equal(evaluation.judging_criteria_total, 1);

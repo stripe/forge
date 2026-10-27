@@ -612,15 +612,13 @@ describe('local artifact store', () => {
         evaluation: {
           ...changed.evaluation,
           judging_criteria: [
+            { ...criterion, evidence_warnings_ref: 'evaluation' },
+          ],
+          evidence_warnings: [
             {
-              ...criterion,
-              evidence_warnings: [
-                {
-                  source: 'workspace',
-                  code: 'workspace_file_truncated',
-                  message: 'File text was truncated.',
-                },
-              ],
+              source: 'workspace',
+              code: 'workspace_file_truncated',
+              message: 'File text was truncated.',
             },
           ],
         },
@@ -628,7 +626,7 @@ describe('local artifact store', () => {
     );
     await assert.rejects(
       verifyCompletedRun(location),
-      /Criterion evidence warnings do not match the saved evidence/,
+      /Evaluation evidence warnings do not match the saved evidence/,
     );
   });
 

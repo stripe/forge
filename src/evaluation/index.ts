@@ -35,7 +35,11 @@ export {
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   parseCriterionJudgment,
 } from './criterionJudge.ts';
-export { DECISION_PROBABILITY_TOLERANCE } from './decision.ts';
+export {
+  DECISION_PROBABILITY_SUM_TOLERANCE,
+  DECISION_PROBABILITY_TOLERANCE,
+  type DecisionRejectionReason,
+} from './decision.ts';
 export {
   type JudgeEvidenceBudgetInput,
   type JudgeEvidenceBudgetSelection,

@@ -965,13 +965,13 @@ describe('unified live end-to-end suite', () => {
     {
       name: 'valid backticks',
       content:
-        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Missing `cancel_url`."}}}',
+        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"explanation":"Missing `cancel_url`."}}}',
       error: undefined,
     },
     {
       name: 'illegal backtick escapes',
       content:
-        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"Missing \\`cancel_url\\`."}}}',
+        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"explanation":"Missing \\`cancel_url\\`."}}}',
       error: {
         code: 'invalid_output',
         message: /live JSON escape check returned malformed structured output/,
@@ -980,7 +980,7 @@ describe('unified live end-to-end suite', () => {
     {
       name: 'whitespace explanation',
       content:
-        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"confidence":1,"explanation":"   "}}}',
+        '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"explanation":"   "}}}',
       error: { message: /valid completed judgment/ },
     },
   ]) {

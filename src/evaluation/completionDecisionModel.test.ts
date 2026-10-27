@@ -6,6 +6,33 @@ import {
 } from './completionDecisionModel.ts';
 
 describe('completion decision adapter', () => {
+  it.each([
+    { instructions: 'Choose.', criteria: {} },
+    { instructions: ' ', criteria: { yes: 'Yes.' } },
+    { instructions: 'Choose.', criteria: { yes: ' ' } },
+  ])(
+    'rejects an invalid choice question before invoking a completion provider: %j',
+    async (question) => {
+      let calls = 0;
+      const adapter = createCompletionDecisionModel({
+        invoke: async () => {
+          calls += 1;
+          return '{}';
+        },
+      });
+      await assert.rejects(
+        adapter.decide({
+          state: 'State.',
+          questions: {
+            check: { type: 'choice', ...question },
+          },
+          signal: new AbortController().signal,
+        }),
+        /Decision request validation failed/,
+      );
+      assert.equal(calls, 0);
+    },
+  );
   it('preserves caller IDs and options that match object prototype names', async () => {
     const answer = {
       type: 'choice',
@@ -21,7 +48,9 @@ describe('completion decision adapter', () => {
       model: null,
       invoke: async () =>
         JSON.stringify({
-          answers: Object.fromEntries([['__proto__', answer]]),
+          answers: Object.fromEntries([
+            ['__proto__', { ...answer, confidence: undefined }],
+          ]),
         }),
     });
     const result = await adapter.decide({
@@ -71,7 +100,13 @@ describe('completion decision adapter', () => {
       invoke: async (request) => {
         calls.push(request);
         return {
-          content: JSON.stringify({ answers }),
+          content: JSON.stringify({
+            answers: Object.fromEntries(
+              Object.entries(answers).map(
+                ([id, { confidence: _confidence, ...answer }]) => [id, answer],
+              ),
+            ),
+          }),
           usage,
           stopReason: 'end_turn',
         };
@@ -128,7 +163,7 @@ describe('completion decision adapter', () => {
       (error) => {
         assert.equal(
           (error as Error).message,
-          'Judge response did not match the required schema.',
+          'Judge response rejected: unknown_key.',
         );
         return true;
       },

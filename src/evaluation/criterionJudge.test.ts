@@ -41,7 +41,8 @@ function expectedDecision(passed: boolean) {
     criterionJudgment(passed).answers.criterion;
   return {
     ...answer,
-    outcome: passed ? 'met' : 'not_met',
+    thresholded_outcome: passed ? 'met' : 'not_met',
+    confidence: 1,
     thresholds: { minimum_probability: 0.8 },
   };
 }
@@ -498,6 +499,7 @@ describe('judgeCriteria', () => {
           type: 'parse_error',
           attempts: 3,
           message: 'Judge response was not valid JSON.',
+          reason: 'invalid_json',
         },
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
@@ -534,6 +536,7 @@ describe('judgeCriteria', () => {
           type: 'parse_error',
           attempts: 4,
           message: 'Judge response was not valid JSON.',
+          reason: 'invalid_json',
         },
         explanation:
           'Judge response was not valid JSON. (unavailable after 4 attempts)',
@@ -604,10 +607,11 @@ describe('judgeCriteria', () => {
         error: {
           type: 'parse_error',
           attempts: 3,
-          message: 'Judge response did not match the required schema.',
+          message: 'Judge response rejected: explanation.',
+          reason: 'explanation',
         },
         explanation:
-          'Judge response did not match the required schema. (unavailable after 3 attempts)',
+          'Judge response rejected: explanation. (unavailable after 3 attempts)',
       },
     ]);
   });
@@ -815,6 +819,7 @@ describe('parseCriterionJudgment', () => {
         type: 'parse_error',
         attempts: 1,
         message: 'Judge response was not valid JSON.',
+        reason: 'invalid_json',
       },
       explanation: 'Judge response was not valid JSON.',
     });
@@ -833,6 +838,7 @@ describe('parseCriterionJudgment', () => {
           type: 'parse_error',
           attempts: 1,
           message: 'Judge response was not valid JSON.',
+          reason: 'invalid_json',
         },
         explanation: 'Judge response was not valid JSON.',
       });
@@ -842,41 +848,72 @@ describe('parseCriterionJudgment', () => {
   it('rejects missing answers, extra fields, blank explanations, and unknown question IDs', () => {
     const response = criterionJudgment(true, 'ok');
     const answer = response.answers.criterion;
-    for (const invalid of [
-      { answers: { criterion: { ...answer, extra: true } } },
-      { answers: { criterion: { ...answer, explanation: '' } } },
-      { answers: { criterion: { ...answer, explanation: '   ' } } },
-      { answers: { criterion: { ...answer, explanation: '\t\r\n' } } },
-      { ...response, extra: true },
-      { answers: {} },
-      { answers: { ...response.answers, unknown: answer } },
-      { results: [{ index: 0, passed: true, explanation: 'old model reply' }] },
-    ]) {
+    for (const [invalid, reason] of [
+      [{ answers: { criterion: { ...answer, extra: true } } }, 'unknown_key'],
+      [
+        { answers: { criterion: { ...answer, explanation: '' } } },
+        'explanation',
+      ],
+      [
+        { answers: { criterion: { ...answer, explanation: '   ' } } },
+        'explanation',
+      ],
+      [
+        { answers: { criterion: { ...answer, explanation: '\t\r\n' } } },
+        'explanation',
+      ],
+      [{ ...response, extra: true }, 'unknown_key'],
+      [{ answers: {} }, 'missing_answer'],
+      [{ answers: { ...response.answers, unknown: answer } }, 'unknown_key'],
+      [
+        {
+          results: [{ index: 0, passed: true, explanation: 'old model reply' }],
+        },
+        'unknown_key',
+      ],
+    ] as const) {
       const result = parseCriterionJudgment(JSON.stringify(invalid), 'g');
       assert.equal(result.passed, null);
       assert.equal(result.error?.type, 'parse_error');
+      assert.equal(result.error?.reason, reason);
       assert.equal(
         result.error?.message,
-        'Judge response did not match the required schema.',
+        `Judge response rejected: ${reason}.`,
       );
     }
   });
 
   it('keeps unknown keys and received values out of schema diagnostics', () => {
-    for (const response of [
-      { results: [{ index: 'secret-index', passed: true, explanation: 'ok' }] },
-      { results: [{ index: 0, passed: 'secret-pass', explanation: 'ok' }] },
-      {
-        results: [
-          { index: 0, passed: true, explanation: 'ok', 'secret-key': true },
-        ],
-      },
-    ]) {
+    const answer = criterionJudgment().answers.criterion;
+    for (const [response, reason] of [
+      [
+        { answers: { criterion: { ...answer, choice: 'secret-choice' } } },
+        'unknown_choice',
+      ],
+      [
+        {
+          answers: {
+            criterion: {
+              ...answer,
+              probabilities: {
+                ...answer.probabilities,
+                met: 'secret-probability',
+              },
+            },
+          },
+        },
+        'probability_range',
+      ],
+      [
+        { answers: { criterion: { ...answer, 'secret-key': 'secret-value' } } },
+        'unknown_key',
+      ],
+    ] as const) {
       const result = parseCriterionJudgment(
         JSON.stringify(response),
         'criterion',
       );
-      assert.match(result.error!.message, /required schema/);
+      assert.equal(result.error?.reason, reason);
       assert.doesNotMatch(JSON.stringify(result), /secret/);
     }
   });

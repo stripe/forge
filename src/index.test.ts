@@ -20,6 +20,7 @@ import {
   credentialReference,
   credentialsSetupHandler,
   criterionResultMatchesDefinition,
+  DECISION_PROBABILITY_SUM_TOLERANCE,
   DECISION_PROBABILITY_TOLERANCE,
   type DecisionModel,
   defineSetupActionBundle,
@@ -112,6 +113,7 @@ describe('@stripe/forge package root', () => {
       minimum_probability: 0.8,
     });
     assert.equal(DECISION_PROBABILITY_TOLERANCE, 0.000001);
+    assert.equal(DECISION_PROBABILITY_SUM_TOLERANCE, 0.02);
     const question: ChoiceQuestion<'yes' | 'no'> = {
       type: 'choice',
       instructions: 'Choose.',

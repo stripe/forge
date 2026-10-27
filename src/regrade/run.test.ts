@@ -48,7 +48,6 @@ describe('regradeCompletedRun', () => {
               not_met: 0.05,
               insufficient_evidence: 0.9,
             },
-            confidence: 0.9,
             explanation: 'The required file content is not visible.',
           },
         },
@@ -66,21 +65,21 @@ describe('regradeCompletedRun', () => {
     );
     const result = regrade!.evaluation.judging_criteria[0]!;
     assert.equal(result.passed, false);
-    assert.equal(result.decision?.outcome, 'insufficient_evidence');
+    assert.equal(result.decision?.thresholded_outcome, 'insufficient_evidence');
     assert.deepEqual(result.decision?.thresholds, { minimum_probability: 0.8 });
     assert.deepEqual(
-      result.evidence_warnings,
-      original.result.evaluation.judging_criteria[0]!.evidence_warnings,
+      regrade!.evaluation.evidence_warnings,
+      original.result.evaluation.evidence_warnings,
     );
     assert.ok(
-      result.evidence_warnings!.some(
+      regrade!.evaluation.evidence_warnings!.some(
         (warning) =>
           warning.source === 'workspace' &&
           warning.code === 'workspace_binary_omitted',
       ),
     );
     assert.ok(
-      result.evidence_warnings!.some(
+      regrade!.evaluation.evidence_warnings!.some(
         (warning) =>
           warning.source === 'trajectory' && warning.code === 'fallback_used',
       ),
