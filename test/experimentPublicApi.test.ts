@@ -243,6 +243,13 @@ describe('experiment public entry points', () => {
       cases: readonly ExperimentRunReportCaseV1[];
       runs: readonly ExperimentRunReportRunV1[];
       summary: ExperimentRunReportStatisticsV1;
+      headline:
+        | {
+            view: 'must_should_average';
+            score: number | null;
+            evaluations: number;
+          }
+        | undefined;
       evaluation: ExperimentRunReportEvaluationV1 | null;
       requiredStrict: number | null;
       requiredAvg: number | null;
@@ -256,6 +263,7 @@ describe('experiment public entry points', () => {
       cases: report.cases,
       runs: report.runs,
       summary: report.summary,
+      headline: report.summary.headline,
       evaluation: report.runs[0]?.evaluation ?? null,
       requiredStrict: report.summary.criterion_scores.required.strict,
       requiredAvg: report.summary.criterion_scores.required.avg,

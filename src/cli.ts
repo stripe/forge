@@ -29,6 +29,7 @@ import {
   ExperimentUsageError,
   runExperimentCommand,
 } from './experimentCli.ts';
+import { summarizeReportHeadline } from './experimentReport.ts';
 import {
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
@@ -633,7 +634,18 @@ async function runPublicExperiment(
     },
   });
   const { outcomes: _outcomes, arguments: _arguments, ...summary } = result;
-  stdout(serializeCanonicalJson(summary));
+  stdout(
+    `${JSON.stringify({
+      headline: summarizeReportHeadline(
+        result.outcomes.flatMap((outcome) =>
+          outcome.state === 'completed'
+            ? [outcome.artifact!.evaluation.score]
+            : [],
+        ),
+      ),
+      ...JSON.parse(serializeCanonicalJson(summary)),
+    })}\n`,
+  );
   return result.errored === 0 ? 0 : 1;
 }
 

@@ -75,6 +75,12 @@ describe('forge regrade', () => {
     );
     assert.equal(result.code, 0, result.stderr);
     const summary = JSON.parse(result.stdout);
+    assert.equal(Object.keys(summary)[0], 'headline');
+    assert.deepEqual(summary.headline, {
+      view: 'must_should_average',
+      score: 1,
+      evaluations: 1,
+    });
     assert.equal(summary.regraded, 1);
     assert.deepEqual(summary.judge, {
       provider: 'anthropic',

@@ -1520,7 +1520,8 @@ evidence. This validation runs outside the retryable provider call; failure
 cancels peer judgments and prevents commit.
 
 Reports count choices of `insufficient_evidence` separately from
-`judging_criteria_low_confidence` (firm choices below the stored threshold).
+`judging_criteria_low_confidence`: how many met or not-met verdicts the judge
+gave with less than 0.80 probability under the current stored rule.
 Summary and case groups carry corresponding `insufficient_evidence` and
 `low_confidence` counts of evaluations and criteria, including OPTIONAL criteria.
 They overlap existing statuses without changing score views. Run evaluations
@@ -1539,6 +1540,22 @@ The checkpoint and saved runs remain the complete source; inspection and regrade
 use them independently of report detail. Old reports may omit the new fields.
 
 ### Score and status
+
+The headline view is `must_should_average`. Report statistics include optional
+`headline: {view: 'must_should_average', score, evaluations}` in the overall
+summary and each case/configuration group. New reports always emit it; older
+reports without it parse unchanged. The score is the mean of completed
+evaluations' saved non-null `score`, with equal weight per evaluation. Null
+scores, pending selections and execution errors are excluded; the count names
+the evaluations used, and the mean is null when that count is zero. Checks-only
+evaluations contribute their saved zero. The headline weights evaluations
+equally, while `criterion_scores.recommended.avg` pools valid MUST and SHOULD
+judgments with equal weight per criterion. Existing views remain unchanged.
+Report JSON puts the headline first within each statistics object, followed by
+the other keys in canonical order. The run and regrade CLI summaries also put
+the named view first. `regrade.json` and `RegradeExperimentSummaryV1` have the
+same optional headline. Report parsing verifies present headlines against run
+rows; summary-only reports can check their counts but cannot rebuild the mean.
 
 The numeric score is passes divided by valid MUST and SHOULD judgments, with
 equal weight per criterion. `judging_criteria_passed`, `judging_criteria_total`,

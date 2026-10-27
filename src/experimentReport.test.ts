@@ -50,6 +50,170 @@ afterEach(async () => {
 });
 
 describe('experiment run scorecards', () => {
+  it('headlines saved MUST and SHOULD scores with equal evaluation weight', () => {
+    const runs = Array.from({ length: 7 }, (_, index) => row(index));
+    runs[0]!.evaluation = evaluation(0, 1, 'failed');
+    runs[1]!.evaluation = evaluation(9, 9, 'passed');
+    runs[2]!.selection.treatment = 'unavailable';
+    runs[2]!.evaluation = summarizeReportEvaluation(
+      scoreEvaluation([erroredJudgment('MUST')], []),
+    );
+    Object.assign(runs[3]!, {
+      state: 'errored',
+      evaluation: null,
+      error_code: 'agent_failed',
+      result_path: null,
+    });
+    runs[3]!.selection.treatment = 'unavailable';
+    Object.assign(runs[4]!, {
+      state: 'pending',
+      evaluation: null,
+      run_id: null,
+      attempt_count: 0,
+      result_path: null,
+    });
+    runs[4]!.selection.treatment = 'unavailable';
+    runs[5]!.selection.treatment = 'partly-judged';
+    runs[5]!.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          judgment('MUST', true),
+          judgment('SHOULD', false),
+          erroredJudgment('SHOULD'),
+        ],
+        [],
+      ),
+    );
+    runs[6]!.selection.treatment = 'checks-only';
+    const report = build(runs);
+    assert.deepEqual(report.summary.headline, {
+      view: 'must_should_average',
+      score: 0.375,
+      evaluations: 4,
+    });
+    assert.deepEqual(
+      report.cases.map((group) => group.headline),
+      [
+        { view: 'must_should_average', score: 0.5, evaluations: 2 },
+        { view: 'must_should_average', score: null, evaluations: 0 },
+        { view: 'must_should_average', score: 0.5, evaluations: 1 },
+        { view: 'must_should_average', score: 0, evaluations: 1 },
+      ],
+    );
+    assert.equal(report.summary.criterion_scores.recommended.avg, 10 / 12);
+    assert.deepEqual(report.summary.judging_score, {
+      mean: 0.5,
+      evaluations: 3,
+    });
+    const printed = JSON.parse(serializeExperimentRunReport(report));
+    assert.equal(Object.keys(printed.summary)[0], 'headline');
+    for (const group of printed.cases)
+      assert.equal(Object.keys(group)[0], 'headline');
+    assert.deepEqual(parseExperimentRunReport(printed), report);
+  });
+
+  it('keeps choice-based weak passes and insufficient evidence inside the headline', () => {
+    const low = criterionJudgment();
+    low.answers.criterion.probabilities = {
+      met: 0.75,
+      not_met: 0.2,
+      insufficient_evidence: 0.05,
+    };
+    const insufficient = {
+      answers: {
+        criterion: {
+          type: 'choice',
+          choice: 'insufficient_evidence',
+          probabilities: { met: 0.1, not_met: 0.1, insufficient_evidence: 0.8 },
+          explanation: 'Relevant evidence is missing.',
+        },
+      },
+    };
+    const run = row(0);
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          parseCriterionJudgment(JSON.stringify(low), {
+            value: 'The answer MUST be complete.',
+            requirement_level: 'MUST',
+          }),
+          parseCriterionJudgment(JSON.stringify(insufficient), 'Answers.'),
+        ],
+        [],
+      ),
+    );
+    const report = build([run]);
+    assert.deepEqual(report.summary.headline, {
+      view: 'must_should_average',
+      score: 0.5,
+      evaluations: 1,
+    });
+    assert.deepEqual(report.summary.low_confidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.deepEqual(report.summary.insufficient_evidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+  });
+
+  it('accepts reports without headlines unchanged and checks each present headline', () => {
+    const report = build([row(0)]);
+    const old = structuredClone(report);
+    delete old.summary.headline;
+    for (const group of old.cases) delete group.headline;
+    assert.deepEqual(parseExperimentRunReport(old), old);
+    assert.deepEqual(
+      parseExperimentRunReport({ ...report, summary: old.summary }),
+      {
+        ...report,
+        summary: old.summary,
+      },
+    );
+    assert.deepEqual(
+      parseExperimentRunReport({ ...old, summary: report.summary }),
+      {
+        ...old,
+        summary: report.summary,
+      },
+    );
+    for (const group of [report.summary, report.cases[0]!]) {
+      for (const replacement of [
+        { view: 'another_view', score: 0, evaluations: 1 },
+        { view: 'must_should_average', score: 1, evaluations: 1 },
+        { view: 'must_should_average', score: null, evaluations: 0 },
+        { view: 'must_should_average', score: null, evaluations: 1 },
+        { view: 'must_should_average', score: 0, evaluations: 1, extra: true },
+      ]) {
+        const forged = structuredClone(report);
+        const target =
+          group === report.summary ? forged.summary : forged.cases[0]!;
+        Object.assign(target, { headline: replacement });
+        assert.throws(() => parseExperimentRunReport(forged));
+      }
+    }
+    const summaryOnly = {
+      ...report,
+      runs: [],
+      cases: [],
+      details_unavailable: {
+        reason: 'size_limit' as const,
+        runs: 1,
+        cases: 1,
+      },
+    };
+    assert.deepEqual(parseExperimentRunReport(summaryOnly), summaryOnly);
+    const forged = structuredClone(summaryOnly);
+    forged.summary.headline!.evaluations = 2;
+    assert.throws(() => parseExperimentRunReport(forged));
+    forged.summary.headline!.evaluations = 1;
+    forged.summary.headline!.score = null;
+    assert.throws(() => parseExperimentRunReport(forged));
+    delete forged.summary.headline;
+    assert.deepEqual(parseExperimentRunReport(forged), forged);
+  });
+
   it('counts low-confidence passes separately from insufficient evidence and failures', () => {
     const low = parseCriterionJudgment(
       JSON.stringify({
@@ -438,6 +602,7 @@ describe('experiment run scorecards', () => {
     runs[5]!.attempt_count = 0;
     const report = build(runs);
     assert.deepEqual(report.summary, {
+      headline: { view: 'must_should_average', score: 0.375, evaluations: 4 },
       selections: 6,
       completed: 4,
       errored: 1,
@@ -1928,6 +2093,15 @@ function judgment(
     requirement_level,
     passed,
     explanation: '',
+  };
+}
+function erroredJudgment(requirement_level: 'MUST' | 'SHOULD' | 'OPTIONAL') {
+  return {
+    criterion: 'The answer MUST be complete.',
+    requirement_level,
+    passed: null,
+    explanation: 'Judge unavailable.',
+    error: { type: 'request_error' as const, attempts: 3, message: 'timeout' },
   };
 }
 function row(index: number): ExperimentRunReportRunV1 {

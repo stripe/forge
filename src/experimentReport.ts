@@ -23,6 +23,18 @@ const MAX_REPORT_CRITERION_FAILURES = 100;
 const MAX_REPORT_CRITERION_FAILURE_BYTES = 64 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
+const HEADLINE_VIEW = 'must_should_average' as const;
+const headlineSchema = z
+  .object({
+    view: z.literal(HEADLINE_VIEW),
+    score: ratio.nullable(),
+    evaluations: count,
+  })
+  .strict()
+  .refine(
+    (headline) => (headline.score === null) === (headline.evaluations === 0),
+    'Headline score is unavailable exactly when no evaluations were counted.',
+  );
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const selectionSchema = z.unknown().transform(parseRunSelection);
 const criterionCountsSchema = z
@@ -264,6 +276,7 @@ const runSchema = z
   });
 const statisticsSchema = z
   .object({
+    headline: headlineSchema.optional(),
     rate_limit_wait_ms: count.optional(),
     selections: count,
     completed: count,
@@ -461,6 +474,10 @@ export function parseExperimentRunReport(
         report.summary.selections ||
       scored > report.summary.completed ||
       report.summary.judge_errors.evaluations > report.summary.completed ||
+      (report.summary.headline !== undefined &&
+        (report.summary.headline.evaluations > report.summary.completed ||
+          report.summary.headline.evaluations <
+            report.summary.judging_score.evaluations)) ||
       report.summary.pass_rate !==
         (scored === 0 ? null : report.summary.passed / scored) ||
       report.summary.coverage !==
@@ -478,6 +495,10 @@ export function parseExperimentRunReport(
       'Report details must be present or explicitly unavailable.',
     );
   const aggregate = aggregateRuns(report.runs);
+  if (report.summary.headline === undefined) delete aggregate.summary.headline;
+  for (const [index, group] of aggregate.cases.entries()) {
+    if (report.cases[index]?.headline === undefined) delete group.headline;
+  }
   if (
     serializeCanonicalJson(report.summary) !==
       serializeCanonicalJson(aggregate.summary) ||
@@ -514,7 +535,35 @@ export function serializeExperimentRunReport(
 }
 
 function reportBody(report: ExperimentRunReportV1): string {
-  return `${JSON.stringify(JSON.parse(serializeCanonicalJson(report)), null, 2)}\n`;
+  return `${JSON.stringify(
+    JSON.parse(serializeCanonicalJson(report)),
+    (_key, value: unknown) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !Object.hasOwn(value, 'headline')
+      )
+        return value;
+      const { headline, ...rest } = value as Record<string, unknown>;
+      return { headline, ...rest };
+    },
+    2,
+  )}\n`;
+}
+
+/** Each completed evaluation's saved non-null score has one vote. */
+export function summarizeReportHeadline(
+  scores: readonly (number | null)[],
+): z.infer<typeof headlineSchema> {
+  const counted = scores.filter((score) => score !== null);
+  return {
+    view: HEADLINE_VIEW,
+    score:
+      counted.length === 0
+        ? null
+        : counted.reduce((sum, score) => sum + score, 0) / counted.length,
+    evaluations: counted.length,
+  };
 }
 
 /** Count pretty JSON bytes before allocating a complete serialized report. */
@@ -683,6 +732,11 @@ function statistics(
     }
   }
   return {
+    headline: summarizeReportHeadline(
+      runs.flatMap((run) =>
+        run.state === 'completed' ? [run.evaluation!.score] : [],
+      ),
+    ),
     ...(runs.some((run) => run.rate_limit_wait_ms !== undefined)
       ? {
           rate_limit_wait_ms: runs.reduce(

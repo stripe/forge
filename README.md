@@ -477,6 +477,13 @@ JS
 
 ### Understand scores
 
+The headline view is `must_should_average`: the mean of completed evaluations'
+saved `score`, with one vote per evaluation. It appears first as `headline` in
+the report summary and each case/configuration group, and in run and regrade
+CLI summaries. Its `evaluations` count excludes null scores and execution errors;
+its `score` is `null` when none qualify. Checks-only evaluations contribute
+their saved score of `0`. All other score views remain available.
+
 Numeric `score` is the fraction of valid MUST and SHOULD judgments that passed.
 Judge errors are excluded; the score is `null` if every scored criterion errored.
 `requirement_level` classifies each criterion as `MUST` (required),
@@ -504,11 +511,12 @@ score of `0.75` and status `judge_error`. Each errored criterion records
 message; `judging_criteria_errored` counts MUST and SHOULD errors.
 
 New judgments also record a `decision`: the choice, normalized probabilities,
-derived confidence, thresholds, and a separate `thresholded_outcome`. The choice
-sets `passed`: a `met` choice at 0.75 still passes, while a choice of
-`insufficient_evidence` counts as not passed. Thresholding flags weak verdicts
-without changing the headline score. Judge errors remain separate. See the
-[decision rule](docs/architecture.md#criterion-judging).
+derived confidence and the rule used to flag weak verdicts. The choice sets
+`passed`: a `met` choice at 0.75 still passes, while `insufficient_evidence`
+counts as not passed inside the headline. For met and not-met choices,
+`low_confidence` reports how many verdicts the judge gave with less than 0.80
+probability. This count does not change the score. Judge errors remain separate.
+See the [decision rule](docs/architecture.md#criterion-judging).
 
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
@@ -518,7 +526,7 @@ it also has per-case/configuration `cases` and one `runs` row per saved selectio
 With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
+jq '.cases[] | {headline, case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 

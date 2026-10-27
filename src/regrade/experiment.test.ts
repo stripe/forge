@@ -55,6 +55,16 @@ describe('regradeExperimentRun', () => {
     assert.equal(summary.format, REGRADE_SUMMARY_FORMAT);
     assert.equal(summary.regraded, 1);
     assert.equal(summary.reused, 0);
+    assert.deepEqual(summary.headline, {
+      view: 'must_should_average',
+      score: 0,
+      evaluations: 1,
+    });
+    const savedSummary = JSON.parse(
+      await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
+    );
+    assert.equal(Object.keys(savedSummary)[0], 'headline');
+    assert.deepEqual(savedSummary.headline, summary.headline);
     assert.deepEqual(summary.failed, []);
     assert.equal(first.scripted.calls.length, 1);
 
