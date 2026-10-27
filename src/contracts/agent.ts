@@ -48,6 +48,7 @@ export interface AgentNativeArtifact {
 }
 
 export type AgentNativeArtifactUnavailableReason =
+  | 'not_started'
   | 'too_large'
   | 'timed_out'
   | 'identity_conflict'

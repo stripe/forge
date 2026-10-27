@@ -39,6 +39,7 @@ const nativeFormat = z.enum([
   'opencode-session-json',
 ]);
 export const failureEvidenceReasonSchema = z.enum([
+  'not_started',
   'too_large',
   'timed_out',
   'identity_conflict',

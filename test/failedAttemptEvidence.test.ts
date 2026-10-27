@@ -56,7 +56,10 @@ async function fixture(
   mode: 'exit' | 'timeout' | 'success',
   enabled: boolean,
   completeFirst = true,
-  options: { completedTurns?: number; failExport?: 'later' | 'oversized' } = {},
+  options: {
+    completedTurns?: number;
+    failExport?: 'later' | 'oversized' | 'identity_conflict' | 'timed_out';
+  } = {},
 ) {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), 'forge-failure-evidence-'),
@@ -190,10 +193,16 @@ async function fixture(
             'Output limit exceeded.',
             'command_output_limit',
           );
+        if (options.failExport === 'timed_out')
+          throw new CommandExecutionError(
+            'Export timed out.',
+            'command_timeout',
+          );
+        const exported = openCodeExport([{ prompt: 'Start work.', response }]);
+        if (options.failExport === 'identity_conflict')
+          exported.info.id = 'ses_another-session';
         return {
-          stdout: JSON.stringify(
-            openCodeExport([{ prompt: 'Start work.', response }]),
-          ),
+          stdout: JSON.stringify(exported),
           stderr: '',
           durationMs: 1,
           exitCode: 0,
@@ -292,6 +301,100 @@ async function fixture(
 }
 
 describe('failed attempt evidence', () => {
+  for (const stage of [
+    'runtime_prepare',
+    'agent_prepare',
+    'open_session',
+  ] as const)
+    it(`reports no started native session after ${stage} fails`, async () => {
+      const f = await fixture('claude-code', 'exit', true);
+      let reads = 0;
+      let opens = 0;
+      const agent: AgentAdapter = {
+        ...f.adapter,
+        async openSession(context) {
+          opens++;
+          if (stage === 'open_session') throw new Error(PRIVATE);
+          return f.adapter.openSession(context);
+        },
+        async collectNativeArtifact() {
+          reads++;
+          return undefined;
+        },
+      };
+      if (stage === 'agent_prepare')
+        agent.prepare = async () => {
+          throw new Error(PRIVATE);
+        };
+      await assert.rejects(
+        f.run({
+          agent,
+          ...(stage === 'runtime_prepare'
+            ? {
+                runtime: {
+                  ...f.runtime.adapter,
+                  async prepare() {
+                    throw new Error(PRIVATE);
+                  },
+                },
+              }
+            : {}),
+        }),
+        {
+          code: stage === 'open_session' ? 'agent_failed' : 'runtime_failed',
+          phase: stage === 'open_session' ? 'interaction' : 'runtime_prepare',
+        },
+      );
+      const saved = (await f.store.read(
+        f.identity,
+        new AbortController().signal,
+      ))!;
+      assert.deepEqual(saved.failure_evidence!.native_log, {
+        state: 'unavailable',
+        reason: 'not_started',
+      });
+      assert.equal(saved.failure_evidence!.partial_trajectory.state, 'empty');
+      assert.equal(reads, 0);
+      assert.equal(opens, stage === 'open_session' ? 1 : 0);
+      assert.equal(saved.restricted, undefined);
+      assert.deepEqual(
+        await fs.readdir(path.join(f.root, 'results')).catch(() => []),
+        [],
+      );
+    });
+  it('skips native lookup when a failed session has no native identity', async () => {
+    const f = await fixture('codex', 'exit', true);
+    let reads = 0;
+    await assert.rejects(
+      f.run({
+        agent: {
+          ...f.adapter,
+          async openSession() {
+            return {
+              sessionId: () => undefined,
+              async send() {
+                throw new Error(PRIVATE);
+              },
+            };
+          },
+          async collectNativeArtifact() {
+            reads++;
+            return undefined;
+          },
+        },
+      }),
+      { code: 'agent_failed' },
+    );
+    const saved = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.deepEqual(saved.failure_evidence!.native_log, {
+      state: 'unavailable',
+      reason: 'not_started',
+    });
+    assert.equal(reads, 0);
+  });
   for (const harness of ['claude-code', 'codex'] as const)
     it(`${harness} preserves a source-reader limit reason in attempt.json`, async () => {
       const f = await fixture(harness, 'exit', true);
@@ -497,6 +600,26 @@ describe('failed attempt evidence', () => {
     assert.equal(saved.failure_evidence!.partial_trajectory.completed_turns, 1);
     assert.equal(saved.failure_evidence!.native_log.reason, 'too_large');
   });
+  for (const reason of ['identity_conflict', 'timed_out'] as const)
+    it(`keeps the OpenCode export ${reason} reason after a later invocation fails`, async () => {
+      const f = await fixture('opencode', 'exit', true, true, {
+        failExport: reason,
+      });
+      await assert.rejects(f.run(), { code: 'agent_failed' });
+      const saved = (await f.store.read(
+        f.identity,
+        new AbortController().signal,
+      ))!;
+      assert.equal(
+        saved.failure_evidence!.partial_trajectory.completed_turns,
+        1,
+      );
+      assert.deepEqual(saved.failure_evidence!.native_log, {
+        state: 'unavailable',
+        reason,
+      });
+      assert.equal(saved.agent_invocations!.at(-1)!.state, 'failed');
+    });
   it('bounds a hung native read and ignores its late result', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const f = await fixture('claude-code', 'exit', true);

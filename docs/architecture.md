@@ -1803,9 +1803,11 @@ Failed attempts may also include optional `failure_evidence`, with
 `disabled`, `unsupported`, `unavailable`, `available`, or `truncated`; an `empty`
 partial trajectory means no agent turn completed. Partial-trajectory metadata
 counts completed turns, tool calls, and retained turns without copying their
-content. Optional `reason` codes distinguish `too_large`, `timed_out`,
+content. Optional `reason` codes distinguish `not_started`, `too_large`, `timed_out`,
 `identity_conflict`, `not_supported`, and `read_failed`. Missing or unreadable
-sources share `read_failed`. An in-progress snapshot can omit a reason until the
+sources for a known native session share `read_failed`. If no agent session has
+opened or no native session ID is known, `not_started` means no read was attempted.
+An in-progress snapshot can omit a reason until the
 native read completes. A partial projection failure also carries a reason;
 unsupported text capture uses `not_supported`. Older attempts can omit sections
 and reasons.

@@ -915,7 +915,7 @@ export async function executeEvalWithTestHooks(
               runId: input.runId,
               plan: input.plan,
             })
-          : { reason: 'read_failed' };
+          : { reason: failedSession ? 'read_failed' : 'not_started' };
       const captured = failureEvidence.finish(native);
       diagnostics.failureEvidence(captured.record, captured.bodies);
     }
@@ -979,7 +979,7 @@ async function collectFailedNativeArtifact(input: {
     )
       return { reason: 'identity_conflict' };
     const sessionId = input.observedSessionId ?? completedSessionId;
-    if (!sessionId) return { reason: 'read_failed' };
+    if (!sessionId) return { reason: 'not_started' };
     if (!isSafeSessionIdentity(sessionId))
       return { reason: 'identity_conflict' };
     if (!input.agent.collectNativeArtifact) return { reason: 'not_supported' };

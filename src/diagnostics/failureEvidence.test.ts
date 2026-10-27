@@ -251,6 +251,7 @@ describe('failure evidence projection', () => {
       'identity_conflict',
       'not_supported',
       'read_failed',
+      'not_started',
     ] as const) {
       const record = fixture().finish({ reason }).record;
       assert.equal(record.native_log.state, 'unavailable');
