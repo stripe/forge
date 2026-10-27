@@ -333,7 +333,32 @@ describe('collectJudgeWorkspaceEvidence', () => {
     );
   });
 
-  it('retains a sorted prefix if an external workspace returns more than requested', async () => {
+  it('marks evidence unavailable when a legacy runtime ignores exclusions and throws an untyped limit error', async () => {
+    const test = fixture({
+      listError: new Error('Workspace entry limit exceeded: sensitive detail'),
+    });
+    const collected = await collectJudgeWorkspaceEvidence(test.workspace, {
+      maxEntries: 1,
+    });
+    assert.ok(
+      test.listOptions[0]?.excludeDirectoryNames?.includes('node_modules'),
+    );
+    assert.deepEqual(test.reads, []);
+    assert.deepEqual(collected.evidence.entries, []);
+    assert.equal(collected.evidence.complete, false);
+    assert.equal(collected.evidence.truncated, true);
+    assert.deepEqual(
+      collected.evidence.warnings.map(({ code }) => code),
+      ['workspace_entry_limit_reached', 'workspace_listing_unavailable'],
+    );
+    assert.match(
+      collected.renderedText,
+      /no partial listing.*workspace text is unavailable/,
+    );
+    assert.doesNotMatch(JSON.stringify(collected), /sensitive detail/);
+  });
+
+  it('retains a sorted prefix if an external workspace ignores exclusions and returns more than requested', async () => {
     const test = fixture({ bodies: { 'a.txt': 'a', 'z.txt': 'z' } });
     const workspace = {
       ...test.workspace,
@@ -347,6 +372,11 @@ describe('collectJudgeWorkspaceEvidence', () => {
       ['a.txt'],
     );
     assert.equal(collected.evidence.truncated, true);
+    assert.equal(collected.evidence.complete, false);
+    assert.match(
+      collected.renderedText,
+      /listing was truncated.*entry limit of 1/,
+    );
     assert.deepEqual(
       test.reads.map(({ path }) => path),
       ['a.txt'],

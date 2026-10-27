@@ -102,7 +102,9 @@ export interface JudgeWorkspaceEvidenceEntryV1 {
 /** JSON-safe evidence which can be persisted beside the judge result. */
 export interface JudgeWorkspaceEvidenceV1 {
   readonly entries: readonly JudgeWorkspaceEvidenceEntryV1[];
+  /** False when any warning or bound leaves evidence incomplete. */
   readonly complete: boolean;
+  /** Any collection or rendering bound was hit, including per-file text limits. */
   readonly truncated: boolean;
   readonly bytes_read: number;
   readonly warnings: readonly JudgeWorkspaceWarningV1[];
@@ -217,6 +219,11 @@ export async function collectJudgeWorkspaceEvidence(
         stop(error);
       } else if (isLimitError(error)) {
         stop(entryLimit(limits.maxEntries));
+        warnings.push({
+          code: 'workspace_listing_unavailable',
+          message:
+            'The runtime supplied no partial listing after reporting an entry limit; workspace text is unavailable.',
+        });
       } else {
         warnings.push({
           code: 'workspace_listing_unavailable',

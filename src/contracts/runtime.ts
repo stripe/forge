@@ -28,8 +28,15 @@ export interface WorkspaceEntry {
 export interface WorkspaceListOptions {
   /** Workspace-relative directory. Defaults to the workspace root. */
   readonly under?: string;
+  /**
+   * Retain the shallowest entries first, then code-unit path order at each depth.
+   * Successful listings and overflow error entries use code-unit path order.
+   */
   readonly maxEntries?: number;
-  /** Case-sensitive directory basenames to omit, with their subtrees, without counting them. */
+  /**
+   * Case-sensitive, safe, non-empty directory basenames to omit with their
+   * subtrees, without counting them. Paths, `.` and `..` are invalid.
+   */
   readonly excludeDirectoryNames?: readonly string[];
   readonly signal?: AbortSignal;
 }

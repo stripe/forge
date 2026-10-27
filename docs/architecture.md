@@ -707,14 +707,17 @@ that ID and implement pure synchronous preflight. Private paths, credentials,
 or inferred host settings do not belong in runtime config.
 
 Workspace `listFiles` accepts optional `excludeDirectoryNames`: case-sensitive,
-literal directory basenames. Matching directories and their descendants are
-omitted before counting entries or descending, including when `under` is
+literal directory basenames. Names must be safe, non-empty workspace path
+segments; paths, `.` and `..` are rejected. Matching directories and their
+descendants are omitted before counting entries or descending, including when `under` is
 inside an excluded directory. Files and symlinks with those names remain
 listed. On entry overflow, implementations reject with `WorkspaceEntryLimitError`
 from `@stripe/forge`, carrying `maxEntries` and the bounded, lexically sorted
-`entries` reached before traversal stopped. The partial listing need not be a
-prefix of a full listing; traversal order is runtime-specific. Other failures,
-including cancellation, still reject without partial evidence.
+`entries` reached before traversal stopped. Entries survive overflow shallowest
+first, then by code-unit path order at each depth, and the retained subset is
+returned in code-unit path order. A budget consumed by shallow directories can
+leave no files in that subset. Other failures, including cancellation, still
+reject without partial evidence.
 
 ### Built-in Docker runtime
 
@@ -1476,12 +1479,17 @@ rendered characters total. On entry overflow, the collector keeps the files
 reached in the partial listing in lexical order, subject to the remaining
 collection bounds. It also bounds overlong listings returned by external
 runtimes. A `workspace_entry_limit_reached` warning tells the judge that the
-listing was truncated and names the limit. Older runtime implementations that
-throw without partial entries still yield a warning without file text.
+listing was truncated and names the limit. Recovery uses `WorkspaceEntryLimitError`;
+older runtimes may ignore exclusions and throw a plain error. A legacy limit-message
+check preserves their entry-limit warning, with an explicit unavailable warning
+when no partial listing was supplied. Their lost file text cannot be recovered.
 `judge-evidence.json` records the redacted workspace subset, warnings, and exact
 projected transcript for audit and regrade. Its optional `workspace.truncated`
-flag records whether collection or rendering hit a bound; older artifacts may
-omit it, so readers must also inspect `workspace.complete` and warnings.
+flag records whether any collection or rendering bound was hit, including per-file
+text truncation, rather than only listing truncation. `workspace.complete: false`
+also covers omissions and read failures that hit no bound. Older artifacts may
+omit `truncated`; absence does not mean false, so readers must also inspect
+`workspace.complete` and warnings.
 
 At most four criteria run concurrently. Each request carries a 1,024-token
 output budget and a strict one-criterion JSON schema, with no temperature;

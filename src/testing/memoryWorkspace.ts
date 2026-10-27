@@ -7,6 +7,10 @@ import {
   type WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
 import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
+import {
+  compareWorkspaceListingPaths,
+  workspaceDirectoryExclusions,
+} from '../runtime/workspaceListing.ts';
 
 export type TestFileContents = string | Uint8Array;
 
@@ -75,6 +79,9 @@ export function createMemoryWorkspace(
     options.signal?.throwIfAborted();
     const under = options.under ?? '.';
     assertWorkspacePath(under, true);
+    const excluded = workspaceDirectoryExclusions(
+      options.excludeDirectoryNames,
+    );
     const allDirectories = directories(files);
     if (!allDirectories.has(under)) {
       throw new Error(`Memory workspace directory does not exist: ${under}`);
@@ -84,7 +91,6 @@ export function createMemoryWorkspace(
       'maxEntries',
     );
     const prefix = under === '.' ? '' : `${under}/`;
-    const excluded = new Set(options.excludeDirectoryNames);
     const isExcludedDirectory = (directory: string): boolean =>
       directory
         .split('/')
@@ -112,10 +118,16 @@ export function createMemoryWorkspace(
         );
       }
     }
-    entries.sort((left, right) => compareCodeUnits(left.path, right.path));
     if (entries.length > limit) {
-      throw new WorkspaceEntryLimitError(limit, entries.slice(0, limit));
+      entries.sort((left, right) =>
+        compareWorkspaceListingPaths(left.path, right.path),
+      );
+      const retained = entries
+        .slice(0, limit)
+        .sort((left, right) => compareCodeUnits(left.path, right.path));
+      throw new WorkspaceEntryLimitError(limit, retained);
     }
+    entries.sort((left, right) => compareCodeUnits(left.path, right.path));
     return Object.freeze(entries);
   };
 

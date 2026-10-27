@@ -44,7 +44,7 @@ describe('createMemoryWorkspace', () => {
               'node_modules-extra',
               'node_modules-extra/app.ts',
               'src',
-              'src/app.ts',
+              'vendor',
             ],
           );
           assert.ok(Object.isFrozen(error.entries));
