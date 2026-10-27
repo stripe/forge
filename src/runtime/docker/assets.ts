@@ -6,4 +6,4 @@ export const FORGE_CODEX_VERSION = '0.149.0';
 
 /** Hash of Dockerfile, a NUL separator, and entrypoint.sh. */
 export const FORGE_RUNTIME_ASSET_DIGEST =
-  '13c09887d61e6b919792b87723dd67e11c2ce84f53c525139eb096f7fe63598f';
+  'e28116131c7596f9e1dd06255fcc529dc354c963adb1a2307be6360e0272f761';
