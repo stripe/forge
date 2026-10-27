@@ -13,12 +13,14 @@ import {
 } from '../testing/fakes.ts';
 import { createMemoryRunInputProvider } from '../testing/memoryInputs.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
+import { ForgeExecutionError } from './errors.ts';
 
 function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
   const mcpServers: PluginMcpServerId[] = ['stripe'];
   const runtime = createFakeRuntimeAdapter();
   const agent = createScriptedAgentAdapter({
     id: 'codex',
+    turns: [{ sessionId: 'fixture-session', text: 'Done', toolCalls: [] }],
     requirements: {
       executables: [],
       stateDirectories: [],
@@ -153,6 +155,48 @@ describe('runtime readiness', () => {
       run.events.indexOf('finalizeSetup') < run.events.indexOf('command:agent'),
     );
     assert.equal(run.events.at(-1), 'dispose');
+  });
+
+  it('checks MCP before opening an eval session after setup finalization', async () => {
+    const test = fixture();
+    test.composition.credentialResolver = createStaticCredentialResolver({
+      'env:STRIPE_API_KEY': 'mock-token',
+      'model-key': 'model-token',
+    });
+    await defaultForgeEngine.executeEval({ ...test, runId: 'ready-eval' });
+    assert.deepEqual(test.checkedServers, ['stripe']);
+    assert.ok(test.agent.events.includes('open-session'));
+    const run = test.runtime.runs[0]!;
+    assert.ok(
+      run.events.indexOf('finalizeSetup') < run.events.indexOf('command:agent'),
+    );
+    assert.equal(
+      run.commands.filter(({ argv }) => argv[0] === 'check-mcp').length,
+      1,
+    );
+  });
+
+  it('fails eval setup and disposes the runtime before any model turn when MCP is unavailable', async () => {
+    const test = fixture('mcp');
+    test.composition.credentialResolver = createStaticCredentialResolver({
+      'env:STRIPE_API_KEY': 'mock-token',
+      'model-key': 'model-token',
+    });
+    await assert.rejects(
+      defaultForgeEngine.executeEval({ ...test, runId: 'unready-eval' }),
+      (error) => {
+        assert.ok(error instanceof ForgeExecutionError);
+        assert.equal(error.code, 'setup_failed');
+        assert.equal(error.phase, 'setup');
+        assert.match(
+          error.diagnostic?.message ?? '',
+          /\[REDACTED\] authentication failed/,
+        );
+        return true;
+      },
+    );
+    assert.deepEqual(test.agent.events, ['prepare']);
+    assert.equal(test.runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('rejects a missing native MCP checker before credential lookup or allocation', async () => {

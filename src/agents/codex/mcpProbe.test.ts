@@ -9,7 +9,7 @@ const connected = {
   name: 'stripe',
   serverInfo: { name: 'fixture', version: '1' },
   authStatus: 'bearerToken',
-  tools: {},
+  tools: { probe: { name: 'probe', inputSchema: { type: 'object' } } },
 };
 
 async function probe(pages: readonly unknown[]) {
@@ -84,14 +84,15 @@ describe('Codex MCP native status probe', () => {
     assert.equal(result.messages.at(-1)?.params.cursor, 'next');
   });
 
-  for (const [name, pages] of [
-    ['missing server', [{ data: [], nextCursor: null }]],
+  for (const [name, pages, exitCode] of [
+    ['missing server', [{ data: [], nextCursor: null }], 2],
     [
       'duplicate identity',
       [
         { data: [connected], nextCursor: 'next' },
         { data: [connected], nextCursor: null },
       ],
+      2,
     ],
     [
       'failed authentication',
@@ -101,10 +102,25 @@ describe('Codex MCP native status probe', () => {
           nextCursor: null,
         },
       ],
+      3,
     ],
+    ...['notLoggedIn', 'oAuth', 'unsupported'].map(
+      (authStatus) =>
+        [
+          'unauthenticated server without connection metadata',
+          [
+            {
+              data: [{ ...connected, serverInfo: null, authStatus }],
+              nextCursor: null,
+            },
+          ],
+          3,
+        ] as const,
+    ),
     [
       'failed discovery',
       [{ data: [{ ...connected, serverInfo: null }], nextCursor: null }],
+      2,
     ],
     [
       'repeated cursor',
@@ -112,10 +128,24 @@ describe('Codex MCP native status probe', () => {
         { data: [], nextCursor: 'same' },
         { data: [], nextCursor: 'same' },
       ],
+      1,
     ],
-    ['malformed page', [{ data: {}, nextCursor: null }]],
+    ['malformed page', [{ data: {}, nextCursor: null }], 1],
+    ...[{}, [], null].map(
+      (tools) =>
+        [
+          'empty or malformed tool surface',
+          [{ data: [{ ...connected, tools }], nextCursor: null }],
+          4,
+        ] as const,
+    ),
+    [
+      'wrong plugin namespace',
+      [{ data: [{ ...connected, pluginId: 'other@test' }], nextCursor: null }],
+      2,
+    ],
   ] as const)
     it(`rejects ${name}`, async () => {
-      assert.equal((await probe(pages)).exitCode, 1);
+      assert.equal((await probe(pages)).exitCode, exitCode);
     });
 });

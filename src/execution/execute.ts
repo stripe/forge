@@ -339,43 +339,13 @@ export async function validateRuntimeWithSetupActions(
       stage = 'finalize';
       await runtime.finalizeSetup();
       stage = 'mcp';
-      let serverCount = 0;
-      for (const step of applied.steps) {
-        if (step.uses !== 'forge/plugin') continue;
-        const receipt = parseAgentPluginInstallationReceipt(step.resolution);
-        const planned = plan.setup[step.index] as PluginSetupStepV1;
-        const definition = pluginDefinitionForAgent(
-          planned.with.plugin,
-          plan.agent.adapter,
-        );
-        if (
-          definition === undefined ||
-          receipt.adapter !== plan.agent.adapter ||
-          receipt.plugin !== definition.distribution.plugin ||
-          receipt.marketplace !== definition.distribution.marketplace
-        )
-          throw new Error(
-            'Plugin MCP receipt does not match the expected plugin and authentication.',
-          );
-        if (definition.mcpServers.length === 0) continue;
-        // Expected servers come from the code-owned definition, never the receipt.
-        if (
-          !isNativePluginInstallationReceipt(receipt) ||
-          receipt.native_plugin_id.split('@')[0] !==
-            definition.distribution.plugin.split('@')[0]
-        )
-          throw new Error(
-            'Plugin MCP receipt does not match the expected plugin and authentication.',
-          );
-        await preflight.agent.pluginInstaller!.checkMcp!({
-          receipt,
-          servers: definition.mcpServers,
-          stateDirectories: runtime.stateDirectories,
-          commands: runtime.commands.agent,
-          signal: runSignal,
-        });
-        serverCount += definition.mcpServers.length;
-      }
+      const serverCount = await checkPluginMcp(
+        plan,
+        preflight.agent,
+        applied,
+        runtime,
+        runSignal,
+      );
       stage = 'quiesce';
       const sealed = await runtime.quiesce();
       results.push(
@@ -403,6 +373,55 @@ export async function validateRuntimeWithSetupActions(
     if (failure) throw failure;
   }
   return Object.freeze(results);
+}
+
+async function checkPluginMcp(
+  plan: ResolvedRunPlanV1,
+  agent: AgentAdapter,
+  applied: AppliedSetup,
+  runtime: PreparedRuntime,
+  signal: AbortSignal,
+): Promise<number> {
+  const installer = agent.pluginInstaller;
+  if (!installer?.checkMcp) return 0;
+  let serverCount = 0;
+  for (const step of applied.steps) {
+    if (step.uses !== 'forge/plugin') continue;
+    const receipt = parseAgentPluginInstallationReceipt(step.resolution);
+    const planned = plan.setup[step.index] as PluginSetupStepV1;
+    const definition = pluginDefinitionForAgent(
+      planned.with.plugin,
+      plan.agent.adapter,
+    );
+    if (
+      definition === undefined ||
+      receipt.adapter !== plan.agent.adapter ||
+      receipt.plugin !== definition.distribution.plugin ||
+      receipt.marketplace !== definition.distribution.marketplace
+    )
+      throw new Error(
+        'Plugin MCP receipt does not match the expected plugin and authentication.',
+      );
+    if (definition.mcpServers.length === 0) continue;
+    // Expected servers come from the code-owned definition, never the receipt.
+    if (
+      !isNativePluginInstallationReceipt(receipt) ||
+      receipt.native_plugin_id.split('@')[0] !==
+        definition.distribution.plugin.split('@')[0]
+    )
+      throw new Error(
+        'Plugin MCP receipt does not match the expected plugin and authentication.',
+      );
+    await installer.checkMcp({
+      receipt,
+      servers: definition.mcpServers,
+      stateDirectories: runtime.stateDirectories,
+      commands: runtime.commands.agent,
+      signal,
+    });
+    serverCount += definition.mcpServers.length;
+  }
+  return serverCount;
 }
 
 function readinessErrorDetail(error: unknown): string {
@@ -561,6 +580,13 @@ export async function executeEvalWithTestHooks(
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
       throwIfAborted(signal, phase);
       await prepared!.finalizeSetup();
+      await checkPluginMcp(
+        input.plan,
+        preflight.agent,
+        applied,
+        prepared!,
+        signal,
+      );
       return artifact;
     });
 

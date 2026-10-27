@@ -463,6 +463,7 @@ sequenceDiagram
     Forge->>Agent: prepare(uncredentialed runtime projection)
     Forge->>Runtime: apply ordered setup
     Forge->>Runtime: finalizeSetup()
+    Forge->>Agent: optional native plugin MCP readiness check
     Forge->>Agent: openSession(agent-scoped runtime projection)
     loop One turn or Ava loop
         Forge->>Completion: role-player completion, if multi-turn
@@ -589,7 +590,15 @@ Resolutions do not include credentials or private host paths. Static built-ins
 return no dynamic resolution.
 Once all actions succeed, Forge calls `finalizeSetup()` once. This closes setup
 command authority and asks the runtime to seal any state directory declared
-immutable for interaction.
+immutable for interaction. When the selected installer provides `checkMcp`,
+Forge then checks the registered plugin's native MCP connection using agent-scoped
+commands. Execution and host validation share receipt identity checks and the
+code-owned expected server list. A failed check is a setup error: the runtime is
+disposed before a session opens. Codex requires a connected server, bearer auth,
+and a nonempty tool map. This discovers tools without invoking them; it does not
+prove that a later model call can use them. Installers without `checkMcp` retain
+their setup behavior; explicit host validation requires this capability for
+registered MCP plugins.
 
 ### 5. Run the interaction
 

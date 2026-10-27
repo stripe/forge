@@ -267,6 +267,10 @@ configured plugin MCP servers through each agent's native client. It initializes
 MCP and discovers tools without invoking them or making model calls. It requires
 the required MCP keys, and reports model authentication as untested. Failures
 name the stage; temporary runtimes are disposed after success or failure.
+During eval execution, native MCP checks also run after setup for adapters that
+provide them. Codex requires a connected plugin server with bearer auth and a
+nonempty tool map before opening the agent session. See the
+[plugin contract](docs/plugin-action.md#credentials-and-limitations) for limits.
 
 For a payment case with Stripe MCP and both agents, use the portable
 [plugin experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/plugin-experiment.yaml);

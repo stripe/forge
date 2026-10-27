@@ -233,7 +233,13 @@ in the plan.
 Use `forge validate --host --experiment …` to install setup and check native MCP
 initialization and tool discovery from a disposable runtime. It requires the
 Stripe key, makes no model or MCP tool calls, and reports model auth as
-untested. Ordinary `validate` remains credential-free.
+untested. Ordinary `validate` remains credential-free. Eval execution also runs
+native MCP checks after setup when the adapter supplies them (Claude Code and
+Codex). A failed check stops setup before the agent session opens. Codex rejects
+missing or disconnected plugin servers, unavailable bearer auth, and empty tool
+maps with fixed reasons that do not include native output. These checks discover
+tools but do not invoke them or prove model-facing tool use. A full eval with a
+known tool call is needed to verify that boundary.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
 source fails setup. Custom MCP config paths, OAuth, and host login passthrough
