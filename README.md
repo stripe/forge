@@ -375,9 +375,9 @@ If both arms need Stripe account access, declare `forge/credentials` with
 `--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`. Keep shared treatment
 setup out of the reserved `baseline`, which requires an empty setup list.
 
-OpenCode loads Stripe's standard skills-and-MCP bundle from the source commit
-selected by the same official marketplace used for Codex. It does not load
-Claude-specific hooks or commands. See the [plugin contract](docs/plugin-action.md)
+OpenCode loads skills and MCP from the same Claude-format Stripe plugin used
+by Claude Code and Codex. It does not load Claude-specific hooks, commands, or
+agents. See the [plugin contract](docs/plugin-action.md)
 for installation provenance and the catalog's rolling revision semantics.
 
 The CLI credential reference is `opencode.api-key`; use

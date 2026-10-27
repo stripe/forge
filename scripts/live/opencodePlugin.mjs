@@ -8,9 +8,8 @@ import {
 } from '../../dist/agents/opencode/pluginConfig.js';
 import { assertRuntimeCleanup } from './cleanup.mjs';
 
-const bundlePath = 'providers/agent-plugins/plugin';
+const bundlePath = 'providers/claude/plugin';
 const manifest = {
-  $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
   name: 'stripe',
   version: '1.0.0',
 };
@@ -114,13 +113,17 @@ export async function startOpenCodeMcpFixture() {
 /** Real Git fixtures, installed by production code; no public source or production endpoint overrides. */
 export function openCodePluginFixtureSetup(url) {
   const files = {
-    [`${bundlePath}/plugin.json`]: JSON.stringify(manifest),
-    [`${bundlePath}/mcp.json`]: JSON.stringify({
-      $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
-      mcpServers: { stripe: { type: 'streamable-http', url } },
+    [`${bundlePath}/.claude-plugin/plugin.json`]: JSON.stringify(manifest),
+    [`${bundlePath}/.mcp.json`]: JSON.stringify({
+      mcpServers: { stripe: { type: 'http', url } },
     }),
     [`${bundlePath}/skills/stripe-test/SKILL.md`]:
       '---\nname: stripe-test\ndescription: Read the Stripe fixture instructions.\n---\nUse the fixture_echo MCP tool, then write answer.txt.\n',
+    [`${bundlePath}/hooks/hooks.json`]: JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: 'exit 1' }] }],
+      },
+    }),
   };
   const script = `
 const fs = require('node:fs');

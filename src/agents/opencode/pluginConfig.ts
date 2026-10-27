@@ -3,10 +3,9 @@ import { isSafeVersion } from '../../model/paths.ts';
 import { PLUGIN_MCP_CREDENTIALS } from '../../model/pluginCredentials.ts';
 import { parseJson, record } from './native.ts';
 
-export const BUNDLE_SOURCE_PATH = 'providers/agent-plugins/plugin';
+export const BUNDLE_SOURCE_PATH = 'providers/claude/plugin';
 export const PLUGIN_ROOT = 'plugins/stripe';
 export const PLUGIN_CONFIG_PATH = `${PLUGIN_ROOT}/opencode.json`;
-const SCHEMA_ROOT = 'https://agent-plugins.org/schemas/1.0.0/';
 
 export interface StripeOpenCodeConfiguration {
   readonly skills: { readonly paths: readonly string[] };
@@ -21,11 +20,10 @@ export interface StripeOpenCodeConfiguration {
   };
 }
 
-/** Only metadata, standard skills, and the bundled Stripe MCP connection are supported. */
+/** Read the Claude-format identity; only conventional skills and MCP are loaded. */
 export function stripeBundleVersion(manifest: unknown): string {
   const value = record(manifest);
   const metadata = new Set([
-    '$schema',
     'name',
     'version',
     'description',
@@ -34,16 +32,17 @@ export function stripeBundleVersion(manifest: unknown): string {
     'repository',
     'license',
     'keywords',
-    'extensions',
+    'hooks',
+    'commands',
+    'agents',
   ]);
   if (
-    value.$schema !== `${SCHEMA_ROOT}plugin.schema.json` ||
     value.name !== 'stripe' ||
     typeof value.version !== 'string' ||
     !isSafeVersion(value.version) ||
     Object.keys(value).some((key) => !metadata.has(key))
   )
-    throw new Error('Unsupported Stripe standard bundle manifest.');
+    throw new Error('Unsupported Stripe Claude-format plugin manifest.');
   return value.version;
 }
 
@@ -55,13 +54,10 @@ export function stripeOpenCodeConfiguration(
   const servers = record(value.mcpServers);
   const stripe = record(servers.stripe);
   if (
-    value.$schema !== `${SCHEMA_ROOT}mcp.schema.json` ||
-    Object.keys(value).some(
-      (key) => !['$schema', 'mcpServers'].includes(key),
-    ) ||
+    Object.keys(value).some((key) => key !== 'mcpServers') ||
     Object.keys(servers).length !== 1 ||
     Object.keys(stripe).some((key) => !['type', 'url'].includes(key)) ||
-    stripe.type !== 'streamable-http' ||
+    stripe.type !== 'http' ||
     typeof stripe.url !== 'string'
   )
     throw new Error('Unsupported Stripe bundle MCP configuration.');
@@ -102,8 +98,7 @@ export function mergeStripeOpenCodeConfiguration(
   const server = record(record(fragment.mcp).stripe);
   const expected = stripeOpenCodeConfiguration(
     {
-      $schema: `${SCHEMA_ROOT}mcp.schema.json`,
-      mcpServers: { stripe: { type: 'streamable-http', url: server.url } },
+      mcpServers: { stripe: { type: 'http', url: server.url } },
     },
     stateDirectory,
   );

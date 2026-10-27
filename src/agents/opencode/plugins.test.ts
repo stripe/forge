@@ -10,7 +10,6 @@ import {
 } from '../../testing/index.ts';
 import { OPENCODE_STATE_ID, resolveOpenCodeLayout } from './layout.ts';
 import {
-  BUNDLE_SOURCE_PATH,
   mergeStripeOpenCodeConfiguration,
   PLUGIN_CONFIG_PATH,
   PLUGIN_ROOT,
@@ -36,22 +35,31 @@ const catalog = {
   plugins: [{ name: 'stripe', source }],
 };
 const manifest = {
-  $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
   name: 'stripe',
   version: '1.2.3',
+  hooks: './hooks/hooks.json',
+  commands: ['./commands/test.md'],
+  agents: ['./agents/test.md'],
 };
 const mcp = {
-  $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
   mcpServers: {
-    stripe: { type: 'streamable-http', url: 'https://mcp.stripe.com' },
+    stripe: { type: 'http', url: 'https://mcp.stripe.com' },
   },
 };
 const layout = resolveOpenCodeLayout(undefined);
 const files = {
-  'plugin.json': JSON.stringify(manifest),
-  'mcp.json': JSON.stringify(mcp),
+  '.claude-plugin/plugin.json': JSON.stringify(manifest),
+  '.mcp.json': JSON.stringify(mcp),
   'skills/stripe-test/SKILL.md':
     '---\nname: stripe-test\ndescription: Test Stripe integration.\n---\nRead this skill.',
+  'skills/stripe-test/references/test.md': 'Use the bundled Stripe MCP server.',
+  'hooks/hooks.json': JSON.stringify({
+    hooks: {
+      SessionStart: [{ hooks: [{ type: 'command', command: 'exit 1' }] }],
+    },
+  }),
+  'commands/test.md': 'A Claude command that must not be registered.',
+  'agents/test.md': 'A Claude agent that must not be registered.',
 };
 
 function fixture(
@@ -60,7 +68,7 @@ function fixture(
   const state = createMemoryWorkspace(
     Object.fromEntries(
       Object.entries(options.files ?? files).map(([name, content]) => [
-        `stripe-source/${BUNDLE_SOURCE_PATH}/${name}`,
+        `stripe-source/${source.path}/${name}`,
         content,
       ]),
     ),
@@ -113,37 +121,56 @@ function fixture(
 }
 
 describe('OpenCode Stripe bundle installation', () => {
-  it('binds without I/O and materializes the catalog pin with auditable config and contents', async () => {
+  it('loads skills and MCP from the selected Claude bundle without running its other behavior', async () => {
     const test = fixture();
     assert.equal(test.calls.length, 0);
     const receipt = await test.install();
     assert.equal(receipt.installation, 'opencode-bundle');
     assert.equal(receipt.marketplace_commit, catalogCommit);
+    assert.equal(receipt.version, manifest.version);
     assert.deepEqual(receipt.source, {
       kind: 'git-subdir',
       commit: sourceCommit,
-      path: BUNDLE_SOURCE_PATH,
+      path: source.path,
     });
     assert.equal(Object.hasOwn(receipt, 'native_plugin_id'), false);
     assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
-    assert.equal(receipt.installed_tree.file_count, 4);
+    assert.equal(receipt.installed_tree.file_count, 8);
     const config = JSON.parse(
       Buffer.from(
         await test.state.readonly.readFile(PLUGIN_CONFIG_PATH),
       ).toString(),
     );
-    assert.equal(
-      config.mcp.stripe.headers.Authorization,
-      'Bearer {env:STRIPE_API_KEY}',
-    );
-    assert.equal(config.mcp.stripe.oauth, false);
+    assert.deepEqual(config, {
+      skills: {
+        paths: [`${layout.stateDirectory}/plugins/stripe/bundle/skills`],
+      },
+      mcp: {
+        stripe: {
+          type: 'remote',
+          url: mcp.mcpServers.stripe.url,
+          enabled: true,
+          oauth: false,
+          headers: { Authorization: 'Bearer {env:STRIPE_API_KEY}' },
+        },
+      },
+    });
     assert.ok(
       test.calls.some(
         (argv) => argv.includes('fetch') && argv.at(-1) === sourceCommit,
       ),
     );
     assert.ok(
-      test.calls.every((argv) => !argv.join(' ').includes('STRIPE_API_KEY')),
+      test.calls.some(
+        (argv) =>
+          argv.includes('sparse-checkout') && argv.at(-1) === source.path,
+      ),
+    );
+    assert.ok(
+      test.calls.every(
+        (argv) =>
+          argv[4] === 'git' && !argv.join(' ').includes('STRIPE_API_KEY'),
+      ),
     );
     for (const [name, body] of Object.entries(files))
       assert.equal(
@@ -190,13 +217,11 @@ describe('OpenCode Stripe bundle installation', () => {
     assert.equal(test.calls.length, 0);
   });
 
-  it('rejects unsupported behavior, missing skills, and unsafe filesystem entries', async () => {
+  it('rejects missing skills, unsafe filesystem entries, and unsupported MCP overrides', async () => {
     await assert.rejects(
-      fixture({ files: { ...files, 'hooks/hooks.json': '{}' } }).install(),
-      /unsupported agent behavior/,
-    );
-    await assert.rejects(
-      fixture({ files: { 'plugin.json': JSON.stringify(manifest) } }).install(),
+      fixture({
+        files: { '.claude-plugin/plugin.json': JSON.stringify(manifest) },
+      }).install(),
       /no skills/,
     );
     const test = fixture();
@@ -207,7 +232,7 @@ describe('OpenCode Stripe bundle installation', () => {
           return [
             ...(await test.state.mutable.listFiles(options)),
             {
-              path: `stripe-source/${BUNDLE_SOURCE_PATH}/link`,
+              path: `stripe-source/${source.path}/link`,
               kind: 'symlink',
             },
           ];
@@ -215,10 +240,16 @@ describe('OpenCode Stripe bundle installation', () => {
       }),
       /unsupported filesystem/,
     );
-    assert.throws(
-      () => stripeBundleVersion({ ...manifest, hooks: {} }),
-      /manifest/,
-    );
+    for (const override of [
+      { mcpServers: './other-mcp.json' },
+      { skills: './other-skills' },
+      { name: 'other-plugin' },
+      { version: '../unsafe' },
+    ])
+      assert.throws(
+        () => stripeBundleVersion({ ...manifest, ...override }),
+        /manifest/,
+      );
     assert.throws(
       () =>
         stripeOpenCodeConfiguration(
@@ -245,7 +276,7 @@ describe('OpenCode Stripe bundle installation', () => {
       { ...receipt, source: { ...receipt.source, commit: 'main' } },
       {
         ...receipt,
-        source: { ...receipt.source, path: 'providers/claude/plugin' },
+        source: { ...receipt.source, path: 'providers/agent-plugins/plugin' },
       },
     ])
       assert.throws(() => parseAgentPluginInstallationReceipt(changed));

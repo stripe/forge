@@ -25,9 +25,10 @@ treatments:
           plugin: stripe
 ```
 
-`stripe` is currently the only registered name. Both `claude-code` and `codex`
-use the compatible Claude-format distribution `stripe@claude-plugins-official`
-from `anthropics/claude-plugins-official`.
+`stripe` is currently the only registered name. Claude Code, Codex, and OpenCode
+use the Claude-format distribution `stripe@claude-plugins-official` from
+`anthropics/claude-plugins-official`. OpenCode loads its skills and MCP connection
+as described below.
 
 `with` accepts only `plugin`. Plans retain this short name; the producing Forge
 version defines its native distribution and credential mapping. During pure
@@ -105,20 +106,22 @@ Installed manifests may use the native `.codex-plugin`, `.claude-plugin`, or
 `.cursor-plugin` format, or Agent Plugins 1.0's schema-qualified root
 `plugin.json`. Forge checks the native manifest's identity and version.
 
-## OpenCode standard bundle
+## OpenCode skills and MCP
 
-OpenCode uses the same `stripe@claude-plugins-official` catalog entry as Codex.
-It requires that entry to select `stripe/ai` with a full Git source SHA, checks
-out that exact commit, and installs its `providers/agent-plugins/plugin`
-standard bundle. The bundle may have a different version from the Claude-format
-plugin at that commit. The catalog itself is fetched at execution time, so its
+OpenCode uses the same `stripe@claude-plugins-official` catalog entry as Claude
+Code and Codex. It requires that entry to select `stripe/ai`'s
+`providers/claude/plugin` with a full Git source SHA, checks out that exact
+commit, and copies the selected bundle. Its version comes from the bundle's
+`.claude-plugin/plugin.json`. The catalog is fetched at execution time, so its
 source pin can change between runs; Forge does not hard-code a plugin revision.
 
-OpenCode has no native marketplace installer. Forge validates the standard
-manifest and materializes its files into run-owned OpenCode state. Supported
-behavior is skills plus the bundled Stripe HTTP MCP connection. Unsupported
-behavioral declarations, missing skills, and unsafe filesystem entries fail
-setup. Claude-specific hooks, commands, and agents are not ported.
+OpenCode has no native marketplace installer. Forge validates the Claude-format
+manifest and materializes its files into run-owned OpenCode state. It loads
+only the conventional `skills/` directory and translates the Stripe HTTP
+connection in `.mcp.json` into native OpenCode configuration. Other files and
+Claude-specific hook, command, and agent declarations are retained but are not
+registered or executed. Missing skills, manifest overrides of the skills or MCP
+paths, unsupported MCP configuration, and unsafe filesystem entries fail setup.
 
 The generated native config adds an absolute skill path and a remote MCP server
 with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
@@ -128,7 +131,7 @@ plugin config and restores it before every turn, including resume.
 
 OpenCode receipts use `installation: opencode-bundle` instead of
 `native_plugin_id`. They retain the selected catalog identity and commit, record
-`source: {kind: git-subdir, commit, path}` for the actual standard bundle, and
+`source: {kind: git-subdir, commit, path}` with path `providers/claude/plugin`, and
 fingerprint the copied bundle plus generated config. The native Claude/Codex
 receipt shape is unchanged. Like other plugin state, bundle files remain writable
 during interaction; the receipt describes installation-time contents.
@@ -175,8 +178,7 @@ During setup, the prepared operation:
 
 1. registers the marketplace;
 2. validates the catalog and selected source;
-3. installs through the agent's native CLI, or materializes OpenCode's standard
-   bundle;
+3. installs through the agent's native CLI, or copies the bundle for OpenCode;
 4. validates the plugin identity, version, path, source provenance, and native
    load status where applicable;
 5. configures the bundled MCP connection and fingerprints the installed tree

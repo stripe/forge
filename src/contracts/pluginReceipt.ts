@@ -73,7 +73,7 @@ export function parseAgentPluginInstallationReceipt(
       source.kind !== 'git-subdir' ||
       typeof source.commit !== 'string' ||
       !isFullGitCommit(source.commit) ||
-      source.path !== 'providers/agent-plugins/plugin'
+      source.path !== 'providers/claude/plugin'
     )
       throw new TypeError('OpenCode bundle source receipt is invalid.');
     return Object.freeze({

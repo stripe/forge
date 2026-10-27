@@ -59,14 +59,14 @@ export interface NativeAgentPluginInstallationReceipt
   readonly native_plugin_id: string;
 }
 
-/** An adapter materializes the standard bundle without a native marketplace CLI. */
+/** An adapter materializes the Claude-format bundle and configures skills and MCP. */
 export interface OpenCodeBundleInstallationReceipt
   extends PluginInstallationReceiptBase {
   readonly installation: 'opencode-bundle';
   readonly source: JsonObject & {
     readonly kind: 'git-subdir';
     readonly commit: string;
-    readonly path: 'providers/agent-plugins/plugin';
+    readonly path: 'providers/claude/plugin';
   };
 }
 

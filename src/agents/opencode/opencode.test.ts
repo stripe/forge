@@ -112,9 +112,8 @@ describe('OpenCode adapter', () => {
     const test = await fixture();
     const config = stripeOpenCodeConfiguration(
       {
-        $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
         mcpServers: {
-          stripe: { type: 'streamable-http', url: 'https://mcp.stripe.com' },
+          stripe: { type: 'http', url: 'https://mcp.stripe.com' },
         },
       },
       '/home/forge/.opencode-forge',

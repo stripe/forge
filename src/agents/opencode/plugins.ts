@@ -125,22 +125,11 @@ export function createOpenCodePluginInstaller(options: {
           const bundle = `${sourceRelative}/${BUNDLE_SOURCE_PATH}`;
           // Inspect before copying to reject symlinks/special entries and bound every byte.
           await inspectInstalledPluginTree(state, bundle, signal);
-          const manifest = await readJson(state, `${bundle}/plugin.json`);
+          const manifest = await readJson(
+            state,
+            `${bundle}/.claude-plugin/plugin.json`,
+          );
           const version = stripeBundleVersion(manifest);
-          for (const unsupported of [
-            'hooks',
-            'commands',
-            'agents',
-            '.claude-plugin',
-            '.opencode',
-          ])
-            if (
-              (await state.inspect(`${bundle}/${unsupported}`)).kind !==
-              'absent'
-            )
-              throw new Error(
-                'Stripe bundle contains unsupported agent behavior.',
-              );
           const entries = await state.listFiles({
             under: bundle,
             maxEntries: 100_000,
@@ -163,8 +152,9 @@ export function createOpenCodePluginInstaller(options: {
               await state.readFile(entry.path, { maxBytes: 64 * 1024 * 1024 }),
             );
           }
+          // Copy the source intact, but register only its conventional skills and MCP.
           const configuration = stripeOpenCodeConfiguration(
-            await readJson(state, `${bundle}/mcp.json`),
+            await readJson(state, `${bundle}/.mcp.json`),
             layout.stateDirectory,
           );
           await state.writeFile(
@@ -195,7 +185,7 @@ export function createOpenCodePluginInstaller(options: {
   } satisfies AgentPluginInstaller);
 }
 
-/** Pin policy follows Codex's registered catalog; the standard bundle uses a sibling path. */
+/** Use the exact source path and pin selected for the registered Claude-format plugin. */
 export function stripeCatalogSourceCommit(catalog: unknown): string {
   const value = record(catalog);
   if (
@@ -214,7 +204,7 @@ export function stripeCatalogSourceCommit(catalog: unknown): string {
   if (
     source.source !== 'git-subdir' ||
     source.url !== SOURCE_URL ||
-    source.path !== 'providers/claude/plugin' ||
+    source.path !== BUNDLE_SOURCE_PATH ||
     (entry.dependencies !== undefined &&
       (!Array.isArray(entry.dependencies) ||
         entry.dependencies.length !== 0)) ||

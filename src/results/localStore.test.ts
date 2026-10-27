@@ -1148,7 +1148,7 @@ describe('local artifact store', () => {
       source: {
         kind: 'git-subdir',
         commit: 'b'.repeat(40),
-        path: 'providers/agent-plugins/plugin',
+        path: 'providers/claude/plugin',
       },
     };
     const openCodeLocation = await commitArtifacts(

@@ -881,8 +881,9 @@ through the authored file and setup commands. Because this file is relocated,
 local `{file:...}` references, instruction globs, skill paths, and local plugin
 paths must use absolute runtime paths (for example `/workspace/AGENTS.md`).
 Relative forms are rejected; HTTP(S) instruction URLs and npm plugin names
-remain usable. OpenCode's `forge/plugin` installer materializes Stripe's standard
-bundle into the same run-owned state and generates native skill paths and MCP
+remain usable. OpenCode's `forge/plugin` installer materializes the same
+Claude-format Stripe bundle used by Claude Code and Codex into run-owned state.
+It loads only the bundle's skills and MCP connection through generated native
 configuration. The adapter merges that fragment with the authored model config,
 rejects an authored Stripe MCP collision, and restores the combined snapshot on
 every turn. See the [plugin contract](plugin-action.md) for source selection,
