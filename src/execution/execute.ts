@@ -13,6 +13,7 @@ import type {
   AgentEvidenceIdentity,
   AgentEvidenceRuntime,
   AgentNativeArtifact,
+  AgentNativeArtifactUnavailableReason,
   AgentNativeEvidenceResult,
   AgentPrepareRuntime,
   AgentRuntimeRequirements,
@@ -61,6 +62,8 @@ import {
 } from '../credentialDeclarations.ts';
 import {
   createFailureEvidenceCapture,
+  type FailureNativeCapture,
+  failureEvidenceReasonSchema,
   MAX_FAILURE_NATIVE_SOURCE_BYTES,
 } from '../diagnostics/failureEvidence.ts';
 import {
@@ -505,6 +508,7 @@ export async function executeEvalWithTestHooks(
             else observedSessionId = id;
           },
           nativeSession: failureEvidence!.nativeSession,
+          nativeSessionUnavailable: failureEvidence!.nativeSessionUnavailable,
           record: (record, excerpts, publication) =>
             publication === 'invocation_boundary'
               ? executionTimeout.withoutRecordingTime(() =>
@@ -894,24 +898,24 @@ export async function executeEvalWithTestHooks(
       reason: primary.diagnostic?.reason ?? 'failure',
       message: primary.diagnostic?.message ?? primary.message,
     });
-    if (
-      failureEvidence &&
-      restrictedCapture &&
-      prepared &&
-      !runtimeDisposed &&
-      failedSession &&
-      failedAgent
-    ) {
-      const native = await collectFailedNativeArtifact({
-        prepared,
-        sealed,
-        agent: failedAgent,
-        session: failedSession,
-        observedSessionId,
-        ambiguousSession,
-        runId: input.runId,
-        plan: input.plan,
-      });
+    if (failureEvidence) {
+      const native: FailureNativeCapture =
+        restrictedCapture &&
+        prepared &&
+        !runtimeDisposed &&
+        failedSession &&
+        failedAgent
+          ? await collectFailedNativeArtifact({
+              prepared,
+              sealed,
+              agent: failedAgent,
+              session: failedSession,
+              observedSessionId,
+              ambiguousSession,
+              runId: input.runId,
+              plan: input.plan,
+            })
+          : { reason: 'read_failed' };
       const captured = failureEvidence.finish(native);
       diagnostics.failureEvidence(captured.record, captured.bodies);
     }
@@ -931,6 +935,7 @@ export async function executeEvalWithTestHooks(
   }
 }
 
+const FAILURE_QUIESCE_TIMEOUT_MS = 60_000;
 const FAILURE_NATIVE_CAPTURE_TIMEOUT_MS = 500;
 async function collectFailedNativeArtifact(input: {
   prepared: PreparedRuntime;
@@ -941,29 +946,50 @@ async function collectFailedNativeArtifact(input: {
   ambiguousSession: boolean;
   runId: string;
   plan: ResolvedRunPlanV1;
-}): Promise<AgentNativeArtifact | undefined> {
+}): Promise<FailureNativeCapture> {
   const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let unavailableReason: AgentNativeArtifactUnavailableReason = 'read_failed';
+  async function withinBudget<T>(
+    operation: () => Promise<T>,
+    durationMs: number,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(operation),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error('Failure evidence capture timed out.'));
+          }, durationMs);
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   try {
     const completedSessionId = input.session.sessionId();
     if (
-      completedSessionId !== undefined &&
-      input.observedSessionId !== undefined &&
-      completedSessionId !== input.observedSessionId
+      input.ambiguousSession ||
+      (completedSessionId !== undefined &&
+        input.observedSessionId !== undefined &&
+        completedSessionId !== input.observedSessionId)
     )
-      return undefined;
-    const sessionId = input.ambiguousSession
-      ? undefined
-      : (input.observedSessionId ?? completedSessionId);
-    if (
-      !sessionId ||
-      !isSafeSessionIdentity(sessionId) ||
-      !input.agent.collectNativeArtifact
-    )
-      return undefined;
-    const read = async () => {
-      const sealed = input.sealed ?? (await input.prepared.quiesce());
-      controller.signal.throwIfAborted();
+      return { reason: 'identity_conflict' };
+    const sessionId = input.observedSessionId ?? completedSessionId;
+    if (!sessionId) return { reason: 'read_failed' };
+    if (!isSafeSessionIdentity(sessionId))
+      return { reason: 'identity_conflict' };
+    if (!input.agent.collectNativeArtifact) return { reason: 'not_supported' };
+    const sealed =
+      input.sealed ??
+      (await withinBudget(
+        () => input.prepared.quiesce(),
+        FAILURE_QUIESCE_TIMEOUT_MS,
+      ));
+    return await withinBudget(async (): Promise<FailureNativeCapture> => {
       const native = await input.agent.collectNativeArtifact!({
         runId: input.runId,
         plan: input.plan,
@@ -971,28 +997,23 @@ async function collectFailedNativeArtifact(input: {
         runtime: projectAgentEvidenceRuntime(sealed),
         sessionId,
         signal: controller.signal,
+        onNativeArtifactUnavailable(reason) {
+          const parsed = failureEvidenceReasonSchema.safeParse(reason);
+          unavailableReason = parsed.success ? parsed.data : 'read_failed';
+        },
       });
-      if (
-        native?.sessionId !== sessionId ||
-        native.body.byteLength > MAX_FAILURE_NATIVE_SOURCE_BYTES
-      )
-        return undefined;
-      return native;
-    };
-    return await Promise.race([
-      read(),
-      new Promise<undefined>((resolve) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          resolve(undefined);
-        }, FAILURE_NATIVE_CAPTURE_TIMEOUT_MS);
-        timer.unref();
-      }),
-    ]);
+      if (!native) return { reason: unavailableReason };
+      if (native.sessionId !== sessionId)
+        return { reason: 'identity_conflict' };
+      if (native.body.byteLength > MAX_FAILURE_NATIVE_SOURCE_BYTES)
+        return { reason: 'too_large' };
+      return { artifact: native };
+    }, FAILURE_NATIVE_CAPTURE_TIMEOUT_MS);
   } catch {
-    return undefined;
+    return {
+      reason: controller.signal.aborted ? 'timed_out' : unavailableReason,
+    };
   } finally {
-    clearTimeout(timer);
     controller.abort();
   }
 }

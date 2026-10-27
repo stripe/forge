@@ -8,6 +8,7 @@ import {
   createFailureEvidenceCapture,
   failureEvidenceSchema,
   MAX_FAILURE_EVIDENCE_BYTES,
+  MAX_FAILURE_NATIVE_SOURCE_BYTES,
 } from './failureEvidence.ts';
 
 const SECRET = 'synthetic-secret-value';
@@ -99,6 +100,7 @@ describe('failure evidence projection', () => {
       assert.deepEqual(saved.bodies, {});
       assert.deepEqual(saved.record.partial_trajectory, {
         state: requested ? 'unsupported' : 'disabled',
+        ...(requested ? { reason: 'not_supported' } : {}),
         completed_turns: 1,
         tool_calls: 1,
         retained_turns: 0,
@@ -127,6 +129,7 @@ describe('failure evidence projection', () => {
     const saved = recorder.finish();
     assert.equal(saved.record.native_log.state, 'truncated');
     assert.equal(saved.record.native_log.capture_point, 'completed_turn');
+    assert.equal(saved.record.native_log.through_turn, 1);
     assert.equal(saved.record.native_log.source_bytes, native.body.length);
     assert.ok(
       Buffer.byteLength(saved.bodies.native_log!) <= MAX_FAILURE_EVIDENCE_BYTES,
@@ -134,7 +137,7 @@ describe('failure evidence projection', () => {
     assert.match(saved.bodies.native_log!, /\[REDACTED\]$/);
     assert.doesNotMatch(saved.bodies.native_log!, /secret-value/);
     assert.equal(
-      recorder.finish(native).record.native_log.capture_point,
+      recorder.finish({ artifact: native }).record.native_log.capture_point,
       'failure',
     );
   });
@@ -155,16 +158,19 @@ describe('failure evidence projection', () => {
     });
     const saved = recorder.finish();
     assert.equal(saved.record.native_log.state, 'unavailable');
+    assert.equal(saved.record.native_log.reason, 'identity_conflict');
     assert.equal(saved.bodies.native_log, undefined);
   });
 
   it('masks a secret that crosses the start of the retained native tail', () => {
     const saved = fixture().finish({
-      format: 'claude-code-jsonl',
-      sessionId: 'session-1',
-      body: Buffer.from(SECRET + 'x'.repeat(MAX_FAILURE_EVIDENCE_BYTES - 5)),
-      mediaType: 'text/plain',
-      extension: 'jsonl',
+      artifact: {
+        format: 'claude-code-jsonl',
+        sessionId: 'session-1',
+        body: Buffer.from(SECRET + 'x'.repeat(MAX_FAILURE_EVIDENCE_BYTES - 5)),
+        mediaType: 'text/plain',
+        extension: 'jsonl',
+      },
     });
     assert.doesNotMatch(saved.bodies.native_log!, /value|secret/);
   });
@@ -188,14 +194,152 @@ describe('failure evidence projection', () => {
       'unavailable',
     );
     const unsupported = fixture().finish({
-      format: SECRET,
-      sessionId: 'session-1',
-      body: Buffer.from(SECRET),
-      mediaType: 'text/plain',
-      extension: 'txt',
+      artifact: {
+        format: SECRET,
+        sessionId: 'session-1',
+        body: Buffer.from(SECRET),
+        mediaType: 'text/plain',
+        extension: 'txt',
+      },
     });
     assert.equal(unsupported.record.native_log.state, 'unavailable');
+    assert.equal(unsupported.record.native_log.reason, 'not_supported');
+    assert.equal(
+      broken.finish().record.partial_trajectory.reason,
+      'read_failed',
+    );
     assert.deepEqual(unsupported.bodies, {});
+  });
+
+  for (const escaped of [false, true])
+    it(`retains a single oversized turn with ${escaped ? 'escaped' : 'plain'} tool identifiers as truncated ATIF`, () => {
+      const recorder = fixture();
+      const content = escaped ? '\u0001' : 'x';
+      recorder.completed(content.repeat(6000), {
+        sessionId: 'session-1',
+        text: content.repeat(6000),
+        toolCalls: Array.from({ length: 30 }, (_, index) => ({
+          id: `id-${index}-${content.repeat(5000)}`,
+          name: content.repeat(5000),
+          input: { secret: SECRET },
+        })),
+      });
+      const saved = recorder.finish();
+      assert.equal(saved.record.partial_trajectory.state, 'truncated');
+      assert.equal(saved.record.partial_trajectory.completed_turns, 1);
+      assert.equal(saved.record.partial_trajectory.retained_turns, 1);
+      assert.equal(saved.record.partial_trajectory.tool_calls, 30);
+      const body = saved.bodies.partial_trajectory!;
+      assert.ok(Buffer.byteLength(body) <= MAX_FAILURE_EVIDENCE_BYTES);
+      const parsed = parseAtifTrajectory(JSON.parse(body));
+      assert.equal(parsed.extra!.truncated, true);
+      assert.equal(parsed.steps.length, 2);
+      const calls = parsed.steps[1]!.tool_calls!;
+      assert.ok(calls.length > 0 && calls.length <= 20);
+      if (escaped) assert.ok(calls.length < 20);
+      for (const call of calls) {
+        assert.ok(Buffer.byteLength(call.tool_call_id) <= 256);
+        assert.ok(Buffer.byteLength(call.function_name) <= 256);
+        assert.equal(call.extra!.arguments_omitted, true);
+      }
+    });
+
+  it('keeps closed failure reasons and accepts older evidence with no reason', () => {
+    for (const reason of [
+      'too_large',
+      'timed_out',
+      'identity_conflict',
+      'not_supported',
+      'read_failed',
+    ] as const) {
+      const record = fixture().finish({ reason }).record;
+      assert.equal(record.native_log.state, 'unavailable');
+      assert.equal(record.native_log.reason, reason);
+      assert.deepEqual(failureEvidenceSchema.parse(record), record);
+      const old = structuredClone(record);
+      delete old.native_log.reason;
+      assert.deepEqual(failureEvidenceSchema.parse(old), old);
+    }
+    const oversized = fixture().finish({
+      artifact: {
+        format: 'claude-code-jsonl',
+        sessionId: 'session-1',
+        body: Buffer.alloc(MAX_FAILURE_NATIVE_SOURCE_BYTES + 1),
+        mediaType: 'text/plain',
+        extension: 'jsonl',
+      },
+    });
+    assert.equal(oversized.record.native_log.reason, 'too_large');
+    assert.equal(oversized.bodies.native_log, undefined);
+  });
+
+  it('labels an older completed export with the turn it actually covers', () => {
+    const recorder = fixture();
+    recorder.nativeSession({
+      format: 'opencode-session-json',
+      sessionId: 'session-1',
+      body: Buffer.from('first export'),
+      mediaType: 'application/json',
+      extension: 'json',
+    });
+    recorder.completed('First', {
+      sessionId: 'session-1',
+      text: 'One',
+      toolCalls: [],
+    });
+    recorder.nativeSessionUnavailable('too_large');
+    recorder.completed('Second', {
+      sessionId: 'session-1',
+      text: 'Two',
+      toolCalls: [],
+    });
+    const saved = recorder.finish({ reason: 'read_failed' });
+    assert.equal(saved.record.native_log.through_turn, 1);
+    assert.equal(saved.record.partial_trajectory.completed_turns, 2);
+    assert.equal(saved.bodies.native_log, 'first export');
+    assert.equal(saved.record.native_log.reason, 'read_failed');
+    const timedOut = recorder.finish({ reason: 'timed_out' });
+    assert.equal(timedOut.record.native_log.through_turn, 1);
+    assert.equal(timedOut.record.native_log.reason, 'timed_out');
+  });
+
+  it('accepts old exports without coverage and rejects invented turn coverage', () => {
+    const recorder = fixture();
+    recorder.nativeSession({
+      format: 'opencode-session-json',
+      sessionId: 'session-1',
+      body: Buffer.from('export'),
+      mediaType: 'application/json',
+      extension: 'json',
+    });
+    recorder.completed('Prompt', {
+      sessionId: 'session-1',
+      text: 'Answer',
+      toolCalls: [],
+    });
+    const saved = recorder.finish();
+    const descriptor = { bytes: 6, sha256: 'a'.repeat(64) };
+    const record = {
+      partial_trajectory: {
+        ...saved.record.partial_trajectory,
+        artifact: descriptor,
+      },
+      native_log: { ...saved.record.native_log, artifact: descriptor },
+    };
+    assert.deepEqual(failureEvidenceSchema.parse(record), record);
+    const old = structuredClone(record);
+    delete old.native_log.through_turn;
+    assert.deepEqual(failureEvidenceSchema.parse(old), old);
+    for (const native of [
+      { ...record.native_log, through_turn: 2 },
+      { ...record.native_log, through_turn: 0 },
+      { ...record.native_log, capture_point: 'failure' },
+    ])
+      assert.equal(
+        failureEvidenceSchema.safeParse({ ...record, native_log: native })
+          .success,
+        false,
+      );
   });
 
   it('rejects unknown fields and contradictory evidence states', () => {
@@ -204,6 +348,8 @@ describe('failure evidence projection', () => {
     for (const invalid of [
       { ...saved, prompt: SECRET },
       { ...saved, native_log: { ...saved.native_log, url: SECRET } },
+      { ...saved, native_log: { ...saved.native_log, reason: SECRET } },
+      { ...saved, native_log: { ...saved.native_log, through_turn: 1 } },
       {
         ...saved,
         partial_trajectory: { ...saved.partial_trajectory, state: 'available' },

@@ -1803,27 +1803,48 @@ Failed attempts may also include optional `failure_evidence`, with
 `disabled`, `unsupported`, `unavailable`, `available`, or `truncated`; an `empty`
 partial trajectory means no agent turn completed. Partial-trajectory metadata
 counts completed turns, tool calls, and retained turns without copying their
-content. Missing sections in older attempts remain supported.
+content. Optional `reason` codes distinguish `too_large`, `timed_out`,
+`identity_conflict`, `not_supported`, and `read_failed`. Missing or unreadable
+sources share `read_failed`. An in-progress snapshot can omit a reason until the
+native read completes. A partial projection failure also carries a reason;
+unsupported text capture uses `not_supported`. Older attempts can omit sections
+and reasons.
 
 When excerpts are enabled, each section can reference one restricted companion
 by size and SHA-256, capped at 64 KiB each. The partial ATIF trajectory retains a
 suffix of validated completed driver turns. Text is redacted before capping each
-message at 4,096 bytes, with an omission marker. Each turn keeps at most 20 tool
-calls, with arguments explicitly omitted; dropped turns, calls, or arguments
-mark it truncated. It is diagnostic data and never a substitute for a scored
+message at 4,096 bytes and identifiers at 256 bytes, with an omission marker.
+Each turn keeps at most 20 tool calls, with arguments explicitly omitted.
+If JSON escaping still puts a single turn over budget, drop tool calls until its
+messages fit. Dropped turns, calls, arguments, or text mark it truncated.
+It is diagnostic data and never a substitute for a scored
 trajectory. A failed invocation does not become a completed turn.
 
-For an exact session known to the adapter, the engine tries to quiesce and read
-its native source before disposal, under a separate 500 ms diagnostic deadline.
+For an exact session known to the adapter, the engine tries to quiesce before
+disposal, allowing up to 60 seconds for the stop barrier. Once sealed, a separate
+500 ms deadline bounds the native read; stopping the runtime does not consume
+that read budget. Both timeouts record `timed_out`. Runtime teardown still owns
+completion of any started stop barrier and may outlast the diagnostic wait.
 The existing source reader bounds still apply (at most 16 MiB), then redaction
-precedes tail retention. Unreadable, oversized, ambiguous, missing, or slow
-sources become `unavailable`. Claude supplies its assigned session ID; Codex can
+precedes tail retention. Without a retained completed export, unreadable,
+oversized, ambiguous, missing, or slow sources become `unavailable`.
+Claude supplies its assigned session ID; Codex can
 supply an observed thread ID through the optional diagnostic-only
 `observeSessionId` callback. Conflicting observations disable that lookup and
 never choose an execution session. OpenCode can supply its last completed,
-identity-checked export through the optional `nativeSession` callback. Its tail
-is marked `capture_point: completed_turn`; a source read after failure is marked
-`failure`. The earlier export cannot show work from the failed invocation.
+identity-checked export through the optional `nativeSession` callback during
+`send`, before returning its turn, or report an export failure through
+`nativeSessionUnavailable`. The engine publishes that staged export only after
+validating the completed turn. A retained earlier export
+is marked `capture_point: completed_turn` and `through_turn` names the completed
+driver turn it covers. If a newer source cannot be read, `reason` records that
+loss even when the earlier export is retained. Older exports may omit coverage.
+A source read after failure is marked `failure`. The earlier export cannot
+show work from later turns or the failed invocation.
+Native readers can report typed causes through the optional
+`AgentEvidenceContext.onNativeArtifactUnavailable` callback; a custom reader
+returning no source without a cause yields `read_failed`. These callbacks do not
+alter evidence selection or expose error text.
 No extra OpenCode export command runs during failure cleanup.
 
 Each attempt has one serialized writer, atomic replacement, increasing revisions,

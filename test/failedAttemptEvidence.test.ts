@@ -16,6 +16,7 @@ import { parseAtifTrajectory } from '../src/atif/index.ts';
 import type { AgentAdapter } from '../src/contracts/agent.ts';
 import type { AttemptDiagnosticsStore } from '../src/contracts/attemptDiagnostics.ts';
 import { CommandExecutionError } from '../src/contracts/command.ts';
+import type { RuntimeAdapter } from '../src/contracts/runtime.ts';
 import { createAttemptDiagnosticsStore } from '../src/diagnostics/localStore.ts';
 import { attemptDiagnosticsIdentity } from '../src/diagnostics/model.ts';
 import { executeEval } from '../src/execution/execute.ts';
@@ -55,6 +56,7 @@ async function fixture(
   mode: 'exit' | 'timeout' | 'success',
   enabled: boolean,
   completeFirst = true,
+  options: { completedTurns?: number; failExport?: 'later' | 'oversized' } = {},
 ) {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), 'forge-failure-evidence-'),
@@ -144,6 +146,7 @@ async function fixture(
           }
         : {};
   let turns = 0;
+  let exports = 0;
   let entered!: () => void;
   const started = new Promise<void>((resolve) => {
     entered = resolve;
@@ -178,7 +181,15 @@ async function fixture(
           durationMs: 1,
           exitCode: 0,
         };
-      if (command.argv[1] === 'export')
+      if (command.argv[1] === 'export') {
+        exports++;
+        if (options.failExport === 'later' && exports > 1)
+          return { stdout: '', stderr: '', durationMs: 1, exitCode: 1 };
+        if (options.failExport === 'oversized')
+          throw new CommandExecutionError(
+            'Output limit exceeded.',
+            'command_output_limit',
+          );
         return {
           stdout: JSON.stringify(
             openCodeExport([{ prompt: 'Start work.', response }]),
@@ -187,7 +198,11 @@ async function fixture(
           durationMs: 1,
           exitCode: 0,
         };
-      if ((++turns === 1 && completeFirst) || mode === 'success')
+      }
+      if (
+        (++turns <= (options.completedTurns ?? 1) && completeFirst) ||
+        mode === 'success'
+      )
         return { stdout: success, stderr: '', durationMs: 1, exitCode: 0 };
       for (const line of failedLines) command.options.onStdoutLine?.(line);
       command.options.onStderrChunk?.(`${'s'.repeat(40000)}synthetic-sec`);
@@ -225,10 +240,12 @@ async function fixture(
         user_needs: [{ description: 'Finish the task', status: 'remaining' }],
         message: 'Start work.',
       }),
-      JSON.stringify({
-        remaining_need_ids: ['need_1'],
-        message: 'Continue work.',
-      }),
+      ...Array.from({ length: options.completedTurns ?? 1 }, () =>
+        JSON.stringify({
+          remaining_need_ids: ['need_1'],
+          message: 'Continue work.',
+        }),
+      ),
       JSON.stringify({ remaining_need_ids: [], message: '' }),
     ],
   });
@@ -236,6 +253,7 @@ async function fixture(
   const run = (
     overrides: {
       agent?: AgentAdapter;
+      runtime?: RuntimeAdapter;
       store?: AttemptDiagnosticsStore;
       signal?: AbortSignal;
     } = {},
@@ -246,7 +264,7 @@ async function fixture(
       ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
       now: () => new Date('2026-01-01T00:00:00.000Z'),
       composition: {
-        runtime: runtime.adapter,
+        runtime: overrides.runtime ?? runtime.adapter,
         agents: new Map([[adapter.id, overrides.agent ?? adapter]]),
         completionProviders: new Map([['test-provider', provider.provider]]),
         credentialResolver: createStaticCredentialResolver({
@@ -274,6 +292,211 @@ async function fixture(
 }
 
 describe('failed attempt evidence', () => {
+  for (const harness of ['claude-code', 'codex'] as const)
+    it(`${harness} preserves a source-reader limit reason in attempt.json`, async () => {
+      const f = await fixture(harness, 'exit', true);
+      await assert.rejects(
+        f.run({
+          agent: {
+            ...f.adapter,
+            async collectNativeArtifact(context) {
+              const states = new Map(
+                [...context.runtime.stateDirectories].map(([id, workspace]) => [
+                  id,
+                  {
+                    ...workspace,
+                    async inspect(file: string) {
+                      const entry = await workspace.inspect(file);
+                      return file.endsWith('.jsonl')
+                        ? { ...entry, size: 16 * 1024 * 1024 + 1 }
+                        : entry;
+                    },
+                  },
+                ]),
+              );
+              return f.adapter.collectNativeArtifact!({
+                ...context,
+                runtime: { ...context.runtime, stateDirectories: states },
+              });
+            },
+          },
+        }),
+        { code: 'agent_failed' },
+      );
+      const saved = (await f.store.read(
+        f.identity,
+        new AbortController().signal,
+      ))!;
+      assert.equal(saved.failure_evidence!.native_log.reason, 'too_large');
+    });
+  it('starts the native read budget after a slow quiesce', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = await fixture('claude-code', 'exit', true);
+    let began!: () => void;
+    const stopping = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    const outcome = assert.rejects(
+      f.run({
+        runtime: {
+          ...f.runtime.adapter,
+          async prepare(input) {
+            const prepared = await f.runtime.adapter.prepare(input);
+            return {
+              ...prepared,
+              async quiesce() {
+                began();
+                await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+                return prepared.quiesce();
+              },
+            };
+          },
+        },
+      }),
+      { code: 'agent_failed' },
+    );
+    await Promise.race([stopping, outcome]);
+    const pending = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.equal(pending.state, 'running');
+    assert.equal(pending.failure_evidence!.native_log.reason, undefined);
+    await vi.advanceTimersByTimeAsync(2001);
+    await outcome;
+    const saved = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.equal(saved.failure_evidence!.native_log.state, 'truncated');
+    assert.equal(saved.failure_evidence!.native_log.capture_point, 'failure');
+    assert.equal(saved.failure_evidence!.native_log.reason, undefined);
+  });
+  it('reports a quiesce timeout without reading unstable native files', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = await fixture('claude-code', 'exit', true);
+    let began!: () => void;
+    const stopping = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    let reads = 0;
+    const outcome = assert.rejects(
+      f.run({
+        runtime: {
+          ...f.runtime.adapter,
+          async prepare(input) {
+            const prepared = await f.runtime.adapter.prepare(input);
+            return {
+              ...prepared,
+              async quiesce() {
+                began();
+                return new Promise(() => {});
+              },
+            };
+          },
+        },
+        agent: {
+          ...f.adapter,
+          async collectNativeArtifact() {
+            reads++;
+            return undefined;
+          },
+        },
+      }),
+      { code: 'agent_failed' },
+    );
+    await Promise.race([stopping, outcome]);
+    await vi.advanceTimersByTimeAsync(60_001);
+    await outcome;
+    const saved = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.equal(saved.failure_evidence!.native_log.reason, 'timed_out');
+    assert.equal(reads, 0);
+    assert.equal(f.runtime.runs[0]!.events.at(-1), 'dispose');
+  });
+  it('reports unsupported capture and oversized artifacts with typed reasons', async () => {
+    for (const reason of ['not_supported', 'too_large'] as const) {
+      const f = await fixture('claude-code', 'exit', true);
+      const agent: AgentAdapter = { ...f.adapter };
+      if (reason === 'not_supported') delete agent.collectNativeArtifact;
+      else
+        agent.collectNativeArtifact = async () => ({
+          format: 'claude-code-jsonl',
+          sessionId: SESSION,
+          body: Buffer.alloc(16 * 1024 * 1024 + 1),
+          mediaType: 'text/plain',
+          extension: 'jsonl',
+        });
+      await assert.rejects(f.run({ agent }), { code: 'agent_failed' });
+      const saved = (await f.store.read(
+        f.identity,
+        new AbortController().signal,
+      ))!;
+      assert.equal(saved.failure_evidence!.native_log.state, 'unavailable');
+      assert.equal(saved.failure_evidence!.native_log.reason, reason);
+    }
+  });
+  it('disables native lookup when observed session IDs conflict', async () => {
+    const f = await fixture('claude-code', 'exit', true);
+    let reads = 0;
+    await assert.rejects(
+      f.run({
+        agent: {
+          ...f.adapter,
+          async openSession(context) {
+            const session = await f.adapter.openSession(context);
+            context.diagnostics?.observeSessionId?.('another-session');
+            return session;
+          },
+          async collectNativeArtifact() {
+            reads++;
+            return undefined;
+          },
+        },
+      }),
+      { code: 'agent_failed' },
+    );
+    const saved = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.equal(
+      saved.failure_evidence!.native_log.reason,
+      'identity_conflict',
+    );
+    assert.equal(reads, 0);
+  });
+  it('records the exact completed turn covered by an older OpenCode export', async () => {
+    const f = await fixture('opencode', 'exit', true, true, {
+      completedTurns: 2,
+      failExport: 'later',
+    });
+    await assert.rejects(f.run(), { code: 'agent_failed' });
+    const saved = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.equal(saved.failure_evidence!.partial_trajectory.completed_turns, 2);
+    assert.equal(
+      saved.failure_evidence!.native_log.capture_point,
+      'completed_turn',
+    );
+    assert.equal(saved.failure_evidence!.native_log.through_turn, 1);
+  });
+  it('keeps the output-limit reason when an OpenCode export cannot be saved', async () => {
+    const f = await fixture('opencode', 'exit', true, true, {
+      failExport: 'oversized',
+    });
+    await assert.rejects(f.run(), { code: 'agent_failed' });
+    const saved = (await f.store.read(
+      f.identity,
+      new AbortController().signal,
+    ))!;
+    assert.equal(saved.failure_evidence!.partial_trajectory.completed_turns, 1);
+    assert.equal(saved.failure_evidence!.native_log.reason, 'too_large');
+  });
   it('bounds a hung native read and ignores its late result', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const f = await fixture('claude-code', 'exit', true);
@@ -307,6 +530,7 @@ describe('failed attempt evidence', () => {
       new AbortController().signal,
     ))!;
     assert.equal(saved.failure_evidence!.native_log.state, 'unavailable');
+    assert.equal(saved.failure_evidence!.native_log.reason, 'timed_out');
     assert.equal(saved.failure_evidence!.partial_trajectory.completed_turns, 1);
     assert.equal(f.runtime.runs[0]!.events.at(-1), 'dispose');
     resolveRead(undefined);
@@ -342,6 +566,10 @@ describe('failed attempt evidence', () => {
         new AbortController().signal,
       ))!;
       assert.equal(saved.failure_evidence!.native_log.state, 'unavailable');
+      assert.equal(
+        saved.failure_evidence!.native_log.reason,
+        mismatch ? 'identity_conflict' : 'read_failed',
+      );
       assert.equal(
         saved.failure_evidence!.partial_trajectory.completed_turns,
         1,

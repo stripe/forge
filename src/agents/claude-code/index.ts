@@ -264,6 +264,7 @@ export function createClaudeCodeAdapter(
         project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
         sessionId: context.sessionId,
         signal: context.signal,
+        onNativeArtifactUnavailable: context.onNativeArtifactUnavailable,
       });
     },
   };

@@ -655,9 +655,10 @@ benchmark setting. Excerpts of CLI events and stderr live under
 `diagnostics/<eval-run-id>/restricted/`; `attempt.json` names their size and
 SHA-256. Failed attempts can also retain a bounded partial trajectory from completed
 turns and a redacted native-session tail. `failure_evidence` records counts and
-capture availability; text stays off unless excerpts are enabled. OpenCode's
-native tail can come from the last completed export, marked `completed_turn`,
-since its failed invocation may have no export. Only the latest saved failed
+capture availability and typed failure reasons; text stays off unless excerpts
+are enabled. OpenCode's native tail can come from an earlier completed export,
+marked `completed_turn` with `through_turn` naming the last turn it covers,
+since a later export or failed invocation may have no usable source. Only the latest saved failed
 call has CLI-event and stderr references. Older
 digest files can remain on disk for readers holding prior snapshots; hosts own
 deletion. Excerpts stay out of reports and progress output. Treat them as sensitive:

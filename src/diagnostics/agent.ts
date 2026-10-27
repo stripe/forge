@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import type { AgentNativeArtifact } from '../contracts/agent.ts';
+import type {
+  AgentNativeArtifact,
+  AgentNativeArtifactUnavailableReason,
+} from '../contracts/agent.ts';
 
 const count = z.number().int().nonnegative().safe();
 export const MAX_INVOCATION_RECORDS = 64;
@@ -177,8 +180,10 @@ export interface AgentDiagnosticsCapture {
   readonly restrictedExcerpts: boolean;
   /** Diagnostic identity only; never chooses the execution session. */
   observeSessionId?(sessionId: string): void;
-  /** Last completed native export, retained only when excerpts are enabled. */
+  /** Report a completed native export during send, before returning its turn. */
   nativeSession?(artifact: AgentNativeArtifact): void;
+  /** Optional cause when a completed-turn export cannot be retained. */
+  nativeSessionUnavailable?(reason: AgentNativeArtifactUnavailableReason): void;
   /** Exact secret values remain inside execution; adapters receive only redaction authority. */
   redact(text: string): string;
   redactedTail(maximumBytes: number): RedactedDiagnosticTail;

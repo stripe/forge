@@ -1,8 +1,10 @@
 import type {
   AgentAdapter,
+  AgentNativeArtifactUnavailableReason,
   AgentRuntimeRequirements,
   AgentSession,
 } from '../../contracts/agent.ts';
+import { CommandExecutionError } from '../../contracts/command.ts';
 import {
   type CredentialReference,
   credentialReference,
@@ -185,6 +187,15 @@ export function createOpenCodeAdapter(
       let currentSessionId: string | undefined;
       let sending = false;
       let invocationSequence = 0;
+      const exportUnavailable = (
+        reason: AgentNativeArtifactUnavailableReason,
+      ) => {
+        try {
+          context.diagnostics?.nativeSessionUnavailable?.(reason);
+        } catch {
+          /* Observation cannot control execution. */
+        }
+      };
       return {
         sessionId: () => currentSessionId,
         async send(message, { signal }) {
@@ -278,32 +289,47 @@ export function createOpenCodeAdapter(
                 },
               );
               signal.throwIfAborted();
-              if (
-                exported.exitCode === 0 &&
-                Buffer.byteLength(exported.stdout) <= MAX_NATIVE_BYTES
-              ) {
+              if (Buffer.byteLength(exported.stdout) > MAX_NATIVE_BYTES) {
+                exportUnavailable('too_large');
+              } else if (exported.exitCode !== 0) {
+                exportUnavailable('read_failed');
+              } else {
                 await state.writeFile(
                   EXPORT_PATH,
                   Buffer.from(exported.stdout),
                   { mode: 0o600 },
                 );
                 try {
-                  if (
-                    context.diagnostics?.restrictedExcerpts &&
-                    JSON.parse(exported.stdout)?.info?.id === currentSessionId
-                  )
-                    context.diagnostics?.nativeSession?.({
-                      format: 'opencode-session-json',
-                      sessionId: currentSessionId,
-                      mediaType: 'application/json',
-                      extension: 'json',
-                      body: Buffer.from(exported.stdout),
-                    });
+                  if (context.diagnostics?.restrictedExcerpts) {
+                    if (exported.capture?.stdoutTruncated)
+                      exportUnavailable('too_large');
+                    else if (
+                      JSON.parse(exported.stdout)?.info?.id !== currentSessionId
+                    )
+                      exportUnavailable('identity_conflict');
+                    else
+                      context.diagnostics?.nativeSession?.({
+                        format: 'opencode-session-json',
+                        sessionId: currentSessionId,
+                        mediaType: 'application/json',
+                        extension: 'json',
+                        body: Buffer.from(exported.stdout),
+                      });
+                  }
                 } catch {
-                  /* Observation cannot control execution. */
+                  exportUnavailable('read_failed');
                 }
               }
-            } catch {
+            } catch (error) {
+              exportUnavailable(
+                error instanceof CommandExecutionError &&
+                  error.code === 'command_output_limit'
+                  ? 'too_large'
+                  : error instanceof CommandExecutionError &&
+                      error.code === 'command_timeout'
+                    ? 'timed_out'
+                    : 'read_failed',
+              );
               // Native capture is optional; cancellation is not an evidence failure.
               signal.throwIfAborted();
               await state
@@ -334,6 +360,7 @@ export function createOpenCodeAdapter(
         state: context.runtime.stateDirectories.get(OPENCODE_STATE_ID),
         sessionId: context.sessionId,
         signal: context.signal,
+        onNativeArtifactUnavailable: context.onNativeArtifactUnavailable,
       });
     },
   } satisfies AgentAdapter);

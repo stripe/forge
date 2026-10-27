@@ -47,6 +47,13 @@ export interface AgentNativeArtifact {
   readonly body: Uint8Array;
 }
 
+export type AgentNativeArtifactUnavailableReason =
+  | 'too_large'
+  | 'timed_out'
+  | 'identity_conflict'
+  | 'not_supported'
+  | 'read_failed';
+
 export type AgentNativeEvidenceSource =
   | {
       readonly kind: 'native_log';
@@ -170,6 +177,10 @@ export interface AgentEvidenceContext {
   readonly runtime: AgentEvidenceRuntime;
   readonly sessionId: string;
   readonly signal: AbortSignal;
+  /** Optional diagnostic observation; must not change evidence selection. */
+  readonly onNativeArtifactUnavailable?:
+    | ((reason: AgentNativeArtifactUnavailableReason) => void)
+    | undefined;
 }
 
 /** One coding-agent integration configured by the host composition. */
