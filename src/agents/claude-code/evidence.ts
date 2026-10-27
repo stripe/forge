@@ -81,6 +81,7 @@ interface SessionBlock {
 interface SessionRecord {
   type?: string;
   subtype?: string;
+  source?: string;
   timestamp?: string;
   sessionId?: string;
   session_id?: string;
@@ -240,8 +241,10 @@ function recordsToAtif(
       record.isCompactSummary === true ||
       record.subtype === 'compact_boundary'
     ) {
-      throw new ClaudeSessionIncompleteError(
-        'Compacted Claude sessions are not supported by Forge normalization.',
+      throw incompleteRecord(
+        record,
+        recordIndex,
+        'Claude compaction may replace earlier turns; complete conversation coverage cannot be established.',
       );
     }
     if (record.isSidechain === true) {
@@ -626,6 +629,18 @@ function handleNonConversationRecord(
   ) {
     return;
   }
+  if (
+    record.type === 'system' &&
+    record.subtype === 'api_error' &&
+    record.source === 'request_retry'
+  ) {
+    warnings.push({
+      code: 'unsupported_native_event',
+      message: 'Claude API retry metadata was omitted from ATIF.',
+      path: `line:${recordIndex + 1}`,
+    });
+    return;
+  }
   if (record.type === 'attachment') {
     const attachment = plainRecord(record.attachment);
     if (attachment === undefined) {
@@ -647,11 +662,29 @@ function handleNonConversationRecord(
       );
     }
     if (attachmentType === 'queued_command') {
-      throw incompleteRecord(
-        record,
-        recordIndex,
-        'A Claude queued-command attachment may contain an unrepresented user turn.',
-      );
+      addQueuedCommand(record, attachment, warnings, recordIndex, addStep);
+      return;
+    }
+    if (attachmentType === 'batching_reminder_sent') {
+      if (
+        !hasExactKeys(attachment, ['type', 'model', 'text']) ||
+        typeof attachment.model !== 'string' ||
+        typeof attachment.text !== 'string' ||
+        (record.rendered !== undefined &&
+          (!Array.isArray(record.rendered) || record.rendered.length !== 0))
+      ) {
+        throw incompleteRecord(
+          record,
+          recordIndex,
+          'A Claude batching reminder had unrepresented content.',
+        );
+      }
+      warnings.push({
+        code: 'unsupported_native_event',
+        message: 'Claude batching reminder bookkeeping was omitted from ATIF.',
+        path: `line:${recordIndex + 1}`,
+      });
+      return;
     }
     if (attachmentType === 'hook_success') {
       if (hasPairedHookContext(record, nextRecord)) return;
@@ -734,6 +767,67 @@ function handleNonConversationRecord(
     record,
     recordIndex,
     'A Claude session contained an unsupported conversation record.',
+  );
+}
+
+function addQueuedCommand(
+  record: SessionRecord,
+  attachment: Readonly<Record<string, unknown>>,
+  warnings: AgentNativeEvidenceWarning[],
+  recordIndex: number,
+  addStep: (step: Omit<AtifStep, 'step_id'>) => void,
+): void {
+  let rendered: string[];
+  try {
+    rendered = renderedAttachmentContent(record.rendered);
+  } catch {
+    throw incompleteRecord(
+      record,
+      recordIndex,
+      'A Claude queued command had unsupported rendered content.',
+    );
+  }
+  if (
+    !hasExactKeys(attachment, ['type', 'commandMode', 'prompt', 'timestamp']) ||
+    typeof attachment.prompt !== 'string' ||
+    attachment.prompt.length === 0 ||
+    typeof attachment.timestamp !== 'string' ||
+    rendered.length !== 1
+  ) {
+    throw incompleteRecord(
+      record,
+      recordIndex,
+      'A Claude queued command had an unsupported shape.',
+    );
+  }
+  const extra = {
+    native_record_type: 'attachment',
+    attachment_type: 'queued_command',
+  };
+  const timestamp = timestampField(record.timestamp, warnings, recordIndex);
+  if (
+    attachment.commandMode === 'task-notification' &&
+    rendered[0]?.includes(attachment.prompt)
+  ) {
+    addStep({ source: 'system', message: rendered[0], extra, ...timestamp });
+    return;
+  }
+  if (
+    attachment.commandMode === 'prompt' &&
+    rendered[0] === attachment.prompt
+  ) {
+    addStep({
+      source: 'user',
+      message: attachment.prompt,
+      extra,
+      ...timestamp,
+    });
+    return;
+  }
+  throw incompleteRecord(
+    record,
+    recordIndex,
+    'A Claude queued command could not be represented faithfully.',
   );
 }
 
@@ -852,6 +946,8 @@ function incompleteRecord(
 
 /** Diagnostic labels are literals, never untrusted native field values. */
 function safeRecordKind(record: SessionRecord): string {
+  if (record.isCompactSummary === true) return 'compact summary';
+  if (record.subtype === 'compact_boundary') return 'system/compact_boundary';
   if (record.type === 'attachment') {
     const attachmentType = plainRecord(record.attachment)?.type;
     switch (attachmentType) {
@@ -859,6 +955,7 @@ function safeRecordKind(record: SessionRecord): string {
       case 'queued_command':
       case 'session_context':
       case 'prompt_snapshot':
+      case 'batching_reminder_sent':
         return `attachment/${attachmentType}`;
       default:
         return 'attachment';
@@ -937,6 +1034,12 @@ function safeSessionFailure(error: unknown): string {
     return 'Claude session evidence exceeded a safety limit.';
   }
   if (error instanceof ClaudeSessionIncompleteError && error.location) {
+    if (
+      error.location.kind === 'compact summary' ||
+      error.location.kind === 'system/compact_boundary'
+    ) {
+      return `Claude compaction may replace earlier turns; complete conversation coverage cannot be established (${error.location.kind} at line ${error.location.line}).`;
+    }
     return `Claude session evidence could not be normalized safely (${error.location.kind} at line ${error.location.line}).`;
   }
   return 'Claude session evidence could not be normalized safely.';

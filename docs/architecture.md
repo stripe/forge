@@ -1011,6 +1011,18 @@ Empty session-context bookkeeping is ignored. Prompt snapshots stay in the
 restricted native source and add a partial-detail warning until their per-call
 semantics can be normalized faithfully.
 
+Claude queued-command attachments are classified by `commandMode`. A
+`task-notification` with one rendered text part containing its prompt becomes a
+system step, preserving the rendered reminder without adding a user turn. A
+`prompt` whose single rendered part equals its prompt becomes a user step.
+Both require the known attachment shape; other modes, missing text, and
+mismatched rendering trigger fallback. Batching-reminder bookkeeping with the
+known model/text shape and no rendered content, and `api_error` system records
+from `request_retry`, are omitted with partial-detail warnings. Error bodies
+are not copied into those warnings. Compaction boundaries and summary flags
+remain `source_incomplete`, with their location and the unresolved loss of
+earlier turns made explicit.
+
 Codex selects a single matching root UUID rollout under its isolated
 `CODEX_HOME/sessions`, validates session metadata, and records source format
 `codex-rollout-jsonl`. The exported evidence loader defaults to primary `exec`

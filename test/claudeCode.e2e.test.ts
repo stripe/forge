@@ -38,6 +38,7 @@ async function fixture(
   root: string,
   plan: ResolvedRunPlanV1,
   incomplete = false,
+  nativeContext: readonly unknown[] = [],
 ) {
   const turns: Array<{ prompt: string; response: string }> = [];
   const resolved: string[] = [];
@@ -94,6 +95,7 @@ async function fixture(
             sessionId: SESSION_ID,
             message: { content: turn.prompt },
           },
+          ...nativeContext,
           ...(!incomplete
             ? [
                 {
@@ -301,6 +303,81 @@ it('runs the real Claude adapter through two turns, native selection, redaction,
     'quiesce',
     'dispose',
   ]);
+});
+
+it('commits native evidence with batching bookkeeping, queued task context, and retry metadata', async (t) => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'forge-claude-records-'),
+  );
+  t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+  const plan = createTestResolvedRunPlan({
+    agent: selection,
+    prompt: 'Complete the answer.',
+  });
+  const notification = `Background task finished: ${SECRET}`;
+  const test = await fixture(root, plan, false, [
+    {
+      type: 'attachment',
+      attachment: {
+        type: 'batching_reminder_sent',
+        model: 'claude-test',
+        text: 'Batch tool calls.',
+      },
+    },
+    {
+      type: 'attachment',
+      sessionId: SESSION_ID,
+      attachment: {
+        type: 'queued_command',
+        commandMode: 'task-notification',
+        prompt: notification,
+        timestamp: '2026-09-17T16:02:50.000Z',
+      },
+      rendered: [
+        { content: `<system-reminder>${notification}</system-reminder>` },
+      ],
+    },
+    {
+      type: 'system',
+      subtype: 'api_error',
+      source: 'request_retry',
+      error: { message: SECRET },
+    },
+  ]);
+  const completed = await executeEval({
+    runId: 'claude-native-records',
+    plan,
+    composition: test.composition,
+  });
+  const verified = await verifyCompletedRun(completed.location);
+  assert.equal(verified.result.evidence.completeness, 'partial');
+  assert.equal(verified.result.evidence.provenance.source.kind, 'native_log');
+  assert.deepEqual(
+    verified.result.evidence.warnings.map(({ code }) => code),
+    ['unsupported_native_event', 'unsupported_native_event'],
+  );
+  const trajectory = parseAtifTrajectory(
+    await artifact(completed.location, 'trajectory.json'),
+  );
+  assert.deepEqual(
+    trajectory.steps
+      .filter(({ source }) => source === 'user')
+      .map(({ message }) => message),
+    ['Complete the answer.'],
+  );
+  assert.equal(trajectory.steps[1]?.source, 'system');
+  assert.equal(
+    trajectory.steps[1]?.message,
+    '<system-reminder>Background task finished: [REDACTED]</system-reminder>',
+  );
+  assert.doesNotMatch(JSON.stringify(trajectory), new RegExp(SECRET));
+  assert.equal(
+    await fs.readFile(
+      path.join(completed.location, 'native/claude-code/session.jsonl'),
+      'utf8',
+    ),
+    test.native(),
+  );
 });
 
 it('uses driver fallback for user-only Claude native evidence while preserving exact restricted source', async (t) => {
