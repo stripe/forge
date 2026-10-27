@@ -1915,8 +1915,30 @@ providers receive benchmark prompts and the evidence needed for their roles.
 
 ## Failure, cancellation, and cleanup semantics
 
-Every run combines the caller's abort signal with the plan timeout. Fatal
-errors are mapped to stable `ForgeExecutionError` codes and the phase in which
+Newly resolved plans record `limits.evaluation_timeout_ms`, defaulting to
+`DEFAULT_EVALUATION_TIMEOUT_MS` (five minutes). The optional field is accepted
+in experiment configs and saved plans, with the same positive integer and
+24-hour bound as `limits.run_timeout_ms`. The package root exports the default
+constant. Experiment parsing and planning materialize it; saved-plan parsing
+preserves its absence and canonical bytes. Older strict readers reject the
+new field. The new plan policy changes plan digests, so a fresh resolution
+cannot resume an experiment saved with the shared-budget policy.
+
+The run timeout covers preflight through quiescence. Once quiescence succeeds,
+Forge checks the remaining run budget before starting the fresh evaluation
+budget. Evidence collection, normalization, judge workspace collection, judge
+calls and retries, and deterministic checks share that second budget. It ends
+after evaluation; artifact staging, disposal, and commit follow outside it.
+Awaited diagnostic-store writes remain outside both budgets. Saved plans
+without the field retain the shared run timeout through the original lifecycle.
+Runtime readiness checks use only the run timeout and do not evaluate evidence.
+
+The caller's abort signal stays active across both budgets. Evidence reads,
+judge calls, and deterministic evidence collection stop waiting on abort even
+if a dependency does not settle; late results cannot be scored or committed.
+Host integrations must still honor cancellation to stop their underlying work.
+Timeout messages name the active budget, its limit, and the execution phase.
+Fatal errors are mapped to stable `ForgeExecutionError` codes and the phase in which
 they occurred. The controller attaches a credential-redacted diagnostic of at
 most 4,096 characters after all credentials have been resolved. It uses only the
 error's message, never its stack, cause, or other properties. Built-in agent

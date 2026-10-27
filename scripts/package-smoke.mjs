@@ -220,6 +220,9 @@ try {
         platform: 'linux/amd64', config: {profile: 'offline'},
       }});
       assert.equal(forge.parseResolvedRunPlan(externalPlan).runtime.adapter, 'package-smoke/process');
+      assert.equal(forge.DEFAULT_EVALUATION_TIMEOUT_MS, 300_000);
+      const budgetedPlan = {...externalPlan, limits: {...externalPlan.limits, evaluation_timeout_ms: 600_000}};
+      assert.equal(forge.parseResolvedRunPlan(budgetedPlan).limits.evaluation_timeout_ms, 600_000);
       const customClaude = claude.createClaudeCodeAdapter({layout: {
         workspace: '/tmp/example/workspace', home: '/tmp/example/home',
         configDirectory: '/tmp/example/session',

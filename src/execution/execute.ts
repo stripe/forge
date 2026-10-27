@@ -1,5 +1,4 @@
 import * as path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -367,6 +366,8 @@ export async function executeEvalWithTestHooks(
   );
   const timeoutSignal = executionTimeout.signal;
   const signal = AbortSignal.any([externalSignal, timeoutSignal]);
+  let timeoutMs = input.plan.limits.run_timeout_ms;
+  let timeoutBudget = 'Run';
   try {
     const preflight = await step('preflight', async () => {
       throwIfAborted(signal, phase);
@@ -490,13 +491,15 @@ export async function executeEvalWithTestHooks(
         inputs: input.composition.inputProvider,
         signal,
       });
-      return executeInteraction(
+      const completed = await executeInteraction(
         input.plan,
         session,
         completions,
         signal,
         hooks.waitBeforeCompletionRetry,
       );
+      throwIfAborted(signal, phase);
+      return completed;
     });
 
     sealed = await step('quiesce', async () => {
@@ -505,6 +508,14 @@ export async function executeEvalWithTestHooks(
       );
       return prepared!.quiesce();
     });
+
+    const evaluationTimeoutMs = input.plan.limits.evaluation_timeout_ms;
+    if (evaluationTimeoutMs !== undefined) {
+      executionTimeout.restart(evaluationTimeoutMs);
+      throwIfAborted(signal, phase);
+      timeoutMs = evaluationTimeoutMs;
+      timeoutBudget = 'Evaluation';
+    }
 
     const selectedEvidence = await step('evidence', async () => {
       await executionTimeout.withoutRecordingTime(() =>
@@ -534,9 +545,14 @@ export async function executeEvalWithTestHooks(
         sessionId: interaction.sessionId,
         signal,
       };
-      const captured =
-        await preflight.agent.collectNativeArtifact?.(evidenceContext);
-      const collected = await preflight.agent.collectEvidence(evidenceContext);
+      const captured = await abortable(
+        preflight.agent.collectNativeArtifact?.(evidenceContext),
+        signal,
+      );
+      const collected = await abortable(
+        preflight.agent.collectEvidence(evidenceContext),
+        signal,
+      );
       const nativeArtifact = buildNativeArtifact(
         captured,
         collected,
@@ -659,7 +675,10 @@ export async function executeEvalWithTestHooks(
           createCompletionDecisionModel({
             model: input.plan.evaluation.judge!,
             invoke: (request) =>
-              completions.invoke('judge', request, request.signal),
+              abortable(
+                completions.invoke('judge', request, request.signal),
+                request.signal,
+              ),
             validateRequest: (request) =>
               assertJudgePromptWillRemainUnchanged(request, secrets),
           }),
@@ -697,16 +716,23 @@ export async function executeEvalWithTestHooks(
           { forgeVersion: FORGE_VERSION },
         );
       }
-      const result = await evaluateRunEvidence({
-        plan: input.plan,
-        trajectory: redacted.evidence.trajectory,
-        workspace: sealed!.workspace,
-        ...(criterionResults === undefined ? {} : { criterionResults }),
-        ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
+      const result = await abortable(
+        evaluateRunEvidence({
+          plan: input.plan,
+          trajectory: redacted.evidence.trajectory,
+          workspace: sealed!.workspace,
+          ...(criterionResults === undefined ? {} : { criterionResults }),
+          ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
+          signal,
+        }),
         signal,
-      });
+      );
       return { ...result, judgeEvidence, redacted };
     });
+    if (evaluationTimeoutMs !== undefined) {
+      executionTimeout.dispose();
+      throwIfAborted(signal, phase);
+    }
 
     const interactionArtifact = redactInteractionArtifact(
       buildInteractionArtifact(input.plan, interaction),
@@ -840,14 +866,14 @@ export async function executeEvalWithTestHooks(
           'aborted',
           phase,
           timedOut
-            ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
+            ? `The Forge run timed out after ${timeoutMs}ms during ${phase} (${timeoutBudget.toLowerCase()} budget).`
             : 'The Forge run was cancelled by the caller.',
           {
             cause: signal.reason,
             diagnostic: {
               reason: timedOut ? 'timeout' : 'cancelled',
               message: timedOut
-                ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
+                ? `${timeoutBudget} timeout of ${timeoutMs}ms exceeded during ${phase}.`
                 : 'Caller cancellation stopped the run.',
             },
           },
@@ -880,6 +906,7 @@ function createExecutionTimeout(durationMs: number) {
   let remaining = durationMs;
   let resumedAt = performance.now();
   let timer: ReturnType<typeof setTimeout>;
+  let active = true;
   const expire = () =>
     controller.abort(
       new DOMException(
@@ -889,7 +916,7 @@ function createExecutionTimeout(durationMs: number) {
     );
   function resume() {
     resumedAt = performance.now();
-    if (!controller.signal.aborted) {
+    if (active && !controller.signal.aborted) {
       if (remaining <= 0) expire();
       else {
         timer = setTimeout(expire, remaining);
@@ -897,13 +924,23 @@ function createExecutionTimeout(durationMs: number) {
       }
     }
   }
+  function pause() {
+    clearTimeout(timer);
+    if (!active) return;
+    remaining -= performance.now() - resumedAt;
+    if (remaining <= 0) expire();
+  }
   resume();
   return {
     signal: controller.signal,
+    restart(duration: number) {
+      pause();
+      if (controller.signal.aborted) return;
+      remaining = duration;
+      resume();
+    },
     async withoutRecordingTime(record: () => Promise<void>) {
-      clearTimeout(timer);
-      remaining -= performance.now() - resumedAt;
-      if (remaining <= 0) expire();
+      pause();
       try {
         await record();
       } finally {
@@ -911,9 +948,30 @@ function createExecutionTimeout(durationMs: number) {
       }
     },
     dispose() {
-      clearTimeout(timer);
+      pause();
+      active = false;
     },
   };
+}
+
+/** Read-only work can stop waiting even when a dependency ignores cancellation. */
+async function abortable<T>(
+  operation: Promise<T> | T,
+  signal: AbortSignal,
+): Promise<T> {
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    const value = await Promise.race([operation, aborted]);
+    signal.throwIfAborted();
+    return value;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 interface ExecutedInteraction {

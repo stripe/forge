@@ -24,6 +24,26 @@ const CASE_A_PATH = 'cases/case/a/case.yaml';
 const CASE_B_PATH = 'cases/case-b.case.yaml';
 
 describe('experiment expansion and run planning', () => {
+  it('materializes a separate evaluation allowance without mutating config and binds it to plan identity', () => {
+    const loaded = inputs();
+    const selection = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+    const plan = resolveRunPlan({ ...loaded, selection });
+    assert.equal(plan.limits.evaluation_timeout_ms, 300_000);
+    assert.equal(
+      Object.hasOwn(loaded.experiment.config.limits, 'evaluation_timeout_ms'),
+      false,
+    );
+    assert.ok(Object.isFrozen(plan.limits));
+    loaded.experiment.config.limits.evaluation_timeout_ms = 600_000;
+    const overridden = resolveRunPlan({ ...loaded, selection });
+    assert.equal(overridden.limits.evaluation_timeout_ms, 600_000);
+    assert.equal(plan.limits.evaluation_timeout_ms, 300_000);
+    assert.notEqual(
+      resolvedRunPlanSha256(overridden),
+      resolvedRunPlanSha256(plan),
+    );
+  });
+
   it('binds named groups to selections and plan identity without using array position', () => {
     const config = experimentConfig();
     const axes = getMatrixGroups(config.matrix)[0]!;

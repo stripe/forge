@@ -12,9 +12,47 @@ import {
   parseExperimentConfigYaml,
   parseSetupStep,
 } from './parse.ts';
-import { DEFAULT_RUN_TIMEOUT_MS } from './types.ts';
+import {
+  DEFAULT_EVALUATION_TIMEOUT_MS,
+  DEFAULT_RUN_TIMEOUT_MS,
+} from './types.ts';
 
 describe('public benchmark parsing', () => {
+  it('defaults the evaluation allowance and rejects invalid or unknown limits', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    assert.deepEqual(config.limits, {
+      run_timeout_ms: 1_800_000,
+      evaluation_timeout_ms: 300_000,
+    });
+    for (const evaluation_timeout_ms of [1, 86_400_000]) {
+      assert.equal(
+        parseExperimentConfig({
+          ...config,
+          limits: { ...config.limits, evaluation_timeout_ms },
+        }).limits.evaluation_timeout_ms,
+        evaluation_timeout_ms,
+      );
+    }
+    for (const evaluation_timeout_ms of [0, -1, 1.5, 86_400_001, null, '100']) {
+      assert.throws(
+        () =>
+          parseExperimentConfig({
+            ...config,
+            limits: { ...config.limits, evaluation_timeout_ms },
+          }),
+        BenchmarkModelError,
+      );
+    }
+    assert.throws(
+      () =>
+        parseExperimentConfig({
+          ...config,
+          limits: { ...config.limits, unknown_timeout_ms: 100 },
+        }),
+      /Unrecognized key/,
+    );
+  });
+
   it('requires an explicit lowercase kebab-case authored identity and version', () => {
     const version = '0.1.0';
     for (const id of ['task', 'suite/task', 'team-name/task-2']) {
@@ -586,7 +624,10 @@ task: safe
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     assert.equal(config.forge, undefined);
     assert.deepEqual(config.models, {});
-    assert.deepEqual(config.limits, { run_timeout_ms: DEFAULT_RUN_TIMEOUT_MS });
+    assert.deepEqual(config.limits, {
+      run_timeout_ms: DEFAULT_RUN_TIMEOUT_MS,
+      evaluation_timeout_ms: DEFAULT_EVALUATION_TIMEOUT_MS,
+    });
     assert.deepEqual(config.treatments, { baseline: { setup: [] } });
     {
       const actual = config.matrix;
