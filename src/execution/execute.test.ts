@@ -23,7 +23,11 @@ import type {
   SealedRuntime,
 } from '../contracts/runtime.ts';
 import type { ResolvedRunPlanV1 } from '../model/types.ts';
-import { createArtifactStore, verifyCompletedRun } from '../results/index.ts';
+import {
+  createArtifactStore,
+  parseRunResult,
+  verifyCompletedRun,
+} from '../results/index.ts';
 import { createOwnedWorkspace } from '../runtime/workspace.ts';
 import { createSetupExecutorWithHandlers } from '../setup/executor.ts';
 import type {
@@ -51,6 +55,71 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('commits refusal warnings through native-evidence fallback without changing scores', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(
+      createArtifactStore({ root: path.join(fixture.root, 'refusals') }),
+    );
+    const original = composition.agents.get('claude-code')!;
+    for (const [index, observation] of [
+      { state: 'available', count: 2 },
+      { state: 'unavailable', reason: 'source_invalid' },
+      { state: 'available', count: -1 },
+    ].entries()) {
+      const completed = await executeEval({
+        runId: `refusals-${index}`,
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([
+            [
+              original.id,
+              {
+                ...original,
+                async collectEvidence() {
+                  return {
+                    kind: 'unavailable',
+                    reason: {
+                      code: 'source_incomplete',
+                      message: 'Synthetic normalization gap.',
+                    },
+                    mcpToolRefusals: observation,
+                  } as AgentNativeEvidenceResult;
+                },
+              },
+            ],
+          ]),
+        },
+      });
+      const expected =
+        index === 0
+          ? { state: 'available', count: 2 }
+          : { state: 'unavailable', reason: 'source_invalid' };
+      assert.deepEqual(
+        completed.result.warnings[0]?.mcp_tool_refusals,
+        expected,
+      );
+      assert.equal(
+        completed.result.evidence.provenance.source.kind,
+        'driver_fallback',
+      );
+      assert.equal(completed.result.evaluation.status, 'passed');
+      assert.deepEqual(
+        (await verifyCompletedRun(completed.location)).result.warnings,
+        completed.result.warnings,
+      );
+      for (const invalid of [
+        { state: 'available', count: -1 },
+        { state: 'unavailable', reason: 'unknown' },
+        { state: 'available', count: 1, extra: true },
+      ]) {
+        const changed = structuredClone(completed.result);
+        Object.assign(changed.warnings[0]!, { mcp_tool_refusals: invalid });
+        assert.throws(() => parseRunResult(changed));
+      }
+    }
+  });
+
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
     const fixture = await executionFixture();
     const store = createArtifactStore({

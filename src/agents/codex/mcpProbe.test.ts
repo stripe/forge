@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { describe, it } from 'vitest';
-import { CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
+import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { CODEX_HOME_STATE_ID } from './layout.ts';
+import { CODEX_MCP_PROBE_EXIT, CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
+import { createCodexPluginInstaller } from './plugins.ts';
 
 const connected = {
   pluginId: 'fixture@test',
@@ -69,6 +72,76 @@ async function probe(pages: readonly unknown[]) {
 }
 
 describe('Codex MCP native status probe', () => {
+  it('reports generated probe outcomes through the installer using shared codes', async () => {
+    const installer = createCodexPluginInstaller({
+      adapterId: 'codex',
+      executable: 'codex',
+    });
+    for (const [data, expectedCode, reason] of [
+      [
+        [],
+        CODEX_MCP_PROBE_EXIT.serverUnavailable,
+        'plugin server missing or disconnected',
+      ],
+      [
+        [{ ...connected, authStatus: 'notLoggedIn' }],
+        CODEX_MCP_PROBE_EXIT.authenticationUnavailable,
+        'bearer authentication unavailable',
+      ],
+      [
+        [{ ...connected, tools: {} }],
+        CODEX_MCP_PROBE_EXIT.toolsUnavailable,
+        'no usable tools discovered',
+      ],
+      [null, CODEX_MCP_PROBE_EXIT.discoveryFailed, 'native discovery failed'],
+    ] as const) {
+      const result = await probe([{ data, nextCursor: null }]);
+      assert.equal(result.exitCode, expectedCode);
+      await assert.rejects(
+        installer.checkMcp!({
+          receipt: {
+            version: '1',
+            adapter: 'codex',
+            plugin: 'fixture@test',
+            marketplace: 'example/plugins',
+            marketplace_commit: 'a'.repeat(40),
+            native_plugin_id: 'fixture@test',
+            source: { kind: 'marketplace-path' },
+            installed_tree: {
+              format: 'forge-plugin-tree-v1',
+              sha256: `sha256:${'b'.repeat(64)}`,
+              entry_count: 1,
+              file_count: 1,
+              size_bytes: 1,
+            },
+          },
+          servers: ['stripe'],
+          stateDirectories: new Map([
+            [CODEX_HOME_STATE_ID, createMemoryWorkspace().mutable],
+          ]),
+          signal: new AbortController().signal,
+          commands: {
+            async run() {
+              return {
+                ...result,
+                stdout: 'untrusted native details',
+                stderr: '',
+                durationMs: 0,
+              };
+            },
+          },
+        }),
+        (error) => {
+          assert.equal(
+            (error as Error).message,
+            `Codex MCP readiness failed: ${reason}.`,
+          );
+          return true;
+        },
+      );
+    }
+  });
+
   it('finds the requested plugin server on a later status page', async () => {
     const result = await probe([
       {

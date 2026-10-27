@@ -8,6 +8,7 @@ import {
   parseAtifTrajectory,
 } from '../../atif/index.ts';
 import type {
+  AgentMcpToolRefusals,
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
@@ -81,19 +82,29 @@ export async function loadCodexEvidence(
   input: LoadCodexEvidenceInput,
 ): Promise<AgentNativeEvidenceResult> {
   if (!input.home || !SESSION_ID.test(input.sessionId))
-    return unavailable('source_unavailable');
+    return {
+      ...unavailable('source_unavailable'),
+      mcpToolRefusals: { state: 'unavailable', reason: 'source_unavailable' },
+    };
   input.signal.throwIfAborted();
+  let mcpToolRefusals: AgentMcpToolRefusals | undefined;
   try {
     const bytes = await readExactRollout(
       input.home,
       input.sessionId,
       input.signal,
     );
-    if (!bytes) return unavailable('source_unavailable');
+    if (!bytes)
+      return {
+        ...unavailable('source_unavailable'),
+        mcpToolRefusals: { state: 'unavailable', reason: 'source_unavailable' },
+      };
     const records = parseRecords(bytes, input.signal);
+    mcpToolRefusals = countMcpToolRefusals(records, input.sessionId);
     const converted = normalizeRecords(records, input);
     return {
       kind: 'available',
+      mcpToolRefusals,
       trajectory: parseAtifTrajectory(converted.trajectory),
       source: {
         kind: 'native_log',
@@ -104,13 +115,61 @@ export async function loadCodexEvidence(
     };
   } catch (error) {
     if (input.signal.aborted) input.signal.throwIfAborted();
-    return unavailable(
+    const reason =
       error instanceof IncompleteRolloutError ||
-        error instanceof CodexToolEvidenceError
+      error instanceof CodexToolEvidenceError
         ? 'source_incomplete'
-        : 'source_invalid',
-    );
+        : 'source_invalid';
+    return {
+      ...unavailable(reason),
+      mcpToolRefusals: mcpToolRefusals ?? { state: 'unavailable', reason },
+    };
   }
+}
+
+function countMcpToolRefusals(
+  records: readonly RolloutRecord[],
+  sessionId: string,
+): AgentMcpToolRefusals {
+  const refused = new Set<string>();
+  for (const record of records) {
+    if (record.type !== 'event_msg' || record.payload.type !== 'item_completed')
+      continue;
+    const item = record.payload.item;
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      return { state: 'unavailable', reason: 'source_incomplete' };
+    const snapshot = item as RecordValue;
+    if (snapshot.type !== 'McpToolCall') continue;
+    if (record.payload.thread_id !== sessionId)
+      return { state: 'unavailable', reason: 'source_invalid' };
+    if (
+      typeof snapshot.id !== 'string' ||
+      !snapshot.id ||
+      typeof snapshot.server !== 'string' ||
+      !snapshot.server ||
+      typeof snapshot.tool !== 'string' ||
+      !snapshot.tool ||
+      (snapshot.status !== 'failed' && snapshot.status !== 'completed')
+    ) {
+      return { state: 'unavailable', reason: 'source_incomplete' };
+    }
+    const error = snapshot.error;
+    if (snapshot.status !== 'failed') continue;
+    if (error === undefined && snapshot.result !== undefined) continue;
+    if (
+      !error ||
+      typeof error !== 'object' ||
+      Array.isArray(error) ||
+      typeof (error as RecordValue).message !== 'string'
+    )
+      return { state: 'unavailable', reason: 'source_incomplete' };
+    if (
+      (error as RecordValue).message ===
+      `MCP tool \`${snapshot.server}/${snapshot.tool}\` is not available to the model`
+    )
+      refused.add(snapshot.id);
+  }
+  return { state: 'available', count: refused.size };
 }
 
 async function readExactRollout(

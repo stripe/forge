@@ -14,6 +14,7 @@ import {
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
+import { mcpToolRefusalsSchema } from '../mcpToolRefusals.ts';
 import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
@@ -691,6 +692,7 @@ const runResultFields = {
     z
       .object({
         code: safeText,
+        mcp_tool_refusals: mcpToolRefusalsSchema.optional(),
         message: z
           .string()
           .min(1)
