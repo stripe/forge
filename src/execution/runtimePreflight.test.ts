@@ -74,15 +74,12 @@ describe('runtime composition preflight', () => {
           assert(Object.isFrozen(environment.credentials));
           assert.deepEqual(environment.credentials, {
             AGENT_TOKEN: { reference: 'test.token', scopes: ['agent'] },
-            STRIPE_API_KEY: {
-              reference: 'env:STRIPE_API_KEY',
-              scopes: ['agent'],
-            },
           });
           assert.equal(
             JSON.stringify(environment).includes('test-only-value'),
             false,
           );
+          assert.deepEqual(requirements.mcpRelays, ['stripe']);
           assert.deepEqual(requirements.executables, [
             'plugin-install',
             'test-agent',

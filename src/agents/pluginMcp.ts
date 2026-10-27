@@ -1,4 +1,7 @@
-import type { MutableWorkspace } from '../contracts/runtime.ts';
+import type {
+  MutableWorkspace,
+  PluginMcpConnections,
+} from '../contracts/runtime.ts';
 import { PLUGIN_MCP_CREDENTIALS } from '../model/pluginCredentials.ts';
 import type { PluginMcpServerId } from '../model/types.ts';
 
@@ -8,6 +11,7 @@ export async function configurePluginMcp(
   root: string,
   adapter: 'claude-code' | 'codex',
   servers: readonly PluginMcpServerId[],
+  connections: PluginMcpConnections = {},
 ): Promise<void> {
   // Native manifests can redirect MCP loading. Only the conventional bundled
   // .mcp.json contract is supported until each alternate format is exercised.
@@ -26,7 +30,7 @@ export async function configurePluginMcp(
     );
     if (manifest === 'plugin.json' && adapter === 'codex')
       throw new Error(
-        'Codex Agent Plugins mcp.json does not support environment-backed bearer auth. The registered Stripe plugin requires a compatible Claude-format distribution.',
+        'Codex Agent Plugins mcp.json is unsupported by this installer. The registered Stripe plugin requires a compatible Claude-format distribution.',
       );
     if (
       !record(value) ||
@@ -47,18 +51,24 @@ export async function configurePluginMcp(
       'utf8',
     ),
   );
-  const configured = configurePluginMcpDocument(input, adapter, servers);
+  const configured = configurePluginMcpDocument(
+    input,
+    adapter,
+    servers,
+    connections,
+  );
   await state.writeFile(
     path,
     Buffer.from(`${JSON.stringify(configured, null, 2)}\n`),
   );
 }
 
-/** Pure native-format transformation; the document contains references only. */
+/** Pure native-format transformation; upstream keys never enter the document. */
 export function configurePluginMcpDocument(
   input: unknown,
   adapter: 'claude-code' | 'codex',
   servers: readonly PluginMcpServerId[],
+  relays: PluginMcpConnections = {},
 ): Record<string, unknown> {
   if (!record(input) || !record(input.mcpServers))
     throw new Error('Plugin .mcp.json must contain mcpServers.');
@@ -79,11 +89,7 @@ export function configurePluginMcpDocument(
     if (typeof server.url !== 'string' || server.command !== undefined)
       throw new Error(`Plugin MCP server ${name} requires HTTP transport.`);
     const url = new URL(server.url);
-    if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password
-    )
+    if (url.href !== PLUGIN_MCP_CREDENTIALS[name].url)
       throw new Error(`Plugin MCP server ${name} has an unsupported URL.`);
     if (
       server.oauth !== undefined ||
@@ -93,27 +99,21 @@ export function configurePluginMcpDocument(
       throw new Error(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );
-    const environmentName =
-      PLUGIN_MCP_CREDENTIALS[name].credentialEnvironmentVariable;
-    if (adapter === 'claude-code') {
-      if (server.headers !== undefined && !record(server.headers))
+    const relay = relays[name];
+    if (!relay)
+      throw new Error(
+        `Plugin MCP server ${name} requires a host credential relay.`,
+      );
+    for (const field of ['headers', 'http_headers', 'env_http_headers'])
+      if (server[field] !== undefined && !record(server[field]))
         throw new Error(`Plugin MCP server ${name} has invalid headers.`);
-      const headers = { ...(server.headers as Record<string, unknown>) };
-      for (const key of Object.keys(headers))
-        if (key.toLowerCase() === 'authorization') delete headers[key];
-      headers.Authorization = `Bearer \${${environmentName}}`;
-      server.headers = headers;
-    } else {
-      for (const field of ['http_headers', 'env_http_headers']) {
-        if (server[field] !== undefined && !record(server[field]))
-          throw new Error(`Plugin MCP server ${name} has invalid headers.`);
-        if (record(server[field]))
-          for (const key of Object.keys(server[field]))
-            if (key.toLowerCase() === 'authorization')
-              delete server[field][key];
-      }
-      server.bearer_token_env_var = environmentName;
-    }
+    connections[name] = {
+      type: 'http',
+      url: relay.url,
+      [adapter === 'claude-code' ? 'headers' : 'http_headers']: {
+        Authorization: `Bearer ${relay.token}`,
+      },
+    };
   }
   return output;
 }

@@ -4,6 +4,7 @@ import type { RunInputProvider } from '../contracts/inputs.ts';
 import type { AgentPluginInstaller } from '../contracts/plugin.ts';
 import type {
   MutableWorkspace,
+  PluginMcpConnections,
   RuntimeLogicalPaths,
   RuntimeStateDirectoryRequirement,
 } from '../contracts/runtime.ts';
@@ -43,6 +44,7 @@ export interface SetupPreflightContext {
 /** Runtime capabilities shared by all steps in one already-preflighted setup. */
 export interface SetupApplyContext {
   readonly runId: string;
+  readonly pluginMcpConnections?: PluginMcpConnections;
   readonly paths: RuntimeLogicalPaths;
   readonly workspace: MutableWorkspace;
   /** All state directories aggregated during pure setup preflight. */

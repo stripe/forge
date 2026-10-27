@@ -140,8 +140,9 @@ that inserts it for `run` and passes other subcommands through unchanged.
 Verify connectivity from a container: a successful host-side request does not
 establish that the container can resolve or reach the bridge.
 
-This is test-suite behavior: the public CLI creates no bridge and requires
-endpoints reachable from the container. See the README's
+These model bridges are test-suite behavior: the public CLI requires model
+endpoints reachable from the container. Its separate plugin MCP relay follows
+the [plugin contract](plugin-action.md#credentials-and-limitations). See the README's
 [endpoint configuration](../README.md#requirements--credentials).
 
 Results default to `results/live`. `FORGE_LIVE_RUN_ID` sets the suite/run ID
@@ -517,7 +518,7 @@ application across several files.
 | [`forgeWrite.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
 | [`forgeCommand.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
 | [`forgeCredentials.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCredentials.ts) | `credentialsSetupHandler` | Declares agent-scoped credentials from runtime environment names; application performs no commands or mutations. |
-| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Resolves a registered plugin for the selected agent, declares credentials and installer requirements, installs, and validates its receipt. |
+| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Resolves a registered plugin for the selected agent, declares installer requirements, passes relay connections to installation, and validates its receipt. |
 | [`resolution.ts`](https://github.com/stripe/forge/blob/main/src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
 
@@ -589,6 +590,7 @@ those two sides.
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
 | [`workspace.ts`](https://github.com/stripe/forge/blob/main/src/runtime/workspace.ts) | `createOwnedWorkspace` | Safe host-backed mutable workspace: canonical root, no symlink traversal, stable listing, bounded reads, and atomic writes. Used by Docker. |
+| [`mcpCredentialRelay.ts`](https://github.com/stripe/forge/blob/main/src/runtime/mcpCredentialRelay.ts) | `startMcpCredentialRelay` | Bounded host HTTP relay with a per-run token, fixed upstream, counts, and shutdown; owned by the Docker runtime. |
 | [`processCommandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/processCommandRunner.ts) | `createHostCommandRunner` | Shell-free host subprocess runner with timeout, output cap, abort, and process-tree termination. Used by Docker CLI operations. |
 
 ### `src/runtime/docker`

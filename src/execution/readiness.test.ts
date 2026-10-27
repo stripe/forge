@@ -13,6 +13,7 @@ import {
 } from '../testing/fakes.ts';
 import { createMemoryRunInputProvider } from '../testing/memoryInputs.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
+import { executeEval, preflightEval } from './execute.ts';
 
 function fixture(
   fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup',
@@ -164,7 +165,76 @@ describe('runtime readiness', () => {
     }
   });
 
-  it('checks MCP after setup finalization, scopes tokens to agent commands and skips model auth', async () => {
+  it('keeps the plugin key outside the agent environment during an evaluation', async () => {
+    const test = fixture();
+    test.composition.credentialResolver = createStaticCredentialResolver({
+      'env:STRIPE_API_KEY': 'synthetic-plugin-key',
+      'model-key': 'synthetic-model-key',
+    });
+    const completed = await executeEval({ ...test, runId: 'relay-evaluation' });
+    const run = test.runtime.runs[0]!;
+    assert.deepEqual(run.input.mcpRelayCredentials, [
+      { server: 'stripe', value: 'synthetic-plugin-key' },
+    ]);
+    assert.equal(
+      Object.hasOwn(run.input.environment.credentials, 'STRIPE_API_KEY'),
+      false,
+    );
+    assert.deepEqual(run.input.requirements.mcpRelays, ['stripe']);
+    assert.equal(
+      run.commands.some(({ credentialEnvironmentNames }) =>
+        credentialEnvironmentNames.includes('STRIPE_API_KEY'),
+      ),
+      false,
+    );
+    assert.ok(
+      !JSON.stringify(completed.result).includes('synthetic-plugin-key'),
+    );
+    assert.equal(run.events.at(-1), 'dispose');
+  });
+
+  it('requires a relay-capable runtime before resolving credentials', () => {
+    const test = fixture();
+    const { supportsMcpCredentialRelay: _capability, ...runtime } =
+      test.composition.runtime;
+    assert.throws(() =>
+      preflightEval({ ...test, composition: { ...test.composition, runtime } }),
+    );
+    assert.deepEqual(test.resolutions, []);
+    assert.equal(test.runtime.runs.length, 0);
+  });
+
+  it('rejects a plugin key also declared for command environments before lookup', () => {
+    const test = fixture();
+    const agent = test.composition.agents.get('codex')!;
+    const composition = {
+      ...test.composition,
+      agents: new Map([
+        [
+          'codex',
+          {
+            ...agent,
+            requirements(selection: Parameters<typeof agent.requirements>[0]) {
+              return {
+                ...agent.requirements(selection),
+                environment: {
+                  credentials: {
+                    API_KEY: {
+                      reference: credentialReference('env:STRIPE_API_KEY'),
+                    },
+                  },
+                },
+              };
+            },
+          },
+        ],
+      ]),
+    };
+    assert.throws(() => preflightEval({ ...test, composition }));
+    assert.deepEqual(test.resolutions, []);
+  });
+
+  it('checks MCP after setup finalization, keeps upstream keys outside command environments and skips model auth', async () => {
     const test = fixture();
     const results = await defaultForgeEngine.validateRuntime([test]);
     assert.deepEqual(test.resolutions, ['env:STRIPE_API_KEY']);
@@ -172,6 +242,13 @@ describe('runtime readiness', () => {
     assert.equal(results[0]?.model_authentication, 'untested');
     assert.deepEqual(test.agent.events, ['prepare']);
     const run = test.runtime.runs[0]!;
+    assert.deepEqual(run.input.mcpRelayCredentials, [
+      { server: 'stripe', value: 'mock-token' },
+    ]);
+    assert.equal(
+      Object.hasOwn(run.input.environment.credentials, 'STRIPE_API_KEY'),
+      false,
+    );
     assert.deepEqual(
       run.commands.map(({ argv, scope, credentialEnvironmentNames }) => ({
         argv,
@@ -192,7 +269,7 @@ describe('runtime readiness', () => {
         {
           argv: ['check-mcp'],
           scope: 'agent',
-          credentialEnvironmentNames: ['STRIPE_API_KEY'],
+          credentialEnvironmentNames: [],
         },
       ],
     );
@@ -218,6 +295,32 @@ describe('runtime readiness', () => {
     );
     assert.deepEqual(test.resolutions, []);
     assert.equal(test.runtime.runs.length, 0);
+  });
+
+  it('redacts relay capabilities from native readiness errors', async () => {
+    const test = fixture();
+    const agent = test.composition.agents.get('codex')!;
+    test.composition.agents.set('codex', {
+      ...agent,
+      pluginInstaller: {
+        ...agent.pluginInstaller!,
+        async checkMcp() {
+          throw new Error(
+            `Native auth rejected ${test.runtime.runs[0]!.prepared.pluginMcpConnections!.stripe!.token}`,
+          );
+        },
+      },
+    });
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([test]),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Native auth rejected \[REDACTED\]/);
+        assert.ok(!error.message.includes('a'.repeat(64)));
+        return true;
+      },
+    );
+    assert.equal(test.runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('checks the code-owned MCP servers for the plugin, not receipt-supplied ones', async () => {

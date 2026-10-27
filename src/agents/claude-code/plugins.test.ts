@@ -14,6 +14,8 @@ import {
   createClaudePluginInstaller,
 } from './plugins.ts';
 
+const relay = { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) };
+
 const CATALOG_COMMIT = 'a'.repeat(40);
 const PLUGIN_COMMIT = 'b'.repeat(40);
 const MARKETPLACE_REPOSITORY =
@@ -58,7 +60,7 @@ describe('Claude plugin installer', () => {
     );
     assert.equal(
       configured.mcpServers.stripe.headers.Authorization,
-      `Bearer \${STRIPE_API_KEY}`,
+      `Bearer ${relay.token}`,
     );
     const originalTree = await installerPreflight().install(
       installContext(state, harness.commands),
@@ -580,6 +582,7 @@ function installContext(
 ) {
   return {
     runId: 'run-plugin',
+    pluginMcpConnections: { stripe: relay },
     paths: { workspace: '/workspace', home: '/home/forge' },
     stateDirectories: new Map([[CLAUDE_PLUGIN_STATE_ID, state.mutable]]),
     commands,

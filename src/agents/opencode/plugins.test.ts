@@ -22,6 +22,8 @@ import {
   stripeCatalogSourceCommit,
 } from './plugins.ts';
 
+const relay = { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) };
+
 const sourceCommit = 'a'.repeat(40);
 const catalogCommit = 'b'.repeat(40);
 const source = {
@@ -104,6 +106,7 @@ function fixture(
     ) =>
       prepared.install({
         runId: 'test',
+        pluginMcpConnections: { stripe: relay },
         paths: { workspace: layout.workspace, home: layout.home },
         stateDirectories: new Map([[OPENCODE_STATE_ID, workspace]]),
         commands,
@@ -134,7 +137,7 @@ describe('OpenCode Stripe bundle installation', () => {
     );
     assert.equal(
       config.mcp.stripe.headers.Authorization,
-      'Bearer {env:STRIPE_API_KEY}',
+      `Bearer ${relay.token}`,
     );
     assert.equal(config.mcp.stripe.oauth, false);
     assert.ok(
@@ -254,7 +257,7 @@ describe('OpenCode Stripe bundle installation', () => {
 
 describe('OpenCode installed plugin configuration', () => {
   const installed = JSON.stringify(
-    stripeOpenCodeConfiguration(mcp, layout.stateDirectory),
+    stripeOpenCodeConfiguration(mcp, layout.stateDirectory, relay),
   );
   it('combines authored model configuration with skills and MCP without mutating inputs', () => {
     const authored = JSON.stringify({
@@ -273,7 +276,7 @@ describe('OpenCode installed plugin configuration', () => {
       '/workspace/skills',
       `${layout.stateDirectory}/${PLUGIN_ROOT}/bundle/skills`,
     ]);
-    assert.equal(result.mcp.stripe.url, mcp.mcpServers.stripe.url);
+    assert.equal(result.mcp.stripe.url, relay.url);
   });
   it('rejects an authored Stripe override or model changes in the installed fragment', () => {
     assert.throws(

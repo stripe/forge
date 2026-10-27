@@ -121,8 +121,8 @@ behavioral declarations, missing skills, and unsafe filesystem entries fail
 setup. Claude-specific hooks, commands, and agents are not ported.
 
 The generated native config adds an absolute skill path and a remote MCP server
-with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
-the bundled URL. An authored Stripe MCP entry is rejected rather than replacing
+with OAuth disabled. Its URL and bearer token select the run-owned host relay.
+An authored Stripe MCP entry is rejected rather than replacing
 or disabling this connection. The adapter snapshots the combined authored and
 plugin config and restores it before every turn, including resume.
 
@@ -166,7 +166,8 @@ and hook execution behavior.
 ## Execution and receipt
 
 During pure preflight, Forge resolves the registered plugin, binds the adapter's
-installer, and declares executable, state, and agent credential requirements.
+installer, and declares executable and state requirements. The engine declares
+the host relay credential separately from command credentials.
 During setup, the prepared operation:
 
 1. registers the marketplace;
@@ -222,13 +223,41 @@ Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
 
-Forge keeps the bundled URL and unrelated plugin content. Claude and OpenCode use
-Authorization header templates; Codex uses `bearer_token_env_var`. All reference
-`STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
-use the same key. Tokens reach only agent commands, never setup commands.
-Forge fingerprints the configured installation. Runtime credential names and
-references are part of the Forge version; the host variable name is not recorded
-in the plan.
+Forge checks that the bundled server names the fixed Stripe MCP endpoint, then
+replaces that connection with a run-owned relay URL and a random bearer token.
+The relay runs in the Forge host process, outside the container. It forwards
+only to `https://mcp.stripe.com/`, replaces client authorization with the host
+key, and rejects redirects, other paths, and methods other than GET, POST, or
+DELETE. The key never enters the command environment or generated config.
+Declaring the same key name or credential reference for command environments
+in a plugin run fails pure preflight.
+
+The relay starts before setup and survives setup-container replacement. Abort,
+quiescence, and disposal close it and cancel in-flight requests. Its token has
+no authority after shutdown. Forge redacts relay tokens from ordinary artifacts;
+restricted native logs can still contain them. Configured installation hashes
+include the run-specific relay configuration and thus can differ between runs.
+
+Docker's default network uses `host.docker.internal`: native Linux adds an
+explicit `host-gateway` mapping, while Docker Desktop supplies its host DNS.
+The relay listens on host IPv4 interfaces and requires its random token. With `runtime.network: host`, it listens on loopback instead.
+Forge adds the relay host to command proxy bypass lists. A local Docker daemon
+and a container-reachable host are required; remote daemons are unsupported for
+this treatment. Host networking retains Docker's platform requirements.
+
+Each relay admits eight active requests, with at most 32 connections, 1 MiB
+request bodies, 16 MiB streamed responses, and a 60-second request deadline.
+Only MCP transport headers are forwarded. Completed runs record request and
+error counts as `runtime.metadata.pluginMcpRequests` and `pluginMcpErrors`;
+these include discovery and rejected requests, and do not identify tools or
+retain bodies. Older results may omit these keys. Requests that invoke write
+tools are allowed; Forge applies no tool-level read/write filter.
+
+Custom runtimes must opt into `supportsMcpCredentialRelay`, honor
+`RuntimeRequirements.mcpRelays`, and keep `RuntimePreparation.mcpRelayCredentials`
+host-only. They return `pluginMcpConnections` for setup and own relay shutdown.
+Direct installer callers supply these connections through
+`AgentPluginInstallContext`. Unsupported runtimes fail before credential lookup.
 
 Use `forge validate --host --experiment …` to install setup and check native MCP
 initialization and tool discovery from a disposable runtime. It requires the

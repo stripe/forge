@@ -11,6 +11,8 @@ import { createTestResolvedRunPlan } from '../../testing/plans.ts';
 import { CODEX_HOME_STATE_ID } from './layout.ts';
 import { createCodexPluginInstaller } from './plugins.ts';
 
+const relay = { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) };
+
 const commit = 'a'.repeat(40);
 const catalogRelative = '.tmp/marketplaces/test';
 const configRoot = '/home/forge/.codex';
@@ -178,6 +180,7 @@ function fixture(
   const install = (signal = new AbortController().signal) =>
     prepared.install({
       runId: 'test',
+      pluginMcpConnections: { stripe: relay },
       paths: { workspace: '/workspace', home: '/home/forge' },
       commands,
       stateDirectories: new Map([[CODEX_HOME_STATE_ID, state.mutable]]),
@@ -187,7 +190,7 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
-  it('sets the native bearer environment reference in the installed plugin', async () => {
+  it('routes native MCP authentication through the host relay', async () => {
     const mcpServers = ['stripe'] as const;
     const test = fixture({ mcpServers });
     await test.state.mutable.writeFile(
@@ -208,8 +211,8 @@ describe('Codex native plugin installer', () => {
       ).toString(),
     );
     assert.equal(
-      configured.mcpServers.stripe.bearer_token_env_var,
-      'STRIPE_API_KEY',
+      configured.mcpServers.stripe.http_headers.Authorization,
+      `Bearer ${relay.token}`,
     );
     assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
   });

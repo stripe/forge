@@ -211,9 +211,6 @@ describe('portable setup actions', () => {
       pluginInstaller: installer,
     });
     assert.deepEqual(prepared.requirements, {
-      credentials: {
-        agent: { STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' } },
-      },
       executables: ['git'],
       stateDirectories: [
         {
@@ -294,11 +291,7 @@ describe('portable setup actions', () => {
         ...target,
         pluginInstaller: installer,
       });
-      assert.deepEqual(prepared.requirements.credentials, {
-        agent: {
-          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
-        },
-      });
+      assert.equal(prepared.requirements.credentials, undefined);
       const augmented = createSetupExecutor().preflight(
         [
           step,

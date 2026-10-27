@@ -11,54 +11,58 @@ const step = {
 };
 
 describe('plugin MCP bearer authentication', () => {
-  it('retains native endpoints, other servers and non-auth headers without mutating input', () => {
+  it('replaces upstream auth and endpoints with relay capabilities without mutating input', () => {
     const input = {
       mcpServers: {
         stripe: {
           type: 'http',
           url: 'https://mcp.stripe.com',
-          headers: { authorization: 'old', Accept: 'application/json' },
+          headers: { authorization: 'old' },
+          bearer_token_env_var: 'STRIPE_API_KEY',
         },
         other: { command: 'local' },
       },
-      extra: true,
     };
-    const claude = configurePluginMcpDocument(input, 'claude-code', servers);
-    assert.deepEqual(claude, {
-      ...input,
-      mcpServers: {
-        ...input.mcpServers,
-        stripe: {
-          ...input.mcpServers.stripe,
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer \${STRIPE_API_KEY}`,
-          },
-        },
-      },
-    });
-    assert.equal(input.mcpServers.stripe.headers.authorization, 'old');
-    const codex = configurePluginMcpDocument(
-      {
+    const relays = {
+      stripe: { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) },
+    };
+    for (const adapter of ['claude-code', 'codex'] as const) {
+      const configured = configurePluginMcpDocument(
+        input,
+        adapter,
+        servers,
+        relays,
+      );
+      assert.deepEqual(configured, {
         mcpServers: {
           stripe: {
-            url: 'https://mcp.stripe.com',
-            http_headers: { Authorization: 'old', Accept: 'application/json' },
+            type: 'http',
+            url: relays.stripe.url,
+            [adapter === 'claude-code' ? 'headers' : 'http_headers']: {
+              Authorization: `Bearer ${relays.stripe.token}`,
+            },
           },
+          other: input.mcpServers.other,
         },
-      },
-      'codex',
-      servers,
+      });
+      assert.ok(!JSON.stringify(configured).includes('STRIPE_API_KEY'));
+      assert.ok(!JSON.stringify(configured).includes('env:'));
+    }
+    assert.equal(input.mcpServers.stripe.headers.authorization, 'old');
+    assert.throws(
+      () => configurePluginMcpDocument(input, 'codex', servers),
+      /host credential relay/,
     );
-    assert.deepEqual(codex, {
-      mcpServers: {
-        stripe: {
-          url: 'https://mcp.stripe.com',
-          http_headers: { Accept: 'application/json' },
-          bearer_token_env_var: 'STRIPE_API_KEY',
-        },
-      },
-    });
+    assert.throws(
+      () =>
+        configurePluginMcpDocument(
+          { mcpServers: { stripe: { url: 'https://example.com' } } },
+          'codex',
+          servers,
+          relays,
+        ),
+      /unsupported URL/,
+    );
   });
 
   it('fails on absent servers, unsupported transport and competing auth sources', () => {
@@ -80,7 +84,7 @@ describe('plugin MCP bearer authentication', () => {
             'codex',
             servers,
           ),
-        /absent|HTTP|auth/,
+        /absent|HTTP|auth|URL/,
       );
     }
   });
@@ -105,7 +109,7 @@ describe('plugin MCP bearer authentication', () => {
     );
     await assert.rejects(
       configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
-      /Agent Plugins.*bearer auth.*Claude-format/,
+      /Agent Plugins.*unsupported.*Claude-format/,
     );
   });
 

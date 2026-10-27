@@ -112,12 +112,14 @@ export async function startOpenCodeMcpFixture() {
 }
 
 /** Real Git fixtures, installed by production code; no public source or production endpoint overrides. */
-export function openCodePluginFixtureSetup(url) {
+export function openCodePluginFixtureSetup() {
   const files = {
     [`${bundlePath}/plugin.json`]: JSON.stringify(manifest),
     [`${bundlePath}/mcp.json`]: JSON.stringify({
       $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
-      mcpServers: { stripe: { type: 'streamable-http', url } },
+      mcpServers: {
+        stripe: { type: 'streamable-http', url: 'https://mcp.stripe.com/' },
+      },
     }),
     [`${bundlePath}/skills/stripe-test/SKILL.md`]:
       '---\nname: stripe-test\ndescription: Read the Stripe fixture instructions.\n---\nUse the fixture_echo MCP tool, then write answer.txt.\n',
@@ -270,6 +272,9 @@ export async function verifyPublishedOpenCodePlugin(
     });
     const receipt = await installation.install({
       runId,
+      pluginMcpConnections: {
+        stripe: { url: 'http://127.0.0.1:1/mcp', token: 'a'.repeat(64) },
+      },
       paths: prepared.paths,
       stateDirectories: prepared.stateDirectories,
       commands: prepared.commands.uncredentialed,

@@ -28,6 +28,30 @@ import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
 
 describe('experiment public entry points', () => {
+  it('exports host-only relay inputs separately from agent-visible connections', () => {
+    const credential: root.PluginMcpRelayCredential = {
+      server: 'stripe',
+      value: 'synthetic-host-key',
+    };
+    const connection: root.PluginMcpConnection = {
+      url: 'http://127.0.0.1:12345/mcp',
+      token: 'a'.repeat(64),
+    };
+    const connections: root.PluginMcpConnections = { stripe: connection };
+    const requirements: root.RuntimeRequirements = {
+      executables: [],
+      stateDirectories: [],
+      mcpRelays: [credential.server],
+    };
+    const acceptsPreparation = (input: root.RuntimePreparation) =>
+      input.mcpRelayCredentials;
+    const acceptsInstallation = (input: root.AgentPluginInstallContext) =>
+      input.pluginMcpConnections;
+    assert.equal(requirements.mcpRelays?.[0], 'stripe');
+    assert.equal(connections.stripe, connection);
+    assert.equal(typeof acceptsPreparation, 'function');
+    assert.equal(typeof acceptsInstallation, 'function');
+  });
   it('exports versioned dataset case entries with their paths', () => {
     const entry: root.DatasetManifestCaseV1 = {
       id: 'first',

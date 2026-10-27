@@ -60,6 +60,7 @@ export function createOpenCodePluginInstaller(options: {
           stateDirectories,
           commands,
           signal,
+          pluginMcpConnections,
         }): Promise<OpenCodeBundleInstallationReceipt> {
           assertOpenCodeRuntimeLayout(layout, paths);
           const state = stateDirectories.get(OPENCODE_STATE_ID);
@@ -166,6 +167,7 @@ export function createOpenCodePluginInstaller(options: {
           const configuration = stripeOpenCodeConfiguration(
             await readJson(state, `${bundle}/mcp.json`),
             layout.stateDirectory,
+            pluginMcpConnections?.stripe,
           );
           await state.writeFile(
             PLUGIN_CONFIG_PATH,

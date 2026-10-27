@@ -9,6 +9,7 @@ import type {
 import type { CommandRunner } from './command.ts';
 import type {
   MutableWorkspace,
+  PluginMcpConnections,
   RuntimeLogicalPaths,
   RuntimeRequirements,
 } from './runtime.ts';
@@ -71,6 +72,7 @@ export interface AgentPluginPreflightContext {
 /** Narrow authority supplied to one already-preflighted native installation. */
 export interface AgentPluginInstallContext {
   readonly runId: string;
+  readonly pluginMcpConnections?: PluginMcpConnections;
   readonly paths: RuntimeLogicalPaths;
   /** Contains only state directories declared by this plugin operation. */
   readonly stateDirectories: ReadonlyMap<string, MutableWorkspace>;
@@ -89,7 +91,7 @@ export interface PreparedAgentPluginInstallation {
 
 /** Optional narrow capability implemented by an agent adapter. */
 export interface AgentPluginInstaller {
-  /** Accepts environment-backed bearer auth for bundled HTTP MCP servers. */
+  /** Accepts bearer auth for bundled HTTP MCP servers. */
   readonly supportsMcpBearerAuth?: true;
   /**
    * Native MCP initialization and discovery only; never model or tool calls.

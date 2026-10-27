@@ -299,7 +299,13 @@ export function createCodexPluginInstaller(options: {
           );
           const mcpServers = context.mcpServers;
           if (mcpServers)
-            await configurePluginMcp(home, relative, 'codex', mcpServers);
+            await configurePluginMcp(
+              home,
+              relative,
+              'codex',
+              mcpServers,
+              installContext.pluginMcpConnections,
+            );
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,
