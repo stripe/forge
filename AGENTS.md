@@ -124,17 +124,48 @@ documentation, and tests. Do not inherit the implementation conversation.
 Keep the reviewer read-only, address actionable findings, and obtain another
 review when fixes materially change the reviewed diff.
 
-Every PR description must include these sections:
+### PR descriptions
 
-- **Context:** Explain the problem, its consequences, and intended behavior for
-  a reader unfamiliar with the task.
-- **Changes:** Describe the final changes and consequential decisions. Use
-  tables or diagrams when they make the change easier to understand, and
-  include before/after comparisons when applicable.
+Write for an experienced engineer who is unfamiliar with this part of Forge.
+Start with the system context, the concrete problem, and the resulting
+behavior; define Forge-specific terms when they first matter. Explain the main
+workflow and the conditions that let a reviewer predict its outcomes: what
+starts work, when results are reused, what counts as success, and what can
+remain afterward.
 
-When useful, include a **Validation** section describing checks that add signal
-beyond routine CI and any remaining validation gaps. Keep the description
-proportional to the change and focused on the final implementation.
+Ground every behavioral claim in the current diff and the relevant
+implementation, tests, and config — not in prior PR prose or discussion. Keep
+material conditions next to the claims they limit, and distinguish inferred
+intent from observed behavior. Use plain, direct language and precise
+technical names; cut secondary topics rather than packing them into dense
+sentences. Scale detail to the change — simple PRs can be brief.
+
+Every PR description must include these sections, in this order:
+
+- **Context:** the concrete problem — the input or situation, what the system
+  does today, and how that was observed (a run, a reproduction, a test) — and
+  its impact: who or what it hurts and how much. Keep measured impact separate
+  from inferred impact.
+- **Changes:** the changed behavior, the main workflow, and its important
+  boundaries and consequential decisions. Use a before/after or a table when it
+  helps, and a diagram when it materially improves understanding. Say why this
+  approach and not the obvious alternatives — name them and say why they lose —
+  and how the change degrades, rather than breaks, when its inputs are missing
+  or malformed, plus what it deliberately doesn't do.
+
+When useful, include a **Validation** section with the exact commands a
+reviewer can run and what they should see; which tests fail without the fix;
+the commands actually run and their results; and any proposed check that adds
+signal beyond routine CI. Code containing a test is not proof it passed —
+state when results are unavailable, and label proposed checks as proposed.
+Note any remaining validation gaps.
+
+Before submitting, challenge the description's consequential claims. Look for
+a permitted input, state change, or failure path that would contradict each
+one, especially words like "only," "every," and "always." Distinguish an
+attempted action from a verified outcome, and narrow or qualify claims the
+code permits a counterexample to. Keep the description proportional to the
+change and focused on the final implementation.
 
 ## Documentation maintenance
 
