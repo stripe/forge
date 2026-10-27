@@ -1260,14 +1260,13 @@ describe('Forge CLI', () => {
     );
   });
 
-  it('keeps host OpenAI credentials separate from the Codex agent credential', async () => {
+  it('shares one OpenAI credential between host completions and the Codex agent', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
       environment: {
-        OPENAI_API_KEY: 'host-key',
-        CODEX_API_KEY: 'agent-key',
+        OPENAI_API_KEY: 'shared-key',
         OPENAI_BASE_URL: 'https://gateway.example/v1',
       },
     });
@@ -1295,19 +1294,19 @@ describe('Forge CLI', () => {
         credentialReference('openai.completion-api-key'),
         scope,
       ),
-      'host-key',
+      'shared-key',
     );
     assert.equal(
       await composition.credentialResolver.resolve(
         credentialReference('openai.api-key'),
         scope,
       ),
-      'agent-key',
+      'shared-key',
     );
     const noHostKey = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'other-results'),
-      environment: { CODEX_API_KEY: 'agent-key' },
+      environment: {},
     });
     await assert.rejects(
       noHostKey.credentialResolver.resolve(
@@ -1346,15 +1345,14 @@ describe('Forge CLI', () => {
     }
   });
 
-  it('binds Codex credentials independently from harness completion credentials', async () => {
+  it('binds the Codex agent credential to OPENAI_API_KEY by default', async () => {
     const fixture = await createBenchmarkFixture();
     for (const compatible of [false, true]) {
       const composition = await createDefaultCliComposition({
         datasetRoot: fixture.datasetRoot,
         resultsRoot: path.join(fixture.root, 'results'),
         environment: {
-          CODEX_API_KEY: 'codex-test-key',
-          OPENAI_API_KEY: 'must-not-be-inferred',
+          OPENAI_API_KEY: 'codex-test-key',
           ...(compatible
             ? { OPENAI_BASE_URL: 'https://gateway.example.test/v1' }
             : {}),
@@ -1374,7 +1372,7 @@ describe('Forge CLI', () => {
           '/home/forge/.codex',
         );
         assert.equal(
-          actual.environment.credentials!.CODEX_API_KEY!.reference,
+          actual.environment.credentials!.OPENAI_API_KEY!.reference,
           'openai.api-key',
         );
       }

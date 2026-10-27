@@ -62,8 +62,8 @@ For the built-in CLI, you need:
 | --- | --- | --- |
 | Claude Code, one-shot with checks only | `ANTHROPIC_API_KEY` | None |
 | Claude Code with Ava or judging criteria | `ANTHROPIC_API_KEY` | Selected host provider credential |
-| Codex, one-shot with checks only | `CODEX_API_KEY` | None |
-| Codex with Ava or judging criteria | `CODEX_API_KEY` | Selected host provider credential |
+| Codex, one-shot with checks only | `OPENAI_API_KEY` | None |
+| Codex with Ava or judging criteria | `OPENAI_API_KEY` | Selected host provider credential |
 | `validate` or `plan` | None | None |
 
 Export the required variables in your shell or credential manager before
@@ -87,10 +87,12 @@ OpenAI host completions use the Responses API with strict JSON Schema,
 `store: false`, and `OPENAI_API_KEY` (credential reference
 `openai.completion-api-key`). `OPENAI_BASE_URL` optionally sets the complete
 API root, including `/v1`; Forge appends `/responses`. Codex uses the same
-endpoint setting but its separate `CODEX_API_KEY` credential. Neither key
-falls back to the other. GPT-5 and later and o-series model identifiers omit
-`temperature` and receive an output budget of at least 16,000 tokens to allow
-for reasoning. Reasoning blocks are excluded from completion text.
+endpoint setting and the same `OPENAI_API_KEY` credential (reference
+`openai.api-key`) by default; bind `--credential-env openai.api-key=<name>`
+to give Codex a different key. GPT-5 and later and o-series model
+identifiers omit `temperature` and receive an output budget of at least
+16,000 tokens to allow for reasoning. Reasoning blocks are excluded from
+completion text.
 
 The Anthropic provider requires Claude 4.5-or-newer model identifiers with
 strict structured-output support.
@@ -102,7 +104,7 @@ used by Claude Code and host-side `/v1/messages`, including structured output.
 
 Codex optionally accepts `OPENAI_BASE_URL`, a complete Responses-compatible
 API root such as `https://gateway.example.com/v1`. The CLI reads
-`CODEX_API_KEY`, without falling back to `OPENAI_API_KEY`. Remote endpoints
+`OPENAI_API_KEY`, the same credential used for host completions. Remote endpoints
 must use HTTPS and be reachable from the container; host-side completions
 must also reach their endpoint. A host loopback address points at the
 container when used by the agent, including names ending in `.localhost`.

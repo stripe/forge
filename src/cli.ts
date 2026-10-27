@@ -52,7 +52,8 @@ const ANTHROPIC_AUTH_TOKEN_REFERENCE = 'anthropic.auth-token';
 const ANTHROPIC_AUTH_TOKEN_ENVIRONMENT = 'ANTHROPIC_AUTH_TOKEN';
 const ANTHROPIC_BASE_URL_ENVIRONMENT = 'ANTHROPIC_BASE_URL';
 const OPENAI_API_KEY_REFERENCE = 'openai.api-key';
-const CODEX_API_KEY_ENVIRONMENT = 'CODEX_API_KEY';
+const OPENAI_COMPLETION_API_KEY_REFERENCE = 'openai.completion-api-key';
+const OPENAI_API_KEY_ENVIRONMENT = 'OPENAI_API_KEY';
 const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
 
 const HOST_CLI_OPTIONS = {
@@ -182,12 +183,13 @@ export async function createDefaultCliComposition(
   });
   const codex = createCodexAdapter({
     credential: OPENAI_API_KEY_REFERENCE,
+    credentialEnvironmentName: OPENAI_API_KEY_ENVIRONMENT,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
-    [OPENAI_API_KEY_REFERENCE, CODEX_API_KEY_ENVIRONMENT],
-    ['openai.completion-api-key', 'OPENAI_API_KEY'],
+    [OPENAI_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
+    [OPENAI_COMPLETION_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
   const credentialResolver = createEnvironmentCredentialResolver({
