@@ -8,7 +8,7 @@ import {
 } from './experimentModel.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { ModelProfileSchema, parseRunSelection } from './model/parse.ts';
-import type { RequirementLevelV1 } from './model/types.ts';
+import type { JsonValue, RequirementLevelV1 } from './model/types.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import {
@@ -17,6 +17,7 @@ import {
   parseForgeBuildIdentity,
 } from './version.ts';
 
+const MAX_PLUGIN_INSTALLATIONS = 2_000;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
@@ -151,7 +152,7 @@ const runSchema = z
     evaluation: evaluationSchema.nullable(),
     plugin_installations: z
       .array(z.unknown().transform(parseAgentPluginInstallationReceipt))
-      .max(2_000)
+      .max(MAX_PLUGIN_INSTALLATIONS)
       .readonly()
       .optional(),
   })
@@ -226,11 +227,40 @@ const coordinates = z
   })
   .strict();
 const caseSchema = coordinates.merge(statisticsSchema);
+const pluginBundleFieldSchema = z.enum([
+  'plugin',
+  'marketplace',
+  'version',
+  'source.kind',
+  'source.path',
+  'source.commit',
+  'installed_tree',
+  'dropped_parts',
+]);
+type PluginBundleField = z.infer<typeof pluginBundleFieldSchema>;
+interface BundleFieldObservation {
+  identity?: string;
+  missing: boolean;
+}
 const pluginBundleComparisonSchema = z
   .object({
     treatment: z.string().min(1).max(4096),
     status: z.enum(['same', 'different', 'unknown']),
     selection_indices: z.array(count).min(1).max(100_000),
+    compared_fields: z
+      .array(
+        z
+          .object({
+            installation_index: count.max(MAX_PLUGIN_INSTALLATIONS - 1),
+            fields: z
+              .array(pluginBundleFieldSchema)
+              .min(1)
+              .max(pluginBundleFieldSchema.options.length),
+          })
+          .strict(),
+      )
+      .max(MAX_PLUGIN_INSTALLATIONS)
+      .optional(),
   })
   .strict();
 const reportSchema = z
@@ -397,51 +427,80 @@ function comparePluginBundles(
     treatments.set(run.selection.treatment, group);
   }
   return [...treatments].map(([treatment, group]) => {
-    const knownFields = new Map<string, string>();
+    const installations = new Map<
+      number,
+      Map<PluginBundleField, BundleFieldObservation>
+    >();
+    let installationCount: number | undefined;
     let unknown = false;
     let different = false;
-    const compareBundleField = (field: string, value: unknown) => {
-      if (value === undefined) {
-        unknown = true;
-        return;
-      }
-      const identity = serializeCanonicalJson(value);
-      const previous = knownFields.get(field);
-      if (previous !== undefined && previous !== identity) different = true;
-      knownFields.set(field, identity);
-    };
     for (const run of group) {
       if (run.plugin_installations === undefined) {
         unknown = true;
         continue;
       }
-      compareBundleField(
-        'installed_set',
-        run.plugin_installations.map((receipt) => ({
+      if (
+        installationCount !== undefined &&
+        installationCount !== run.plugin_installations.length
+      ) {
+        different = true;
+      }
+      installationCount = run.plugin_installations.length;
+      for (const [index, receipt] of run.plugin_installations.entries()) {
+        const observations =
+          installations.get(index) ??
+          new Map<PluginBundleField, BundleFieldObservation>();
+        installations.set(index, observations);
+        const values: Record<PluginBundleField, JsonValue | undefined> = {
           plugin: receipt.plugin,
           marketplace: receipt.marketplace,
           version: receipt.version,
-          source_kind: receipt.source.kind,
+          'source.kind': receipt.source.kind,
+          'source.path': receipt.source.path,
+          'source.commit': receipt.source.commit,
           installed_tree: receipt.installed_tree,
-        })),
-      );
-      for (const [index, receipt] of run.plugin_installations.entries()) {
-        compareBundleField(`${index}.source.path`, receipt.source.path);
-        if (receipt.source.kind !== 'archive') {
-          compareBundleField(`${index}.source.commit`, receipt.source.commit);
+          dropped_parts:
+            receipt.dropped_parts === undefined
+              ? undefined
+              : [...receipt.dropped_parts].sort(),
+        };
+        for (const field of pluginBundleFieldSchema.options) {
+          const observation = observations.get(field) ?? { missing: false };
+          const value = values[field];
+          if (value === undefined) {
+            observation.missing = true;
+          } else {
+            const identity = serializeCanonicalJson(value);
+            if (
+              observation.identity !== undefined &&
+              observation.identity !== identity
+            )
+              different = true;
+            observation.identity = identity;
+          }
+          observations.set(field, observation);
         }
-        compareBundleField(
-          `${index}.dropped_parts`,
-          receipt.dropped_parts === undefined
-            ? undefined
-            : [...receipt.dropped_parts].sort(),
-        );
       }
+    }
+    const comparedFields: {
+      installation_index: number;
+      fields: PluginBundleField[];
+    }[] = [];
+    for (const [installation_index, observations] of installations) {
+      const fields: PluginBundleField[] = [];
+      for (const field of pluginBundleFieldSchema.options) {
+        const observation = observations.get(field)!;
+        if (observation.identity === undefined) continue;
+        fields.push(field);
+        if (observation.missing) unknown = true;
+      }
+      comparedFields.push({ installation_index, fields });
     }
     return {
       treatment,
       status: different ? 'different' : unknown ? 'unknown' : 'same',
       selection_indices: group.map((run) => run.selection_index),
+      compared_fields: comparedFields,
     };
   });
 }

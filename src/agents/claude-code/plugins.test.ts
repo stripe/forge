@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-
+import { reportPluginInstallations } from '../../../test/fixtures/pluginReport.ts';
 import type { CommandResult, CommandRunner } from '../../contracts/command.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
 import {
@@ -236,6 +236,42 @@ describe('Claude plugin installer', () => {
       },
     });
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
+  });
+
+  it('reports identical native installations as the same on their recorded fields', async () => {
+    const install = async (installedVersion = LATEST_VERSION) => {
+      const state = createMemoryWorkspace();
+      const harness = nativeCommandHarness(state, { installedVersion });
+      return installerPreflight().install(
+        installContext(state, harness.commands),
+      );
+    };
+    const first = await install();
+    const second = await install();
+    assert.equal(Object.hasOwn(first, 'dropped_parts'), false);
+    const comparison = reportPluginInstallations([[first], [second]])
+      .plugin_bundle_comparisons![0]!;
+    assert.equal(comparison.status, 'same');
+    assert.deepEqual(comparison.compared_fields, [
+      {
+        installation_index: 0,
+        fields: [
+          'plugin',
+          'marketplace',
+          'version',
+          'source.kind',
+          'source.path',
+          'source.commit',
+          'installed_tree',
+        ],
+      },
+    ]);
+    const changed = await install('2.0.0');
+    assert.equal(
+      reportPluginInstallations([[first], [changed]])
+        .plugin_bundle_comparisons![0]!.status,
+      'different',
+    );
   });
 
   it('reuses the registered marketplace across repeated plugin setup', async () => {

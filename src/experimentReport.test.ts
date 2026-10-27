@@ -74,6 +74,21 @@ describe('experiment run scorecards', () => {
         treatment: runs[0]!.selection.treatment,
         status: 'different',
         selection_indices: [0, 1, 2],
+        compared_fields: [
+          {
+            installation_index: 0,
+            fields: [
+              'plugin',
+              'marketplace',
+              'version',
+              'source.kind',
+              'source.path',
+              'source.commit',
+              'installed_tree',
+              'dropped_parts',
+            ],
+          },
+        ],
       },
     ]);
     assert.deepEqual(report.runs[1]!.plugin_installations, [second]);
@@ -231,9 +246,95 @@ describe('experiment run scorecards', () => {
         treatment: first.selection.treatment,
         status: 'same',
         selection_indices: [0, 1],
+        compared_fields: [
+          {
+            installation_index: 0,
+            fields: [
+              'plugin',
+              'marketplace',
+              'version',
+              'source.kind',
+              'source.path',
+              'installed_tree',
+              'dropped_parts',
+            ],
+          },
+        ],
       },
-      { treatment: 'other', status: 'same', selection_indices: [2] },
+      {
+        treatment: 'other',
+        status: 'same',
+        selection_indices: [2],
+        compared_fields: [],
+      },
     ]);
+  });
+
+  it('states a separate comparison basis for each position and skips uniformly absent fields', () => {
+    const full = bundleReceipt();
+    const { dropped_parts: _parts, ...uninspected } = full;
+    const partial = parseAgentPluginInstallationReceipt({
+      ...uninspected,
+      source: { kind: 'git-subdir' },
+    });
+    const runs = [0, 1].map((index) => ({
+      ...row(index),
+      plugin_installations: [partial, full],
+    }));
+    const report = build(runs);
+    assert.equal(report.plugin_bundle_comparisons?.[0]?.status, 'same');
+    assert.deepEqual(report.plugin_bundle_comparisons?.[0]?.compared_fields, [
+      {
+        installation_index: 0,
+        fields: [
+          'plugin',
+          'marketplace',
+          'version',
+          'source.kind',
+          'installed_tree',
+        ],
+      },
+      {
+        installation_index: 1,
+        fields: [
+          'plugin',
+          'marketplace',
+          'version',
+          'source.kind',
+          'source.path',
+          'source.commit',
+          'installed_tree',
+          'dropped_parts',
+        ],
+      },
+    ]);
+    assert.deepEqual(
+      parseExperimentRunReport(
+        JSON.parse(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+    const legacy = {
+      ...report,
+      plugin_bundle_comparisons: report.plugin_bundle_comparisons!.map(
+        ({ compared_fields: _basis, ...comparison }) => comparison,
+      ),
+    };
+    assert.deepEqual(parseExperimentRunReport(legacy), report);
+    for (const basis of [
+      [{ installation_index: 2_000, fields: ['plugin'] }],
+      [{ installation_index: 0, fields: ['unexpected'] }],
+      [{ installation_index: 0, fields: ['plugin'], unexpected: true }],
+    ]) {
+      assert.throws(() =>
+        parseExperimentRunReport({
+          ...report,
+          plugin_bundle_comparisons: [
+            { ...report.plugin_bundle_comparisons![0], compared_fields: basis },
+          ],
+        }),
+      );
+    }
   });
 
   it('records the producing Forge build and reads standalone pending scorecards', () => {

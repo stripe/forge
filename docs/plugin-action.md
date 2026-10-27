@@ -237,11 +237,21 @@ including regraded, reused, checks-only, and saved errored runs. Identity includ
 plugin and marketplace names, version, source kind/path/commit, the entire
 `installed_tree` descriptor (format, hash, entry/file counts, bytes), and the
 set of `dropped_parts`. Native adapter/plugin IDs and the catalog commit are
-excluded. Missing receipt arrays, distribution paths, Git revisions, or policy
-observations make equality unknown; archive sources do not require a Git
-revision. Known differences still take precedence over missing observations.
-Thus native installs can show different bundles, but their uninspected exclusion
-policies prevent a claim of full equality.
+excluded. Installation count and setup order always participate when receipts
+are recorded. Missing receipt arrays yield `unknown` unless a known difference
+exists. At each installation position, a field absent from every run is skipped;
+a field present in only some runs yields `unknown` unless a known difference
+exists. Thus identical native installations can be `same` on their recorded
+fields without asserting that their exclusion policies were inspected.
+
+Each comparison's optional `compared_fields` records the basis as entries with
+`installation_index` (zero-based setup order) and `fields`. The field names are
+`plugin`, `marketplace`, `version`, `source.kind`, `source.path`, `source.commit`,
+`installed_tree`, and `dropped_parts`. A field is listed when at least one run
+records it at that position; uniformly absent fields are omitted. `installed_tree`
+compares the complete descriptor. An empty basis covers either an empty recorded
+installation set or unrecorded receipts, distinguished by the status and run
+rows. Old comparisons can omit the basis; readers recompute it from run rows.
 
 The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may

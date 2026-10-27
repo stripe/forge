@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { parse as parseToml } from 'toml';
 import { describe, it } from 'vitest';
-
+import { reportPluginInstallations } from '../../../test/fixtures/pluginReport.ts';
 import type { CommandRunner } from '../../contracts/command.ts';
 import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
@@ -360,6 +360,41 @@ describe('Codex native plugin installer', () => {
       test.calls.some((argv) =>
         argv.includes(`${commit}:.agents/plugins/marketplace.json`),
       ),
+    );
+  });
+
+  it('reports identical native installations as the same on their recorded fields', async () => {
+    const first = await fixture().install();
+    const second = await fixture().install();
+    assert.equal(Object.hasOwn(first, 'dropped_parts'), false);
+    const comparison = reportPluginInstallations([[first], [second]])
+      .plugin_bundle_comparisons![0]!;
+    assert.equal(comparison.status, 'same');
+    assert.deepEqual(comparison.compared_fields, [
+      {
+        installation_index: 0,
+        fields: [
+          'plugin',
+          'marketplace',
+          'version',
+          'source.kind',
+          'source.path',
+          'source.commit',
+          'installed_tree',
+        ],
+      },
+    ]);
+    const changed = await fixture({
+      manifest: {
+        name: 'fixture',
+        version: '1.2.3',
+        description: 'Changed installed content.',
+      },
+    }).install();
+    assert.equal(
+      reportPluginInstallations([[first], [changed]])
+        .plugin_bundle_comparisons![0]!.status,
+      'different',
     );
   });
 

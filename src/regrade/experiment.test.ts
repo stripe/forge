@@ -236,6 +236,21 @@ describe('regradeExperimentRun', () => {
           treatment: 'plugin',
           status: 'different',
           selection_indices: [0, 1, 2],
+          compared_fields: [
+            {
+              installation_index: 0,
+              fields: [
+                'plugin',
+                'marketplace',
+                'version',
+                'source.kind',
+                'source.path',
+                'source.commit',
+                'installed_tree',
+                'dropped_parts',
+              ],
+            },
+          ],
         },
       ]);
     }

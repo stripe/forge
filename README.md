@@ -521,8 +521,10 @@ and one `runs` row per saved selection. Verified run rows retain optional
 `plugin_bundle_comparisons` groups saved-result rows within each treatment
 across cases, repetitions, models, and adapters; it does not compare separate
 treatments. `different` means at least one known bundle field differs, even if
-other fields are missing. `unknown` means some provenance is missing and no
-known difference was found; `same` means all fields are known and match.
+other fields are missing. `same` means the compared fields match. Each entry's
+optional `compared_fields` lists those fields by installation index. Fields
+absent in every run are skipped; missing receipt sets or a field recorded in
+only some runs yield `unknown` if no difference is known.
 Native adapter IDs and catalog commits alone do not imply different bundles.
 Readers recompute stored comparisons from run rows, while still checking scored
 statistics. See the [receipt contract](docs/plugin-action.md#execution-and-receipt)
