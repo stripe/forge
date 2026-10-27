@@ -15,6 +15,13 @@ export interface AgentToolCall {
   readonly id?: string;
   readonly name: string;
   readonly input?: unknown;
+  /** Observable text/structured output, at most 1,048,576 UTF-16 code units. */
+  readonly result?: {
+    readonly content: string;
+    readonly isError?: boolean;
+    /** Native result content was unavailable or partly omitted. */
+    readonly truncated?: boolean;
+  };
 }
 
 export interface AgentTurn {

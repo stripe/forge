@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 
 import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import { textToolResult } from '../toolResult.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;
@@ -235,6 +236,17 @@ function parseItem(item: JsonRecord): StreamItem {
           id,
           name: type,
           input: { command: requiredString(item.command) },
+          ...(typeof item.aggregated_output === 'string'
+            ? {
+                result: {
+                  content: item.aggregated_output,
+                  isError:
+                    item.status === 'failed' ||
+                    (typeof item.exit_code === 'number' &&
+                      item.exit_code !== 0),
+                },
+              }
+            : {}),
         },
       };
     case 'file_change': {
@@ -266,16 +278,26 @@ function parseItem(item: JsonRecord): StreamItem {
       const tool = requiredString(item.tool);
       if (!server || !tool || !Object.hasOwn(item, 'arguments'))
         invalidStream();
+      let output: AgentToolCall['result'];
       if (item.result !== undefined && item.result !== null) {
         const result = requiredRecord(item.result);
         // Opaque result data is bounded with the event and omitted from AgentTurn.
         onlyKeys(result, ['content', '_meta', 'structured_content']);
         requiredArray(result.content);
+        output = textToolResult(result.content);
+        if (result.structured_content != null) {
+          output = {
+            ...output,
+            content: `${output.content}\nStructured result:\n${JSON.stringify(result.structured_content)}`,
+          };
+        }
+        if (item.status === 'failed') output = { ...output, isError: true };
       }
       if (item.error !== undefined && item.error !== null) {
         const error = requiredRecord(item.error);
         onlyKeys(error, ['message']);
         requiredString(error.message);
+        output = { content: requiredString(error.message), isError: true };
       }
       return {
         type,
@@ -283,6 +305,7 @@ function parseItem(item: JsonRecord): StreamItem {
           id,
           name: `mcp__${server}__${tool}`,
           input: item.arguments,
+          ...(output === undefined ? {} : { result: output }),
         },
       };
     }

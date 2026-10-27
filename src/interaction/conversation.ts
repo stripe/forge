@@ -217,6 +217,19 @@ export function snapshotAgentToolCalls(
       Object.freeze({
         ...(call.id === undefined ? {} : { id: call.id }),
         name: call.name,
+        ...(call.result === undefined
+          ? {}
+          : {
+              result: Object.freeze({
+                content: call.result.content,
+                ...(call.result.isError === undefined
+                  ? {}
+                  : { isError: call.result.isError }),
+                ...(call.result.truncated === undefined
+                  ? {}
+                  : { truncated: call.result.truncated }),
+              }),
+            }),
         ...(call.input === undefined
           ? {}
           : { input: snapshotToolInput(call.input) }),

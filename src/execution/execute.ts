@@ -471,12 +471,14 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
+      const fallbackTurns = redactSecrets(interaction.turns, secrets);
       const evidence = selectAgentEvidence({
         agent: preflight.agent,
         identity: preflight.agentEvidenceIdentity,
         model: input.plan.agent.model,
         sessionId: interaction.sessionId,
         completedTurns: interaction.turns,
+        fallbackTurns: fallbackTurns.value,
         collected,
       });
       assertEvidenceMatchesRun(
@@ -484,12 +486,18 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return { evidence, nativeArtifact };
+      return {
+        evidence,
+        nativeArtifact,
+        fallbackRedactions:
+          evidence.completeness === 'fallback' ? fallbackTurns.replacements : 0,
+      };
     });
     const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
     );
+    selectedRedacted.replacements += selectedEvidence.fallbackRedactions ?? 0;
 
     const evaluated = await step('evaluation', async () => {
       throwIfAborted(signal, phase);
@@ -606,6 +614,9 @@ export async function executeEvalWithTestHooks(
               ...(resolved.reason === 'judge_budget_exceeded'
                 ? { omitted: 'judge_budget_exceeded' }
                 : {}),
+              ...(judgeTranscript.warnings === undefined
+                ? {}
+                : { warnings: judgeTranscript.warnings }),
             },
             workspace,
           },
@@ -892,7 +903,14 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
     if (
       !call ||
       !isSafeToolMetadata(call.name) ||
-      (call.id !== undefined && !isSafeToolMetadata(call.id))
+      (call.id !== undefined && !isSafeToolMetadata(call.id)) ||
+      (call.result !== undefined &&
+        (typeof call.result.content !== 'string' ||
+          call.result.content.length > 1024 * 1024 ||
+          (call.result.isError !== undefined &&
+            typeof call.result.isError !== 'boolean') ||
+          (call.result.truncated !== undefined &&
+            typeof call.result.truncated !== 'boolean')))
     ) {
       throw new TypeError('Agent returned an invalid tool call.');
     }
@@ -1645,6 +1663,7 @@ function buildInteractionArtifact(
     tool_calls: turn.toolCalls.map((call) => ({
       ...(call.id === undefined ? {} : { id: call.id }),
       name: call.name,
+      ...(call.result === undefined ? {} : { result: { ...call.result } }),
       ...(call.input === undefined ? {} : { input: jsonValue(call.input) }),
     })),
   }));

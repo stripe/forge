@@ -190,6 +190,14 @@ const interactionToolCall = z
     id: safeText.optional(),
     name: safeText,
     input: jsonValue.optional(),
+    result: z
+      .object({
+        content: z.string().max(1024 * 1024),
+        isError: z.boolean().optional(),
+        truncated: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -428,6 +436,7 @@ const judgeEvidenceSchema = z
         // The shared projection parser below validates the complete step schema.
         steps: z.array(z.unknown()),
         omitted: z.literal('judge_budget_exceeded').optional(),
+        warnings: z.array(z.unknown()).optional(),
       })
       .strict()
       .refine(
@@ -856,6 +865,9 @@ export function parseJudgeEvidence(
     copiedContext: transcript.copied_context,
     includedFields: transcript.included_fields,
     transcriptJson: serializeCanonicalJson(transcript.steps),
+    ...(transcript.warnings === undefined
+      ? {}
+      : { warnings: transcript.warnings }),
   });
   return {
     ...evidence,

@@ -4,6 +4,7 @@ import {
   type AtifAgentStep,
   type AtifNormalizationSource,
   type AtifNormalizationWarning,
+  type AtifObservationResult,
   type AtifToolCall,
   type AtifTrajectoryV1_8,
   createNormalizedTrajectory,
@@ -24,8 +25,10 @@ import type {
 const MAX_COMPLETED_TURNS = 100;
 const FALLBACK_ASSISTANT_CODE_UNIT_BUDGET = 8 * 1024 * 1024;
 const FALLBACK_TOOL_CALL_BUDGET = 256;
-const FALLBACK_TOOL_ARGUMENT_CODE_UNITS = 256;
+const FALLBACK_TOOL_ARGUMENT_CODE_UNITS = 4096;
+const FALLBACK_TOOL_RESULT_CODE_UNITS = 8192;
 const FALLBACK_TOOL_ARGUMENT_DEPTH = 16;
+const TRUNCATION_MARKER = '\n[Forge truncated driver evidence.]';
 
 export interface CompletedEvidenceTurn {
   readonly user: string;
@@ -40,6 +43,8 @@ export interface SelectAgentEvidenceInput {
   readonly sessionId: string;
   readonly completedTurns: readonly CompletedEvidenceTurn[];
   readonly collected: AgentNativeEvidenceResult;
+  /** Optional pre-redacted ledger; raw completed turns still govern native coverage. */
+  readonly fallbackTurns?: readonly CompletedEvidenceTurn[];
 }
 
 /** Validate the adapter's pure coding-agent identity before allocating authority. */
@@ -333,8 +338,9 @@ export function createDriverFallbackEvidence(
   input: Omit<SelectAgentEvidenceInput, 'collected'>,
   reason: AtifNormalizationWarning,
 ): NormalizedTrajectory {
+  const completedTurns = input.fallbackTurns ?? input.completedTurns;
   const steps: AtifTrajectoryV1_8['steps'] = [];
-  const nonemptyAssistantTurns = input.completedTurns.filter(
+  const nonemptyAssistantTurns = completedTurns.filter(
     ({ assistant }) => assistant.length > 0,
   ).length;
   const assistantLimit =
@@ -346,14 +352,11 @@ export function createDriverFallbackEvidence(
             FALLBACK_ASSISTANT_CODE_UNIT_BUDGET / nonemptyAssistantTurns,
           ),
         );
-  const toolCallCounts = boundedToolCallCounts(input.completedTurns);
+  const toolCallCounts = boundedToolCallCounts(completedTurns);
   let detailOmitted = false;
 
-  for (const [turnIndex, turn] of input.completedTurns.entries()) {
-    const assistant =
-      turn.assistant.length <= assistantLimit
-        ? turn.assistant
-        : turn.assistant.slice(0, assistantLimit);
+  for (const [turnIndex, turn] of completedTurns.entries()) {
+    let assistant = boundedPrefix(turn.assistant, assistantLimit);
     if (assistant.length !== turn.assistant.length) detailOmitted = true;
     steps.push({
       step_id: steps.length + 1,
@@ -372,6 +375,9 @@ export function createDriverFallbackEvidence(
     ) {
       detailOmitted = true;
     }
+    if (retainedToolCallCount !== turn.toolCalls.length) {
+      assistant += '\n[Forge omitted additional tool calls and results.]';
+    }
     steps.push({
       step_id: agentStepId,
       source: 'agent',
@@ -380,6 +386,11 @@ export function createDriverFallbackEvidence(
       ...(projectedTools.calls.length === 0
         ? {}
         : { tool_calls: projectedTools.calls }),
+      ...(projectedTools.results.length === 0
+        ? {}
+        : {
+            observation: { results: projectedTools.results },
+          }),
     });
   }
 
@@ -425,8 +436,13 @@ export function createDriverFallbackEvidence(
 function fallbackToolCalls(
   calls: readonly AgentToolCall[],
   stepId: number,
-): { calls: AtifToolCall[]; detailOmitted: boolean } {
+): {
+  calls: AtifToolCall[];
+  results: AtifObservationResult[];
+  detailOmitted: boolean;
+} {
   const usedIds = new Set<string>();
+  const results: AtifObservationResult[] = [];
   let detailOmitted = false;
   const projected = calls.map((call, index) => {
     const preferredId = call.id ?? `driver-call-${stepId}-${index + 1}`;
@@ -439,13 +455,31 @@ function fallbackToolCalls(
     usedIds.add(toolCallId);
     const toolArguments = fallbackToolArguments(call.input);
     if (toolArguments.detailOmitted) detailOmitted = true;
+    if (call.result !== undefined) {
+      const safeContent = call.result.content;
+      const content = boundedPrefix(
+        safeContent +
+          (call.result.truncated === true
+            ? '\n[Forge tool result is incomplete.]'
+            : ''),
+        FALLBACK_TOOL_RESULT_CODE_UNITS,
+      );
+      if (content !== safeContent) detailOmitted = true;
+      results.push({
+        source_call_id: toolCallId,
+        content,
+        ...(call.result.isError === undefined
+          ? {}
+          : { extra: { is_error: call.result.isError } }),
+      });
+    }
     return {
       tool_call_id: toolCallId,
       function_name: call.name,
       arguments: toolArguments.arguments,
     };
   });
-  return { calls: projected, detailOmitted };
+  return { calls: projected, results, detailOmitted };
 }
 
 function boundedToolCallCounts(
@@ -504,23 +538,58 @@ function fallbackToolArguments(value: unknown): {
       return nested;
     });
   } catch {
-    return { arguments: {}, detailOmitted: true };
+    return omittedArguments();
   }
   if (encoded === undefined || lossy) {
-    return { arguments: {}, detailOmitted: true };
+    return omittedArguments();
   }
   const json = JSON.parse(encoded) as JsonValue;
   const candidate =
     json !== null && typeof json === 'object' && !Array.isArray(json)
       ? json
       : { value: json };
+  const serialized = JSON.stringify(candidate);
   if (
-    JSON.stringify(candidate).length > FALLBACK_TOOL_ARGUMENT_CODE_UNITS ||
-    jsonDepth(candidate) > FALLBACK_TOOL_ARGUMENT_DEPTH
+    serialized.length > FALLBACK_TOOL_ARGUMENT_CODE_UNITS ||
+    jsonDepth(candidate) > FALLBACK_TOOL_ARGUMENT_DEPTH ||
+    countJsonValues(candidate) > 128
   ) {
-    return { arguments: {}, detailOmitted: true };
+    return {
+      arguments: {
+        forge_truncated_arguments: boundedPrefix(
+          `${serialized}${TRUNCATION_MARKER}`,
+          FALLBACK_TOOL_ARGUMENT_CODE_UNITS,
+        ),
+      },
+      detailOmitted: true,
+    };
   }
   return { arguments: candidate, detailOmitted: false };
+}
+
+function omittedArguments(): { arguments: JsonObject; detailOmitted: boolean } {
+  return {
+    arguments: {
+      forge_omitted_arguments: '[Forge omitted unavailable tool arguments.]',
+    },
+    detailOmitted: true,
+  };
+}
+
+function boundedPrefix(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  let end = Math.max(0, limit - TRUNCATION_MARKER.length);
+  if (end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1]!)) end -= 1;
+  return text.slice(0, end) + TRUNCATION_MARKER;
+}
+
+function countJsonValues(value: JsonValue): number {
+  if (value === null || typeof value !== 'object') return 1;
+  const children = Array.isArray(value) ? value : Object.values(value);
+  return (
+    1 +
+    children.reduce<number>((total, child) => total + countJsonValues(child), 0)
+  );
 }
 
 function jsonDepth(value: JsonValue, depth = 0): number {

@@ -28,6 +28,18 @@ const continuation = (index = 0) => ({
   },
 });
 describe('OpenCode live stream', () => {
+  it('keeps a completed turn when optional tool output is unavailable', () => {
+    const events = openCodeEvents(turn);
+    const toolEvent = events.find((event) => event.type === 'tool_use')!;
+    toolEvent.part.state = { status: 'completed', input: { command: 'true' } };
+    const parsed = parseOpenCodeStream(encode(events));
+    assert.equal(parsed.text, turn.response);
+    assert.deepEqual(parsed.toolCalls[0]?.result, {
+      content: '[Forge tool result unavailable.]',
+      isError: false,
+      truncated: true,
+    });
+  });
   it('allows a stop step followed by tools or post-compaction continuation', () => {
     const events = openCodeEvents(turn);
     events[3]!.part.reason = 'stop';
@@ -158,6 +170,7 @@ describe('OpenCode live stream', () => {
         id: 'call_0',
         name: 'bash',
         input: { command: 'printf complete > answer.txt' },
+        result: { content: 'Wrote answer.txt.', isError: false },
       },
     ]);
   });
@@ -174,6 +187,7 @@ describe('OpenCode live stream', () => {
         id: 'call_0',
         name: 'bash',
         input: { command: 'printf complete > answer.txt' },
+        result: { content: 'Command failed.', isError: true },
       },
     ]);
   });

@@ -2,6 +2,7 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
+import type { AgentToolCall } from '../contracts/agent.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
@@ -13,6 +14,7 @@ import type {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  JudgeTranscriptProjectionV1,
   JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.ts';
 import type {
@@ -145,6 +147,7 @@ export interface InteractionToolCallV1 {
   readonly id?: string;
   readonly name: string;
   readonly input?: JsonValue;
+  readonly result?: NonNullable<AgentToolCall['result']>;
 }
 
 export interface InteractionTurnV1 {
@@ -220,6 +223,7 @@ export interface JudgeEvidenceV1 {
     readonly steps: readonly JudgeVisibleStepV1[];
     /** Present only when driver evidence exceeds the whole-prompt budget. */
     readonly omitted?: 'judge_budget_exceeded';
+    readonly warnings?: JudgeTranscriptProjectionV1['warnings'];
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];

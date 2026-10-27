@@ -7,8 +7,21 @@ import type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
 } from './completion.ts';
-import { type ConversationTurn, runConversation } from './conversation.ts';
+import {
+  type ConversationTurn,
+  runConversation,
+  snapshotAgentToolCalls,
+} from './conversation.ts';
 import { AVA_STOP_SENTINEL } from './prompt.ts';
+
+it('snapshots tool results so later adapter mutation cannot rewrite evidence', () => {
+  const result = { content: 'original', isError: false };
+  const calls = snapshotAgentToolCalls([{ name: 'Read', result }]);
+  result.content = 'changed';
+  result.isError = true;
+  assert.deepEqual(calls[0]?.result, { content: 'original', isError: false });
+  assert.ok(Object.isFrozen(calls[0]?.result));
+});
 
 function initialResponse(
   descriptions: readonly string[],

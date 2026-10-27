@@ -1141,7 +1141,12 @@ describe('Codex engine integration', () => {
       { forgeVersion: completed.result.forge.version },
     );
     assert.deepEqual(interaction.turns[0]!.tool_calls, [
-      { id: 'item_1', name: 'mcp__fixture__probe', input: {} },
+      {
+        id: 'item_1',
+        name: 'mcp__fixture__probe',
+        input: {},
+        result: { content: `${marker}: [REDACTED]`, isError: true },
+      },
     ]);
     const trajectory = parseAtifTrajectory(
       await readArtifact(completed.location, 'trajectory.json'),
@@ -1164,9 +1169,14 @@ describe('Codex engine integration', () => {
       const observations = steps.flatMap((step) =>
         step.source === 'agent' ? (step.observation?.results ?? []) : [],
       );
-      assert.deepEqual(observations, []);
-      assert.ok(!JSON.stringify(steps).includes('"is_error"'));
-      assert.ok(!JSON.stringify(steps).includes(marker));
+      assert.deepEqual(
+        observations.map(({ source_call_id, content }) => ({
+          source_call_id,
+          content,
+        })),
+        [{ source_call_id: 'item_1', content: `${marker}: [REDACTED]` }],
+      );
+      assert.ok(JSON.stringify(steps).includes('"is_error":true'));
     }
     assert.equal(provider.calls.length, 1);
     const request = provider.calls[0]!.request;
@@ -1175,7 +1185,7 @@ describe('Codex engine integration', () => {
         createJudgeTranscriptProjection(trajectory).transcriptJson,
       ),
     );
-    assert.ok(!JSON.stringify(request).includes(marker));
+    assert.ok(JSON.stringify(request).includes(marker));
     assert.ok(!JSON.stringify(request).includes(AGENT_SECRET));
     assert.ok(test.native()!.includes(marker));
     assert.ok(test.native()!.includes(AGENT_SECRET));
@@ -1252,7 +1262,9 @@ describe('Codex engine integration', () => {
       calls.map(({ function_name }) => function_name),
       ['mcp__fixture__probe'],
     );
-    assert.deepEqual(observations, []);
+    assert.deepEqual(observations, [
+      { source_call_id: 'item_1', content: 'Malformed metadata fixture.' },
+    ]);
     assert.equal(provider.calls.length, 1);
     await assertRestrictedNative(completed, test.native()!);
   });
@@ -1424,7 +1436,7 @@ describe('Codex engine integration', () => {
     assert.equal(verified.result.evidence.completeness, 'fallback');
     assert.deepEqual(
       verified.result.evidence.warnings.map(({ code }) => code),
-      ['source_incomplete', 'fallback_used'],
+      ['source_incomplete', 'value_omitted', 'fallback_used'],
     );
     const trajectory = parseAtifTrajectory(
       await readArtifact(completed.location, 'trajectory.json'),
@@ -1443,7 +1455,12 @@ describe('Codex engine integration', () => {
       calls.map(({ function_name }) => function_name),
       ['mcp__fixture__probe'],
     );
-    assert.deepEqual(observations, []);
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0]?.source_call_id, 'item_1');
+    assert.ok(
+      String(observations[0]?.content).includes(captured.retainedMarker),
+    );
+    assert.match(String(observations[0]?.content), /Forge truncated/);
     assert.ok(
       provider.calls[0]!.request.systemPrompt?.includes(
         createJudgeTranscriptProjection(trajectory).transcriptJson,

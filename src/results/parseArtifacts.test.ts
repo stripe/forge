@@ -8,6 +8,7 @@ import {
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  MAX_JUDGE_TRANSCRIPT_BYTES,
 } from '../evaluation/judgeTranscript.ts';
 import { FORGE_VERSION } from '../version.ts';
 import {
@@ -22,6 +23,54 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 const CONTEXT = { forgeVersion: FORGE_VERSION };
 
 describe('canonical interaction and judge evidence parsing', () => {
+  it('accepts optional bounded driver results and rejects malformed or extended result objects', () => {
+    const artifact = {
+      mode: 'one_shot',
+      stop_reason: 'task_complete',
+      failure: null,
+      turns: [
+        {
+          turn: 1,
+          user: 'Read the file.',
+          assistant: 'Done.',
+          tool_calls: [
+            {
+              name: 'Read',
+              result: { content: 'complete', isError: false, truncated: true },
+            },
+          ],
+        },
+      ],
+    };
+    assert.deepEqual(parseInteractionArtifact(artifact, CONTEXT), artifact);
+    for (const result of [
+      null,
+      { content: 'x', unexpected: true },
+      { content: 'x', isError: 'false' },
+      { content: 'x'.repeat(1024 * 1024 + 1) },
+    ]) {
+      assert.throws(() =>
+        parseInteractionArtifact(
+          {
+            ...artifact,
+            turns: [
+              { ...artifact.turns[0], tool_calls: [{ name: 'Read', result }] },
+            ],
+          },
+          CONTEXT,
+        ),
+      );
+    }
+    assert.doesNotThrow(() =>
+      parseInteractionArtifact(
+        {
+          ...artifact,
+          turns: [{ ...artifact.turns[0], tool_calls: [{ name: 'Read' }] }],
+        },
+        CONTEXT,
+      ),
+    );
+  });
   it('requires compatible parent release context before parsing companion payloads', () => {
     for (const parser of [
       parseSetupArtifact,
@@ -827,10 +876,20 @@ describe('canonical interaction and judge evidence parsing', () => {
         CONTEXT,
       ),
     );
-    const large = judgeEvidenceWithSteps([
-      { step_id: 1, source: 'agent', message: 'x'.repeat(1024 * 1024) },
-    ]);
-    assert.deepEqual(parseJudgeEvidence(large, CONTEXT), large);
+    assert.throws(
+      () =>
+        parseJudgeEvidence(
+          judgeEvidenceWithSteps([
+            {
+              step_id: 1,
+              source: 'agent',
+              message: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES),
+            },
+          ]),
+          CONTEXT,
+        ),
+      /Judge transcript projection exceeds the .*byte limit/,
+    );
 
     const cycle: Record<string, unknown> = {};
     cycle.self = cycle;

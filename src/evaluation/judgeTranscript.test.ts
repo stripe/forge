@@ -13,10 +13,55 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeTranscriptProjectionV1,
   type JudgeVisibleStepV1,
+  MAX_JUDGE_TRANSCRIPT_BYTES,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
 
 describe('createJudgeTranscriptProjection', () => {
+  it('keeps deterministic start/end excerpts within the byte budget, including escaped Unicode', () => {
+    for (const body of ['x', '😀\\"\n']) {
+      const trajectory: AtifTrajectoryV1_8 = {
+        schema_version: 'ATIF-v1.8',
+        agent: { name: 'test', version: '1' },
+        steps: [
+          { step_id: 1, source: 'user', message: 'START' },
+          {
+            step_id: 2,
+            source: 'agent',
+            message: body.repeat(MAX_JUDGE_TRANSCRIPT_BYTES),
+          },
+          { step_id: 3, source: 'agent', message: 'END' },
+        ],
+      };
+      const projected = createJudgeTranscriptProjection(trajectory);
+      assert.ok(
+        Buffer.byteLength(projected.transcriptJson) <=
+          MAX_JUDGE_TRANSCRIPT_BYTES,
+      );
+      const [excerpt] = JSON.parse(projected.transcriptJson);
+      assert.equal(excerpt.source, 'omission');
+      assert.match(excerpt.message, /Forge truncated/);
+      assert.match(excerpt.prefix, /START/);
+      assert.match(excerpt.suffix, /END/);
+      assert.equal(projected.warnings?.[0]?.code, 'transcript_truncated');
+      assert.equal(
+        createJudgeTranscriptProjection(trajectory).transcriptJson,
+        projected.transcriptJson,
+      );
+      assert.deepEqual(parseJudgeTranscriptProjection(projected), projected);
+      const { warnings: _, ...withoutWarning } = projected;
+      assert.throws(
+        () => parseJudgeTranscriptProjection(withoutWarning),
+        /exact evidence warning/,
+      );
+      assert.throws(() =>
+        parseJudgeTranscriptProjection({
+          ...projected,
+          warnings: [{ code: 'transcript_truncated', message: 'changed' }],
+        }),
+      );
+    }
+  });
   it('constructs only judge-visible root steps and fields', () => {
     const trajectory = richTrajectory();
     const before = structuredClone(trajectory);
@@ -348,15 +393,16 @@ describe('parseJudgeTranscriptProjection', () => {
     );
   });
 
-  it('retains large projections and bounds decoded JSON complexity', () => {
+  it('bounds transcript bytes and decoded JSON complexity before schema parsing', () => {
     const valid = createJudgeTranscriptProjection(richTrajectory());
-    const large = createJudgeTranscriptProjection({
-      schema_version: 'ATIF-v1.8',
-      agent: { name: 'test-agent', version: '1' },
-      steps: [{ step_id: 1, source: 'user', message: 'x'.repeat(1024 * 1024) }],
-    });
-    assert.ok(Buffer.byteLength(large.transcriptJson) > 1024 * 1024);
-    assert.deepEqual(parseJudgeTranscriptProjection(large), large);
+    assert.throws(
+      () =>
+        parseJudgeTranscriptProjection({
+          ...valid,
+          transcriptJson: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES + 1),
+        }),
+      new RegExp(`${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit`),
+    );
 
     const deeplyNested = `${'{"nested":'.repeat(65)}null${'}'.repeat(65)}`;
     assert.throws(

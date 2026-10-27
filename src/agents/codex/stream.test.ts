@@ -194,6 +194,7 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'pwd' },
+            result: { content: '/workspace\n', isError: false },
           },
         ],
       },
@@ -324,7 +325,12 @@ describe('Codex exec stream', () => {
             name: 'file_change',
             input: { changes: change },
           })),
-          { id: 'item_4', name: 'command_execution', input: { command } },
+          {
+            id: 'item_4',
+            name: 'command_execution',
+            input: { command },
+            result: { content: '      27 codex-tool.txt\n', isError: false },
+          },
         ],
       },
     );
@@ -353,7 +359,16 @@ describe('Codex exec stream', () => {
     assert.deepEqual(parsed, {
       text: 'Done.',
       sessionId: SESSION_ID,
-      toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+      toolCalls: [
+        {
+          id: 'call',
+          name: 'mcp__fixture__probe',
+          input: {},
+          result: {
+            content: 'Synthetic answer.\nStructured result:\n{"answer":42}',
+          },
+        },
+      ],
     });
   });
 
@@ -374,7 +389,14 @@ describe('Codex exec stream', () => {
       assert.deepEqual(parsed, {
         text: '',
         sessionId: SESSION_ID,
-        toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+        toolCalls: [
+          {
+            id: 'call',
+            name: 'mcp__fixture__probe',
+            input: {},
+            result: { content: '' },
+          },
+        ],
       });
     }
   });
@@ -464,11 +486,26 @@ describe('Codex exec stream', () => {
     );
     assert.deepEqual(parsed.toolCalls, [
       { id: 'file', name: 'file_change', input: { changes } },
-      { id: 'mcp', name: 'mcp__docs__search', input: argumentsValue },
+      {
+        id: 'mcp',
+        name: 'mcp__docs__search',
+        input: argumentsValue,
+        result: { content: 'Found it.\nStructured result:\n{"count":1}' },
+      },
       { id: 'web', name: 'web_search', input: { query: 'example', action } },
       { id: 'todos', name: 'todo_list', input: { items: todos } },
-      { id: 'command', name: 'command_execution', input: { command: 'false' } },
-      { id: 'failed-mcp', name: 'mcp__docs__search', input: {} },
+      {
+        id: 'command',
+        name: 'command_execution',
+        input: { command: 'false' },
+        result: { content: '', isError: true },
+      },
+      {
+        id: 'failed-mcp',
+        name: 'mcp__docs__search',
+        input: {},
+        result: { content: 'Tool unavailable.', isError: true },
+      },
     ]);
     assert.equal(parsed.text, '');
   });
