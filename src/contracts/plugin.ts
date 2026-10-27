@@ -104,7 +104,11 @@ export interface PreparedAgentPluginInstallation {
 export interface AgentPluginInstaller {
   /** Accepts environment-backed bearer auth for bundled HTTP MCP servers. */
   readonly supportsMcpBearerAuth?: true;
-  /** Native MCP initialization and discovery only; never model or tool calls. */
+  /**
+   * Native MCP initialization and discovery only; never model or tool calls.
+   * Runs after setup finalization during execution and host validation when present.
+   * `servers` are the code-owned MCP servers expected for this plugin.
+   */
   checkMcp?(context: {
     readonly receipt: NativeAgentPluginInstallationReceipt;
     readonly servers: readonly PluginMcpServerId[];

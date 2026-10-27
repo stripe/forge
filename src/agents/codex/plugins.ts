@@ -72,10 +72,17 @@ export function createCodexPluginInstaller(options: {
         ],
         { signal, timeoutMs: 90_000, maxOutputBytes: 1024 * 1024 },
       );
-      if (result.exitCode !== 0)
-        throw new Error(
-          'Codex MCP servers did not connect and discover tools.',
-        );
+      if (result.exitCode !== 0) {
+        const reason =
+          result.exitCode === 2
+            ? 'plugin server missing or disconnected'
+            : result.exitCode === 3
+              ? 'bearer authentication unavailable'
+              : result.exitCode === 4
+                ? 'no usable tools discovered'
+                : 'native discovery failed';
+        throw new Error(`Codex MCP readiness failed: ${reason}.`);
+      }
     },
     preflight(
       distribution: PluginSelectionV1,

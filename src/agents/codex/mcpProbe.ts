@@ -48,11 +48,15 @@ createInterface({input: child.stdout}).on('line', line => {
         listStatuses(cursor);
         return;
       }
-      const valid = servers.every(name => {
+      for (const name of servers) {
         const matches = rows.filter(row => row.pluginId === pluginId && row.name === name);
-        return matches.length === 1 && matches[0].serverInfo && matches[0].authStatus === 'bearerToken' && matches[0].tools && typeof matches[0].tools === 'object';
-      });
-      finish(valid ? 0 : 1);
+        if (matches.length !== 1) {finish(2); return;}
+        const row = matches[0];
+        if (row.authStatus !== 'bearerToken') {finish(3); return;}
+        if (!row.serverInfo) {finish(2); return;}
+        if (!row.tools || typeof row.tools !== 'object' || Array.isArray(row.tools) || Object.keys(row.tools).length === 0) {finish(4); return;}
+      }
+      finish(0);
     }
   } catch {finish(1);}
 });
