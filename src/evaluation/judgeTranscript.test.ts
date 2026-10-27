@@ -18,6 +18,74 @@ import {
 } from './judgeTranscript.ts';
 
 describe('createJudgeTranscriptProjection', () => {
+  it.each([
+    [0, 1],
+    [1, 0],
+    [2, 2],
+  ])(
+    'cuts emoji at complete code points and fills the equal-excerpt budget (%i, %i)',
+    (prefixPadding, suffixPadding) => {
+      const steps: AtifTrajectoryV1_8['steps'] = [
+        {
+          step_id: 1,
+          source: 'agent',
+          message:
+            'x'.repeat(prefixPadding) +
+            '😀'.repeat(400_000) +
+            'y'.repeat(suffixPadding),
+        },
+      ];
+      const text = serializeCanonicalJson(steps);
+      const projection = createJudgeTranscriptProjection({
+        schema_version: 'ATIF-v1.8',
+        agent: { name: 'test', version: '1' },
+        steps,
+      });
+      const [excerpt] = JSON.parse(projection.transcriptJson);
+      assert.equal(/[\uD800-\uDBFF]$/.test(excerpt.prefix), false);
+      assert.equal(/^[\uDC00-\uDFFF]/.test(excerpt.suffix), false);
+      assert.ok(text.startsWith(excerpt.prefix));
+      assert.ok(text.endsWith(excerpt.suffix));
+      // These fixtures force each cut to sit immediately outside an emoji.
+      assert.equal(
+        text.slice(excerpt.prefix.length, excerpt.prefix.length + 2),
+        '😀',
+      );
+      assert.equal(
+        text.slice(
+          text.length - excerpt.suffix.length - 2,
+          text.length - excerpt.suffix.length,
+        ),
+        '😀',
+      );
+      if (prefixPadding === 0)
+        assert.equal(excerpt.suffix.length, excerpt.prefix.length + 1);
+      if (suffixPadding === 0)
+        assert.equal(excerpt.prefix.length, excerpt.suffix.length + 1);
+      assert.ok(
+        Buffer.byteLength(projection.transcriptJson) <=
+          MAX_JUDGE_TRANSCRIPT_BYTES,
+      );
+      for (const extended of [
+        { ...excerpt, prefix: text.slice(0, excerpt.prefix.length + 2) },
+        {
+          ...excerpt,
+          suffix: text.slice(text.length - excerpt.suffix.length - 2),
+        },
+      ]) {
+        assert.ok(
+          Buffer.byteLength(serializeCanonicalJson([extended])) >
+            MAX_JUDGE_TRANSCRIPT_BYTES,
+        );
+      }
+      if (prefixPadding === 2) {
+        assert.equal(
+          Buffer.byteLength(projection.transcriptJson),
+          MAX_JUDGE_TRANSCRIPT_BYTES,
+        );
+      }
+    },
+  );
   it('keeps deterministic start/end excerpts within the byte budget, including escaped Unicode', () => {
     for (const body of ['x', '😀\\"\n']) {
       const trajectory: AtifTrajectoryV1_8 = {

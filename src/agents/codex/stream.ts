@@ -236,17 +236,25 @@ function parseItem(item: JsonRecord): StreamItem {
           id,
           name: type,
           input: { command: requiredString(item.command) },
-          ...(typeof item.aggregated_output === 'string'
+          ...(item.status === 'in_progress'
             ? {
                 result: {
-                  content: item.aggregated_output,
-                  isError:
-                    item.status === 'failed' ||
-                    (typeof item.exit_code === 'number' &&
-                      item.exit_code !== 0),
+                  content:
+                    '[Forge tool result unavailable: command did not complete.]',
+                  truncated: true,
                 },
               }
-            : {}),
+            : typeof item.aggregated_output === 'string'
+              ? {
+                  result: {
+                    content: item.aggregated_output,
+                    isError:
+                      item.status === 'failed' ||
+                      (typeof item.exit_code === 'number' &&
+                        item.exit_code !== 0),
+                  },
+                }
+              : {}),
         },
       };
     case 'file_change': {
@@ -298,6 +306,13 @@ function parseItem(item: JsonRecord): StreamItem {
         onlyKeys(error, ['message']);
         requiredString(error.message);
         output = { content: requiredString(error.message), isError: true };
+      }
+      if (item.status === 'in_progress') {
+        output = {
+          content:
+            '[Forge tool result unavailable: tool call did not complete.]',
+          truncated: true,
+        };
       }
       return {
         type,

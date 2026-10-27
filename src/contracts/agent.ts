@@ -15,7 +15,7 @@ export interface AgentToolCall {
   readonly id?: string;
   readonly name: string;
   readonly input?: unknown;
-  /** Observable text/structured output, at most 1,048,576 UTF-16 code units. */
+  /** Observable text/structured output; Forge redacts then bounds it to 1,048,576 UTF-16 code units. */
   readonly result?: {
     readonly content: string;
     readonly isError?: boolean;

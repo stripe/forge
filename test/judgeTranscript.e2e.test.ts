@@ -19,6 +19,95 @@ import {
   createTestResolvedRunPlan,
 } from '../src/testing/index.ts';
 
+const MAX_TOOL_RESULT_CODE_UNITS = 1_048_576;
+
+it.each([
+  {
+    name: 'adapter output above the limit',
+    secret: 'synthetic-private-token',
+    content: `${'x'.repeat(MAX_TOOL_RESULT_CODE_UNITS - 45)}synthetic-private-token${'x'.repeat(100)}`,
+  },
+  {
+    name: 'output that grows above the limit during redaction',
+    secret: 'zz',
+    content: 'zz'.repeat(MAX_TOOL_RESULT_CODE_UNITS / 2),
+  },
+])(
+  'bounds $name after redaction without failing the run',
+  async ({ secret, content }) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-result-bound-'),
+    );
+    try {
+      const plan = createTestResolvedRunPlan();
+      const agent = createScriptedAgentAdapter({
+        requirements: {
+          executables: [],
+          stateDirectories: [],
+          environment: {
+            credentials: {
+              TEST_TOKEN: { reference: credentialReference('test.key') },
+            },
+          },
+        },
+        turns: [
+          {
+            text: 'Done.',
+            sessionId: 'selected',
+            toolCalls: [
+              {
+                id: 'call',
+                name: 'Read',
+                result: { content, isError: false },
+              },
+            ],
+          },
+        ],
+      });
+      const completed = await executeEval({
+        runId: 'bounded-result',
+        plan,
+        composition: {
+          runtime: createFakeRuntimeAdapter().adapter,
+          agents: new Map([[agent.adapter.id, agent.adapter]]),
+          credentialResolver: createStaticCredentialResolver({
+            'test.key': secret,
+          }),
+          inputProvider: createMemoryRunInputProvider(),
+          artifactStore: createArtifactStore({ root }),
+        },
+      });
+      await verifyCompletedRun(completed.location);
+      const audit = JSON.parse(
+        await fs.readFile(
+          path.join(completed.location, 'interaction.json'),
+          'utf8',
+        ),
+      );
+      const saved = audit.turns[0].tool_calls[0].result;
+      assert.ok(saved.content.length <= MAX_TOOL_RESULT_CODE_UNITS);
+      assert.equal(saved.truncated, true);
+      assert.equal(saved.isError, false);
+      assert.match(saved.content, /Forge truncated the tool result/);
+      assert.match(saved.content, /\[REDACTED\]/);
+      assert.equal(saved.content.includes(secret), false);
+      assert.equal(saved.content.includes('synthetic-private-'), false);
+      const trajectoryText = await fs.readFile(
+        path.join(completed.location, 'trajectory.json'),
+        'utf8',
+      );
+      assert.equal(trajectoryText.includes(secret), false);
+      assert.equal(trajectoryText.includes('synthetic-private-'), false);
+      assert.ok(
+        (completed.result.evidence as { redaction_count: number })
+          .redaction_count > 0,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 it('commits and verifies bounded fallback results and oversized judge evidence after redaction', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-transcript-'));
   const secret = 'synthetic-private-token';

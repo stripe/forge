@@ -620,14 +620,16 @@ immutable for interaction.
 
 Forge opens one persistent `AgentSession`. Every completed turn must report a
 safe, stable session ID; changing identity between turns is a contract
-violation. Agent text, tool calls, tool inputs, optional cost, and session
-identity, and optional tool results are snapshotted at the boundary so later adapter mutation cannot
-change the driver ledger.
+violation. Agent text, tool calls, tool inputs, optional cost, session identity,
+and optional tool results are snapshotted at the boundary so later adapter
+mutation cannot change the driver ledger.
 
 `AgentToolCall.result` optionally carries `content` (text, limited to
 1,048,576 UTF-16 code units), `isError`, and `truncated` (native content was
-unavailable or omitted).
-The interaction audit retains this optional object; old turns may omit it.
+unavailable or omitted). Forge redacts result text before this boundary's limit
+is applied; oversized text retains a marked prefix and sets `truncated: true`.
+The same limit applies after audit redaction. The interaction audit retains this
+optional object; old turns may omit it.
 
 One-shot and multi-turn interaction are described separately below.
 
@@ -1018,11 +1020,15 @@ arguments, and tool results may be deterministically truncated to stay within AT
 safety bounds. Fallback retains at most 256 calls across the run, reserving tool
 activity for each turn. Arguments over 4,096 UTF-16 code units, depth 16, or
 128 JSON values become a marked JSON text prefix rather than an empty object.
+Unsafe or lossy input values use the judge-visible `forge_omitted_arguments` key
+with an omission marker.
 Available tool-result text retains up to 8,192 code units per call, correlated
 with its invocation and error state. Claude Code supplies tool-result text,
 Codex supplies command and MCP output, and OpenCode supplies tool output or
-errors. Native media bytes are omitted explicitly. Missing driver results
-cannot be recovered by fallback. Resolved secrets are redacted before these
+errors. A started-only Codex command or MCP call has an unavailable marker and
+makes no claim about success or failure. Native media bytes are omitted
+explicitly. Missing driver results cannot be recovered by fallback. Resolved
+secrets are redacted before these
 prefixes are clipped. Assistant, argument, result, and call-count truncation
 has a visible marker and adds a `value_omitted` warning. Scoring consumes this
 exact bounded trajectory; judging receives its declared root-behavior projection
@@ -1207,7 +1213,11 @@ The marker names the missing middle; no content is invented to fill it.
 `JudgeTranscriptProjectionV1.warnings` and `judge-evidence.json.transcript.warnings`
 record `transcript_truncated`. These optional fields are absent for untruncated
 projections; readers accept older artifacts without them. A marked excerpt
-requires its exact warning. The full saved trajectory remains unchanged.
+requires its exact warning. Judge-only loss is absent from `result.evidence`,
+which describes the canonical trajectory. The full saved trajectory remains
+unchanged. Completed-run verification recomputes the projection: its limit,
+marker text, and cut rule are part of the artifact contract. Changing them can
+invalidate saved truncated runs; inspect those runs with the producing build.
 Untrusted projections still reject excess bytes and invalid shapes, with
 bounded-JSON graph preflight before recursive validation.
 

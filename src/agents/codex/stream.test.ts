@@ -56,6 +56,41 @@ function assertInvalid(
 }
 
 describe('Codex exec stream', () => {
+  it('marks started-only commands and MCP calls as unavailable, without claiming success', () => {
+    const parsed = parseCodexStream(
+      stream(
+        item(
+          'command_execution',
+          {
+            id: 'unfinished-command',
+            command: 'sleep 600',
+            aggregated_output: '',
+            exit_code: null,
+            status: 'in_progress',
+          },
+          'started',
+        ),
+        item(
+          'mcp_tool_call',
+          {
+            id: 'unfinished-mcp',
+            server: 'sample',
+            tool: 'inspect',
+            arguments: {},
+            status: 'in_progress',
+            result: { content: [] },
+          },
+          'started',
+        ),
+      ),
+    );
+    for (const call of parsed.toolCalls) {
+      assert.match(call.result!.content, /unavailable: .* did not complete/);
+      assert.equal(call.result!.truncated, true);
+      assert.equal(call.result!.isError, undefined);
+    }
+    assert.equal(parsed.toolCalls.length, 2);
+  });
   it('accepts only captured pre-turn hook automation and ignored-provider advisories for the selected invocation', () => {
     const warning =
       '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.';
@@ -150,6 +185,11 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'bash -lc ls' },
+            result: {
+              content:
+                '[Forge tool result unavailable: command did not complete.]',
+              truncated: true,
+            },
           },
         ],
       },

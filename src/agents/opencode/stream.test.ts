@@ -28,6 +28,22 @@ const continuation = (index = 0) => ({
   },
 });
 describe('OpenCode live stream', () => {
+  it.each(['pending', 'running'])(
+    'rejects a nonterminal %s tool snapshot without inventing an outcome',
+    (status) => {
+      const events = openCodeEvents(turn);
+      const toolEvent = events.find((event) => event.type === 'tool_use')!;
+      toolEvent.part.state = {
+        status,
+        input: { command: 'sleep 600' },
+        output: '',
+      };
+      assert.throws(
+        () => parseOpenCodeStream(encode(events)),
+        OpenCodeStreamError,
+      );
+    },
+  );
   it('keeps a completed turn when optional tool output is unavailable', () => {
     const events = openCodeEvents(turn);
     const toolEvent = events.find((event) => event.type === 'tool_use')!;

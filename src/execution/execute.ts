@@ -78,6 +78,7 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
+import { boundToolResult } from '../interaction/toolResult.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
@@ -428,6 +429,7 @@ export async function executeEvalWithTestHooks(
         input.plan,
         session,
         completions,
+        secrets,
         signal,
         hooks.waitBeforeCompletionRetry,
       );
@@ -490,7 +492,9 @@ export async function executeEvalWithTestHooks(
         evidence,
         nativeArtifact,
         fallbackRedactions:
-          evidence.completeness === 'fallback' ? fallbackTurns.replacements : 0,
+          evidence.completeness === 'fallback'
+            ? fallbackTurns.replacements + interaction.toolResultRedactions
+            : 0,
       };
     });
     const selectedRedacted = redactNormalizedTrajectory(
@@ -765,16 +769,19 @@ interface ExecutedInteraction {
   readonly sessionId: string | null;
   readonly avaAudit?: AvaConversationAudit;
   readonly failure: RolePlayerErrorV1 | null;
+  readonly toolResultRedactions: number;
 }
 
 async function executeInteraction(
   plan: ResolvedRunPlanV1,
   session: AgentSession,
   completions: PreparedCompletionRuntime,
+  secrets: readonly string[],
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
+  let toolResultRedactions = 0;
   const trackedSession: AgentSession = Object.freeze({
     sessionId: () => session.sessionId(),
     async send(
@@ -792,7 +799,12 @@ async function executeInteraction(
           'Agent changed session identity before a completed turn.',
         );
       }
-      const turn = snapshotAgentTurn(await session.send(message, options));
+      const snapshot = snapshotAgentTurn(
+        await session.send(message, options),
+        secrets,
+      );
+      const turn = snapshot.turn;
+      toolResultRedactions += snapshot.toolResultRedactions;
       if (
         (declaredBeforeTurn !== undefined &&
           declaredBeforeTurn !== turn.sessionId) ||
@@ -835,6 +847,7 @@ async function executeInteraction(
       totalCostUsd: response.costUsd ?? null,
       sessionId: resolveSessionId(session, lastTurnSessionId, true),
       failure: null,
+      toolResultRedactions,
     });
   }
 
@@ -883,10 +896,14 @@ async function executeInteraction(
     ),
     avaAudit: conversation.avaAudit,
     failure,
+    toolResultRedactions,
   });
 }
 
-function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
+function snapshotAgentTurn(
+  turn: AgentTurn,
+  secrets: readonly string[],
+): { turn: AgentTurn; toolResultRedactions: number } {
   if (
     !turn ||
     typeof turn.text !== 'string' ||
@@ -906,7 +923,6 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
       (call.id !== undefined && !isSafeToolMetadata(call.id)) ||
       (call.result !== undefined &&
         (typeof call.result.content !== 'string' ||
-          call.result.content.length > 1024 * 1024 ||
           (call.result.isError !== undefined &&
             typeof call.result.isError !== 'boolean') ||
           (call.result.truncated !== undefined &&
@@ -915,12 +931,33 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
       throw new TypeError('Agent returned an invalid tool call.');
     }
   }
-  return Object.freeze({
-    text: turn.text,
-    sessionId: turn.sessionId,
-    toolCalls: snapshotAgentToolCalls(turn.toolCalls),
-    ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+  let toolResultRedactions = 0;
+  const toolCalls = turn.toolCalls.map((call) => {
+    if (call.result === undefined) return call;
+    const redacted = redactSecrets(
+      {
+        content: call.result.content,
+        ...(call.result.isError === undefined
+          ? {}
+          : { isError: call.result.isError }),
+        ...(call.result.truncated === undefined
+          ? {}
+          : { truncated: call.result.truncated }),
+      },
+      secrets,
+    );
+    toolResultRedactions += redacted.replacements;
+    return { ...call, result: redacted.value };
   });
+  return {
+    turn: Object.freeze({
+      text: turn.text,
+      sessionId: turn.sessionId,
+      toolCalls: snapshotAgentToolCalls(toolCalls),
+      ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+    }),
+    toolResultRedactions,
+  };
 }
 
 function resolveSessionId(
@@ -1709,7 +1746,20 @@ function redactInteractionArtifact(
   artifact: InteractionArtifactV1,
   secrets: readonly string[],
 ): InteractionArtifactV1 {
-  return parseInteractionArtifact(redactSecrets(artifact, secrets).value, {
+  const redacted = redactSecrets(artifact, secrets).value;
+  const bounded = {
+    ...redacted,
+    turns: redacted.turns.map((turn) => ({
+      ...turn,
+      tool_calls: turn.tool_calls.map((call) => ({
+        ...call,
+        ...(call.result === undefined
+          ? {}
+          : { result: boundToolResult(call.result) }),
+      })),
+    })),
+  };
+  return parseInteractionArtifact(bounded, {
     forgeVersion: FORGE_VERSION,
   });
 }

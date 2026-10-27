@@ -14,6 +14,7 @@ import {
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
+import { MAX_TOOL_RESULT_CODE_UNITS } from '../interaction/toolResult.ts';
 import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
@@ -192,7 +193,7 @@ const interactionToolCall = z
     input: jsonValue.optional(),
     result: z
       .object({
-        content: z.string().max(1024 * 1024),
+        content: z.string().max(MAX_TOOL_RESULT_CODE_UNITS),
         isError: z.boolean().optional(),
         truncated: z.boolean().optional(),
       })
