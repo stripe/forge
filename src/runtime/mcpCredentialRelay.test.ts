@@ -345,6 +345,43 @@ describe('host MCP credential relay', () => {
     await closed;
   });
 
+  it('caps pending sockets at four and evicts the oldest before authentication', async () => {
+    const clock = relayClock();
+    const test = await fixture(undefined, { scheduleTimeout: clock.schedule });
+    const { port } = new URL(test.relay.connection.url);
+    const sockets: Socket[] = [];
+    cleanup.push(async () => {
+      for (const socket of sockets) socket.destroy();
+    });
+    let oldestClosed!: Promise<void>;
+    for (let index = 0; index < 5; index += 1) {
+      const socket = createConnection({
+        host: '127.0.0.1',
+        port: Number(port),
+      });
+      socket.on('error', () => {});
+      sockets.push(socket);
+      if (index === 0)
+        oldestClosed = new Promise<void>((resolve) =>
+          socket.once('close', resolve),
+        );
+      await once(socket, 'connect');
+    }
+    await oldestClosed;
+    assert.equal(sockets[0]!.destroyed, true);
+    assert.deepEqual(test.relay.counts(), { requests: 0, errors: 0 });
+    for (const socket of sockets.slice(1)) {
+      socket.write(
+        `GET /mcp HTTP/1.1\r\nHost: localhost\r\nAuthorization: ${test.headers.Authorization}\r\nConnection: close\r\n\r\n`,
+      );
+      let response = '';
+      for await (const chunk of socket) response += chunk.toString();
+      assert.match(response, /^HTTP\/1\.1 200 /);
+    }
+    assert.equal(test.calls.length, 4);
+    assert.deepEqual(test.relay.counts(), { requests: 4, errors: 0 });
+  });
+
   it('caps authenticated connections separately from request concurrency', async () => {
     let entered!: () => void;
     const started = new Promise<void>((resolve) => {
