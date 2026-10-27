@@ -516,16 +516,18 @@ Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
 `report.json` contains an overall `summary`, per-case/configuration `cases`,
-and one `runs` row per saved selection. Each verified run row retains its
-optional `plugin_installations` from the eval result. The
-`plugin_bundle_comparisons` array groups these rows by treatment and lists their
-selection indices. `different` means at least two known installation sets differ
-in source, version, tree fingerprint, or excluded behavior kinds. `unknown` means
-some provenance is missing and no known difference was found; `same` means all
-recorded sets match. Rows without a saved result are excluded. Native adapter
-IDs and catalog commits alone do not imply different bundles. See the
-[receipt contract](docs/plugin-action.md#execution-and-receipt) for provenance
-limits. These fields do not change scores or plan hashes.
+and one `runs` row per saved selection. Verified run rows retain optional
+`plugin_installations` from the eval result, including in regrade reports.
+`plugin_bundle_comparisons` groups saved-result rows within each treatment
+across cases, repetitions, models, and adapters; it does not compare separate
+treatments. `different` means at least one known bundle field differs, even if
+other fields are missing. `unknown` means some provenance is missing and no
+known difference was found; `same` means all fields are known and match.
+Native adapter IDs and catalog commits alone do not imply different bundles.
+Readers recompute stored comparisons from run rows, while still checking scored
+statistics. See the [receipt contract](docs/plugin-action.md#execution-and-receipt)
+for identity fields and provenance limits. These fields do not change scores or
+plan hashes.
 
 With optional `jq`:
 

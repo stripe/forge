@@ -888,13 +888,15 @@ native distribution and declares agent-scoped MCP credential requirements using
 policy fixed by the Forge version. Setup installs the current marketplace entry,
 configures its existing MCP connection, and fingerprints the installation.
 The `setup.json` receipt records resolved native IDs, catalog commit, installed
-version, distribution path, available source commit, excluded behavior kinds,
+version, distribution path, available source commit, inspected policy exclusions,
 and the installed-tree fingerprint; Codex receipts also mark when the MCP
 connection moved to run-owned user configuration and list its non-sensitive
-endpoint. Results copy built-in plugin receipts in setup order under optional
-`plugin_installations`; absence means not recorded. These identify the catalog
-snapshot and observed contents; plugin state remains writable during
-interaction. See
+endpoint. Uninspected policy exclusions remain absent.
+Results and verified `ExperimentRunArtifact` metadata copy built-in plugin
+receipts in setup order under optional `plugin_installations`; absence means not
+recorded. Both experiment and regrade reports retain these verified observations.
+These identify the catalog snapshot and observed contents; plugin state remains
+writable during interaction. See
 [Marketplace plugin treatments](plugin-action.md) for registered names and
 installation semantics.
 

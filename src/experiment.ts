@@ -63,6 +63,7 @@ export interface ExperimentRunArtifact {
     readonly score: number | null;
   };
   readonly failure: 'role_player_error' | null;
+  readonly plugin_installations?: readonly AgentPluginInstallationReceipt[];
 }
 
 /** The effective latest attempt for one selection, in saved selection order. */
@@ -574,9 +575,12 @@ export async function runExperiment(
                 inspected.artifact === null
                   ? null
                   : `runs/${last.run_id}/result.json`,
-              ...(inspected.pluginInstallations === undefined
+              ...(inspected.artifact?.plugin_installations === undefined
                 ? {}
-                : { plugin_installations: inspected.pluginInstallations }),
+                : {
+                    plugin_installations:
+                      inspected.artifact.plugin_installations,
+                  }),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -611,7 +615,6 @@ interface AttemptInspection {
   attempt: SettledAttempt;
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
-  pluginInstallations?: readonly AgentPluginInstallationReceipt[];
 }
 interface CachedInspection {
   identity: string;
@@ -658,11 +661,11 @@ async function inspectAttempt(
     return {
       attempt,
       evaluation: summarizeReportEvaluation(evaluation),
-      ...(completed.result.plugin_installations === undefined
-        ? {}
-        : { pluginInstallations: completed.result.plugin_installations }),
       artifact: {
         location,
+        ...(completed.result.plugin_installations === undefined
+          ? {}
+          : { plugin_installations: completed.result.plugin_installations }),
         evaluation: {
           status: completed.result.evaluation.status,
           score: completed.result.evaluation.score,

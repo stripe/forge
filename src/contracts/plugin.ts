@@ -34,7 +34,7 @@ interface PluginInstallationReceiptBase extends JsonObject {
     /** Distribution path within the source; `.` denotes its root. */
     readonly path?: string;
   };
-  /** Behavior kinds excluded by the adapter's distribution policy. */
+  /** Inspected distribution policy exclusions; absent means not inspected. */
   readonly dropped_parts?: ('hooks' | 'commands' | 'agents')[];
   readonly installed_tree: JsonObject & {
     readonly format: 'forge-plugin-tree-v1';

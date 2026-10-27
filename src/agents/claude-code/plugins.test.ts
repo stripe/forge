@@ -225,7 +225,6 @@ describe('Claude plugin installer', () => {
         commit: PLUGIN_COMMIT,
         path: 'providers/claude/plugin',
       },
-      dropped_parts: [],
       installed_tree: {
         format: 'forge-plugin-tree-v1',
         sha256: receipt.installed_tree.sha256,
@@ -383,6 +382,27 @@ describe('Claude plugin installer', () => {
       harness.calls.some((argv) => argv.includes('install')),
       false,
     );
+  });
+
+  it('rejects paths outside the receipt contract before native installation', async () => {
+    for (const pluginPath of ['c:x', 'a'.repeat(256), 'é'.repeat(128)]) {
+      for (const catalogSource of [
+        `./${pluginPath}`,
+        { source: 'git-subdir', url: PLUGIN_REPOSITORY, path: pluginPath },
+        { source: 'url', url: PLUGIN_REPOSITORY, path: pluginPath },
+      ]) {
+        const state = createMemoryWorkspace();
+        const harness = nativeCommandHarness(state, { catalogSource });
+        await assert.rejects(
+          installerPreflight().install(installContext(state, harness.commands)),
+          /source|path/,
+        );
+        assert.equal(
+          harness.calls.some((argv) => argv.includes('install')),
+          false,
+        );
+      }
+    }
   });
 
   it('supports latest entries stored in the marketplace or in an archive', async () => {

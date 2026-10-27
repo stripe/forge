@@ -77,16 +77,17 @@ describe('experiment run scorecards', () => {
       },
     ]);
     assert.deepEqual(report.runs[1]!.plugin_installations, [second]);
-    assert.throws(
-      () =>
-        parseExperimentRunReport({
-          ...report,
-          plugin_bundle_comparisons: [
-            { ...report.plugin_bundle_comparisons![0], status: 'same' },
-          ],
-        }),
-      /comparisons do not match/,
+    const stale = {
+      ...report,
+      plugin_bundle_comparisons: [
+        { ...report.plugin_bundle_comparisons![0], status: 'same' },
+      ],
+    };
+    assert.deepEqual(
+      parseExperimentRunReport(stale).plugin_bundle_comparisons,
+      report.plugin_bundle_comparisons,
     );
+    assert.equal(stale.plugin_bundle_comparisons[0]!.status, 'same');
   });
 
   it('distinguishes unknown history, no plugin, and identical bundles with different native IDs', () => {
@@ -155,6 +156,84 @@ describe('experiment run scorecards', () => {
         'different',
       );
     }
+  });
+
+  it('preserves known differences when other bundle observations are missing', () => {
+    const full = bundleReceipt();
+    const { dropped_parts: _parts, ...uninspected } = full;
+    const { path: _path, ...unknownPath } = full.source;
+    const { commit: _commit, ...unknownCommit } = full.source;
+    for (const partial of [
+      uninspected,
+      { ...full, source: unknownPath },
+      { ...full, source: unknownCommit },
+    ]) {
+      assert.equal(
+        build([
+          { ...row(0), plugin_installations: [full] },
+          {
+            ...row(1),
+            plugin_installations: [
+              parseAgentPluginInstallationReceipt(partial),
+            ],
+          },
+        ]).plugin_bundle_comparisons?.[0]?.status,
+        'unknown',
+      );
+    }
+    for (const change of [
+      { source: { ...full.source, path: 'other/plugin' } },
+      { source: { ...full.source, commit: 'b'.repeat(40) } },
+      { version: '2.0.0' },
+      { marketplace: 'example/other' },
+      { plugin: 'other@test' },
+      { installed_tree: { ...full.installed_tree, size_bytes: 999 } },
+    ]) {
+      assert.equal(
+        build([
+          { ...row(0), plugin_installations: [uninspected] },
+          {
+            ...row(1),
+            plugin_installations: [
+              parseAgentPluginInstallationReceipt({
+                ...uninspected,
+                ...change,
+              }),
+            ],
+          },
+        ]).plugin_bundle_comparisons?.[0]?.status,
+        'different',
+      );
+    }
+    assert.equal(
+      build([
+        { ...row(0), plugin_installations: [uninspected] },
+        { ...row(1), plugin_installations: [] },
+      ]).plugin_bundle_comparisons?.[0]?.status,
+      'different',
+    );
+  });
+
+  it('compares runs across coordinates within each treatment and exempts archives from Git revisions', () => {
+    const receipt = bundleReceipt({ source: { kind: 'archive', path: '.' } });
+    const first = { ...row(0), plugin_installations: [receipt] };
+    const second = { ...row(1), plugin_installations: [receipt] };
+    second.selection = {
+      ...second.selection,
+      case_id: 'testing/other',
+      repetition: 1,
+      agent: { adapter: 'codex', provider: 'other', model: 'other' },
+    };
+    const third = { ...row(2), plugin_installations: [] };
+    third.selection = { ...third.selection, treatment: 'other' };
+    assert.deepEqual(build([first, second, third]).plugin_bundle_comparisons, [
+      {
+        treatment: first.selection.treatment,
+        status: 'same',
+        selection_indices: [0, 1],
+      },
+      { treatment: 'other', status: 'same', selection_indices: [2] },
+    ]);
   });
 
   it('records the producing Forge build and reads standalone pending scorecards', () => {

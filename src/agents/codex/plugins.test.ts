@@ -344,7 +344,7 @@ describe('Codex native plugin installer', () => {
     const receipt = await test.install();
     assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
     assert.equal(receipt.marketplace_commit, commit);
-    assert.deepEqual(receipt.dropped_parts, []);
+    assert.equal(Object.hasOwn(receipt, 'dropped_parts'), false);
     assert.deepEqual(receipt.source, {
       kind: 'marketplace-path',
       path: 'plugins/fixture',

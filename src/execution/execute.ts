@@ -41,6 +41,7 @@ import {
   agentAdapterMetadataSchema,
 } from '../contracts/metadata.ts';
 import type { RunPhase } from '../contracts/observability.ts';
+import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
 import type {
   MutableWorkspace,
   PreparedRuntime,

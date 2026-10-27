@@ -297,7 +297,6 @@ export function createCodexPluginInstaller(options: {
             native_plugin_id: selected.plugin,
             version: installed.version,
             source: source.receipt,
-            dropped_parts: [],
             installed_tree: installedTree,
             ...(connections?.length
               ? {

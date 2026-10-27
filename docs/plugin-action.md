@@ -139,8 +139,8 @@ OpenCode receipts use `installation: opencode-bundle` instead of
 fingerprint the copied bundle plus generated config. `dropped_parts` lists
 `hooks`, `commands`, and `agents`: the bundle is copied intact, but the OpenCode
 distribution policy does not register these behavior kinds. This is a policy
-record, not a count of removed files. Native Claude/Codex receipts use an empty
-list because Forge installs their complete distribution. Like other plugin
+record, not a count of removed files. Native Claude/Codex receipts omit this
+field because Forge does not inspect their exclusion policies. Like other plugin
 state, bundle files remain writable during interaction; the receipt describes
 installation-time contents.
 
@@ -201,7 +201,9 @@ The receipt includes:
 - the native plugin ID or bundle installation kind, and installed version;
 - the selected source kind, distribution path in `source.path` (`.` for a source
   root), and reported Git commit or full source pin when available;
-- excluded behavior kinds in `dropped_parts`;
+- inspected policy exclusions in optional `dropped_parts`: absence means not
+  inspected, `[]` means inspected with no excluded kinds, and a nonempty list
+  names excluded behavior kinds;
 - a deterministic digest and size/count summary of the installed tree; and
 - for Codex installs with MCP authentication, optional
   `mcp_configuration: codex-user-config` and `mcp_connections`. Together they
@@ -229,6 +231,17 @@ order. An empty array means no built-in plugin was installed; an absent field
 means it was not recorded. Completed-run verification requires this copy, when
 present, to match `setup.json`. Old receipts may omit `source.path` and
 `dropped_parts`; readers retain that absence rather than guessing.
+
+Reports compare each treatment's ordered installation set across its saved runs,
+including regraded, reused, checks-only, and saved errored runs. Identity includes
+plugin and marketplace names, version, source kind/path/commit, the entire
+`installed_tree` descriptor (format, hash, entry/file counts, bytes), and the
+set of `dropped_parts`. Native adapter/plugin IDs and the catalog commit are
+excluded. Missing receipt arrays, distribution paths, Git revisions, or policy
+observations make equality unknown; archive sources do not require a Git
+revision. Known differences still take precedence over missing observations.
+Thus native installs can show different bundles, but their uninspected exclusion
+policies prevent a claim of full equality.
 
 The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may

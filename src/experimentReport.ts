@@ -315,14 +315,8 @@ export function parseExperimentRunReport(
   ) {
     throw new Error('Report statistics do not match its run rows.');
   }
-  if (
-    report.plugin_bundle_comparisons !== undefined &&
-    serializeCanonicalJson(report.plugin_bundle_comparisons) !==
-      serializeCanonicalJson(comparePluginBundles(report.runs))
-  ) {
-    throw new Error(
-      'Report plugin bundle comparisons do not match its run rows.',
-    );
+  if (report.plugin_bundle_comparisons !== undefined) {
+    report.plugin_bundle_comparisons = comparePluginBundles(report.runs);
   }
   assertReportBytes(serializeCanonicalJson(report));
   return report;
@@ -403,39 +397,50 @@ function comparePluginBundles(
     treatments.set(run.selection.treatment, group);
   }
   return [...treatments].map(([treatment, group]) => {
-    const identities = new Set<string>();
+    const knownFields = new Map<string, string>();
     let unknown = false;
+    let different = false;
+    const compareBundleField = (field: string, value: unknown) => {
+      if (value === undefined) {
+        unknown = true;
+        return;
+      }
+      const identity = serializeCanonicalJson(value);
+      const previous = knownFields.get(field);
+      if (previous !== undefined && previous !== identity) different = true;
+      knownFields.set(field, identity);
+    };
     for (const run of group) {
       if (run.plugin_installations === undefined) {
         unknown = true;
         continue;
       }
-      if (
-        run.plugin_installations.some(
-          (receipt) =>
-            receipt.source.path === undefined ||
-            receipt.dropped_parts === undefined,
-        )
-      ) {
-        unknown = true;
-        continue;
-      }
-      identities.add(
-        serializeCanonicalJson(
-          run.plugin_installations.map((receipt) => ({
-            plugin: receipt.plugin,
-            marketplace: receipt.marketplace,
-            version: receipt.version,
-            source: receipt.source,
-            installed_tree: receipt.installed_tree,
-            dropped_parts: [...receipt.dropped_parts!].sort(),
-          })),
-        ),
+      compareBundleField(
+        'installed_set',
+        run.plugin_installations.map((receipt) => ({
+          plugin: receipt.plugin,
+          marketplace: receipt.marketplace,
+          version: receipt.version,
+          source_kind: receipt.source.kind,
+          installed_tree: receipt.installed_tree,
+        })),
       );
+      for (const [index, receipt] of run.plugin_installations.entries()) {
+        compareBundleField(`${index}.source.path`, receipt.source.path);
+        if (receipt.source.kind !== 'archive') {
+          compareBundleField(`${index}.source.commit`, receipt.source.commit);
+        }
+        compareBundleField(
+          `${index}.dropped_parts`,
+          receipt.dropped_parts === undefined
+            ? undefined
+            : [...receipt.dropped_parts].sort(),
+        );
+      }
     }
     return {
       treatment,
-      status: identities.size > 1 ? 'different' : unknown ? 'unknown' : 'same',
+      status: different ? 'different' : unknown ? 'unknown' : 'same',
       selection_indices: group.map((run) => run.selection_index),
     };
   });
