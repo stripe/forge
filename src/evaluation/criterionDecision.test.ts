@@ -120,30 +120,101 @@ describe('criterion decisions', () => {
     }
   });
 
-  it('resolves exact and near ties deterministically but rejects a distinctly non-maximum choice', () => {
-    for (const probabilities of [
-      { met: 0.5, not_met: 0.5, insufficient_evidence: 0 },
+  it.each([
+    ['not_met', { met: 0.5, not_met: 0.5, insufficient_evidence: 0 }],
+    ['not_met', { met: 0.4, not_met: 0.4, insufficient_evidence: 0.2 }],
+    ['met', { met: 0.5, not_met: 0.5, insufficient_evidence: 0 }],
+    ['met', { met: 0.4, not_met: 0.4, insufficient_evidence: 0.2 }],
+    [
+      'insufficient_evidence',
+      { met: 0.5, not_met: 0, insufficient_evidence: 0.5 },
+    ],
+    [
+      'not_met',
       { met: 0.5000001, not_met: 0.4999999, insufficient_evidence: 0 },
-    ]) {
+    ],
+    ['met', { met: 0.4999999, not_met: 0.5000001, insufficient_evidence: 0 }],
+    [
+      'insufficient_evidence',
+      { met: 0.5000001, not_met: 0, insufficient_evidence: 0.4999999 },
+    ],
+    [
+      'not_met',
+      { met: 0.49, not_met: 0.4899995, insufficient_evidence: 0.0000005 },
+    ],
+    [
+      'not_met',
+      { met: 0.51, not_met: 0.509999, insufficient_evidence: 0.000001 },
+    ],
+  ] as const)(
+    'keeps the reported %s choice at a tie or near tie: %j',
+    (choice, probabilities) => {
       const result = parseCriterionJudgment(
-        JSON.stringify(judgment('not_met', probabilities)),
+        JSON.stringify(judgment(choice, probabilities)),
         'Answers.',
       );
-      assert.equal(result.decision?.choice, 'met');
-      assert.equal(result.passed, true);
-    }
-    const invalid = parseCriterionJudgment(
-      JSON.stringify(
-        judgment('not_met', {
-          met: 0.8,
-          not_met: 0.2,
-          insufficient_evidence: 0,
-        }),
-      ),
-      'Answers.',
-    );
-    assert.equal(invalid.error?.reason, 'choice_not_argmax');
-  });
+      assert.equal(result.decision?.choice, choice);
+      assert.equal(result.passed, choice === 'met');
+      const evaluation = scoreEvaluation([result], []);
+      assert.equal(evaluation.score, choice === 'met' ? 1 : 0);
+      assert.deepEqual(
+        parseEvaluationResult(JSON.parse(serializeCanonicalJson(evaluation))),
+        evaluation,
+      );
+    },
+  );
+
+  it.each([
+    ['not_met', { met: 0.8, not_met: 0.2, insufficient_evidence: 0 }],
+    ['met', { met: 0.2, not_met: 0.8, insufficient_evidence: 0 }],
+    [
+      'insufficient_evidence',
+      { met: 0.8, not_met: 0, insufficient_evidence: 0.2 },
+    ],
+    ['not_met', { met: 0.500001, not_met: 0.499999, insufficient_evidence: 0 }],
+    [
+      'not_met',
+      { met: 0.49, not_met: 0.489999, insufficient_evidence: 0.000001 },
+    ],
+  ] as const)(
+    'rejects a clearly non-maximum %s choice without replacing it: %j',
+    (choice, probabilities) => {
+      const result = parseCriterionJudgment(
+        JSON.stringify(judgment(choice, probabilities)),
+        'Answers.',
+      );
+      assert.equal(result.passed, null);
+      assert.equal(result.decision, undefined);
+      assert.equal(result.error?.reason, 'choice_not_argmax');
+      const valid = parseCriterionJudgment(
+        JSON.stringify(criterionJudgment(false)),
+        'Answers.',
+      );
+      assert.ok(valid.passed !== null);
+      assert.ok(valid.decision);
+      const sum = Object.values(probabilities).reduce<number>(
+        (total, p) => total + p,
+        0,
+      );
+      const normalized = {
+        met: probabilities.met / sum,
+        not_met: probabilities.not_met / sum,
+        insufficient_evidence: probabilities.insufficient_evidence / sum,
+      };
+      const forged = {
+        ...valid,
+        passed: choice === 'met',
+        decision: {
+          ...valid.decision,
+          choice,
+          probabilities: normalized,
+          confidence: Math.max(...Object.values(normalized)),
+          thresholded_outcome: 'insufficient_evidence' as const,
+        },
+      };
+      assert.throws(() => parseEvaluationResult(scoreEvaluation([forged], [])));
+    },
+  );
 
   it('stores fixed rejection reasons without caller data', () => {
     const answer = criterionJudgment().answers.criterion;

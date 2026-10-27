@@ -47,7 +47,8 @@ export function choiceDistributionIsValid(
     Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) <=
       DECISION_PROBABILITY_TOLERANCE &&
     Object.hasOwn(answer.probabilities, answer.choice) &&
-    answer.probabilities[answer.choice] === maximum &&
+    maximum - answer.probabilities[answer.choice]! <=
+      DECISION_PROBABILITY_TOLERANCE &&
     Math.abs(answer.confidence - maximum) <= DECISION_PROBABILITY_TOLERANCE
   );
 }
@@ -96,11 +97,11 @@ function parseChoiceAnswer(
   const sum = values.reduce((total, p) => total + p, 0);
   if (Math.abs(sum - 1) > DECISION_PROBABILITY_SUM_TOLERANCE + Number.EPSILON)
     throw new InvalidDecisionResponseError('probabilities_sum');
-  const maximum = Math.max(...values);
-  if (
-    maximum - (weights[value.choice] as number) >
-    DECISION_PROBABILITY_TOLERANCE
-  )
+  const probabilities = Object.fromEntries(
+    options.map((option, index) => [option, values[index]! / sum]),
+  );
+  const maximum = Math.max(...Object.values(probabilities));
+  if (maximum - probabilities[value.choice]! > DECISION_PROBABILITY_TOLERANCE)
     throw new InvalidDecisionResponseError('choice_not_argmax');
   const explanation = z
     .string()
@@ -110,15 +111,11 @@ function parseChoiceAnswer(
     .safeParse(value.explanation);
   if (!explanation.success)
     throw new InvalidDecisionResponseError('explanation');
-  // Declare-order tie breaking is stable, including a reported near-maximum choice.
-  const choice = options[values.indexOf(maximum)]!;
   return {
     type: 'choice',
-    choice,
-    probabilities: Object.fromEntries(
-      options.map((option, index) => [option, values[index]! / sum]),
-    ),
-    confidence: maximum / sum,
+    choice: value.choice,
+    probabilities,
+    confidence: maximum,
     explanation: explanation.data,
   };
 }

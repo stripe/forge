@@ -1454,13 +1454,15 @@ question ID `criterion` and these options:
 
 Local validation requires exactly the declared options and finite probabilities
 in [0, 1]. Sums from 0.98 through 1.02 are accepted and normalized to 1; larger
-errors are rejected. The selected choice must be a maximum or within 0.000001
-of one. Accepted ties and near ties resolve to the first actual maximum in
-question option order. Typed decision-model answers are checked through the
-same rule, and their confidence is recomputed. Saved distributions use a
-0.000001 numerical tolerance and must agree with stored confidence. Invalid
-answers use the malformed-output retry budget and record a fixed rejection
-`reason`, without caller IDs, field paths, or received values.
+errors are rejected. After normalization, the reported choice must be a maximum
+or within 0.000001 of one. Forge keeps that choice, including exact and near
+ties, and never substitutes another option or favors `met`. A clearly
+non-maximal choice is rejected with `choice_not_argmax`. Typed decision-model
+answers use the same rule, and their confidence is recomputed. Saved decisions
+use the same choice tolerance; their distributions must sum to 1 within
+0.000001 and agree with stored confidence. Invalid answers use the
+malformed-output retry budget and record a fixed rejection `reason`, without
+caller IDs, field paths, or received values.
 
 New criterion results record `decision` with the canonical answer fields
 except explanation (kept in the existing `explanation`), plus
