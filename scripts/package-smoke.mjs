@@ -323,6 +323,10 @@ try {
       const report = JSON.parse(await fs.readFile(command.report, 'utf8'));
       assert.equal(experiment.parseExperimentRunReport(report).summary.passed, 2);
       assert.equal(Object.keys(report.summary)[0], 'headline');
+      assert.deepEqual(report.summary.mean_confidence, {mean: null, evaluations: 0});
+      assert.deepEqual(report.summary.expected_score, {experimental: true, mean: null, evaluations: 0});
+      assert.equal(report.runs[0].evaluation.mean_confidence, null);
+      assert.equal(report.runs[0].evaluation.expected_score, null);
       assert.deepEqual(report.summary.headline, {view: 'must_should_average', score: 0, evaluations: 2});
       assert.deepEqual(report.summary.criterion_scores, {
         required: {strict: null, avg: null, evaluations: 0},

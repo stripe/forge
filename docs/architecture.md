@@ -1557,6 +1557,28 @@ the named view first. `regrade.json` and `RegradeExperimentSummaryV1` have the
 same optional headline. Report parsing verifies present headlines against run
 rows; summary-only reports can check their counts but cannot rebuild the mean.
 
+Report evaluations add optional `mean_confidence: number | null` and
+`expected_score: number | null`. They are derived from saved decisions on valid
+MUST and SHOULD judgments. The first averages their derived confidences; the
+second averages P(met), the expected contribution of a pass worth 1. Both use
+only criteria with a decision; OPTIONAL criteria, judge errors and older
+judgments without decisions are excluded. Insufficient-evidence choices still
+contribute P(met). No eligible decisions gives nulls. `EvaluationResultV1`
+keeps the source decisions without storing these report projections again.
+
+Summary and case/configuration statistics add optional
+`mean_confidence: {mean, evaluations}` and
+`expected_score: {experimental: true, mean, evaluations}`. Each mean gives one
+vote to each completed evaluation with a non-null value. Zero votes gives a
+null mean. Expected score is an experimental view of stated probabilities;
+it does not replace the choice-based headline or establish calibration.
+Report and regrade JSON keep the headline first. Regrade invocation summaries
+also carry these optional statistics. Old reports without the fields retain
+their shape. Present aggregates verify against run rows; summary-only reports
+check availability and count bounds without reconstructing means. Run rows
+check ranges and availability but cannot recreate means without the saved
+criterion decisions. All existing scores, statuses and plan digests stay the same.
+
 The numeric score is passes divided by valid MUST and SHOULD judgments, with
 equal weight per criterion. `judging_criteria_passed`, `judging_criteria_total`,
 and `judging_criteria_errored` count those two groups; the denominator is total

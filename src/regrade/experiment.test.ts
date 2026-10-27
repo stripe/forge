@@ -53,6 +53,12 @@ describe('regradeExperimentRun', () => {
       first.dependencies,
     );
     assert.equal(summary.format, REGRADE_SUMMARY_FORMAT);
+    assert.deepEqual(summary.mean_confidence, { mean: 1, evaluations: 1 });
+    assert.deepEqual(summary.expected_score, {
+      experimental: true,
+      mean: 0,
+      evaluations: 1,
+    });
     assert.equal(summary.regraded, 1);
     assert.equal(summary.reused, 0);
     assert.deepEqual(summary.headline, {
@@ -73,6 +79,10 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(report.summary.completed, 1);
     assert.equal(report.runs[0]!.evaluation!.score, 0);
+    assert.equal(report.runs[0]!.evaluation!.mean_confidence, 1);
+    assert.equal(report.runs[0]!.evaluation!.expected_score, 0);
+    assert.deepEqual(report.summary.expected_score, summary.expected_score);
+    assert.deepEqual(savedSummary.expected_score, summary.expected_score);
     assert.equal(
       report.runs[0]!.result_path,
       'runs/regrade-source/result.json',

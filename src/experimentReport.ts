@@ -35,6 +35,12 @@ const headlineSchema = z
     (headline) => (headline.score === null) === (headline.evaluations === 0),
     'Headline score is unavailable exactly when no evaluations were counted.',
   );
+const decisionMeanSchema = z
+  .object({ mean: ratio.nullable(), evaluations: count })
+  .strict();
+const expectedScoreStatisticsSchema = decisionMeanSchema.extend({
+  experimental: z.literal(true),
+});
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const selectionSchema = z.unknown().transform(parseRunSelection);
 const criterionCountsSchema = z
@@ -83,6 +89,11 @@ const evaluationSchema = z
   .object({
     status: z.enum(['passed', 'partial', 'failed', 'judge_error']),
     score: ratio.nullable(),
+    mean_confidence: ratio.nullable().optional(),
+    expected_score: ratio
+      .nullable()
+      .optional()
+      .describe('Experimental mean probability of met over scored decisions.'),
     judging_criteria_passed: count,
     judging_criteria_total: count,
     criteria_by_requirement: criteriaByRequirementSchema,
@@ -207,6 +218,19 @@ const evaluationSchema = z
       });
       return;
     }
+    if (
+      (judged === 0 &&
+        (value.mean_confidence != null || value.expected_score != null)) ||
+      (value.mean_confidence !== undefined &&
+        value.expected_score !== undefined &&
+        (value.mean_confidence === null) !== (value.expected_score === null))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Decision means require valid scored judgments and matching availability.',
+      });
+    }
     const score =
       value.judging_criteria_total === 0
         ? 0
@@ -277,6 +301,8 @@ const runSchema = z
 const statisticsSchema = z
   .object({
     headline: headlineSchema.optional(),
+    mean_confidence: decisionMeanSchema.optional(),
+    expected_score: expectedScoreStatisticsSchema.optional(),
     rate_limit_wait_ms: count.optional(),
     selections: count,
     completed: count,
@@ -377,7 +403,20 @@ export function summarizeReportEvaluation(
   const scoredChecks = evaluation.checks.filter(
     (check) => check.requirement_level !== 'OPTIONAL',
   );
+  const decisions = evaluation.judging_criteria.flatMap((criterion) =>
+    criterion.requirement_level !== 'OPTIONAL' &&
+    criterion.passed !== null &&
+    criterion.decision !== undefined
+      ? [criterion.decision]
+      : [],
+  );
   return {
+    mean_confidence: summarizeReportMean(
+      decisions.map((decision) => decision.confidence),
+    ).mean,
+    expected_score: summarizeReportMean(
+      decisions.map((decision) => decision.probabilities.met),
+    ).mean,
     status: evaluation.status,
     score: evaluation.score,
     judging_criteria_passed: evaluation.judging_criteria_passed,
@@ -450,6 +489,22 @@ export function parseExperimentRunReport(
   const forge = parseForgeBuildIdentity(header.forge);
   assertCompatibleForgeVersion(forge.version);
   const report = reportSchema.parse(input);
+  for (const statistics of [report.summary, ...report.cases]) {
+    for (const mean of [
+      statistics.mean_confidence,
+      statistics.expected_score,
+    ]) {
+      if (
+        mean !== undefined &&
+        ((mean.mean === null) !== (mean.evaluations === 0) ||
+          mean.evaluations > statistics.completed ||
+          mean.evaluations > statistics.judging_score.evaluations)
+      )
+        throw new Error(
+          'Decision mean availability or evaluation counts disagree.',
+        );
+    }
+  }
   if (report.runs.some((run, index) => run.selection_index !== index)) {
     throw new Error(
       'Report selection indices must be contiguous and zero-based.',
@@ -495,9 +550,15 @@ export function parseExperimentRunReport(
       'Report details must be present or explicitly unavailable.',
     );
   const aggregate = aggregateRuns(report.runs);
-  if (report.summary.headline === undefined) delete aggregate.summary.headline;
-  for (const [index, group] of aggregate.cases.entries()) {
-    if (report.cases[index]?.headline === undefined) delete group.headline;
+  for (const field of [
+    'headline',
+    'mean_confidence',
+    'expected_score',
+  ] as const) {
+    if (report.summary[field] === undefined) delete aggregate.summary[field];
+    for (const [index, group] of aggregate.cases.entries()) {
+      if (report.cases[index]?.[field] === undefined) delete group[field];
+    }
   }
   if (
     serializeCanonicalJson(report.summary) !==
@@ -555,13 +616,19 @@ function reportBody(report: ExperimentRunReportV1): string {
 export function summarizeReportHeadline(
   scores: readonly (number | null)[],
 ): z.infer<typeof headlineSchema> {
-  const counted = scores.filter((score) => score !== null);
+  const { mean, evaluations } = summarizeReportMean(scores);
+  return { view: HEADLINE_VIEW, score: mean, evaluations };
+}
+
+function summarizeReportMean(
+  values: readonly (number | null | undefined)[],
+): z.infer<typeof decisionMeanSchema> {
+  const counted = values.filter((value) => value != null);
   return {
-    view: HEADLINE_VIEW,
-    score:
+    mean:
       counted.length === 0
         ? null
-        : counted.reduce((sum, score) => sum + score, 0) / counted.length,
+        : counted.reduce((sum, value) => sum + value, 0) / counted.length,
     evaluations: counted.length,
   };
 }
@@ -737,6 +804,13 @@ function statistics(
         run.state === 'completed' ? [run.evaluation!.score] : [],
       ),
     ),
+    mean_confidence: summarizeReportMean(
+      runs.map((run) => run.evaluation?.mean_confidence),
+    ),
+    expected_score: {
+      experimental: true,
+      ...summarizeReportMean(runs.map((run) => run.evaluation?.expected_score)),
+    },
     ...(runs.some((run) => run.rate_limit_wait_ms !== undefined)
       ? {
           rate_limit_wait_ms: runs.reduce(

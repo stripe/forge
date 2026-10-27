@@ -25,6 +25,8 @@ export const REGRADE_SUMMARY_FORMAT = 'forge-regrade-experiment-v1' as const;
 /** Outcome of regrading one saved experiment run into a separate directory. */
 export interface RegradeExperimentSummaryV1 {
   readonly headline?: ExperimentRunReportStatisticsV1['headline'];
+  readonly mean_confidence?: ExperimentRunReportStatisticsV1['mean_confidence'];
+  readonly expected_score?: ExperimentRunReportStatisticsV1['expected_score'];
   readonly format: typeof REGRADE_SUMMARY_FORMAT;
   readonly experiment_run_id: string;
   /** Source experiment run; report rows' `result_path` values are relative to it. */
@@ -246,6 +248,8 @@ export async function regradeExperimentRun(
     [...outcomes.values()].filter((outcome) => outcome.kind === kind).length;
   const summary: RegradeExperimentSummaryV1 = Object.freeze({
     headline: Object.freeze({ ...report.summary.headline! }),
+    mean_confidence: Object.freeze({ ...report.summary.mean_confidence! }),
+    expected_score: Object.freeze({ ...report.summary.expected_score! }),
     format: REGRADE_SUMMARY_FORMAT,
     experiment_run_id: inspection.experiment_run_id,
     source_location: source,

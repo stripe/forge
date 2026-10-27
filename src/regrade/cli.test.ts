@@ -81,6 +81,12 @@ describe('forge regrade', () => {
       score: 1,
       evaluations: 1,
     });
+    assert.deepEqual(summary.mean_confidence, { mean: 1, evaluations: 1 });
+    assert.deepEqual(summary.expected_score, {
+      experimental: true,
+      mean: 1,
+      evaluations: 1,
+    });
     assert.equal(summary.regraded, 1);
     assert.deepEqual(summary.judge, {
       provider: 'anthropic',

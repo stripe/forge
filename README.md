@@ -518,6 +518,22 @@ counts as not passed inside the headline. For met and not-met choices,
 probability. This count does not change the score. Judge errors remain separate.
 See the [decision rule](docs/architecture.md#criterion-judging).
 
+Each run's report evaluation also shows `mean_confidence` and experimental
+`expected_score`. They average the saved MUST and SHOULD decisions: confidence
+is the largest probability, and Expected score is P(met), the expected value
+of a pass worth 1. A choice of `insufficient_evidence` contributes its P(met).
+Judge errors, OPTIONAL criteria and judgments without decisions do not count.
+Both means are `null` when no scored criterion has a decision, including older
+results and all-error evaluations.
+
+The summary and each case/configuration group average those per-evaluation
+values, with one vote per evaluation that has a value. Each field has `mean`
+and `evaluations`; `expected_score` also has `experimental: true`. A zero count
+means a null mean. Expected score describes the judge's stated chances; it is
+an experiment, not a claim that those chances match real outcomes. The headline
+uses actual choice-based saved scores and stays first. These added views do
+not change scoring. Regrade reports derive them from the saved regrade decisions.
+
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
@@ -526,7 +542,7 @@ it also has per-case/configuration `cases` and one `runs` row per saved selectio
 With optional `jq`:
 
 ```sh
-jq '.cases[] | {headline, case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
+jq '.cases[] | {headline, mean_confidence, expected_score, case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 

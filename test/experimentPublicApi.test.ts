@@ -250,6 +250,12 @@ describe('experiment public entry points', () => {
             evaluations: number;
           }
         | undefined;
+      meanConfidence: { mean: number | null; evaluations: number } | undefined;
+      expectedScore:
+        | { experimental: true; mean: number | null; evaluations: number }
+        | undefined;
+      evaluationConfidence: number | null | undefined;
+      evaluationExpectedScore: number | null | undefined;
       evaluation: ExperimentRunReportEvaluationV1 | null;
       requiredStrict: number | null;
       requiredAvg: number | null;
@@ -264,6 +270,10 @@ describe('experiment public entry points', () => {
       runs: report.runs,
       summary: report.summary,
       headline: report.summary.headline,
+      meanConfidence: report.summary.mean_confidence,
+      expectedScore: report.summary.expected_score,
+      evaluationConfidence: report.runs[0]?.evaluation?.mean_confidence,
+      evaluationExpectedScore: report.runs[0]?.evaluation?.expected_score,
       evaluation: report.runs[0]?.evaluation ?? null,
       requiredStrict: report.summary.criterion_scores.required.strict,
       requiredAvg: report.summary.criterion_scores.required.avg,
