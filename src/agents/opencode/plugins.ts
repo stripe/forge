@@ -22,6 +22,10 @@ import {
 const MAX_BYTES = 8 * 1024 * 1024;
 const SOURCE_URL = 'https://github.com/stripe/ai.git';
 const CATALOG_PATH = '.claude-plugin/marketplace.json';
+const EXCLUDED_BEHAVIOR_KINDS: NonNullable<
+  OpenCodeBundleInstallationReceipt['dropped_parts']
+> = ['hooks', 'commands', 'agents'];
+Object.freeze(EXCLUDED_BEHAVIOR_KINDS);
 
 /** The same catalog pin as Codex, realized using OpenCode's native skills and MCP config. */
 export function createOpenCodePluginInstaller(options: {
@@ -167,6 +171,7 @@ export function createOpenCodePluginInstaller(options: {
             ...selected,
             marketplace_commit: catalogCommit,
             installation: 'opencode-bundle',
+            dropped_parts: EXCLUDED_BEHAVIOR_KINDS,
             version,
             source: Object.freeze({
               kind: 'git-subdir',

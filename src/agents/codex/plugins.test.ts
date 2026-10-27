@@ -344,7 +344,12 @@ describe('Codex native plugin installer', () => {
     const receipt = await test.install();
     assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
     assert.equal(receipt.marketplace_commit, commit);
-    assert.deepEqual(receipt.source, { kind: 'marketplace-path' });
+    assert.deepEqual(receipt.dropped_parts, []);
+    assert.deepEqual(receipt.source, {
+      kind: 'marketplace-path',
+      path: 'plugins/fixture',
+      commit,
+    });
     assert.equal(receipt.installed_tree.file_count, 1);
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
     assert.ok(Object.isFrozen(receipt));
@@ -378,7 +383,10 @@ describe('Codex native plugin installer', () => {
         receipt.source.kind,
         typeof options.source === 'string' ? 'marketplace-path' : 'git-subdir',
       );
-      assert.equal(receipt.source.commit, undefined);
+      assert.equal(
+        receipt.source.commit,
+        typeof options.source === 'string' ? commit : undefined,
+      );
     }
   });
 
@@ -394,7 +402,7 @@ describe('Codex native plugin installer', () => {
     const receipt = await fixture({
       source: { source: 'url', url: 'https://github.com/example/plugin.git' },
     }).install();
-    assert.deepEqual(receipt.source, { kind: 'url' });
+    assert.deepEqual(receipt.source, { kind: 'url', path: '.' });
   });
 
   it('passes catalog Git pins to the native installer and verifies its reported selector', async () => {
@@ -407,7 +415,11 @@ describe('Codex native plugin installer', () => {
     };
     const receipt = await fixture({ source }).install();
     // Native source metadata reports the requested pin, not a resolved commit.
-    assert.deepEqual(receipt.source, { kind: 'git-subdir' });
+    assert.deepEqual(receipt.source, {
+      kind: 'git-subdir',
+      path: 'plugin',
+      commit,
+    });
     for (const sha of [undefined, 'b'.repeat(40)]) {
       await assert.rejects(
         fixture({

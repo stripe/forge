@@ -29,9 +29,13 @@ interface PluginInstallationReceiptBase extends JsonObject {
   readonly version: string;
   readonly source: JsonObject & {
     readonly kind: AgentPluginSourceKind;
-    /** Git revision reported by the native installer, when available. */
+    /** Reported Git revision or selected full source pin, when available. */
     readonly commit?: string;
+    /** Distribution path within the source; `.` denotes its root. */
+    readonly path?: string;
   };
+  /** Behavior kinds excluded by the adapter's distribution policy. */
+  readonly dropped_parts?: ('hooks' | 'commands' | 'agents')[];
   readonly installed_tree: JsonObject & {
     readonly format: 'forge-plugin-tree-v1';
     readonly sha256: Sha256Digest;

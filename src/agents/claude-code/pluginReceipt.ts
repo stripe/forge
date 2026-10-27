@@ -5,13 +5,19 @@ export { inspectInstalledPluginTree } from '../pluginTree.ts';
 export function pluginSourceReceipt(
   source: unknown,
   resolvedCommit: string | undefined,
+  marketplaceCommit: string,
 ): AgentPluginInstallationReceipt['source'] {
   if (typeof source === 'string')
-    return Object.freeze({ kind: 'marketplace-path' });
+    return Object.freeze({
+      kind: 'marketplace-path',
+      commit: marketplaceCommit,
+      path: source.slice(2),
+    });
   if (!isPlainRecord(source) || typeof source.source !== 'string') {
     throw new Error('Marketplace plugin source is malformed.');
   }
-  if (source.source === 'archive') return Object.freeze({ kind: 'archive' });
+  if (source.source === 'archive')
+    return Object.freeze({ kind: 'archive', path: '.' });
   if (
     source.source === 'github' ||
     source.source === 'url' ||
@@ -19,6 +25,7 @@ export function pluginSourceReceipt(
   ) {
     return Object.freeze({
       kind: source.source,
+      path: typeof source.path === 'string' ? source.path : '.',
       ...(resolvedCommit === undefined ? {} : { commit: resolvedCommit }),
     });
   }

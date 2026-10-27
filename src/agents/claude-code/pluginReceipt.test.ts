@@ -6,6 +6,7 @@ import type {
   WorkspaceEntry,
 } from '../../contracts/runtime.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
+import { fingerprintInstalledPluginTree } from '../pluginTree.ts';
 import { inspectInstalledPluginTree } from './pluginReceipt.ts';
 
 describe('Claude installed plugin snapshots', () => {
@@ -45,6 +46,36 @@ describe('Claude installed plugin snapshots', () => {
       file_count: 3,
       size_bytes: 36,
     });
+  });
+
+  it('fingerprints a pure installed snapshot without including its location or other state', async () => {
+    const entry = {
+      kind: 'file' as const,
+      path: 'skill.md',
+      sha256:
+        'sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881',
+      size_bytes: 1,
+    };
+    const fingerprint = fingerprintInstalledPluginTree([entry]);
+    const state = createMemoryWorkspace({
+      'installed/skill.md': 'x',
+      'source/unused.md': 'not installed',
+      'other/skill.md': 'x',
+    });
+    assert.deepEqual(
+      await inspectInstalledPluginTree(state.mutable, 'installed', signal),
+      fingerprint,
+    );
+    assert.deepEqual(
+      await inspectInstalledPluginTree(state.mutable, 'other', signal),
+      fingerprint,
+    );
+    assert.equal(fingerprint.file_count, 1);
+    assert.equal(fingerprint.size_bytes, 1);
+    assert.notEqual(
+      fingerprintInstalledPluginTree([{ ...entry, path: 'renamed.md' }]).sha256,
+      fingerprint.sha256,
+    );
   });
 
   it('distinguishes different installed contents under the same version', async () => {
@@ -131,14 +162,16 @@ describe('Claude installed plugin snapshots', () => {
         /unsupported filesystem entry/,
       );
     }
-    await assert.rejects(
-      inspectInstalledPluginTree(
-        inventory([{ path: 'another/file', kind: 'file', size: 1 }]),
-        'plugin',
-        signal,
-      ),
-      /invalid path/,
-    );
+    for (const path of ['another/file', 'plugin/../outside', 'plugin/a//b']) {
+      await assert.rejects(
+        inspectInstalledPluginTree(
+          inventory([{ path, kind: 'file', size: 1 }]),
+          'plugin',
+          signal,
+        ),
+        /invalid path/,
+      );
+    }
   });
 
   it('enforces file and aggregate byte limits from the inventory', async () => {

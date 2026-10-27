@@ -220,7 +220,12 @@ describe('Claude plugin installer', () => {
       marketplace_commit: CATALOG_COMMIT,
       native_plugin_id: nativeId,
       version: LATEST_VERSION,
-      source: { kind: 'git-subdir', commit: PLUGIN_COMMIT },
+      source: {
+        kind: 'git-subdir',
+        commit: PLUGIN_COMMIT,
+        path: 'providers/claude/plugin',
+      },
+      dropped_parts: [],
       installed_tree: {
         format: 'forge-plugin-tree-v1',
         sha256: receipt.installed_tree.sha256,
@@ -413,8 +418,12 @@ describe('Claude plugin installer', () => {
       assert.deepEqual(
         receipt.source,
         typeof candidate.source === 'string'
-          ? { kind: 'marketplace-path' }
-          : { kind: 'archive' },
+          ? {
+              kind: 'marketplace-path',
+              path: 'plugins/formatter',
+              commit: CATALOG_COMMIT,
+            }
+          : { kind: 'archive', path: '.' },
       );
     }
   });
@@ -464,7 +473,7 @@ describe('Claude plugin installer', () => {
     const receipt = await installerPreflight().install(
       installContext(state, harness.commands),
     );
-    assert.deepEqual(receipt.source, { kind: 'github' });
+    assert.deepEqual(receipt.source, { kind: 'github', path: '.' });
   });
 
   it('records the native source revision when an unpinned Git source reports one', async () => {
@@ -477,7 +486,7 @@ describe('Claude plugin installer', () => {
     const receipt = await installerPreflight().install(
       installContext(state, harness.commands),
     );
-    assert.deepEqual(receipt.source, { kind: 'github', commit });
+    assert.deepEqual(receipt.source, { kind: 'github', commit, path: '.' });
   });
 
   it('rejects a malformed source revision reported by an unpinned Git installation', async () => {

@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { ForgeComposition } from './contracts/composition.ts';
+import type { AgentPluginInstallationReceipt } from './contracts/plugin.ts';
 import type { ForgeEngine } from './engine.ts';
 import {
   executionDiagnostic,
@@ -573,6 +574,9 @@ export async function runExperiment(
                 inspected.artifact === null
                   ? null
                   : `runs/${last.run_id}/result.json`,
+              ...(inspected.pluginInstallations === undefined
+                ? {}
+                : { plugin_installations: inspected.pluginInstallations }),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -607,6 +611,7 @@ interface AttemptInspection {
   attempt: SettledAttempt;
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
+  pluginInstallations?: readonly AgentPluginInstallationReceipt[];
 }
 interface CachedInspection {
   identity: string;
@@ -653,6 +658,9 @@ async function inspectAttempt(
     return {
       attempt,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(completed.result.plugin_installations === undefined
+        ? {}
+        : { pluginInstallations: completed.result.plugin_installations }),
       artifact: {
         location,
         evaluation: {

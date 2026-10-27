@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseAgentPluginInstallationReceipt } from './contracts/pluginReceipt.ts';
 
 import {
   experimentRunDiagnosticSchema,
@@ -148,6 +149,11 @@ const runSchema = z
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
+    plugin_installations: z
+      .array(z.unknown().transform(parseAgentPluginInstallationReceipt))
+      .max(2_000)
+      .readonly()
+      .optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -157,6 +163,7 @@ const runSchema = z
       pending !== (run.run_id === null) ||
       pending !== (run.attempt_count === 0) ||
       (pending && run.result_path !== null) ||
+      (run.result_path === null && run.plugin_installations !== undefined) ||
       completed !== (run.evaluation !== null) ||
       (run.state === 'errored') !== (run.error_code !== null) ||
       (run.state !== 'errored' && run.diagnostic !== undefined) ||
@@ -219,12 +226,23 @@ const coordinates = z
   })
   .strict();
 const caseSchema = coordinates.merge(statisticsSchema);
+const pluginBundleComparisonSchema = z
+  .object({
+    treatment: z.string().min(1).max(4096),
+    status: z.enum(['same', 'different', 'unknown']),
+    selection_indices: z.array(count).min(1).max(100_000),
+  })
+  .strict();
 const reportSchema = z
   .object({
     forge: z.unknown().transform(parseForgeBuildIdentity),
     experiment_run_id: experimentRunIdSchema,
     generated_at: z.string().datetime(),
     checkpoint_sha256: digest,
+    plugin_bundle_comparisons: z
+      .array(pluginBundleComparisonSchema)
+      .max(100_000)
+      .optional(),
     summary: statisticsSchema,
     cases: z.array(caseSchema).min(1).max(100_000),
     runs: z.array(runSchema).min(1).max(100_000),
@@ -297,6 +315,15 @@ export function parseExperimentRunReport(
   ) {
     throw new Error('Report statistics do not match its run rows.');
   }
+  if (
+    report.plugin_bundle_comparisons !== undefined &&
+    serializeCanonicalJson(report.plugin_bundle_comparisons) !==
+      serializeCanonicalJson(comparePluginBundles(report.runs))
+  ) {
+    throw new Error(
+      'Report plugin bundle comparisons do not match its run rows.',
+    );
+  }
   assertReportBytes(serializeCanonicalJson(report));
   return report;
 }
@@ -314,6 +341,7 @@ export function buildExperimentRunReport(input: {
     generated_at: input.generatedAt,
     checkpoint_sha256: sha256Digest(input.checkpointBody),
     ...aggregateRuns(input.runs),
+    plugin_bundle_comparisons: comparePluginBundles(input.runs),
     runs: input.runs,
   });
 }
@@ -361,6 +389,56 @@ function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
       ...statistics(group.runs),
     })),
   };
+}
+
+/** Compare realized treatments across cases, repetitions, models, and adapters. */
+function comparePluginBundles(
+  runs: readonly ExperimentRunReportRunV1[],
+): z.infer<typeof pluginBundleComparisonSchema>[] {
+  const treatments = new Map<string, ExperimentRunReportRunV1[]>();
+  for (const run of runs) {
+    if (run.result_path === null) continue;
+    const group = treatments.get(run.selection.treatment) ?? [];
+    group.push(run);
+    treatments.set(run.selection.treatment, group);
+  }
+  return [...treatments].map(([treatment, group]) => {
+    const identities = new Set<string>();
+    let unknown = false;
+    for (const run of group) {
+      if (run.plugin_installations === undefined) {
+        unknown = true;
+        continue;
+      }
+      if (
+        run.plugin_installations.some(
+          (receipt) =>
+            receipt.source.path === undefined ||
+            receipt.dropped_parts === undefined,
+        )
+      ) {
+        unknown = true;
+        continue;
+      }
+      identities.add(
+        serializeCanonicalJson(
+          run.plugin_installations.map((receipt) => ({
+            plugin: receipt.plugin,
+            marketplace: receipt.marketplace,
+            version: receipt.version,
+            source: receipt.source,
+            installed_tree: receipt.installed_tree,
+            dropped_parts: [...receipt.dropped_parts!].sort(),
+          })),
+        ),
+      );
+    }
+    return {
+      treatment,
+      status: identities.size > 1 ? 'different' : unknown ? 'unknown' : 'same',
+      selection_indices: group.map((run) => run.selection_index),
+    };
+  });
 }
 
 function statistics(

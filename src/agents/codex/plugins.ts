@@ -202,7 +202,7 @@ export function createCodexPluginInstaller(options: {
           ) {
             fail('unsupported plugin dependencies');
           }
-          const source = validatedSource(entry.source, marketplacePath);
+          const source = validatedSource(entry.source, marketplacePath, commit);
           if (
             entry.version !== undefined &&
             (typeof entry.version !== 'string' || !isSafeVersion(entry.version))
@@ -296,7 +296,8 @@ export function createCodexPluginInstaller(options: {
             marketplace_commit: commit,
             native_plugin_id: selected.plugin,
             version: installed.version,
-            source: Object.freeze({ kind: source.kind }),
+            source: source.receipt,
+            dropped_parts: [],
             installed_tree: installedTree,
             ...(connections?.length
               ? {
@@ -316,9 +317,10 @@ export function createCodexPluginInstaller(options: {
 function validatedSource(
   value: unknown,
   marketplacePath: string,
+  marketplaceCommit: string,
 ): {
   native: Record<string, unknown>;
-  kind: AgentPluginInstallationReceipt['source']['kind'];
+  receipt: AgentPluginInstallationReceipt['source'];
 } {
   const source =
     typeof value === 'string' ? { source: 'local', path: value } : value;
@@ -337,7 +339,11 @@ function validatedSource(
     )
       fail('marketplace plugin path');
     return {
-      kind: 'marketplace-path',
+      receipt: Object.freeze({
+        kind: 'marketplace-path',
+        path: relativePath,
+        commit: marketplaceCommit,
+      }),
       native: { source: 'local', path: `${marketplacePath}/${relativePath}` },
     };
   }
@@ -365,7 +371,11 @@ function validatedSource(
     fail('unsupported Git source');
   }
   return {
-    kind: source.source,
+    receipt: Object.freeze({
+      kind: source.source,
+      path: source.path ?? '.',
+      ...(source.sha === undefined ? {} : { commit: source.sha }),
+    }),
     native: {
       source: source.path === undefined ? 'git' : 'git-subdir',
       url: source.url,

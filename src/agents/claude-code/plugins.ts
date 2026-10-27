@@ -194,7 +194,12 @@ export function createClaudePluginInstaller(
             marketplace_commit: marketplaceCommit,
             native_plugin_id: nativePluginId,
             version: installed.version,
-            source: pluginSourceReceipt(entry.source, sourceCommit),
+            source: pluginSourceReceipt(
+              entry.source,
+              sourceCommit,
+              marketplaceCommit,
+            ),
+            dropped_parts: [],
             installed_tree: installedTree,
           });
         },
