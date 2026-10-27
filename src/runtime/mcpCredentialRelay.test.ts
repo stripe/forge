@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
+import { createConnection, type Socket } from 'node:net';
 import { afterEach, describe, it } from 'vitest';
 import { startMcpCredentialRelay } from './mcpCredentialRelay.ts';
 
@@ -11,6 +13,25 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
+function relayClock() {
+  let now = 0;
+  const timers = new Map<() => void, number>();
+  return {
+    schedule(expire: () => void, milliseconds: number) {
+      timers.set(expire, now + milliseconds);
+      return () => {
+        timers.delete(expire);
+      };
+    },
+    advance(milliseconds: number) {
+      now += milliseconds;
+      for (const [expire, due] of [...timers]) {
+        if (due <= now && timers.delete(expire)) expire();
+      }
+    },
+  };
+}
 
 async function fixture(
   handle: (request: IncomingMessage, response: ServerResponse) => void = (
@@ -115,7 +136,7 @@ describe('host MCP credential relay', () => {
       assert.equal(response.status, 401);
     }
     assert.equal(first.calls.length, 0);
-    assert.deepEqual(first.relay.counts(), { requests: 3, errors: 3 });
+    assert.deepEqual(first.relay.counts(), { requests: 0, errors: 0 });
   });
 
   it('rejects other paths, queries and methods without forwarding', async () => {
@@ -228,14 +249,14 @@ describe('host MCP credential relay', () => {
   });
 
   for (const stall of ['transport', 'body'] as const)
-    it(`enforces deadlines even when the upstream ${stall} ignores cancellation`, async () => {
-      const deadline = new AbortController();
+    it(`enforces idle limits even when the upstream ${stall} ignores cancellation`, async () => {
+      const clock = relayClock();
       let entered!: () => void;
       const started = new Promise<void>((resolve) => {
         entered = resolve;
       });
       const test = await fixture(undefined, {
-        timeoutSignal: () => deadline.signal,
+        scheduleTimeout: clock.schedule,
         fetch: async () => {
           entered();
           if (stall === 'transport') return new Promise<Response>(() => {});
@@ -254,11 +275,108 @@ describe('host MCP credential relay', () => {
       });
       await started;
       const completion = stall === 'body' ? (await pending).text() : pending;
-      deadline.abort();
+      clock.advance(60_000);
       await assert.rejects(completion);
       await test.relay.close();
       assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
     });
+
+  it('keeps streams alive beyond the idle limit while bytes arrive, then closes an idle stream', async () => {
+    const clock = relayClock();
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    const test = await fixture(undefined, {
+      scheduleTimeout: clock.schedule,
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              stream = controller;
+              controller.enqueue(Buffer.from('first'));
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    });
+    const response = await fetch(test.relay.connection.url, {
+      headers: test.headers,
+    });
+    const reader = response.body!.getReader();
+    assert.equal(Buffer.from((await reader.read()).value!).toString(), 'first');
+    for (const value of ['second', 'third']) {
+      clock.advance(50_000);
+      stream.enqueue(Buffer.from(value));
+      assert.equal(Buffer.from((await reader.read()).value!).toString(), value);
+    }
+    const stalled = reader.read();
+    clock.advance(60_000);
+    await assert.rejects(stalled);
+    await test.relay.close();
+    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+  });
+
+  it('keeps unauthenticated sockets outside the agent budget and audit counts', async () => {
+    const clock = relayClock();
+    const test = await fixture(undefined, {
+      scheduleTimeout: clock.schedule,
+      limits: { connections: 1 },
+    });
+    const { port } = new URL(test.relay.connection.url);
+    const sockets: Socket[] = [];
+    for (let index = 0; index < 32; index += 1) {
+      const socket = createConnection({
+        host: '127.0.0.1',
+        port: Number(port),
+      });
+      socket.on('error', () => {});
+      sockets.push(socket);
+      await once(socket, 'connect');
+    }
+    cleanup.push(async () => {
+      for (const socket of sockets) socket.destroy();
+    });
+    const response = await fetch(test.relay.connection.url, {
+      headers: test.headers,
+    });
+    assert.equal(await response.text(), 'ok');
+    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 0 });
+    const last = sockets.at(-1)!;
+    const closed = last.closed ? Promise.resolve() : once(last, 'close');
+    clock.advance(1_000);
+    await closed;
+  });
+
+  it('caps authenticated connections separately from request concurrency', async () => {
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const test = await fixture(() => entered(), { limits: { connections: 1 } });
+    const pending = fetch(test.relay.connection.url, { headers: test.headers });
+    const stopped = assert.rejects(pending);
+    await started;
+    const response = await fetch(test.relay.connection.url, {
+      headers: test.headers,
+    });
+    assert.equal(response.status, 503);
+    await test.relay.close();
+    await stopped;
+    assert.deepEqual(test.relay.counts(), { requests: 2, errors: 2 });
+  });
+
+  it('rejects a wildcard listener and invalid bounds before listening', async () => {
+    await assert.rejects(
+      fixture(undefined, { listenHost: '0.0.0.0' }),
+      /specific host/,
+    );
+    await assert.rejects(
+      fixture(undefined, { limits: { idleTimeoutMs: 0 } }),
+      /relay limit/,
+    );
+    await assert.rejects(
+      fixture(undefined, { limits: { idleTimeoutMs: 2 ** 32 } }),
+      /relay timeout/,
+    );
+  });
 
   it('rejects redirects even when the upstream body never finishes cancellation', async () => {
     const test = await fixture(undefined, {
@@ -277,22 +395,22 @@ describe('host MCP credential relay', () => {
     assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
   });
 
-  for (const reason of ['deadline', 'abort'] as const)
+  for (const reason of ['idle timeout', 'abort'] as const)
     it(`cancels a stalled request on ${reason} and revokes the capability on close`, async () => {
-      const deadline = new AbortController();
+      const clock = relayClock();
       let entered!: () => void;
       const started = new Promise<void>((resolve) => {
         entered = resolve;
       });
       const test = await fixture(() => entered(), {
-        timeoutSignal: () => deadline.signal,
+        scheduleTimeout: clock.schedule,
       });
       const pending = fetch(test.relay.connection.url, {
         headers: test.headers,
       });
       await started;
       if (reason === 'abort') test.controller.abort();
-      else deadline.abort();
+      else clock.advance(60_000);
       await assert.rejects(pending);
       await test.relay.close();
       await test.relay.close();

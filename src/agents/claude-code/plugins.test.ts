@@ -36,40 +36,46 @@ const distribution: PluginSelectionV1 = {
 };
 
 describe('Claude plugin installer', () => {
-  it('configures installed MCP auth before fingerprinting without sending secrets to installation', async () => {
-    const state = createMemoryWorkspace();
-    const harness = nativeCommandHarness(state);
-    const root = `cache/claude-plugins-official/stripe/${LATEST_VERSION}`;
-    await state.mutable.writeFile(
-      `${root}/.mcp.json`,
-      Buffer.from(
-        JSON.stringify({
-          mcpServers: {
-            stripe: { type: 'http', url: 'https://mcp.stripe.com' },
-          },
-        }),
-      ),
-    );
-    const servers = ['stripe'] as const;
-    const receipt = await installerPreflight(distribution, servers).install(
-      installContext(state, harness.commands),
-    );
-    assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
-    const configured = JSON.parse(
-      Buffer.from(await state.mutable.readFile(`${root}/.mcp.json`)).toString(),
-    );
-    assert.equal(
-      configured.mcpServers.stripe.headers.Authorization,
-      `Bearer ${relay.token}`,
-    );
-    const originalTree = await installerPreflight().install(
-      installContext(state, harness.commands),
-    );
-    assert.equal(
-      originalTree.installed_tree.sha256,
-      receipt.installed_tree.sha256,
-    );
-    assert.ok(!JSON.stringify(harness.calls).includes('STRIPE_API_KEY'));
+  it('keeps the bundle fingerprint stable across relay connections while configuring each run', async () => {
+    let previousTree: unknown;
+    for (const connection of [
+      relay,
+      { url: 'http://127.0.0.1:23456/mcp', token: 'b'.repeat(64) },
+    ]) {
+      const state = createMemoryWorkspace();
+      const harness = nativeCommandHarness(state);
+      const root = `cache/claude-plugins-official/stripe/${LATEST_VERSION}`;
+      await state.mutable.writeFile(
+        `${root}/.mcp.json`,
+        Buffer.from(
+          JSON.stringify({
+            mcpServers: {
+              stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+            },
+          }),
+        ),
+      );
+      const receipt = await installerPreflight(distribution, [
+        'stripe',
+      ]).install({
+        ...installContext(state, harness.commands),
+        pluginMcpConnections: { stripe: connection },
+      });
+      if (previousTree) assert.deepEqual(receipt.installed_tree, previousTree);
+      previousTree = receipt.installed_tree;
+      const configured = JSON.parse(
+        Buffer.from(
+          await state.mutable.readFile(`${root}/.mcp.json`),
+        ).toString(),
+      );
+      assert.equal(
+        configured.mcpServers.stripe.headers.Authorization,
+        `Bearer ${connection.token}`,
+      );
+      assert.equal(configured.mcpServers.stripe.url, connection.url);
+      assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
+      assert.ok(!JSON.stringify(harness.calls).includes('STRIPE_API_KEY'));
+    }
   });
 
   it('installs and verifies receipts against the explicit separate configuration root', async () => {

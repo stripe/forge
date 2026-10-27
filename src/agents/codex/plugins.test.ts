@@ -22,6 +22,7 @@ const distribution = { plugin: 'fixture@test', marketplace: 'example/plugins' };
 
 function fixture(
   options: {
+    connection?: import('../../contracts/runtime.ts').PluginMcpConnection;
     source?: unknown;
     mcpServers?: readonly import('../../model/types.ts').PluginMcpServerId[];
     catalogPath?: string;
@@ -180,7 +181,7 @@ function fixture(
   const install = (signal = new AbortController().signal) =>
     prepared.install({
       runId: 'test',
-      pluginMcpConnections: { stripe: relay },
+      pluginMcpConnections: { stripe: options.connection ?? relay },
       paths: { workspace: '/workspace', home: '/home/forge' },
       commands,
       stateDirectories: new Map([[CODEX_HOME_STATE_ID, state.mutable]]),
@@ -190,31 +191,39 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
-  it('routes native MCP authentication through the host relay', async () => {
-    const mcpServers = ['stripe'] as const;
-    const test = fixture({ mcpServers });
-    await test.state.mutable.writeFile(
-      `${cache}/.mcp.json`,
-      Buffer.from(
-        JSON.stringify({
-          mcpServers: {
-            stripe: { type: 'http', url: 'https://mcp.stripe.com' },
-          },
-        }),
-      ),
-    );
-    const receipt = await test.install();
-    assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
-    const configured = JSON.parse(
-      Buffer.from(
-        await test.state.mutable.readFile(`${cache}/.mcp.json`),
-      ).toString(),
-    );
-    assert.equal(
-      configured.mcpServers.stripe.http_headers.Authorization,
-      `Bearer ${relay.token}`,
-    );
-    assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
+  it('keeps the bundle fingerprint stable across relay connections while configuring each run', async () => {
+    let previousTree: unknown;
+    for (const connection of [
+      relay,
+      { url: 'http://127.0.0.1:23456/mcp', token: 'b'.repeat(64) },
+    ]) {
+      const test = fixture({ mcpServers: ['stripe'], connection });
+      await test.state.mutable.writeFile(
+        `${cache}/.mcp.json`,
+        Buffer.from(
+          JSON.stringify({
+            mcpServers: {
+              stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+            },
+          }),
+        ),
+      );
+      const receipt = await test.install();
+      if (previousTree) assert.deepEqual(receipt.installed_tree, previousTree);
+      previousTree = receipt.installed_tree;
+      const configured = JSON.parse(
+        Buffer.from(
+          await test.state.mutable.readFile(`${cache}/.mcp.json`),
+        ).toString(),
+      );
+      assert.equal(
+        configured.mcpServers.stripe.http_headers.Authorization,
+        `Bearer ${connection.token}`,
+      );
+      assert.equal(configured.mcpServers.stripe.url, connection.url);
+      assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
+      assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
+    }
   });
 
   for (const [exitCode, reason] of [

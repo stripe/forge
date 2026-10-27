@@ -57,7 +57,11 @@ const files = {
 };
 
 function fixture(
-  options: { checkoutCommit?: string; files?: Record<string, string> } = {},
+  options: {
+    checkoutCommit?: string;
+    files?: Record<string, string>;
+    connection?: import('../../contracts/runtime.ts').PluginMcpConnection;
+  } = {},
 ) {
   const state = createMemoryWorkspace(
     Object.fromEntries(
@@ -106,7 +110,7 @@ function fixture(
     ) =>
       prepared.install({
         runId: 'test',
-        pluginMcpConnections: { stripe: relay },
+        pluginMcpConnections: { stripe: options.connection ?? relay },
         paths: { workspace: layout.workspace, home: layout.home },
         stateDirectories: new Map([[OPENCODE_STATE_ID, workspace]]),
         commands,
@@ -129,7 +133,7 @@ describe('OpenCode Stripe bundle installation', () => {
     });
     assert.equal(Object.hasOwn(receipt, 'native_plugin_id'), false);
     assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
-    assert.equal(receipt.installed_tree.file_count, 4);
+    assert.equal(receipt.installed_tree.file_count, 3);
     const config = JSON.parse(
       Buffer.from(
         await test.state.readonly.readFile(PLUGIN_CONFIG_PATH),
@@ -155,6 +159,29 @@ describe('OpenCode Stripe bundle installation', () => {
         ).toString(),
         body,
       );
+  });
+
+  it('keeps the bundle fingerprint stable across relay connections and sensitive to content', async () => {
+    const first = await fixture().install();
+    const second = fixture({
+      connection: { url: 'http://127.0.0.1:23456/mcp', token: 'b'.repeat(64) },
+    });
+    const receipt = await second.install();
+    assert.deepEqual(receipt.installed_tree, first.installed_tree);
+    const configured = JSON.parse(
+      Buffer.from(
+        await second.state.mutable.readFile(PLUGIN_CONFIG_PATH),
+      ).toString(),
+    );
+    assert.equal(configured.mcp.stripe.url, 'http://127.0.0.1:23456/mcp');
+    assert.equal(
+      configured.mcp.stripe.headers.Authorization,
+      `Bearer ${'b'.repeat(64)}`,
+    );
+    const changed = await fixture({
+      files: { ...files, 'skills/stripe-test/SKILL.md': 'Changed skill.' },
+    }).install();
+    assert.notEqual(changed.installed_tree.sha256, first.installed_tree.sha256);
   });
 
   it('fails closed on changed or unpinned catalogs', () => {

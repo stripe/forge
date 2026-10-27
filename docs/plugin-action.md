@@ -129,7 +129,7 @@ plugin config and restores it before every turn, including resume.
 OpenCode receipts use `installation: opencode-bundle` instead of
 `native_plugin_id`. They retain the selected catalog identity and commit, record
 `source: {kind: git-subdir, commit, path}` for the actual standard bundle, and
-fingerprint the copied bundle plus generated config. The native Claude/Codex
+fingerprint the copied bundle before adding the generated config. The native Claude/Codex
 receipt shape is unchanged. Like other plugin state, bundle files remain writable
 during interaction; the receipt describes installation-time contents.
 
@@ -175,8 +175,8 @@ During setup, the prepared operation:
 3. installs through the agent's native CLI, or materializes OpenCode's standard bundle;
 4. validates the plugin identity, version, path, source provenance, and native
    load status where applicable;
-5. configures the bundled MCP connection; and
-6. fingerprints the configured installation and records a receipt in `setup.json`.
+5. fingerprints the installed content before adding run-specific connection state; and
+6. configures the bundled MCP connection and records a receipt in `setup.json`.
 
 The receipt includes:
 
@@ -188,7 +188,8 @@ The receipt includes:
 
 Forge bounds and validates the installed tree, rejecting symbolic links and
 special entries. The tree fingerprint covers relative paths, directories, and
-the exact regular-file bytes read after installation in stable path order,
+the exact regular-file bytes read after installation, before relay configuration,
+in stable path order,
 independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
@@ -235,22 +236,42 @@ in a plugin run fails pure preflight.
 The relay starts before setup and survives setup-container replacement. Abort,
 quiescence, and disposal close it and cancel in-flight requests. Its token has
 no authority after shutdown. Forge redacts relay tokens from ordinary artifacts;
-restricted native logs can still contain them. Configured installation hashes
-include the run-specific relay configuration and thus can differ between runs.
+restricted native logs can still contain them. Installation hashes cover native
+plugin content before relay configuration. OpenCode hashes the copied bundle
+before adding its generated config. Relay URLs and tokens do not affect these
+hashes; changes to bundle content still do.
 
-Docker's default network uses `host.docker.internal`: native Linux adds an
-explicit `host-gateway` mapping, while Docker Desktop supplies its host DNS.
-The relay listens on host IPv4 interfaces and requires its random token. With `runtime.network: host`, it listens on loopback instead.
+Docker's default network uses `host.docker.internal`. Native Linux inspects the
+default bridge's IPv4 gateway, binds the relay to that address, and adds an
+explicit `--add-host` mapping to the same address. A missing or ambiguous gateway
+fails preparation; there is no wildcard listener fallback. This alias also
+names other host services bound to the bridge gateway. Forge does not isolate
+those services from the container. Docker Desktop supplies its host DNS and
+the relay binds loopback. With `runtime.network: host`, both the listener and
+client URL use loopback.
 Forge adds the relay host to command proxy bypass lists. A local Docker daemon
 and a container-reachable host are required; remote daemons are unsupported for
 this treatment. Host networking retains Docker's platform requirements.
 
-Each relay admits eight active requests, with at most 32 connections, 1 MiB
-request bodies, 16 MiB streamed responses, and a 60-second request deadline.
-Only MCP transport headers are forwarded. Completed runs record request and
-error counts as `runtime.metadata.pluginMcpRequests` and `pluginMcpErrors`;
-these include discovery and rejected requests, and do not identify tools or
-retain bodies. Older results may omit these keys. Requests that invoke write
+Relay bounds are defined by `McpCredentialRelayLimits` and
+`DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS`, exported from `@stripe/forge/runtime/docker`.
+Embedding hosts can override them through `DockerRuntimeAdapterOptions.mcpRelayLimits`.
+Defaults allow eight active requests, 32 authenticated sockets, 1 MiB request
+bodies, and 16 MiB streamed responses. Four pending unauthenticated sockets have
+a separate one-second authentication window; newer connections evict the oldest
+pending socket. Unauthenticated requests do not enter saved counts.
+
+The default idle limit is 60 seconds. Request-body bytes, upstream response
+headers, and response-body bytes reset it. A stream may outlive that limit while
+bytes arrive; run abort remains the outer bound. A stalled request or stream
+closes when idle time expires, including when the upstream ignores cancellation.
+Native client reconnection after idle closure needs live validation.
+Only MCP transport headers are forwarded. Runs that commit a result record
+authenticated request and error counts as `runtime.metadata.pluginMcpRequests`
+and `pluginMcpErrors`, plus the resolved limits as canonical JSON in
+`pluginMcpLimits`. Counts include discovery and authenticated rejections; they
+do not identify tools or retain bodies. Failed attempts without a committed
+result retain no counts on this lifecycle. Older results may omit these keys. Requests that invoke write
 tools are allowed; Forge applies no tool-level read/write filter.
 
 Custom runtimes must opt into `supportsMcpCredentialRelay`, honor
@@ -258,6 +279,12 @@ Custom runtimes must opt into `supportsMcpCredentialRelay`, honor
 host-only. They return `pluginMcpConnections` for setup and own relay shutdown.
 Direct installer callers supply these connections through
 `AgentPluginInstallContext`. Unsupported runtimes fail before credential lookup.
+The `forge/plugin` setup handler declares executable and state requirements;
+it does not declare an agent credential. Hosts that discover credentials from
+setup requirements must instead honor the engine's `RuntimeRequirements.mcpRelays`
+and resolve the separate host-only credential inputs. The Docker adapter's
+`hostPlatform` option controls host routing and defaults to the process platform;
+it is separate from the container's target architecture.
 
 Use `forge validate --host --experiment …` to install setup and check native MCP
 initialization and tool discovery from a disposable runtime. It requires the

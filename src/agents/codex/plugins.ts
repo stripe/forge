@@ -297,6 +297,11 @@ export function createCodexPluginInstaller(options: {
             identity.name,
             installed.version,
           );
+          const installedTree = await inspectInstalledPluginTree(
+            home,
+            relative,
+            signal,
+          );
           const mcpServers = context.mcpServers;
           if (mcpServers)
             await configurePluginMcp(
@@ -306,11 +311,6 @@ export function createCodexPluginInstaller(options: {
               mcpServers,
               installContext.pluginMcpConnections,
             );
-          const installedTree = await inspectInstalledPluginTree(
-            home,
-            relative,
-            signal,
-          );
           return Object.freeze({
             adapter: options.adapterId,
             plugin: selected.plugin,

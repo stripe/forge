@@ -32,9 +32,12 @@ import type {
   ForgeRuntimeV1,
   PluginMcpServerId,
 } from '../../model/types.ts';
+import { serializeCanonicalJson } from '../../serialization.ts';
 import { hashStateFile, importHostFileIntoState } from '../hostFileImport.ts';
 import {
   type McpCredentialRelay,
+  type McpCredentialRelayLimits,
+  resolveMcpCredentialRelayLimits,
   startMcpCredentialRelay,
 } from '../mcpCredentialRelay.ts';
 import {
@@ -49,6 +52,7 @@ import {
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.ts';
 import { DockerCommandController } from './commandRunner.ts';
+import { resolveMcpRelayNetwork } from './mcpRelayNetwork.ts';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -88,6 +92,9 @@ export interface DockerRuntimeAdapterOptions {
   readonly maximumCommandOutputBytes?: number;
   /** Explicit host HTTP transport for MCP relays; the upstream URL stays fixed. */
   readonly mcpRelayFetch?: typeof globalThis.fetch;
+  readonly mcpRelayLimits?: Partial<McpCredentialRelayLimits>;
+  /** Host OS used for relay routing; defaults to the current process platform. */
+  readonly hostPlatform?: NodeJS.Platform;
 }
 
 export interface ValidateDockerRuntimeHostOptions {
@@ -200,6 +207,10 @@ export function createDockerRuntimeAdapter(
   }
   const temporaryRoot = path.resolve(options.temporaryRoot ?? os.tmpdir());
   const hostCommands = options.hostCommands ?? createHostCommandRunner();
+  const mcpRelayLimits = resolveMcpCredentialRelayLimits(
+    options.mcpRelayLimits,
+  );
+  const hostPlatform = options.hostPlatform ?? process.platform;
   const operationTimeoutMs = positive(
     options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
     'operationTimeoutMs',
@@ -320,6 +331,17 @@ export function createDockerRuntimeAdapter(
         throw new TypeError(
           'MCP relay credentials do not match runtime requirements.',
         );
+      const relayNetwork =
+        relayCredentials.length === 0
+          ? undefined
+          : await resolveMcpRelayNetwork({
+              hostPlatform,
+              ...(runtime.network ? { network: runtime.network } : {}),
+              dockerExecutable,
+              hostCommands,
+              timeoutMs: operationTimeoutMs,
+              signal: input.signal,
+            });
       const image = await imageFor(
         runtime.platform,
         input.signal,
@@ -444,7 +466,9 @@ export function createDockerRuntimeAdapter(
           homeRoot,
           image: image.id,
           platform: runtime.platform,
-          hostRelay: relayCredentials.length > 0,
+          ...(relayNetwork?.hostMapping
+            ? { hostRelayMapping: relayNetwork.hostMapping }
+            : {}),
           ...(runtime.network ? { network: runtime.network } : {}),
           resources: runtime.resources,
           sealSetupState,
@@ -457,9 +481,9 @@ export function createDockerRuntimeAdapter(
           const relay = await startMcpCredentialRelay({
             upstreamUrl: PLUGIN_MCP_CREDENTIALS[server].url,
             credential: value,
-            listenHost: runtime.network === 'host' ? '127.0.0.1' : '0.0.0.0',
-            connectHost:
-              runtime.network === 'host' ? '127.0.0.1' : 'host.docker.internal',
+            listenHost: relayNetwork!.listenHost,
+            connectHost: relayNetwork!.connectHost,
+            limits: mcpRelayLimits,
             signal: input.signal,
             ...(options.mcpRelayFetch === undefined
               ? {}
@@ -595,6 +619,7 @@ export function createDockerRuntimeAdapter(
             ...(relays.length === 0
               ? {}
               : {
+                  pluginMcpLimits: serializeCanonicalJson(mcpRelayLimits),
                   pluginMcpRequests: String(
                     relays.reduce(
                       (count, relay) => count + relay.counts().requests,
@@ -989,7 +1014,7 @@ function dockerRunArgv(input: {
   image: string;
   platform: RuntimePlatform;
   network?: 'host';
-  hostRelay: boolean;
+  hostRelayMapping?: string;
   resources: ForgeDockerRuntimeV1['resources'];
   sealSetupState: boolean;
   stateMounts: readonly {
@@ -1003,11 +1028,7 @@ function dockerRunArgv(input: {
     input.dockerExecutable,
     'run',
     ...(input.network ? ['--network', input.network] : []),
-    ...(input.hostRelay &&
-    input.network !== 'host' &&
-    process.platform === 'linux'
-      ? ['--add-host', 'host.docker.internal:host-gateway']
-      : []),
+    ...(input.hostRelayMapping ? ['--add-host', input.hostRelayMapping] : []),
     '--detach',
     '--name',
     input.containerName,

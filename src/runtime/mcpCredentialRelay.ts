@@ -1,22 +1,58 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
+import { isIPv4, type Socket } from 'node:net';
 import type { PluginMcpConnection } from '../contracts/runtime.ts';
 
-interface RelayLimits {
+export interface McpCredentialRelayLimits {
   readonly requestBytes: number;
   readonly responseBytes: number;
   readonly concurrency: number;
-  readonly timeoutMs: number;
+  /** Resets on request-body bytes, upstream headers, and response-body bytes. */
+  readonly idleTimeoutMs: number;
+  /** Sockets that have presented a valid capability. */
   readonly connections: number;
+  /** Pending first authentication; a newer socket evicts the oldest pending one. */
+  readonly unauthenticatedConnections: number;
+  readonly authenticationTimeoutMs: number;
+  readonly headerBytes: number;
+  readonly keepAliveTimeoutMs: number;
 }
 
-const DEFAULT_LIMITS: RelayLimits = Object.freeze({
-  requestBytes: 1024 * 1024,
-  responseBytes: 16 * 1024 * 1024,
-  concurrency: 8,
-  timeoutMs: 60_000,
-  connections: 32,
-});
+export const DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS: McpCredentialRelayLimits =
+  Object.freeze({
+    requestBytes: 1024 * 1024,
+    responseBytes: 16 * 1024 * 1024,
+    concurrency: 8,
+    idleTimeoutMs: 60_000,
+    connections: 32,
+    unauthenticatedConnections: 4,
+    authenticationTimeoutMs: 1_000,
+    headerBytes: 16 * 1024,
+    keepAliveTimeoutMs: 1_000,
+  });
+
+export function resolveMcpCredentialRelayLimits(
+  input: Partial<McpCredentialRelayLimits> = {},
+): McpCredentialRelayLimits {
+  if (
+    Object.keys(input).some(
+      (key) => !Object.hasOwn(DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS, key),
+    )
+  )
+    throw new TypeError('Invalid MCP relay limit.');
+  const limits = { ...DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS, ...input };
+  for (const value of Object.values(limits))
+    if (!Number.isSafeInteger(value) || value <= 0)
+      throw new TypeError('Invalid MCP relay limit.');
+  for (const value of [
+    limits.idleTimeoutMs,
+    limits.authenticationTimeoutMs,
+    limits.keepAliveTimeoutMs,
+  ])
+    if (value > 2_147_483_647)
+      throw new TypeError('Invalid MCP relay timeout.');
+  return Object.freeze(limits);
+}
 const REQUEST_HEADERS = [
   'accept',
   'content-type',
@@ -43,15 +79,24 @@ export async function startMcpCredentialRelay(input: {
   readonly listenHost: string;
   readonly connectHost: string;
   readonly signal: AbortSignal;
-  readonly limits?: Partial<typeof DEFAULT_LIMITS>;
-  readonly timeoutSignal?: (milliseconds: number) => AbortSignal;
+  readonly limits?: Partial<McpCredentialRelayLimits>;
+  readonly scheduleTimeout?: (
+    expire: () => void,
+    milliseconds: number,
+  ) => () => void;
   readonly fetch?: typeof globalThis.fetch;
 }): Promise<McpCredentialRelay> {
   input.signal.throwIfAborted();
-  const limits = { ...DEFAULT_LIMITS, ...input.limits };
-  for (const value of Object.values(limits))
-    if (!Number.isSafeInteger(value) || value <= 0)
-      throw new TypeError('Invalid MCP relay limit.');
+  const limits = resolveMcpCredentialRelayLimits(input.limits);
+  if (!isIPv4(input.listenHost) || input.listenHost === '0.0.0.0')
+    throw new TypeError('MCP relay requires a specific host IPv4 address.');
+  const scheduleTimeout =
+    input.scheduleTimeout ??
+    ((expire, milliseconds) => {
+      const timer = setTimeout(expire, milliseconds);
+      timer.unref();
+      return () => clearTimeout(timer);
+    });
   const token = randomBytes(32).toString('hex');
   const expectedAuthorization = Buffer.from(`Bearer ${token}`);
   const shutdown = new AbortController();
@@ -60,10 +105,11 @@ export async function startMcpCredentialRelay(input: {
   let errors = 0;
   let closing: Promise<void> | undefined;
   const tasks = new Set<Promise<void>>();
+  const unauthenticated = new Map<Socket, () => void>();
+  const authenticated = new Set<Socket>();
   const server = createServer(
-    { maxHeaderSize: 16 * 1024 },
+    { maxHeaderSize: limits.headerBytes },
     (request, response) => {
-      requests += 1;
       let failed = false;
       const markError = () => {
         if (!failed) errors += 1;
@@ -80,8 +126,19 @@ export async function startMcpCredentialRelay(input: {
         authorization.length !== expectedAuthorization.length ||
         !timingSafeEqual(authorization, expectedAuthorization)
       ) {
-        fail(401);
+        response.writeHead(401, { Connection: 'close' }).end();
+        request.resume();
         return;
+      }
+      requests += 1;
+      if (!authenticated.has(request.socket)) {
+        if (authenticated.size >= limits.connections) {
+          fail(503);
+          return;
+        }
+        unauthenticated.get(request.socket)?.();
+        unauthenticated.delete(request.socket);
+        authenticated.add(request.socket);
       }
       if (
         request.url !== '/mcp' ||
@@ -103,21 +160,30 @@ export async function startMcpCredentialRelay(input: {
       active += 1;
       const disconnected = new AbortController();
       response.once('close', () => disconnected.abort());
+      const idle = new AbortController();
+      let cancelIdle = () => {};
+      const refreshIdle = () => {
+        cancelIdle();
+        cancelIdle = scheduleTimeout(() => idle.abort(), limits.idleTimeoutMs);
+      };
+      refreshIdle();
       const signal = AbortSignal.any([
         shutdown.signal,
         disconnected.signal,
-        (input.timeoutSignal ?? AbortSignal.timeout)(limits.timeoutMs),
+        idle.signal,
       ]);
       const abort = () => {
         request.destroy();
         response.destroy();
       };
       signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
       const task = (async () => {
         try {
           const chunks: Buffer[] = [];
           let bytes = 0;
           for await (const chunk of request) {
+            if (chunk.length > 0) refreshIdle();
             bytes += chunk.length;
             if (bytes > limits.requestBytes) {
               fail(413);
@@ -141,6 +207,7 @@ export async function startMcpCredentialRelay(input: {
             }),
             signal,
           );
+          refreshIdle();
           if (upstream.status >= 300 && upstream.status < 400) {
             void upstream.body?.cancel().catch(() => undefined);
             fail(502);
@@ -159,6 +226,7 @@ export async function startMcpCredentialRelay(input: {
               while (true) {
                 const chunk = await awaitRelayOperation(reader.read(), signal);
                 if (chunk.done) break;
+                if (chunk.value.length > 0) refreshIdle();
                 responseBytes += chunk.value.length;
                 if (responseBytes > limits.responseBytes)
                   throw new Error('MCP response limit.');
@@ -175,6 +243,7 @@ export async function startMcpCredentialRelay(input: {
             response.writeHead(502).end();
           else response.destroy();
         } finally {
+          cancelIdle();
           signal.removeEventListener('abort', abort);
           active -= 1;
         }
@@ -183,10 +252,26 @@ export async function startMcpCredentialRelay(input: {
       void task.finally(() => tasks.delete(task));
     },
   );
-  server.maxConnections = limits.connections;
-  server.headersTimeout = Math.min(limits.timeoutMs, 10_000);
-  server.requestTimeout = limits.timeoutMs;
-  server.keepAliveTimeout = 1_000;
+  server.on('connection', (socket) => {
+    if (unauthenticated.size >= limits.unauthenticatedConnections) {
+      const oldest = unauthenticated.keys().next().value!;
+      unauthenticated.get(oldest)!();
+      unauthenticated.delete(oldest);
+      oldest.destroy();
+    }
+    unauthenticated.set(
+      socket,
+      scheduleTimeout(() => socket.destroy(), limits.authenticationTimeoutMs),
+    );
+    socket.once('close', () => {
+      unauthenticated.get(socket)?.();
+      unauthenticated.delete(socket);
+      authenticated.delete(socket);
+    });
+  });
+  server.headersTimeout = limits.authenticationTimeoutMs;
+  server.requestTimeout = 0;
+  server.keepAliveTimeout = limits.keepAliveTimeoutMs;
   const close = (): Promise<void> => {
     closing ??= new Promise<void>((resolve) => {
       shutdown.abort();

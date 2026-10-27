@@ -10,7 +10,11 @@ import type {
   HostCommandOptions,
   HostCommandRunner,
 } from '../processCommandRunner.ts';
-import { createDockerRuntimeAdapter } from './runtime.ts';
+import {
+  createDockerRuntimeAdapter,
+  DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS,
+  type McpCredentialRelayLimits,
+} from './index.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -38,7 +42,12 @@ function fakeDocker() {
           : { environmentBody: await fs.readFile(argv[index + 1]!, 'utf8') }),
       });
       return {
-        stdout: argv[1] === 'image' ? `sha256:${'a'.repeat(64)}\n` : 'ok\n',
+        stdout:
+          argv[1] === 'network'
+            ? '127.0.0.1\n'
+            : argv[1] === 'image'
+              ? `sha256:${'a'.repeat(64)}\n`
+              : 'ok\n',
         stderr: '',
         exitCode: 0,
         durationMs: 0,
@@ -90,14 +99,23 @@ describe('Docker plugin credential relays', () => {
     );
     assert.equal(fake.calls.length, 0);
   });
-  for (const network of ['default', 'host'] as const)
-    it(`owns a host MCP relay across setup replacement on the ${network} network`, async () => {
+  for (const { hostPlatform, network, mapping } of [
+    {
+      hostPlatform: 'linux',
+      network: 'default',
+      mapping: 'host.docker.internal:127.0.0.1',
+    },
+    { hostPlatform: 'darwin', network: 'default', mapping: undefined },
+    { hostPlatform: 'linux', network: 'host', mapping: undefined },
+  ] as const)
+    it(`owns a host MCP relay across setup replacement on ${hostPlatform}/${network}`, async () => {
       const fake = fakeDocker();
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-relay-'));
       roots.push(root);
       const adapter = createDockerRuntimeAdapter({
         hostCommands: fake.runner,
         temporaryRoot: root,
+        hostPlatform,
       });
       const input = preparation();
       if (!('image' in input.plan.runtime)) throw new Error('expected Docker');
@@ -135,10 +153,14 @@ describe('Docker plugin credential relays', () => {
         const starts = fake.calls.filter(({ argv }) => argv[1] === 'run');
         assert.equal(starts.length, 2);
         for (const { argv } of starts)
-          assert.equal(
-            argv.includes('host.docker.internal:host-gateway'),
-            network === 'default' && process.platform === 'linux',
-          );
+          assert.equal(argv.includes('--add-host'), mapping !== undefined);
+        if (mapping)
+          for (const { argv } of starts) assert.ok(argv.includes(mapping));
+        assert.ok(
+          fake.calls
+            .filter(({ argv }) => argv[1] !== 'run')
+            .every(({ argv }) => !argv.includes('--add-host')),
+        );
         await runtime.commands.agent.run(['probe']);
         const command = fake.calls.find(
           ({ environmentBody }) => environmentBody !== undefined,
@@ -155,13 +177,80 @@ describe('Docker plugin credential relays', () => {
           !JSON.stringify(fake.calls).includes('synthetic-host-only-key'),
         );
         const sealed = await runtime.quiesce();
-        assert.equal(sealed.metadata.pluginMcpRequests, '2');
-        assert.equal(sealed.metadata.pluginMcpErrors, '2');
+        assert.equal(sealed.metadata.pluginMcpRequests, '0');
+        assert.equal(sealed.metadata.pluginMcpErrors, '0');
         await assert.rejects(fetch(url));
       } finally {
         await runtime.dispose();
       }
     });
+
+  it('adds no host mapping or network lookup without a relay on Linux', async () => {
+    const fake = fakeDocker();
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-no-relay-'));
+    roots.push(root);
+    const runtime = await createDockerRuntimeAdapter({
+      hostCommands: fake.runner,
+      temporaryRoot: root,
+      hostPlatform: 'linux',
+    }).prepare(preparation());
+    await runtime.dispose();
+    assert.ok(
+      fake.calls.every(
+        ({ argv }) => argv[1] !== 'network' && !argv.includes('--add-host'),
+      ),
+    );
+  });
+
+  it('enforces explicit host bounds and records the resolved policy with completed counts', async () => {
+    const fake = fakeDocker();
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-relay-limits-'),
+    );
+    roots.push(root);
+    let upstreamCalls = 0;
+    const limits: Partial<McpCredentialRelayLimits> = { requestBytes: 4 };
+    const runtime = await createDockerRuntimeAdapter({
+      hostCommands: fake.runner,
+      temporaryRoot: root,
+      mcpRelayLimits: limits,
+      mcpRelayFetch: async () => {
+        upstreamCalls += 1;
+        return new Response('ok');
+      },
+    }).prepare({
+      ...preparation(),
+      requirements: {
+        executables: [],
+        stateDirectories: [],
+        mcpRelays: ['stripe'],
+      },
+      mcpRelayCredentials: [
+        { server: 'stripe', value: 'synthetic-host-only-key' },
+      ],
+    });
+    try {
+      const connection = runtime.pluginMcpConnections!.stripe!;
+      const url = new URL(connection.url);
+      url.hostname = '127.0.0.1';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${connection.token}` },
+        body: '12345',
+      });
+      assert.equal(response.status, 413);
+      assert.equal(upstreamCalls, 0);
+      const sealed = await runtime.quiesce();
+      assert.equal(sealed.metadata.pluginMcpRequests, '1');
+      assert.equal(sealed.metadata.pluginMcpErrors, '1');
+      assert.deepEqual(JSON.parse(sealed.metadata.pluginMcpLimits!), {
+        ...DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS,
+        requestBytes: 4,
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
 
   for (const reason of ['abort', 'dispose'] as const)
     it(`revokes the relay capability on ${reason} before quiescence`, async () => {
