@@ -31,12 +31,14 @@ import {
 
 const SECRET = 'test-opencode-secret-only-agent';
 describe('OpenCode engine integration', () => {
-  for (const [mode, truncated] of [
-    ['one_shot', false],
-    ['multi_turn', false],
-    ['one_shot', true],
+  for (const [mode, captureBytes] of [
+    ['one_shot', undefined],
+    ['multi_turn', undefined],
+    ['one_shot', 4096],
+    ['one_shot', 0],
   ] as const) {
-    it(`commits and independently verifies ${mode} ${truncated ? 'truncated' : 'native'} evidence and redaction`, async () => {
+    const truncated = captureBytes !== undefined;
+    it(`commits and independently verifies ${mode} ${truncated ? `${captureBytes}-byte truncated` : 'native'} evidence and redaction`, async () => {
       const root = await fs.mkdtemp(
         path.join(os.tmpdir(), 'forge-opencode-e2e-'),
       );
@@ -73,7 +75,7 @@ describe('OpenCode engine integration', () => {
                   OPENCODE_STATE_ID,
                 )!.mutable.writeFile(
                   'session.json',
-                  Buffer.from(truncated ? piped : body),
+                  Buffer.from(truncated ? body.slice(0, captureBytes) : body),
                 );
               return {
                 stdout: piped,
@@ -203,9 +205,9 @@ describe('OpenCode engine integration', () => {
             verified.result.evidence.warnings.map(({ code }) => code),
             ['source_truncated', 'fallback_used'],
           );
-          assert.match(
+          assert.equal(
             verified.result.evidence.warnings[0]!.message,
-            /4096 bytes/,
+            `The OpenCode session export ended before its JSON was complete (${captureBytes} bytes).`,
           );
           return;
         }

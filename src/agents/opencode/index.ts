@@ -14,7 +14,7 @@ import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
-import { captureOpenCodeExport } from './export.ts';
+import { captureOpenCodeExport, invalidateOpenCodeExport } from './export.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
 import {
   assertOpenCodeRuntimeLayout,
@@ -23,7 +23,7 @@ import {
   resolveOpenCodeLayout,
   usesDefaultOpenCodeLayout,
 } from './layout.ts';
-import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.ts';
+import { MAX_NATIVE_BYTES } from './native.ts';
 import {
   mergeStripeOpenCodeConfiguration,
   PLUGIN_CONFIG_PATH,
@@ -197,9 +197,7 @@ export function createOpenCodeAdapter(
           sending = true;
           try {
             // Invalidate before any mutation: failed export must never expose an earlier turn.
-            await state.writeFile(EXPORT_PATH, new Uint8Array(), {
-              mode: 0o600,
-            });
+            await invalidateOpenCodeExport(state);
             await state.writeFile('config.json', Buffer.from(config), {
               mode: 0o600,
             });

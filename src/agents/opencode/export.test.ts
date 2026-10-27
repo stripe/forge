@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  access,
   mkdtemp,
   readFile,
   rm,
@@ -21,7 +22,11 @@ import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
-import { captureOpenCodeExport, OPENCODE_EXPORT_LAUNCHER } from './export.ts';
+import {
+  captureOpenCodeExport,
+  invalidateOpenCodeExport,
+  OPENCODE_EXPORT_LAUNCHER,
+} from './export.ts';
 import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.ts';
 
 const body = Buffer.from(
@@ -138,7 +143,12 @@ describe('OpenCode export capture', () => {
         );
       }
     }
-    for (const invalid of [Buffer.from([0xff]), Buffer.from('{"x":!}')]) {
+    for (const invalid of [
+      Buffer.from([0xff]),
+      Buffer.from('{"x":!}'),
+      Buffer.from('{"x":!,"y":"世界').subarray(0, -1),
+      Buffer.from('{}世界').subarray(0, -1),
+    ]) {
       const result = await capture([{ body: invalid }, { body: invalid }]);
       assert.equal(result.calls, 2);
       assert.equal(result.evidence.kind, 'unavailable');
@@ -147,19 +157,100 @@ describe('OpenCode export capture', () => {
     }
   });
 
-  it('rejects mismatched sessions and oversized files without retrying', async () => {
+  it('rejects mismatched sessions without retrying', async () => {
     const wrong = openCodeExport([{ prompt: 'Task', response: 'Done' }]);
     wrong.info.id = 'ses_other';
-    for (const invalid of [
-      Buffer.from(JSON.stringify(wrong)),
-      Buffer.alloc(MAX_NATIVE_BYTES + 1, ' '),
+    const result = await capture([
+      { body: Buffer.from(JSON.stringify(wrong)) },
+    ]);
+    assert.equal(result.calls, 1);
+    assert.equal(result.evidence.kind, 'unavailable');
+    if (result.evidence.kind === 'unavailable')
+      assert.equal(result.evidence.reason.code, 'source_invalid');
+    assert.equal(result.native, undefined);
+  });
+
+  it('clears an oversized file rejected after a custom runner exits', async () => {
+    const result = await capture([
+      { body: Buffer.alloc(MAX_NATIVE_BYTES + 1, ' ') },
+    ]);
+    assert.equal(result.calls, 1);
+    assert.equal(result.evidence.kind, 'unavailable');
+    assert.equal((await result.state.readonly.readFile(EXPORT_PATH)).length, 0);
+    assert.equal(result.native, undefined);
+  });
+
+  it('records successful empty output as truncated at 0 bytes after exactly one retry', async () => {
+    const empty = Buffer.alloc(0);
+    const result = await capture([{ body: empty }, { body: empty }]);
+    assert.equal(result.calls, 2);
+    assert.deepEqual(result.evidence, {
+      kind: 'unavailable',
+      reason: {
+        code: 'source_truncated',
+        message:
+          'The OpenCode session export ended before its JSON was complete (0 bytes).',
+      },
+    });
+    assert.equal(result.native, undefined);
+
+    await invalidateOpenCodeExport(result.state.mutable);
+    const unattempted = await loadOpenCodeEvidence({
+      state: result.state.readonly,
+      sessionId: OPEN_CODE_SESSION,
+      model: OPEN_CODE_MODEL,
+      agentVersion: '1.19.0',
+      signal: new AbortController().signal,
+    });
+    assert.equal(unattempted.kind, 'unavailable');
+    if (unattempted.kind === 'unavailable')
+      assert.equal(unattempted.reason.code, 'source_unavailable');
+  });
+
+  it('does not treat an empty failed command as a successful empty export', async () => {
+    const empty = Buffer.alloc(0);
+    for (const attempts of [
+      [{ body: empty, exitCode: 1 }],
+      [{ body: empty }, { body: empty, exitCode: 1 }],
     ]) {
-      const result = await capture([{ body: invalid }]);
-      assert.equal(result.calls, 1);
+      const result = await capture(attempts);
+      assert.equal(result.calls, attempts.length);
       assert.equal(result.evidence.kind, 'unavailable');
       if (result.evidence.kind === 'unavailable')
-        assert.equal(result.evidence.reason.code, 'source_invalid');
-      assert.equal(result.native, undefined);
+        assert.equal(result.evidence.reason.code, 'source_unavailable');
+    }
+  });
+
+  it('rejects foreign, malformed, or oversized empty-export receipts without exposing their content', async () => {
+    const state = createMemoryWorkspace();
+    await state.mutable.writeFile(EXPORT_PATH, new Uint8Array());
+    for (const receipt of [
+      JSON.stringify({ sessionId: 'ses_other', byteCount: 0 }),
+      JSON.stringify({
+        sessionId: OPEN_CODE_SESSION,
+        byteCount: 0,
+        extra: true,
+      }),
+      JSON.stringify({ sessionId: OPEN_CODE_SESSION, byteCount: 1 }),
+      '{private payload',
+      'x'.repeat(513),
+    ]) {
+      await state.mutable.writeFile(
+        'session-export-empty.json',
+        Buffer.from(receipt),
+      );
+      const evidence = await loadOpenCodeEvidence({
+        state: state.readonly,
+        sessionId: OPEN_CODE_SESSION,
+        model: OPEN_CODE_MODEL,
+        agentVersion: '1.19.0',
+        signal: new AbortController().signal,
+      });
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable') {
+        assert.equal(evidence.reason.code, 'source_invalid');
+        assert.ok(!evidence.reason.message.includes(receipt));
+      }
     }
   });
 
@@ -209,6 +300,51 @@ process.exit(0);
       ]);
       assert.equal(refused.status, 1);
       assert.equal(await readFile(output, 'utf8'), JSON.stringify(value));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('stops a runaway export while it writes and removes its oversized file', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'forge-opencode-size-'));
+    try {
+      const output = path.join(root, 'session.json');
+      const completed = path.join(root, 'finished');
+      for (const continuous of [true, false]) {
+        await writeFile(output, '', { mode: 0o600 });
+        const launched = spawnSync(
+          process.execPath,
+          [
+            '-e',
+            OPENCODE_EXPORT_LAUNCHER,
+            output,
+            process.execPath,
+            '-e',
+            continuous
+              ? `
+const fs = require('node:fs');
+const block = Buffer.alloc(64 * 1024);
+let bytes = 0;
+setInterval(() => {
+  fs.writeSync(1, block);
+  bytes += block.length;
+  if (bytes > ${MAX_NATIVE_BYTES * 2}) {
+    fs.writeFileSync(process.argv[1], 'should have stopped');
+    process.exit(0);
+  }
+}, 1);
+`
+              : `require('node:fs').writeSync(1, Buffer.alloc(${MAX_NATIVE_BYTES + 1}));`,
+            completed,
+          ],
+          { timeout: 3000 },
+        );
+        assert.equal(launched.error, undefined);
+        assert.equal(launched.signal, null);
+        assert.equal(launched.status, 1, launched.stderr.toString());
+        await assert.rejects(access(output), { code: 'ENOENT' });
+        await assert.rejects(access(completed), { code: 'ENOENT' });
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
