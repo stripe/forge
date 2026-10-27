@@ -27,7 +27,18 @@ import type {
 } from '../src/experimentCli.ts';
 import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
-import { criterionJudgment } from './fixtures/criterionJudgment.ts';
+
+const completedCriterionJudgment = JSON.stringify({
+  answers: {
+    criterion: {
+      type: 'choice',
+      choice: 'met',
+      probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
+      confidence: 1,
+      explanation: 'Done.',
+    } satisfies root.ChoiceAnswer<root.CriterionDecisionOption>,
+  },
+});
 
 describe('experiment public entry points', () => {
   it('exports versioned dataset case entries with their paths', () => {
@@ -59,7 +70,7 @@ describe('experiment public entry points', () => {
     assert.equal(typeof root.buildCriterionJudgePrompt, 'function');
     assert.equal(typeof root.parseCriterionJudgment, 'function');
     const criterion: root.CriterionResultV1 = root.parseCriterionJudgment(
-      JSON.stringify(criterionJudgment(true, 'Done.')),
+      completedCriterionJudgment,
       {
         requirement_level: 'SHOULD' as const,
         value: 'The task is complete.',
@@ -105,7 +116,7 @@ describe('experiment public entry points', () => {
     ];
     for (const input of inputs) {
       const result = root.parseCriterionJudgment(
-        JSON.stringify(criterionJudgment(true, 'Done.')),
+        completedCriterionJudgment,
         input,
       );
       assert.deepEqual(result, {
