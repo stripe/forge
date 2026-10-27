@@ -668,6 +668,25 @@ describe('canonical interaction and judge evidence parsing', () => {
       },
     };
     assert.deepEqual(parseJudgeEvidence(evidence, CONTEXT), evidence);
+    for (const truncated of [true, false]) {
+      const recorded = {
+        ...evidence,
+        workspace: { ...evidence.workspace, complete: false, truncated },
+      };
+      assert.deepEqual(
+        parseJudgeEvidence(JSON.parse(JSON.stringify(recorded)), CONTEXT),
+        recorded,
+      );
+    }
+    assert.throws(() =>
+      parseJudgeEvidence(
+        {
+          ...evidence,
+          workspace: { ...evidence.workspace, truncated: 'true' },
+        },
+        CONTEXT,
+      ),
+    );
     assert.throws(() =>
       parseJudgeEvidence({ ...evidence, prompt_version: '1' }, CONTEXT),
     );

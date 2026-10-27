@@ -1,9 +1,10 @@
-import type {
-  MutableWorkspace,
-  ReadonlyWorkspace,
-  WorkspaceEntry,
-  WorkspaceListOptions,
-  WorkspaceWriteOptions,
+import {
+  type MutableWorkspace,
+  type ReadonlyWorkspace,
+  type WorkspaceEntry,
+  WorkspaceEntryLimitError,
+  type WorkspaceListOptions,
+  type WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
 import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 
@@ -83,18 +84,25 @@ export function createMemoryWorkspace(
       'maxEntries',
     );
     const prefix = under === '.' ? '' : `${under}/`;
+    const excluded = new Set(options.excludeDirectoryNames);
+    const isExcludedDirectory = (directory: string): boolean =>
+      directory
+        .split('/')
+        .some((name) => name.length > 0 && excluded.has(name));
     const entries: WorkspaceEntry[] = [];
     for (const directory of allDirectories) {
       if (
         directory !== '.' &&
         directory !== under &&
-        directory.startsWith(prefix)
+        directory.startsWith(prefix) &&
+        !isExcludedDirectory(directory)
       ) {
         entries.push(Object.freeze({ path: directory, kind: 'directory' }));
       }
     }
     for (const [relativePath, contents] of files) {
-      if (relativePath.startsWith(prefix)) {
+      const parent = relativePath.split('/').slice(0, -1).join('/');
+      if (relativePath.startsWith(prefix) && !isExcludedDirectory(parent)) {
         entries.push(
           Object.freeze({
             path: relativePath,
@@ -106,7 +114,7 @@ export function createMemoryWorkspace(
     }
     entries.sort((left, right) => compareCodeUnits(left.path, right.path));
     if (entries.length > limit) {
-      throw new Error(`Memory workspace exceeds its ${limit} entry limit.`);
+      throw new WorkspaceEntryLimitError(limit, entries.slice(0, limit));
     }
     return Object.freeze(entries);
   };

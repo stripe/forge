@@ -5,7 +5,9 @@ import * as path from 'node:path';
 import { describe, it } from 'vitest';
 
 import { parseAtifTrajectory } from '../atif/index.ts';
+import type { AgentAdapter } from '../contracts/agent.ts';
 import { credentialReference } from '../contracts/credentials.ts';
+import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
 import {
   createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
@@ -16,13 +18,16 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeWorkspaceEvidenceV1,
   type JudgeWorkspaceWarningCode,
+  MAX_JUDGE_WORKSPACE_ENTRIES,
   MAX_JUDGE_WORKSPACE_FILE_CHARACTERS,
   MAX_JUDGE_WORKSPACE_TOTAL_CHARACTERS,
   renderJudgeWorkspaceEvidence,
 } from '../evaluation/index.ts';
+import { regradeCompletedRun } from '../regrade/index.ts';
 import {
   createArtifactStore,
   type InteractionArtifactV1,
+  parseJudgeEvidence,
   verifyCompletedRun,
 } from '../results/index.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
@@ -61,6 +66,171 @@ const JUDGE_MODEL = {
 } as const;
 
 describe('executeEval multi-turn and judging integration', () => {
+  it('forwards exclusions through agent views and sends app files past large dependency trees to the judge', async () => {
+    const runtime = createFakeRuntimeAdapter({
+      initialFiles: {
+        ...Object.fromEntries(
+          Array.from(
+            { length: MAX_JUDGE_WORKSPACE_ENTRIES + 1 },
+            (_, index) => [`node_modules/pkg/${index}.js`, 'dependency'],
+          ),
+        ),
+        'src/app.ts': 'app source',
+      },
+    });
+    const agent = createScriptedAgentAdapter();
+    const probedViews: string[] = [];
+    const probe = async (workspace: ReadonlyWorkspace, name: string) => {
+      assert.deepEqual(
+        (
+          await workspace.listFiles({
+            maxEntries: 2,
+            excludeDirectoryNames: ['node_modules'],
+          })
+        ).map(({ path }) => path),
+        ['src', 'src/app.ts'],
+      );
+      probedViews.push(name);
+    };
+    const probingAgent: AgentAdapter = {
+      ...agent.adapter,
+      async prepare(context) {
+        await probe(context.runtime.workspace, 'prepare');
+        await agent.adapter.prepare(context);
+      },
+      async openSession(context) {
+        await probe(context.runtime.workspace, 'session');
+        return agent.adapter.openSession(context);
+      },
+      async collectEvidence(context) {
+        await probe(context.runtime.workspace, 'evidence');
+        return agent.adapter.collectEvidence(context);
+      },
+    };
+    const provider = createScriptedCompletionProvider({
+      id: 'test-provider',
+      responses: [
+        (request) => {
+          assert.match(
+            request.systemPrompt ?? '',
+            /### src\/app.ts[\s\S]*app source/,
+          );
+          assert.doesNotMatch(request.systemPrompt ?? '', /dependency/);
+          return JSON.stringify({
+            results: [
+              {
+                index: 0,
+                passed: true,
+                explanation: 'App source was provided.',
+              },
+            ],
+          });
+        },
+      ],
+    });
+    const artifacts = createMemoryArtifactStore();
+    await executeEval({
+      runId: 'excluded-dependencies',
+      plan: createTestResolvedRunPlan({
+        judgingCriteria: ['App source is present.'],
+        judge: JUDGE_MODEL,
+      }),
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[probingAgent.id, probingAgent]]),
+        completionProviders: new Map([
+          [provider.provider.id, provider.provider],
+        ]),
+        credentialResolver: createStaticCredentialResolver(),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: artifacts.store,
+      },
+    });
+    assert.deepEqual(probedViews, ['prepare', 'session', 'evidence']);
+    const evidence = artifactJson(
+      artifacts.runs.get('excluded-dependencies')!,
+      'judge-evidence.json',
+    ) as { workspace: { complete: boolean; truncated: boolean } };
+    assert.equal(evidence.workspace.complete, true);
+    assert.equal(evidence.workspace.truncated, false);
+  });
+
+  it('saves partial workspace text and its limit warning for verified regrade', async (t) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-partial-listing-'),
+    );
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const runtime = createFakeRuntimeAdapter({
+      initialFiles: Object.fromEntries(
+        Array.from({ length: MAX_JUDGE_WORKSPACE_ENTRIES + 1 }, (_, index) => [
+          `file-${String(index).padStart(5, '0')}.txt`,
+          `app source ${index}`,
+        ]),
+      ),
+    });
+    const agent = createScriptedAgentAdapter();
+    const response = JSON.stringify({
+      results: [
+        { index: 0, passed: true, explanation: 'Partial source was provided.' },
+      ],
+    });
+    const provider = createScriptedCompletionProvider({
+      id: 'test-provider',
+      responses: [response, response],
+    });
+    const completed = await executeEval({
+      runId: 'partial-listing',
+      plan: createTestResolvedRunPlan({
+        judgingCriteria: ['App source is present.'],
+        judge: JUDGE_MODEL,
+      }),
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        completionProviders: new Map([
+          [provider.provider.id, provider.provider],
+        ]),
+        credentialResolver: createStaticCredentialResolver(),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createArtifactStore({ root }),
+      },
+    });
+    await verifyCompletedRun(completed.location);
+    const evidence = parseJudgeEvidence(
+      JSON.parse(
+        await fs.readFile(
+          path.join(completed.location, 'judge-evidence.json'),
+          'utf8',
+        ),
+      ),
+      { forgeVersion: completed.result.forge.version },
+    );
+    assert.equal(evidence.workspace.complete, false);
+    assert.equal(evidence.workspace.truncated, true);
+    assert.equal(evidence.workspace.entries[0]?.path, 'file-00000.txt');
+    assert.ok(evidence.workspace.entries.length > 0);
+    assert.ok(
+      evidence.workspace.warnings.some(
+        ({ code }) => code === 'workspace_entry_limit_reached',
+      ),
+    );
+    const original = provider.calls[0]!.request.systemPrompt ?? '';
+    assert.match(original, /### file-00000.txt[\s\S]*app source 0/);
+    assert.match(original, /listing was truncated.*entry limit of 10000/);
+
+    await regradeCompletedRun(
+      { location: completed.location, judge: JUDGE_MODEL },
+      {
+        completionProviders: new Map([
+          [provider.provider.id, provider.provider],
+        ]),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    assert.equal(provider.calls.length, 2);
+    assert.equal(provider.calls[1]!.request.systemPrompt, original);
+  });
+
   it('preserves a long configured opening through execution and completed-run verification', async (t) => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-long-opening-'),

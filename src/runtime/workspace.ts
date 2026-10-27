@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type {
-  MutableWorkspace,
-  WorkspaceEntry,
-  WorkspaceEntryKind,
-  WorkspaceListOptions,
-  WorkspaceWriteOptions,
+import {
+  type MutableWorkspace,
+  type WorkspaceEntry,
+  type WorkspaceEntryKind,
+  WorkspaceEntryLimitError,
+  type WorkspaceListOptions,
+  type WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
 import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 
@@ -85,6 +86,7 @@ export async function createOwnedWorkspace(
       return body;
     },
     async listFiles(options: WorkspaceListOptions = {}) {
+      options.signal?.throwIfAborted();
       const under = options.under ?? '.';
       assertWorkspacePath(under, true);
       const limit = positiveInteger(
@@ -101,6 +103,13 @@ export async function createOwnedWorkspace(
       }
       await assertRealPathWithinRoot(canonicalRoot, start);
 
+      const excluded = new Set(options.excludeDirectoryNames);
+      if (
+        under !== '.' &&
+        under.split('/').some((name) => excluded.has(name))
+      ) {
+        return Object.freeze([]);
+      }
       const entries: WorkspaceEntry[] = [];
       const pending = [under];
       while (pending.length > 0) {
@@ -114,12 +123,18 @@ export async function createOwnedWorkspace(
         );
         children.sort((left, right) => comparePaths(left.name, right.name));
         for (const child of children) {
+          options.signal?.throwIfAborted();
           const childPath =
             directory === '.' ? child.name : `${directory}/${child.name}`;
           const childStat = await fs.lstat(
             resolveCandidate(canonicalRoot, childPath),
           );
           const kind = entryKind(childStat);
+          if (kind === 'directory' && excluded.has(child.name)) continue;
+          if (entries.length === limit) {
+            entries.sort((left, right) => comparePaths(left.path, right.path));
+            throw new WorkspaceEntryLimitError(limit, entries);
+          }
           entries.push(
             Object.freeze({
               path: childPath,
@@ -127,11 +142,6 @@ export async function createOwnedWorkspace(
               ...(childStat.isFile() ? { size: childStat.size } : {}),
             }),
           );
-          if (entries.length > limit) {
-            throw new Error(
-              `Workspace listing exceeds its ${limit} entry limit.`,
-            );
-          }
           if (kind === 'directory') pending.push(childPath);
         }
       }

@@ -41,6 +41,7 @@ import {
   resolveManifestCaseIdFromFile,
   resolveRunPlan,
   selectJudgeEvidence,
+  WorkspaceEntryLimitError,
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
@@ -84,6 +85,7 @@ describe('@stripe/forge package root', () => {
   });
 
   it('exports the engine, wire model, persistence, and composition contracts', () => {
+    assert.equal(typeof WorkspaceEntryLimitError, 'function');
     for (const removed of [
       'BENCHMARK_SCHEMA_VERSION',
       'RESOLVED_RUN_PLAN_SCHEMA_VERSION',

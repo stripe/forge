@@ -628,6 +628,18 @@ derived snapshots and can be stale after interruption.
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
 
+To find saved runs that lost all workspace files at the listing limit, use
+optional `jq` to check the evidence warnings:
+
+```sh
+find results/experiments -name judge-evidence.json -exec jq -r \
+  'select((.workspace.entries | length) == 0 and any(.workspace.warnings[]?; .code == "workspace_entry_limit_reached")) | input_filename' {} +
+```
+
+Rerun those selections in a new experiment run to collect their files. Resume
+keeps completed scores, and regrade reuses the saved evidence; neither can
+recover workspace text that was not captured.
+
 When using Forge as a library, you can
 [supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
 reusing its container lifecycle. The CLI uses the packaged image.

@@ -525,6 +525,7 @@ export async function executeEvalWithTestHooks(
                 truncated: entry.truncated,
               })),
               complete: safeWorkspace.complete,
+              truncated: safeWorkspace.truncated,
               warnings: safeWorkspace.warnings.map((warning) => ({
                 ...warning,
               })),

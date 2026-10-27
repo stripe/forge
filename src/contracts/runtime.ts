@@ -29,7 +29,25 @@ export interface WorkspaceListOptions {
   /** Workspace-relative directory. Defaults to the workspace root. */
   readonly under?: string;
   readonly maxEntries?: number;
+  /** Case-sensitive directory basenames to omit, with their subtrees, without counting them. */
+  readonly excludeDirectoryNames?: readonly string[];
   readonly signal?: AbortSignal;
+}
+
+/** An entry limit stopped traversal; entries retains the bounded, sorted partial listing. */
+export class WorkspaceEntryLimitError extends Error {
+  readonly entries: readonly WorkspaceEntry[];
+
+  constructor(
+    readonly maxEntries: number,
+    entries: readonly WorkspaceEntry[],
+  ) {
+    super(`Workspace listing exceeds its ${maxEntries} entry limit.`);
+    this.name = 'WorkspaceEntryLimitError';
+    this.entries = Object.freeze(
+      entries.map((entry) => Object.freeze({ ...entry })),
+    );
+  }
 }
 
 export interface RuntimeLogicalPaths {
@@ -78,7 +96,10 @@ export interface ReadonlyWorkspace {
     relativePath: string,
     options?: { maxBytes?: number },
   ): Promise<Uint8Array>;
-  /** Stable lexical order. Symlinks are reported but never traversed. */
+  /**
+   * Stable lexical order. Symlinks are reported but never traversed.
+   * On overflow, reject with WorkspaceEntryLimitError and the entries reached.
+   */
   listFiles(options?: WorkspaceListOptions): Promise<readonly WorkspaceEntry[]>;
 }
 

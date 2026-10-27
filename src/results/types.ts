@@ -226,6 +226,8 @@ export interface JudgeEvidenceV1 {
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];
     readonly complete: boolean;
+    /** Whether collection or rendering hit a bound; older artifacts may omit this. */
+    readonly truncated?: boolean;
     readonly warnings: readonly {
       readonly code: string;
       readonly message: string;

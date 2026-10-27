@@ -706,6 +706,16 @@ platform, and bounded public JSON config. The composition's adapter must match
 that ID and implement pure synchronous preflight. Private paths, credentials,
 or inferred host settings do not belong in runtime config.
 
+Workspace `listFiles` accepts optional `excludeDirectoryNames`: case-sensitive,
+literal directory basenames. Matching directories and their descendants are
+omitted before counting entries or descending, including when `under` is
+inside an excluded directory. Files and symlinks with those names remain
+listed. On entry overflow, implementations reject with `WorkspaceEntryLimitError`
+from `@stripe/forge`, carrying `maxEntries` and the bounded, lexically sorted
+`entries` reached before traversal stopped. The partial listing need not be a
+prefix of a full listing; traversal order is runtime-specific. Other failures,
+including cancellation, still reject without partial evidence.
+
 ### Built-in Docker runtime
 
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
@@ -1458,11 +1468,20 @@ are an area for future expansion; no extraction or conversion is performed.
 These exclusions apply to workspace text collection; deterministic file checks
 and transcript tool results retain their existing evidence policies.
 
-Its hard bounds are 10,000 listed entries,
+It passes directory exclusions to the workspace so ignored trees are neither
+traversed nor counted against the entry limit. Its hard bounds are 10,000 listed
+entries,
 depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
-rendered characters total. Truncation and unavailable evidence are recorded
-explicitly. `judge-evidence.json` records the redacted workspace subset and
-exact projected transcript for audit; it is not an input to a later judge call.
+rendered characters total. On entry overflow, the collector keeps the files
+reached in the partial listing in lexical order, subject to the remaining
+collection bounds. It also bounds overlong listings returned by external
+runtimes. A `workspace_entry_limit_reached` warning tells the judge that the
+listing was truncated and names the limit. Older runtime implementations that
+throw without partial entries still yield a warning without file text.
+`judge-evidence.json` records the redacted workspace subset, warnings, and exact
+projected transcript for audit and regrade. Its optional `workspace.truncated`
+flag records whether collection or rendering hit a bound; older artifacts may
+omit it, so readers must also inspect `workspace.complete` and warnings.
 
 At most four criteria run concurrently. Each request carries a 1,024-token
 output budget and a strict one-criterion JSON schema, with no temperature;
