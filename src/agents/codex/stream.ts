@@ -268,7 +268,8 @@ function parseItem(item: JsonRecord): StreamItem {
         invalidStream();
       if (item.result !== undefined && item.result !== null) {
         const result = requiredRecord(item.result);
-        onlyKeys(result, ['content', 'structured_content']);
+        // Opaque result data is bounded with the event and omitted from AgentTurn.
+        onlyKeys(result, ['content', '_meta', 'structured_content']);
         requiredArray(result.content);
       }
       if (item.error !== undefined && item.error !== null) {
