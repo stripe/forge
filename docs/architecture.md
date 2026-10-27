@@ -1738,7 +1738,7 @@ may lack summaries in an interrupted snapshot. Records and referenced excerpts
 share a 512 KiB retained-byte cap. Safe failure messages follow the existing
 credential-redaction boundary.
 
-Codex sessions receive an optional `AgentDiagnosticsCapture` capability with
+Built-in agent sessions receive an optional `AgentDiagnosticsCapture` capability with
 redaction callbacks; resolved secrets remain inside execution. Each invocation records an exec/resume
 operation label, verified CLI version, process metadata, and typed rejection
 locations. `CommandResult.capture` and `CommandExecutionError.capture` optionally
@@ -1776,16 +1776,19 @@ boundaries. New structural observations trigger background flushes at most once
 per five seconds; the execution clock keeps running during those writes. At most
 64 invocation records fit within 64 KiB, dropping the oldest with an omitted
 count. Process capture is partial when the command output cap drops bytes, and
-unsupported when a rejecting custom runner provides no metadata. Claude Code
-and OpenCode do not yet supply
-these invocation records.
+unsupported when a rejecting custom runner provides no metadata. Sources are
+`codex_exec_json`, `claude_stream_json`, and `opencode_run_json`. Claude and
+OpenCode retain their known event types and failure flags; unknown names become
+`unknown`. Codex additionally retains its item, tool-exit, HTTP, and typed parser
+rejection details. OpenCode model-step finishes are not labeled completed driver
+turns.
 
 Restricted failure excerpts default to off. Hosts enable
 `composition.restrictedDiagnosticExcerpts`, or users pass the README's
 [run option](../README.md#results-and-scores). This policy never enters authored
 inputs, plans, or their digests. Stores must advertise `supportsRestrictedExcerpts`
 and honor the optional excerpt argument to `write`; otherwise restricted capture
-is marked unsupported. Only the latest saved failed Codex invocation has excerpt
+is marked unsupported. Only the latest saved failed invocation has CLI-event and stderr excerpt
 references: at most 128 KiB of the last 20 event excerpts plus the first
 failure/rejected event, and a 32 KiB stderr tail. Event text is individually bounded; truncation is explicit even
 when fewer than 20 fit. Failure text gets space before preceding events. Each
@@ -1793,13 +1796,41 @@ excerpt includes its line index, including malformed JSON. The operation label
 replaces argv. Redaction precedes truncation and retains overlap across stderr
 chunks; unresolved text at an output cutoff is withheld.
 These remain sensitive excerpts, not exact native evidence. They never enter
-reports, progress, scoring, or shared result artifacts. The optional native
-session tail is not implemented.
+reports, progress, scoring, or shared result artifacts.
+
+Failed attempts may also include optional `failure_evidence`, with
+`partial_trajectory` and `native_log` sections. Each has a capture state:
+`disabled`, `unsupported`, `unavailable`, `available`, or `truncated`; an `empty`
+partial trajectory means no agent turn completed. Partial-trajectory metadata
+counts completed turns, tool calls, and retained turns without copying their
+content. Missing sections in older attempts remain supported.
+
+When excerpts are enabled, each section can reference one restricted companion
+by size and SHA-256, capped at 64 KiB each. The partial ATIF trajectory retains a
+suffix of validated completed driver turns. Text is redacted before capping each
+message at 4,096 bytes, with an omission marker. Each turn keeps at most 20 tool
+calls, with arguments explicitly omitted; dropped turns, calls, or arguments
+mark it truncated. It is diagnostic data and never a substitute for a scored
+trajectory. A failed invocation does not become a completed turn.
+
+For an exact session known to the adapter, the engine tries to quiesce and read
+its native source before disposal, under a separate 500 ms diagnostic deadline.
+The existing source reader bounds still apply (at most 16 MiB), then redaction
+precedes tail retention. Unreadable, oversized, ambiguous, missing, or slow
+sources become `unavailable`. Claude supplies its assigned session ID; Codex can
+supply an observed thread ID through the optional diagnostic-only
+`observeSessionId` callback. Conflicting observations disable that lookup and
+never choose an execution session. OpenCode can supply its last completed,
+identity-checked export through the optional `nativeSession` callback. Its tail
+is marked `capture_point: completed_turn`; a source read after failure is marked
+`failure`. The earlier export cannot show work from the failed invocation.
+No extra OpenCode export command runs during failure cleanup.
 
 Each attempt has one serialized writer, atomic replacement, increasing revisions,
 and idempotent identical terminal writes. Concurrent observations coalesce while
 a write is active. Restricted excerpts are synced and atomically renamed below
-`restricted/<sha256>.json` (CLI events) and `restricted/<sha256>.txt` (stderr)
+`restricted/<sha256>.json` (CLI events or partial ATIF) and
+`restricted/<sha256>.txt` (stderr or native tail)
 before their descriptors enter `attempt.json`. Reads verify their size and digest;
 missing or mismatched excerpts reject that diagnostic record independently of
 completed results. Superseded excerpts and interrupted writes can leave

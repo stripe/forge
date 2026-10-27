@@ -11,6 +11,11 @@ import type { AgentSelectionV1 } from '../../model/types.ts';
 import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import {
+  createInvocationCapture,
+  runCapturedAgentCommand,
+} from '../invocationDiagnostics.ts';
+import { summarizeNativeStreamLine } from '../streamDiagnostics.ts';
+import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
@@ -179,6 +184,7 @@ export function createOpenCodeAdapter(
       context.signal.throwIfAborted();
       let currentSessionId: string | undefined;
       let sending = false;
+      let invocationSequence = 0;
       return {
         sessionId: () => currentSessionId,
         async send(message, { signal }) {
@@ -206,38 +212,60 @@ export function createOpenCodeAdapter(
               mode: 0o600,
             });
             signal.throwIfAborted();
-            const result = await context.runtime.commands.agent.run(
-              [
-                'node',
-                '-e',
-                OPENCODE_LAUNCHER,
-                `${layout.stateDirectory}/prompt.txt`,
-                executable,
-                'run',
-                '--format',
-                'json',
-                '--agent',
-                'build',
-                '--model',
-                `forge/${context.selection.model}`,
-                '--auto',
-                ...(currentSessionId === undefined
-                  ? []
-                  : ['--session', currentSessionId]),
-              ],
-              {
-                cwd: '.',
-                signal,
-                timeoutMs: context.plan.limits.run_timeout_ms,
-                maxOutputBytes: MAX_NATIVE_BYTES,
+            const capture = createInvocationCapture({
+              sequence: ++invocationSequence,
+              resume: currentSessionId !== undefined,
+              cliVersion: expectedVersion,
+              isFailure: (summary) => summary.event_type === 'error',
+              source: 'opencode_run_json',
+              capture: context.diagnostics,
+              summarizeLine: (line, sequence, at) =>
+                summarizeNativeStreamLine(
+                  'opencode_run_json',
+                  line,
+                  sequence,
+                  at,
+                ),
+            });
+            const turn = await runCapturedAgentCommand({
+              capture,
+              run: (callbacks) =>
+                context.runtime.commands.agent.run(
+                  [
+                    'node',
+                    '-e',
+                    OPENCODE_LAUNCHER,
+                    `${layout.stateDirectory}/prompt.txt`,
+                    executable,
+                    'run',
+                    '--format',
+                    'json',
+                    '--agent',
+                    'build',
+                    '--model',
+                    `forge/${context.selection.model}`,
+                    '--auto',
+                    ...(currentSessionId === undefined
+                      ? []
+                      : ['--session', currentSessionId]),
+                  ],
+                  {
+                    ...callbacks,
+                    cwd: '.',
+                    signal,
+                    timeoutMs: context.plan.limits.run_timeout_ms,
+                    maxOutputBytes: MAX_NATIVE_BYTES,
+                  },
+                ),
+              parse(result) {
+                signal.throwIfAborted();
+                if (result.exitCode !== 0)
+                  throw new Error(
+                    'OpenCode exited without a successful completed turn.',
+                  );
+                return parseOpenCodeStream(result.stdout, currentSessionId);
               },
-            );
-            signal.throwIfAborted();
-            if (result.exitCode !== 0)
-              throw new Error(
-                'OpenCode exited without a successful completed turn.',
-              );
-            const turn = parseOpenCodeStream(result.stdout, currentSessionId);
+            });
             currentSessionId = turn.sessionId;
             try {
               const exported = await context.runtime.commands.agent.run(
@@ -253,12 +281,28 @@ export function createOpenCodeAdapter(
               if (
                 exported.exitCode === 0 &&
                 Buffer.byteLength(exported.stdout) <= MAX_NATIVE_BYTES
-              )
+              ) {
                 await state.writeFile(
                   EXPORT_PATH,
                   Buffer.from(exported.stdout),
                   { mode: 0o600 },
                 );
+                try {
+                  if (
+                    context.diagnostics?.restrictedExcerpts &&
+                    JSON.parse(exported.stdout)?.info?.id === currentSessionId
+                  )
+                    context.diagnostics?.nativeSession?.({
+                      format: 'opencode-session-json',
+                      sessionId: currentSessionId,
+                      mediaType: 'application/json',
+                      extension: 'json',
+                      body: Buffer.from(exported.stdout),
+                    });
+                } catch {
+                  /* Observation cannot control execution. */
+                }
+              }
             } catch {
               // Native capture is optional; cancellation is not an evidence failure.
               signal.throwIfAborted();

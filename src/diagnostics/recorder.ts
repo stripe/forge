@@ -15,6 +15,7 @@ import {
   MAX_INVOCATION_RECORDS,
   type RestrictedAgentExcerpts,
 } from './agent.ts';
+import type { FailureEvidenceRecord } from './failureEvidence.ts';
 import {
   type AttemptDiagnosticsIdentity,
   type AttemptDiagnosticsSnapshot,
@@ -156,7 +157,7 @@ export function createAttemptRecorder(input: {
               omitted += 1;
             }
             if (body && restrictedExcerpts) {
-              excerpts = structuredClone(body);
+              excerpts = { ...excerpts, ...structuredClone(body) };
               const descriptor = (value: string) => ({
                 bytes: Buffer.byteLength(value),
                 sha256: createHash('sha256').update(value).digest('hex'),
@@ -268,6 +269,55 @@ export function createAttemptRecorder(input: {
         },
       };
       void flush();
+    },
+    failureEvidence(
+      record: {
+        partial_trajectory: Omit<
+          FailureEvidenceRecord['partial_trajectory'],
+          'artifact'
+        >;
+        native_log: Omit<FailureEvidenceRecord['native_log'], 'artifact'>;
+      },
+      bodies: Partial<
+        Pick<RestrictedAgentExcerpts, 'partial_trajectory' | 'native_log'>
+      >,
+    ) {
+      if (snapshot.timing.finished_at !== undefined) return;
+      const enabled = snapshot.capture.restricted === 'enabled';
+      const descriptor = (body: string) => ({
+        bytes: Buffer.byteLength(body),
+        sha256: createHash('sha256').update(body).digest('hex'),
+      });
+      snapshot = {
+        ...snapshot,
+        failure_evidence: {
+          partial_trajectory: {
+            ...record.partial_trajectory,
+            ...(enabled && bodies.partial_trajectory !== undefined
+              ? { artifact: descriptor(bodies.partial_trajectory) }
+              : {}),
+          },
+          native_log: {
+            ...record.native_log,
+            ...(enabled && bodies.native_log !== undefined
+              ? { artifact: descriptor(bodies.native_log) }
+              : {}),
+          },
+        },
+      };
+      if (
+        enabled &&
+        (excerpts ||
+          bodies.native_log !== undefined ||
+          bodies.partial_trajectory !== undefined)
+      )
+        excerpts = {
+          cli_events: excerpts?.cli_events ?? '',
+          stderr: excerpts?.stderr ?? '',
+          events_truncated: excerpts?.events_truncated ?? false,
+          stderr_truncated: excerpts?.stderr_truncated ?? false,
+          ...bodies,
+        };
     },
     async failure(
       failure: NonNullable<AttemptDiagnosticsSnapshot['primary_failure']>,

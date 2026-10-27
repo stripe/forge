@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AgentNativeArtifact } from '../contracts/agent.ts';
 
 const count = z.number().int().nonnegative().safe();
 export const MAX_INVOCATION_RECORDS = 64;
@@ -38,6 +39,16 @@ export const eventSummarySchema = z
       'item.updated',
       'item.completed',
       'error',
+      'system',
+      'assistant',
+      'user',
+      'result',
+      'stream_event',
+      'step_start',
+      'step_finish',
+      'text',
+      'reasoning',
+      'tool_use',
       'unknown',
     ]),
     item_type: z
@@ -65,7 +76,11 @@ export const agentInvocationSchema = z
     sequence: count.positive(),
     operation: z.enum(['agent_exec', 'agent_resume']),
     cli_version: z.string().min(1).max(4096),
-    source: z.literal('codex_exec_json'),
+    source: z.enum([
+      'codex_exec_json',
+      'claude_stream_json',
+      'opencode_run_json',
+    ]),
     state: z.enum(['running', 'completed', 'failed']),
     process: z
       .object({
@@ -141,6 +156,8 @@ export const restrictedDescriptorSchema = z
   })
   .strict();
 export interface RestrictedAgentExcerpts {
+  readonly native_log?: string;
+  readonly partial_trajectory?: string;
   readonly cli_events: string;
   readonly stderr: string;
   readonly events_truncated: boolean;
@@ -158,6 +175,10 @@ export interface RedactedDiagnosticTail {
 /** Explicit execution capability; callbacks must not change the agent outcome. */
 export interface AgentDiagnosticsCapture {
   readonly restrictedExcerpts: boolean;
+  /** Diagnostic identity only; never chooses the execution session. */
+  observeSessionId?(sessionId: string): void;
+  /** Last completed native export, retained only when excerpts are enabled. */
+  nativeSession?(artifact: AgentNativeArtifact): void;
   /** Exact secret values remain inside execution; adapters receive only redaction authority. */
   redact(text: string): string;
   redactedTail(maximumBytes: number): RedactedDiagnosticTail;

@@ -50,6 +50,46 @@ async function fixture() {
 }
 
 describe('attempt diagnostics store', () => {
+  it('can finalize an attempt after a later capture drops an earlier native companion', async () => {
+    const f = await fixture();
+    const recorder = createAttemptRecorder({
+      identity: f.identity,
+      write: createAttemptDiagnosticsWriter(f.store),
+    });
+    await recorder.start();
+    recorder.agentCapture([], true);
+    const initial = {
+      partial_trajectory: {
+        state: 'empty' as const,
+        completed_turns: 0,
+        tool_calls: 0,
+        retained_turns: 0,
+      },
+      native_log: {
+        state: 'available' as const,
+        format: 'claude-code-jsonl' as const,
+        source_bytes: 4,
+        capture_point: 'failure' as const,
+      },
+    };
+    recorder.failureEvidence(initial, { native_log: 'text' });
+    await recorder.failure({
+      error_code: 'agent_failed',
+      phase: 'interaction',
+      reason: 'failure',
+      message: 'Agent failed.',
+    });
+    recorder.failureEvidence(
+      { ...initial, native_log: { state: 'unavailable' } },
+      {},
+    );
+    await recorder.finish('errored');
+    const saved = (await f.store.read(f.identity, f.signal))!;
+    assert.equal(saved.state, 'errored');
+    assert.equal(saved.failure_evidence!.native_log.state, 'unavailable');
+    assert.equal(recorder.recordingFailed, false);
+  });
+
   it('serializes concurrent snapshots across store instances and makes terminal writes idempotent', async () => {
     const f = await fixture();
     await fs.symlink(f.root, path.join(f.root, 'alias'));

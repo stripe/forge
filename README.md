@@ -643,7 +643,7 @@ become `unavailable` without blocking resume. A readable identity conflict still
 stops resume. Recording can fail or time out, so absence of detail does not
 establish success. These records are owner-only and never enter scoring or regrade.
 
-For Codex, optional `agent_invocations` records retain process exit or command
+For the built-in agents, optional `agent_invocations` records retain process exit or command
 failure details, typed stream rejections, and the last 20 structural event
 summaries plus the first failure. Tool exit codes are observations; they do not
 make a successful agent turn fail. HTTP statuses carry `agent_reported` origin.
@@ -653,7 +653,12 @@ To retain redacted failure excerpts, pass `--restricted-diagnostic-excerpts` to
 `forge run`, including on resume. It defaults to off and has no environment or
 benchmark setting. Excerpts of CLI events and stderr live under
 `diagnostics/<eval-run-id>/restricted/`; `attempt.json` names their size and
-SHA-256. Only the latest saved failed Codex call has excerpt references. Older
+SHA-256. Failed attempts can also retain a bounded partial trajectory from completed
+turns and a redacted native-session tail. `failure_evidence` records counts and
+capture availability; text stays off unless excerpts are enabled. OpenCode's
+native tail can come from the last completed export, marked `completed_turn`,
+since its failed invocation may have no export. Only the latest saved failed
+call has CLI-event and stderr references. Older
 digest files can remain on disk for readers holding prior snapshots; hosts own
 deletion. Excerpts stay out of reports and progress output. Treat them as sensitive:
 exact credential redaction cannot remove all private data.

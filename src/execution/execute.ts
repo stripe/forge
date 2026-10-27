@@ -60,6 +60,10 @@ import {
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
 import {
+  createFailureEvidenceCapture,
+  MAX_FAILURE_NATIVE_SOURCE_BYTES,
+} from '../diagnostics/failureEvidence.ts';
+import {
   assertAttemptDiagnosticsIdentity,
   attemptDiagnosticsIdentity,
 } from '../diagnostics/model.ts';
@@ -360,6 +364,14 @@ export async function executeEvalWithTestHooks(
       return operation();
     });
   let diagnosticSecrets: readonly string[] | undefined;
+  let restrictedCapture = false;
+  let observedSessionId: string | undefined;
+  let ambiguousSession = false;
+  let failedSession: AgentSession | undefined;
+  let failedAgent: AgentAdapter | undefined;
+  let failureEvidence:
+    | ReturnType<typeof createFailureEvidenceCapture>
+    | undefined;
 
   await diagnostics.start(startedAt.toISOString(), false);
   const executionTimeout = createExecutionTimeout(
@@ -411,6 +423,18 @@ export async function executeEvalWithTestHooks(
     ]);
 
     diagnosticSecrets = secrets;
+    const capture = diagnostics.agentCapture(
+      secrets,
+      input.composition.restrictedDiagnosticExcerpts,
+    );
+    restrictedCapture = capture.restrictedExcerpts;
+    failureEvidence = createFailureEvidenceCapture({
+      capture,
+      identity: preflight.agentEvidenceIdentity,
+      model: input.plan.agent.model,
+      requested: input.composition.restrictedDiagnosticExcerpts === true,
+    });
+    failedAgent = preflight.agent;
 
     prepared = await step('runtime_prepare', async () => {
       await executionTimeout.withoutRecordingTime(() =>
@@ -469,13 +493,18 @@ export async function executeEvalWithTestHooks(
         diagnostics.phase('interaction'),
       );
       throwIfAborted(signal, phase);
-      const capture = diagnostics.agentCapture(
-        secrets,
-        input.composition.restrictedDiagnosticExcerpts,
-      );
       const session = await preflight.agent.openSession({
         diagnostics: {
           ...capture,
+          observeSessionId(id) {
+            if (
+              !isSafeSessionIdentity(id) ||
+              (observedSessionId !== undefined && observedSessionId !== id)
+            )
+              ambiguousSession = true;
+            else observedSessionId = id;
+          },
+          nativeSession: failureEvidence!.nativeSession,
           record: (record, excerpts, publication) =>
             publication === 'invocation_boundary'
               ? executionTimeout.withoutRecordingTime(() =>
@@ -490,12 +519,14 @@ export async function executeEvalWithTestHooks(
         inputs: input.composition.inputProvider,
         signal,
       });
+      failedSession = session;
       return executeInteraction(
         input.plan,
         session,
         completions,
         signal,
         hooks.waitBeforeCompletionRetry,
+        failureEvidence!.completed,
       );
     });
 
@@ -853,12 +884,37 @@ export async function executeEvalWithTestHooks(
           },
         )
       : mapExecutionError(error, phase, diagnosticSecrets);
+    if (failureEvidence) {
+      const initial = failureEvidence.finish();
+      diagnostics.failureEvidence(initial.record, initial.bodies);
+    }
     await diagnostics.failure({
       error_code: primary.code,
       phase: primary.phase,
       reason: primary.diagnostic?.reason ?? 'failure',
       message: primary.diagnostic?.message ?? primary.message,
     });
+    if (
+      failureEvidence &&
+      restrictedCapture &&
+      prepared &&
+      !runtimeDisposed &&
+      failedSession &&
+      failedAgent
+    ) {
+      const native = await collectFailedNativeArtifact({
+        prepared,
+        sealed,
+        agent: failedAgent,
+        session: failedSession,
+        observedSessionId,
+        ambiguousSession,
+        runId: input.runId,
+        plan: input.plan,
+      });
+      const captured = failureEvidence.finish(native);
+      diagnostics.failureEvidence(captured.record, captured.bodies);
+    }
     await transaction
       ?.rollback()
       .catch(() => diagnostics.cleanupFailure('rollback_failed'));
@@ -872,6 +928,72 @@ export async function executeEvalWithTestHooks(
     throw primary;
   } finally {
     executionTimeout.dispose();
+  }
+}
+
+const FAILURE_NATIVE_CAPTURE_TIMEOUT_MS = 500;
+async function collectFailedNativeArtifact(input: {
+  prepared: PreparedRuntime;
+  sealed: SealedRuntime | undefined;
+  agent: AgentAdapter;
+  session: AgentSession;
+  observedSessionId: string | undefined;
+  ambiguousSession: boolean;
+  runId: string;
+  plan: ResolvedRunPlanV1;
+}): Promise<AgentNativeArtifact | undefined> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const completedSessionId = input.session.sessionId();
+    if (
+      completedSessionId !== undefined &&
+      input.observedSessionId !== undefined &&
+      completedSessionId !== input.observedSessionId
+    )
+      return undefined;
+    const sessionId = input.ambiguousSession
+      ? undefined
+      : (input.observedSessionId ?? completedSessionId);
+    if (
+      !sessionId ||
+      !isSafeSessionIdentity(sessionId) ||
+      !input.agent.collectNativeArtifact
+    )
+      return undefined;
+    const read = async () => {
+      const sealed = input.sealed ?? (await input.prepared.quiesce());
+      controller.signal.throwIfAborted();
+      const native = await input.agent.collectNativeArtifact!({
+        runId: input.runId,
+        plan: input.plan,
+        selection: input.plan.agent,
+        runtime: projectAgentEvidenceRuntime(sealed),
+        sessionId,
+        signal: controller.signal,
+      });
+      if (
+        native?.sessionId !== sessionId ||
+        native.body.byteLength > MAX_FAILURE_NATIVE_SOURCE_BYTES
+      )
+        return undefined;
+      return native;
+    };
+    return await Promise.race([
+      read(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve(undefined);
+        }, FAILURE_NATIVE_CAPTURE_TIMEOUT_MS);
+        timer.unref();
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
 }
 
@@ -931,6 +1053,7 @@ async function executeInteraction(
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
+  completedTurn: (message: string, turn: AgentTurn) => void,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   const trackedSession: AgentSession = Object.freeze({
@@ -969,6 +1092,7 @@ async function executeInteraction(
         );
       }
       lastTurnSessionId = turn.sessionId;
+      completedTurn(message, turn);
       return turn;
     },
   });
