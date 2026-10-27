@@ -13,14 +13,15 @@ import {
 } from '../testing/fakes.ts';
 import { createMemoryRunInputProvider } from '../testing/memoryInputs.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
-import { ForgeExecutionError } from './errors.ts';
 
-function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
+function fixture(
+  fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup',
+  adapterId: 'codex' | 'claude-code' = 'codex',
+) {
   const mcpServers: PluginMcpServerId[] = ['stripe'];
   const runtime = createFakeRuntimeAdapter();
   const agent = createScriptedAgentAdapter({
-    id: 'codex',
-    turns: [{ sessionId: 'fixture-session', text: 'Done', toolCalls: [] }],
+    id: adapterId,
     requirements: {
       executables: [],
       stateDirectories: [],
@@ -43,7 +44,7 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
           await commands.run(['install']);
           if (fail === 'setup') throw new Error('install failed');
           return {
-            adapter: 'codex',
+            adapter: adapterId,
             plugin: distribution.plugin,
             marketplace: distribution.marketplace,
             marketplace_commit: 'a'.repeat(40),
@@ -77,7 +78,7 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
     },
   };
   const plan = createTestResolvedRunPlan({
-    agent: { adapter: 'codex', provider: 'openai', model: 'unused' },
+    agent: { adapter: adapterId, provider: 'openai', model: 'unused' },
     treatmentSetup: [
       {
         uses: 'forge/plugin',
@@ -119,6 +120,50 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
 }
 
 describe('runtime readiness', () => {
+  it('keeps native discovery out of measured evals, including failed and unsupported checkers', async () => {
+    for (const [adapterId, supported] of [
+      ['codex', true],
+      ['codex', false],
+      ['claude-code', true],
+    ] as const) {
+      const test = fixture('mcp', adapterId);
+      const agent = test.composition.agents.get(adapterId)!;
+      const composition = {
+        ...test.composition,
+        credentialResolver: createStaticCredentialResolver({
+          'model-key': 'mock-model-token',
+          'env:STRIPE_API_KEY': 'mock-token',
+        }),
+        agents: new Map([
+          [
+            adapterId,
+            {
+              ...agent,
+              pluginInstaller: supported
+                ? agent.pluginInstaller!
+                : {
+                    supportsMcpBearerAuth: true as const,
+                    preflight: agent.pluginInstaller!.preflight,
+                  },
+            },
+          ],
+        ]),
+      };
+      const completed = await defaultForgeEngine.executeEval({
+        runId: `discovery-${adapterId}-${supported}`,
+        plan: test.plan,
+        composition,
+      });
+      assert.equal(completed.result.agent.session_id, 'test-session');
+      assert.deepEqual(test.checkedServers, []);
+      assert.ok(
+        !test.runtime.runs[0]!.commands.some(
+          (command) => command.argv[0] === 'check-mcp',
+        ),
+      );
+    }
+  });
+
   it('checks MCP after setup finalization, scopes tokens to agent commands and skips model auth', async () => {
     const test = fixture();
     const results = await defaultForgeEngine.validateRuntime([test]);
@@ -155,48 +200,6 @@ describe('runtime readiness', () => {
       run.events.indexOf('finalizeSetup') < run.events.indexOf('command:agent'),
     );
     assert.equal(run.events.at(-1), 'dispose');
-  });
-
-  it('checks MCP before opening an eval session after setup finalization', async () => {
-    const test = fixture();
-    test.composition.credentialResolver = createStaticCredentialResolver({
-      'env:STRIPE_API_KEY': 'mock-token',
-      'model-key': 'model-token',
-    });
-    await defaultForgeEngine.executeEval({ ...test, runId: 'ready-eval' });
-    assert.deepEqual(test.checkedServers, ['stripe']);
-    assert.ok(test.agent.events.includes('open-session'));
-    const run = test.runtime.runs[0]!;
-    assert.ok(
-      run.events.indexOf('finalizeSetup') < run.events.indexOf('command:agent'),
-    );
-    assert.equal(
-      run.commands.filter(({ argv }) => argv[0] === 'check-mcp').length,
-      1,
-    );
-  });
-
-  it('fails eval setup and disposes the runtime before any model turn when MCP is unavailable', async () => {
-    const test = fixture('mcp');
-    test.composition.credentialResolver = createStaticCredentialResolver({
-      'env:STRIPE_API_KEY': 'mock-token',
-      'model-key': 'model-token',
-    });
-    await assert.rejects(
-      defaultForgeEngine.executeEval({ ...test, runId: 'unready-eval' }),
-      (error) => {
-        assert.ok(error instanceof ForgeExecutionError);
-        assert.equal(error.code, 'setup_failed');
-        assert.equal(error.phase, 'setup');
-        assert.match(
-          error.diagnostic?.message ?? '',
-          /\[REDACTED\] authentication failed/,
-        );
-        return true;
-      },
-    );
-    assert.deepEqual(test.agent.events, ['prepare']);
-    assert.equal(test.runtime.runs[0]?.events.at(-1), 'dispose');
   });
 
   it('rejects a missing native MCP checker before credential lookup or allocation', async () => {

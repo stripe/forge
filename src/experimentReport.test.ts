@@ -48,6 +48,60 @@ afterEach(async () => {
 });
 
 describe('experiment run scorecards', () => {
+  it('keeps typed refusal warnings in report rows after fallback and resume', async () => {
+    const fixture = await experimentRunFixture();
+    fixture.options.execute = (input) => {
+      const base = composition(fixture.root);
+      const agent = createScriptedAgentAdapter({
+        evidence: {
+          kind: 'unavailable',
+          reason: {
+            code: 'source_incomplete',
+            message: 'Synthetic normalization gap.',
+          },
+          mcpToolRefusals: { state: 'available', count: 3 },
+        },
+      }).adapter;
+      return defaultForgeEngine.executeEval({
+        ...input,
+        composition: { ...base, agents: new Map([[agent.id, agent]]) },
+      });
+    };
+    await runExperiment(fixture.options);
+    const first = await readReport(path.join(fixture.root, 'report.json'));
+    assert.deepEqual(
+      first.runs.map((run) => run.warnings?.[0]?.mcp_tool_refusals),
+      [
+        { state: 'available', count: 3 },
+        { state: 'available', count: 3 },
+      ],
+    );
+    fixture.options.resume = true;
+    fixture.options.execute = async () => {
+      throw new Error('Completed runs must not rerun.');
+    };
+    await runExperiment(fixture.options);
+    const resumed = await readReport(path.join(fixture.root, 'report.json'));
+    assert.deepEqual(resumed.runs, first.runs);
+    assert.deepEqual(resumed.summary, first.summary);
+    const old = build([row(0)]);
+    assert.equal(
+      Object.hasOwn(parseExperimentRunReport(old).runs[0]!, 'warnings'),
+      false,
+    );
+    for (const observation of [
+      { state: 'available', count: -1 },
+      { state: 'unavailable', reason: 'arbitrary' },
+      { state: 'available', count: 1, extra: true },
+    ]) {
+      const changed = structuredClone(first);
+      Object.assign(changed.runs[0]!.warnings![0]!, {
+        mcp_tool_refusals: observation,
+      });
+      assert.throws(() => parseExperimentRunReport(changed));
+    }
+  });
+
   it('records the producing Forge build and reads standalone pending scorecards', () => {
     const pending = row(0);
     Object.assign(pending, {

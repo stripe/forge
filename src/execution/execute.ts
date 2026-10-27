@@ -83,6 +83,7 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
+import { mcpToolRefusalWarnings } from '../mcpToolRefusals.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
@@ -410,13 +411,43 @@ export async function validateRuntimeWithSetupActions(
       stage = 'finalize';
       await runtime.finalizeSetup();
       stage = 'mcp';
-      const serverCount = await checkPluginMcp(
-        plan,
-        preflight.agent,
-        applied,
-        runtime,
-        runSignal,
-      );
+      let serverCount = 0;
+      for (const step of applied.steps) {
+        if (step.uses !== 'forge/plugin') continue;
+        const receipt = parseAgentPluginInstallationReceipt(step.resolution);
+        const planned = plan.setup[step.index] as PluginSetupStepV1;
+        const definition = pluginDefinitionForAgent(
+          planned.with.plugin,
+          plan.agent.adapter,
+        );
+        if (
+          definition === undefined ||
+          receipt.adapter !== plan.agent.adapter ||
+          receipt.plugin !== definition.distribution.plugin ||
+          receipt.marketplace !== definition.distribution.marketplace
+        )
+          throw new Error(
+            'Plugin MCP receipt does not match the expected plugin and authentication.',
+          );
+        if (definition.mcpServers.length === 0) continue;
+        // Expected servers come from the code-owned definition, never the receipt.
+        if (
+          !isNativePluginInstallationReceipt(receipt) ||
+          receipt.native_plugin_id.split('@')[0] !==
+            definition.distribution.plugin.split('@')[0]
+        )
+          throw new Error(
+            'Plugin MCP receipt does not match the expected plugin and authentication.',
+          );
+        await preflight.agent.pluginInstaller!.checkMcp!({
+          receipt,
+          servers: definition.mcpServers,
+          stateDirectories: runtime.stateDirectories,
+          commands: runtime.commands.agent,
+          signal: runSignal,
+        });
+        serverCount += definition.mcpServers.length;
+      }
       stage = 'quiesce';
       const sealed = await runtime.quiesce();
       results.push(
@@ -456,55 +487,6 @@ function readinessMcpServers(
         plan.agent.adapter,
       )?.mcpServers ?? [])
     : [];
-}
-
-async function checkPluginMcp(
-  plan: ResolvedRunPlanV1,
-  agent: AgentAdapter,
-  applied: AppliedSetup,
-  runtime: PreparedRuntime,
-  signal: AbortSignal,
-): Promise<number> {
-  const installer = agent.pluginInstaller;
-  if (!installer?.checkMcp) return 0;
-  let serverCount = 0;
-  for (const step of applied.steps) {
-    if (step.uses !== 'forge/plugin') continue;
-    const receipt = parseAgentPluginInstallationReceipt(step.resolution);
-    const planned = plan.setup[step.index] as PluginSetupStepV1;
-    const definition = pluginDefinitionForAgent(
-      planned.with.plugin,
-      plan.agent.adapter,
-    );
-    if (
-      definition === undefined ||
-      receipt.adapter !== plan.agent.adapter ||
-      receipt.plugin !== definition.distribution.plugin ||
-      receipt.marketplace !== definition.distribution.marketplace
-    )
-      throw new Error(
-        'Plugin MCP receipt does not match the expected plugin and authentication.',
-      );
-    if (definition.mcpServers.length === 0) continue;
-    // Expected servers come from the code-owned definition, never the receipt.
-    if (
-      !isNativePluginInstallationReceipt(receipt) ||
-      receipt.native_plugin_id.split('@')[0] !==
-        definition.distribution.plugin.split('@')[0]
-    )
-      throw new Error(
-        'Plugin MCP receipt does not match the expected plugin and authentication.',
-      );
-    await installer.checkMcp({
-      receipt,
-      servers: definition.mcpServers,
-      stateDirectories: runtime.stateDirectories,
-      commands: runtime.commands.agent,
-      signal,
-    });
-    serverCount += definition.mcpServers.length;
-  }
-  return serverCount;
 }
 
 function readinessErrorDetail(error: unknown): string {
@@ -665,13 +647,6 @@ export async function executeEvalWithTestHooks(
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
       throwIfAborted(signal, phase);
       await prepared!.finalizeSetup();
-      await checkPluginMcp(
-        input.plan,
-        preflight.agent,
-        applied,
-        prepared!,
-        signal,
-      );
       return artifact;
     });
 
@@ -708,6 +683,7 @@ export async function executeEvalWithTestHooks(
             preflight.agentEvidenceIdentity,
           ),
           nativeArtifact: undefined,
+          warnings: [],
         };
       }
       if (interaction.sessionId === null) {
@@ -745,7 +721,11 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return { evidence, nativeArtifact };
+      return {
+        evidence,
+        nativeArtifact,
+        warnings: mcpToolRefusalWarnings(collected.mcpToolRefusals),
+      };
     });
     const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
@@ -919,7 +899,10 @@ export async function executeEvalWithTestHooks(
         evaluation: evaluated.evaluation,
         coreDescriptors,
         supplementalDescriptors: nativeDescriptors,
-        warnings: rolePlayerWarnings(interaction.failure),
+        warnings: [
+          ...rolePlayerWarnings(interaction.failure),
+          ...selectedEvidence.warnings,
+        ],
         startedAt,
         completedAt: now(),
       });
@@ -943,7 +926,10 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
+    const warnings: RunWarningV1[] = [
+      ...rolePlayerWarnings(interaction.failure),
+      ...selectedEvidence.warnings,
+    ];
     await step('runtime_dispose', async () => {
       try {
         await prepared!.dispose();
