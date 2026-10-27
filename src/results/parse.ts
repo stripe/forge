@@ -502,6 +502,7 @@ const normalizationWarning = z
     code: z.enum([
       'source_unavailable',
       'source_invalid',
+      'source_truncated',
       'source_incomplete',
       'unsupported_native_event',
       'fallback_used',

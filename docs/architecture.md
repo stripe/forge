@@ -1127,10 +1127,15 @@ to a text-only judge. Incomplete, compacted, ambiguous, or unsupported
 conversation records still trigger whole-trajectory fallback.
 
 OpenCode exports the exact session after each completed turn, while commands
-are still permitted. Before another turn, the adapter invalidates the previous
-export so a failed capture cannot leave stale native evidence eligible. An
-export failure preserves the completed driver turn; cancellation propagates.
-After quiescence, evidence collection only reads the saved JSON. Normalization
+are still permitted. The CLI writes stdout directly to a regular file in declared
+state to avoid losing buffered pipe output at exit. The adapter reads at most
+16 MiB, checks JSON and session identity, and retries a JSON parse failure once.
+JSON cut off at the end becomes `source_truncated`, with the captured byte count
+in its warning; other malformed JSON or mismatched identity stays `source_invalid`.
+Before another turn, the adapter invalidates the previous export so a failed
+capture cannot leave stale native evidence eligible. An export failure preserves
+the completed driver turn; cancellation propagates. After quiescence, evidence
+collection only reads the saved JSON. Normalization
 validates session/version/model identity and retains user text, assistant text,
 reasoning, correlated tool results and errors, and available usage. Compaction,
 attachments, unsupported conversation parts, or incomplete tools trigger

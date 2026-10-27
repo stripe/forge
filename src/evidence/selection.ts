@@ -540,6 +540,7 @@ function parseUnavailableReason(input: unknown): AtifNormalizationWarning {
   if (
     input.code !== 'source_unavailable' &&
     input.code !== 'source_invalid' &&
+    input.code !== 'source_truncated' &&
     input.code !== 'source_incomplete'
   ) {
     throw new TypeError(
