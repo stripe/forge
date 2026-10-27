@@ -249,7 +249,11 @@ names other host services bound to the bridge gateway. Forge does not isolate
 those services from the container. Docker Desktop supplies its host DNS and
 the relay binds loopback. With `runtime.network: host`, both the listener and
 client URL use loopback.
-Forge adds the relay host to command proxy bypass lists. A local Docker daemon
+Forge appends the relay host to `NO_PROXY` and `no_proxy`, preserving existing
+entries. The relay does not restrict general network egress: the selected Docker
+network and other proxy settings stay unchanged. Agents can still browse docs
+and use unauthenticated CLIs and tools; only the plugin key moves to the host.
+A local Docker daemon
 and a container-reachable host are required; remote daemons are unsupported for
 this treatment. Host networking retains Docker's platform requirements.
 
@@ -269,10 +273,28 @@ Native client reconnection after idle closure needs live validation.
 Only MCP transport headers are forwarded. Runs that commit a result record
 authenticated request and error counts as `runtime.metadata.pluginMcpRequests`
 and `pluginMcpErrors`, plus the resolved limits as canonical JSON in
-`pluginMcpLimits`. Counts include discovery and authenticated rejections; they
-do not identify tools or retain bodies. Failed attempts without a committed
-result retain no counts on this lifecycle. Older results may omit these keys. Requests that invoke write
-tools are allowed; Forge applies no tool-level read/write filter.
+`pluginMcpLimits`. Counts include discovery and authenticated rejections.
+`pluginMcpToolCalls` holds canonical JSON with `tools` (tool name to call count),
+`other`, `unparsed`, and `overflow`. The relay reads only `method` and
+`params.name` from the already-bounded request body. Each `tools/call` in a batch
+counts separately, before forwarding; failed upstream calls still count.
+Other RPC methods do not add tool counts. Body-less GET/DELETE requests do not
+add tool observations. Requests rejected before body collection add no tool counts.
+
+Tool names must be 1–128 characters from `[A-Za-z0-9_.-]`; unsafe or missing
+names count under `other`, as do names containing the host key or relay token.
+At most 64 distinct names are retained per run;
+calls to further names count under `overflow`, while known names keep counting.
+Safe names such as `other` remain distinct from the bucket. Malformed JSON or
+UTF-8, empty batches, and malformed message entries count under `unparsed`.
+Counting never rejects a request. No arguments, results, or bodies are retained.
+These observation bounds are fixed by the Forge version, separately from
+transport limits.
+
+Failed attempts without a committed result retain no counts on this lifecycle.
+Older results may omit these keys. Writes are not blocked while tool use is
+being observed. Analysis can classify reads and writes from names; Forge has
+no hard-coded write list. A later tool policy may block writes.
 
 Custom runtimes must opt into `supportsMcpCredentialRelay`, honor
 `RuntimeRequirements.mcpRelays`, and keep `RuntimePreparation.mcpRelayCredentials`

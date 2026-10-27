@@ -40,6 +40,7 @@ import {
   resolveMcpCredentialRelayLimits,
   startMcpCredentialRelay,
 } from '../mcpCredentialRelay.ts';
+import { mergeMcpToolCallCounts } from '../mcpToolCallCounts.ts';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
@@ -620,6 +621,11 @@ export function createDockerRuntimeAdapter(
               ? {}
               : {
                   pluginMcpLimits: serializeCanonicalJson(mcpRelayLimits),
+                  pluginMcpToolCalls: serializeCanonicalJson(
+                    mergeMcpToolCallCounts(
+                      relays.map((relay) => relay.toolCalls()),
+                    ),
+                  ),
                   pluginMcpRequests: String(
                     relays.reduce(
                       (count, relay) => count + relay.counts().requests,

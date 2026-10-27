@@ -85,6 +85,72 @@ async function fixture(
 }
 
 describe('host MCP credential relay', () => {
+  it('observes tool calls and malformed bodies without blocking or changing them', async () => {
+    const test = await fixture((_request, response) =>
+      response.end('synthetic-result'),
+    );
+    const bodies = [
+      JSON.stringify([
+        {
+          method: 'tools/call',
+          params: {
+            name: 'records.create',
+            arguments: { omit: 'synthetic-input' },
+          },
+        },
+        { method: 'tools/call', params: { name: 'records.read' } },
+        { method: 'tools/call', params: { name: 'unsafe/name' } },
+        { method: 'tools/list' },
+        { method: 'tools/call', params: { name: 'synthetic-host-key' } },
+        {
+          method: 'tools/call',
+          params: { name: `tool_${test.relay.connection.token}` },
+        },
+      ]),
+      '{broken',
+    ];
+    for (const body of bodies) {
+      const response = await fetch(test.relay.connection.url, {
+        method: 'POST',
+        headers: test.headers,
+        body,
+      });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'synthetic-result');
+    }
+    assert.deepEqual(
+      test.calls.map(({ body }) => body),
+      bodies,
+    );
+    assert.deepEqual(test.relay.toolCalls(), {
+      tools: { 'records.create': 1, 'records.read': 1 },
+      other: 3,
+      unparsed: 1,
+      overflow: 0,
+    });
+    assert.deepEqual(test.relay.counts(), { requests: 2, errors: 0 });
+    assert.ok(
+      !JSON.stringify(test.relay.toolCalls()).includes('synthetic-input'),
+    );
+    assert.ok(
+      !JSON.stringify(test.relay.toolCalls()).includes('synthetic-result'),
+    );
+    assert.ok(
+      !JSON.stringify(test.relay.toolCalls()).includes('synthetic-host-key'),
+    );
+    assert.ok(
+      !JSON.stringify(test.relay.toolCalls()).includes(
+        test.relay.connection.token,
+      ),
+    );
+    const rejected = await fetch(test.relay.connection.url, {
+      method: 'POST',
+      body: bodies[0]!,
+    });
+    assert.equal(rejected.status, 401);
+    assert.equal(test.relay.toolCalls().tools['records.create'], 1);
+  });
+
   it('injects the host key, forwards only MCP headers, and streams the fixed upstream', async () => {
     const test = await fixture((_request, response) => {
       response.setHeader('mcp-session-id', 'synthetic-session');

@@ -117,7 +117,18 @@ describe('Docker plugin credential relays', () => {
         temporaryRoot: root,
         hostPlatform,
       });
-      const input = preparation();
+      const input = {
+        ...preparation(),
+        environment: {
+          variables: {
+            HTTP_PROXY: 'http://proxy.example.com:8080',
+            HTTPS_PROXY: 'http://proxy.example.com:8080',
+            NO_PROXY: 'docs.example.com',
+            no_proxy: 'tools.example.com',
+          },
+          credentials: {},
+        },
+      };
       if (!('image' in input.plan.runtime)) throw new Error('expected Docker');
       if (network === 'host')
         input.plan.runtime = { ...input.plan.runtime, network };
@@ -152,8 +163,14 @@ describe('Docker plugin credential relays', () => {
         assert.equal((await fetch(url)).status, 401);
         const starts = fake.calls.filter(({ argv }) => argv[1] === 'run');
         assert.equal(starts.length, 2);
-        for (const { argv } of starts)
+        for (const { argv } of starts) {
           assert.equal(argv.includes('--add-host'), mapping !== undefined);
+          const networkIndex = argv.indexOf('--network');
+          assert.equal(
+            networkIndex < 0 ? undefined : argv[networkIndex + 1],
+            network === 'host' ? 'host' : undefined,
+          );
+        }
         if (mapping)
           for (const { argv } of starts) assert.ok(argv.includes(mapping));
         assert.ok(
@@ -165,10 +182,23 @@ describe('Docker plugin credential relays', () => {
         const command = fake.calls.find(
           ({ environmentBody }) => environmentBody !== undefined,
         )!;
-        assert.ok(
-          command.environmentBody?.includes(
-            `NO_PROXY=${network === 'host' ? '127.0.0.1' : 'host.docker.internal'}`,
+        const relayHost =
+          network === 'host' ? '127.0.0.1' : 'host.docker.internal';
+        assert.deepEqual(
+          Object.fromEntries(
+            command
+              .environmentBody!.trim()
+              .split('\n')
+              .map((line) => {
+                const separator = line.indexOf('=');
+                return [line.slice(0, separator), line.slice(separator + 1)];
+              }),
           ),
+          {
+            ...input.environment.variables,
+            NO_PROXY: `docs.example.com,${relayHost}`,
+            no_proxy: `tools.example.com,${relayHost}`,
+          },
         );
         assert.ok(
           !command.environmentBody?.includes('synthetic-host-only-key'),
@@ -179,6 +209,12 @@ describe('Docker plugin credential relays', () => {
         const sealed = await runtime.quiesce();
         assert.equal(sealed.metadata.pluginMcpRequests, '0');
         assert.equal(sealed.metadata.pluginMcpErrors, '0');
+        assert.deepEqual(JSON.parse(sealed.metadata.pluginMcpToolCalls!), {
+          tools: {},
+          other: 0,
+          unparsed: 0,
+          overflow: 0,
+        });
         await assert.rejects(fetch(url));
       } finally {
         await runtime.dispose();
@@ -247,6 +283,77 @@ describe('Docker plugin credential relays', () => {
         ...DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS,
         requestBytes: 4,
       });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it('saves bounded per-tool observations with completed relay counts', async () => {
+    const fake = fakeDocker();
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-relay-counts-'),
+    );
+    roots.push(root);
+    const bodies: string[] = [];
+    const runtime = await createDockerRuntimeAdapter({
+      hostCommands: fake.runner,
+      temporaryRoot: root,
+      mcpRelayFetch: async (_url, options) => {
+        bodies.push(String(options?.body));
+        return new Response('synthetic-result', { status: 500 });
+      },
+    }).prepare({
+      ...preparation(),
+      requirements: {
+        executables: [],
+        stateDirectories: [],
+        mcpRelays: ['stripe'],
+      },
+      mcpRelayCredentials: [
+        { server: 'stripe', value: 'synthetic-host-only-key' },
+      ],
+    });
+    try {
+      const connection = runtime.pluginMcpConnections!.stripe!;
+      const url = new URL(connection.url);
+      url.hostname = '127.0.0.1';
+      const body = JSON.stringify([
+        ...Array.from({ length: 65 }, (_, index) => ({
+          method: 'tools/call',
+          params: {
+            name: `tool_${index}`,
+            arguments: { omit: 'synthetic-input' },
+          },
+        })),
+        { method: 'tools/call', params: { name: 'unsafe/name' } },
+      ]);
+      for (const content of [body, '{broken']) {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${connection.token}` },
+          body: content,
+        });
+        assert.equal(response.status, 500);
+        await response.text();
+      }
+      assert.deepEqual(bodies, [body, '{broken']);
+      const sealed = await runtime.quiesce();
+      assert.equal(sealed.metadata.pluginMcpRequests, '2');
+      assert.equal(sealed.metadata.pluginMcpErrors, '2');
+      const counts = JSON.parse(sealed.metadata.pluginMcpToolCalls!);
+      assert.deepEqual(counts, {
+        tools: Object.fromEntries(
+          Array.from({ length: 64 }, (_, index) => [`tool_${index}`, 1]),
+        ),
+        other: 1,
+        unparsed: 1,
+        overflow: 1,
+      });
+      assert.ok(!JSON.stringify(sealed.metadata).includes('synthetic-input'));
+      assert.ok(!JSON.stringify(sealed.metadata).includes('synthetic-result'));
+      assert.ok(
+        !JSON.stringify(sealed.metadata).includes('synthetic-host-only-key'),
+      );
     } finally {
       await runtime.dispose();
     }

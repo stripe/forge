@@ -591,6 +591,7 @@ those two sides.
 | --- | --- | --- |
 | [`workspace.ts`](https://github.com/stripe/forge/blob/main/src/runtime/workspace.ts) | `createOwnedWorkspace` | Safe host-backed mutable workspace: canonical root, no symlink traversal, stable listing, bounded reads, and atomic writes. Used by Docker. |
 | [`mcpCredentialRelay.ts`](https://github.com/stripe/forge/blob/main/src/runtime/mcpCredentialRelay.ts) | `startMcpCredentialRelay` | Bounded host HTTP relay with a per-run token, fixed upstream, counts, and shutdown; owned by the Docker runtime. |
+| [`mcpToolCallCounts.ts`](https://github.com/stripe/forge/blob/main/src/runtime/mcpToolCallCounts.ts) | `mcpToolCallNames`, `countMcpToolCalls` | Pure bounded tool-name observations and per-run counts from proxied MCP request bytes. |
 | [`processCommandRunner.ts`](https://github.com/stripe/forge/blob/main/src/runtime/processCommandRunner.ts) | `createHostCommandRunner` | Shell-free host subprocess runner with timeout, output cap, abort, and process-tree termination. Used by Docker CLI operations. |
 
 ### `src/runtime/docker`

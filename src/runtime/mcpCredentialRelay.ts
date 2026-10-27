@@ -2,6 +2,12 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { isIPv4, type Socket } from 'node:net';
 import type { PluginMcpConnection } from '../contracts/runtime.ts';
+import {
+  countMcpToolCalls,
+  EMPTY_MCP_TOOL_CALL_COUNTS,
+  type McpToolCallCounts,
+  mcpToolCallNames,
+} from './mcpToolCallCounts.ts';
 
 export interface McpCredentialRelayLimits {
   readonly requestBytes: number;
@@ -69,6 +75,7 @@ const RESPONSE_HEADERS = [
 export interface McpCredentialRelay {
   readonly connection: PluginMcpConnection;
   counts(): Readonly<{ requests: number; errors: number }>;
+  toolCalls(): McpToolCallCounts;
   close(): Promise<void>;
 }
 
@@ -103,6 +110,7 @@ export async function startMcpCredentialRelay(input: {
   let active = 0;
   let requests = 0;
   let errors = 0;
+  let toolCalls = EMPTY_MCP_TOOL_CALL_COUNTS;
   let closing: Promise<void> | undefined;
   const tasks = new Set<Promise<void>>();
   const unauthenticated = new Map<Socket, () => void>();
@@ -191,6 +199,12 @@ export async function startMcpCredentialRelay(input: {
             }
             chunks.push(Buffer.from(chunk));
           }
+          const body = Buffer.concat(chunks);
+          if (bytes > 0 || request.method === 'POST')
+            toolCalls = countMcpToolCalls(
+              mcpToolCallNames(body, [input.credential, token]),
+              toolCalls,
+            );
           const headers = new Headers();
           for (const name of REQUEST_HEADERS) {
             const value = request.headers[name];
@@ -201,7 +215,7 @@ export async function startMcpCredentialRelay(input: {
             (input.fetch ?? globalThis.fetch)(input.upstreamUrl, {
               method: request.method!,
               headers,
-              ...(bytes > 0 ? { body: Buffer.concat(chunks) } : {}),
+              ...(bytes > 0 ? { body } : {}),
               redirect: 'manual',
               signal,
             }),
@@ -305,6 +319,7 @@ export async function startMcpCredentialRelay(input: {
         token,
       }),
       counts: () => Object.freeze({ requests, errors }),
+      toolCalls: () => toolCalls,
       close,
     });
   } catch {

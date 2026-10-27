@@ -712,7 +712,10 @@ for embedding and local fixtures; the default uses native fetch. The relay
 upstream remains code-owned. `mcpRelayLimits` accepts explicit overrides of the
 typed relay bounds exported with their defaults from `@stripe/forge/runtime/docker`;
 `hostPlatform` selects host routing independently of the image architecture.
-Other traffic has no domain allowlist.
+The relay does not restrict general egress or change the selected network and
+proxy settings. It appends only its host to proxy bypass lists. Other traffic
+has no domain allowlist. Bounded per-tool relay counts are observations described
+in the plugin contract; they do not block writes or affect scoring.
 
 #### Run-owned paths and mounts
 
