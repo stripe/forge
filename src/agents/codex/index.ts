@@ -9,6 +9,7 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
+import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
 import {
@@ -135,6 +136,15 @@ export function createCodexAdapter(
       layout,
     }),
     requirements,
+    probeModel(selection) {
+      requirements(selection);
+      return createAgentModelProbe({
+        endpoint: `${baseUrl.replace(/\/+$/, '')}/responses`,
+        credential,
+        model: selection.model,
+        protocol: 'responses',
+      });
+    },
     evidenceIdentity(selection) {
       requirements(selection);
       return { name: 'codex', version: expectedVersion };

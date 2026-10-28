@@ -9,6 +9,7 @@ import {
 } from '../../contracts/credentials.ts';
 import type { AgentSelectionV1 } from '../../model/types.ts';
 import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.ts';
+import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { readOpenCodeConfiguration } from './config.ts';
 import {
@@ -158,6 +159,15 @@ export function createOpenCodeAdapter(
       layout_mode: usesDefaultOpenCodeLayout(layout) ? 'default' : 'custom',
     }),
     requirements,
+    probeModel(selection) {
+      requirements(selection);
+      return createAgentModelProbe({
+        endpoint: `${(modelRoutes.get(selection.model)?.baseUrl ?? baseUrl)!.replace(/\/+$/, '')}/chat/completions`,
+        credential: modelRoutes.get(selection.model)?.credential ?? credential,
+        model: selection.model,
+        protocol: 'chat',
+      });
+    },
     pluginInstaller: createOpenCodePluginInstaller({ adapterId: id, layout }),
     evidenceIdentity(selection) {
       requirements(selection);

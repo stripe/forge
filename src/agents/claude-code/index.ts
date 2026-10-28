@@ -10,6 +10,7 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.ts';
+import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 import {
@@ -144,6 +145,16 @@ export function createClaudeCodeAdapter(
     }),
     pluginInstaller,
     requirements,
+    probeModel(selection) {
+      requirements(selection);
+      return createAgentModelProbe({
+        endpoint: `${(baseUrl ?? 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`,
+        credential,
+        model: selection.model,
+        protocol: 'messages',
+        bearer: credentialEnvironmentName === 'ANTHROPIC_AUTH_TOKEN',
+      });
+    },
     evidenceIdentity(selection) {
       requirements(selection);
       return { name: 'claude-code', version: expectedVersion };

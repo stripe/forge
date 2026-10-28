@@ -14,6 +14,11 @@ import {
 } from '../../contracts/credentials.ts';
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type { ModelRefV1 } from '../../model/types.ts';
+import {
+  createHttpModelProbe,
+  isProbeObject,
+  modelProbeRequest,
+} from '../../validation/httpProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 
 export const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1' as const;
@@ -99,6 +104,27 @@ export function createOpenAICompletionProvider(
     requirements(input: CompletionProviderRequirementInput) {
       validateCapability(input);
       return requirements;
+    },
+    probeModel(input: CompletionProviderRequirementInput) {
+      validateCapability(input);
+      const request = modelProbeRequest(input.model);
+      return createHttpModelProbe({
+        endpoint,
+        model: input.model.model,
+        credential,
+        fetch: fetchImplementation,
+        timeoutMs,
+        headers: (secret) => ({ authorization: `Bearer ${secret}` }),
+        body: serializeRequest(request),
+        structured: true,
+        accepts: (raw) => {
+          const response = parseResponse(raw, false);
+          return (
+            response.stopReason === 'end_turn' &&
+            isProbeObject(response.content)
+          );
+        },
+      });
     },
     async preflight(input: CompletionProviderPreflightInput): Promise<void> {
       throwIfAborted(input.signal);

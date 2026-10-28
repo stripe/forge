@@ -3,6 +3,7 @@ import type { CommandRunner } from './command.ts';
 import type { EnvironmentSpecification } from './credentials.ts';
 import type { RunInputProvider } from './inputs.ts';
 import type { AgentAdapterMetadata } from './metadata.ts';
+import type { ModelProbe } from './modelProbe.ts';
 import type { AgentPluginInstaller } from './plugin.ts';
 import type {
   MutableWorkspace,
@@ -180,6 +181,8 @@ export interface AgentAdapter {
   readonly pluginInstaller?: AgentPluginInstaller;
   /** Pure declaration used before credentials resolve or a runtime allocates. */
   requirements(selection: AgentSelectionV1): AgentRuntimeRequirements;
+  /** Purely describe a direct model test, without starting a CLI or runtime. */
+  probeModel?(selection: AgentSelectionV1): ModelProbe;
   /** Pure coding-agent identity used when Forge must construct fallback ATIF. */
   evidenceIdentity(selection: AgentSelectionV1): AgentEvidenceIdentity;
   /** Initialize adapter-owned state before authored setup executes. */
