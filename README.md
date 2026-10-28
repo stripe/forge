@@ -446,6 +446,29 @@ for configuration isolation and native evidence behavior.
 
 ### Concurrency and resume
 
+New plans have separate time budgets for agent work and evaluation. Set them
+in the experiment file (these are the defaults):
+
+```yaml
+limits:
+  run_timeout_ms: 1800000
+  evaluation_timeout_ms: 300000
+```
+
+The run budget covers preflight, setup, interaction (including Ava), and
+quiescence. After mutation stops, the evaluation budget covers evidence
+collection, judge calls and retries, file checks, and finalization up to the
+start of atomic commit. Contributors share this deadline. Store calls and
+runtime cleanup must settle before Forge handles expiry; a commit already in
+progress is awaited. Both limits accept positive whole milliseconds, up to
+24 hours each. Caller cancellation stays active across both budgets. Timeout
+diagnostics name the budget and phase that expired.
+
+Saved plans without `evaluation_timeout_ms` keep their shared run timeout.
+Resolving an experiment with this build adds the new default to its plans,
+changing their digests; resume needs the original plans and matching Forge
+identity. See [timeout and cleanup semantics](docs/architecture.md#failure-cancellation-and-cleanup-semantics).
+
 Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
 
 ```sh

@@ -520,6 +520,8 @@ export async function executeEvalWithTestHooks(
   );
   const timeoutSignal = executionTimeout.signal;
   const signal = AbortSignal.any([externalSignal, timeoutSignal]);
+  let timeoutMs = input.plan.limits.run_timeout_ms;
+  let timeoutBudget = 'Run';
   try {
     const preflight = await events.phase('preflight', async () => {
       phase = 'preflight';
@@ -645,7 +647,7 @@ export async function executeEvalWithTestHooks(
         inputs: input.composition.inputProvider,
         signal,
       });
-      return executeInteraction(
+      const completed = await executeInteraction(
         input.plan,
         session,
         completions,
@@ -654,6 +656,8 @@ export async function executeEvalWithTestHooks(
         hooks.waitBeforeCompletionRetry,
         events.agentUsage,
       );
+      throwIfAborted(signal, phase);
+      return completed;
     });
 
     sealed = await events.phase('quiesce', async () => {
@@ -663,6 +667,14 @@ export async function executeEvalWithTestHooks(
       );
       return prepared!.quiesce();
     });
+
+    const evaluationTimeoutMs = input.plan.limits.evaluation_timeout_ms;
+    if (evaluationTimeoutMs !== undefined) {
+      executionTimeout.restart(evaluationTimeoutMs);
+      throwIfAborted(signal, phase);
+      timeoutMs = evaluationTimeoutMs;
+      timeoutBudget = 'Evaluation';
+    }
 
     const selectedEvidence = await events.phase('evidence', async () => {
       phase = 'evidence';
@@ -694,9 +706,14 @@ export async function executeEvalWithTestHooks(
         sessionId: interaction.sessionId,
         signal,
       };
-      const captured =
-        await preflight.agent.collectNativeArtifact?.(evidenceContext);
-      const collected = await preflight.agent.collectEvidence(evidenceContext);
+      const captured = await abortable(
+        preflight.agent.collectNativeArtifact?.(evidenceContext),
+        signal,
+      );
+      const collected = await abortable(
+        preflight.agent.collectEvidence(evidenceContext),
+        signal,
+      );
       const nativeArtifact = buildNativeArtifact(
         captured,
         collected,
@@ -784,7 +801,10 @@ export async function executeEvalWithTestHooks(
           createCompletionDecisionModel({
             model: input.plan.evaluation.judge!,
             invoke: (request) =>
-              completions.invoke('judge', request, request.signal),
+              abortable(
+                completions.invoke('judge', request, request.signal),
+                request.signal,
+              ),
             validateRequest: (request) =>
               assertJudgePromptWillRemainUnchanged(request, secrets),
           }),
@@ -833,16 +853,20 @@ export async function executeEvalWithTestHooks(
           { forgeVersion: FORGE_VERSION },
         );
       }
-      const result = await evaluateRunEvidence({
-        plan: input.plan,
-        trajectory: redacted.evidence.trajectory,
-        workspace: sealed!.workspace,
-        ...(criterionResults === undefined ? {} : { criterionResults }),
-        ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
+      const result = await abortable(
+        evaluateRunEvidence({
+          plan: input.plan,
+          trajectory: redacted.evidence.trajectory,
+          workspace: sealed!.workspace,
+          ...(criterionResults === undefined ? {} : { criterionResults }),
+          ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
+          signal,
+        }),
         signal,
-      });
+      );
       return { ...result, judgeEvidence };
     });
+    throwIfAborted(signal, phase);
 
     const interactionArtifact = redactInteractionArtifact(
       buildInteractionArtifact(input.plan, interaction),
@@ -866,52 +890,60 @@ export async function executeEvalWithTestHooks(
         ? []
         : [selectedEvidence.nativeArtifact];
     const nativeDescriptors = nativeArtifacts.map(describeArtifact);
-    let contributedArtifacts: RunArtifact[] = [];
-    if ((input.composition.contributors?.length ?? 0) > 0) {
-      const contributorResult = buildResult({
-        input,
-        agent: preflight.agent,
-        agentMetadata: preflight.agentMetadata,
-        runtime: sealed,
-        interaction,
-        setupArtifact,
-        completionCalls: completions.calls,
-        completionCallTotals: completions.totals,
-        evidence: redacted.evidence,
-        redactionCount: redacted.replacements,
-        evaluation: evaluated.evaluation,
-        coreDescriptors,
-        supplementalDescriptors: nativeDescriptors,
-        warnings: [
-          ...rolePlayerWarnings(interaction.failure),
-          ...selectedEvidence.warnings,
-        ],
-        startedAt,
-        completedAt: now(),
-      });
-      contributedArtifacts = await buildSupplementalArtifacts(
-        input,
-        contributorResult,
-        secrets,
-        signal,
-      );
-    }
-    const supplementalArtifacts = [...nativeArtifacts, ...contributedArtifacts];
-    const supplementalDescriptors = [
-      ...nativeDescriptors,
-      ...contributedArtifacts.map(describeArtifact),
-    ];
-
-    await events.phase('artifact_stage', async () => {
-      phase = 'artifact_stage';
-      await executionTimeout.withoutRecordingTime(() =>
-        diagnostics.phase('artifact_stage'),
-      );
-      transaction = await input.composition.artifactStore.begin(input.runId);
-      for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
-        await transaction.write(artifact);
-      }
-    });
+    const supplementalDescriptors = await events.phase(
+      'artifact_stage',
+      async () => {
+        phase = 'artifact_stage';
+        await executionTimeout.withoutRecordingTime(() =>
+          diagnostics.phase('artifact_stage'),
+        );
+        throwIfAborted(signal, phase);
+        let contributedArtifacts: RunArtifact[] = [];
+        if ((input.composition.contributors?.length ?? 0) > 0) {
+          const contributorResult = buildResult({
+            input,
+            agent: preflight.agent,
+            agentMetadata: preflight.agentMetadata,
+            runtime: sealed!,
+            interaction,
+            setupArtifact,
+            completionCalls: completions.calls,
+            completionCallTotals: completions.totals,
+            evidence: redacted.evidence,
+            redactionCount: redacted.replacements,
+            evaluation: evaluated.evaluation,
+            coreDescriptors,
+            supplementalDescriptors: nativeDescriptors,
+            warnings: [
+              ...rolePlayerWarnings(interaction.failure),
+              ...selectedEvidence.warnings,
+            ],
+            startedAt,
+            completedAt: now(),
+          });
+          contributedArtifacts = await buildSupplementalArtifacts(
+            input,
+            contributorResult,
+            secrets,
+            signal,
+          );
+        }
+        const supplementalArtifacts = [
+          ...nativeArtifacts,
+          ...contributedArtifacts,
+        ];
+        transaction = await input.composition.artifactStore.begin(input.runId);
+        throwIfAborted(signal, phase);
+        for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
+          await transaction.write(artifact);
+          throwIfAborted(signal, phase);
+        }
+        return [
+          ...nativeDescriptors,
+          ...contributedArtifacts.map(describeArtifact),
+        ];
+      },
+    );
 
     const warnings: RunWarningV1[] = [
       ...rolePlayerWarnings(interaction.failure),
@@ -937,6 +969,7 @@ export async function executeEvalWithTestHooks(
         runtimeDisposed = true;
         diagnostics.cleanupCompleted();
       }
+      throwIfAborted(signal, phase);
     });
 
     const result = buildResult({
@@ -964,6 +997,8 @@ export async function executeEvalWithTestHooks(
       await executionTimeout.withoutRecordingTime(() =>
         diagnostics.phase('result_commit'),
       );
+      throwIfAborted(signal, phase);
+      // An atomic commit must settle before reporting success or rolling back.
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
@@ -993,14 +1028,14 @@ export async function executeEvalWithTestHooks(
           'aborted',
           phase,
           timedOut
-            ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
+            ? `The Forge run timed out after ${timeoutMs}ms during ${phase} (${timeoutBudget.toLowerCase()} budget).`
             : 'The Forge run was cancelled by the caller.',
           {
             cause: signal.reason,
             diagnostic: {
               reason: timedOut ? 'timeout' : 'cancelled',
               message: timedOut
-                ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
+                ? `${timeoutBudget} timeout of ${timeoutMs}ms exceeded during ${phase}.`
                 : 'Caller cancellation stopped the run.',
             },
           },
@@ -1038,6 +1073,7 @@ function createExecutionTimeout(durationMs: number) {
   let remaining = durationMs;
   let resumedAt = performance.now();
   let timer: ReturnType<typeof setTimeout>;
+  let active = true;
   const expire = () =>
     controller.abort(
       new DOMException(
@@ -1047,7 +1083,7 @@ function createExecutionTimeout(durationMs: number) {
     );
   function resume() {
     resumedAt = performance.now();
-    if (!controller.signal.aborted) {
+    if (active && !controller.signal.aborted) {
       if (remaining <= 0) expire();
       else {
         timer = setTimeout(expire, remaining);
@@ -1055,13 +1091,23 @@ function createExecutionTimeout(durationMs: number) {
       }
     }
   }
+  function pause() {
+    clearTimeout(timer);
+    if (!active) return;
+    remaining -= performance.now() - resumedAt;
+    if (remaining <= 0) expire();
+  }
   resume();
   return {
     signal: controller.signal,
+    restart(duration: number) {
+      pause();
+      if (controller.signal.aborted) return;
+      remaining = duration;
+      resume();
+    },
     async withoutRecordingTime(record: () => Promise<void>) {
-      clearTimeout(timer);
-      remaining -= performance.now() - resumedAt;
-      if (remaining <= 0) expire();
+      pause();
       try {
         await record();
       } finally {
@@ -1069,9 +1115,30 @@ function createExecutionTimeout(durationMs: number) {
       }
     },
     dispose() {
-      clearTimeout(timer);
+      pause();
+      active = false;
     },
   };
+}
+
+/** Abandon late results on abort; hosts still own their underlying work. */
+async function abortable<T>(
+  operation: Promise<T> | T,
+  signal: AbortSignal,
+): Promise<T> {
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    const value = await Promise.race([operation, aborted]);
+    signal.throwIfAborted();
+    return value;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 interface ExecutedInteraction {
@@ -2220,11 +2287,15 @@ async function buildSupplementalArtifacts(
     if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(contributor.id)) {
       throw new TypeError('Artifact contributor IDs must be safe identifiers.');
     }
-    const contributed = await contributor.contribute({
-      runId: input.runId,
-      result: JSON.parse(resultJson) as Readonly<Record<string, unknown>>,
+    signal.throwIfAborted();
+    const contributed = await abortable(
+      contributor.contribute({
+        runId: input.runId,
+        result: JSON.parse(resultJson) as Readonly<Record<string, unknown>>,
+        signal,
+      }),
       signal,
-    });
+    );
     for (const artifact of contributed) {
       const { path: artifactPath, body, mediaType, sensitivity } = artifact;
       if (!(body instanceof Uint8Array)) {

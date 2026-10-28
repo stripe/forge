@@ -30,6 +30,7 @@ import {
   DEFAULT_DOCKER_CPU_COUNT,
   DEFAULT_DOCKER_MEMORY_BYTES,
   DEFAULT_DOCKER_PROCESS_COUNT,
+  DEFAULT_EVALUATION_TIMEOUT_MS,
   DEFAULT_MAX_TURNS,
   DEFAULT_RUN_TIMEOUT_MS,
   type EvalCaseV1,
@@ -529,6 +530,9 @@ const ExperimentConfigSchema = z
         run_timeout_ms: PositiveIntegerSchema.max(24 * 60 * 60 * 1000).default(
           DEFAULT_RUN_TIMEOUT_MS,
         ),
+        evaluation_timeout_ms: PositiveIntegerSchema.max(
+          24 * 60 * 60 * 1000,
+        ).default(DEFAULT_EVALUATION_TIMEOUT_MS),
       })
       .strict()
       .default({}),
@@ -716,6 +720,9 @@ const ResolvedRunPlanSchema = z
     limits: z
       .object({
         run_timeout_ms: PositiveIntegerSchema.max(24 * 60 * 60 * 1000),
+        evaluation_timeout_ms: PositiveIntegerSchema.max(
+          24 * 60 * 60 * 1000,
+        ).optional(),
       })
       .strict(),
   })

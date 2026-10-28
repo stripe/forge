@@ -191,6 +191,7 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof evaluateRunEvidence, 'function');
     assert.equal(typeof resolveRunPlan, 'function');
     assert.equal(typeof parseResolvedRunPlan, 'function');
+    assert.equal(rootExports.DEFAULT_EVALUATION_TIMEOUT_MS, 300_000);
     assert.equal(typeof resolveManifestCaseIdFromFile, 'function');
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof rootExports.createAttemptDiagnosticsStore, 'function');

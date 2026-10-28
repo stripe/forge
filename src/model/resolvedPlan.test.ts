@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
+import { serializeResolvedRunPlan } from '../planning/planner.ts';
 import { FORGE_VERSION } from '../version.ts';
 import { BenchmarkModelError } from './errors.ts';
 import { parseResolvedRunPlan } from './parse.ts';
@@ -78,6 +79,45 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('preserves old shared-budget plan bytes and round-trips a separate evaluation limit', () => {
+    const old = validPlan();
+    const bytes = serializeResolvedRunPlan(old);
+    assert.equal(serializeResolvedRunPlan(parseResolvedRunPlan(old)), bytes);
+    assert.equal(
+      Object.hasOwn(parseResolvedRunPlan(old).limits, 'evaluation_timeout_ms'),
+      false,
+    );
+    const plan = {
+      ...old,
+      limits: { ...old.limits, evaluation_timeout_ms: 300_000 },
+    };
+    assert.equal(
+      serializeResolvedRunPlan(
+        parseResolvedRunPlan(JSON.parse(serializeResolvedRunPlan(plan))),
+      ),
+      serializeResolvedRunPlan(plan),
+    );
+    assert.notEqual(serializeResolvedRunPlan(plan), bytes);
+    for (const evaluation_timeout_ms of [0, -1, 1.5, 86_400_001, null, '100']) {
+      assert.throws(
+        () =>
+          parseResolvedRunPlan({
+            ...plan,
+            limits: { ...plan.limits, evaluation_timeout_ms },
+          }),
+        BenchmarkModelError,
+      );
+    }
+    assert.throws(
+      () =>
+        parseResolvedRunPlan({
+          ...plan,
+          limits: { ...plan.limits, unknown_timeout_ms: 100 },
+        }),
+      /Unrecognized key/,
+    );
+  });
+
   it('retains historical case identities and filenames in saved artifacts', () => {
     const plan = validPlan();
     const id = 'Legacy_Suite/Case.1';

@@ -9,6 +9,7 @@ import {
   type AgentSelectionV1,
   type CaseId,
   type DatasetRelativePath,
+  DEFAULT_EVALUATION_TIMEOUT_MS,
   DEFAULT_MAX_TURNS,
   type ExperimentConfigV1,
   type ExperimentMatrixGroupV1,
@@ -262,7 +263,11 @@ export function resolveRunPlanWithSetupActions(
         }),
     agent: resolveAgentSelection(selection.agent),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
-    limits: cloneJson(config.limits),
+    limits: {
+      ...cloneJson(config.limits),
+      evaluation_timeout_ms:
+        config.limits.evaluation_timeout_ms ?? DEFAULT_EVALUATION_TIMEOUT_MS,
+    },
   };
   return deepFreeze(plan);
 }
