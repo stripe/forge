@@ -178,21 +178,26 @@ quiesces all mutation before evidence selection.
 ## Credentials and limitations
 
 Selecting `plugin: stripe` automatically configures bearer authentication for
-its bundled HTTP MCP connection. By default, the CLI reads an Agent API key from
-the host's `STRIPE_API_KEY`. To read another host variable, pass an explicit binding:
+its bundled HTTP MCP connection and declares `STRIPE_API_KEY` for the agent.
+The CLI requires an explicit grant to read the key. For a Claude Code experiment
+using the default OpenAI Ava/judge models:
 
 ```sh
 npx --no-install forge run --experiment ./experiment.yaml --output ./results \
-  --credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
+  --credential-env STRIPE_API_KEY
 ```
 
-Export the selected host variable before starting the eval. An explicit binding
-takes precedence over the default; if its value is missing, Forge fails without
-falling back to another variable. Account or merchant provisioning remains
-external to Forge.
+Export the selected host variables before starting the eval, using an Agent API
+key for `STRIPE_API_KEY`. To read another host variable, replace the Stripe grant
+with `--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`. Missing grants or
+values fail before runtime allocation, without fallback to another variable.
+Account or merchant provisioning remains external to Forge.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
-credential resolver. Missing values fail before runtime allocation. Ordinary
-validation and planning need no values.
+credential resolver. Ordinary validation and planning need neither grants nor
+secret values. See the README for other
+[credential grants](../README.md#requirements--credentials).
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference

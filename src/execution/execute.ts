@@ -27,8 +27,8 @@ import type { CommandOptions, CommandRunner } from '../contracts/command.ts';
 import type { ForgeComposition } from '../contracts/composition.ts';
 import {
   type CredentialEnvironmentBinding,
+  type CredentialReference,
   type CredentialScope,
-  createEnvironmentResolver,
   credentialReference,
   type EnvironmentSpecification,
   normalizeEnvironmentSpecification,
@@ -51,6 +51,11 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
+import {
+  type RuntimeCredentialDeclaration,
+  resolveCredentialDeclarations,
+  validateCredentialDeclarations,
+} from '../credentialDeclarations.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
@@ -108,7 +113,10 @@ import {
   redactSecrets,
 } from '../security/redaction.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
-import { createSetupExecutorForRegistry } from '../setup/executor.ts';
+import {
+  createSetupExecutorForRegistry,
+  preparedSetupCredentialDeclarations,
+} from '../setup/executor.ts';
 import type {
   AppliedSetup,
   PreparedSetup,
@@ -166,6 +174,14 @@ export interface PreflightEvalInput {
   readonly composition: ForgeComposition;
 }
 
+/** A normalized selected consumer, retaining its original credential identity. */
+export interface EvalCredentialUse {
+  readonly reference: CredentialReference;
+  readonly purpose: string;
+  /** Present for runtime consumers; host completion credentials have no slot. */
+  readonly environmentName?: string;
+}
+
 interface EvalPreflight {
   readonly agent: AgentAdapter;
   readonly agentMetadata: AgentAdapterMetadata | undefined;
@@ -173,6 +189,7 @@ interface EvalPreflight {
   readonly setup: PreparedSetup;
   readonly requirements: RuntimeRequirements;
   readonly environmentSpecification: ScopedEnvironmentSpecification;
+  readonly credentialDeclarations: readonly RuntimeCredentialDeclaration[];
   readonly completionBindings: readonly CompletionBinding[];
 }
 
@@ -198,13 +215,58 @@ export function preflightEvalWithSetupActions(
     buildEvalPreflight(
       plan,
       request.composition,
-      createSetupExecutorForRegistry(setupActions),
+      createSetupExecutorForRegistry(setupActions, true),
     );
   } catch (error) {
     throw executionError(
       'invalid_plan',
       'preflight',
       'Forge could not execute this plan with the supplied composition.',
+      error,
+    );
+  }
+}
+
+/** @internal Engine-bound pure discovery before a host finalizes source bindings. */
+export function inspectEvalCredentialsWithSetupActions(
+  request: PreflightEvalInput,
+  setupActions: SetupActionRegistry,
+): readonly EvalCredentialUse[] {
+  try {
+    const plan = parseResolvedRunPlanWithSetupActions(
+      request.plan,
+      setupActions,
+    );
+    const preflight = buildEvalPreflight(
+      plan,
+      request.composition,
+      createSetupExecutorForRegistry(setupActions, true),
+      false,
+    );
+    return Object.freeze([
+      ...preflight.credentialDeclarations.map(
+        ({ environmentName, reference }) =>
+          Object.freeze({
+            environmentName,
+            reference,
+            purpose: `forge-eval:${environmentName}`,
+          }),
+      ),
+      ...preflight.completionBindings.flatMap((binding) =>
+        Object.entries(binding.requirements.credentials ?? {}).map(
+          ([name, { reference }]) =>
+            Object.freeze({
+              reference,
+              purpose: `forge-eval:completion:${binding.purpose}:${name}`,
+            }),
+        ),
+      ),
+    ]);
+  } catch (error) {
+    throw executionError(
+      'invalid_plan',
+      'preflight',
+      'Forge could not inspect this plan with the supplied composition.',
       error,
     );
   }
@@ -269,13 +331,15 @@ export async function executeEvalWithTestHooks(
       return buildEvalPreflight(
         input.plan,
         input.composition,
-        hooks.setupExecutor ?? createSetupExecutorForRegistry(setupActions),
+        hooks.setupExecutor ??
+          createSetupExecutorForRegistry(setupActions, true),
       );
     });
 
     const environment = await resolveEnvironment(
       input,
       preflight.environmentSpecification,
+      preflight.credentialDeclarations,
       signal,
     );
     let completions: PreparedCompletionRuntime;
@@ -873,6 +937,7 @@ function buildEvalPreflight(
   plan: ResolvedRunPlanV1,
   composition: ForgeComposition,
   setupExecutor: SetupExecutor,
+  validateCredentials = true,
 ): EvalPreflight {
   assertExecutablePlan(plan);
   const agent = selectedAgent(plan, composition);
@@ -902,29 +967,46 @@ function buildEvalPreflight(
       stateDirectories: setup.requirements.stateDirectories ?? [],
     },
   );
-  const environmentSpecification = mergeEnvironmentSpecifications([
-    { scope: 'agent', specification: agentRequirements.environment },
+  const setupDeclarations = preparedSetupCredentialDeclarations(setup);
+  const environment = mergeEnvironmentSpecifications([
+    {
+      scope: 'agent',
+      source: 'agent',
+      specification: agentRequirements.environment,
+    },
     {
       scope: 'setup',
+      source: 'setup',
       specification: {
         ...(setup.requirements.variables === undefined
           ? {}
           : { variables: setup.requirements.variables }),
-        ...(setup.requirements.credentials?.setup === undefined
-          ? {}
-          : { credentials: setup.requirements.credentials.setup }),
       },
     },
-    {
-      scope: 'agent',
-      specification: {
-        ...(setup.requirements.credentials?.agent === undefined
-          ? {}
-          : { credentials: setup.requirements.credentials.agent }),
-      },
-    },
+    ...(['setup', 'agent'] as const).flatMap((scope) =>
+      setupDeclarations
+        .filter((declaration) => declaration.scope === scope)
+        .map((declaration) => ({
+          ...declaration,
+          specification: {
+            credentials: {
+              [declaration.environmentName]: {
+                reference: declaration.reference,
+              },
+            },
+          },
+        })),
+    ),
   ]);
   const completionBindings = completionBindingsForPlan(plan, composition);
+  if (validateCredentials) {
+    validateCredentialDeclarations(
+      environment.declarations,
+      composition.credentialResolver,
+      'preflight',
+    );
+  }
+  const environmentSpecification = environment.specification;
   preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
     agent,
@@ -933,6 +1015,7 @@ function buildEvalPreflight(
     setup,
     requirements,
     environmentSpecification,
+    credentialDeclarations: environment.declarations,
     completionBindings,
   });
 }
@@ -1006,16 +1089,20 @@ function selectedAgent(
 async function resolveEnvironment(
   input: ExecuteEvalInput,
   specification: ScopedEnvironmentSpecification,
+  declarations: readonly RuntimeCredentialDeclaration[],
   signal: AbortSignal,
 ): Promise<ResolvedEnvironment> {
   try {
-    return await createEnvironmentResolver(
+    return await resolveCredentialDeclarations(
+      specification,
+      declarations,
       input.composition.credentialResolver,
-    ).resolve(specification, {
-      runId: input.runId,
-      purpose: 'forge-eval',
-      signal,
-    });
+      {
+        runId: input.runId,
+        purpose: 'forge-eval',
+        signal,
+      },
+    );
   } catch (error) {
     throw executionError(
       'credential_failed',
@@ -1028,15 +1115,21 @@ async function resolveEnvironment(
 
 interface ScopedEnvironmentDeclaration {
   readonly scope: CredentialScope;
+  readonly source: string;
+  readonly setupStepIndex?: number;
   readonly specification: EnvironmentSpecification;
 }
 
 function mergeEnvironmentSpecifications(
   declarations: readonly ScopedEnvironmentDeclaration[],
-): ScopedEnvironmentSpecification {
+): Readonly<{
+  specification: ScopedEnvironmentSpecification;
+  declarations: readonly RuntimeCredentialDeclaration[];
+}> {
   const variables: Record<string, string> = {};
   const credentials: Record<string, CredentialEnvironmentBinding> = {};
-  for (const { scope, specification } of declarations) {
+  const credentialDeclarations: RuntimeCredentialDeclaration[] = [];
+  for (const { scope, specification, source, setupStepIndex } of declarations) {
     const normalized = normalizeEnvironmentSpecification(specification);
     for (const [name, value] of Object.entries(normalized.variables)) {
       if (Object.hasOwn(credentials, name)) {
@@ -1068,22 +1161,33 @@ function mergeEnvironmentSpecifications(
       const previous = Object.hasOwn(credentials, name)
         ? credentials[name]
         : undefined;
-      if (previous && previous.reference !== binding.reference) {
-        throw new TypeError(
-          `Environment ${name} has conflicting credential references.`,
-        );
-      }
+      credentialDeclarations.push(
+        Object.freeze({
+          environmentName: name,
+          reference: binding.reference,
+          scope,
+          source,
+          ...(setupStepIndex === undefined ? {} : { setupStepIndex }),
+        }),
+      );
       defineRecordValue(
         credentials,
         name,
         Object.freeze({
-          reference: credentialReference(binding.reference),
+          reference:
+            previous?.reference ?? credentialReference(binding.reference),
           scopes: orderedCredentialScopes(previous?.scopes ?? [], scope),
         }),
       );
     }
   }
-  return normalizeScopedEnvironmentSpecification({ variables, credentials });
+  return Object.freeze({
+    specification: normalizeScopedEnvironmentSpecification({
+      variables,
+      credentials,
+    }),
+    declarations: Object.freeze(credentialDeclarations),
+  });
 }
 
 function normalizeAgentRequirements(

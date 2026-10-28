@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import type { DefaultCliCompositionOptions } from '../src/cli.ts';
 import type {
   ExperimentRunArtifact,
   ExperimentRunInspection,
@@ -252,10 +253,25 @@ describe('experiment public entry points', () => {
       engine,
       loadExperiment,
     });
+    const acceptsCredentialInspection = (
+      engine: root.ForgeEngine,
+      request: root.PreflightEvalInput,
+      context: root.CredentialSourceContext,
+      options: DefaultCliCompositionOptions,
+    ): readonly root.EvalCredentialUse[] => {
+      const uses = engine.inspectEvalCredentials?.(request) ?? [];
+      for (const use of uses) {
+        const source: string | undefined =
+          options.credentialResolver?.sourceIdentity?.(use.reference, context);
+        void source;
+      }
+      return uses;
+    };
     assert.equal(typeof acceptsCoreTypes, 'function');
     assert.equal(typeof acceptsReportTypes, 'function');
     assert.equal(typeof acceptsReferences, 'function');
     assert.equal(typeof acceptsCommandLoader, 'function');
+    assert.equal(typeof acceptsCredentialInspection, 'function');
   });
 
   it('exposes usage and execution errors with experiment run references', () => {

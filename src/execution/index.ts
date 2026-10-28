@@ -8,6 +8,7 @@ export {
   type ForgeExecutionErrorCode,
 } from './errors.ts';
 export {
+  type EvalCredentialUse,
   type ExecuteEvalInput,
   executeEval,
   type PreflightEvalInput,
