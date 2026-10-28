@@ -1,5 +1,6 @@
 import type { AgentSession, AgentToolCall } from '../contracts/agent.ts';
 import type { AvaError, AvaNeed, AvaRolePlayer, AvaTurn } from './ava.ts';
+import { boundToolResult } from './toolResult.ts';
 
 export interface ConversationTurn {
   readonly turn: number;
@@ -219,6 +220,11 @@ export function snapshotAgentToolCalls(
       Object.freeze({
         ...(call.id === undefined ? {} : { id: call.id }),
         name: call.name,
+        ...(call.result === undefined
+          ? {}
+          : {
+              result: Object.freeze(boundToolResult(call.result)),
+            }),
         ...(call.input === undefined
           ? {}
           : { input: snapshotToolInput(call.input) }),

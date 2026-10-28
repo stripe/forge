@@ -21,6 +21,37 @@ const agent = {
 const identity = { name: 'test-agent-binary', version: '2.0.0' };
 
 describe('selectAgentEvidence', () => {
+  it('keeps bounded argument text and correlated tool output with visible truncation', () => {
+    const selected = select(
+      completeNativeSteps(),
+      {
+        kind: 'unavailable',
+        reason: { code: 'source_invalid', message: 'No native source.' },
+      },
+      [
+        {
+          id: 'read',
+          name: 'Read',
+          input: { command: `START${'x'.repeat(10_000)}` },
+          result: { content: `OUTPUT${'x'.repeat(20_000)}`, isError: true },
+        },
+      ],
+    );
+    const step = selected.trajectory.steps[1]!;
+    assert.equal(step.source, 'agent');
+    const argumentsText =
+      step.tool_calls?.[0]?.arguments.forge_truncated_arguments;
+    assert.equal(typeof argumentsText, 'string');
+    assert.match(String(argumentsText), /START/);
+    assert.match(String(argumentsText), /Forge truncated/);
+    assert.ok(String(argumentsText).length <= 4096);
+    const result = step.observation?.results[0];
+    assert.equal(result?.source_call_id, 'read');
+    assert.equal(result?.extra?.is_error, true);
+    assert.match(String(result?.content), /^OUTPUT.*Forge truncated/s);
+    assert.ok(String(result?.content).length <= 8192);
+    assert.ok(selected.warnings.some(({ code }) => code === 'value_omitted'));
+  });
   it('prefers structurally complete native detail despite lossy projection differences', () => {
     const selected = select([
       { step_id: 1, source: 'user', message: 'First prompt' },
@@ -242,7 +273,9 @@ describe('selectAgentEvidence', () => {
         firstAgentStep.message.length < longAssistant.length,
     );
     assert.equal(firstAgentStep?.tool_calls?.length, 256);
-    assert.deepEqual(firstAgentStep?.tool_calls?.[0]?.arguments, {});
+    assert.deepEqual(firstAgentStep?.tool_calls?.[0]?.arguments, {
+      value: 'x'.repeat(300),
+    });
     assert.deepEqual(
       selected.warnings.map(({ code }) => code),
       ['source_unavailable', 'value_omitted', 'fallback_used'],
@@ -330,6 +363,9 @@ describe('selectAgentEvidence', () => {
       (value) => ({ value }),
       null,
     );
+    const omittedArguments = {
+      forge_omitted_arguments: '[Forge omitted unavailable tool arguments.]',
+    };
     const cases: readonly {
       input: unknown;
       expected: Record<string, unknown>;
@@ -343,25 +379,35 @@ describe('selectAgentEvidence', () => {
       },
       { input: 'argument', expected: { value: 'argument' }, omitted: false },
       { input: [1, 2], expected: { value: [1, 2] }, omitted: false },
-      { input: cyclic, expected: {}, omitted: true },
+      { input: cyclic, expected: omittedArguments, omitted: true },
       {
         input: { value: Number.POSITIVE_INFINITY },
-        expected: {},
+        expected: omittedArguments,
         omitted: true,
       },
-      { input: { value: 1n }, expected: {}, omitted: true },
-      { input: { value: undefined }, expected: {}, omitted: true },
+      { input: { value: 1n }, expected: omittedArguments, omitted: true },
+      {
+        input: { value: undefined },
+        expected: omittedArguments,
+        omitted: true,
+      },
       {
         input: { value: new Map([['key', 'value']]) },
-        expected: {},
+        expected: omittedArguments,
         omitted: true,
       },
       {
         input: JSON.parse('{"__proto__":{"polluted":true},"path":"safe.txt"}'),
-        expected: {},
+        expected: omittedArguments,
         omitted: true,
       },
-      { input: deep, expected: {}, omitted: true },
+      {
+        input: deep,
+        expected: {
+          forge_truncated_arguments: `${JSON.stringify(deep)}\n[Forge truncated driver evidence.]`,
+        },
+        omitted: true,
+      },
     ];
 
     for (const [index, { input, expected, omitted }] of cases.entries()) {

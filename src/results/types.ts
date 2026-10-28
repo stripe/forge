@@ -2,7 +2,11 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
-import type { AgentTokenUsage, AgentMcpToolRefusals } from '../contracts/agent.ts';
+import type {
+  AgentTokenUsage,
+  AgentMcpToolRefusals,
+  AgentToolCall,
+} from '../contracts/agent.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
@@ -14,6 +18,7 @@ import type {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  JudgeTranscriptProjectionV1,
   JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.ts';
 import type {
@@ -123,6 +128,7 @@ export interface InteractionToolCallV1 {
   readonly id?: string;
   readonly name: string;
   readonly input?: JsonValue;
+  readonly result?: NonNullable<AgentToolCall['result']>;
 }
 
 export interface InteractionTurnV1 {
@@ -200,6 +206,7 @@ export interface JudgeEvidenceV1 {
     readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
     /** Canonical serialization of these steps is the judge's transcript input. */
     readonly steps: readonly JudgeVisibleStepV1[];
+    readonly warnings?: JudgeTranscriptProjectionV1['warnings'];
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];

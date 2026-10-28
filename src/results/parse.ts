@@ -15,6 +15,7 @@ import {
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
+import { MAX_TOOL_RESULT_CODE_UNITS } from '../interaction/toolResult.ts';
 import { mcpToolRefusalsSchema } from '../mcpToolRefusals.ts';
 import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
@@ -164,6 +165,14 @@ const interactionToolCall = z
     id: safeText.optional(),
     name: safeText,
     input: jsonValue.optional(),
+    result: z
+      .object({
+        content: z.string().max(MAX_TOOL_RESULT_CODE_UNITS),
+        isError: z.boolean().optional(),
+        truncated: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -394,6 +403,7 @@ const judgeEvidenceSchema = z
         ]),
         // The shared projection parser below validates the complete step schema.
         steps: z.array(z.unknown()),
+        warnings: z.array(z.unknown()).optional(),
       })
       .strict(),
     workspace: z
@@ -812,6 +822,9 @@ export function parseJudgeEvidence(
     copiedContext: transcript.copied_context,
     includedFields: transcript.included_fields,
     transcriptJson: serializeCanonicalJson(transcript.steps),
+    ...(transcript.warnings === undefined
+      ? {}
+      : { warnings: transcript.warnings }),
   });
   return {
     ...evidence,

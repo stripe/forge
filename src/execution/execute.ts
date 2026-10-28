@@ -79,6 +79,7 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
+import { boundToolResult } from '../interaction/toolResult.ts';
 import { mcpToolRefusalWarnings } from '../mcpToolRefusals.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
@@ -586,6 +587,7 @@ export async function executeEvalWithTestHooks(
         input.plan,
         session,
         completions,
+        secrets,
         signal,
         hooks.waitBeforeCompletionRetry,
         events.agentUsage,
@@ -633,12 +635,14 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
+      const fallbackTurns = redactSecrets(interaction.turns, secrets);
       const evidence = selectAgentEvidence({
         agent: preflight.agent,
         identity: preflight.agentEvidenceIdentity,
         model: input.plan.agent.model,
         sessionId: interaction.sessionId,
         completedTurns: interaction.turns,
+        fallbackTurns: fallbackTurns.value,
         collected,
       });
       assertEvidenceMatchesRun(
@@ -650,12 +654,17 @@ export async function executeEvalWithTestHooks(
         evidence,
         nativeArtifact,
         warnings: mcpToolRefusalWarnings(collected.mcpToolRefusals),
+        fallbackRedactions:
+          evidence.completeness === 'fallback'
+            ? fallbackTurns.replacements + interaction.toolResultRedactions
+            : 0,
       };
     });
     const redacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
     );
+    redacted.replacements += selectedEvidence.fallbackRedactions ?? 0;
     const trajectoryJson = serializeAtifTrajectory(
       redacted.evidence.trajectory,
     );
@@ -723,6 +732,9 @@ export async function executeEvalWithTestHooks(
               copied_context: judgeTranscript.copiedContext,
               included_fields: [...judgeTranscript.includedFields],
               steps: JSON.parse(judgeTranscript.transcriptJson),
+              ...(judgeTranscript.warnings === undefined
+                ? {}
+                : { warnings: judgeTranscript.warnings }),
             },
             workspace: {
               entries: safeWorkspace.entries.map((entry) => ({
@@ -907,18 +919,21 @@ interface ExecutedInteraction {
   readonly sessionId: string | null;
   readonly avaAudit?: AvaConversationAudit;
   readonly failure: RolePlayerErrorV1 | null;
+  readonly toolResultRedactions: number;
 }
 
 async function executeInteraction(
   plan: ResolvedRunPlanV1,
   session: AgentSession,
   completions: PreparedCompletionRuntime,
+  secrets: readonly string[],
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
   onUsage: (turn: number, usage: AgentTokenUsage) => Promise<void>,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   const usages: (AgentTokenUsage | undefined)[] = [];
+  let toolResultRedactions = 0;
   const trackedSession: AgentSession = Object.freeze({
     sessionId: () => session.sessionId(),
     async send(
@@ -936,7 +951,12 @@ async function executeInteraction(
           'Agent changed session identity before a completed turn.',
         );
       }
-      const turn = snapshotAgentTurn(await session.send(message, options));
+      const snapshot = snapshotAgentTurn(
+        await session.send(message, options),
+        secrets,
+      );
+      const turn = snapshot.turn;
+      toolResultRedactions += snapshot.toolResultRedactions;
       if (
         (declaredBeforeTurn !== undefined &&
           declaredBeforeTurn !== turn.sessionId) ||
@@ -982,6 +1002,7 @@ async function executeInteraction(
       usage: sumAgentTokenUsage(usages),
       sessionId: resolveSessionId(session, lastTurnSessionId, true),
       failure: null,
+      toolResultRedactions,
     });
   }
 
@@ -1034,10 +1055,14 @@ async function executeInteraction(
     ),
     avaAudit: conversation.avaAudit,
     failure,
+    toolResultRedactions,
   });
 }
 
-function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
+function snapshotAgentTurn(
+  turn: AgentTurn,
+  secrets: readonly string[],
+): { turn: AgentTurn; toolResultRedactions: number } {
   if (
     !turn ||
     typeof turn.text !== 'string' ||
@@ -1054,20 +1079,47 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
     if (
       !call ||
       !isSafeToolMetadata(call.name) ||
-      (call.id !== undefined && !isSafeToolMetadata(call.id))
+      (call.id !== undefined && !isSafeToolMetadata(call.id)) ||
+      (call.result !== undefined &&
+        (typeof call.result.content !== 'string' ||
+          (call.result.isError !== undefined &&
+            typeof call.result.isError !== 'boolean') ||
+          (call.result.truncated !== undefined &&
+            typeof call.result.truncated !== 'boolean')))
     ) {
       throw new TypeError('Agent returned an invalid tool call.');
     }
   }
-  return Object.freeze({
-    text: turn.text,
-    sessionId: turn.sessionId,
-    toolCalls: snapshotAgentToolCalls(turn.toolCalls),
-    ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
-    ...(turn.usage === undefined
-      ? {}
-      : { usage: Object.freeze(observeAgentTokenUsage(turn.usage)) }),
+  let toolResultRedactions = 0;
+  const toolCalls = turn.toolCalls.map((call) => {
+    if (call.result === undefined) return call;
+    const redacted = redactSecrets(
+      {
+        content: call.result.content,
+        ...(call.result.isError === undefined
+          ? {}
+          : { isError: call.result.isError }),
+        ...(call.result.truncated === undefined
+          ? {}
+          : { truncated: call.result.truncated }),
+      },
+      secrets,
+    );
+    toolResultRedactions += redacted.replacements;
+    return { ...call, result: redacted.value };
   });
+  return {
+    turn: Object.freeze({
+      text: turn.text,
+      sessionId: turn.sessionId,
+      toolCalls: snapshotAgentToolCalls(toolCalls),
+      ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+      ...(turn.usage === undefined
+        ? {}
+        : { usage: Object.freeze(observeAgentTokenUsage(turn.usage)) }),
+    }),
+    toolResultRedactions,
+  };
 }
 
 function resolveSessionId(
@@ -1772,6 +1824,7 @@ function buildInteractionArtifact(
     tool_calls: turn.toolCalls.map((call) => ({
       ...(call.id === undefined ? {} : { id: call.id }),
       name: call.name,
+      ...(call.result === undefined ? {} : { result: { ...call.result } }),
       ...(call.input === undefined ? {} : { input: jsonValue(call.input) }),
     })),
   }));
@@ -1817,7 +1870,20 @@ function redactInteractionArtifact(
   artifact: InteractionArtifactV1,
   secrets: readonly string[],
 ): InteractionArtifactV1 {
-  return parseInteractionArtifact(redactSecrets(artifact, secrets).value, {
+  const redacted = redactSecrets(artifact, secrets).value;
+  const bounded = {
+    ...redacted,
+    turns: redacted.turns.map((turn) => ({
+      ...turn,
+      tool_calls: turn.tool_calls.map((call) => ({
+        ...call,
+        ...(call.result === undefined
+          ? {}
+          : { result: boundToolResult(call.result) }),
+      })),
+    })),
+  };
+  return parseInteractionArtifact(bounded, {
     forgeVersion: FORGE_VERSION,
   });
 }

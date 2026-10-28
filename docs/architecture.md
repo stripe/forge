@@ -720,9 +720,16 @@ immutable for interaction.
 
 Forge opens one persistent `AgentSession`. Every completed turn must report a
 safe, stable session ID; changing identity between turns is a contract
-violation. Agent text, tool calls, tool inputs, optional cost and usage, and
-session identity are snapshotted at the boundary so later adapter mutation cannot
-change the driver ledger.
+violation. Agent text, tool calls, tool inputs, optional cost and usage,
+session identity, and optional tool results are snapshotted at the boundary so
+later adapter mutation cannot change the driver ledger.
+
+`AgentToolCall.result` optionally carries `content` (text, limited to
+1,048,576 UTF-16 code units), `isError`, and `truncated` (native content was
+unavailable or omitted). Forge redacts result text before this boundary's limit
+is applied; oversized text retains a marked prefix and sets `truncated: true`.
+The same limit applies after audit redaction. The interaction audit retains this
+optional object; old turns may omit it.
 
 `AgentTurn.usage` optionally supplies `AgentTokenUsage`: strict nonnegative safe
 integer or null counters named `input_tokens`, `cached_input_tokens`,
@@ -1214,10 +1221,23 @@ aborts the evidence phase. Optional native detail loss may instead produce
 `partial` evidence with warnings.
 
 Driver fallback preserves every ordered user prompt and a visible response
-marker for every completed invocation. Assistant text, tool calls, or tool
-arguments may be deterministically truncated to stay within ATIF safety bounds;
-such loss adds a `value_omitted` warning. Scoring consumes this exact bounded
-trajectory, and judging receives its declared root-behavior projection. If Ava
+marker for every completed invocation. Assistant text, tool calls, tool
+arguments, and tool results may be deterministically truncated to stay within ATIF
+safety bounds. Fallback retains at most 256 calls across the run, reserving tool
+activity for each turn. Arguments over 4,096 UTF-16 code units, depth 16, or
+128 JSON values become a marked JSON text prefix rather than an empty object.
+Unsafe or lossy input values use the judge-visible `forge_omitted_arguments` key
+with an omission marker.
+Available tool-result text retains up to 8,192 code units per call, correlated
+with its invocation and error state. Claude Code supplies tool-result text,
+Codex supplies command and MCP output, and OpenCode supplies tool output or
+errors. A started-only Codex command or MCP call has an unavailable marker and
+makes no claim about success or failure. Native media bytes are omitted
+explicitly. Missing driver results cannot be recovered by fallback. Resolved
+secrets are redacted before these
+prefixes are clipped. Assistant, argument, result, and call-count truncation
+has a visible marker and adds a `value_omitted` warning. Scoring consumes this
+exact bounded trajectory, and judging receives its declared root-behavior projection. If Ava
 fails before any agent turn, the system-only fallback instead identifies
 `role_player_error` and has no agent session ID.
 
@@ -1385,9 +1405,24 @@ of `transcript.steps` reproduces the transcript JSON supplied to each request.
 `judgeCriteria` accepts a validated projection rather than an arbitrary
 transcript string.
 
-Projected transcript JSON is capped at 786,432 UTF-8 bytes, with bounded-JSON
-graph preflight before recursive validation. The complete rendered criterion
-prompt is capped at 1,048,576 UTF-8 bytes before a provider is invoked. Each
+Projected transcript JSON is capped at 786,432 UTF-8 bytes (768 KiB), including
+markers and the final LF. Oversized projections retain equally sized start/end
+excerpts of the canonical step JSON, with cuts at Unicode code-point boundaries.
+The largest equal code-unit prefix/suffix pair that fits after JSON escaping is
+kept. The transcript then contains a single `source: "omission"` record with
+`message`, `prefix`, and `suffix`, rather than complete conversation steps.
+The marker names the missing middle; no content is invented to fill it.
+`JudgeTranscriptProjectionV1.warnings` and `judge-evidence.json.transcript.warnings`
+record `transcript_truncated`. These optional fields are absent for untruncated
+projections; readers accept older artifacts without them. A marked excerpt
+requires its exact warning. Judge-only loss is absent from `result.evidence`,
+which describes the canonical trajectory. The full saved trajectory remains
+unchanged. Completed-run verification recomputes the projection: its limit,
+marker text, and cut rule are part of the artifact contract. Changing them can
+invalidate saved truncated runs; inspect those runs with the producing build.
+Untrusted projections still reject excess bytes and invalid shapes, with
+bounded-JSON graph preflight before recursive validation. The complete rendered
+criterion prompt is capped at 1,048,576 UTF-8 bytes before a provider is invoked. Each
 authored criterion is limited to 65,536 characters, matching the persisted
 evaluation bound.
 

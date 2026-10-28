@@ -56,6 +56,41 @@ function assertInvalid(
 }
 
 describe('Codex exec stream', () => {
+  it('marks started-only commands and MCP calls as unavailable, without claiming success', () => {
+    const parsed = parseCodexStream(
+      stream(
+        item(
+          'command_execution',
+          {
+            id: 'unfinished-command',
+            command: 'sleep 600',
+            aggregated_output: '',
+            exit_code: null,
+            status: 'in_progress',
+          },
+          'started',
+        ),
+        item(
+          'mcp_tool_call',
+          {
+            id: 'unfinished-mcp',
+            server: 'sample',
+            tool: 'inspect',
+            arguments: {},
+            status: 'in_progress',
+            result: { content: [] },
+          },
+          'started',
+        ),
+      ),
+    );
+    for (const call of parsed.toolCalls) {
+      assert.match(call.result!.content, /unavailable: .* did not complete/);
+      assert.equal(call.result!.truncated, true);
+      assert.equal(call.result!.isError, undefined);
+    }
+    assert.equal(parsed.toolCalls.length, 2);
+  });
   it('accepts the pinned CLI model-metadata advisory only for the selected model before the turn', () => {
     const notice = (model: string) =>
       `Model metadata for \`${model}\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`;
@@ -194,6 +229,11 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'bash -lc ls' },
+            result: {
+              content:
+                '[Forge tool result unavailable: command did not complete.]',
+              truncated: true,
+            },
           },
         ],
       },
@@ -239,6 +279,7 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'pwd' },
+            result: { content: '/workspace\n', isError: false },
           },
         ],
       },
@@ -387,7 +428,12 @@ describe('Codex exec stream', () => {
             name: 'file_change',
             input: { changes: change },
           })),
-          { id: 'item_4', name: 'command_execution', input: { command } },
+          {
+            id: 'item_4',
+            name: 'command_execution',
+            input: { command },
+            result: { content: '      27 codex-tool.txt\n', isError: false },
+          },
         ],
       },
     );
@@ -440,11 +486,26 @@ describe('Codex exec stream', () => {
     );
     assert.deepEqual(parsed.toolCalls, [
       { id: 'file', name: 'file_change', input: { changes } },
-      { id: 'mcp', name: 'mcp__docs__search', input: argumentsValue },
+      {
+        id: 'mcp',
+        name: 'mcp__docs__search',
+        input: argumentsValue,
+        result: { content: 'Found it.\nStructured result:\n{"count":1}' },
+      },
       { id: 'web', name: 'web_search', input: { query: 'example', action } },
       { id: 'todos', name: 'todo_list', input: { items: todos } },
-      { id: 'command', name: 'command_execution', input: { command: 'false' } },
-      { id: 'failed-mcp', name: 'mcp__docs__search', input: {} },
+      {
+        id: 'command',
+        name: 'command_execution',
+        input: { command: 'false' },
+        result: { content: '', isError: true },
+      },
+      {
+        id: 'failed-mcp',
+        name: 'mcp__docs__search',
+        input: {},
+        result: { content: 'Tool unavailable.', isError: true },
+      },
     ]);
     assert.equal(parsed.text, '');
   });

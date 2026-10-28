@@ -99,9 +99,21 @@ export function parseOpenCodeStream(
           string(part.text);
         } else if (event.type === 'tool_use' && part.type === 'tool') {
           const call = tool(part);
+          const state = record(part.state);
+          const output = state.status === 'error' ? state.error : state.output;
           stepHasTools = true;
           if (calls.has(call.id) || calls.size >= 2_000) throw new Error();
-          calls.set(call.id, call);
+          calls.set(call.id, {
+            ...call,
+            result: {
+              content:
+                typeof output === 'string'
+                  ? output
+                  : '[Forge tool result unavailable.]',
+              ...(typeof output === 'string' ? {} : { truncated: true }),
+              isError: state.status === 'error',
+            },
+          });
         } else throw new Error();
       }
     }

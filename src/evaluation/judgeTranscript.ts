@@ -16,6 +16,12 @@ export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
 /** Portable upper bound before workspace, criterion, and prompt text are added. */
 export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
+const TRANSCRIPT_OMISSION_MESSAGE =
+  '[Forge truncated the judge transcript to 768 KiB. The prefix and suffix are excerpts of canonical step JSON; intervening evidence is omitted.]';
+const TRANSCRIPT_WARNING = Object.freeze({
+  code: 'transcript_truncated' as const,
+  message: TRANSCRIPT_OMISSION_MESSAGE,
+});
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
 export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze([
   'user',
@@ -70,10 +76,16 @@ export interface JudgeVisibleAgentStepV1 {
   readonly observation?: JudgeVisibleObservationV1;
 }
 
-/** One explicitly allowlisted, root-trajectory step visible to a judge. */
+/** Root behavior, or a marked start/end excerpt when the full projection exceeds its budget. */
 export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
-  | JudgeVisibleAgentStepV1;
+  | JudgeVisibleAgentStepV1
+  | {
+      readonly source: 'omission';
+      readonly message: string;
+      readonly prefix: string;
+      readonly suffix: string;
+    };
 
 /** Exact transcript projection and declared policy supplied to a criterion judge. */
 export interface JudgeTranscriptProjectionV1 {
@@ -85,6 +97,11 @@ export interface JudgeTranscriptProjectionV1 {
   readonly includedFields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
   /** Exact canonical JSON supplied to the judge, including its final LF. */
   readonly transcriptJson: string;
+  /** Present when the transcript contains a marked start/end excerpt. */
+  readonly warnings?: readonly {
+    readonly code: 'transcript_truncated';
+    readonly message: string;
+  }[];
 }
 
 /**
@@ -92,8 +109,9 @@ export interface JudgeTranscriptProjectionV1 {
  *
  * The input is validated first and projected by positive allowlist. System and
  * copied-context steps are excluded. Opaque tool arguments and result content
- * remain intact because they are observable agent behavior; all other ATIF
- * metadata, reasoning, extras, and subagent references are excluded.
+ * are observable agent behavior; all other ATIF metadata, reasoning, extras,
+ * and subagent references are excluded. Oversized projections retain marked
+ * start/end excerpts within the byte budget.
  */
 export function createJudgeTranscriptProjection(
   trajectory: AtifTrajectoryV1_8,
@@ -119,7 +137,37 @@ export function createJudgeTranscriptProjection(
     }
   }
 
-  return makeProjection(serializeCanonicalJson(projectedSteps));
+  const transcriptJson = serializeCanonicalJson(projectedSteps);
+  if (Buffer.byteLength(transcriptJson, 'utf8') <= MAX_JUDGE_TRANSCRIPT_BYTES) {
+    return makeProjection(transcriptJson);
+  }
+  return makeProjection(truncateTranscript(transcriptJson), true);
+}
+
+function truncateTranscript(text: string): string {
+  const render = (length: number): string => {
+    let prefixEnd = length;
+    let suffixStart = text.length - length;
+    if (/[\uD800-\uDBFF]/.test(text[prefixEnd - 1] ?? '')) prefixEnd -= 1;
+    if (/[\uDC00-\uDFFF]/.test(text[suffixStart] ?? '')) suffixStart += 1;
+    return serializeCanonicalJson([
+      {
+        source: 'omission',
+        message: TRANSCRIPT_OMISSION_MESSAGE,
+        prefix: text.slice(0, prefixEnd),
+        suffix: text.slice(suffixStart),
+      },
+    ]);
+  };
+  let low = 0;
+  let high = Math.min(Math.floor(text.length / 2), MAX_JUDGE_TRANSCRIPT_BYTES);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(render(middle), 'utf8') <= MAX_JUDGE_TRANSCRIPT_BYTES)
+      low = middle;
+    else high = middle - 1;
+  }
+  return render(low);
 }
 
 /**
@@ -151,7 +199,16 @@ export function parseJudgeTranscriptProjection(
     );
   }
 
-  return makeProjection(canonicalTranscript);
+  const truncated = steps[0]?.source === 'omission';
+  if (
+    serializeCanonicalJson(projection.warnings ?? []) !==
+    serializeCanonicalJson(truncated ? [TRANSCRIPT_WARNING] : [])
+  ) {
+    throw new TypeError(
+      'Judge transcript truncation requires its exact evidence warning.',
+    );
+  }
+  return makeProjection(canonicalTranscript, truncated);
 }
 
 function projectAgentStep(step: AtifAgentStep): JudgeVisibleAgentStepV1 {
@@ -224,7 +281,10 @@ function projectObservationResult(
   return Object.keys(projected).length > 0 ? projected : undefined;
 }
 
-function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
+function makeProjection(
+  transcriptJson: string,
+  truncated = false,
+): JudgeTranscriptProjectionV1 {
   assertTranscriptByteLimit(transcriptJson);
   return Object.freeze({
     source: JUDGE_TRANSCRIPT_SOURCE,
@@ -234,6 +294,7 @@ function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
     copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
     includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
     transcriptJson,
+    ...(truncated ? { warnings: Object.freeze([TRANSCRIPT_WARNING]) } : {}),
   });
 }
 
@@ -376,7 +437,7 @@ const AgentStepSchema = z
       }
     }
   });
-const JudgeVisibleStepsSchema = z
+const CompleteStepsSchema = z
   .array(z.union([UserStepSchema, AgentStepSchema]))
   .superRefine((steps, context) => {
     for (let index = 1; index < steps.length; index += 1) {
@@ -389,6 +450,19 @@ const JudgeVisibleStepsSchema = z
       }
     }
   });
+const JudgeVisibleStepsSchema = z.union([
+  CompleteStepsSchema,
+  z.tuple([
+    z
+      .object({
+        source: z.literal('omission'),
+        message: z.literal(TRANSCRIPT_OMISSION_MESSAGE),
+        prefix: z.string().min(1),
+        suffix: z.string().min(1),
+      })
+      .strict(),
+  ]),
+]);
 const ProjectionSchema = z
   .object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
@@ -411,5 +485,16 @@ const ProjectionSchema = z
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[8]),
     ]),
     transcriptJson: z.string(),
+    warnings: z
+      .array(
+        z
+          .object({
+            code: z.literal(TRANSCRIPT_WARNING.code),
+            message: z.literal(TRANSCRIPT_WARNING.message),
+          })
+          .strict(),
+      )
+      .length(1)
+      .optional(),
   })
   .strict();
