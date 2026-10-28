@@ -334,7 +334,9 @@ function parseJudgeResponse(
     // Paths come only from this fixed schema. Never copy validator messages,
     // unknown keys, received values, or raw output into persisted diagnostics.
     const path = issue.path
-      .map((part) => (typeof part === 'number' ? `[${part}]` : `.${part}`))
+      .map((part) =>
+        typeof part === 'number' ? `[${part}]` : `.${String(part)}`,
+      )
       .join('');
     return {
       valid: false,

@@ -820,7 +820,7 @@ describe('parseCriterionJudgment', () => {
       ],
       [
         { results: [{ ...entry, index: 1 }] },
-        'response.results[0].index (invalid_literal)',
+        'response.results[0].index (invalid_value)',
       ],
       [
         { results: [{ ...entry, explanation: '' }] },

@@ -55,7 +55,9 @@ export function parseAtifTrajectory(input: unknown): AtifTrajectoryV1_8 {
   assertBoundedJsonValue(input);
 
   try {
-    return parseAtifSchema(input);
+    // Zod may reuse parsed nodes for repeated references. Expand the bounded
+    // JSON graph so each occurrence remains an independent projection.
+    return parseAtifSchema(cloneJsonValue(input));
   } catch (error) {
     if (error instanceof AtifValidationError) throw error;
     if (error instanceof z.ZodError) {
@@ -246,4 +248,15 @@ function failLimit(path: AtifValidationPath, message: string): never {
   throw new AtifValidationError([
     { code: 'input_limit_exceeded', path, message },
   ]);
+}
+
+/** Called only after the bounded JSON preflight has rejected cycles and accessors. */
+function cloneJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneJsonValue);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, cloneJsonValue(child)]),
+    );
+  }
+  return value;
 }
