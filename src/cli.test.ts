@@ -14,6 +14,7 @@ import type { AgentAdapter } from './contracts/agent.ts';
 import type { CompletionProvider } from './contracts/completion.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
+import { CredentialReferenceConflictError } from './credentialDeclarations.ts';
 import {
   createForgeEngine,
   defaultForgeEngine,
@@ -2595,6 +2596,7 @@ describe('Forge CLI', () => {
     ]) {
       const execution = createCredentialExecution();
       let reads = 0;
+      let conflictObserved = false;
       let output = '';
       const exitCode = await runCli(
         [
@@ -2620,10 +2622,30 @@ describe('Forge CLI', () => {
           stderr: (text) => {
             output += text;
           },
+          engine: {
+            ...defaultForgeEngine,
+            preflightEval: (input) => {
+              try {
+                return defaultForgeEngine.preflightEval(input);
+              } catch (error) {
+                assert.ok(error instanceof ForgeExecutionError);
+                assert.ok(
+                  error.cause instanceof CredentialReferenceConflictError,
+                );
+                assert.ok(error.cause instanceof TypeError);
+                assert.equal(error.cause.environmentName, 'OPENAI_API_KEY');
+                conflictObserved = true;
+                error.cause.message =
+                  'These declarations cannot share a binding.';
+                throw error;
+              }
+            },
+          },
           execute: execution.execute,
         },
       );
       assert.equal(exitCode, 1, output);
+      assert.equal(conflictObserved, true, output);
       assert.equal(reads, 0);
       assert.equal(execution.runtime.runs.length, 0);
       assert.match(

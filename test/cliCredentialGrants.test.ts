@@ -3,14 +3,20 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import { type RunCliOptions, runCli } from '../src/cli.ts';
+import {
+  createDefaultCliComposition,
+  type RunCliOptions,
+  runCli,
+} from '../src/cli.ts';
 import { credentialReference } from '../src/contracts/credentials.ts';
 import { createForgeEngine } from '../src/engine.ts';
 import type { ExecuteEvalInput } from '../src/execution/execute.ts';
+import { parseExperimentConfigYaml } from '../src/model/index.ts';
 import { defineSetupActionBundle } from '../src/setup/index.ts';
 import {
   createFakeRuntimeAdapter,
   createScriptedAgentAdapter,
+  createScriptedCompletionProvider,
 } from '../src/testing/index.ts';
 
 const temporaryDirectories: string[] = [];
@@ -25,6 +31,110 @@ afterEach(async () => {
 });
 
 describe('CLI credential grant scopes', () => {
+  it('suggests a usable explicit grant for a custom host completion reference', async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-custom-completion-'),
+    );
+    temporaryDirectories.push(root);
+    await fs.cp(path.join(import.meta.dirname, 'fixtures', 'one-shot'), root, {
+      recursive: true,
+    });
+    const experimentPath = path.join(root, 'experiment.yaml');
+    const experiment = parseExperimentConfigYaml(
+      await fs.readFile(experimentPath, 'utf8'),
+    );
+    await fs.writeFile(
+      experimentPath,
+      JSON.stringify({
+        ...experiment,
+        models: { judge: { provider: 'custom', model: 'judge-model' } },
+      }),
+    );
+    await fs.writeFile(
+      path.join(root, 'dataset', 'cases', 'examples', 'hello-file.case.yaml'),
+      JSON.stringify({
+        id: 'examples/hello-file',
+        version: '0.1.0',
+        task: 'Complete the task.',
+        execution_mode: 'one_shot',
+        setup: [],
+        judging_criteria: ['Completes the requested task.'],
+      }),
+    );
+
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({ id: 'claude-code' });
+    const completion = createScriptedCompletionProvider({
+      id: 'custom',
+      requirements: {
+        credentials: {
+          token: { reference: credentialReference('env:API_TOKEN') },
+        },
+      },
+      responses: [
+        JSON.stringify({
+          results: [{ index: 0, passed: true, explanation: 'Task completed.' }],
+        }),
+      ],
+    });
+    let secretReads = 0;
+    async function invoke(grants: readonly string[]) {
+      let stderr = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          experimentPath,
+          ...grants.flatMap((grant) => ['--credential-env', grant]),
+        ],
+        {
+          cwd: root,
+          environment: {
+            get API_TOKEN() {
+              secretReads += 1;
+              return 'custom-completion-key';
+            },
+          },
+          compositionFactory: async (options) => ({
+            ...(await createDefaultCliComposition(options)),
+            runtime: runtime.adapter,
+            agents: new Map([[agent.adapter.id, agent.adapter]]),
+            completionProviders: new Map([
+              [completion.provider.id, completion.provider],
+            ]),
+          }),
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      );
+      return { exitCode, stderr };
+    }
+
+    let suggestedGrant: string | undefined;
+    for (const grants of [[], ['API_TOKEN']]) {
+      const missing = await invoke(grants);
+      assert.equal(missing.exitCode, 1, missing.stderr);
+      assert.equal(secretReads, 0);
+      assert.equal(runtime.runs.length, 0);
+      assert.equal(completion.calls.length, 0);
+      suggestedGrant = /Add --credential-env (\S+)\./.exec(missing.stderr)?.[1];
+      assert.equal(suggestedGrant, 'env:API_TOKEN=API_TOKEN', missing.stderr);
+    }
+
+    const authorized = await invoke([suggestedGrant!]);
+    assert.equal(authorized.exitCode, 0, authorized.stderr);
+    assert.ok(secretReads > 0);
+    assert.equal(runtime.runs.length, 1);
+    assert.deepEqual(runtime.runs[0]!.input.environment.credentials, {});
+    assert.equal(completion.calls.length, 1);
+    assert.equal(completion.calls[0]!.request.purpose, 'judge');
+    assert.deepEqual(completion.calls[0]!.context.credentials, {
+      token: 'custom-completion-key',
+    });
+  });
+
   it('does not authorize a different runtime name through a shared reference', async () => {
     for (const selection of [[], ['--case', 'case/second']]) {
       const fixture = await createFixture();

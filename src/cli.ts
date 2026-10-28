@@ -13,6 +13,7 @@ import {
 } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
+import { CredentialReferenceConflictError } from './credentialDeclarations.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
 import type { EvalCredentialUse } from './execution/execute.ts';
 import {
@@ -929,14 +930,15 @@ function createCliCredentialResolver(
     async resolve(...args: Parameters<typeof resolver.resolve>) {
       const [reference, context] = args;
       context.signal.throwIfAborted();
-      const name =
+      const shorthand =
         /^forge-eval:([A-Za-z_][A-Za-z0-9_]*)$/.exec(context.purpose)?.[1] ??
-        credentialEnvironmentName(reference);
+        CLI_CREDENTIAL_ENVIRONMENTS.get(reference);
+      const name = shorthand ?? credentialEnvironmentName(reference);
       const binding = Object.hasOwn(bindings, reference)
         ? { source: bindings[reference]!, resolver }
         : scoped.get(reference)?.get(context.purpose);
       if (binding === undefined) {
-        const grant = name ?? `${reference}=HOST_VARIABLE`;
+        const grant = shorthand ?? `${reference}=${name ?? 'HOST_VARIABLE'}`;
         throw new CliCredentialError(
           `No environment binding exists for ${name ?? 'the requested credential'}. Add --credential-env ${grant}.`,
         );
@@ -967,17 +969,12 @@ function credentialDiagnostic(
       error instanceof ForgeExecutionError &&
       (error.code === 'invalid_plan' || error.code === 'credential_failed') &&
       error.phase === 'preflight' &&
-      error.cause instanceof TypeError
+      error.cause instanceof CredentialReferenceConflictError
     ) {
-      const conflict =
-        /^(?:Environment|Credential binding) ([A-Za-z_][A-Za-z0-9_]*) has conflicting (?:credential references\.|references without a proven shared source\.)$/.exec(
-          error.cause.message,
-        );
-      if (conflict !== null) {
-        return running
-          ? `Environment ${conflict[1]} has conflicting credential references. Authorize every declaration with the same host source, for example --credential-env ${conflict[1]}.`
-          : `Environment ${conflict[1]} has conflicting credential references. Its declarations need a shared reference or host-supplied source compatibility metadata.`;
-      }
+      const { environmentName } = error.cause;
+      return running
+        ? `Environment ${environmentName} has conflicting credential references. Authorize every declaration with the same host source, for example --credential-env ${environmentName}.`
+        : `Environment ${environmentName} has conflicting credential references. Its declarations need a shared reference or host-supplied source compatibility metadata.`;
     }
     error = error.cause;
   }
