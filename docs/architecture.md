@@ -1061,10 +1061,20 @@ Codex selects a single matching root UUID rollout under its isolated
 AGENTS.md and environment context, which become system steps. Function and
 custom-tool calls retain native call IDs, arguments, and correlated outputs;
 tool-search calls and returned tool definitions remain correlated tool behavior.
-Every MCP call requires a matching `McpToolCall` completion snapshot verified
-against its call and result. A missing snapshot triggers fallback even if an
+Web-search completion snapshots must match a completed `web_search_call` with
+a nonempty ID in the same turn. Search, page-open, and page-find actions become
+one `web_search` tool call with the recorded query and action. Missing or unknown
+actions and non-completed statuses trigger fallback. Image-view snapshots
+validate the path of their matching `view_image` call, including native file
+URLs. Relative arguments require an absolute cwd recorded for that turn. The
+existing call and output supply the evidence without adding a duplicate call.
+MCP-qualified calls require a matching `McpToolCall` completion snapshot verified
+against the call and result. A missing snapshot triggers fallback even if an
 output includes `is_error`; another completion type cannot substitute. A
-completed invocation does not override an MCP `isError` result.
+completed invocation does not override an MCP `isError` result. Bare resource
+listing calls stay ordinary function evidence when no snapshot claims them.
+When a snapshot identifies one as MCP, Forge restores its server identity and
+requires the output to equal its single text block.
 
 Supported Codex MCP text and image blocks may carry opaque `annotations` and
 `_meta` objects under the existing JSON graph bounds. Metadata in recorded

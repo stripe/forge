@@ -11,6 +11,11 @@ type NativeOutputBlock =
   | { type: 'input_text'; text: string }
   | { type: 'input_image'; image_url: string; detail?: string };
 
+const CODEX_MCP_RESOURCE_LIST_TOOLS: readonly string[] = [
+  'list_mcp_resources',
+  'list_mcp_resource_templates',
+];
+
 const IMAGE_OMITTED =
   '[Codex image content retained only in the native artifact.]';
 const IMAGE_DECODE_OMITTED =
@@ -121,7 +126,11 @@ export function validateCodexMcpSnapshot(
   const qualified =
     (call.namespace === undefined || call.namespace === '') &&
     call.name === `mcp__${server}__${tool}`;
-  if (!namespaced && !qualified) fail();
+  const unqualified =
+    (call.namespace === undefined || call.namespace === '') &&
+    call.name === tool &&
+    CODEX_MCP_RESOURCE_LIST_TOOLS.includes(tool);
+  if (!namespaced && !qualified && !unqualified) fail();
   const arguments_: unknown = JSON.parse(string(call.arguments));
   assertBoundedJsonValue(arguments_);
   if (!isDeepStrictEqual(object(item.arguments), object(arguments_))) fail();
@@ -185,6 +194,16 @@ export function validateCodexMcpSnapshot(
       structuredContent === undefined ? 'content' : 'structuredContent',
     ]);
   };
+  if (unqualified) {
+    if (
+      structuredContent !== undefined ||
+      expectedContent.length !== 1 ||
+      expectedContent[0]?.type !== 'text' ||
+      output.output !== expectedContent[0].text
+    )
+      fail();
+    return { isError: failed, truncated: false };
+  }
   const truncated = validateMcpOutputMirror(
     output.output,
     expectedContent,
