@@ -17,7 +17,9 @@ import {
   OPEN_CODE_SESSION,
   openCodeExport,
 } from '../../../test/support/opencode.ts';
+import { CommandExecutionError } from '../../contracts/command.ts';
 import { createMemoryWorkspace } from '../../testing/index.ts';
+import { NativeArtifactReadError } from '../nativeArtifactError.ts';
 import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
@@ -27,7 +29,11 @@ import {
   invalidateOpenCodeExport,
   OPENCODE_EXPORT_LAUNCHER,
 } from './export.ts';
-import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.ts';
+import {
+  EXPORT_PATH,
+  MAX_NATIVE_BYTES,
+  OpenCodeNativeError,
+} from './native.ts';
 
 const body = Buffer.from(
   JSON.stringify(
@@ -37,10 +43,11 @@ const body = Buffer.from(
 
 async function capture(
   attempts: readonly { body: Uint8Array; exitCode?: number }[],
+  expectedError?: Error,
 ) {
   const state = createMemoryWorkspace();
   let calls = 0;
-  await captureOpenCodeExport({
+  const capturing = captureOpenCodeExport({
     state: state.mutable,
     stateDirectory: '/state',
     executable: 'opencode',
@@ -62,6 +69,8 @@ async function capture(
       },
     },
   });
+  if (expectedError) await assert.rejects(capturing, expectedError);
+  else await capturing;
   const input = {
     state: state.readonly,
     sessionId: OPEN_CODE_SESSION,
@@ -171,9 +180,10 @@ describe('OpenCode export capture', () => {
   });
 
   it('clears an oversized file rejected after a custom runner exits', async () => {
-    const result = await capture([
-      { body: Buffer.alloc(MAX_NATIVE_BYTES + 1, ' ') },
-    ]);
+    const result = await capture(
+      [{ body: Buffer.alloc(MAX_NATIVE_BYTES + 1, ' ') }],
+      new NativeArtifactReadError('too_large'),
+    );
     assert.equal(result.calls, 1);
     assert.equal(result.evidence.kind, 'unavailable');
     assert.equal((await result.state.readonly.readFile(EXPORT_PATH)).length, 0);
@@ -213,7 +223,7 @@ describe('OpenCode export capture', () => {
       [{ body: empty, exitCode: 1 }],
       [{ body: empty }, { body: empty, exitCode: 1 }],
     ]) {
-      const result = await capture(attempts);
+      const result = await capture(attempts, new OpenCodeNativeError());
       assert.equal(result.calls, attempts.length);
       assert.equal(result.evidence.kind, 'unavailable');
       if (result.evidence.kind === 'unavailable')
@@ -255,13 +265,40 @@ describe('OpenCode export capture', () => {
   });
 
   it('does not accept file bytes from a failed export command', async () => {
-    const result = await capture([{ body, exitCode: 1 }]);
+    const result = await capture(
+      [{ body, exitCode: 1 }],
+      new OpenCodeNativeError(),
+    );
     assert.equal(result.calls, 1);
     assert.equal(result.evidence.kind, 'unavailable');
     if (result.evidence.kind === 'unavailable')
       assert.equal(result.evidence.reason.code, 'source_unavailable');
     assert.equal(result.native, undefined);
   });
+
+  for (const [code, reason] of [
+    ['command_output_limit', 'too_large'],
+    ['command_timeout', 'timed_out'],
+  ] as const)
+    it(`reports ${reason} when the export runner rejects with ${code}`, async () => {
+      const state = createMemoryWorkspace({ [EXPORT_PATH]: body });
+      await assert.rejects(
+        captureOpenCodeExport({
+          state: state.mutable,
+          stateDirectory: '/state',
+          executable: 'opencode',
+          sessionId: OPEN_CODE_SESSION,
+          signal: new AbortController().signal,
+          commands: {
+            async run() {
+              throw new CommandExecutionError('private synthetic failure', code);
+            },
+          },
+        }),
+        new NativeArtifactReadError(reason),
+      );
+      assert.equal((await state.readonly.readFile(EXPORT_PATH)).length, 0);
+    });
 
   it('gives real child stdout a regular file and retains a large exit-time write', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'forge-opencode-export-'));

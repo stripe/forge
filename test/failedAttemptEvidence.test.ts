@@ -11,7 +11,15 @@ import {
   CODEX_HOME_STATE_ID,
   createCodexAdapter,
 } from '../src/agents/codex/index.ts';
-import { createOpenCodeAdapter } from '../src/agents/opencode/index.ts';
+import { OPENCODE_EXPORT_LAUNCHER } from '../src/agents/opencode/export.ts';
+import {
+  createOpenCodeAdapter,
+  OPENCODE_STATE_ID,
+} from '../src/agents/opencode/index.ts';
+import {
+  EXPORT_PATH,
+  MAX_NATIVE_BYTES,
+} from '../src/agents/opencode/native.ts';
 import { parseAtifTrajectory } from '../src/atif/index.ts';
 import type { AgentAdapter } from '../src/contracts/agent.ts';
 import type { AttemptDiagnosticsStore } from '../src/contracts/attemptDiagnostics.ts';
@@ -185,25 +193,32 @@ async function fixture(
           durationMs: 1,
           exitCode: 0,
         };
-      if (command.argv[1] === 'export') {
+      if (command.argv[2] === OPENCODE_EXPORT_LAUNCHER) {
+        assert.equal(command.argv[0], 'node');
+        assert.equal(command.argv[1], '-e');
+        assert.equal(command.argv[5], 'export');
         exports++;
         if (options.failExport === 'later' && exports > 1)
           return { stdout: '', stderr: '', durationMs: 1, exitCode: 1 };
-        if (options.failExport === 'oversized')
-          throw new CommandExecutionError(
-            'Output limit exceeded.',
-            'command_output_limit',
-          );
         if (options.failExport === 'timed_out')
           throw new CommandExecutionError(
             'Export timed out.',
             'command_timeout',
           );
         const exported = openCodeExport([{ prompt: 'Start work.', response }]);
+        assert.equal(command.argv[6], exported.info.id);
         if (options.failExport === 'identity_conflict')
           exported.info.id = 'ses_another-session';
+        await runtime.runs[0]!.stateDirectories
+          .get(OPENCODE_STATE_ID)!
+          .mutable.writeFile(
+            EXPORT_PATH,
+            options.failExport === 'oversized'
+              ? Buffer.alloc(MAX_NATIVE_BYTES + 1)
+              : Buffer.from(JSON.stringify(exported)),
+          );
         return {
-          stdout: JSON.stringify(exported),
+          stdout: '',
           stderr: '',
           durationMs: 1,
           exitCode: 0,

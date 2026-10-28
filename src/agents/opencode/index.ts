@@ -1,5 +1,6 @@
 import type {
   AgentAdapter,
+  AgentNativeArtifactUnavailableReason,
   AgentRuntimeRequirements,
   AgentSession,
 } from '../../contracts/agent.ts';
@@ -15,6 +16,7 @@ import {
   createInvocationCapture,
   runCapturedAgentCommand,
 } from '../invocationDiagnostics.ts';
+import { reportNativeArtifactUnavailable } from '../nativeArtifactError.ts';
 import { summarizeNativeStreamLine } from '../streamDiagnostics.ts';
 import { readOpenCodeConfiguration } from './config.ts';
 import {
@@ -301,14 +303,40 @@ export function createOpenCodeAdapter(
               },
             });
             currentSessionId = turn.sessionId;
-            await captureOpenCodeExport({
-              state,
-              commands: context.runtime.commands.agent,
-              stateDirectory: layout.stateDirectory,
-              executable,
-              sessionId: currentSessionId,
-              signal,
-            });
+            const onNativeArtifactUnavailable = (
+              reason: AgentNativeArtifactUnavailableReason,
+            ) => context.diagnostics?.nativeSessionUnavailable?.(reason);
+            try {
+              await captureOpenCodeExport({
+                state,
+                commands: context.runtime.commands.agent,
+                stateDirectory: layout.stateDirectory,
+                executable,
+                sessionId: currentSessionId,
+                signal,
+              });
+              if (context.diagnostics?.restrictedExcerpts) {
+                const native = await loadOpenCodeNativeArtifact({
+                  state,
+                  sessionId: currentSessionId,
+                  signal,
+                  onNativeArtifactUnavailable,
+                });
+                if (native) {
+                  try {
+                    context.diagnostics.nativeSession?.(native);
+                  } catch {
+                    /* Observation cannot change the completed turn. */
+                  }
+                }
+              }
+            } catch (error) {
+              signal.throwIfAborted();
+              reportNativeArtifactUnavailable(
+                { onNativeArtifactUnavailable },
+                error,
+              );
+            }
             signal.throwIfAborted();
             return turn;
           } finally {

@@ -1,4 +1,7 @@
-import type { CommandRunner } from '../../contracts/command.ts';
+import {
+  CommandExecutionError,
+  type CommandRunner,
+} from '../../contracts/command.ts';
 import type {
   MutableWorkspace,
   ReadonlyWorkspace,
@@ -179,8 +182,15 @@ export async function captureOpenCodeExport(input: {
         if (!(error instanceof OpenCodeExportParseError)) return;
       }
     }
-  } catch {
+  } catch (error) {
     input.signal.throwIfAborted();
     await invalidateOpenCodeExport(input.state).catch(() => undefined);
+    if (error instanceof CommandExecutionError) {
+      if (error.code === 'command_output_limit')
+        throw new NativeArtifactReadError('too_large');
+      if (error.code === 'command_timeout')
+        throw new NativeArtifactReadError('timed_out');
+    }
+    throw error;
   }
 }

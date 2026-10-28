@@ -16,6 +16,7 @@ import type {
   AgentSessionContext,
 } from '../../contracts/agent.ts';
 import type { CommandOptions, CommandResult } from '../../contracts/command.ts';
+import { createRedactedTail } from '../../security/diagnosticRedaction.ts';
 import {
   createMemoryRunInputProvider,
   createMemoryWorkspace,
@@ -418,6 +419,42 @@ describe('OpenCode adapter', () => {
       0,
     );
   });
+  for (const failExport of [false, true])
+    it(`preserves completed turns when the native ${failExport ? 'unavailable' : 'artifact'} observer throws`, async () => {
+      const test = await fixture(async (argv) => {
+        if (argv[2] !== OPENCODE_EXPORT_LAUNCHER)
+          return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
+        if (failExport) throw new Error('capture failed');
+        return result(
+          JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
+        );
+      });
+      const observations: string[] = [];
+      const session = await test.adapter.openSession({
+        ...test.context,
+        diagnostics: {
+          restrictedExcerpts: true,
+          redact: (text) => text,
+          redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+          async record() {},
+          nativeSession(native) {
+            observations.push(native.sessionId);
+            throw new Error('observer failed');
+          },
+          nativeSessionUnavailable(reason) {
+            observations.push(reason);
+            throw new Error('observer failed');
+          },
+        },
+      });
+      assert.equal(
+        (await session.send('Do it', { signal: test.context.signal })).text,
+        'Done',
+      );
+      assert.deepEqual(observations, [
+        failExport ? 'read_failed' : OPEN_CODE_SESSION,
+      ]);
+    });
   it('propagates cancellation during execution or export', async () => {
     for (const phase of ['run', 'export']) {
       const controller = new AbortController();
