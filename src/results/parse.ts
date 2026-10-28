@@ -1,11 +1,22 @@
 import { z } from 'zod';
 import { agentTokenUsageSchema } from '../agentUsage.ts';
 import { assertBoundedJsonValue } from '../atif/parser.ts';
+import { MAX_COMPLETION_ATTEMPTS } from '../completionRetry.ts';
+import {
+  completionTransportObservationSchema,
+  MAX_COMPLETION_RETRY_WAIT_MS,
+} from '../contracts/completionObservation.ts';
 import {
   agentAdapterMetadataSchema,
   completionProviderMetadataSchema,
 } from '../contracts/metadata.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import { criterionDecisionSchema } from '../evaluation/criterionDecision.ts';
+import {
+  MAX_CRITERION_EVIDENCE_WARNING_BYTES,
+  MAX_CRITERION_EVIDENCE_WARNINGS,
+} from '../evaluation/criterionEvidence.ts';
+import { DECISION_REJECTION_REASONS } from '../evaluation/decision.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -185,6 +196,28 @@ const interactionTurn = z
     tool_calls: z.array(interactionToolCall).max(100_000),
   })
   .strict();
+export const criterionEvidenceWarningSchema = z
+  .object({
+    source: z.enum(['trajectory', 'workspace']),
+    code: z.string().min(1).max(4096),
+    message: z
+      .string()
+      .min(1)
+      .max(64 * 1024),
+    path: safeText.optional(),
+  })
+  .strict();
+
+export const criterionEvidenceWarningsSchema = z
+  .array(criterionEvidenceWarningSchema)
+  .max(MAX_CRITERION_EVIDENCE_WARNINGS)
+  .refine(
+    (warnings) =>
+      Buffer.byteLength(JSON.stringify(warnings)) <=
+      MAX_CRITERION_EVIDENCE_WARNING_BYTES,
+    'Criterion evidence warnings exceed their byte limit.',
+  );
+
 const criterionFields = {
   label: z
     .string()
@@ -198,10 +231,17 @@ const criterionFields = {
     .min(1)
     .max(64 * 1024),
   explanation: z.string().max(64 * 1024),
+  evidence_warnings_ref: z.literal('evaluation').optional(),
 };
 const criterionResult = z
   .union([
-    z.object({ ...criterionFields, passed: z.boolean() }).strict(),
+    z
+      .object({
+        ...criterionFields,
+        passed: z.boolean(),
+        decision: criterionDecisionSchema.optional(),
+      })
+      .strict(),
     z
       .object({
         ...criterionFields,
@@ -209,7 +249,8 @@ const criterionResult = z
         error: z
           .object({
             type: z.enum(['parse_error', 'request_error']),
-            attempts: z.number().int().min(1).max(3),
+            reason: z.enum(DECISION_REJECTION_REASONS).optional(),
+            attempts: z.number().int().min(1).max(MAX_COMPLETION_ATTEMPTS),
             message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
           })
           .strict(),
@@ -217,6 +258,26 @@ const criterionResult = z
       .strict(),
   ])
   .superRefine((criterion, context) => {
+    if (
+      'decision' in criterion &&
+      criterion.decision !== undefined &&
+      criterion.passed !== (criterion.decision.choice === 'met')
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Criterion passed flag disagrees with its decision.',
+      });
+    }
+    if (
+      criterion.passed === null &&
+      criterion.error.type === 'request_error' &&
+      criterion.error.reason !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Decision rejection reasons apply only to parse errors.',
+      });
+    }
     const wordingIssue = criterionRequirementWordingIssue(
       criterion.criterion,
       criterion.requirement_level,
@@ -239,16 +300,38 @@ export const evaluationResultSchema = z
     judging_criteria_errored: z.number().int().nonnegative(),
     judging_criteria: z.array(criterionResult),
     checks: z.array(checkResult),
+    evidence_warnings: criterionEvidenceWarningsSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
     const expected = scoreEvaluation(
-      value.judging_criteria.map(({ label, ...criterion }) => ({
-        ...criterion,
-        ...(label === undefined ? {} : { label }),
-      })),
+      value.judging_criteria.map(
+        ({ label, evidence_warnings_ref, ...criterion }) => ({
+          ...criterion,
+          ...(label === undefined ? {} : { label }),
+          ...(evidence_warnings_ref === undefined
+            ? {}
+            : { evidence_warnings_ref }),
+        }),
+      ),
       value.checks.map(({ name, passed }) => ({ name, passed })),
+      value.evidence_warnings?.map(({ path, ...warning }) => ({
+        ...warning,
+        ...(path === undefined ? {} : { path }),
+      })),
     );
+    if (
+      value.evidence_warnings === undefined &&
+      value.judging_criteria.some(
+        (criterion) => criterion.evidence_warnings_ref !== undefined,
+      )
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Criterion warning reference has no evaluation warning record.',
+      });
+    }
     if (
       value.judging_criteria_total !== expected.judging_criteria_total ||
       value.judging_criteria_passed !== expected.judging_criteria_passed ||
@@ -467,6 +550,26 @@ const completionCallSummary = z
     cached_tokens: z.number().int().nonnegative().nullable(),
     cost_usd: z.number().finite().nonnegative().nullable(),
     error_code: safeText.nullable(),
+    http_status:
+      completionTransportObservationSchema.shape.http_status.optional(),
+    request_id: completionTransportObservationSchema.shape.request_id,
+    provider_error_code:
+      completionTransportObservationSchema.shape.provider_error_code,
+    retry_ordinal: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(MAX_COMPLETION_ATTEMPTS - 1)
+      .optional(),
+    retry_wait_ms: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_COMPLETION_RETRY_WAIT_MS)
+      .optional(),
+    disposition: z
+      .enum(['succeeded', 'failed', 'retry', 'rate_limit_retry', 'exhausted'])
+      .optional(),
   })
   .strict();
 
@@ -666,6 +769,15 @@ const runResultFields = {
       usage: agentTokenUsageSchema.optional(),
     })
     .strict(),
+  completion_call_totals: z
+    .object({
+      calls: z.number().int().nonnegative().safe(),
+      failed: z.number().int().nonnegative().safe(),
+      omitted: z.number().int().nonnegative().safe(),
+      rate_limit_wait_ms: z.number().int().nonnegative().safe(),
+    })
+    .strict()
+    .optional(),
   completion_calls: z
     .array(completionCallSummary)
     .superRefine((calls, context) => {
@@ -729,6 +841,30 @@ const runResultSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    const totals = value.completion_call_totals;
+    if (
+      totals !== undefined &&
+      (totals.calls !== value.completion_calls.length + totals.omitted ||
+        totals.failed > totals.calls ||
+        totals.failed <
+          value.completion_calls.filter((call) => call.status === 'failed')
+            .length ||
+        totals.rate_limit_wait_ms <
+          value.completion_calls.reduce(
+            (sum, call) =>
+              sum +
+              (call.disposition === 'rate_limit_retry'
+                ? (call.retry_wait_ms ?? 0)
+                : 0),
+            0,
+          ))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['completion_call_totals'],
+        message: 'Completion-call totals disagree with retained records.',
+      });
+    }
     if (value.stop_reason === 'role_player_error' && value.failure === null) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

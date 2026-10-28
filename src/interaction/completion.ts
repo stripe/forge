@@ -22,6 +22,7 @@ export interface InteractionCompletionRequest {
   readonly maxTokens: number;
   readonly responseSchema: StrictCompletionResponseSchema;
   readonly signal: AbortSignal;
+  readonly retryOrdinal?: number;
 }
 
 export type InteractionCompletionInvoker = (

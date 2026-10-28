@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { agentTokenUsageSchema, sumAgentTokenUsage } from './agentUsage.ts';
 import { parseAgentPluginInstallationReceipt } from './contracts/pluginReceipt.ts';
+import { UNKNOWN_EVIDENCE_WARNINGS } from './evaluation/criterionEvidence.ts';
 
 import {
   experimentRunDiagnosticSchema,
@@ -11,6 +12,7 @@ import { mcpToolRefusalWarningSchema } from './mcpToolRefusals.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
 import type { JsonValue, RequirementLevelV1 } from './model/types.ts';
+import { criterionEvidenceWarningsSchema } from './results/parse.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import {
@@ -21,8 +23,28 @@ import {
 
 const MAX_PLUGIN_INSTALLATIONS = 2_000;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
+const MAX_REPORT_CRITERION_FAILURES = 100;
+const MAX_REPORT_CRITERION_FAILURE_BYTES = 64 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
+const HEADLINE_VIEW = 'must_should_average' as const;
+const headlineSchema = z
+  .object({
+    view: z.literal(HEADLINE_VIEW),
+    score: ratio.nullable(),
+    evaluations: count,
+  })
+  .strict()
+  .refine(
+    (headline) => (headline.score === null) === (headline.evaluations === 0),
+    'Headline score is unavailable exactly when no evaluations were counted.',
+  );
+const decisionMeanSchema = z
+  .object({ mean: ratio.nullable(), evaluations: count })
+  .strict();
+const expectedScoreStatisticsSchema = decisionMeanSchema.extend({
+  experimental: z.literal(true),
+});
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const selectionSchema = z.unknown().transform(parseRunSelection);
 const criterionCountsSchema = z
@@ -71,18 +93,110 @@ const evaluationSchema = z
   .object({
     status: z.enum(['passed', 'partial', 'failed', 'judge_error']),
     score: ratio.nullable(),
+    mean_confidence: ratio.nullable().optional(),
+    expected_score: ratio
+      .nullable()
+      .optional()
+      .describe('Experimental mean probability of met over scored decisions.'),
     judging_criteria_passed: count,
     judging_criteria_total: count,
     criteria_by_requirement: criteriaByRequirementSchema,
     judging_criteria_errored: count,
     judging_criteria_excluded_errored: count,
     criterion_scores: criterionScoresSchema,
+    judging_criteria_insufficient_evidence: count.optional(),
+    judging_criteria_low_confidence: count.optional(),
+    evidence_warnings: criterionEvidenceWarningsSchema.optional(),
+    criterion_failures_omitted: count.optional(),
+    criterion_failures: z
+      .array(
+        z
+          .object({
+            criterion: z
+              .string()
+              .min(1)
+              .max(64 * 1024),
+            label: z
+              .string()
+              .regex(/^[a-z][a-z0-9_]*$/)
+              .optional(),
+            requirement_level: z.enum(['MUST', 'SHOULD', 'OPTIONAL']),
+            outcome: z.enum(['not_met', 'insufficient_evidence']),
+            evidence_warnings_ref: z.literal('evaluation'),
+          })
+          .strict(),
+      )
+      .max(100_000)
+      .optional(),
     checks_passed: count,
     checks_total: count,
   })
   .strict()
   .superRefine((value, context) => {
     const { MUST, SHOULD, OPTIONAL } = value.criteria_by_requirement;
+    if (value.criterion_failures !== undefined) {
+      const omitted = value.criterion_failures_omitted ?? 0;
+      const failed =
+        MUST.total +
+        SHOULD.total +
+        OPTIONAL.total -
+        MUST.passed -
+        SHOULD.passed -
+        OPTIONAL.passed -
+        MUST.errored -
+        SHOULD.errored -
+        OPTIONAL.errored;
+      const insufficient = value.criterion_failures.filter(
+        (criterion) => criterion.outcome === 'insufficient_evidence',
+      ).length;
+      if (
+        value.evidence_warnings === undefined ||
+        value.criterion_failures.length + omitted !== failed ||
+        value.judging_criteria_insufficient_evidence === undefined ||
+        insufficient > value.judging_criteria_insufficient_evidence ||
+        insufficient + omitted < value.judging_criteria_insufficient_evidence
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'Criterion failure details disagree with counts or warning references.',
+        });
+      }
+    }
+    if (
+      value.judging_criteria_low_confidence !== undefined &&
+      value.judging_criteria_low_confidence >
+        MUST.total +
+          SHOULD.total +
+          OPTIONAL.total -
+          MUST.errored -
+          SHOULD.errored -
+          OPTIONAL.errored -
+          (value.judging_criteria_insufficient_evidence ?? 0)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Low-confidence count exceeds firm choices.',
+      });
+    }
+    if (
+      value.judging_criteria_insufficient_evidence !== undefined &&
+      value.judging_criteria_insufficient_evidence >
+        MUST.total +
+          SHOULD.total +
+          OPTIONAL.total -
+          MUST.passed -
+          SHOULD.passed -
+          OPTIONAL.passed -
+          MUST.errored -
+          SHOULD.errored -
+          OPTIONAL.errored
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Insufficient evidence count exceeds failed criteria.',
+      });
+    }
     if (
       value.judging_criteria_passed !== MUST.passed + SHOULD.passed ||
       value.judging_criteria_total !== MUST.total + SHOULD.total ||
@@ -107,6 +221,19 @@ const evaluationSchema = z
         message: 'Passed and error counts exceed totals.',
       });
       return;
+    }
+    if (
+      (judged === 0 &&
+        (value.mean_confidence != null || value.expected_score != null)) ||
+      (value.mean_confidence !== undefined &&
+        value.expected_score !== undefined &&
+        (value.mean_confidence === null) !== (value.expected_score === null))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Decision means require valid scored judgments and matching availability.',
+      });
     }
     const score =
       value.judging_criteria_total === 0
@@ -151,6 +278,7 @@ const runSchema = z
     diagnostic: experimentRunDiagnosticSchema.optional(),
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
+    rate_limit_wait_ms: count.optional(),
     evaluation: evaluationSchema.nullable(),
     agent_usage: agentTokenUsageSchema.optional(),
     warnings: z.array(mcpToolRefusalWarningSchema).max(1).optional(),
@@ -186,6 +314,10 @@ const runSchema = z
   });
 const statisticsSchema = z
   .object({
+    headline: headlineSchema.optional(),
+    mean_confidence: decisionMeanSchema.optional(),
+    expected_score: expectedScoreStatisticsSchema.optional(),
+    rate_limit_wait_ms: count.optional(),
     selections: count,
     completed: count,
     errored: count,
@@ -193,6 +325,14 @@ const statisticsSchema = z
     passed: count,
     partial: count,
     failed: count,
+    insufficient_evidence: z
+      .object({ evaluations: count, criteria: count })
+      .strict()
+      .optional(),
+    low_confidence: z
+      .object({ evaluations: count, criteria: count })
+      .strict()
+      .optional(),
     judge_errors: z.object({ evaluations: count, criteria: count }).strict(),
     attempts_total: count,
     retry_attempts: count,
@@ -293,8 +433,16 @@ const reportSchema = z
       .optional(),
     summary: statisticsSchema,
     agent_usage_by_model: z.array(modelUsageSchema).max(100_000).optional(),
-    cases: z.array(caseSchema).min(1).max(100_000),
-    runs: z.array(runSchema).min(1).max(100_000),
+    cases: z.array(caseSchema).max(100_000),
+    runs: z.array(runSchema).max(100_000),
+    details_unavailable: z
+      .object({
+        reason: z.literal('size_limit'),
+        runs: count.positive().max(100_000),
+        cases: count.positive().max(100_000),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -319,13 +467,39 @@ export function summarizeReportEvaluation(
     if (criterion.passed === true) group.passed += 1;
     if (criterion.passed === null) group.errored += 1;
   }
+  const decisions = evaluation.judging_criteria.flatMap((criterion) =>
+    criterion.requirement_level !== 'OPTIONAL' &&
+    criterion.passed !== null &&
+    criterion.decision !== undefined
+      ? [criterion.decision]
+      : [],
+  );
   return {
+    mean_confidence: summarizeReportMean(
+      decisions.map((decision) => decision.confidence),
+    ).mean,
+    expected_score: summarizeReportMean(
+      decisions.map((decision) => decision.probabilities.met),
+    ).mean,
     status: evaluation.status,
     score: evaluation.score,
     judging_criteria_passed: evaluation.judging_criteria_passed,
     judging_criteria_total: evaluation.judging_criteria_total,
     judging_criteria_errored: evaluation.judging_criteria_errored,
     judging_criteria_excluded_errored: criteriaByRequirement.OPTIONAL.errored,
+    judging_criteria_insufficient_evidence: evaluation.judging_criteria.filter(
+      (criterion) => criterion.decision?.choice === 'insufficient_evidence',
+    ).length,
+    judging_criteria_low_confidence: evaluation.judging_criteria.filter(
+      (criterion) =>
+        criterion.decision !== undefined &&
+        criterion.decision.choice !== 'insufficient_evidence' &&
+        criterion.decision.thresholded_outcome === 'insufficient_evidence',
+    ).length,
+    evidence_warnings: (
+      evaluation.evidence_warnings ?? UNKNOWN_EVIDENCE_WARNINGS
+    ).map((warning) => ({ ...warning })),
+    ...summarizeCriterionFailures(evaluation),
     criteria_by_requirement: criteriaByRequirement,
     criterion_scores: criterionScores(criteriaByRequirement),
     checks_passed: evaluation.checks.filter((check) => check.passed).length,
@@ -333,7 +507,44 @@ export function summarizeReportEvaluation(
   };
 }
 
-/** Check the producing release, then verify every aggregate against its run rows. */
+function summarizeCriterionFailures(
+  evaluation: EvaluationResultV1,
+): Pick<
+  ExperimentRunReportEvaluationV1,
+  'criterion_failures' | 'criterion_failures_omitted'
+> {
+  const failures: NonNullable<
+    ExperimentRunReportEvaluationV1['criterion_failures']
+  > = [];
+  let omitted = 0;
+  let bytes = 2;
+  for (const criterion of evaluation.judging_criteria) {
+    if (criterion.passed !== false) continue;
+    const failure = {
+      criterion: criterion.criterion,
+      ...(criterion.label === undefined ? {} : { label: criterion.label }),
+      requirement_level: criterion.requirement_level,
+      outcome:
+        criterion.decision?.choice === 'insufficient_evidence'
+          ? ('insufficient_evidence' as const)
+          : ('not_met' as const),
+      evidence_warnings_ref: 'evaluation' as const,
+    };
+    const size = Buffer.byteLength(JSON.stringify(failure)) + 1;
+    if (
+      failures.length >= MAX_REPORT_CRITERION_FAILURES ||
+      bytes + size > MAX_REPORT_CRITERION_FAILURE_BYTES
+    )
+      omitted += 1;
+    else {
+      failures.push(failure);
+      bytes += size;
+    }
+  }
+  return { criterion_failures: failures, criterion_failures_omitted: omitted };
+}
+
+/** Verify complete row aggregates; summary-only reports declare detail loss. */
 export function parseExperimentRunReport(
   input: unknown,
 ): ExperimentRunReportV1 {
@@ -341,6 +552,22 @@ export function parseExperimentRunReport(
   const forge = parseForgeBuildIdentity(header.forge);
   assertCompatibleForgeVersion(forge.version);
   const report = reportSchema.parse(input);
+  for (const statistics of [report.summary, ...report.cases]) {
+    for (const mean of [
+      statistics.mean_confidence,
+      statistics.expected_score,
+    ]) {
+      if (
+        mean !== undefined &&
+        ((mean.mean === null) !== (mean.evaluations === 0) ||
+          mean.evaluations > statistics.completed ||
+          mean.evaluations > statistics.judging_score.evaluations)
+      )
+        throw new Error(
+          'Decision mean availability or evaluation counts disagree.',
+        );
+    }
+  }
   if (report.runs.some((run, index) => run.selection_index !== index)) {
     throw new Error(
       'Report selection indices must be contiguous and zero-based.',
@@ -351,7 +578,51 @@ export function parseExperimentRunReport(
   );
   if (new Set(runIds).size !== runIds.length)
     throw new Error('Report contains duplicate run IDs.');
+  if (report.details_unavailable !== undefined) {
+    const scored =
+      report.summary.passed + report.summary.partial + report.summary.failed;
+    if (
+      report.runs.length !== 0 ||
+      report.cases.length !== 0 ||
+      report.details_unavailable.runs !== report.summary.selections ||
+      report.details_unavailable.cases > report.details_unavailable.runs ||
+      report.summary.completed +
+        report.summary.errored +
+        report.summary.pending !==
+        report.summary.selections ||
+      scored > report.summary.completed ||
+      report.summary.judge_errors.evaluations > report.summary.completed ||
+      (report.summary.headline !== undefined &&
+        (report.summary.headline.evaluations > report.summary.completed ||
+          report.summary.headline.evaluations <
+            report.summary.judging_score.evaluations)) ||
+      report.summary.pass_rate !==
+        (scored === 0 ? null : report.summary.passed / scored) ||
+      report.summary.coverage !==
+        report.summary.completed / report.summary.selections
+    ) {
+      throw new Error(
+        'Unavailable report details disagree with retained rows or counts.',
+      );
+    }
+    assertReportBytes(serializeCanonicalJson(report));
+    return report;
+  }
+  if (report.runs.length === 0 || report.cases.length === 0)
+    throw new Error(
+      'Report details must be present or explicitly unavailable.',
+    );
   const aggregate = aggregateRuns(report.runs);
+  for (const field of [
+    'headline',
+    'mean_confidence',
+    'expected_score',
+  ] as const) {
+    if (report.summary[field] === undefined) delete aggregate.summary[field];
+    for (const [index, group] of aggregate.cases.entries()) {
+      if (report.cases[index]?.[field] === undefined) delete group[field];
+    }
+  }
   if (
     report.agent_usage_by_model !== undefined &&
     serializeCanonicalJson(report.agent_usage_by_model) !==
@@ -369,8 +640,7 @@ export function parseExperimentRunReport(
   if (report.plugin_bundle_comparisons !== undefined) {
     report.plugin_bundle_comparisons = comparePluginBundles(report.runs);
   }
-  assertReportBytes(serializeCanonicalJson(report));
-  return report;
+  return boundExperimentReportDetails(report);
 }
 
 /** Internal construction from bounded, verified latest-selection metadata. */
@@ -395,9 +665,135 @@ export function buildExperimentRunReport(input: {
 export function serializeExperimentRunReport(
   report: ExperimentRunReportV1,
 ): string {
-  const body = `${JSON.stringify(JSON.parse(serializeCanonicalJson(report)), null, 2)}\n`;
-  assertReportBytes(body);
-  return body;
+  return reportBody(boundExperimentReportDetails(report));
+}
+
+function reportBody(report: ExperimentRunReportV1): string {
+  return `${JSON.stringify(
+    JSON.parse(serializeCanonicalJson(report)),
+    (_key, value: unknown) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !Object.hasOwn(value, 'headline')
+      )
+        return value;
+      const { headline, ...rest } = value as Record<string, unknown>;
+      return { headline, ...rest };
+    },
+    2,
+  )}\n`;
+}
+
+/** Each completed evaluation's saved non-null score has one vote. */
+export function summarizeReportHeadline(
+  scores: readonly (number | null)[],
+): z.infer<typeof headlineSchema> {
+  const { mean, evaluations } = summarizeReportMean(scores);
+  return { view: HEADLINE_VIEW, score: mean, evaluations };
+}
+
+function summarizeReportMean(
+  values: readonly (number | null | undefined)[],
+): z.infer<typeof decisionMeanSchema> {
+  const counted = values.filter((value) => value != null);
+  return {
+    mean:
+      counted.length === 0
+        ? null
+        : counted.reduce((sum, value) => sum + value, 0) / counted.length,
+    evaluations: counted.length,
+  };
+}
+
+/** Count pretty JSON bytes before allocating a complete serialized report. */
+function reportFitsBudget(
+  report: ExperimentRunReportV1,
+  budget: number,
+): boolean {
+  let remaining = budget - 1; // trailing newline
+  function spend(bytes: number): boolean {
+    remaining -= bytes;
+    return remaining >= 0;
+  }
+  function visit(value: unknown, depth: number): boolean {
+    if (typeof value !== 'object' || value === null)
+      return spend(Buffer.byteLength(JSON.stringify(value)));
+    const entries = Array.isArray(value) ? value : Object.entries(value);
+    if (!spend(2)) return false;
+    if (entries.length === 0) return true;
+    if (!spend(1 + depth * 2)) return false;
+    for (let index = 0; index < entries.length; index += 1) {
+      if (!spend((depth + 1) * 2 + 1 + (index > 0 ? 1 : 0))) return false;
+      if (Array.isArray(value)) {
+        if (!visit(entries[index], depth + 1)) return false;
+      } else {
+        const [key, child] = entries[index] as [string, unknown];
+        if (
+          !spend(Buffer.byteLength(JSON.stringify(key)) + 2) ||
+          !visit(child, depth + 1)
+        )
+          return false;
+      }
+    }
+    return true;
+  }
+  return visit(report, 0);
+}
+
+/** Preserve scores and counts; optional detail loss is explicit and deterministic. */
+export function boundExperimentReportDetails(
+  report: ExperimentRunReportV1,
+  maxBytes = MAX_REPORT_BYTES,
+): ExperimentRunReportV1 {
+  if (reportFitsBudget(report, maxBytes)) return report;
+  const withoutDetails: ExperimentRunReportV1 = {
+    ...report,
+    runs: report.runs.map((run) => ({
+      ...run,
+      evaluation:
+        run.evaluation === null
+          ? null
+          : {
+              ...run.evaluation,
+              ...(run.evaluation.criterion_failures === undefined
+                ? {}
+                : {
+                    criterion_failures: [],
+                    criterion_failures_omitted:
+                      (run.evaluation.criterion_failures_omitted ?? 0) +
+                      run.evaluation.criterion_failures.length,
+                  }),
+              ...(run.evaluation.evidence_warnings === undefined ||
+              run.evaluation.evidence_warnings.length === 0
+                ? {}
+                : {
+                    evidence_warnings: [
+                      {
+                        source: 'trajectory' as const,
+                        code: 'report_evidence_warnings_omitted',
+                        message:
+                          'Evidence warning details were omitted to bound the report; see the saved evaluation.',
+                      },
+                    ],
+                  }),
+            },
+    })),
+  };
+  if (reportFitsBudget(withoutDetails, maxBytes)) return withoutDetails;
+  const unavailable: ExperimentRunReportV1 = {
+    ...report,
+    runs: [],
+    cases: [],
+    details_unavailable: report.details_unavailable ?? {
+      reason: 'size_limit',
+      runs: report.runs.length,
+      cases: report.cases.length,
+    },
+  };
+  if (!reportFitsBudget(unavailable, maxBytes))
+    throw new RangeError('Report byte budget cannot hold its summary.');
+  return unavailable;
 }
 
 function assertReportBytes(body: string): void {
@@ -599,6 +995,26 @@ function statistics(
     }
   }
   return {
+    headline: summarizeReportHeadline(
+      runs.flatMap((run) =>
+        run.state === 'completed' ? [run.evaluation!.score] : [],
+      ),
+    ),
+    mean_confidence: summarizeReportMean(
+      runs.map((run) => run.evaluation?.mean_confidence),
+    ),
+    expected_score: {
+      experimental: true,
+      ...summarizeReportMean(runs.map((run) => run.evaluation?.expected_score)),
+    },
+    ...(runs.some((run) => run.rate_limit_wait_ms !== undefined)
+      ? {
+          rate_limit_wait_ms: runs.reduce(
+            (total, run) => total + (run.rate_limit_wait_ms ?? 0),
+            0,
+          ),
+        }
+      : {}),
     selections: runs.length,
     completed,
     errored,
@@ -606,6 +1022,43 @@ function statistics(
     passed,
     partial,
     failed,
+    ...(runs.some(
+      (run) =>
+        run.evaluation?.judging_criteria_insufficient_evidence !== undefined,
+    )
+      ? {
+          insufficient_evidence: {
+            evaluations: runs.filter(
+              (run) =>
+                (run.evaluation?.judging_criteria_insufficient_evidence ?? 0) >
+                0,
+            ).length,
+            criteria: runs.reduce(
+              (total, run) =>
+                total +
+                (run.evaluation?.judging_criteria_insufficient_evidence ?? 0),
+              0,
+            ),
+          },
+        }
+      : {}),
+    ...(runs.some(
+      (run) => run.evaluation?.judging_criteria_low_confidence !== undefined,
+    )
+      ? {
+          low_confidence: {
+            evaluations: runs.filter(
+              (run) =>
+                (run.evaluation?.judging_criteria_low_confidence ?? 0) > 0,
+            ).length,
+            criteria: runs.reduce(
+              (total, run) =>
+                total + (run.evaluation?.judging_criteria_low_confidence ?? 0),
+              0,
+            ),
+          },
+        }
+      : {}),
     judge_errors: {
       evaluations: judgeErrorEvaluations,
       criteria: judgeErrorCriteria,

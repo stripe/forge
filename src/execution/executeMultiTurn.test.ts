@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 
 import { parseAtifTrajectory } from '../atif/index.ts';
 import type { AgentAdapter } from '../contracts/agent.ts';
@@ -419,15 +420,9 @@ describe('executeEval multi-turn and judging integration', () => {
             },
           ]);
           judgeSystemPrompt = request.systemPrompt ?? '';
-          return JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: true,
-                explanation: 'answer.txt is complete.',
-              },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(true, 'answer.txt is complete.'),
+          );
         },
       ],
     });
@@ -645,15 +640,9 @@ describe('executeEval multi-turn and judging integration', () => {
         (request) => {
           assert.equal(request.purpose, 'judge');
           judgeSystemPrompt = request.systemPrompt ?? '';
-          return JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: true,
-                explanation: 'Both completed turns are present.',
-              },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(true, 'Both completed turns are present.'),
+          );
         },
       ],
     });
@@ -918,11 +907,9 @@ describe('executeEval multi-turn and judging integration', () => {
       );
       assert.ok((request.systemPrompt ?? '').includes('"is_error":false'));
       judgePrompts.push(request.systemPrompt ?? '');
-      return JSON.stringify({
-        results: [
-          { index: 0, passed: true, explanation: 'Visible evidence passed.' },
-        ],
-      });
+      return JSON.stringify(
+        criterionJudgment(true, 'Visible evidence passed.'),
+      );
     };
     const provider = createScriptedCompletionProvider({
       id: 'test-provider',
@@ -1052,11 +1039,7 @@ describe('executeEval multi-turn and judging integration', () => {
         },
       },
       responses: [
-        JSON.stringify({
-          results: [
-            { index: 0, passed: true, explanation: 'Visible evidence passed.' },
-          ],
-        }),
+        JSON.stringify(criterionJudgment(true, 'Visible evidence passed.')),
       ],
     });
     const artifacts = createMemoryArtifactStore();
@@ -1119,6 +1102,7 @@ describe('executeEval multi-turn and judging integration', () => {
         new Error('private transport detail one'),
         new Error('private transport detail two'),
         new Error('private transport detail three'),
+        new Error('private transport detail four'),
       ],
     });
     const artifacts = createMemoryArtifactStore();
@@ -1156,6 +1140,7 @@ describe('executeEval multi-turn and judging integration', () => {
     assert.deepEqual(waits, [
       { purpose: 'role_player', attempt: 1 },
       { purpose: 'role_player', attempt: 2 },
+      { purpose: 'role_player', attempt: 3 },
     ]);
     assert.deepEqual(agent.messages, []);
     assert.ok(!agent.events.includes('collect-evidence'));
@@ -1166,7 +1151,7 @@ describe('executeEval multi-turn and judging integration', () => {
     });
     assert.equal(completed.result.agent.session_id, null);
     assert.equal(completed.result.failure?.error_type, 'request_error');
-    assert.equal(completed.result.completion_calls.length, 3);
+    assert.equal(completed.result.completion_calls.length, 4);
     assert.ok(
       completed.result.completion_calls.every(
         ({ status }) => status === 'failed',

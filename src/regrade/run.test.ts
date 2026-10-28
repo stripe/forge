@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { afterEach, describe, it } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import { verifyCompletedRun } from '../results/index.ts';
 import {
   createScriptedCompletionProvider,
@@ -33,6 +34,60 @@ function judge(responses: string[]) {
 }
 
 describe('regradeCompletedRun', () => {
+  it('records insufficient evidence with the same thresholds and saved warnings as execution', async () => {
+    const source = await fixture();
+    const original = await verifyCompletedRun(source.runLocation);
+    const scripted = judge([
+      JSON.stringify({
+        answers: {
+          criterion: {
+            type: 'choice',
+            choice: 'insufficient_evidence',
+            probabilities: {
+              met: 0.05,
+              not_met: 0.05,
+              insufficient_evidence: 0.9,
+            },
+            explanation: 'The required file content is not visible.',
+          },
+        },
+      }),
+    ]);
+    const regrade = await regradeCompletedRun(
+      {
+        location: source.runLocation,
+        judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      },
+      {
+        completionProviders: new Map([['anthropic', scripted.provider]]),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    const result = regrade!.evaluation.judging_criteria[0]!;
+    assert.equal(result.passed, false);
+    assert.equal(result.decision?.thresholded_outcome, 'insufficient_evidence');
+    assert.deepEqual(result.decision?.thresholds, { minimum_probability: 0.8 });
+    assert.deepEqual(
+      regrade!.evaluation.evidence_warnings,
+      original.result.evaluation.evidence_warnings,
+    );
+    assert.ok(
+      regrade!.evaluation.evidence_warnings!.some(
+        (warning) =>
+          warning.source === 'workspace' &&
+          warning.code === 'workspace_binary_omitted',
+      ),
+    );
+    assert.ok(
+      regrade!.evaluation.evidence_warnings!.some(
+        (warning) =>
+          warning.source === 'trajectory' && warning.code === 'fallback_used',
+      ),
+    );
+    assert.equal(regrade!.evaluation.score, 0);
+    assert.equal(regrade!.evaluation.judging_criteria_errored, 0);
+  });
+
   it('sends the original judge request and reproduces the original evaluation', async () => {
     const source = await fixture();
     const original = await verifyCompletedRun(source.runLocation);
@@ -71,9 +126,7 @@ describe('regradeCompletedRun', () => {
     const source = await fixture();
     const original = await verifyCompletedRun(source.runLocation);
     const scripted = judge([
-      JSON.stringify({
-        results: [{ index: 0, passed: false, explanation: 'Not shown.' }],
-      }),
+      JSON.stringify(criterionJudgment(false, 'Not shown.')),
     ]);
     const regrade = await regradeCompletedRun(
       {

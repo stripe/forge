@@ -27,6 +27,20 @@ import type {
 import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
 
+const completedCriterionJudgment = JSON.stringify({
+  answers: {
+    criterion: {
+      type: 'choice',
+      choice: 'met',
+      probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
+      explanation: 'Done.',
+    } satisfies Omit<
+      root.ChoiceAnswer<root.CriterionDecisionOption>,
+      'confidence'
+    >,
+  },
+});
+
 describe('experiment public entry points', () => {
   it('exports versioned dataset case entries with their paths', () => {
     const entry: root.DatasetManifestCaseV1 = {
@@ -57,9 +71,7 @@ describe('experiment public entry points', () => {
     assert.equal(typeof root.buildCriterionJudgePrompt, 'function');
     assert.equal(typeof root.parseCriterionJudgment, 'function');
     const criterion: root.CriterionResultV1 = root.parseCriterionJudgment(
-      JSON.stringify({
-        results: [{ index: 0, passed: true, explanation: 'Done.' }],
-      }),
+      completedCriterionJudgment,
       {
         requirement_level: 'SHOULD' as const,
         value: 'The task is complete.',
@@ -105,15 +117,21 @@ describe('experiment public entry points', () => {
     ];
     for (const input of inputs) {
       const result = root.parseCriterionJudgment(
-        JSON.stringify({
-          results: [{ index: 0, passed: true, explanation: 'Done.' }],
-        }),
+        completedCriterionJudgment,
         input,
       );
       assert.deepEqual(result, {
         criterion: text,
         requirement_level: 'SHOULD',
         passed: true,
+        decision: {
+          type: 'choice',
+          choice: 'met',
+          confidence: 1,
+          probabilities: { met: 1, not_met: 0, insufficient_evidence: 0 },
+          thresholded_outcome: 'met',
+          thresholds: { minimum_probability: 0.8 },
+        },
         explanation: 'Done.',
       });
       assert.equal(root.criterionResultMatchesDefinition(result, input), true);
@@ -224,6 +242,19 @@ describe('experiment public entry points', () => {
       cases: readonly ExperimentRunReportCaseV1[];
       runs: readonly ExperimentRunReportRunV1[];
       summary: ExperimentRunReportStatisticsV1;
+      headline:
+        | {
+            view: 'must_should_average';
+            score: number | null;
+            evaluations: number;
+          }
+        | undefined;
+      meanConfidence: { mean: number | null; evaluations: number } | undefined;
+      expectedScore:
+        | { experimental: true; mean: number | null; evaluations: number }
+        | undefined;
+      evaluationConfidence: number | null | undefined;
+      evaluationExpectedScore: number | null | undefined;
       evaluation: ExperimentRunReportEvaluationV1 | null;
       requiredStrict: number | null;
       requiredAvg: number | null;
@@ -237,6 +268,11 @@ describe('experiment public entry points', () => {
       cases: report.cases,
       runs: report.runs,
       summary: report.summary,
+      headline: report.summary.headline,
+      meanConfidence: report.summary.mean_confidence,
+      expectedScore: report.summary.expected_score,
+      evaluationConfidence: report.runs[0]?.evaluation?.mean_confidence,
+      evaluationExpectedScore: report.runs[0]?.evaluation?.expected_score,
       evaluation: report.runs[0]?.evaluation ?? null,
       requiredStrict: report.summary.criterion_scores.required.strict,
       requiredAvg: report.summary.criterion_scores.required.avg,

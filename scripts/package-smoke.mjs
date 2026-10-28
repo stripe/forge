@@ -97,6 +97,11 @@ try {
       assert.equal(typeof forge.parseJudgeEvidence, 'function');
       assert.equal(typeof forge.parseResolvedRunPlan, 'function');
       assert.equal(typeof forge.judgeCriteria, 'function');
+      assert.equal(typeof forge.createCompletionDecisionModel, 'function');
+      assert.equal(typeof forge.criterionDecisionOutcome, 'function');
+      assert.equal(forge.CRITERION_DECISION_THRESHOLDS.minimum_probability, 0.8);
+      assert.equal(forge.DECISION_PROBABILITY_TOLERANCE, 0.000001);
+      assert.equal(forge.DECISION_PROBABILITY_SUM_TOLERANCE, 0.02);
       assert.equal(typeof forge.criterionResultMatchesDefinition, 'function');
       assert.equal(typeof forge.buildCriterionJudgePrompt, 'function');
       assert.equal(typeof forge.parseCriterionJudgment, 'function');
@@ -104,10 +109,11 @@ try {
         assert.equal(removed in forge, false);
       }
       const criterion = forge.parseCriterionJudgment(
-        JSON.stringify({results: [{index: 0, passed: true, explanation: 'Done.'}]}),
+        JSON.stringify({answers: {criterion: {type: 'choice', choice: 'met', probabilities: {met: 1, not_met: 0, insufficient_evidence: 0}, explanation: 'Done.'}}}),
         {value: 'The task is complete.'},
       );
       assert.equal(criterion.requirement_level, 'SHOULD');
+      assert.equal(criterion.decision.thresholded_outcome, 'met');
       const evaluation = forge.parseEvaluationResult(forge.scoreEvaluation([criterion], []));
       assert.equal(evaluation.judging_criteria_passed, 1);
       assert.equal(evaluation.judging_criteria_total, 1);
@@ -163,6 +169,8 @@ try {
       for (const removed of ['@stripe/forge/campaign', '@stripe/forge/campaign/cli']) {
         await assert.rejects(import(removed), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
       }
+      assert.equal(typeof forge.CompletionInvocationError, 'function');
+      assert.equal(forge.MAX_COMPLETION_CALL_SUMMARIES, 1024);
       assert.equal(typeof regrade.regradeCompletedRun, 'function');
       assert.equal(typeof regrade.regradeExperimentRun, 'function');
       assert.equal(typeof regrade.compareRegradeResults, 'function');
@@ -347,6 +355,12 @@ try {
       assert.equal(command.report, path.join(command.location, 'report.json'));
       const report = JSON.parse(await fs.readFile(command.report, 'utf8'));
       assert.equal(experiment.parseExperimentRunReport(report).summary.passed, 2);
+      assert.equal(Object.keys(report.summary)[0], 'headline');
+      assert.deepEqual(report.summary.mean_confidence, {mean: null, evaluations: 0});
+      assert.deepEqual(report.summary.expected_score, {experimental: true, mean: null, evaluations: 0});
+      assert.equal(report.runs[0].evaluation.mean_confidence, null);
+      assert.equal(report.runs[0].evaluation.expected_score, null);
+      assert.deepEqual(report.summary.headline, {view: 'must_should_average', score: 0, evaluations: 2});
       assert.deepEqual(report.summary.criterion_scores, {
         required: {strict: null, avg: null, evaluations: 0},
         recommended: {strict: null, avg: null, evaluations: 0},

@@ -579,6 +579,13 @@ JS
 
 ### Understand scores
 
+The headline view is `must_should_average`: the mean of completed evaluations'
+saved `score`, with one vote per evaluation. It appears first as `headline` in
+the report summary and each case/configuration group, and in run and regrade
+CLI summaries. Its `evaluations` count excludes null scores and execution errors;
+its `score` is `null` when none qualify. Checks-only evaluations contribute
+their saved score of `0`. All other score views remain available.
+
 Numeric `score` is the fraction of valid MUST and SHOULD judgments that passed.
 Judge errors are excluded; the score is `null` if every scored criterion errored.
 `requirement_level` classifies each criterion as `MUST` (required),
@@ -604,11 +611,37 @@ For nine scored criteria, six passes, two failures, and one judge error give a
 score of `0.75` and status `judge_error`. Each errored criterion records
 `passed: null` and an `error` with its type, attempt count, and diagnostic
 message; `judging_criteria_errored` counts MUST and SHOULD errors.
+
+New judgments also record a `decision`: the choice, normalized probabilities,
+derived confidence and the rule used to flag weak verdicts. The choice sets
+`passed`: a `met` choice at 0.75 still passes, while `insufficient_evidence`
+counts as not passed inside the headline. For met and not-met choices,
+`low_confidence` reports how many verdicts the judge gave with less than 0.80
+probability. This count does not change the score. Judge errors remain separate.
+See the [decision rule](docs/architecture.md#criterion-judging).
+
+Each run's report evaluation also shows `mean_confidence` and experimental
+`expected_score`. They average the saved MUST and SHOULD decisions: confidence
+is the largest probability, and Expected score is P(met), the expected value
+of a pass worth 1. A choice of `insufficient_evidence` contributes its P(met).
+Judge errors, OPTIONAL criteria and judgments without decisions do not count.
+Both means are `null` when no scored criterion has a decision, including older
+results and all-error evaluations.
+
+The summary and each case/configuration group average those per-evaluation
+values, with one vote per evaluation that has a value. Each field has `mean`
+and `evaluations`; `expected_score` also has `experimental: true`. A zero count
+means a null mean. Expected score describes the judge's stated chances; it is
+an experiment, not a claim that those chances match real outcomes. The headline
+uses actual choice-based saved scores and stays first. These added views do
+not change scoring. Regrade reports derive them from the saved regrade decisions.
+
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
-`report.json` contains an overall `summary`, per-case/configuration `cases`,
-and one `runs` row per saved selection. Codex MCP dispatch refusals appear as
+`report.json` contains an overall `summary`. When detail fits its size limit,
+it also has per-case/configuration `cases` and one `runs` row per saved
+selection. Codex MCP dispatch refusals appear as
 warnings in saved results and report rows, even when native evidence falls back.
 Codex reports missing counts as unavailable. The absence of a warning does not
 prove that tools work.
@@ -631,7 +664,7 @@ plan hashes.
 With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criterion_scores, criteria_by_requirement}' \
+jq '.cases[] | {headline, mean_confidence, expected_score, case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criterion_scores, criteria_by_requirement}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
@@ -652,7 +685,18 @@ runs contribute to pass rate. `judge_errors` separately counts affected
 evaluations and errored criteria in the summary and each case/configuration,
 including errors on OPTIONAL criteria.
 These errors remain committed outcomes on resume; they do not rerun the coding
-agent. Ratios range from 0 to 1. Only the latest verified effective outcome
+agent.
+
+`insufficient_evidence` and `low_confidence` separately count affected
+evaluations and criteria in the summary and case groups, including OPTIONAL
+criteria. Run evaluations carry the same counts and bounded `criterion_failures`.
+Failed criteria reference one shared list of evidence warnings per evaluation.
+Warnings flag capture limits, not proof of failure; missing records show
+completeness as unknown. Omitted failure details have an explicit count. If a
+report cannot retain run and case details within its size limit, it marks them
+as `details_unavailable` while keeping the summary. Saved runs and the checkpoint
+remain complete. See [report bounds](docs/architecture.md#criterion-judging).
+Ratios range from 0 to 1. Only the latest verified effective outcome
 contributes for each selection, so retries do not add scores. Compare treatments
 on matched cases and agent configurations. See
 [scoring semantics](docs/architecture.md#evaluation-and-scoring).
@@ -670,7 +714,9 @@ Avg of `1`, Recommended Strict of `0`, and Recommended Avg of `0.5`. OPTIONAL
 and file checks do not affect these scores. An empty set has `null` scores.
 For summary and case groups, `strict` is the fraction of eligible evaluations
 where all relevant criteria passed. `avg` pools their passed/total counts, so
-each criterion result has equal weight across runs. Each set's `evaluations`
+each criterion result has equal weight across runs. The headline weights each
+evaluation equally, while `criterion_scores.recommended.avg` pools MUST and
+SHOULD results so each judged criterion has equal weight. Each set's `evaluations`
 counts completed evaluations with at least one relevant criterion; empty sets,
 pending runs, and execution errors do not enter either denominator.
 
@@ -714,6 +760,16 @@ callback failures may have only `error_code`. For a committed Ava failure, `resu
 records the final request or output rejection reason; raw rejected responses
 are not saved.
 
+Ava and the judge back off through rate limits and temporary provider failures;
+see the [host completion retry policy](docs/architecture.md#host-side-completion-providers).
+`result.json.completion_calls` keeps bounded records of failed calls even when
+retry succeeds. `completion_call_totals` continues counting after that cap.
+When available, `report.json` includes `rate_limit_wait_ms` in run rows, case
+groups, and the summary. It sums measured host-completion retry waits from the
+latest verified results, including waits from calls omitted by the cap. Parallel
+waits are added, so this total can exceed wall-clock run time. Older records and
+attempts without a committed result have no measured value.
+
 ### Inspect evidence
 
 Runs may also contain `workspace-evidence.json`, `judge-evidence.json`, and
@@ -754,7 +810,7 @@ neither can recover text that was not captured.
 without re-running any coding agent or Ava turn. Each completed run is verified
 first. Its transcript is projected from the saved `trajectory.json`, and its
 workspace text comes from the saved `judge-evidence.json`, so the new judge
-receives the same evidence and prompt as the original judge:
+receives the saved evidence under the current Forge judge contract:
 
 ```sh
 npx --no-install forge regrade \
@@ -766,17 +822,22 @@ npx --no-install forge regrade \
 The source experiment run is only read; `--output` must be a new location
 outside it. Each regrade is written to `runs/<run-id>.json` there, with the
 judge, the new evaluation, its completion calls, and digests of the saved
-inputs. `report.json` aggregates the regraded evaluations with the standard
-report format, and `regrade.json` summarizes the invocation. Rerunning the same
-command reuses regrades for the same judge and committed result, so an
-interrupted regrade can be continued. An output that already holds regrades
-from another judge reports those runs as failed instead of mixing judges.
+inputs. Regraded criteria use the same decision rule and warning fields as
+new runs. `report.json` aggregates the regraded evaluations with the standard
+report format, and `regrade.json` summarizes the invocation. For runs with
+judging criteria, regrade reports count rate-limit waits from the new judge
+calls only; they do not add waits from the source run. Reused older regrades
+without wait records leave that value absent. Rerunning the same command
+reuses regrades for the same judge and committed result, so an interrupted
+regrade can be continued. An output that already holds regrades from another
+judge reports those runs as failed instead of mixing judges.
 
 Deterministic file checks are not re-run, because the workspace is gone after
 a run; each regrade keeps the run's original check results. The judge sees
 only the bounded workspace excerpts captured at run time. Runs without judging
-criteria keep their checks-only evaluation. Runs that could not be regraded
-appear as pending in the regrade report, and the command exits with status 1.
+criteria keep their checks-only evaluation and source-run wait totals. Runs
+that could not be regraded appear as pending in the regrade report, and the
+command exits with status 1.
 
 Compare saved verdicts and scores with the source run without model calls or
 credentials:

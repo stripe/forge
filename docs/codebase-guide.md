@@ -467,6 +467,7 @@ implementations.
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
 | [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by coding-agent adapters and testing fakes; consumed by `execution` and `evidence` |
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic`, `providers/openai`, and scripted tests; managed by `execution/completionRuntime.ts` |
+| [`decision.ts`](https://github.com/stripe/forge/blob/main/src/contracts/decision.ts) | `DecisionModel`, typed Choice questions/answers, request/response envelopes | Transport-neutral judging boundary, implemented by `evaluation/completionDecisionModel.ts`. |
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
@@ -686,8 +687,8 @@ implement Messages and Responses host transports. Each owns request validation,
 schema projection, bounded fetch, response parsing, usage normalization, and safe
 error classes. They have no SDK dependency or ambient credential reads.
 
-Both are used only through `execution/completionRuntime.ts`. Ava and criterion
-judging depend on the provider-neutral completion contract.
+Both are used only through `execution/completionRuntime.ts`. Ava depends on
+the provider-neutral completion contract. Criterion judging uses `contracts/decision.ts` through the completion decision adapter.
 That distinction lets an embedding host register another provider without
 changing `interaction` or `evaluation`.
 
@@ -734,7 +735,10 @@ one originally selected.
 | [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
 | [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
 | [`judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
-| [`criterionJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionJudge.ts) | `judgeCriteria`, prompt/response helpers | Renders one prompt per criterion, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
+| [`criterionJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionJudge.ts) | `judgeCriteria`, prompt/response helpers | Renders one prompt per criterion, runs bounded concurrent workers, retries, and parses strict judgments. Receives a decision model from execution, with a prompt-only callback form for embedding hosts. |
+| [`completionDecisionModel.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/completionDecisionModel.ts) | `createCompletionDecisionModel` | Adapts host completion calls to typed decisions with strict response validation in `decision.ts`. |
+| [`criterionDecision.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionDecision.ts) | `criterionDecisionOutcome`, choice and threshold data | Pure threshold annotation and stored-decision schema; the choice sets the headline score. |
+| [`criterionEvidence.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionEvidence.ts) | `criterionEvidenceWarnings` | Shared evaluation warning projection and fixed capture status for execution, regrade, and verification. |
 | [`score.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/score.ts) | `scoreEvaluation` | Purely combines criterion and check results into score/status. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/index.ts) | Public evaluation barrel | Re-exported at package root |
 

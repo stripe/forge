@@ -250,15 +250,6 @@ describe('OpenAI Responses completion provider', () => {
         input_tokens_details: { cached_tokens: 2 },
       },
     }),
-    response({
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: '```json\n{}\n```' }],
-        },
-      ],
-    }),
   ])('rejects malformed or unsuccessful responses safely', async (value) => {
     const provider = createOpenAICompletionProvider({
       fetch: async () => jsonResponse(value),
@@ -266,6 +257,27 @@ describe('OpenAI Responses completion provider', () => {
     await assert.rejects(
       provider.complete(request(), context),
       errorCode('invalid_response'),
+    );
+  });
+
+  it('distinguishes malformed structured model text from an invalid envelope', async () => {
+    const provider = createOpenAICompletionProvider({
+      fetch: async () =>
+        jsonResponse(
+          response({
+            output: [
+              {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: '```json\n{}\n```' }],
+              },
+            ],
+          }),
+        ),
+    });
+    await assert.rejects(
+      provider.complete(request(), context),
+      errorCode('invalid_output'),
     );
   });
 

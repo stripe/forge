@@ -4,7 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, it } from 'vitest';
-
 import { runCli } from '../src/cli.ts';
 import type { AgentAdapter } from '../src/contracts/agent.ts';
 import { createDirectoryRunInputProvider } from '../src/contracts/inputs.ts';
@@ -20,6 +19,7 @@ import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
 } from '../src/testing/index.ts';
+import { criterionJudgment } from './fixtures/criterionJudgment.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -127,16 +127,12 @@ describe('multi-turn CLI end to end', () => {
           message: `Use this exact status sentence: ${deliverable.trim()}`,
         }),
         JSON.stringify({ remaining_need_ids: [], message: '' }),
-        JSON.stringify({
-          results: [
-            {
-              index: 0,
-              passed: true,
-              explanation:
-                'The conversation supplied the exact status sentence.',
-            },
-          ],
-        }),
+        JSON.stringify(
+          criterionJudgment(
+            true,
+            'The conversation supplied the exact status sentence.',
+          ),
+        ),
       ],
     });
     const compositionFactory = async ({

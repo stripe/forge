@@ -168,7 +168,7 @@ describe('regrade diff', () => {
       await fs.readFile(file, 'utf8'),
     ) as RegradeResultV1;
     const evaluation = scoreEvaluation(
-      saved.evaluation.judging_criteria.map((criterion) => ({
+      saved.evaluation.judging_criteria.map(({ decision: _decision, ...criterion }) => ({
         ...criterion,
         passed: null,
         error: {
@@ -510,7 +510,7 @@ describe('regrade diff', () => {
       JSON.stringify({
         ...saved,
         evaluation: scoreEvaluation(
-          saved.evaluation.judging_criteria.map((criterion) => ({
+          saved.evaluation.judging_criteria.map(({ decision: _decision, ...criterion }) => ({
             ...criterion,
             passed: null,
             error: {

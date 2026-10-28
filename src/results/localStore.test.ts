@@ -593,6 +593,43 @@ describe('local artifact store', () => {
     }
   });
 
+  it('checks recorded criterion warnings against the saved evidence while accepting their absence', async () => {
+    const location = await commitArtifacts(
+      [
+        { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+        { path: 'trajectory.json', body: oneShotTrajectory },
+        { path: 'judge-evidence.json', body: judgeEvidenceBody() },
+      ],
+      withPassingCriterion,
+    );
+    const verified = await verifyCompletedRun(location);
+    const changed = structuredClone(verified.result);
+    const criterion = changed.evaluation.judging_criteria[0]!;
+    await fs.writeFile(
+      path.join(location, 'result.json'),
+      jsonBody({
+        ...changed,
+        evaluation: {
+          ...changed.evaluation,
+          judging_criteria: [
+            { ...criterion, evidence_warnings_ref: 'evaluation' },
+          ],
+          evidence_warnings: [
+            {
+              source: 'workspace',
+              code: 'workspace_file_truncated',
+              message: 'File text was truncated.',
+            },
+          ],
+        },
+      }),
+    );
+    await assert.rejects(
+      verifyCompletedRun(location),
+      /Evaluation evidence warnings do not match the saved evidence/,
+    );
+  });
+
   it('rejects unclaimed files and symlinks even when the claimed artifact bytes match', async () => {
     const location = await commitArtifacts([
       { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
@@ -916,6 +953,51 @@ describe('local artifact store', () => {
       parseRunResult({ ...result, completion_calls: calls }).completion_calls,
       calls,
     );
+    assert.equal(
+      parseRunResult({
+        ...result,
+        completion_calls: [{ ...call, retry_ordinal: 11 }],
+      }).completion_calls[0]!.retry_ordinal,
+      11,
+    );
+    const observedCall = {
+      ...calls[1]!,
+      http_status: 429,
+      request_id: 'req_synthetic',
+      provider_error_code: 'rate_limit_error',
+      retry_ordinal: 0,
+      retry_wait_ms: 2000,
+      disposition: 'rate_limit_retry',
+    };
+    const observed = parseRunResult({
+      ...result,
+      completion_calls: [call, observedCall],
+      completion_call_totals: {
+        calls: 2,
+        failed: 1,
+        omitted: 0,
+        rate_limit_wait_ms: 2000,
+      },
+    });
+    assert.equal(observed.completion_calls[1]!.retry_wait_ms, 2000);
+    assert.equal(observed.completion_call_totals!.rate_limit_wait_ms, 2000);
+    for (const extra of [
+      { http_status: 999 },
+      { request_id: 'bad request id' },
+      { provider_error_code: 'arbitrary' },
+      { retry_wait_ms: 64001 },
+      { retry_ordinal: -1 },
+      { retry_ordinal: 12 },
+      { disposition: 'arbitrary' },
+      { body: 'not allowed' },
+    ]) {
+      assert.throws(() =>
+        parseRunResult({
+          ...result,
+          completion_calls: [call, { ...observedCall, ...extra }],
+        }),
+      );
+    }
     assert.throws(
       () =>
         parseRunResult({

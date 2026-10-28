@@ -25,28 +25,40 @@ export async function runCriterionJudgmentRegression(
     credentials,
     signal,
   });
-  const response = await provider.complete(
-    {
-      runId,
-      purpose: 'judge',
-      model,
-      systemPrompt:
-        'Return one structured judgment. Set index to 0 and passed to true.',
-      messages: [
-        {
-          role: 'user',
-          content:
-            'Copy this object exactly, including every backslash in the explanation: ' +
-            '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}',
-        },
-      ],
-      temperature: 0,
-      maxTokens: 1024,
-      responseSchema: forge.CRITERION_JUDGMENT_RESPONSE_SCHEMA,
-      signal,
-    },
-    { credentials },
-  );
+  const response = await provider
+    .complete(
+      {
+        runId,
+        purpose: 'judge',
+        model,
+        systemPrompt:
+          'Return one structured choice answer for criterion. Choose met with probability 1; set the other probabilities to 0.',
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Copy this object exactly, including every backslash in the explanation: ' +
+              '{"answers":{"criterion":{"type":"choice","choice":"met","probabilities":{"met":1,"not_met":0,"insufficient_evidence":0},"explanation":"Missing \\`cancel_url\\`."}}}',
+          },
+        ],
+        temperature: 0,
+        maxTokens: 1024,
+        responseSchema: forge.CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+        signal,
+      },
+      { credentials },
+    )
+    .catch((error) => {
+      if (error?.code === 'invalid_output') {
+        throw Object.assign(
+          new Error(
+            'The live JSON escape check returned malformed structured output.',
+          ),
+          { code: 'invalid_output' },
+        );
+      }
+      throw error;
+    });
   const judgment = forge.parseCriterionJudgment(response.content, {
     value: 'Synthetic JSON escape check.',
   });

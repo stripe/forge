@@ -105,3 +105,10 @@ export interface CompletionProvider {
 export interface CompletionProviderResolver {
   resolve(model: ModelRefV1): CompletionProvider;
 }
+
+export {
+  CompletionInvocationError,
+  type CompletionProviderErrorCode,
+  type CompletionRetryDecision,
+  type CompletionTransportObservation,
+} from './completionObservation.ts';

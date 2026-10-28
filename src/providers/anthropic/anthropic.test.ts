@@ -836,7 +836,7 @@ describe('Anthropic completion provider', () => {
       nonJsonProvider.complete(completionRequest({ responseSchema: schema }), {
         credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
       }),
-      'invalid_response',
+      'invalid_output',
     );
   });
 

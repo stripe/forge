@@ -1134,10 +1134,10 @@ The loop stops with:
 - `max_turns` after the final response has been assessed; or
 - `role_player_error` after structured-output/request retry exhaustion.
 
-Each Ava decision has at most three attempts with fixed one- and five-second
-retry waits. Exhaustion is a recordable interaction outcome, not a fatal run
-error. If it happens before the first agent turn, Forge emits a system-only
-fallback trajectory and records a null agent session identity.
+Each Ava decision uses the shared [host completion retry policy](#host-side-completion-providers).
+Exhaustion is a recordable interaction outcome, not a fatal run error. If it
+happens before the first agent turn, Forge emits a system-only fallback
+trajectory and records a null agent session identity.
 
 Exhausted decisions record a final `message` alongside the error type, attempt
 count, and summary explanation in `interaction.json` and `result.json`.
@@ -1180,6 +1180,59 @@ Provider-specific output budgets account for reasoning tokens without changing
 Ava or judge validation. Compatible endpoints and credentials are explicit host
 configuration; neither enters plans or results. See the README's
 [credentials](../README.md#requirements--credentials) for CLI bindings.
+
+Ava and criterion judging share one retry policy per logical request:
+
+- HTTP 429, and HTTP 503 with a valid `Retry-After`, have six retry waits.
+  Their base delays are 2, 4, 8, 16, 32, and 64 seconds. Jitter scales each
+  delay to 75–100% of its base. `Retry-After` seconds or an HTTP date can
+  increase that single delay, capped at 64 seconds. Zero, past, or smaller
+  hints never shorten the scheduled backoff.
+- A recognized `insufficient_quota` error is permanent and ends the request
+  without another call or wait, including when HTTP 429 carries `Retry-After`.
+- HTTP 400, 401, 403, 404, recognized invalid-request/authentication errors,
+  and malformed structured output use the short 1- and 5-second schedule.
+- Other failures, including unclassified custom-provider errors, HTTP 5xx
+  without the rate-limit signal, transport errors, and timeouts, get three
+  retries with 4-, 16-, and 64-second base delays and the same jitter.
+
+Rate-limit, short, and fallback retries each have a separate budget per logical
+request. Mixed failures can use at most 12 calls in total. Failures that cannot
+be classified use the bounded fallback schedule; non-finite random samples use
+the full scheduled delay. Cancellation interrupts waits and prevents further
+calls. The plan's run timeout still bounds execution. Clock, random source, and sleep can be
+supplied through Ava and judge execution options for deterministic hosts.
+The exported legacy attempt constants describe the short schedule. Observation
+callbacks cannot change retry or cancellation outcomes. If the measurement
+clock fails, the per-call wait stays absent (unknown) rather than becoming zero.
+
+Built-in HTTP failures carry a `CompletionTransportObservation` with origin
+`host_transport` through the public `CompletionInvocationError`. It includes
+HTTP status and, when valid, normalized `retry_after_ms`, a request ID, and a
+recognized provider error code. OpenAI reads only `x-request-id`; Anthropic
+reads only `request-id`. IDs must be at most 128 ASCII letters, digits,
+underscores, or hyphens and begin with a letter or digit. The error-envelope
+parser reads at most 16 KiB and accepts only the
+[recognized code/type values](https://github.com/stripe/forge/blob/main/src/contracts/completionObservation.ts).
+Bodies, arbitrary headers, and endpoint URLs are never retained. An unreadable
+or locked error body leaves the provider error code unknown while preserving
+validated headers and status. Cleanup does not wait for stream cancellation.
+
+`result.json.completion_calls` retains the first 1,024 provider calls per
+eval, including failures before a later success. Optional `http_status`,
+`request_id`, `provider_error_code`, `retry_ordinal`, `retry_wait_ms`, and
+`disposition` fields record each subattempt. Ordinals start at zero for each
+Ava decision or judge criterion. Dispositions are `succeeded`, `failed`,
+`retry`, `rate_limit_retry`, or `exhausted`; waits measure elapsed sleep,
+bounded by the selected delay, including interrupted waits.
+`completion_call_totals` counts all calls, failed calls, omitted summaries,
+and measured `rate_limit_wait_ms`, even after the cap. Regrades retain these
+records and counters for their new judge calls only; their reports do not
+include waits from the source run. Runs without judging criteria retain
+their source-run totals with the unchanged evaluation. Reused older regrades
+without counters leave the wait total absent. Older results may omit the new
+fields. These are observations and do not change plan digests. Attempts that
+fail before result commit do not persist these records.
 
 ## Evidence architecture
 
@@ -1538,10 +1591,79 @@ also covers omissions and read failures that hit no bound. Older artifacts may
 omit `truncated`; absence does not mean false, so readers must also inspect
 `workspace.complete` and warnings.
 
+Criterion judging uses the public `DecisionModel` contract from
+`@stripe/forge`: `decide` takes a text `state`, typed `questions` keyed by
+caller IDs, a signal, and an optional retry ordinal. Its response requires
+`answers` keyed by those IDs. Optional `model` and `usage` annotations are for
+embedding hosts; `judgeCriteria` does not consume, verify, or persist them.
+Execution and regrade bind the judge independently and record usage through
+the completion runtime. Choice is the only question and answer primitive.
+A question has `instructions` and `criteria` mapping each option to its meaning.
+An answer has `type: choice`, `choice`, `probabilities`, a derived `confidence`,
+and a nonblank explanation bounded to 65,536 characters.
+
+`createCompletionDecisionModel` adapts an explicit completion callback to this
+contract. Its strict wire schema requests `{answers: {<id>: <choice answer>}}`
+with choice, probabilities and explanation; it does not request confidence.
+Forge derives confidence as the largest normalized probability, measuring
+concentration rather than correctness. The adapter may supply optional model
+and usage annotations. No separate decision endpoint is built in.
+`judgeCriteria` accepts a decision model or a prompt-only callback; callbacks
+must return the current choice wire schema. Each criterion uses the stable
+question ID `criterion` and these options:
+
+| Choice | Meaning |
+| --- | --- |
+| `met` | The supplied evidence establishes that the criterion was met. |
+| `not_met` | The supplied evidence establishes that it was not met. |
+| `insufficient_evidence` | The evidence cannot establish either outcome, for example because relevant code was not captured. |
+
+Local validation requires exactly the declared options and finite probabilities
+in [0, 1]. Sums from 0.98 through 1.02 are accepted and normalized to 1; larger
+errors are rejected. After normalization, the reported choice must be a maximum
+or within 0.000001 of one. Forge keeps that choice, including exact and near
+ties, and never substitutes another option or favors `met`. A clearly
+non-maximal choice is rejected with `choice_not_argmax`. Typed decision-model
+answers use the same rule, and their confidence is recomputed. Saved decisions
+use the same choice tolerance; their distributions must sum to 1 within
+0.000001 and agree with stored confidence. Invalid answers use the
+malformed-output retry budget and record a fixed rejection `reason`, without
+caller IDs, field paths, or received values.
+
+New criterion results record `decision` with the canonical answer fields
+except explanation (kept in the existing `explanation`), plus
+`thresholded_outcome` and `thresholds`. The choice sets `passed`: `met` is
+true; `not_met` and `insufficient_evidence` are false. A `met` choice at 0.75
+therefore still passes. Independently, `CRITERION_DECISION_THRESHOLDS` derives
+`thresholded_outcome`: a `met` or `not_met` choice needs at least 0.80, otherwise
+it yields `insufficient_evidence`. This release policy is stored as data and
+does not set the headline score. Insufficient-evidence choices remain in
+scored denominators. `passed: null` still means a judge error and has no
+decision. Result parsing verifies the distribution, thresholded outcome,
+thresholds, and passed flag together. Old results without the optional fields
+retain their shape and scores; older strict readers cannot read new fields.
+
+Evaluation-level `evidence_warnings` records trajectory normalization and
+workspace collection warnings once, tagged by source. Criteria use
+`evidence_warnings_ref: evaluation` to refer to that shared list. It is capped
+at 64 warnings and 16 KiB, with an explicit `evidence_warnings_truncated` marker;
+full source warnings remain in saved evidence. These observations do not affect
+plan digests or force a verdict. The prompt shows fixed trajectory capture
+status (complete, partial/fallback, unavailable, or unknown), with no warning
+messages or paths. Workspace warnings remain in the existing workspace text.
+Completed-run verification checks the shared warning list against saved evidence.
+Regrades reconstruct it from the source result and judge evidence.
+`judgeInputFromSavedRun` accepts optional `evidence` provenance; omitting it
+marks trajectory completeness as unknown. Direct judging callers can pass
+`evidenceWarnings` to `judgeCriteria` and as the optional third argument of
+`scoreEvaluation`; `evaluateRunEvidence` accepts the same optional input.
+Unresolved warning references get an explicit unknown record when scored;
+artifact parsing rejects a reference without its shared list.
+
 At most four criteria run concurrently, with temperature 0, a 1,024-token
-response limit, and a strict one-criterion JSON schema. Each gets up to three
-attempts with fixed one- and five-second retry waits. Exhaustion records that
-criterion with `passed: null`, a bounded explanation, and an `error` containing
+response limit, and a strict one-criterion JSON schema. Each uses the shared
+[host completion retry policy](#host-side-completion-providers) with independent
+retry counts. Exhaustion records that criterion with `passed: null`, a bounded explanation, and an `error` containing
 `type` (`parse_error` or `request_error`), `attempts`, and `message`. The final
 unsuccessful attempt determines the error type. Other criteria continue, and
 the run commits its evidence, valid judgments, checks, and safe completion-call
@@ -1553,17 +1675,75 @@ Custom completion providers must keep messages free of sensitive
 non-credential data such as request/response bodies. The same policy applies
 to role-player request errors. Standalone `judgeCriteria` callers can supply
 `redactionSecrets` in execution options for their custom invoker's diagnostics.
-Parse diagnostics identify invalid JSON or the first schema violation's path
-and category, never raw responses, unknown keys, or received values.
+Parse diagnostics identify invalid JSON or a fixed rejection reason, never raw
+responses, caller question IDs, unknown keys, or received values.
 `parseCriterionJudgment` reports malformed input as a one-attempt parse error.
 
 Cancellation, oversized prompts, and dispatch invariant failures remain fatal.
-The execution controller supplies `validateRequest` to the judge's execution
-options to ensure final defensive redaction cannot change the already-audited
+The execution controller binds `validateRequest` on the completion decision
+adapter to ensure final defensive redaction cannot change the already-audited
 evidence. This validation runs outside the retryable provider call; failure
 cancels peer judgments and prevents commit.
 
+Reports count choices of `insufficient_evidence` separately from
+`judging_criteria_low_confidence`: how many met or not-met verdicts the judge
+gave with less than 0.80 probability under the current stored rule.
+Summary and case groups carry corresponding `insufficient_evidence` and
+`low_confidence` counts of evaluations and criteria, including OPTIONAL criteria.
+They overlap existing statuses without changing score views. Run evaluations
+store warnings once; failed-criterion entries reference that list. Missing
+warning records produce an explicit unknown marker. Failure details are capped
+at 100 entries and 64 KiB of compact JSON per evaluation; `criterion_failures_omitted` records
+missing entries without changing counts.
+
+Reports remain bounded to 64 MiB. Before serialization, Forge counts JSON bytes
+without building an oversized string. It first omits failure details and warning
+text, with counts and a fixed omission marker. If run and case rows still do not
+fit, the report retains its summary and checkpoint digest with empty detail
+arrays and `details_unavailable: {reason: size_limit, runs, cases}`. Readers can
+check summary consistency but cannot recompute its aggregates from missing rows.
+The checkpoint and saved runs remain the complete source; inspection and regrade
+use them independently of report detail. Old reports may omit the new fields.
+
 ### Score and status
+
+The headline view is `must_should_average`. Report statistics include optional
+`headline: {view: 'must_should_average', score, evaluations}` in the overall
+summary and each case/configuration group. New reports always emit it; older
+reports without it parse unchanged. The score is the mean of completed
+evaluations' saved non-null `score`, with equal weight per evaluation. Null
+scores, pending selections and execution errors are excluded; the count names
+the evaluations used, and the mean is null when that count is zero. Checks-only
+evaluations contribute their saved zero. The headline weights evaluations
+equally, while `criterion_scores.recommended.avg` pools valid MUST and SHOULD
+judgments with equal weight per criterion. Existing views remain unchanged.
+Report JSON puts the headline first within each statistics object, followed by
+the other keys in canonical order. The run and regrade CLI summaries also put
+the named view first. `regrade.json` and `RegradeExperimentSummaryV1` have the
+same optional headline. Report parsing verifies present headlines against run
+rows; summary-only reports can check their counts but cannot rebuild the mean.
+
+Report evaluations add optional `mean_confidence: number | null` and
+`expected_score: number | null`. They are derived from saved decisions on valid
+MUST and SHOULD judgments. The first averages their derived confidences; the
+second averages P(met), the expected contribution of a pass worth 1. Both use
+only criteria with a decision; OPTIONAL criteria, judge errors and older
+judgments without decisions are excluded. Insufficient-evidence choices still
+contribute P(met). No eligible decisions gives nulls. `EvaluationResultV1`
+keeps the source decisions without storing these report projections again.
+
+Summary and case/configuration statistics add optional
+`mean_confidence: {mean, evaluations}` and
+`expected_score: {experimental: true, mean, evaluations}`. Each mean gives one
+vote to each completed evaluation with a non-null value. Zero votes gives a
+null mean. Expected score is an experimental view of stated probabilities;
+it does not replace the choice-based headline or establish calibration.
+Report and regrade JSON keep the headline first. Regrade invocation summaries
+also carry these optional statistics. Old reports without the fields retain
+their shape. Present aggregates verify against run rows; summary-only reports
+check availability and count bounds without reconstructing means. Run rows
+check ranges and availability but cannot recreate means without the saved
+criterion decisions. All existing scores, statuses and plan digests stay the same.
 
 The numeric score is passes divided by valid MUST and SHOULD judgments, with
 equal weight per criterion. `judging_criteria_passed`, `judging_criteria_total`,
@@ -1863,7 +2043,7 @@ be committed; failures before that point remain fatal.
 
 | Entry point | Purpose |
 | --- | --- |
-| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation, results, setup, and composition contracts |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation (including choice decisions and the completion adapter), results, setup, and composition contracts |
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |

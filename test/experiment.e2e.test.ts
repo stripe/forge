@@ -1262,6 +1262,7 @@ describe('resumable CLI experiment runs', () => {
     assert.equal(first.code, 1);
     assert.deepEqual(executed, [0, 1, 2]);
     assert.deepEqual(first.summary, {
+      headline: { view: 'must_should_average', score: 0, evaluations: 2 },
       experiment_run_id: 'exp-1',
       location: fixture.root,
       checkpoint: fixture.checkpoint,
@@ -1272,6 +1273,13 @@ describe('resumable CLI experiment runs', () => {
       completed: 2,
       errored: 1,
     });
+    assert.equal(Object.keys(first.summary)[0], 'headline');
+    const report = parseExperimentRunReport(
+      JSON.parse(
+        await fs.readFile(path.join(fixture.root, 'report.json'), 'utf8'),
+      ),
+    );
+    assert.deepEqual(first.summary.headline, report.summary.headline);
     const before = await fs.readFile(
       path.join(fixture.root, 'runs', 'attempt-1', 'result.json'),
     );
@@ -1809,6 +1817,7 @@ describe('resumable CLI experiment runs', () => {
         const completion = createScriptedCompletionProvider({
           id: 'scripted',
           responses: [
+            new Error('unavailable'),
             new Error('unavailable'),
             new Error('unavailable'),
             new Error('unavailable'),

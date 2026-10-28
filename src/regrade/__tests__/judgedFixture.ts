@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { criterionJudgment } from '../../../test/fixtures/criterionJudgment.ts';
 import { runCli } from '../../cli.ts';
 import type { AgentAdapter } from '../../contracts/agent.ts';
 import { createDirectoryRunInputProvider } from '../../contracts/inputs.ts';
@@ -15,15 +16,12 @@ import {
 const FIXTURE_ROOT = path.join(process.cwd(), 'test', 'fixtures', 'multi-turn');
 const DELIVERABLE = 'Forge is ready for multi-turn evaluation.\n';
 
-export const ORIGINAL_JUDGMENT = JSON.stringify({
-  results: [
-    {
-      index: 0,
-      passed: true,
-      explanation: 'The conversation supplied the exact status sentence.',
-    },
-  ],
-});
+export const ORIGINAL_JUDGMENT = JSON.stringify(
+  criterionJudgment(
+    true,
+    'The conversation supplied the exact status sentence.',
+  ),
+);
 
 /**
  * Execute the multi-turn fixture once through the public CLI with scripted

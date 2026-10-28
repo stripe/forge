@@ -5,6 +5,8 @@ import type { AtifTrajectoryV1_8 } from '../atif/types.ts';
 import type { CompletionProviderCollection } from '../contracts/composition.ts';
 import type { CredentialResolver } from '../contracts/credentials.ts';
 import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
+import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionJudgeExecutionOptions,
   type CriterionJudgeInput,
@@ -23,8 +25,10 @@ import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
 import type {
   CompletedRunV1,
   CompletionCallSummaryV1,
+  CompletionCallTotalsV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
+  RunEvidenceV1,
   RunResultV1,
 } from '../results/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
@@ -47,6 +51,7 @@ export interface RegradeResultV1 {
   /** Regraded criteria plus the run's original deterministic check results. */
   readonly evaluation: EvaluationResultV1;
   readonly completion_calls: readonly CompletionCallSummaryV1[];
+  readonly completion_call_totals?: CompletionCallTotalsV1;
   readonly regraded_at: string;
   readonly forge: ForgeBuildIdentity;
 }
@@ -63,6 +68,7 @@ export interface SavedJudgeInputs {
   readonly plan: ResolvedRunPlanV1;
   readonly trajectory: AtifTrajectoryV1_8;
   readonly judgeEvidence: JudgeEvidenceV1;
+  readonly evidence?: Pick<RunEvidenceV1, 'completeness' | 'warnings'>;
 }
 
 /**
@@ -79,6 +85,18 @@ export function judgeInputFromSavedRun(
   return {
     transcript: createJudgeTranscriptProjection(saved.trajectory),
     criteria: saved.plan.evaluation.judging_criteria,
+    evidenceWarnings: criterionEvidenceWarnings({
+      trajectory: saved.evidence ?? {
+        completeness: 'partial',
+        warnings: [
+          {
+            code: 'evidence_completeness_unknown',
+            message: 'Trajectory completeness was not supplied.',
+          },
+        ],
+      },
+      workspace: saved.judgeEvidence.workspace,
+    }),
     ...(saved.plan.evaluation.example_answer === undefined
       ? {}
       : { exampleAnswer: saved.plan.evaluation.example_answer }),
@@ -148,19 +166,31 @@ export async function regradeVerifiedRun(
     credentialResolver: dependencies.credentialResolver,
     signal,
   });
+  const judgeInput = judgeInputFromSavedRun({
+    plan,
+    trajectory,
+    judgeEvidence,
+    evidence: result.evidence,
+  });
   const criteria = await judgeCriteria(
-    { ...judgeInputFromSavedRun({ plan, trajectory, judgeEvidence }), signal },
-    async (request) =>
-      (await completions.invoke('judge', request, request.signal ?? signal))
-        .content,
+    { ...judgeInput, signal },
+    createCompletionDecisionModel({
+      model: input.judge,
+      invoke: (request) => completions.invoke('judge', request, request.signal),
+    }),
     {
       redactionSecrets: completions.secrets,
+      onRetryDecision: completions.recordRetryDecision,
       ...(input.waitBeforeJudgeRetry === undefined
         ? {}
         : { waitBeforeRetry: input.waitBeforeJudgeRetry }),
     },
   );
-  const evaluation = scoreEvaluation(criteria, result.evaluation.checks);
+  const evaluation = scoreEvaluation(
+    criteria,
+    result.evaluation.checks,
+    judgeInput.evidenceWarnings,
+  );
   // The same strict validator committed results pass through.
   parseEvaluationResult(evaluation);
   return Object.freeze({
@@ -180,6 +210,7 @@ export async function regradeVerifiedRun(
     }),
     evaluation,
     completion_calls: completions.calls,
+    completion_call_totals: completions.totals,
     regraded_at: (input.now ?? (() => new Date()))().toISOString(),
     forge: FORGE_BUILD_IDENTITY,
   });

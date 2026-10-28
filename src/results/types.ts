@@ -2,6 +2,7 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
+import type { CompletionProviderErrorCode } from '../contracts/completionObservation.ts';
 import type {
   AgentTokenUsage,
   AgentMcpToolRefusals,
@@ -12,6 +13,8 @@ import type {
   CompletionProviderMetadata,
 } from '../contracts/metadata.ts';
 import type { AgentPluginInstallationReceipt } from '../contracts/plugin.ts';
+import type { CriterionDecisionV1 } from '../evaluation/criterionDecision.ts';
+import type { DecisionRejectionReason } from '../evaluation/decision.ts';
 import type {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -48,18 +51,32 @@ export interface CheckResultV1 {
   readonly detail?: string;
 }
 
+export interface CriterionEvidenceWarningV1 {
+  readonly source: 'trajectory' | 'workspace';
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}
+
 export type CriterionResultV1 = {
   readonly label?: string;
   /** Always present after parsing; omitted input defaults to SHOULD. */
   readonly requirement_level: RequirementLevelV1;
   readonly criterion: string;
   readonly explanation: string;
+  readonly evidence_warnings_ref?: 'evaluation';
 } & (
-  | { readonly passed: boolean; readonly error?: never }
+  | {
+      readonly passed: boolean;
+      readonly decision?: CriterionDecisionV1 | undefined;
+      readonly error?: never;
+    }
   | {
       readonly passed: null;
+      readonly decision?: never;
       readonly error: {
         readonly type: 'parse_error' | 'request_error';
+        readonly reason?: DecisionRejectionReason | undefined;
         readonly attempts: number;
         /** Bounded diagnostic; request messages redact resolved credentials. */
         readonly message: string;
@@ -76,6 +93,7 @@ export interface EvaluationResultV1 {
   readonly judging_criteria_errored: number;
   readonly judging_criteria: readonly CriterionResultV1[];
   readonly checks: readonly CheckResultV1[];
+  readonly evidence_warnings?: readonly CriterionEvidenceWarningV1[];
 }
 
 export interface WorkspaceEvidenceEntryV1 {
@@ -109,7 +127,30 @@ export type CompletionStopReasonV1 =
   | 'model_context_window_exceeded'
   | 'other';
 
-export interface CompletionCallSummaryV1 {
+export const MAX_COMPLETION_CALL_SUMMARIES = 1024;
+
+export interface CompletionCallTotalsV1 {
+  readonly calls: number;
+  readonly failed: number;
+  readonly omitted: number;
+  readonly rate_limit_wait_ms: number;
+}
+
+export interface CompletionSubattemptRecordV1 {
+  readonly http_status?: number;
+  readonly request_id?: string;
+  readonly provider_error_code?: CompletionProviderErrorCode;
+  readonly retry_ordinal?: number;
+  readonly retry_wait_ms?: number;
+  readonly disposition?:
+    | 'succeeded'
+    | 'failed'
+    | 'retry'
+    | 'rate_limit_retry'
+    | 'exhausted';
+}
+
+export interface CompletionCallSummaryV1 extends CompletionSubattemptRecordV1 {
   readonly sequence: number;
   readonly purpose: CompletionPurposeV1;
   readonly provider: string;
@@ -312,6 +353,7 @@ interface RunResultCommon {
   /** Built-in plugin receipts in setup order; absence means not recorded. */
   readonly plugin_installations?: readonly AgentPluginInstallationReceipt[];
   readonly completion_calls: readonly CompletionCallSummaryV1[];
+  readonly completion_call_totals?: CompletionCallTotalsV1;
   readonly interaction: {
     readonly mode: 'multi_turn' | 'one_shot';
     readonly turn_count: number;

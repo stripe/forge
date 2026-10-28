@@ -4,6 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
+import { criterionJudgment } from '../test/fixtures/criterionJudgment.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { parseAgentPluginInstallationReceipt } from './contracts/pluginReceipt.ts';
 import { defaultForgeEngine } from './engine.ts';
@@ -17,6 +18,7 @@ import {
   runExperiment,
 } from './experiment.ts';
 import {
+  boundExperimentReportDetails,
   buildExperimentRunReport,
   type ExperimentRunReportRunV1,
   serializeExperimentRunReport,
@@ -389,6 +391,598 @@ describe('experiment run scorecards', () => {
     }
   });
 
+  it('reports saved decision means for scored criteria with equal evaluation weight', () => {
+    const decision = (
+      choice: 'met' | 'not_met' | 'insufficient_evidence',
+      probabilities: {
+        met: number;
+        not_met: number;
+        insufficient_evidence: number;
+      },
+      requirement_level: 'MUST' | 'SHOULD' | 'OPTIONAL' = 'SHOULD',
+    ) =>
+      parseCriterionJudgment(
+        JSON.stringify({
+          answers: {
+            criterion: {
+              type: 'choice',
+              choice,
+              probabilities,
+              explanation: 'Synthetic judgment.',
+            },
+          },
+        }),
+        { value: 'The answer MUST be complete.', requirement_level },
+      );
+    const met = decision(
+      'met',
+      { met: 0.75, not_met: 0.2, insufficient_evidence: 0.05 },
+      'MUST',
+    );
+    const insufficient = decision('insufficient_evidence', {
+      met: 0.25,
+      not_met: 0.25,
+      insufficient_evidence: 0.5,
+    });
+    const notMet = decision('not_met', {
+      met: 0,
+      not_met: 1,
+      insufficient_evidence: 0,
+    });
+    const optional = decision(
+      'met',
+      { met: 1, not_met: 0, insufficient_evidence: 0 },
+      'OPTIONAL',
+    );
+    const runs = Array.from({ length: 8 }, (_, index) => row(index));
+    const evaluations = [
+      scoreEvaluation(
+        [
+          met,
+          insufficient,
+          optional,
+          erroredJudgment('SHOULD'),
+          judgment('MUST', true),
+        ],
+        [],
+      ),
+      scoreEvaluation([notMet], []),
+      scoreEvaluation([met, met, met], []),
+      scoreEvaluation([judgment('SHOULD', true)], []),
+      scoreEvaluation([erroredJudgment('MUST'), optional], []),
+      scoreEvaluation([], []),
+    ];
+    const saved = structuredClone(evaluations);
+    evaluations.forEach((evaluation, index) => {
+      runs[index]!.evaluation = summarizeReportEvaluation(evaluation);
+    });
+    runs[2]!.selection.treatment = 'other';
+    Object.assign(runs[6]!, {
+      state: 'errored',
+      evaluation: null,
+      error_code: 'agent_failed',
+      result_path: null,
+    });
+    Object.assign(runs[7]!, {
+      state: 'pending',
+      evaluation: null,
+      run_id: null,
+      attempt_count: 0,
+      result_path: null,
+    });
+    const report = build(runs);
+    assert.deepEqual(evaluations, saved);
+    assert.deepEqual(
+      report.runs
+        .slice(0, 6)
+        .map((run) => [
+          run.evaluation!.mean_confidence,
+          run.evaluation!.expected_score,
+        ]),
+      [
+        [0.625, 0.5],
+        [1, 0],
+        [0.75, 0.75],
+        [null, null],
+        [null, null],
+        [null, null],
+      ],
+    );
+    assert.deepEqual(report.summary.mean_confidence, {
+      mean: (0.625 + 1 + 0.75) / 3,
+      evaluations: 3,
+    });
+    assert.deepEqual(report.summary.expected_score, {
+      experimental: true,
+      mean: 1.25 / 3,
+      evaluations: 3,
+    });
+    assert.deepEqual(report.cases[0]!.mean_confidence, {
+      mean: 0.8125,
+      evaluations: 2,
+    });
+    assert.deepEqual(report.cases[0]!.expected_score, {
+      experimental: true,
+      mean: 0.25,
+      evaluations: 2,
+    });
+    assert.deepEqual(report.cases[1]!.expected_score, {
+      experimental: true,
+      mean: 0.75,
+      evaluations: 1,
+    });
+    assert.deepEqual(report.summary.headline, {
+      view: 'must_should_average',
+      score: (2 / 3 + 0 + 1 + 1 + 0) / 5,
+      evaluations: 5,
+    });
+    const printed = JSON.parse(serializeExperimentRunReport(report));
+    for (const statistics of [printed.summary, ...printed.cases])
+      assert.equal(Object.keys(statistics)[0], 'headline');
+    assert.deepEqual(parseExperimentRunReport(printed), report);
+  });
+
+  it('keeps missing decision views absent in old reports and explicit nulls in new reports', () => {
+    const run = row(0);
+    const legacy = scoreEvaluation([judgment('SHOULD', true)], []);
+    run.evaluation = summarizeReportEvaluation(legacy);
+    const report = build([run]);
+    assert.equal(report.runs[0]!.evaluation!.mean_confidence, null);
+    assert.equal(report.runs[0]!.evaluation!.expected_score, null);
+    assert.deepEqual(report.summary.mean_confidence, {
+      mean: null,
+      evaluations: 0,
+    });
+    assert.deepEqual(report.summary.expected_score, {
+      experimental: true,
+      mean: null,
+      evaluations: 0,
+    });
+    const old = structuredClone(report);
+    for (const statistics of [old.summary, ...old.cases]) {
+      delete statistics.mean_confidence;
+      delete statistics.expected_score;
+    }
+    for (const row of old.runs) {
+      delete row.evaluation!.mean_confidence;
+      delete row.evaluation!.expected_score;
+    }
+    assert.deepEqual(parseExperimentRunReport(old), old);
+    assert.deepEqual(
+      parseExperimentRunReport({ ...old, summary: report.summary }).summary,
+      report.summary,
+    );
+    assert.deepEqual(
+      parseExperimentRunReport({ ...report, summary: old.summary }).summary,
+      old.summary,
+    );
+    const noDetails = {
+      ...old,
+      cases: [],
+      runs: [],
+      details_unavailable: { reason: 'size_limit' as const, runs: 1, cases: 1 },
+    };
+    assert.deepEqual(parseExperimentRunReport(noDetails), noDetails);
+  });
+
+  it('checks decision view ranges, aggregates, experimental status and unavailable counts', () => {
+    const run = row(0);
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          parseCriterionJudgment(
+            JSON.stringify(criterionJudgment()),
+            'Answers.',
+          ),
+        ],
+        [],
+      ),
+    );
+    const report = build([run]);
+    for (const change of [
+      (value: typeof report) => {
+        value.summary.mean_confidence!.mean = 0;
+      },
+      (value: typeof report) => {
+        value.cases[0]!.expected_score!.mean = 0;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.expected_score = -0.1;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.mean_confidence = 1.1;
+      },
+      (value: typeof report) => {
+        value.runs[0]!.evaluation!.expected_score = null;
+      },
+      (value: typeof report) => {
+        Object.assign(value.summary.expected_score!, { experimental: false });
+      },
+      (value: typeof report) => {
+        Object.assign(value.cases[0]!.mean_confidence!, { extra: true });
+      },
+    ]) {
+      const changed = structuredClone(report);
+      change(changed);
+      assert.throws(() => parseExperimentRunReport(changed));
+    }
+    const withoutJudgments = build([row(0)]);
+    withoutJudgments.runs[0]!.evaluation!.mean_confidence = 1;
+    assert.throws(
+      () => parseExperimentRunReport(withoutJudgments),
+      /Decision means require/,
+    );
+    const bounded = {
+      ...report,
+      cases: [],
+      runs: [],
+      details_unavailable: { reason: 'size_limit' as const, runs: 1, cases: 1 },
+    };
+    assert.deepEqual(parseExperimentRunReport(bounded), bounded);
+    for (const field of ['mean_confidence', 'expected_score'] as const) {
+      for (const replacement of [
+        { mean: null },
+        { evaluations: 0 },
+        { evaluations: 2 },
+      ]) {
+        const changed = structuredClone(bounded);
+        Object.assign(changed.summary[field]!, replacement);
+        assert.throws(() => parseExperimentRunReport(changed), /Decision mean/);
+      }
+      const changed = structuredClone(bounded);
+      changed.summary.judging_score = { mean: null, evaluations: 0 };
+      assert.throws(() => parseExperimentRunReport(changed), /Decision mean/);
+    }
+  });
+
+  it('headlines saved MUST and SHOULD scores with equal evaluation weight', () => {
+    const runs = Array.from({ length: 7 }, (_, index) => row(index));
+    runs[0]!.evaluation = evaluation(0, 1, 'failed');
+    runs[1]!.evaluation = evaluation(9, 9, 'passed');
+    runs[2]!.selection.treatment = 'unavailable';
+    runs[2]!.evaluation = summarizeReportEvaluation(
+      scoreEvaluation([erroredJudgment('MUST')], []),
+    );
+    Object.assign(runs[3]!, {
+      state: 'errored',
+      evaluation: null,
+      error_code: 'agent_failed',
+      result_path: null,
+    });
+    runs[3]!.selection.treatment = 'unavailable';
+    Object.assign(runs[4]!, {
+      state: 'pending',
+      evaluation: null,
+      run_id: null,
+      attempt_count: 0,
+      result_path: null,
+    });
+    runs[4]!.selection.treatment = 'unavailable';
+    runs[5]!.selection.treatment = 'partly-judged';
+    runs[5]!.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          judgment('MUST', true),
+          judgment('SHOULD', false),
+          erroredJudgment('SHOULD'),
+        ],
+        [],
+      ),
+    );
+    runs[6]!.selection.treatment = 'checks-only';
+    const report = build(runs);
+    assert.deepEqual(report.summary.headline, {
+      view: 'must_should_average',
+      score: 0.375,
+      evaluations: 4,
+    });
+    assert.deepEqual(
+      report.cases.map((group) => group.headline),
+      [
+        { view: 'must_should_average', score: 0.5, evaluations: 2 },
+        { view: 'must_should_average', score: null, evaluations: 0 },
+        { view: 'must_should_average', score: 0.5, evaluations: 1 },
+        { view: 'must_should_average', score: 0, evaluations: 1 },
+      ],
+    );
+    assert.equal(report.summary.criterion_scores.recommended.avg, 10 / 12);
+    assert.deepEqual(report.summary.judging_score, {
+      mean: 0.5,
+      evaluations: 3,
+    });
+    const printed = JSON.parse(serializeExperimentRunReport(report));
+    assert.equal(Object.keys(printed.summary)[0], 'headline');
+    for (const group of printed.cases)
+      assert.equal(Object.keys(group)[0], 'headline');
+    assert.deepEqual(parseExperimentRunReport(printed), report);
+  });
+
+  it('keeps choice-based weak passes and insufficient evidence inside the headline', () => {
+    const low = criterionJudgment();
+    low.answers.criterion.probabilities = {
+      met: 0.75,
+      not_met: 0.2,
+      insufficient_evidence: 0.05,
+    };
+    const insufficient = {
+      answers: {
+        criterion: {
+          type: 'choice',
+          choice: 'insufficient_evidence',
+          probabilities: { met: 0.1, not_met: 0.1, insufficient_evidence: 0.8 },
+          explanation: 'Relevant evidence is missing.',
+        },
+      },
+    };
+    const run = row(0);
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        [
+          parseCriterionJudgment(JSON.stringify(low), {
+            value: 'The answer MUST be complete.',
+            requirement_level: 'MUST',
+          }),
+          parseCriterionJudgment(JSON.stringify(insufficient), 'Answers.'),
+        ],
+        [],
+      ),
+    );
+    const report = build([run]);
+    assert.deepEqual(report.summary.headline, {
+      view: 'must_should_average',
+      score: 0.5,
+      evaluations: 1,
+    });
+    assert.deepEqual(report.summary.low_confidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.deepEqual(report.summary.insufficient_evidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+  });
+
+  it('accepts reports without headlines unchanged and checks each present headline', () => {
+    const report = build([row(0)]);
+    const old = structuredClone(report);
+    delete old.summary.headline;
+    for (const group of old.cases) delete group.headline;
+    assert.deepEqual(parseExperimentRunReport(old), old);
+    assert.deepEqual(
+      parseExperimentRunReport({ ...report, summary: old.summary }),
+      {
+        ...report,
+        summary: old.summary,
+      },
+    );
+    assert.deepEqual(
+      parseExperimentRunReport({ ...old, summary: report.summary }),
+      {
+        ...old,
+        summary: report.summary,
+      },
+    );
+    for (const group of [report.summary, report.cases[0]!]) {
+      for (const replacement of [
+        { view: 'another_view', score: 0, evaluations: 1 },
+        { view: 'must_should_average', score: 1, evaluations: 1 },
+        { view: 'must_should_average', score: null, evaluations: 0 },
+        { view: 'must_should_average', score: null, evaluations: 1 },
+        { view: 'must_should_average', score: 0, evaluations: 1, extra: true },
+      ]) {
+        const forged = structuredClone(report);
+        const target =
+          group === report.summary ? forged.summary : forged.cases[0]!;
+        Object.assign(target, { headline: replacement });
+        assert.throws(() => parseExperimentRunReport(forged));
+      }
+    }
+    const summaryOnly = {
+      ...report,
+      runs: [],
+      cases: [],
+      details_unavailable: {
+        reason: 'size_limit' as const,
+        runs: 1,
+        cases: 1,
+      },
+    };
+    assert.deepEqual(parseExperimentRunReport(summaryOnly), summaryOnly);
+    const forged = structuredClone(summaryOnly);
+    forged.summary.headline!.evaluations = 2;
+    assert.throws(() => parseExperimentRunReport(forged));
+    forged.summary.headline!.evaluations = 1;
+    forged.summary.headline!.score = null;
+    assert.throws(() => parseExperimentRunReport(forged));
+    delete forged.summary.headline;
+    assert.deepEqual(parseExperimentRunReport(forged), forged);
+  });
+
+  it('counts low-confidence passes separately from insufficient evidence and failures', () => {
+    const low = parseCriterionJudgment(
+      JSON.stringify({
+        answers: {
+          criterion: {
+            type: 'choice',
+            choice: 'met',
+            probabilities: {
+              met: 0.75,
+              not_met: 0.2,
+              insufficient_evidence: 0.05,
+            },
+            explanation: 'Work is likely complete.',
+          },
+        },
+      }),
+      'Creates a file.',
+    );
+    const insufficient = parseCriterionJudgment(
+      JSON.stringify({
+        answers: {
+          criterion: {
+            type: 'choice',
+            choice: 'insufficient_evidence',
+            probabilities: {
+              met: 0.1,
+              not_met: 0.1,
+              insufficient_evidence: 0.8,
+            },
+            explanation: 'The file was not captured.',
+          },
+        },
+      }),
+      { value: 'Shows the file.', requirement_level: 'OPTIONAL' },
+    );
+    const failed = parseCriterionJudgment(
+      JSON.stringify(criterionJudgment(false)),
+      'Answers.',
+    );
+    const warning = {
+      source: 'workspace' as const,
+      code: 'workspace_file_truncated',
+      message: 'File text was truncated.',
+      path: 'app.ts',
+    };
+    const run = row(0);
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation([low, insufficient, failed], [], [warning]),
+    );
+    const report = build([run]);
+    assert.equal(report.runs[0]!.evaluation!.score, 0.5);
+    assert.deepEqual(report.summary.low_confidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.deepEqual(report.summary.insufficient_evidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.deepEqual(report.cases[0]!.low_confidence, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.deepEqual(report.runs[0]!.evaluation!.evidence_warnings, [warning]);
+    assert.deepEqual(
+      report.runs[0]!.evaluation!.criterion_failures?.map((failure) => [
+        failure.outcome,
+        failure.evidence_warnings_ref,
+      ]),
+      [
+        ['insufficient_evidence', 'evaluation'],
+        ['not_met', 'evaluation'],
+      ],
+    );
+    assert.equal(
+      JSON.stringify(report.runs).split('File text was truncated.').length - 1,
+      1,
+    );
+    assert.deepEqual(
+      parseExperimentRunReport(
+        JSON.parse(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+    const forged = structuredClone(report);
+    forged.runs[0]!.evaluation!.judging_criteria_insufficient_evidence = 0;
+    assert.throws(() => parseExperimentRunReport(forged));
+  });
+
+  it('bounds failure details and degrades large reports without changing score counts', () => {
+    const run = row(0);
+    const failed = {
+      criterion: 'A'.repeat(1300),
+      requirement_level: 'SHOULD' as const,
+      passed: false,
+      explanation: 'Not met.',
+    };
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation(
+        Array.from({ length: 150 }, () => failed),
+        [],
+        [
+          {
+            source: 'workspace',
+            code: 'workspace_file_truncated',
+            message: 'File text was truncated.',
+          },
+        ],
+      ),
+    );
+    const shortDetails = summarizeReportEvaluation(
+      scoreEvaluation(
+        Array.from({ length: 150 }, () => ({
+          ...failed,
+          criterion: 'Answers.',
+        })),
+        [],
+      ),
+    );
+    assert.equal(shortDetails.criterion_failures!.length, 100);
+    assert.equal(shortDetails.criterion_failures_omitted, 50);
+    const report = build([run]);
+    const details = report.runs[0]!.evaluation!;
+    assert.ok(details.criterion_failures!.length < 100);
+    assert.equal(
+      details.criterion_failures!.length + details.criterion_failures_omitted!,
+      150,
+    );
+    assert.ok(
+      Buffer.byteLength(JSON.stringify(details.criterion_failures)) <=
+        64 * 1024,
+    );
+    const bounded = boundExperimentReportDetails(report, 20_000);
+    assert.equal(bounded.runs[0]!.evaluation!.criterion_failures_omitted, 150);
+    assert.equal(
+      bounded.runs[0]!.evaluation!.evidence_warnings?.[0]?.code,
+      'report_evidence_warnings_omitted',
+    );
+    assert.deepEqual(bounded.summary, report.summary);
+    assert.deepEqual(parseExperimentRunReport(bounded), bounded);
+    const summaryOnly = {
+      ...report,
+      runs: [],
+      cases: [],
+      details_unavailable: { reason: 'size_limit' as const, runs: 1, cases: 1 },
+    };
+    const limit = Buffer.byteLength(serializeExperimentRunReport(summaryOnly));
+    const unavailable = boundExperimentReportDetails(report, limit);
+    assert.deepEqual(unavailable, summaryOnly);
+    assert.throws(
+      () => boundExperimentReportDetails(summaryOnly, limit - 1),
+      RangeError,
+    );
+    assert.equal(
+      boundExperimentReportDetails(
+        report,
+        Buffer.byteLength(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+    assert.deepEqual(parseExperimentRunReport(unavailable), unavailable);
+    const oversizedSelectionCount = {
+      ...unavailable,
+      details_unavailable: { reason: 'size_limit', runs: 100_001, cases: 1 },
+      summary: {
+        ...unavailable.summary,
+        selections: 100_001,
+        completed: 100_001,
+        failed: 100_001,
+      },
+    };
+    assert.throws(() => parseExperimentRunReport(oversizedSelectionCount));
+    for (const invalid of [
+      {
+        ...unavailable,
+        details_unavailable: { ...unavailable.details_unavailable!, runs: 2 },
+      },
+      { ...unavailable, summary: { ...unavailable.summary, coverage: 0 } },
+      { ...unavailable, summary: { ...unavailable.summary, pass_rate: 1 } },
+      { ...unavailable, summary: { ...unavailable.summary, completed: 2 } },
+    ])
+      assert.throws(() => parseExperimentRunReport(invalid));
+  });
+
   it('records the producing Forge build and reads standalone pending scorecards', () => {
     const pending = row(0);
     Object.assign(pending, {
@@ -455,6 +1049,32 @@ describe('experiment run scorecards', () => {
         /incompatible with installed Forge/,
       );
     }
+  });
+
+  it('sums rate-limit time from available runs and accepts older reports without it', () => {
+    const legacy = build([row(0)]);
+    assert.equal(
+      parseExperimentRunReport(legacy).summary.rate_limit_wait_ms,
+      undefined,
+    );
+    const runs = [row(0), row(1)];
+    runs[0]!.rate_limit_wait_ms = 60000;
+    runs[1]!.rate_limit_wait_ms = 23000;
+    const report = build(runs);
+    assert.equal(report.summary.rate_limit_wait_ms, 83000);
+    assert.equal(
+      report.cases.reduce(
+        (total, group) => total + (group.rate_limit_wait_ms ?? 0),
+        0,
+      ),
+      83000,
+    );
+    assert.throws(() =>
+      parseExperimentRunReport({
+        ...report,
+        summary: { ...report.summary, rate_limit_wait_ms: 1 },
+      }),
+    );
   });
 
   it('keeps Codex hook policies in report coordinates and separates their score groups', () => {
@@ -530,6 +1150,9 @@ describe('experiment run scorecards', () => {
     runs[5]!.attempt_count = 0;
     const report = build(runs);
     assert.deepEqual(report.summary, {
+      headline: { view: 'must_should_average', score: 0.375, evaluations: 4 },
+      mean_confidence: { mean: null, evaluations: 0 },
+      expected_score: { experimental: true, mean: null, evaluations: 0 },
       selections: 6,
       completed: 4,
       errored: 1,
@@ -915,9 +1538,7 @@ describe('experiment run scorecards', () => {
       const raw =
         passed === null
           ? '{}'
-          : JSON.stringify({
-              results: [{ index: 0, passed, explanation: 'Judged.' }],
-            });
+          : JSON.stringify(criterionJudgment(passed, 'Judged.'));
       return parseCriterionJudgment(raw, {
         value: 'The answer MUST be complete.',
         requirement_level,
@@ -1419,14 +2040,8 @@ describe('experiment run scorecards', () => {
       const provider = createScriptedCompletionProvider({
         id: 'scripted',
         responses: [
-          JSON.stringify({
-            results: [{ index: 0, passed, explanation: 'Scripted judgment.' }],
-          }),
-          JSON.stringify({
-            results: [
-              { index: 0, passed: !passed, explanation: 'Source observation.' },
-            ],
-          }),
+          JSON.stringify(criterionJudgment(passed, 'Scripted judgment.')),
+          JSON.stringify(criterionJudgment(!passed, 'Source observation.')),
         ],
       }).provider;
       return defaultForgeEngine.executeEval({
@@ -1459,6 +2074,38 @@ describe('experiment run scorecards', () => {
       [
         {
           status: 'partial',
+          mean_confidence: 1,
+          expected_score: 1,
+          judging_criteria_insufficient_evidence: 0,
+          judging_criteria_low_confidence: 0,
+          criterion_failures_omitted: 0,
+          evidence_warnings: [
+            {
+              source: 'trajectory',
+              code: 'trajectory_incomplete',
+              message:
+                'The selected trajectory is partial or uses driver fallback.',
+            },
+            {
+              source: 'trajectory',
+              code: 'source_unavailable',
+              message: 'The scripted agent has no native evidence.',
+            },
+            {
+              source: 'trajectory',
+              code: 'fallback_used',
+              message: 'Canonical ATIF was built from completed driver turns.',
+            },
+          ],
+          criterion_failures: [
+            {
+              criterion: 'Read docs',
+              label: 'source',
+              requirement_level: 'OPTIONAL',
+              outcome: 'not_met',
+              evidence_warnings_ref: 'evaluation',
+            },
+          ],
           score: 1,
           judging_criteria_passed: 1,
           judging_criteria_total: 1,
@@ -1479,6 +2126,38 @@ describe('experiment run scorecards', () => {
         },
         {
           status: 'failed',
+          mean_confidence: 1,
+          expected_score: 0,
+          judging_criteria_insufficient_evidence: 0,
+          judging_criteria_low_confidence: 0,
+          criterion_failures_omitted: 0,
+          evidence_warnings: [
+            {
+              source: 'trajectory',
+              code: 'trajectory_incomplete',
+              message:
+                'The selected trajectory is partial or uses driver fallback.',
+            },
+            {
+              source: 'trajectory',
+              code: 'source_unavailable',
+              message: 'The scripted agent has no native evidence.',
+            },
+            {
+              source: 'trajectory',
+              code: 'fallback_used',
+              message: 'Canonical ATIF was built from completed driver turns.',
+            },
+          ],
+          criterion_failures: [
+            {
+              criterion: 'The answer MUST be complete.',
+              label: 'correctness',
+              requirement_level: 'MUST',
+              outcome: 'not_met',
+              evidence_warnings_ref: 'evaluation',
+            },
+          ],
           score: 0,
           judging_criteria_passed: 0,
           judging_criteria_total: 1,
@@ -1553,7 +2232,7 @@ describe('experiment run scorecards', () => {
       const provider = createScriptedCompletionProvider({
         id: 'scripted',
         requirements,
-        responses: Array.from({ length: 9 }, () => (request) => {
+        responses: Array.from({ length: 12 }, () => (request) => {
           if (repetition === 2)
             throw new Error('Service unavailable for scripted-token');
           if (
@@ -1570,15 +2249,9 @@ describe('experiment run scorecards', () => {
             )
           )
             return '{}';
-          return JSON.stringify({
-            results: [
-              {
-                index: 0,
-                passed: repetition !== 3,
-                explanation: 'Valid judgment.',
-              },
-            ],
-          });
+          return JSON.stringify(
+            criterionJudgment(repetition !== 3, 'Valid judgment.'),
+          );
         }),
       }).provider;
       return executeEvalWithTestHooks(
@@ -1634,7 +2307,7 @@ describe('experiment run scorecards', () => {
     assert.equal(stored.result.evaluation.status, 'judge_error');
     assert.deepEqual(stored.result.evaluation.judging_criteria[0]!.error, {
       type: 'request_error',
-      attempts: 3,
+      attempts: 4,
       message: 'Service unavailable for [REDACTED]',
     });
     const malformed = await defaultForgeEngine.verifyCompletedRun(
@@ -1643,10 +2316,10 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(malformed.result.evaluation.judging_criteria[1]!.error, {
       type: 'parse_error',
       attempts: 3,
-      message:
-        'Judge response did not match the required schema at response.results (invalid_type).',
+      message: 'Judge response rejected: invalid_schema.',
+      reason: 'invalid_schema',
     });
-    assert.equal(stored.result.completion_calls.length, 9);
+    assert.equal(stored.result.completion_calls.length, 12);
     assert.ok(
       stored.result.completion_calls.every((call) => call.status === 'failed'),
     );

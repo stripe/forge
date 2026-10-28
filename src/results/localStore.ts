@@ -8,6 +8,7 @@ import type {
   RunArtifactTransaction,
 } from '../contracts/artifacts.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
 import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
 import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
@@ -659,6 +660,19 @@ function verifyJudgeEvidence(
   const judgeEvidence = parseJsonArtifact(path, body, (value) =>
     parseJudgeEvidence(value, { forgeVersion: result.forge.version }),
   );
+  const warnings = criterionEvidenceWarnings({
+    trajectory: result.evidence,
+    workspace: judgeEvidence.workspace,
+  });
+  if (
+    result.evaluation.evidence_warnings !== undefined &&
+    serializeCanonicalJson(result.evaluation.evidence_warnings) !==
+      serializeCanonicalJson(warnings)
+  ) {
+    throw new ArtifactStoreError(
+      'Evaluation evidence warnings do not match the saved evidence.',
+    );
+  }
   if (
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
     createJudgeTranscriptProjection(trajectory).transcriptJson

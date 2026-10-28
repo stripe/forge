@@ -58,6 +58,8 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
+import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
@@ -113,6 +115,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.ts';
+import type { CompletionCallTotalsV1 } from '../results/types.ts';
 import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   assertNoSecrets,
@@ -677,6 +680,9 @@ export async function executeEvalWithTestHooks(
         | Awaited<ReturnType<typeof judgeCriteria>>
         | undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
+      let evidenceWarnings:
+        | ReturnType<typeof criterionEvidenceWarnings>
+        | undefined;
       if (criteria.length > 0) {
         const collected = await collectJudgeWorkspaceEvidence(
           sealed!.workspace,
@@ -690,10 +696,15 @@ export async function executeEvalWithTestHooks(
         const judgeTranscript = createJudgeTranscriptProjection(
           redacted.evidence.trajectory,
         );
+        evidenceWarnings = criterionEvidenceWarnings({
+          trajectory: redacted.evidence,
+          workspace: safeWorkspace,
+        });
         criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
             criteria,
+            evidenceWarnings,
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
               : { exampleAnswer: input.plan.evaluation.example_answer }),
@@ -702,14 +713,16 @@ export async function executeEvalWithTestHooks(
               : { workspaceText: safeWorkspaceText }),
             signal,
           },
-          async (request) => {
-            return (await completions.invoke('judge', request, request.signal))
-              .content;
-          },
-          {
-            redactionSecrets: secrets,
+          createCompletionDecisionModel({
+            model: input.plan.evaluation.judge!,
+            invoke: (request) =>
+              completions.invoke('judge', request, request.signal),
             validateRequest: (request) =>
               assertJudgePromptWillRemainUnchanged(request, secrets),
+          }),
+          {
+            redactionSecrets: secrets,
+            onRetryDecision: completions.recordRetryDecision,
             ...(hooks.waitBeforeCompletionRetry === undefined
               ? {}
               : {
@@ -757,6 +770,7 @@ export async function executeEvalWithTestHooks(
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
         ...(criterionResults === undefined ? {} : { criterionResults }),
+        ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
         signal,
       });
       return { ...result, judgeEvidence };
@@ -794,6 +808,7 @@ export async function executeEvalWithTestHooks(
         interaction,
         setupArtifact,
         completionCalls: completions.calls,
+        completionCallTotals: completions.totals,
         evidence: redacted.evidence,
         redactionCount: redacted.replacements,
         evaluation: evaluated.evaluation,
@@ -856,6 +871,7 @@ export async function executeEvalWithTestHooks(
       interaction,
       setupArtifact,
       completionCalls: completions.calls,
+      completionCallTotals: completions.totals,
       evidence: redacted.evidence,
       redactionCount: redacted.replacements,
       evaluation: evaluated.evaluation,
@@ -1027,6 +1043,7 @@ async function executeInteraction(
     (request) => completions.invoke('role_player', request, signal),
     {
       redactionSecrets: completions.secrets,
+      onRetryDecision: completions.recordRetryDecision,
       ...(waitBeforeCompletionRetry === undefined
         ? {}
         : {
@@ -2100,6 +2117,7 @@ function buildResult(input: {
   interaction: ExecutedInteraction;
   setupArtifact: SetupArtifactV1;
   completionCalls: readonly CompletionCallSummaryV1[];
+  completionCallTotals: CompletionCallTotalsV1;
   evidence: NormalizedTrajectory;
   redactionCount: number;
   evaluation: EvaluationResultV1;
@@ -2149,6 +2167,7 @@ function buildResult(input: {
         : [],
     ),
     completion_calls: input.completionCalls.map((call) => ({ ...call })),
+    completion_call_totals: input.completionCallTotals,
     interaction: {
       mode: input.input.plan.interaction.mode,
       turn_count: input.interaction.turns.length,

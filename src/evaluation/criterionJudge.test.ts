@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it, vi } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
+import { CompletionInvocationError } from '../contracts/completion.ts';
 import { REQUIREMENT_LEVELS } from '../model/types.ts';
 import { parseEvaluationResult } from '../results/parse.ts';
 import {
@@ -34,8 +36,19 @@ function visibleTranscript(message: string) {
   });
 }
 
+function expectedDecision(passed: boolean) {
+  const { explanation: _explanation, ...answer } =
+    criterionJudgment(passed).answers.criterion;
+  return {
+    ...answer,
+    thresholded_outcome: passed ? 'met' : 'not_met',
+    confidence: 1,
+    thresholds: { minimum_probability: 0.8 },
+  };
+}
+
 function valid(passed = true, explanation = 'yes'): string {
-  return JSON.stringify({ results: [{ index: 0, passed, explanation }] });
+  return JSON.stringify(criterionJudgment(passed, explanation));
 }
 
 describe('judgeCriteria', () => {
@@ -130,6 +143,7 @@ describe('judgeCriteria', () => {
         criterion: 'THE_CRITERION',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
     ]);
@@ -137,7 +151,10 @@ describe('judgeCriteria', () => {
     const request = requests[0]!;
     assert.equal(request.temperature, 0);
     assert.equal(request.maxTokens, 1024);
-    assert.equal(request.responseSchema, CRITERION_JUDGMENT_RESPONSE_SCHEMA);
+    assert.deepEqual(
+      request.responseSchema,
+      CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+    );
     assert.deepEqual(request.messages, [
       { role: 'user', content: 'Return the requested structured judgment.' },
     ]);
@@ -204,6 +221,7 @@ describe('judgeCriteria', () => {
         label: 'correctness',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
       {
@@ -211,6 +229,7 @@ describe('judgeCriteria', () => {
         label: 'source',
         requirement_level: 'OPTIONAL' as const,
         passed: false,
+        decision: expectedDecision(false),
         explanation: 'yes',
       },
       {
@@ -218,12 +237,14 @@ describe('judgeCriteria', () => {
         label: 'source',
         requirement_level: 'OPTIONAL' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
       {
         criterion: 'Optional behavior',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'yes',
       },
     ]);
@@ -239,7 +260,7 @@ describe('judgeCriteria', () => {
     assert.doesNotMatch(prompt, /## Workspace Files/);
     assert.match(
       prompt,
-      /Only mark the criterion as passed if the assistant explicitly addressed it/,
+      /Only choose met if the assistant explicitly addressed it/,
     );
     assert.match(prompt, /TRANSCRIPT[\s\S]*CRITERION/);
   });
@@ -312,6 +333,7 @@ describe('judgeCriteria', () => {
         criterion: criterion.value,
         requirement_level: 'SHOULD' as const,
         passed: index % 2 === 0,
+        decision: expectedDecision(index % 2 === 0),
         explanation: `result ${index}`,
       })),
     );
@@ -346,6 +368,7 @@ describe('judgeCriteria', () => {
         criterion,
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: criterion,
       })),
     );
@@ -382,6 +405,7 @@ describe('judgeCriteria', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'recovered',
       },
     ]);
@@ -409,13 +433,13 @@ describe('judgeCriteria', () => {
         passed: null,
         error: {
           type: 'request_error',
-          attempts: 3,
-          message: 'transport failed on attempt 3',
+          attempts: 4,
+          message: 'transport failed on attempt 4',
         },
-        explanation: 'Judge request failed after 3 attempts.',
+        explanation: 'Judge request failed after 4 attempts.',
       },
     ]);
-    assert.equal(calls, MAX_CRITERION_JUDGE_ATTEMPTS);
+    assert.equal(calls, 4);
   });
 
   it('preserves peer judgments after one transport failure is exhausted', async () => {
@@ -437,13 +461,14 @@ describe('judgeCriteria', () => {
       noRetryWait,
     );
 
-    assert.equal(failingCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
+    assert.equal(failingCalls, 4);
     assert.equal(peerCalls, 1);
     assert.equal(results[0]!.passed, null);
     assert.deepEqual(results[1], {
       criterion: 'peer',
       requirement_level: 'SHOULD',
       passed: true,
+      decision: expectedDecision(true),
       explanation: 'Peer passed.',
     });
   });
@@ -474,6 +499,7 @@ describe('judgeCriteria', () => {
           type: 'parse_error',
           attempts: 3,
           message: 'Judge response was not valid JSON.',
+          reason: 'invalid_json',
         },
         explanation:
           'Judge response was not valid JSON. (unavailable after 3 attempts)',
@@ -500,7 +526,7 @@ describe('judgeCriteria', () => {
       noRetryWait,
     );
 
-    assert.equal(failedCalls, MAX_CRITERION_JUDGE_ATTEMPTS);
+    assert.equal(failedCalls, 4);
     assert.deepEqual(results, [
       {
         criterion: 'unavailable',
@@ -508,16 +534,18 @@ describe('judgeCriteria', () => {
         passed: null,
         error: {
           type: 'parse_error',
-          attempts: 3,
+          attempts: 4,
           message: 'Judge response was not valid JSON.',
+          reason: 'invalid_json',
         },
         explanation:
-          'Judge response was not valid JSON. (unavailable after 3 attempts)',
+          'Judge response was not valid JSON. (unavailable after 4 attempts)',
       },
       {
         criterion: 'successful',
         requirement_level: 'SHOULD' as const,
         passed: true,
+        decision: expectedDecision(true),
         explanation: 'completed',
       },
     ]);
@@ -533,7 +561,10 @@ describe('judgeCriteria', () => {
   });
 
   it('classifies a final request failure after earlier malformed responses', async () => {
-    const failure = new Error('final transport failure');
+    const failure = new CompletionInvocationError(
+      'invalid_request',
+      'final transport failure',
+    );
     let calls = 0;
     const results = await judgeCriteria(
       { transcript: EMPTY_TRANSCRIPT, criteria: ['criterion'] },
@@ -576,11 +607,11 @@ describe('judgeCriteria', () => {
         error: {
           type: 'parse_error',
           attempts: 3,
-          message:
-            'Judge response did not match the required schema at response.results[0].explanation (too_big).',
+          message: 'Judge response rejected: explanation.',
+          reason: 'explanation',
         },
         explanation:
-          'Judge response did not match the required schema. (unavailable after 3 attempts)',
+          'Judge response rejected: explanation. (unavailable after 3 attempts)',
       },
     ]);
   });
@@ -771,6 +802,7 @@ describe('parseCriterionJudgment', () => {
         criterion: 'criterion',
         requirement_level: 'SHOULD' as const,
         passed: false,
+        decision: expectedDecision(false),
         explanation: explanation.trim(),
       },
     );
@@ -787,6 +819,7 @@ describe('parseCriterionJudgment', () => {
         type: 'parse_error',
         attempts: 1,
         message: 'Judge response was not valid JSON.',
+        reason: 'invalid_json',
       },
       explanation: 'Judge response was not valid JSON.',
     });
@@ -805,71 +838,82 @@ describe('parseCriterionJudgment', () => {
           type: 'parse_error',
           attempts: 1,
           message: 'Judge response was not valid JSON.',
+          reason: 'invalid_json',
         },
         explanation: 'Judge response was not valid JSON.',
       });
     }
   });
 
-  it('reports parse errors for extra fields, the wrong index, blank explanations, and wrong result counts', () => {
-    const entry = { index: 0, passed: true, explanation: 'ok' };
-    for (const [response, diagnostic] of [
+  it('rejects missing answers, extra fields, blank explanations, and unknown question IDs', () => {
+    const response = criterionJudgment(true, 'ok');
+    const answer = response.answers.criterion;
+    for (const [invalid, reason] of [
+      [{ answers: { criterion: { ...answer, extra: true } } }, 'unknown_key'],
       [
-        { results: [{ ...entry, extra: true }] },
-        'response.results[0] (unrecognized_keys)',
+        { answers: { criterion: { ...answer, explanation: '' } } },
+        'explanation',
       ],
       [
-        { results: [{ ...entry, index: 1 }] },
-        'response.results[0].index (invalid_literal)',
+        { answers: { criterion: { ...answer, explanation: '   ' } } },
+        'explanation',
       ],
       [
-        { results: [{ ...entry, explanation: '' }] },
-        'response.results[0].explanation (too_small)',
+        { answers: { criterion: { ...answer, explanation: '\t\r\n' } } },
+        'explanation',
       ],
+      [{ ...response, extra: true }, 'unknown_key'],
+      [{ answers: {} }, 'missing_answer'],
+      [{ answers: { ...response.answers, unknown: answer } }, 'unknown_key'],
       [
-        { results: [{ ...entry, explanation: '   ' }] },
-        'response.results[0].explanation (too_small)',
-      ],
-      [
-        { results: [{ ...entry, explanation: '\t\r\n' }] },
-        'response.results[0].explanation (too_small)',
-      ],
-      [{ results: [entry], extra: true }, 'response (unrecognized_keys)'],
-      [{ results: [] }, 'response.results (too_small)'],
-      [{ results: [entry, entry] }, 'response.results (too_big)'],
-    ] as const) {
-      assert.deepEqual(parseCriterionJudgment(JSON.stringify(response), 'g'), {
-        criterion: 'g',
-        requirement_level: 'SHOULD' as const,
-        passed: null,
-        error: {
-          type: 'parse_error',
-          attempts: 1,
-          message: `Judge response did not match the required schema at ${diagnostic}.`,
+        {
+          results: [{ index: 0, passed: true, explanation: 'old model reply' }],
         },
-        explanation: 'Judge response did not match the required schema.',
-      });
+        'unknown_key',
+      ],
+    ] as const) {
+      const result = parseCriterionJudgment(JSON.stringify(invalid), 'g');
+      assert.equal(result.passed, null);
+      assert.equal(result.error?.type, 'parse_error');
+      assert.equal(result.error?.reason, reason);
+      assert.equal(
+        result.error?.message,
+        `Judge response rejected: ${reason}.`,
+      );
     }
   });
 
   it('keeps unknown keys and received values out of schema diagnostics', () => {
-    for (const response of [
-      { results: [{ index: 'secret-index', passed: true, explanation: 'ok' }] },
-      { results: [{ index: 0, passed: 'secret-pass', explanation: 'ok' }] },
-      {
-        results: [
-          { index: 0, passed: true, explanation: 'ok', 'secret-key': true },
-        ],
-      },
-    ]) {
+    const answer = criterionJudgment().answers.criterion;
+    for (const [response, reason] of [
+      [
+        { answers: { criterion: { ...answer, choice: 'secret-choice' } } },
+        'unknown_choice',
+      ],
+      [
+        {
+          answers: {
+            criterion: {
+              ...answer,
+              probabilities: {
+                ...answer.probabilities,
+                met: 'secret-probability',
+              },
+            },
+          },
+        },
+        'probability_range',
+      ],
+      [
+        { answers: { criterion: { ...answer, 'secret-key': 'secret-value' } } },
+        'unknown_key',
+      ],
+    ] as const) {
       const result = parseCriterionJudgment(
         JSON.stringify(response),
         'criterion',
       );
-      assert.match(
-        result.error!.message,
-        /required schema at response.results\[0\]/,
-      );
+      assert.equal(result.error?.reason, reason);
       assert.doesNotMatch(JSON.stringify(result), /secret/);
     }
   });

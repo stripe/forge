@@ -585,6 +585,9 @@ export async function runExperiment(
               ...(inspected.artifact?.warnings?.length
                 ? { warnings: inspected.artifact.warnings }
                 : {}),
+              ...(inspected.rateLimitWaitMs === undefined
+                ? {}
+                : { rate_limit_wait_ms: inspected.rateLimitWaitMs }),
               attempt_count: entry.attempts.length,
               result_path:
                 inspected.artifact === null
@@ -639,6 +642,7 @@ interface AttemptInspection {
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
   usage?: AgentTokenUsage;
+  rateLimitWaitMs?: number;
 }
 interface CachedInspection {
   identity: string;
@@ -693,6 +697,12 @@ async function inspectAttempt(
       ...(completed.result.agent.usage === undefined
         ? {}
         : { usage: completed.result.agent.usage }),
+      ...(completed.result.completion_call_totals === undefined
+        ? {}
+        : {
+            rateLimitWaitMs:
+              completed.result.completion_call_totals.rate_limit_wait_ms,
+          }),
       artifact: {
         ...(warnings.length ? { warnings } : {}),
         location,

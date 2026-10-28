@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
 import { defaultForgeEngine } from '../engine.ts';
 import { executeEvalWithTestHooks } from '../execution/execute.ts';
@@ -33,9 +34,7 @@ afterEach(async () => {
   );
 });
 
-const failingJudgment = JSON.stringify({
-  results: [{ index: 0, passed: false, explanation: 'Not shown.' }],
-});
+const failingJudgment = JSON.stringify(criterionJudgment(false, 'Not shown.'));
 
 function dependencies(responses: string[]) {
   const scripted = createScriptedCompletionProvider({
@@ -99,8 +98,24 @@ describe('regradeExperimentRun', () => {
       first.dependencies,
     );
     assert.equal(summary.format, REGRADE_SUMMARY_FORMAT);
+    assert.deepEqual(summary.mean_confidence, { mean: 1, evaluations: 1 });
+    assert.deepEqual(summary.expected_score, {
+      experimental: true,
+      mean: 0,
+      evaluations: 1,
+    });
     assert.equal(summary.regraded, 1);
     assert.equal(summary.reused, 0);
+    assert.deepEqual(summary.headline, {
+      view: 'must_should_average',
+      score: 0,
+      evaluations: 1,
+    });
+    const savedSummary = JSON.parse(
+      await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
+    );
+    assert.equal(Object.keys(savedSummary)[0], 'headline');
+    assert.deepEqual(savedSummary.headline, summary.headline);
     assert.deepEqual(summary.failed, []);
     assert.equal(first.scripted.calls.length, 1);
 
@@ -113,6 +128,10 @@ describe('regradeExperimentRun', () => {
       count: 1,
     });
     assert.equal(report.runs[0]!.evaluation!.score, 0);
+    assert.equal(report.runs[0]!.evaluation!.mean_confidence, 1);
+    assert.equal(report.runs[0]!.evaluation!.expected_score, 0);
+    assert.deepEqual(report.summary.expected_score, summary.expected_score);
+    assert.deepEqual(savedSummary.expected_score, summary.expected_score);
     assert.equal(
       report.runs[0]!.result_path,
       'runs/regrade-source/result.json',
@@ -125,6 +144,16 @@ describe('regradeExperimentRun', () => {
     );
     assert.deepEqual(saved.judge, judge);
     assert.equal(saved.source.original_evaluation.score, 1);
+    assert.ok(
+      saved.completion_calls.every(
+        (call: { purpose: string }) => call.purpose === 'judge',
+      ),
+    );
+    assert.equal(
+      report.runs[0]!.rate_limit_wait_ms,
+      saved.completion_call_totals.rate_limit_wait_ms,
+    );
+    assert.equal(report.summary.rate_limit_wait_ms, 0);
 
     // A rerun with the same judge reuses the saved regrade without judge calls.
     const second = dependencies([]);
@@ -139,6 +168,24 @@ describe('regradeExperimentRun', () => {
       JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
     );
     assert.deepEqual(reusedReport.runs[0]!.warnings, report.runs[0]!.warnings);
+
+    // Reusing a legacy regrade cannot invent a measured wait total.
+    delete saved.completion_call_totals;
+    await fs.writeFile(
+      path.join(output, 'runs', 'regrade-source.json'),
+      JSON.stringify(saved),
+    );
+    const legacy = await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      second.dependencies,
+    );
+    assert.equal(legacy.reused, 1);
+    const legacyReport = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(legacyReport.runs[0]!.rate_limit_wait_ms, undefined);
+    assert.equal(legacyReport.summary.rate_limit_wait_ms, undefined);
+    assert.equal(second.scripted.calls.length, 0);
 
     // The source experiment run is untouched and still has its original score.
     const sourceReport = parseExperimentRunReport(

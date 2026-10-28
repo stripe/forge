@@ -5,13 +5,24 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type ChoiceAnswer,
+  type ChoiceQuestion,
+  type CompletionCallTotalsV1,
+  CompletionInvocationError,
+  type CompletionSubattemptRecordV1,
+  type CompletionTransportObservation,
+  CRITERION_DECISION_THRESHOLDS,
   createArtifactStore,
+  createCompletionDecisionModel,
   createForgeEngine,
   createJudgeTranscriptProjection,
   createSetupExecutor,
   credentialReference,
   credentialsSetupHandler,
   criterionResultMatchesDefinition,
+  DECISION_PROBABILITY_SUM_TOLERANCE,
+  DECISION_PROBABILITY_TOLERANCE,
+  type DecisionModel,
   defineSetupActionBundle,
   evaluateRunEvidence,
   executeEval,
@@ -27,6 +38,7 @@ import {
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeEvidenceV1,
+  MAX_COMPLETION_CALL_SUMMARIES,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   MAX_JUDGE_TRANSCRIPT_BYTES,
   type ModelProbe,
@@ -130,6 +142,36 @@ describe('@stripe/forge package root', () => {
     ]) {
       assert.equal(removed in rootExports, false);
     }
+    assert.equal(typeof CompletionInvocationError, 'function');
+    assert.equal(typeof createCompletionDecisionModel, 'function');
+    assert.deepEqual(CRITERION_DECISION_THRESHOLDS, {
+      minimum_probability: 0.8,
+    });
+    assert.equal(DECISION_PROBABILITY_TOLERANCE, 0.000001);
+    assert.equal(DECISION_PROBABILITY_SUM_TOLERANCE, 0.02);
+    const question: ChoiceQuestion<'yes' | 'no'> = {
+      type: 'choice',
+      instructions: 'Choose.',
+      criteria: { yes: 'Yes.', no: 'No.' },
+    };
+    const answer: ChoiceAnswer<'yes' | 'no'> = {
+      type: 'choice',
+      choice: 'yes',
+      probabilities: { yes: 1, no: 0 },
+      confidence: 1,
+      explanation: 'Yes.',
+    };
+    const model: DecisionModel = {
+      decide: async () => ({
+        model: null,
+        usage: null,
+        answers: { check: answer },
+      }),
+    };
+    assert.equal(question.type, 'choice');
+    assert.equal(typeof model.decide, 'function');
+
+    assert.equal(MAX_COMPLETION_CALL_SUMMARIES, 1024);
     assert.equal(typeof FORGE_VERSION, 'string');
     assert.equal(FORGE_BUILD_IDENTITY.version, FORGE_VERSION);
     assert.equal(Object.isFrozen(FORGE_BUILD_IDENTITY), true);
@@ -181,6 +223,9 @@ describe('@stripe/forge package root', () => {
 
     const _acceptsPublicContracts = (
       _agent: AgentAdapter,
+      _transport: CompletionTransportObservation,
+      _subattempt: CompletionSubattemptRecordV1,
+      _totals: CompletionCallTotalsV1,
       _runtime: RuntimeAdapter,
       _composition: ForgeComposition,
       _judgeEvidence: JudgeEvidenceV1,
