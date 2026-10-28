@@ -223,7 +223,14 @@ export async function runExperiment(
     entries: identities.map((identity) => ({ ...identity, attempts: [] })),
   });
   for (const plan of options.plans) {
-    options.engine.preflightEval({ plan, composition: options.composition });
+    const request = { plan, composition: options.composition };
+    if (options.resume && options.engine.inspectEvalCredentials !== undefined) {
+      // Completed runs need structural validation, but no current credential
+      // bindings. Defer source compatibility until we know what must execute.
+      options.engine.inspectEvalCredentials(request);
+    } else {
+      options.engine.preflightEval(request);
+    }
   }
   options.signal.throwIfAborted();
   if (options.resume) {
@@ -338,6 +345,14 @@ export async function runExperiment(
         }
       }
       pending.push(index);
+    }
+    if (options.resume && options.engine.inspectEvalCredentials !== undefined) {
+      for (const index of pending) {
+        options.engine.preflightEval({
+          plan: options.plans[index]!,
+          composition: options.composition,
+        });
+      }
     }
     await writeExperimentRunCheckpoint(checkpoint, experimentRun);
     options.progress({

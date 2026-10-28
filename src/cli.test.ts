@@ -12,13 +12,19 @@ import {
 } from './cli.ts';
 import type { AgentAdapter } from './contracts/agent.ts';
 import type { CompletionProvider } from './contracts/completion.ts';
+import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
-import { createForgeEngine, defaultForgeEngine } from './engine.ts';
+import {
+  createForgeEngine,
+  defaultForgeEngine,
+  type ForgeEngine,
+} from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import { FORGE_VERSION, ForgeExecutionError } from './execution/index.ts';
 import {
   type ExperimentConfigV1,
   parseExperimentConfigYaml,
+  type SetupActionBundleReferenceV1,
   type SetupStepV1,
 } from './model/index.ts';
 import { serializeResolvedRunPlan } from './planning/index.ts';
@@ -60,7 +66,7 @@ async function executeOffline(input: ExecuteEvalInput) {
   });
 }
 
-function createCredentialExecution() {
+function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
   const runtime = createFakeRuntimeAdapter();
   const completionCalls: RecordedCompletionCall[] = [];
   const respond: ScriptedCompletionHandler = (request, context) => {
@@ -114,7 +120,7 @@ function createCredentialExecution() {
           }).provider,
         ]),
       );
-      return defaultForgeEngine.executeEval({
+      return engine.executeEval({
         ...input,
         composition: {
           ...input.composition,
@@ -1533,6 +1539,294 @@ describe('Forge CLI', () => {
     );
   });
 
+  for (const customAction of [true, false]) {
+    it(`validates ${customAction ? 'original-reference custom' : 'built-in'} duplicate credentials through default factory wrappers`, async () => {
+      const bundle = createCredentialActionBundle([
+        { name: 'OPENAI_API_KEY', reference: 'openai.api-key' },
+      ]);
+      const engine = customAction
+        ? createForgeEngine({ setupActionBundles: [bundle] })
+        : defaultForgeEngine;
+      const fixture = await createBenchmarkFixture({
+        agent: 'codex',
+        actionBundles: customAction ? [bundle.manifest] : [],
+        caseSetup: [
+          customAction
+            ? { uses: bundle.actions[0]!.uses, with: {} }
+            : { uses: 'forge/credentials', with: { env: ['OPENAI_API_KEY'] } },
+        ],
+      });
+      for (const compositionFactory of [
+        undefined,
+        createDefaultCliComposition,
+        async (options: Parameters<typeof createDefaultCliComposition>[0]) =>
+          createDefaultCliComposition(options),
+      ]) {
+        let reads = 0;
+        let stderr = '';
+        assert.equal(
+          await runCli(['validate', '--experiment', fixture.experimentPath], {
+            engine,
+            ...(compositionFactory === undefined ? {} : { compositionFactory }),
+            environment: {
+              get OPENAI_API_KEY() {
+                reads += 1;
+                return 'unread-secret';
+              },
+            },
+            stdout: () => undefined,
+            stderr: (text) => {
+              stderr += text;
+            },
+          }),
+          0,
+          stderr,
+        );
+        assert.equal(reads, 0);
+      }
+    });
+  }
+
+  it('preserves original references when custom setup shares the Codex credential', async () => {
+    const bundle = createCredentialActionBundle([
+      { name: 'OPENAI_API_KEY', reference: 'openai.api-key' },
+    ]);
+    const engine = createForgeEngine({ setupActionBundles: [bundle] });
+    const fixture = await createBenchmarkFixture({
+      agent: 'codex',
+      actionBundles: [bundle.manifest],
+      caseSetup: [{ uses: bundle.actions[0]!.uses, with: {} }],
+    });
+    for (const grant of ['OPENAI_API_KEY', 'openai.api-key=OPENAI_API_KEY']) {
+      const execution = createCredentialExecution(engine);
+      let stderr = '';
+      assert.equal(
+        await runCli(
+          [
+            'run',
+            '--experiment',
+            fixture.experimentPath,
+            '--credential-env',
+            grant,
+          ],
+          {
+            engine,
+            environment: { OPENAI_API_KEY: 'shared-codex-key' },
+            stdout: () => undefined,
+            stderr: (text) => {
+              stderr += text;
+            },
+            execute: async (input) => {
+              assert.equal(
+                input.composition.agents
+                  .get('codex')!
+                  .requirements(input.plan.selection.agent).environment
+                  .credentials!.OPENAI_API_KEY!.reference,
+                'openai.api-key',
+              );
+              return execution.execute(input);
+            },
+          },
+        ),
+        0,
+        stderr,
+      );
+      assert.deepEqual(
+        execution.runtime.runs[0]!.input.environment.credentials,
+        {
+          OPENAI_API_KEY: { value: 'shared-codex-key', scopes: ['agent'] },
+        },
+      );
+    }
+  });
+
+  it('authorizes every custom setup reference and resumes completed groups without grants', async () => {
+    const bundle = createCredentialActionBundle([
+      { name: 'API_TOKEN', reference: 'acme.api-key' },
+      { name: 'API_TOKEN', reference: 'other.api-key' },
+    ]);
+    const engine = createForgeEngine({ setupActionBundles: [bundle] });
+    const fixture = await createBenchmarkFixture({
+      agent: 'codex',
+      actionBundles: [bundle.manifest],
+      caseSetup: bundle.actions.map(({ uses }) => ({ uses, with: {} })),
+    });
+    for (const { grants, succeeds } of [
+      { grants: ['API_TOKEN'], succeeds: true },
+      {
+        grants: ['acme.api-key=API_TOKEN', 'other.api-key=API_TOKEN'],
+        succeeds: true,
+      },
+      { grants: ['acme.api-key=API_TOKEN'], succeeds: false },
+      {
+        grants: ['acme.api-key=API_TOKEN', 'other.api-key=OTHER_TOKEN'],
+        succeeds: false,
+      },
+    ]) {
+      const execution = createCredentialExecution(engine);
+      let reads = 0;
+      let stdout = '';
+      let stderr = '';
+      const options: RunCliOptions = {
+        engine,
+        environment: new Proxy(
+          Object.fromEntries(
+            ['CODEX_KEY', 'API_TOKEN', 'OTHER_TOKEN'].map((name) => [
+              name,
+              'shared-key',
+            ]),
+          ),
+          {
+            get(target, name, receiver) {
+              if (typeof name === 'string' && Object.hasOwn(target, name))
+                reads += 1;
+              return Reflect.get(target, name, receiver);
+            },
+          },
+        ),
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        execute: execution.execute,
+      };
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'openai.api-key=CODEX_KEY',
+          ...grants.flatMap((grant) => ['--credential-env', grant]),
+        ],
+        options,
+      );
+      assert.equal(exitCode, succeeds ? 0 : 1, stderr);
+      if (succeeds) {
+        assert.deepEqual(
+          execution.runtime.runs[0]!.input.environment.credentials,
+          {
+            OPENAI_API_KEY: { value: 'shared-key', scopes: ['agent'] },
+            API_TOKEN: { value: 'shared-key', scopes: ['agent'] },
+          },
+        );
+        const experimentRunId = JSON.parse(stdout).experiment_run_id;
+        reads = 0;
+        stdout = '';
+        assert.equal(
+          await runCli(
+            [
+              'run',
+              '--experiment',
+              fixture.experimentPath,
+              '--resume',
+              experimentRunId,
+            ],
+            options,
+          ),
+          0,
+          stderr,
+        );
+        assert.equal(reads, 0);
+        assert.equal(execution.runtime.runs.length, 1);
+        assert.equal(JSON.parse(stdout).skipped, 1);
+        assert.equal(JSON.parse(stdout).executed, 0);
+      } else {
+        assert.equal(reads, 0);
+        assert.equal(execution.runtime.runs.length, 0);
+      }
+      assert.ok(!stderr.includes('shared-key'));
+    }
+  });
+
+  it('constructs one composition for shorthand discovery and execution', async () => {
+    const fixture = await createBenchmarkFixture({ agent: 'codex' });
+    const execution = createCredentialExecution();
+    const compositions: ForgeComposition[] = [];
+    let executedComposition: ForgeComposition | undefined;
+    let stderr = '';
+    assert.equal(
+      await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'OPENAI_API_KEY',
+        ],
+        {
+          environment: { OPENAI_API_KEY: 'codex-key' },
+          compositionFactory: async (options) => {
+            const composition = await createDefaultCliComposition(options);
+            compositions.push(composition);
+            return composition;
+          },
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          execute: async (input) => {
+            executedComposition = input.composition;
+            return execution.execute(input);
+          },
+        },
+      ),
+      0,
+      stderr,
+    );
+    assert.equal(compositions.length, 1);
+    assert.equal(executedComposition, compositions[0]);
+    assert.equal(execution.runtime.runs.length, 1);
+  });
+
+  it('resumes completed duplicate-credential runs without grants or secret reads', async () => {
+    const fixture = await createBenchmarkFixture({
+      agent: 'codex',
+      caseSetup: [
+        { uses: 'forge/credentials', with: { env: ['OPENAI_API_KEY'] } },
+      ],
+    });
+    const execution = createCredentialExecution();
+    let reads = 0;
+    let stdout = '';
+    let stderr = '';
+    const options: RunCliOptions = {
+      environment: {
+        get OPENAI_API_KEY() {
+          reads += 1;
+          return 'codex-key';
+        },
+      },
+      experimentRunIdFactory: () => 'completed-credentials',
+      stdout: (text) => {
+        stdout += text;
+      },
+      stderr: (text) => {
+        stderr += text;
+      },
+      execute: execution.execute,
+    };
+    const args = ['run', '--experiment', fixture.experimentPath];
+    assert.equal(
+      await runCli([...args, '--credential-env', 'OPENAI_API_KEY'], options),
+      0,
+      stderr,
+    );
+    reads = 0;
+    stdout = '';
+    assert.equal(
+      await runCli([...args, '--resume', 'completed-credentials'], options),
+      0,
+      stderr,
+    );
+    assert.equal(reads, 0);
+    assert.equal(execution.runtime.runs.length, 1);
+    assert.equal(JSON.parse(stdout).skipped, 1);
+    assert.equal(JSON.parse(stdout).executed, 0);
+  });
+
   it('selects standard gateway authentication when ANTHROPIC_BASE_URL is set', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
@@ -1992,7 +2286,8 @@ describe('Forge CLI', () => {
     assert.equal(exitCode, 1, output);
     assert.equal(execution.runtime.runs.length, 0);
     assert.equal(execution.completionCalls.length, 0);
-    assert.ok(output.includes('openai.completion-api-key'));
+    assert.ok(output.includes('OPENAI_API_KEY'));
+    assert.ok(!output.includes('openai.completion-api-key'));
     assert.ok(output.includes('--credential-env OPENAI_API_KEY'));
     assert.ok(!output.includes('agent-only-secret'));
   });
@@ -2673,7 +2968,7 @@ describe('Forge CLI', () => {
         failure.cause.message,
         explicitBinding
           ? /Set EVAL_API_TOKEN: no value is available/
-          : /No environment binding exists.*env:API_TOKEN/,
+          : /No environment binding exists for API_TOKEN/,
       );
       assert.equal(runtime.runs.length, 0);
       assert.ok(
@@ -2681,6 +2976,7 @@ describe('Forge CLI', () => {
           explicitBinding ? 'Set EVAL_API_TOKEN' : '--credential-env API_TOKEN',
         ),
       );
+      assert.ok(!stderr.includes('env:API_TOKEN'));
       assert.ok(!stderr.includes('same-name-does-not-grant-access'));
     });
   }
@@ -2805,6 +3101,30 @@ describe('Forge CLI', () => {
   });
 });
 
+function createCredentialActionBundle(
+  declarations: readonly { name: string; reference: string }[],
+) {
+  return defineSetupActionBundle({
+    manifest: {
+      namespace: 'acme-evals',
+      version: '1.0.0',
+      sha256: `sha256:${'a'.repeat(64)}`,
+    },
+    actions: declarations.map(({ name, reference }, index) => ({
+      uses: `acme-evals/credential-${index}`,
+      parseWith: () => ({}),
+      preflight: () => ({
+        requirements: {
+          credentials: {
+            agent: { [name]: { reference: credentialReference(reference) } },
+          },
+        },
+        async apply() {},
+      }),
+    })),
+  });
+}
+
 async function createGroupedBenchmarkFixture() {
   const fixture = await createBenchmarkFixture({ includeUnselectedCase: true });
   const config = parseExperimentConfigYaml(
@@ -2854,6 +3174,7 @@ async function createBenchmarkFixture(
     repetitions?: number;
     includeUnselectedCase?: boolean;
     caseSetup?: readonly SetupStepV1[];
+    actionBundles?: readonly SetupActionBundleReferenceV1[];
     withHostCompletions?: boolean;
     models?: ExperimentConfigV1['models'];
   } = {},
@@ -2927,7 +3248,7 @@ judging_criteria: []
     experimentPath,
     `id: experiment/default
 version: 2026.09.0
-dataset:
+${options.actionBundles?.length ? `forge: ${JSON.stringify({ action_bundles: options.actionBundles })}\n` : ''}dataset:
   path: ../dataset
   id: example-dataset
   version: 2026.09.0

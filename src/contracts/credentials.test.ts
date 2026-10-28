@@ -10,13 +10,30 @@ import {
 
 describe('credential and environment resolution', () => {
   it('resolves only explicit references and preserves secret scopes', async () => {
+    const bindings = { 'provider/key': 'FORGE_TEST_TOKEN' };
+    let reads = 0;
     const credentials = createEnvironmentCredentialResolver({
-      bindings: { 'provider/key': 'FORGE_TEST_TOKEN' },
+      bindings,
       environment: {
-        FORGE_TEST_TOKEN: 'secret-value',
+        get FORGE_TEST_TOKEN() {
+          reads += 1;
+          return 'secret-value';
+        },
         UNDECLARED_TOKEN: 'must-not-escape',
       },
     });
+    bindings['provider/key'] = 'CHANGED_SOURCE';
+    for (const phase of ['preflight', 'execution'] as const) {
+      assert.equal(
+        credentials.sourceIdentity?.(credentialReference('provider/key'), {
+          environmentName: 'API_TOKEN',
+          purpose: 'runtime:API_TOKEN',
+          phase,
+        }),
+        'FORGE_TEST_TOKEN',
+      );
+    }
+    assert.equal(reads, 0);
     const environment = await createEnvironmentResolver(credentials).resolve(
       {
         variables: { PUBLIC_SETTING: 'enabled' },
@@ -41,6 +58,7 @@ describe('credential and environment resolution', () => {
     });
     assert.equal('UNDECLARED_TOKEN' in environment.variables, false);
     assert.equal(Object.isFrozen(environment.credentials), true);
+    assert.equal(reads, 1);
   });
 
   it('rejects missing mappings and plain/secret name collisions', async () => {

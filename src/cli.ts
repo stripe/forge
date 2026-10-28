@@ -8,13 +8,13 @@ import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
+  type CredentialResolver,
   createEnvironmentCredentialResolver,
-  normalizeEnvironmentSpecification,
 } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
-import { completionBindingsForPlan } from './execution/completionRuntime.ts';
+import type { EvalCredentialUse } from './execution/execute.ts';
 import {
   type executeEval,
   FORGE_VERSION,
@@ -33,7 +33,6 @@ import {
   getMatrixGroups,
   type LoadedDatasetV1,
   parseRunSelection,
-  type ResolvedRunPlanV1,
   type RunSelection,
 } from './model/index.ts';
 import {
@@ -147,7 +146,10 @@ export interface DefaultCliCompositionOptions {
   /** Resolved runtime selection supplied by runCli to embedding hosts. */
   readonly runtime?: ForgeRuntimeV1;
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  /** Explicit reference mappings; same-name grants are bound after discovery. */
   readonly credentialBindings?: Readonly<Record<string, string>>;
+  /** Run-owned resolver handle; forwarding wrappers should preserve this option. */
+  readonly credentialResolver?: CredentialResolver;
 }
 
 export interface RunCliOptions {
@@ -175,13 +177,6 @@ export interface RunCliOptions {
 export async function createDefaultCliComposition(
   options: DefaultCliCompositionOptions,
 ): Promise<ForgeComposition> {
-  return createCliComposition(options, false);
-}
-
-async function createCliComposition(
-  options: DefaultCliCompositionOptions,
-  validationOnly: boolean,
-): Promise<ForgeComposition> {
   if (options.runtime && 'config' in options.runtime) {
     throw new CliUsageError(
       'External runtimes require a host-supplied compositionFactory.',
@@ -189,17 +184,6 @@ async function createCliComposition(
   }
   const environment = options.environment ?? process.env;
   const bindings = Object.freeze({ ...options.credentialBindings });
-  // Only this public host understands its built-in aliases. The engine and
-  // custom resolvers continue treating credential references as opaque.
-  const runtimeReference = (reference: string, name: string): string => {
-    const applicationReference = `env:${name}`;
-    return validationOnly ||
-      (Object.hasOwn(bindings, reference) &&
-        Object.hasOwn(bindings, applicationReference) &&
-        bindings[reference] === bindings[applicationReference])
-      ? applicationReference
-      : reference;
-  };
   const baseUrl = environment[ANTHROPIC_BASE_URL_ENVIRONMENT];
   const gatewaySelected = baseUrl !== undefined;
   const credential = gatewaySelected
@@ -209,7 +193,7 @@ async function createCliComposition(
     ? ANTHROPIC_AUTH_TOKEN_ENVIRONMENT
     : ANTHROPIC_API_KEY_ENVIRONMENT;
   const claude = createClaudeCodeAdapter({
-    credential: runtimeReference(credential, credentialEnvironmentName),
+    credential,
     credentialEnvironmentName,
     ...(baseUrl === undefined ? {} : { baseUrl }),
   });
@@ -226,14 +210,13 @@ async function createCliComposition(
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const codex = createCodexAdapter({
-    credential: runtimeReference(
-      OPENAI_API_KEY_REFERENCE,
-      OPENAI_API_KEY_ENVIRONMENT,
-    ),
+    credential: OPENAI_API_KEY_REFERENCE,
     credentialEnvironmentName: OPENAI_API_KEY_ENVIRONMENT,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
-  const credentialResolver = createCliCredentialResolver(bindings, environment);
+  const credentialResolver =
+    options.credentialResolver ??
+    createCliCredentialResolver(bindings, environment);
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
@@ -261,6 +244,7 @@ export async function runCli(
   const stderr =
     options.stderr ?? ((text: string) => void process.stderr.write(text));
   const engine = options.engine ?? defaultForgeEngine;
+  let running = false;
 
   try {
     const parsed = parseArgs({
@@ -297,6 +281,7 @@ export async function runCli(
     ];
     assertAllowedOptions(parsed.values, allowed);
     if (command === 'run') {
+      running = true;
       return await runPublicExperiment(argv, options, engine, stdout, stderr);
     }
 
@@ -333,9 +318,7 @@ export async function runCli(
     if (command === 'validate') {
       const selections = expandExperiment(experiment, dataset);
       const compositionFactory =
-        options.compositionFactory ??
-        ((input: DefaultCliCompositionOptions) =>
-          createCliComposition(input, true));
+        options.compositionFactory ?? createDefaultCliComposition;
       let hostSelection:
         | {
             docker_platform: RuntimePlatform;
@@ -455,7 +438,7 @@ export async function runCli(
     stdout(serializeResolvedRunPlan(plan));
     return 0;
   } catch (error) {
-    stderr(`forge: ${errorMessage(error)}\n`);
+    stderr(`forge: ${errorMessage(error, running)}\n`);
     if (isUsageError(error)) stderr(`Run forge --help for usage.\n`);
     return isUsageError(error) ? 2 : 1;
   }
@@ -553,10 +536,15 @@ async function runPublicExperiment(
       const grants = parseCredentialEnvironmentBindings(
         values['credential-env'],
       );
+      const credentials = createCliCredentialBindingSession(
+        grants,
+        options.environment ?? process.env,
+      );
       const compositionOptions = {
         datasetRoot: dataset.root,
         runtime: plans[0]!.runtime,
         resultsRoot: root,
+        credentialResolver: credentials.resolver,
         ...(options.environment === undefined
           ? {}
           : { environment: options.environment }),
@@ -565,18 +553,21 @@ async function runPublicExperiment(
           : { credentialBindings: grants.references }),
       };
       const factory = options.compositionFactory ?? createDefaultCliComposition;
-      let composition = await factory(compositionOptions);
-      if (grants.environmentNames.length > 0) {
-        const credentialBindings = expandCredentialEnvironmentBindings(
-          grants,
-          plans,
-          composition,
+      const composition = await factory(compositionOptions);
+      if (
+        grants.environmentNames.length > 0 &&
+        engine.inspectEvalCredentials === undefined
+      ) {
+        throw new CliUsageError(
+          'Same-name credential grants require an engine with inspectEvalCredentials. Use explicit reference=HOST_VAR bindings with this engine.',
         );
-        composition = await factory({
-          ...compositionOptions,
-          credentialBindings,
-        });
       }
+      credentials.finalize(
+        plans.flatMap(
+          (plan) =>
+            engine.inspectEvalCredentials?.({ plan, composition }) ?? [],
+        ),
+      );
       const execute =
         options.execute ?? ((request) => engine.executeEval(request));
       return {
@@ -751,8 +742,7 @@ function parseCredentialEnvironmentBindings(
 
 function expandCredentialEnvironmentBindings(
   grants: CredentialEnvironmentGrants,
-  plans: readonly ResolvedRunPlanV1[],
-  composition: ForgeComposition,
+  uses: readonly EvalCredentialUse[],
 ): Readonly<Record<string, string>> {
   const bindings = new Map(Object.entries(grants.references));
   const bind = (reference: string, name: string): void => {
@@ -764,29 +754,13 @@ function expandCredentialEnvironmentBindings(
     }
     bindings.set(reference, name);
   };
-  // An unused grant does not inject a variable: resolution still uses only
-  // declarations in each selected plan, including its host completion models.
-  for (const name of grants.environmentNames) bind(`env:${name}`, name);
-  for (const plan of plans) {
-    const agent = composition.agents.get(plan.agent.adapter);
-    if (agent === undefined) continue; // Engine preflight diagnoses missing adapters.
-    const requirements = normalizeEnvironmentSpecification(
-      agent.requirements(plan.agent).environment,
-    );
-    for (const name of grants.environmentNames) {
-      if (Object.hasOwn(requirements.credentials, name)) {
-        bind(requirements.credentials[name]!.reference, name);
-      }
-    }
-    for (const completion of completionBindingsForPlan(plan, composition)) {
-      for (const { reference } of Object.values(
-        completion.requirements.credentials,
-      )) {
-        const name = CLI_CREDENTIAL_ENVIRONMENTS.get(reference);
-        if (name !== undefined && grants.environmentNames.includes(name)) {
-          bind(reference, name);
-        }
-      }
+  // Only actual selected declarations receive grants. Runtime uses include
+  // custom setup actions; host providers keep their separate references.
+  for (const use of uses) {
+    const name =
+      use.environmentName ?? CLI_CREDENTIAL_ENVIRONMENTS.get(use.reference);
+    if (name !== undefined && grants.environmentNames.includes(name)) {
+      bind(use.reference, name);
     }
   }
   return Object.freeze(Object.fromEntries(bindings));
@@ -794,27 +768,86 @@ function expandCredentialEnvironmentBindings(
 
 class CliCredentialError extends Error {}
 
+function createCliCredentialBindingSession(
+  grants: CredentialEnvironmentGrants,
+  environment: Readonly<Record<string, string | undefined>>,
+): {
+  readonly resolver: CredentialResolver;
+  finalize(uses: readonly EvalCredentialUse[]): void;
+} {
+  const provisional = createCliCredentialResolver(
+    grants.references,
+    environment,
+  );
+  let finalized: CredentialResolver | undefined;
+  return {
+    resolver: Object.freeze({
+      sourceIdentity(reference, context) {
+        return (finalized ?? provisional).sourceIdentity?.(reference, context);
+      },
+      async resolve(reference, context) {
+        context.signal.throwIfAborted();
+        if (finalized === undefined) {
+          throw new CliCredentialError(
+            'Credential lookup is unavailable during composition construction. Forge binds selected requirements before execution.',
+          );
+        }
+        return finalized.resolve(reference, context);
+      },
+    } satisfies CredentialResolver),
+    finalize(uses) {
+      if (finalized !== undefined) {
+        throw new Error('Credential bindings have already been finalized.');
+      }
+      finalized = createCliCredentialResolver(
+        expandCredentialEnvironmentBindings(grants, uses),
+        environment,
+      );
+    },
+  };
+}
+
+function credentialEnvironmentName(reference: string): string | undefined {
+  return (
+    CLI_CREDENTIAL_ENVIRONMENTS.get(reference) ??
+    (/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(reference)
+      ? reference.slice(4)
+      : undefined)
+  );
+}
+
 function createCliCredentialResolver(
   bindings: Readonly<Record<string, string>>,
   environment: Readonly<Record<string, string | undefined>>,
-) {
+): CredentialResolver {
   const resolver = createEnvironmentCredentialResolver({
     bindings,
     environment,
   });
   return {
+    sourceIdentity(reference, context) {
+      const source = resolver.sourceIdentity?.(reference, context);
+      if (source !== undefined) return source;
+      // Known aliases may be structurally compatible without granting access.
+      // Execution always requires actual, explicitly authorized source IDs.
+      if (
+        context.phase === 'preflight' &&
+        credentialEnvironmentName(reference) === context.environmentName
+      ) {
+        return context.environmentName;
+      }
+      return undefined;
+    },
     async resolve(...args: Parameters<typeof resolver.resolve>) {
       const [reference, context] = args;
       context.signal.throwIfAborted();
+      const name =
+        credentialEnvironmentName(reference) ??
+        /^forge-eval:([A-Za-z_][A-Za-z0-9_]*)$/.exec(context.purpose)?.[1];
       if (!Object.hasOwn(bindings, reference)) {
-        const name =
-          CLI_CREDENTIAL_ENVIRONMENTS.get(reference) ??
-          (/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(reference)
-            ? reference.slice(4)
-            : undefined);
         const grant = name ?? `${reference}=HOST_VARIABLE`;
         throw new CliCredentialError(
-          `No environment binding exists for credential reference ${JSON.stringify(reference)}. Add --credential-env ${grant}.`,
+          `No environment binding exists for ${name ?? 'the requested credential'}. Add --credential-env ${grant}.`,
         );
       }
       try {
@@ -823,7 +856,7 @@ function createCliCredentialResolver(
         context.signal.throwIfAborted();
         // The environment resolver never includes values in its diagnostics.
         throw new CliCredentialError(
-          `Set ${bindings[reference]}: no value is available for credential reference ${JSON.stringify(reference)}.`,
+          `Set ${bindings[reference]}: no value is available for ${name ?? 'the requested credential'}.`,
           { cause: error },
         );
       }
@@ -831,23 +864,28 @@ function createCliCredentialResolver(
   };
 }
 
-function credentialDiagnostic(error: unknown): string | undefined {
+function credentialDiagnostic(
+  error: unknown,
+  running = true,
+): string | undefined {
   const seen = new Set<unknown>();
   while (error instanceof Error && !seen.has(error)) {
     seen.add(error);
     if (error instanceof CliCredentialError) return error.message;
     if (
       error instanceof ForgeExecutionError &&
-      error.code === 'invalid_plan' &&
+      (error.code === 'invalid_plan' || error.code === 'credential_failed') &&
       error.phase === 'preflight' &&
       error.cause instanceof TypeError
     ) {
       const conflict =
-        /^Environment ([A-Za-z_][A-Za-z0-9_]*) has conflicting credential references\.$/.exec(
+        /^(?:Environment|Credential binding) ([A-Za-z_][A-Za-z0-9_]*) has conflicting (?:credential references\.|references without a proven shared source\.)$/.exec(
           error.cause.message,
         );
       if (conflict !== null) {
-        return `Environment ${conflict[1]} has conflicting credential references. Authorize every declaration with the same host source, for example --credential-env ${conflict[1]}.`;
+        return running
+          ? `Environment ${conflict[1]} has conflicting credential references. Authorize every declaration with the same host source, for example --credential-env ${conflict[1]}.`
+          : `Environment ${conflict[1]} has conflicting credential references. Its declarations need a shared reference or host-supplied source compatibility metadata.`;
       }
     }
     error = error.cause;
@@ -881,8 +919,8 @@ function isUsageError(error: unknown): boolean {
   );
 }
 
-function errorMessage(error: unknown): string {
-  const diagnostic = credentialDiagnostic(error);
+function errorMessage(error: unknown, running: boolean): string {
+  const diagnostic = credentialDiagnostic(error, running);
   if (diagnostic !== undefined) return diagnostic;
   if (error instanceof Error && error.message) return error.message;
   return 'Unknown failure.';

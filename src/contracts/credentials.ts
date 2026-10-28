@@ -14,8 +14,25 @@ export interface CredentialResolutionContext {
   readonly signal: AbortSignal;
 }
 
+/** Pure, nonsecret context for proving that runtime declarations share a source. */
+export interface CredentialSourceContext {
+  readonly environmentName: string;
+  readonly purpose: string;
+  readonly phase: 'preflight' | 'execution';
+}
+
 /** A host-owned secret lookup. References are opaque to Forge. */
 export interface CredentialResolver {
+  /**
+   * Equal nonempty identities attest interchangeable values for this context.
+   * Preflight may describe conditional compatibility without granting access;
+   * execution must prove a real binding for every distinct original reference.
+   * This method must be synchronous and must never read secret values.
+   */
+  sourceIdentity?(
+    reference: CredentialReference,
+    context: CredentialSourceContext,
+  ): string | undefined;
   resolve(
     reference: CredentialReference,
     context: CredentialResolutionContext,
@@ -204,6 +221,9 @@ export function createEnvironmentCredentialResolver(
   }
 
   return {
+    sourceIdentity(reference) {
+      return bindings.get(reference);
+    },
     async resolve(reference, context) {
       throwIfAborted(context.signal);
       const name = bindings.get(reference);

@@ -10,6 +10,10 @@ import type {
   MutableWorkspace,
   RuntimeStateDirectoryRequirement,
 } from '../contracts/runtime.ts';
+import {
+  type RuntimeCredentialDeclaration,
+  validateCredentialDeclarations,
+} from '../credentialDeclarations.ts';
 import { isSafeActionIdentifier } from '../model/paths.ts';
 import type {
   AgentSelectionV1,
@@ -38,6 +42,21 @@ import {
 export const firstPartySetupHandlers: ReadonlyMap<string, SetupStepHandler> =
   handlersForRegistry(defaultSetupActionRegistry);
 
+const credentialDeclarations = new WeakMap<
+  PreparedSetup,
+  readonly RuntimeCredentialDeclaration[]
+>();
+
+/** @internal The public requirement summary retains its original shape. */
+export function preparedSetupCredentialDeclarations(
+  setup: PreparedSetup,
+): readonly RuntimeCredentialDeclaration[] {
+  return (
+    credentialDeclarations.get(setup) ??
+    declarationsForRequirements(setup.requirements, 'setup')
+  );
+}
+
 export function createSetupExecutor(): SetupExecutor {
   return createSetupExecutorForRegistry(defaultSetupActionRegistry);
 }
@@ -45,13 +64,18 @@ export function createSetupExecutor(): SetupExecutor {
 /** Construct an executor bound to the exact immutable registry owned by an engine. */
 export function createSetupExecutorForRegistry(
   registry: SetupActionRegistry,
+  deferCredentialValidation = false,
 ): SetupExecutor {
-  return createSetupExecutorWithHandlers(handlersForRegistry(registry));
+  return createSetupExecutorWithHandlers(
+    handlersForRegistry(registry),
+    deferCredentialValidation,
+  );
 }
 
 /** @internal Contract-test seam; not exported from the package entry point. */
 export function createSetupExecutorWithHandlers(
   handlers: ReadonlyMap<string, SetupStepHandler>,
+  deferCredentialValidation = false,
 ): SetupExecutor {
   const selectedHandlers = new Map(handlers);
 
@@ -74,6 +98,7 @@ export function createSetupExecutorWithHandlers(
         readonly stateDirectoryIds: readonly string[];
       }> = [];
       const requirementAccumulator = createRequirementAccumulator();
+      const declarations: RuntimeCredentialDeclaration[] = [];
 
       for (let index = 0; index < steps.length; index += 1) {
         const inputStep = steps[index];
@@ -97,6 +122,13 @@ export function createSetupExecutorWithHandlers(
           step.uses,
         );
         requirementAccumulator.add(prepared.requirements);
+        declarations.push(
+          ...declarationsForRequirements(
+            prepared.requirements,
+            step.uses,
+            index,
+          ),
+        );
         const setupCredentialEnvironmentNames = Object.freeze(
           Object.keys(prepared.requirements.credentials?.setup ?? {}).sort(
             compareCodeUnits,
@@ -117,6 +149,9 @@ export function createSetupExecutorWithHandlers(
       }
 
       const requirements = requirementAccumulator.finish();
+      if (!deferCredentialValidation) {
+        validateCredentialDeclarations(declarations, undefined, 'preflight');
+      }
       let applied = false;
       const preparedSetup: PreparedSetup = {
         requirements,
@@ -167,10 +202,32 @@ export function createSetupExecutorWithHandlers(
           return Object.freeze({ steps: Object.freeze(appliedSteps) });
         },
       };
+      credentialDeclarations.set(preparedSetup, Object.freeze(declarations));
       return Object.freeze(preparedSetup);
     },
   };
   return Object.freeze(executor);
+}
+
+function declarationsForRequirements(
+  requirements: SetupStepRequirements,
+  source: string,
+  setupStepIndex?: number,
+): readonly RuntimeCredentialDeclaration[] {
+  return Object.freeze(
+    (['setup', 'agent'] as const).flatMap((scope) =>
+      Object.entries(requirements.credentials?.[scope] ?? {}).map(
+        ([environmentName, { reference }]) =>
+          Object.freeze({
+            environmentName,
+            reference,
+            scope,
+            source,
+            ...(setupStepIndex === undefined ? {} : { setupStepIndex }),
+          }),
+      ),
+    ),
+  );
 }
 
 function normalizePreparedStep(
@@ -405,12 +462,6 @@ function createRequirementAccumulator(): Readonly<{
       if (Object.hasOwn(variables, name)) {
         throw new TypeError(
           `Environment variable ${name} cannot be both plain and credential-backed.`,
-        );
-      }
-      const previous = credentials.get(name);
-      if (previous !== undefined && previous !== binding.reference) {
-        throw new TypeError(
-          `Credential binding ${name} has conflicting references.`,
         );
       }
       credentials.set(name, binding.reference);

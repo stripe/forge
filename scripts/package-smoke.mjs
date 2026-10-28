@@ -321,6 +321,7 @@ try {
   );
   const consumerImports = new Map([
     ['index', '@stripe/forge'],
+    ['cli', '@stripe/forge/cli'],
     ['experiment', '@stripe/forge/experiment'],
     ['experimentCli', '@stripe/forge/experiment/cli'],
   ]);

@@ -225,7 +225,8 @@ If you are following the public executable, start instead at
 | --- | --- | --- |
 | [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
 | [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
-| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, filters matrix entries, creates adapters, and calls the engine or experiment run controller. It is composition code, not benchmark semantics. |
+| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, filters matrix entries, constructs each composition once, binds selected credential grants, and calls the engine or experiment run controller. |
+| [`src/credentialDeclarations.ts`](https://github.com/stripe/forge/blob/main/src/credentialDeclarations.ts) | `validateCredentialDeclarations`, `resolveCredentialDeclarations` | Internal declaration ledger and shared source-proof rules for setup aggregation and execution; resolves every distinct reference before producing one runtime binding per name. |
 | [`src/experiment.ts`](https://github.com/stripe/forge/blob/main/src/experiment.ts) | `runExperiment`, `readExperimentRunSelections`, `inspectExperimentRun` | Experiment run controller, checkpoint/report persistence under the lock, bounded verified outcome collection, and read-only inspection of latest attempts. |
 | [`src/experimentModel.ts`](https://github.com/stripe/forge/blob/main/src/experimentModel.ts) | Checkpoint schemas and attempt types | Strict execution checkpoint model shared by the controller and report schemas. |
 | [`src/experimentReport.ts`](https://github.com/stripe/forge/blob/main/src/experimentReport.ts) | `parseExperimentRunReport`, report types, internal builder/serializer | Bounded scorecard schema, case/configuration aggregation, and verification that statistics match run rows. Public parser/types are re-exported through the experiment subpath. |
@@ -247,6 +248,7 @@ parseExperimentConfig/Yaml     →  model/parse.ts
 parseResolvedRunPlan           →  model/parse.ts
 loadDataset/config             →  model/loaders.ts
 resolveRunPlan                 →  planning/planner.ts, then reparses
+inspectEvalCredentials        →  execution/execute.ts
 preflightEval/executeEval      →  execution/execute.ts
 verifyCompletedRun             →  results/localStore.ts
 ```
@@ -315,6 +317,7 @@ executeEvalWithTestHooks
 │   ├── completionBindingsForPlan
 │   └── runtime.preflight
 ├── resolveEnvironment
+│   └── resolveCredentialDeclarations
 ├── prepareCompletionRuntime
 │   ├── credentialResolver.resolve
 │   └── completionProvider.preflight
@@ -447,7 +450,7 @@ implementations.
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
 | [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
 | [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic`, `providers/openai`, and scripted tests; managed by `execution/completionRuntime.ts` |
-| [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
+| [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, `CredentialSourceContext`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Defines secret resolution and optional pure source proof; used by agent/setup/provider declarations and execution |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |

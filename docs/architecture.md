@@ -290,9 +290,10 @@ an experiment run controller is responsible for retrying that selection.
 A `RunSelection` chooses exactly one case, treatment, complete agent selection,
 and zero-based repetition. Codex selections include `hook_trust`; new plans
 materialize its `native` default, while saved plans may omit it. The CLI requires
-filters to resolve to one entry for `plan`. `run` resolves and purely preflights
-every matching plan before executing them with bounded concurrency. The CLI loads the dataset from
-the experiment config and permits selectors such as `--case` to restrict execution.
+filters to resolve to one entry for `plan`. `run` resolves every matching plan
+and preflights pending work before executing it with bounded concurrency. The
+CLI loads the dataset from the experiment config and permits selectors such as
+`--case` to restrict execution.
 
 The shared controller exposed through `@stripe/forge/experiment` checkpoints
 attempts in a strict `experiment.json` under
@@ -406,6 +407,7 @@ registry and closes over it for every operation:
 - parse cases, experiment configs, setup steps, and resolved plans;
 - load datasets and experiment configs;
 - resolve run plans;
+- inspect selected credential uses without resolving them;
 - preflight and execute runs; and
 - verify completed runs.
 
@@ -504,37 +506,64 @@ Docker server, builds the selected image, and executes a network-disabled
 disposable probe from its immutable image ID, but does not alter preflight or
 execute an evaluation.
 
+On resume, the experiment scheduler uses the engine's credential inspection
+to check every selected plan structurally before verifying completed artifacts,
+deferring source proof. It then preflights only pending plans before checkpoint
+writes and execution. A resume that verifies every selection as complete needs
+no grants, credential lookup, or runtime allocation, including for custom
+reference groups. Engines without the optional inspection method retain normal
+preflight for all selections.
+
 ### 2. Resolve credentials and completion transports
 
-Runtime credentials begin as opaque references. Forge assigns their scopes
-from the declaration source rather than trusting an adapter-supplied scope:
+Runtime credentials use opaque references whose identities remain unchanged by
+validation or CLI grants. Forge assigns their scopes from the declaration
+source rather than trusting an adapter-supplied scope:
 
 - a setup action may request a setup-scoped credential;
 - an agent requirement receives agent scope;
 - a setup action may separately declare a credential the later agent needs.
 
-The resolver is called only for the selected plan's declared bindings. Plain
-variables remain structurally separate from resolved secrets, and the ambient
-host environment is never copied wholesale.
+Preparation retains every declaration's original reference, runtime name,
+source, assigned scope, and setup step where applicable. Both setup aggregation
+and the final agent/setup merge use the same compatibility rule. Repeated
+identical references combine directly. Distinct references for one runtime
+name require nonsecret proof from the resolver; a matching name alone is
+insufficient. Plain-variable/secret collisions and declaration structure are
+validated before source proof or secret lookup.
 
-`forge/credentials` lets a case or treatment declare additional agent credentials
-by runtime environment name. Each name maps to the opaque reference `env:NAME`;
-the declaration grants no automatic host lookup. The public CLI requires an
-explicit grant for every credential, including built-in agent and plugin
-requirements. `--credential-env NAME` authorizes all selected built-in consumers
-that need the same host variable: matching agent or setup declarations and the
-Ava/judge providers used by the plan. It cannot forward undeclared names or bind
-unselected providers. `--credential-env reference=HOST_VAR` grants one reference
-for narrower access or separate keys. A same-name grant and an explicit binding
-for one of its selected references must name the same host source; neither
-overrides the other.
-Repeated runtime names can combine when their references are explicitly
-authorized to the same host source; different sources conflict. Embedding hosts
-authorize and resolve opaque references through their credential resolver.
-Missing grants or values fail before runtime allocation; validation and planning
-require neither. See
-[additional API credentials](../README.md#additional-api-credentials) for the
-case, treatment, and launch configuration.
+The optional synchronous `CredentialResolver.sourceIdentity(reference,
+{environmentName, purpose, phase})` returns a nonempty source ID or `undefined`.
+Equal IDs attest interchangeable source values for that context. Every distinct
+reference in a group must have the same ID; absent or conflicting IDs fail.
+Resolvers without this method retain exact-reference-only merging. The method
+must not read secrets. `createEnvironmentCredentialResolver` uses explicitly
+bound host variable names as IDs, so different host variables conflict even
+when their values match.
+
+For `phase: 'preflight'`, hosts may describe conditional compatibility without
+granting access. The default CLI recognizes its known aliases; unknown distinct
+custom references need host-supplied proof. Execution repeats source validation
+with `phase: 'execution'` for all groups before any secret lookup, requiring
+actual bindings. It then resolves every distinct original reference once per
+runtime name with purpose `forge-eval:NAME`. A denied member fails the run;
+different returned values after successful source proof also fail. Value
+comparison never establishes equivalence, and resolution is not cached across
+different names or completion purposes.
+
+The runtime preflight environment retains one deterministic original reference
+per name and the union of declared scopes. This is a summary; the internal
+declaration ledger governs authorization. Sharing a source adds no scope, and
+each setup step still receives only its declared setup credentials. Plain
+variables stay separate from resolved secrets; the host environment is never
+copied wholesale.
+
+`forge/credentials` maps each declared runtime name to the opaque reference
+`env:NAME`. That prefix is a host convention, not an implicit core lookup.
+The public CLI requires explicit grants, with missing grants or values failing
+before allocation. See the README's [credential grants](../README.md#requirements--credentials)
+for normal usage and [advanced bindings](../README.md#advanced-credential-bindings)
+for selecting different host variables.
 
 Completion-provider credentials use a separate path. They are resolved per
 purpose (`role_player` or `judge`), remain host-side, and are passed only to the
@@ -1429,6 +1458,30 @@ Codex agent adapters, Anthropic and OpenAI host completion providers, an explici
 environment-backed credential resolver, a directory input provider, and the
 local artifact store. Embedding hosts can replace this composition or use an
 external runtime without changing core lifecycle semantics.
+
+`run` constructs its composition once. It passes a CLI-owned resolver through
+the optional `DefaultCliCompositionOptions.credentialResolver` field, then uses
+`ForgeEngine.inspectEvalCredentials({plan, composition})` to collect normalized
+uses from the returned adapters, providers, and engine-bound setup actions.
+Each use retains its `reference` and `purpose`; runtime uses also have an
+`environmentName`. Inspection runs pure preflight while deferring source proof.
+The CLI expands bare-name grants over these selected uses and its known
+completion aliases, rejects conflicting source bindings across plans, and
+finalizes the resolver's immutable nonsecret table once. Lookup before
+finalization fails. The same composition then preflights and executes pending
+work. Validation constructs one composition per concrete runtime platform.
+
+Forwarding wrappers preserve this behavior by passing options to
+`createDefaultCliComposition`. A factory that replaces the resolver retains
+its own authorization and source-proof policy. `credentialBindings` supplies
+only immutable explicit-reference mappings at construction; factories needing
+discovered bare-name grants must use the resolver handle. Direct calls without
+the handle use `credentialBindings`. Custom engines without the optional
+inspection method support explicit-reference grants only.
+
+The public CLI configures Codex to receive `OPENAI_API_KEY`. The library's
+`createCodexAdapter` still defaults to reference `openai.api-key` and runtime
+variable `CODEX_API_KEY`; embedding hosts choose and authorize its source.
 
 ## Repository map
 

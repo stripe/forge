@@ -69,11 +69,11 @@ For the built-in CLI, you need:
 Export the required variables in your shell or credential manager and grant
 each one explicitly when running or resuming pending work. Exporting a variable
 or selecting an agent, provider, or plugin does not authorize access to secrets.
-`--credential-env NAME` authorizes all selected built-in consumers that need
-that variable: the coding agent, declared application or plugin credentials,
-and Ava/judge providers. One `--credential-env OPENAI_API_KEY` therefore covers
-Codex, Ava, and the judge when all use OpenAI. Grants do not forward undeclared
-variables or bind providers unused by the selected run.
+`--credential-env NAME` authorizes selected agent and setup declarations that
+request that runtime variable, including custom declarations, plus built-in
+Ava/judge providers that use it. One `--credential-env OPENAI_API_KEY` therefore
+covers Codex, Ava, and the judge when all use OpenAI. Grants do not forward
+undeclared variables or bind providers unused by the selected run.
 Use restricted, short-lived keys with appropriate account limits: the evaluated
 agent receives its credential and outbound network access. Keep secrets outside
 dataset and experiment files.
@@ -133,8 +133,9 @@ Their use remains subject to their providers' terms.
 ### Advanced credential bindings
 
 Use `--credential-env reference=HOST_VAR` to grant a single credential reference
-for narrower access or separate keys. For example, Codex and OpenAI Ava/judge
-models can use different exported variables:
+for narrower access or separate keys. The text before `=` always names a
+reference, even when it looks like an environment variable name. For example,
+Codex and OpenAI Ava/judge models can use different exported variables:
 
 ```sh
 npx --no-install forge run --experiment ./experiment.yaml \
@@ -200,8 +201,12 @@ neither grants nor secret values. Embedding hosts resolve the opaque reference
 
 If a selected agent or plugin already declares a runtime name, there is no need
 to repeat it in `forge/credentials`. Duplicate declarations for one runtime name
-can combine when their references are explicitly authorized to the same host
-variable; grants pointing to different host variables conflict.
+can combine when every reference is explicitly authorized to the same host
+variable, including declarations from custom setup actions. Different host
+variables conflict even if their values happen to match. Validation checks
+declarations and known aliases without reading secrets; custom references need
+nonsecret compatibility information from the embedding host when they differ.
+Successful validation does not establish that a future run has grants or values.
 
 ## Installation
 
@@ -349,7 +354,8 @@ Forge verifies completed artifacts before skipping them. Failed or partial
 evaluations remain completed; execution errors and missing or invalid artifacts
 are retried with fresh eval run IDs. Earlier attempts remain saved. Only one
 process may execute an experiment run at a time. Resume can also rebuild a
-missing or corrupt report without rerunning valid completed evals.
+missing or corrupt report without rerunning valid completed evals. When every
+eval is verified complete, resume needs no credential grants or secret values.
 
 Exit code 0 means execution completed and the report was saved, regardless of
 evaluation scores. Exit code 1 means execution errors remain or report generation
