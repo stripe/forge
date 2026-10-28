@@ -46,14 +46,17 @@ node dist/cli.js plan \
 ```
 
 Validation and planning verify the case inventory and experiment pin without
-Docker or credentials. To execute the evaluation, use Docker, an Anthropic key
-for Claude Code, and an OpenAI key for Ava and judging:
+Docker, credential grants, or secret values. To execute the evaluation, use
+Docker and explicitly grant an Anthropic key for Claude Code and an OpenAI key
+for Ava and judging:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
 OPENAI_API_KEY=your-openai-key \
 node dist/cli.js run \
   --experiment release/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env openai.completion-api-key=OPENAI_API_KEY \
   --output ./results
 ```
 

@@ -4,12 +4,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
+import { createCodexAdapter } from './agents/codex/index.ts';
 import {
   createDefaultCliComposition,
   runCli as invokeCli,
   type RunCliOptions,
 } from './cli.ts';
 import type { AgentAdapter } from './contracts/agent.ts';
+import type { CompletionProvider } from './contracts/completion.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
@@ -49,6 +51,39 @@ async function executeOffline(input: ExecuteEvalInput) {
       agents: new Map([[agent.adapter.id, agent.adapter]]),
     },
   });
+}
+
+function createCredentialExecution() {
+  const runtime = createFakeRuntimeAdapter();
+  return {
+    runtime,
+    async execute(input: ExecuteEvalInput) {
+      const selection = input.plan.selection.agent;
+      const builtin = input.composition.agents.get(selection.adapter)!;
+      const scripted = createScriptedAgentAdapter({
+        id: selection.adapter,
+        requirements: builtin.requirements(selection),
+      });
+      const agent: AgentAdapter = {
+        ...scripted.adapter,
+        ...(builtin.pluginInstaller === undefined
+          ? {}
+          : { pluginInstaller: builtin.pluginInstaller }),
+        async openSession(context) {
+          await context.runtime.commands.agent.run(['probe-agent']);
+          return scripted.adapter.openSession(context);
+        },
+      };
+      return defaultForgeEngine.executeEval({
+        ...input,
+        composition: {
+          ...input.composition,
+          runtime: runtime.adapter,
+          agents: new Map([[agent.id, agent]]),
+        },
+      });
+    },
+  };
 }
 
 afterEach(async () => {
@@ -1223,6 +1258,7 @@ describe('Forge CLI', () => {
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
+      credentialBindings: { 'anthropic.api-key': 'ANTHROPIC_API_KEY' },
       environment: { ANTHROPIC_API_KEY: 'test-api-key' },
     });
 
@@ -1260,11 +1296,59 @@ describe('Forge CLI', () => {
     );
   });
 
-  it('shares one OpenAI credential between host completions and the Codex agent', async () => {
+  it('does not authorize exported provider or Stripe secrets without explicit bindings', async () => {
+    const fixture = await createBenchmarkFixture();
+    let secretReads = 0;
+    const environment = Object.fromEntries(
+      [
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_AUTH_TOKEN',
+        'OPENAI_API_KEY',
+        'STRIPE_API_KEY',
+      ].map((name) => [name, 'ambient-secret']),
+    );
+    const composition = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      environment: new Proxy(environment, {
+        get(target, name, receiver) {
+          if (typeof name === 'string' && Object.hasOwn(target, name)) {
+            secretReads += 1;
+          }
+          return Reflect.get(target, name, receiver);
+        },
+      }),
+    });
+    for (const reference of [
+      'anthropic.api-key',
+      'anthropic.auth-token',
+      'anthropic.completion-api-key',
+      'anthropic.completion-auth-token',
+      'openai.api-key',
+      'openai.completion-api-key',
+      'env:STRIPE_API_KEY',
+    ]) {
+      await assert.rejects(
+        composition.credentialResolver.resolve(credentialReference(reference), {
+          runId: 'unbound',
+          purpose: 'test',
+          signal: new AbortController().signal,
+        }),
+        /No environment binding exists/,
+      );
+    }
+    assert.equal(secretReads, 0);
+  });
+
+  it('uses separate explicit grants for OpenAI host completions and the Codex agent', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
+      credentialBindings: {
+        'openai.api-key': 'OPENAI_API_KEY',
+        'openai.completion-api-key': 'OPENAI_API_KEY',
+      },
       environment: {
         OPENAI_API_KEY: 'shared-key',
         OPENAI_BASE_URL: 'https://gateway.example/v1',
@@ -1345,12 +1429,13 @@ describe('Forge CLI', () => {
     }
   });
 
-  it('binds the Codex agent credential to OPENAI_API_KEY by default', async () => {
+  it('delivers an explicitly bound Codex credential as OPENAI_API_KEY', async () => {
     const fixture = await createBenchmarkFixture();
     for (const compatible of [false, true]) {
       const composition = await createDefaultCliComposition({
         datasetRoot: fixture.datasetRoot,
         resultsRoot: path.join(fixture.root, 'results'),
+        credentialBindings: { 'openai.api-key': 'OPENAI_API_KEY' },
         environment: {
           OPENAI_API_KEY: 'codex-test-key',
           ...(compatible
@@ -1412,6 +1497,7 @@ describe('Forge CLI', () => {
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
+      credentialBindings: { 'anthropic.auth-token': 'ANTHROPIC_AUTH_TOKEN' },
       environment: {
         ANTHROPIC_API_KEY: 'direct-key-must-not-be-selected',
         ANTHROPIC_AUTH_TOKEN: 'gateway-token',
@@ -1469,6 +1555,361 @@ describe('Forge CLI', () => {
     );
   });
 
+  for (const variant of [
+    {
+      label: 'Codex',
+      agent: 'codex' as const,
+      name: 'OPENAI_API_KEY',
+      reference: 'openai.api-key',
+      completionReference: 'openai.completion-api-key',
+      environment: {},
+    },
+    {
+      label: 'Claude Code',
+      agent: 'claude-code' as const,
+      name: 'ANTHROPIC_API_KEY',
+      reference: 'anthropic.api-key',
+      completionReference: 'anthropic.completion-api-key',
+      environment: {},
+    },
+    {
+      label: 'Claude Code gateway',
+      agent: 'claude-code' as const,
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      reference: 'anthropic.auth-token',
+      completionReference: 'anthropic.completion-auth-token',
+      environment: {
+        ANTHROPIC_BASE_URL: 'https://gateway.example.test/anthropic',
+      },
+    },
+  ]) {
+    it(`validates duplicate ${variant.label} credential declarations without secrets and merges explicit same-source grants`, async () => {
+      const fixture = await createBenchmarkFixture({
+        agent: variant.agent,
+        caseSetup: [
+          { uses: 'forge/credentials', with: { env: [variant.name] } },
+          { uses: 'forge/command', with: { argv: ['probe-setup'] } },
+        ],
+      });
+      for (const command of ['validate', 'plan']) {
+        let stderr = '';
+        assert.equal(
+          await runCli([command, '--experiment', fixture.experimentPath], {
+            environment: variant.environment,
+            stdout: () => undefined,
+            stderr: (text) => {
+              stderr += text;
+            },
+          }),
+          0,
+          stderr,
+        );
+      }
+      for (const grants of [
+        [variant.name, 'UNDECLARED_TOKEN'],
+        [`${variant.reference}=SHARED_KEY`, `env:${variant.name}=SHARED_KEY`],
+      ]) {
+        const execution = createCredentialExecution();
+        let output = '';
+        const exitCode = await runCli(
+          [
+            'run',
+            '--experiment',
+            fixture.experimentPath,
+            ...grants.flatMap((grant) => ['--credential-env', grant]),
+          ],
+          {
+            environment: {
+              ...variant.environment,
+              [variant.name]: 'explicit-shared-key',
+              SHARED_KEY: 'explicit-shared-key',
+              UNDECLARED_TOKEN: 'must-not-be-forwarded',
+            },
+            stdout: (text) => {
+              output += text;
+            },
+            stderr: (text) => {
+              output += text;
+            },
+            execute: async (input) => {
+              await assert.rejects(
+                input.composition.credentialResolver.resolve(
+                  credentialReference(variant.completionReference),
+                  {
+                    runId: input.runId,
+                    purpose: 'judge',
+                    signal: input.signal ?? new AbortController().signal,
+                  },
+                ),
+                /No environment binding exists/,
+              );
+              return execution.execute(input);
+            },
+          },
+        );
+        assert.equal(exitCode, 0, output);
+        assert.equal(execution.runtime.runs.length, 1);
+        const run = execution.runtime.runs[0]!;
+        assert.deepEqual(run.input.environment.credentials, {
+          [variant.name]: {
+            value: 'explicit-shared-key',
+            scopes: ['agent'],
+          },
+        });
+        assert.deepEqual(
+          run.commands.map(({ argv, credentialEnvironmentNames }) => ({
+            argv,
+            credentialEnvironmentNames,
+          })),
+          [
+            { argv: ['probe-setup'], credentialEnvironmentNames: [] },
+            {
+              argv: ['probe-agent'],
+              credentialEnvironmentNames: [variant.name],
+            },
+          ],
+        );
+        assert.ok(!output.includes('explicit-shared-key'));
+      }
+    });
+
+    it(`keeps a ${variant.label} host-completion grant from authorizing the runtime`, async () => {
+      const fixture = await createBenchmarkFixture({ agent: variant.agent });
+      const execution = createCredentialExecution();
+      let output = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          `${variant.completionReference}=${variant.name}`,
+        ],
+        {
+          environment: {
+            ...variant.environment,
+            [variant.name]: 'host-completion-secret',
+          },
+          stdout: (text) => {
+            output += text;
+          },
+          stderr: (text) => {
+            output += text;
+          },
+          execute: async (input) => {
+            const provider = (
+              input.composition.completionProviders as ReadonlyMap<
+                string,
+                CompletionProvider
+              >
+            ).get(input.plan.selection.agent.provider)!;
+            const requirements = provider.requirements({
+              model: {
+                provider: provider.id,
+                model:
+                  provider.id === 'openai'
+                    ? 'gpt-6.1-sol'
+                    : 'claude-sonnet-4-6',
+              },
+              purpose: 'judge',
+            });
+            assert.deepEqual(
+              Object.values(requirements.credentials ?? {}).map(
+                ({ reference }) => reference,
+              ),
+              [variant.completionReference],
+            );
+            assert.equal(
+              await input.composition.credentialResolver.resolve(
+                credentialReference(variant.completionReference),
+                {
+                  runId: input.runId,
+                  purpose: 'judge',
+                  signal: input.signal ?? new AbortController().signal,
+                },
+              ),
+              'host-completion-secret',
+            );
+            return execution.execute(input);
+          },
+        },
+      );
+      assert.equal(exitCode, 1, output);
+      assert.equal(execution.runtime.runs.length, 0);
+      assert.ok(output.includes(`--credential-env ${variant.reference}=`));
+      assert.ok(!output.includes('host-completion-secret'));
+    });
+  }
+
+  it('rejects incomplete or different-source duplicate grants before reading secret values', async () => {
+    const fixture = await createBenchmarkFixture({
+      agent: 'codex',
+      caseSetup: [
+        { uses: 'forge/credentials', with: { env: ['OPENAI_API_KEY'] } },
+      ],
+    });
+    for (const grants of [
+      ['openai.api-key=AGENT_KEY'],
+      ['env:OPENAI_API_KEY=APPLICATION_KEY'],
+      ['openai.api-key=AGENT_KEY', 'env:OPENAI_API_KEY=APPLICATION_KEY'],
+    ]) {
+      const execution = createCredentialExecution();
+      let reads = 0;
+      let output = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          ...grants.flatMap((grant) => ['--credential-env', grant]),
+        ],
+        {
+          environment: {
+            get AGENT_KEY() {
+              reads += 1;
+              return 'same-secret-value';
+            },
+            get APPLICATION_KEY() {
+              reads += 1;
+              return 'same-secret-value';
+            },
+          },
+          stdout: (text) => {
+            output += text;
+          },
+          stderr: (text) => {
+            output += text;
+          },
+          execute: execution.execute,
+        },
+      );
+      assert.equal(exitCode, 1, output);
+      assert.equal(reads, 0);
+      assert.equal(execution.runtime.runs.length, 0);
+      assert.match(
+        output,
+        /OPENAI_API_KEY has conflicting credential references/,
+      );
+      assert.ok(output.includes('--credential-env OPENAI_API_KEY'));
+      assert.ok(!output.includes('same-secret-value'));
+    }
+  });
+
+  it('does not use an unselected agent alias to authorize an application credential', async () => {
+    const fixture = await createBenchmarkFixture({
+      agent: 'codex',
+      caseSetup: [
+        { uses: 'forge/credentials', with: { env: ['ANTHROPIC_API_KEY'] } },
+      ],
+    });
+    const execution = createCredentialExecution();
+    let stderr = '';
+    assert.equal(
+      await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'OPENAI_API_KEY',
+          '--credential-env',
+          'anthropic.api-key=ANTHROPIC_API_KEY',
+        ],
+        {
+          environment: {
+            OPENAI_API_KEY: 'codex-secret',
+            ANTHROPIC_API_KEY: 'application-secret',
+          },
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          execute: execution.execute,
+        },
+      ),
+      1,
+      stderr,
+    );
+    assert.equal(execution.runtime.runs.length, 0);
+    assert.ok(stderr.includes('--credential-env env:ANTHROPIC_API_KEY='));
+    assert.ok(!stderr.includes('application-secret'));
+    stderr = '';
+    assert.equal(
+      await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'OPENAI_API_KEY',
+          '--credential-env',
+          'ANTHROPIC_API_KEY',
+        ],
+        {
+          environment: {
+            OPENAI_API_KEY: 'codex-secret',
+            ANTHROPIC_API_KEY: 'application-secret',
+          },
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          execute: async (input) => {
+            await assert.rejects(
+              input.composition.credentialResolver.resolve(
+                credentialReference('anthropic.api-key'),
+                {
+                  runId: input.runId,
+                  purpose: 'agent',
+                  signal: input.signal ?? new AbortController().signal,
+                },
+              ),
+              /No environment binding exists/,
+            );
+            return execution.execute(input);
+          },
+        },
+      ),
+      0,
+      stderr,
+    );
+    assert.deepEqual(execution.runtime.runs[0]!.input.environment.credentials, {
+      OPENAI_API_KEY: { value: 'codex-secret', scopes: ['agent'] },
+      ANTHROPIC_API_KEY: { value: 'application-secret', scopes: ['agent'] },
+    });
+  });
+
+  it('preserves a custom resolver and the library Codex credential environment', async () => {
+    const fixture = await createBenchmarkFixture({ agent: 'codex' });
+    const execution = createCredentialExecution();
+    const resolved: string[] = [];
+    let stderr = '';
+    assert.equal(
+      await runCli(['run', '--experiment', fixture.experimentPath], {
+        environment: {},
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+        compositionFactory: async (options) => ({
+          ...(await createDefaultCliComposition(options)),
+          agents: new Map([['codex', createCodexAdapter()]]),
+          credentialResolver: createStaticCredentialResolver(
+            { 'openai.api-key': 'embedding-owned-key' },
+            { onResolve: (reference) => resolved.push(reference) },
+          ),
+        }),
+        execute: execution.execute,
+      }),
+      0,
+      stderr,
+    );
+    assert.deepEqual(resolved, ['openai.api-key']);
+    assert.deepEqual(execution.runtime.runs[0]!.input.environment.credentials, {
+      CODEX_API_KEY: { value: 'embedding-owned-key', scopes: ['agent'] },
+    });
+  });
+
   it('binds explicit credential references to host environment variables for run', async () => {
     const fixture = await createBenchmarkFixture();
     let resolved: string | undefined;
@@ -1507,7 +1948,7 @@ describe('Forge CLI', () => {
     assert.equal(resolved, 'mcp-secret');
   });
 
-  it('allows an explicit credential binding to override the CLI default', async () => {
+  it('binds an agent credential to an alternate host variable', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
@@ -1628,6 +2069,46 @@ describe('Forge CLI', () => {
         },
       ],
     );
+  });
+
+  it('requires an explicit grant even when the selected Stripe plugin secret is exported', async () => {
+    const fixture = await createBenchmarkFixture({
+      caseSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+    });
+    const execution = createCredentialExecution();
+    let output = '';
+    let stripeReads = 0;
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--credential-env',
+        'ANTHROPIC_API_KEY',
+      ],
+      {
+        environment: {
+          ANTHROPIC_API_KEY: 'selected-agent-secret',
+          get STRIPE_API_KEY() {
+            stripeReads += 1;
+            return 'ungranted-plugin-secret';
+          },
+        },
+        stdout: (text) => {
+          output += text;
+        },
+        stderr: (text) => {
+          output += text;
+        },
+        execute: execution.execute,
+      },
+    );
+    assert.equal(exitCode, 1, output);
+    assert.equal(stripeReads, 0);
+    assert.equal(execution.runtime.runs.length, 0);
+    assert.ok(output.includes('--credential-env env:STRIPE_API_KEY='));
+    assert.ok(!output.includes('ungranted-plugin-secret'));
+    assert.ok(!output.includes('selected-agent-secret'));
   });
 
   it('validates and plans case and treatment credentials without host bindings', async () => {
@@ -1820,6 +2301,7 @@ describe('Forge CLI', () => {
       const runtime = createFakeRuntimeAdapter();
       const agent = createScriptedAgentAdapter({ id: 'claude-code' });
       let failure: unknown;
+      let stderr = '';
 
       const exitCode = await runCli(
         [
@@ -1832,6 +2314,9 @@ describe('Forge CLI', () => {
         ],
         {
           stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
           environment: { API_TOKEN: 'same-name-does-not-grant-access' },
           execute: async (input) => {
             try {
@@ -1862,6 +2347,14 @@ describe('Forge CLI', () => {
           : /No environment binding exists.*env:API_TOKEN/,
       );
       assert.equal(runtime.runs.length, 0);
+      assert.ok(
+        stderr.includes(
+          explicitBinding
+            ? 'Set EVAL_API_TOKEN'
+            : '--credential-env env:API_TOKEN=',
+        ),
+      );
+      assert.ok(!stderr.includes('same-name-does-not-grant-access'));
     });
   }
 
@@ -1892,29 +2385,40 @@ describe('Forge CLI', () => {
 
   it('rejects conflicting credential mappings without echoing host variable names', async () => {
     const fixture = await createBenchmarkFixture();
-    let stderr = '';
-
-    const exitCode = await runCli(
-      [
-        'run',
-        '--experiment',
-        fixture.experimentPath,
-        '--credential-env',
-        'stripe.token=FIRST_SECRET_NAME',
-        '--credential-env',
-        'stripe.token=SECOND_SECRET_NAME',
-      ],
+    for (const { reference, grants } of [
       {
-        stderr: (text) => {
-          stderr += text;
-        },
+        reference: 'stripe.token',
+        grants: [
+          'stripe.token=FIRST_SECRET_NAME',
+          'stripe.token=SECOND_SECRET_NAME',
+        ],
       },
-    );
+      {
+        reference: 'anthropic.api-key',
+        grants: ['ANTHROPIC_API_KEY', 'anthropic.api-key=SECOND_SECRET_NAME'],
+      },
+    ]) {
+      let stderr = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          ...grants.flatMap((grant) => ['--credential-env', grant]),
+        ],
+        {
+          environment: {},
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      );
 
-    assert.equal(exitCode, 2);
-    assert.ok(stderr.includes('stripe.token'));
-    assert.ok(!stderr.includes('FIRST_SECRET_NAME'));
-    assert.ok(!stderr.includes('SECOND_SECRET_NAME'));
+      assert.equal(exitCode, 2);
+      assert.ok(stderr.includes(reference));
+      assert.ok(!stderr.includes('FIRST_SECRET_NAME'));
+      assert.ok(!stderr.includes('SECOND_SECRET_NAME'));
+    }
   });
 
   it('returns a usage exit code when a selection is ambiguous', async () => {
@@ -2001,6 +2505,7 @@ async function createGroupedBenchmarkFixture() {
 
 async function createBenchmarkFixture(
   options: {
+    agent?: 'claude-code' | 'codex';
     repetitions?: number;
     includeUnselectedCase?: boolean;
     caseSetup?: readonly SetupStepV1[];
@@ -2095,9 +2600,9 @@ matrix:
   cases: [cases/example.case.yaml]
   treatments: [baseline]
   agents:
-    - adapter: claude-code
-      provider: anthropic
-      model: claude-sonnet
+    - adapter: ${options.agent ?? 'claude-code'}
+      provider: ${options.agent === 'codex' ? 'openai' : 'anthropic'}
+      model: ${options.agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet'}
   repetitions: ${options.repetitions ?? 1}
   retries: 0
 limits:

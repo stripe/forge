@@ -519,17 +519,24 @@ host environment is never copied wholesale.
 
 `forge/credentials` lets a case or treatment declare additional agent credentials
 by runtime environment name. Each name maps to the opaque reference `env:NAME`;
-the declaration grants no automatic host lookup. The CLI requires an explicit
-`--credential-env` binding unless a selected integration already supplies one.
-Embedding hosts authorize and resolve references through their credential
-resolver. Missing bindings or values fail before runtime allocation. See
+the declaration grants no automatic host lookup. The public CLI requires an
+explicit grant for every credential, including built-in agent and plugin
+requirements. `--credential-env NAME` authorizes a selected runtime requirement
+named `NAME` to read the same host variable; it cannot forward undeclared names.
+`--credential-env reference=HOST_VAR` binds a reference to another host variable.
+Repeated runtime names can combine when their references are explicitly
+authorized to the same host source; different sources conflict. Embedding hosts
+authorize and resolve opaque references through their credential resolver.
+Missing grants or values fail before runtime allocation; validation and planning
+require neither. See
 [additional API credentials](../README.md#additional-api-credentials) for the
 case, treatment, and launch configuration.
 
 Completion-provider credentials use a separate path. They are resolved per
 purpose (`role_player` or `judge`), remain host-side, and are passed only to the
-selected provider. An optional provider `preflight` runs here, after resolution
-but before runtime allocation.
+selected provider. The public CLI requires a separate reference grant for host
+completions even when the coding agent reads the same host variable. An optional
+provider `preflight` runs here, after resolution but before runtime allocation.
 
 All resolved secret values become inputs to the output-safety boundary. Forge
 redacts them from host-completion prompts and responses, normalized evidence,

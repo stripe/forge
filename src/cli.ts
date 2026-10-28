@@ -6,12 +6,20 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import type { AgentAdapter } from './contracts/agent.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
-import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
+import {
+  createEnvironmentCredentialResolver,
+  normalizeEnvironmentSpecification,
+} from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
-import { type executeEval, FORGE_VERSION } from './execution/index.ts';
+import {
+  type executeEval,
+  FORGE_VERSION,
+  ForgeExecutionError,
+} from './execution/index.ts';
 import {
   createExperimentCliOptions,
   EXPERIMENT_CLI_OPTIONS,
@@ -25,9 +33,9 @@ import {
   getMatrixGroups,
   type LoadedDatasetV1,
   parseRunSelection,
+  type ResolvedRunPlanV1,
   type RunSelection,
 } from './model/index.ts';
-import { pluginMcpEnvironmentBindings } from './model/pluginCredentials.ts';
 import {
   expandExperiment,
   ManifestCaseFileError,
@@ -50,9 +58,11 @@ const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
 const ANTHROPIC_API_KEY_ENVIRONMENT = 'ANTHROPIC_API_KEY';
 const ANTHROPIC_AUTH_TOKEN_REFERENCE = 'anthropic.auth-token';
 const ANTHROPIC_AUTH_TOKEN_ENVIRONMENT = 'ANTHROPIC_AUTH_TOKEN';
+const ANTHROPIC_COMPLETION_API_KEY_REFERENCE = 'anthropic.completion-api-key';
+const ANTHROPIC_COMPLETION_AUTH_TOKEN_REFERENCE =
+  'anthropic.completion-auth-token';
 const ANTHROPIC_BASE_URL_ENVIRONMENT = 'ANTHROPIC_BASE_URL';
 const OPENAI_API_KEY_REFERENCE = 'openai.api-key';
-const OPENAI_COMPLETION_API_KEY_REFERENCE = 'openai.completion-api-key';
 const OPENAI_API_KEY_ENVIRONMENT = 'OPENAI_API_KEY';
 const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
 
@@ -107,8 +117,10 @@ Run options:
   --run-id <id>        Use an explicit eval ID when exactly one combination is selected
   --resume <id>        Resume this experiment run; an ID is required
   --jobs <count>       Maximum simultaneous evals (default: 1)
+  --credential-env <environment-name>
+                        Authorize declared runtime credentials from this host variable
   --credential-env <reference>=<environment-name>
-                        Bind an opaque credential reference for this run
+                        Bind one credential reference (including host completions)
 
 Validation options:
   --host                Build and inspect the selected Docker runtime image
@@ -153,12 +165,31 @@ export interface RunCliOptions {
 export async function createDefaultCliComposition(
   options: DefaultCliCompositionOptions,
 ): Promise<ForgeComposition> {
+  return createCliComposition(options, false);
+}
+
+async function createCliComposition(
+  options: DefaultCliCompositionOptions,
+  validationOnly: boolean,
+): Promise<ForgeComposition> {
   if (options.runtime && 'config' in options.runtime) {
     throw new CliUsageError(
       'External runtimes require a host-supplied compositionFactory.',
     );
   }
   const environment = options.environment ?? process.env;
+  const bindings = Object.freeze({ ...options.credentialBindings });
+  // Only this public host understands its built-in aliases. The engine and
+  // custom resolvers continue treating credential references as opaque.
+  const runtimeReference = (reference: string, name: string): string => {
+    const applicationReference = `env:${name}`;
+    return validationOnly ||
+      (Object.hasOwn(bindings, reference) &&
+        Object.hasOwn(bindings, applicationReference) &&
+        bindings[reference] === bindings[applicationReference])
+      ? applicationReference
+      : reference;
+  };
   const baseUrl = environment[ANTHROPIC_BASE_URL_ENVIRONMENT];
   const gatewaySelected = baseUrl !== undefined;
   const credential = gatewaySelected
@@ -168,12 +199,14 @@ export async function createDefaultCliComposition(
     ? ANTHROPIC_AUTH_TOKEN_ENVIRONMENT
     : ANTHROPIC_API_KEY_ENVIRONMENT;
   const claude = createClaudeCodeAdapter({
-    credential,
+    credential: runtimeReference(credential, credentialEnvironmentName),
     credentialEnvironmentName,
     ...(baseUrl === undefined ? {} : { baseUrl }),
   });
   const completionProvider = createAnthropicCompletionProvider({
-    credential,
+    credential: gatewaySelected
+      ? ANTHROPIC_COMPLETION_AUTH_TOKEN_REFERENCE
+      : ANTHROPIC_COMPLETION_API_KEY_REFERENCE,
     auth: gatewaySelected ? 'bearer' : 'api-key',
     ...(baseUrl === undefined ? {} : { baseUrl }),
   });
@@ -182,20 +215,14 @@ export async function createDefaultCliComposition(
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const codex = createCodexAdapter({
-    credential: OPENAI_API_KEY_REFERENCE,
+    credential: runtimeReference(
+      OPENAI_API_KEY_REFERENCE,
+      OPENAI_API_KEY_ENVIRONMENT,
+    ),
     credentialEnvironmentName: OPENAI_API_KEY_ENVIRONMENT,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
-  const bindings = new Map<string, string>([
-    [credential, credentialEnvironmentName],
-    [OPENAI_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
-    [OPENAI_COMPLETION_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
-    ...Object.entries(options.credentialBindings ?? {}),
-  ]);
-  const credentialResolver = createEnvironmentCredentialResolver({
-    bindings: Object.fromEntries(bindings),
-    environment,
-  });
+  const credentialResolver = createCliCredentialResolver(bindings, environment);
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
@@ -295,7 +322,9 @@ export async function runCli(
     if (command === 'validate') {
       const selections = expandExperiment(experiment, dataset);
       const compositionFactory =
-        options.compositionFactory ?? createDefaultCliComposition;
+        options.compositionFactory ??
+        ((input: DefaultCliCompositionOptions) =>
+          createCliComposition(input, true));
       let hostSelection:
         | {
             docker_platform: RuntimePlatform;
@@ -510,27 +539,47 @@ async function runPublicExperiment(
           ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
         }),
       );
-      const credentialBindings = pluginMcpEnvironmentBindings(
-        plans,
-        parseCredentialEnvironmentBindings(values['credential-env']),
+      const grants = parseCredentialEnvironmentBindings(
+        values['credential-env'],
       );
-      const composition = await (
-        options.compositionFactory ?? createDefaultCliComposition
-      )({
+      const compositionOptions = {
         datasetRoot: dataset.root,
         runtime: plans[0]!.runtime,
         resultsRoot: root,
         ...(options.environment === undefined
           ? {}
           : { environment: options.environment }),
-        ...(Object.keys(credentialBindings).length === 0
+        ...(Object.keys(grants.references).length === 0
           ? {}
-          : { credentialBindings }),
-      });
+          : { credentialBindings: grants.references }),
+      };
+      const factory = options.compositionFactory ?? createDefaultCliComposition;
+      let composition = await factory(compositionOptions);
+      if (grants.environmentNames.length > 0) {
+        const credentialBindings = expandCredentialEnvironmentBindings(
+          grants,
+          plans,
+          composition.agents,
+        );
+        composition = await factory({
+          ...compositionOptions,
+          credentialBindings,
+        });
+      }
+      const execute =
+        options.execute ?? ((request) => engine.executeEval(request));
       return {
         plans,
         composition,
-        execute: options.execute ?? ((request) => engine.executeEval(request)),
+        execute: async (request) => {
+          try {
+            return await execute(request);
+          } catch (error) {
+            const diagnostic = credentialDiagnostic(error);
+            if (diagnostic !== undefined) stderr(`forge: ${diagnostic}\n`);
+            throw error;
+          }
+        },
       };
     },
   });
@@ -647,12 +696,22 @@ function assertAllowedOptions(
   }
 }
 
+interface CredentialEnvironmentGrants {
+  readonly references: Readonly<Record<string, string>>;
+  readonly environmentNames: readonly string[];
+}
+
 function parseCredentialEnvironmentBindings(
   values: readonly string[] | undefined,
-): Readonly<Record<string, string>> {
+): CredentialEnvironmentGrants {
   const bindings = new Map<string, string>();
+  const environmentNames = new Set<string>();
   for (const value of values ?? []) {
     const separator = value.indexOf('=');
+    if (separator === -1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+      environmentNames.add(value);
+      continue;
+    }
     const reference = separator < 1 ? '' : value.slice(0, separator);
     const environmentName = separator < 0 ? '' : value.slice(separator + 1);
     if (
@@ -662,7 +721,7 @@ function parseCredentialEnvironmentBindings(
       !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName)
     ) {
       throw new CliUsageError(
-        '--credential-env must be an opaque reference followed by a valid environment variable name.',
+        '--credential-env must be NAME or an opaque reference followed by =NAME, where NAME is a valid environment variable name.',
       );
     }
     const previous = bindings.get(reference);
@@ -673,7 +732,100 @@ function parseCredentialEnvironmentBindings(
     }
     bindings.set(reference, environmentName);
   }
+  return Object.freeze({
+    references: Object.freeze(Object.fromEntries(bindings)),
+    environmentNames: Object.freeze([...environmentNames]),
+  });
+}
+
+function expandCredentialEnvironmentBindings(
+  grants: CredentialEnvironmentGrants,
+  plans: readonly ResolvedRunPlanV1[],
+  agents: ReadonlyMap<string, AgentAdapter>,
+): Readonly<Record<string, string>> {
+  const bindings = new Map(Object.entries(grants.references));
+  const bind = (reference: string, name: string): void => {
+    const previous = bindings.get(reference);
+    if (previous !== undefined && previous !== name) {
+      throw new CliUsageError(
+        `Credential reference ${JSON.stringify(reference)} has conflicting environment bindings.`,
+      );
+    }
+    bindings.set(reference, name);
+  };
+  // An unused grant does not inject a variable: runtime resolution still uses
+  // only declarations in each selected plan. Never expand completion aliases.
+  for (const name of grants.environmentNames) bind(`env:${name}`, name);
+  for (const plan of plans) {
+    const agent = agents.get(plan.agent.adapter);
+    if (agent === undefined) continue; // Engine preflight diagnoses missing adapters.
+    const requirements = normalizeEnvironmentSpecification(
+      agent.requirements(plan.agent).environment,
+    );
+    for (const name of grants.environmentNames) {
+      if (Object.hasOwn(requirements.credentials, name)) {
+        bind(requirements.credentials[name]!.reference, name);
+      }
+    }
+  }
   return Object.freeze(Object.fromEntries(bindings));
+}
+
+class CliCredentialError extends Error {}
+
+function createCliCredentialResolver(
+  bindings: Readonly<Record<string, string>>,
+  environment: Readonly<Record<string, string | undefined>>,
+) {
+  const resolver = createEnvironmentCredentialResolver({
+    bindings,
+    environment,
+  });
+  return {
+    async resolve(...args: Parameters<typeof resolver.resolve>) {
+      const [reference, context] = args;
+      context.signal.throwIfAborted();
+      if (!Object.hasOwn(bindings, reference)) {
+        throw new CliCredentialError(
+          `No environment binding exists for credential reference ${JSON.stringify(reference)}. Add --credential-env ${reference}=HOST_VARIABLE.`,
+        );
+      }
+      try {
+        return await resolver.resolve(...args);
+      } catch (error) {
+        context.signal.throwIfAborted();
+        // The environment resolver never includes values in its diagnostics.
+        throw new CliCredentialError(
+          `Set ${bindings[reference]}: no value is available for credential reference ${JSON.stringify(reference)}.`,
+          { cause: error },
+        );
+      }
+    },
+  };
+}
+
+function credentialDiagnostic(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  while (error instanceof Error && !seen.has(error)) {
+    seen.add(error);
+    if (error instanceof CliCredentialError) return error.message;
+    if (
+      error instanceof ForgeExecutionError &&
+      error.code === 'invalid_plan' &&
+      error.phase === 'preflight' &&
+      error.cause instanceof TypeError
+    ) {
+      const conflict =
+        /^Environment ([A-Za-z_][A-Za-z0-9_]*) has conflicting credential references\.$/.exec(
+          error.cause.message,
+        );
+      if (conflict !== null) {
+        return `Environment ${conflict[1]} has conflicting credential references. Authorize every declaration with the same host source, for example --credential-env ${conflict[1]}.`;
+      }
+    }
+    error = error.cause;
+  }
+  return undefined;
 }
 
 function isCommand(
@@ -703,6 +855,8 @@ function isUsageError(error: unknown): boolean {
 }
 
 function errorMessage(error: unknown): string {
+  const diagnostic = credentialDiagnostic(error);
+  if (diagnostic !== undefined) return diagnostic;
   if (error instanceof Error && error.message) return error.message;
   return 'Unknown failure.';
 }
