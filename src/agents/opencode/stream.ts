@@ -161,6 +161,7 @@ function openCodeUsage(value: unknown): AgentTokenUsage {
       cache.write === undefined ? 0 : cache.write,
     ),
     cached_input_tokens: sumObservedTokens(cache.read),
+    cache_write_input_tokens: sumObservedTokens(cache.write),
     output_tokens: sumObservedTokens(tokens.output, tokens.reasoning),
     reasoning_tokens: sumObservedTokens(tokens.reasoning),
   };

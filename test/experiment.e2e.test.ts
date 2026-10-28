@@ -229,6 +229,7 @@ describe('resumable CLI experiment runs', () => {
       const expected = {
         input_tokens: kind === 'opencode' ? 32 : 180,
         cached_input_tokens: kind === 'opencode' ? 12 : 60,
+        cache_write_input_tokens: kind === 'opencode' ? 0 : null,
         output_tokens: kind === 'opencode' ? 12 : 35,
         reasoning_tokens: kind === 'opencode' ? 4 : null,
       };

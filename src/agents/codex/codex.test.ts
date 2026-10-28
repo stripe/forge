@@ -594,22 +594,30 @@ http_headers={"X-Wrong"="synthetic-secret"}
 
 it('converts cumulative snapshots to invocation deltas and recovers after resets or missing counters', async () => {
   const snapshots = [
-    { input_tokens: 100, cached_input_tokens: 40, output_tokens: 20 },
+    {
+      input_tokens: 100,
+      cached_input_tokens: 40,
+      cache_write_input_tokens: 10,
+      output_tokens: 20,
+    },
     {
       input_tokens: 180,
       cached_input_tokens: 60,
+      cache_write_input_tokens: 25,
       output_tokens: 35,
       reasoning_output_tokens: 9,
     },
     {
       input_tokens: 10,
       cached_input_tokens: 2,
+      cache_write_input_tokens: 1,
       output_tokens: 3,
       reasoning_output_tokens: 1,
     },
     {
       input_tokens: 30,
       cached_input_tokens: 8,
+      cache_write_input_tokens: 4,
       output_tokens: 10,
       reasoning_output_tokens: 3,
     },
@@ -634,24 +642,28 @@ it('converts cumulative snapshots to invocation deltas and recovers after resets
     {
       input_tokens: 100,
       cached_input_tokens: 40,
+      cache_write_input_tokens: 10,
       output_tokens: 20,
       reasoning_tokens: null,
     },
     {
       input_tokens: 80,
       cached_input_tokens: 20,
+      cache_write_input_tokens: 15,
       output_tokens: 15,
       reasoning_tokens: null,
     },
     {
       input_tokens: null,
       cached_input_tokens: null,
+      cache_write_input_tokens: null,
       output_tokens: null,
       reasoning_tokens: null,
     },
     {
       input_tokens: 20,
       cached_input_tokens: 6,
+      cache_write_input_tokens: 3,
       output_tokens: 7,
       reasoning_tokens: 2,
     },

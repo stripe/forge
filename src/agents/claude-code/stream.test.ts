@@ -157,6 +157,7 @@ it('uses terminal invocation usage once, includes cache reads and writes in inpu
   assert.deepEqual(parsed.usage, {
     input_tokens: 20,
     cached_input_tokens: 8,
+    cache_write_input_tokens: 2,
     output_tokens: 4,
     reasoning_tokens: null,
   });
@@ -167,6 +168,7 @@ it('uses terminal invocation usage once, includes cache reads and writes in inpu
     {
       input_tokens: null,
       cached_input_tokens: null,
+      cache_write_input_tokens: null,
       output_tokens: null,
       reasoning_tokens: null,
     },

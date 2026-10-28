@@ -731,7 +731,12 @@ change the driver ledger.
 
 `AgentTurn.usage` optionally supplies `AgentTokenUsage`: strict nonnegative safe
 integer or null counters named `input_tokens`, `cached_input_tokens`,
-`output_tokens`, and `reasoning_tokens`. Input includes cache reads and writes;
+`output_tokens`, and `reasoning_tokens`, plus optional nullable
+`cache_write_input_tokens`. Claude Code also preserves optional nullable
+`cache_write_5m_input_tokens` and `cache_write_1h_input_tokens` from native
+`usage.cache_creation`. Absent TTL breakdowns remain absent; a missing counter
+in a contributing turn makes an aggregated breakdown unknown. Older results
+may omit all cache-write fields. Input includes cache reads and writes;
 reasoning is a subset of output. Codex's stream parser returns cumulative thread
 snapshots. Its agent session subtracts the prior snapshot to report each invocation;
 a new thread starts from zero. An unknown counter or baseline, or a counter reset,

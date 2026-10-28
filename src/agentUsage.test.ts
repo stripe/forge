@@ -71,3 +71,32 @@ it('degrades untrusted usage and unsafe native sums without weakening the saved 
   assert.equal(sumObservedTokens(Number.MAX_SAFE_INTEGER, 1), null);
   assert.equal(sumObservedTokens(1, 2), 3);
 });
+
+it('accepts older usage without writes and rejects invalid or unknown write fields', () => {
+  const old = {
+    input_tokens: 10,
+    cached_input_tokens: 8,
+    output_tokens: 4,
+    reasoning_tokens: null,
+  };
+  assert.deepEqual(agentTokenUsageSchema.parse(old), old);
+  for (const key of [
+    'cache_write_input_tokens',
+    'cache_write_5m_input_tokens',
+    'cache_write_1h_input_tokens',
+  ]) {
+    assert.equal(
+      agentTokenUsageSchema.safeParse({ ...old, [key]: -1 }).success,
+      false,
+    );
+    assert.equal(
+      agentTokenUsageSchema.safeParse({ ...old, [key]: null }).success,
+      true,
+    );
+  }
+  assert.equal(
+    sumAgentTokenUsage([{ ...old, cache_write_input_tokens: 2 }, old])!
+      .cache_write_input_tokens,
+    null,
+  );
+});
