@@ -191,9 +191,7 @@ export function fixtureOpenCodeRuntime(runtime, forge, mcp) {
             (entry) => entry.id === forge.OPENCODE_STATE_ID,
           ).containerPath;
           const config = mergeStripeOpenCodeConfiguration(
-            Buffer.from(
-              await prepared.workspace.readFile('opencode.json'),
-            ).toString(),
+            input.environment.variables.OPENCODE_CONFIG_CONTENT,
             Buffer.from(await state.readFile(PLUGIN_CONFIG_PATH)).toString(),
             directory,
           );

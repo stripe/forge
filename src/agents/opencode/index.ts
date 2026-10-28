@@ -10,7 +10,6 @@ import {
 import type { AgentSelectionV1 } from '../../model/types.ts';
 import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.ts';
 import { FORGE_VERSION } from '../../version.ts';
-import { readOpenCodeConfiguration } from './config.ts';
 import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
@@ -80,6 +79,8 @@ export function createOpenCodeAdapter(
       );
     if (!selection.model || /[\u0000-\u001f\u007f]/.test(selection.model))
       throw new TypeError('OpenCode requires an explicit model.');
+    if (selection.model_profile === undefined)
+      throw new TypeError('OpenCode requires an explicit model_profile.');
     const model = `forge/${selection.model}`;
     return {
       executables: [executable, 'node'],
@@ -108,6 +109,12 @@ export function createOpenCodeAdapter(
               forge: {
                 npm: '@ai-sdk/openai-compatible',
                 name: 'Forge',
+                models: {
+                  [selection.model]: {
+                    ...selection.model_profile,
+                    tool_call: true,
+                  },
+                },
                 env: ['OPENCODE_API_KEY'],
                 options: { baseURL: baseUrl, apiKey: '{env:OPENCODE_API_KEY}' },
               },
@@ -154,15 +161,12 @@ export function createOpenCodeAdapter(
         );
     },
     async openSession(context): Promise<AgentSession> {
-      requirements(context.selection);
+      const required = requirements(context.selection);
       assertOpenCodeRuntimeLayout(layout, context.runtime.paths);
       const state = context.runtime.stateDirectories.get(OPENCODE_STATE_ID);
       if (!state)
         throw new TypeError('OpenCode run-owned state is unavailable.');
-      let config = await readOpenCodeConfiguration(
-        context.runtime.workspace,
-        context.selection.model,
-      );
+      let config = required.environment.variables!.OPENCODE_CONFIG_CONTENT!;
       if (context.plan.setup.some((step) => step.uses === 'forge/plugin')) {
         config = mergeStripeOpenCodeConfiguration(
           config,

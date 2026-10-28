@@ -335,28 +335,28 @@ OpenCode support is experimental. Select `adapter: opencode`,
 `provider: openai-compatible`, and the exact gateway model alias in your
 experiment matrix. Embedded slashes in the model name are preserved.
 
-Supply `opencode.json` with ordinary case or treatment setup. Its
-`provider.forge.models` entry must match the experiment's `model`, with
-explicit limits and capabilities. For example, a treatment for an endpoint
-that exposes `gateway-code` could contain:
+Declare the model's actual limits and capabilities once on the agent selection,
+so every treatment uses the same definition:
 
 ```yaml
-setup:
-  - uses: forge/write
-    with:
-      target: opencode.json
-      source:
-        content: |
-          {"provider":{"forge":{"models":{"gateway-code":{
-            "limit":{"context":32000,"output":4000},
-            "reasoning":false,"temperature":true,
-            "attachment":false,"tool_call":true
-          }}}}}
+matrix:
+  agents:
+    - adapter: opencode
+      provider: openai-compatible
+      model: gateway-code
+      model_profile:
+        limit: { context: 32000, output: 4000 }
+        reasoning: false
+        temperature: true
+        attachment: false
 ```
 
-Use the model's actual limits and capabilities. The adapter requires tool
-support and controls API routing and credentials separately from this authored
-configuration. Keep keys and endpoints out of the setup file:
+`model_profile` is required for OpenCode. Limits must be positive safe integers,
+with output no greater than context; all three capabilities are explicit
+booleans. Unknown fields are rejected. Claude Code and Codex reject this field.
+The adapter sets `tool_call: true`, so the model must support tools. A workspace
+`opencode.json` is ignored. API routing and credentials stay outside the
+experiment:
 
 ```sh
 export OPENCODE_BASE_URL=https://gateway.example.com/v1
@@ -367,13 +367,12 @@ npx --no-install forge run --experiment ./my-eval/experiment.yaml --agent openco
   --credential-env OPENAI_API_KEY
 ```
 
-For a plugin comparison, use two named treatments, `no-plugin` and
-`stripe-plugin`, with the same model configuration above in each. Add
-`uses: forge/plugin` with `with: {plugin: stripe}` only to `stripe-plugin`.
-If both arms need Stripe account access, declare `forge/credentials` with
-`env: [STRIPE_API_KEY]` in both and pass
-`--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`. Keep shared treatment
-setup out of the reserved `baseline`, which requires an empty setup list.
+For a plugin comparison, select `baseline` and `stripe-plugin` in the matrix.
+Keep `baseline.setup: []`; add `uses: forge/plugin` with
+`with: {plugin: stripe}` only to `stripe-plugin`. Both use the model profile
+above. If both arms need Stripe account access, declare `forge/credentials`
+with `env: [STRIPE_API_KEY]` in case setup and pass
+`--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`.
 
 OpenCode loads skills and MCP from the same Claude-format Stripe plugin used
 by Claude Code and Codex. It does not load Claude-specific hooks, commands, or

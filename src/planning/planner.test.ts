@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 
 import { sha256Digest } from '../model/hashes.ts';
 import { getMatrixGroups } from '../model/matrix.ts';
@@ -147,6 +148,55 @@ describe('experiment expansion and run planning', () => {
     assert.throws(() => expandExperiment(loaded.experiment, loaded.dataset), {
       code: 'invalid_loaded_dataset',
     });
+  });
+
+  it('retains frozen model profiles across baseline and plugin plans and distinguishes profiles', () => {
+    const experiment = experimentConfig();
+    const profile = structuredClone(OPEN_CODE_MODEL_PROFILE);
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: profile,
+    };
+    experiment.treatments = {
+      baseline: { setup: [] },
+      'stripe-plugin': {
+        setup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+      },
+    };
+    experiment.matrix = {
+      cases: [CASE_A_PATH],
+      treatments: ['baseline', 'stripe-plugin'],
+      agents: [
+        agent,
+        { ...agent, model_profile: { ...profile, reasoning: true } },
+      ],
+      repetitions: 1,
+      retries: 0,
+    };
+    const loaded = inputs({ experiment });
+    const selections = expandExperiment(experiment, loaded.dataset);
+    const plans = selections.map((selection) =>
+      resolveRunPlan({ ...loaded, selection }),
+    );
+    assert.equal(plans.length, 4);
+    assert.deepEqual(plans[0]!.agent, plans[2]!.agent);
+    assert.deepEqual(plans[0]!.agent.model_profile, OPEN_CODE_MODEL_PROFILE);
+    assert.notEqual(
+      resolvedRunPlanSha256(plans[0]!),
+      resolvedRunPlanSha256(plans[1]!),
+    );
+    assert.notEqual(plans[0]!.agent.model_profile, profile);
+    assert.ok(Object.isFrozen(plans[0]!.agent.model_profile!.limit));
+    assert.deepEqual(plans[0]!.agent, plans[0]!.selection.agent);
+    experiment.matrix.agents.pop();
+    assert.throws(
+      () => resolveRunPlan({ ...loaded, selection: selections[1]! }),
+      /not in the benchmark matrix/,
+    );
+    profile.limit.context = 64000;
+    assert.equal(plans[0]!.agent.model_profile!.limit.context, 32000);
   });
 
   it('records Codex hook trust explicitly and separates policies in selection and plan identity', () => {

@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'vitest';
 import {
-  OPEN_CODE_CONFIG,
   OPEN_CODE_MODEL,
+  OPEN_CODE_MODEL_PROFILE,
   OPEN_CODE_SESSION,
   openCodeExport,
   openCodeStream,
@@ -32,6 +32,7 @@ const selection = {
   adapter: 'opencode',
   provider: 'openai-compatible',
   model: OPEN_CODE_MODEL,
+  model_profile: OPEN_CODE_MODEL_PROFILE,
 };
 const result = (stdout: string, exitCode = 0): CommandResult => ({
   stdout,
@@ -44,15 +45,12 @@ async function fixture(
     argv: readonly string[],
     options: CommandOptions,
   ) => Promise<CommandResult>,
-  config: unknown = OPEN_CODE_CONFIG,
 ) {
   const adapter = createOpenCodeAdapter({
     baseUrl: 'https://gateway.example/v1',
   });
   const state = createMemoryWorkspace();
-  const workspace = createMemoryWorkspace({
-    'opencode.json': JSON.stringify(config),
-  });
+  const workspace = createMemoryWorkspace();
   const calls: { argv: readonly string[]; options: CommandOptions }[] = [];
   const plan = createTestResolvedRunPlan({ agent: selection });
   const runtime = {
@@ -375,33 +373,84 @@ describe('OpenCode adapter', () => {
       );
     }
   });
-  it('requires explicit authored model limits and capabilities before starting a session', async () => {
-    for (const config of [
-      {},
-      {
-        provider: {
-          forge: {
-            models: {
-              [OPEN_CODE_MODEL]: { limit: { context: 32000, output: 4000 } },
+  it('requires a model profile during pure capability preflight', () => {
+    const { model_profile: _, ...missing } = selection;
+    const adapter = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+    });
+    assert.throws(() => adapter.requirements(missing), /model_profile/);
+    assert.throws(() => adapter.evidenceIdentity(missing), /model_profile/);
+  });
+  it('ignores workspace opencode.json and writes the same model for baseline and Stripe plugin arms', async () => {
+    const definitions: unknown[] = [];
+    for (const treatment of ['baseline', 'stripe-plugin']) {
+      const test = await fixture();
+      await test.context.runtime.workspace.writeFile(
+        'opencode.json',
+        Buffer.from(
+          JSON.stringify({
+            model: 'other/model',
+            provider: {
+              forge: {
+                models: {
+                  [OPEN_CODE_MODEL]: { limit: { context: 1, output: 1 } },
+                },
+              },
             },
-          },
-        },
-      },
-      {
-        provider: {
-          forge: {
-            ...OPEN_CODE_CONFIG.provider.forge,
-            options: { baseURL: 'https://other' },
-          },
-        },
-      },
-    ]) {
-      const test = await fixture(undefined, config);
-      await assert.rejects(
-        test.adapter.openSession(test.context),
-        /opencode.json/,
+            mcp: { stripe: { enabled: false } },
+            skills: { paths: ['./ignored'] },
+            agent: { build: { model: 'other/model' } },
+          }),
+        ),
       );
-      assert.equal(test.calls.length, 0);
+      if (treatment === 'stripe-plugin') {
+        await test.state.mutable.writeFile(
+          PLUGIN_CONFIG_PATH,
+          Buffer.from(
+            JSON.stringify(
+              stripeOpenCodeConfiguration(
+                {
+                  mcpServers: {
+                    stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+                  },
+                },
+                '/home/forge/.opencode-forge',
+              ),
+            ),
+          ),
+        );
+      }
+      const plan = createTestResolvedRunPlan({
+        agent: selection,
+        treatment,
+        treatmentSetup:
+          treatment === 'stripe-plugin'
+            ? [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }]
+            : [],
+      });
+      const session = await test.adapter.openSession({ ...test.context, plan });
+      await session.send('Do it', { signal: test.context.signal });
+      const config = JSON.parse(
+        Buffer.from(
+          await test.state.readonly.readFile('config.json'),
+        ).toString(),
+      );
+      definitions.push(config.provider.forge.models);
+      assert.equal(config.model, `forge/${OPEN_CODE_MODEL}`);
+      assert.deepEqual(config.provider.forge.models, {
+        [OPEN_CODE_MODEL]: { ...OPEN_CODE_MODEL_PROFILE, tool_call: true },
+      });
+      assert.equal(
+        config.mcp?.stripe.enabled,
+        treatment === 'stripe-plugin' ? true : undefined,
+      );
+      assert.deepEqual(
+        config.skills?.paths,
+        treatment === 'stripe-plugin'
+          ? ['/home/forge/.opencode-forge/plugins/stripe/bundle/skills']
+          : undefined,
+      );
     }
+    assert.deepEqual(definitions[0], definitions[1]);
   });
 });

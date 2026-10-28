@@ -109,7 +109,8 @@ checks host transport and schemas; use the public CLI to establish real
 coding-agent connectivity to the selected endpoint.
 
 OpenCode setup mode exercises the real pinned CLI against a deterministic
-authenticated Chat Completions endpoint, including plugin/no-plugin treatments, tools, one-shot and Ava turns,
+authenticated Chat Completions endpoint, including baseline/stripe-plugin
+treatments sharing one agent `model_profile`, tools, one-shot and Ava turns,
 exact-session exports, restricted artifacts, and cleanup. It also installs the
 published Stripe bundle and verifies native skill discovery, then uses local
 Git and MCP fixtures to check bearer auth, discovery, tool use, and rejected keys:
@@ -666,13 +667,14 @@ tree receipt.
 
 `plugins.ts` installs the standard Stripe bundle at the official catalog's source
 pin. `pluginConfig.ts` validates its manifest and MCP declaration and merges the
-native configuration with the authored model definition. These use the shared
+native configuration with the generated model definition. These use the shared
 plugin credential policy and tree fingerprinting; the receipt variant records
 the actual standard-bundle source path.
 
 `index.ts` owns routing, isolated state, version verification, stdin execution,
-exact-session resumption, and pre-quiescence exports. `config.ts` validates the
-authored model definition; `launcher.ts` supplies the prompt file to stdin.
+exact-session resumption, and pre-quiescence exports. It generates model config
+from the selected `model_profile`; workspace `opencode.json` is ignored.
+`launcher.ts` supplies the prompt file to stdin.
 `stream.ts` validates completed live part snapshots. `evidence.ts` reads the
 sealed export and converts supported native content to ATIF, using bounded
 JSON helpers in `native.ts`. `layout.ts` validates external-runtime paths.

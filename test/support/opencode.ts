@@ -1,20 +1,11 @@
 /** Independent fixtures matching OpenCode 1.19.0's published session-v1 schema. */
 export const OPEN_CODE_SESSION = 'ses_0123456789abcdefghij';
 export const OPEN_CODE_MODEL = 'gateway/kimi-test';
-export const OPEN_CODE_CONFIG = {
-  provider: {
-    forge: {
-      models: {
-        [OPEN_CODE_MODEL]: {
-          limit: { context: 32000, output: 4000 },
-          reasoning: false,
-          temperature: true,
-          attachment: false,
-          tool_call: true,
-        },
-      },
-    },
-  },
+export const OPEN_CODE_MODEL_PROFILE = {
+  limit: { context: 32000, output: 4000 },
+  reasoning: false,
+  temperature: true,
+  attachment: false,
 };
 export interface OpenCodeFixtureTurn {
   prompt: string;

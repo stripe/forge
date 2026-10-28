@@ -4,6 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../test/support/opencode.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { defaultForgeEngine } from './engine.ts';
 import { parseCriterionJudgment } from './evaluation/criterionJudge.ts';
@@ -15,6 +16,7 @@ import {
   parseExperimentRunReport,
   runExperiment,
 } from './experiment.ts';
+import { parseExperimentRunCheckpoint } from './experimentModel.ts';
 import {
   buildExperimentRunReport,
   type ExperimentRunReportRunV1,
@@ -112,6 +114,43 @@ describe('experiment run scorecards', () => {
         /incompatible with installed Forge/,
       );
     }
+  });
+
+  it('retains model profiles in checkpoints and report rows and separates their score groups', () => {
+    const runs = [row(0), row(1)];
+    runs[0]!.selection.agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    runs[1]!.selection.agent = {
+      ...runs[0]!.selection.agent,
+      model_profile: { ...OPEN_CODE_MODEL_PROFILE, reasoning: true },
+    };
+    const report = build(runs);
+    assert.equal(report.cases.length, 2);
+    assert.deepEqual(
+      report.cases.map(({ agent }) => agent.model_profile),
+      runs.map(({ selection }) => selection.agent.model_profile),
+    );
+    assert.deepEqual(parseExperimentRunReport(report), report);
+    const checkpoint = parseExperimentRunCheckpoint({
+      forge: FORGE_BUILD_IDENTITY,
+      experiment_run_id: report.experiment_run_id,
+      entries: runs.map(({ selection }) => ({
+        selection,
+        plan_sha256: `sha256:${'a'.repeat(64)}`,
+        attempts: [],
+      })),
+    });
+    assert.deepEqual(
+      checkpoint.entries.map(({ selection }) => selection.agent),
+      runs.map(({ selection }) => selection.agent),
+    );
+    const invalid = structuredClone(report);
+    invalid.cases[0]!.agent.model_profile!.limit.output = 0;
+    assert.throws(() => parseExperimentRunReport(invalid));
   });
 
   it('keeps Codex hook policies in report coordinates and separates their score groups', () => {

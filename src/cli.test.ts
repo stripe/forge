@@ -2074,6 +2074,12 @@ describe('Forge CLI', () => {
         adapter: 'opencode',
         provider: 'openai-compatible',
         model: 'gateway/model',
+        model_profile: {
+          limit: { context: 32000, output: 4000 },
+          reasoning: false,
+          temperature: true,
+          attachment: false,
+        },
       });
       const config = JSON.parse(
         requirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
@@ -3654,7 +3660,7 @@ matrix:
     - adapter: ${options.agent ?? 'claude-code'}
       provider: ${options.agent === 'opencode' ? 'openai-compatible' : options.agent === 'codex' ? 'openai' : 'anthropic'}
       model: ${options.agent === 'opencode' ? 'gateway/test' : options.agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet'}
-  repetitions: ${options.repetitions ?? 1}
+${options.agent === 'opencode' ? '      model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false}\n' : ''}  repetitions: ${options.repetitions ?? 1}
   retries: 0
 limits:
   run_timeout_ms: 1800000

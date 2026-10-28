@@ -87,13 +87,13 @@ export function stripeOpenCodeConfiguration(
   };
 }
 
-/** Merge only the adapter-produced skills/MCP fragment; authored routing stays separate. */
+/** Add the validated installed skills/MCP fragment to the generated model config. */
 export function mergeStripeOpenCodeConfiguration(
-  authored: string,
+  generated: string,
   installed: string,
   stateDirectory: string,
 ): string {
-  const config = record(parseJson(authored, 1024 * 1024));
+  const config = record(parseJson(generated, 1024 * 1024));
   const fragment = record(parseJson(installed, 1024 * 1024));
   const server = record(record(fragment.mcp).stripe);
   const expected = stripeOpenCodeConfiguration(
@@ -105,29 +105,9 @@ export function mergeStripeOpenCodeConfiguration(
   // Exact structure also rejects accidental model/auth overrides in installed state.
   if (!isDeepStrictEqual(fragment, expected))
     throw new Error('Invalid installed OpenCode plugin configuration.');
-  const mcp = config.mcp === undefined ? {} : record(config.mcp);
-  if (Object.hasOwn(mcp, 'stripe'))
-    throw new Error(
-      'Authored OpenCode MCP configuration conflicts with the Stripe plugin.',
-    );
-  const skills = config.skills === undefined ? {} : record(config.skills);
-  if (
-    skills.paths !== undefined &&
-    (!Array.isArray(skills.paths) ||
-      !skills.paths.every((item) => typeof item === 'string'))
-  )
-    throw new Error('Invalid authored OpenCode skill paths.');
   return JSON.stringify({
     ...config,
-    skills: {
-      ...skills,
-      paths: [
-        ...new Set([
-          ...((skills.paths as string[] | undefined) ?? []),
-          ...expected.skills.paths,
-        ]),
-      ],
-    },
-    mcp: { ...mcp, ...expected.mcp },
+    skills: expected.skills,
+    mcp: expected.mcp,
   });
 }

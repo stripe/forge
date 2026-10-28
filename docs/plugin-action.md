@@ -125,9 +125,11 @@ paths, unsupported MCP configuration, and unsafe filesystem entries fail setup.
 
 The generated native config adds an absolute skill path and a remote MCP server
 with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
-the bundled URL. An authored Stripe MCP entry is rejected rather than replacing
-or disabling this connection. The adapter snapshots the combined authored and
-plugin config and restores it before every turn, including resume.
+the bundled URL. The adapter combines this fragment with the model definition
+from the experiment's agent `model_profile` and restores it before every turn,
+including resume. A workspace `opencode.json` is ignored; model declarations
+belong to the agent selection, and skills/MCP come from `forge/plugin`. See the
+[OpenCode setup](../README.md#opencode-setup) for a baseline/plugin comparison.
 
 OpenCode receipts use `installation: opencode-bundle` instead of
 `native_plugin_id`. They retain the selected catalog identity and commit, record

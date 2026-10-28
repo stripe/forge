@@ -160,7 +160,7 @@ try {
       assert.equal(opencode.createOpenCodeAdapter().version, forge.FORGE_VERSION);
       assert.equal('createOpenCodeAdapter' in forge, false);
       assert.equal(docker.FORGE_OPENCODE_VERSION, '1.19.0');
-      const openCodeRequirements = opencode.createOpenCodeAdapter({baseUrl: 'https://gateway.example/v1'}).requirements({adapter: 'opencode', provider: 'openai-compatible', model: 'gateway/model'});
+      const openCodeRequirements = opencode.createOpenCodeAdapter({baseUrl: 'https://gateway.example/v1'}).requirements({adapter: 'opencode', provider: 'openai-compatible', model: 'gateway/model', model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false}});
       assert.equal(openCodeRequirements.environment.credentials.OPENCODE_API_KEY.reference, 'opencode.api-key');
       assert.equal(JSON.parse(openCodeRequirements.environment.variables.OPENCODE_CONFIG_CONTENT).model, 'forge/gateway/model');
       assert.equal(typeof codex.createCodexAdapter, 'function');

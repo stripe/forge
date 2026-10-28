@@ -21,8 +21,8 @@ import {
   createTestResolvedRunPlan,
 } from '../src/testing/index.js';
 import {
-  OPEN_CODE_CONFIG,
   OPEN_CODE_MODEL,
+  OPEN_CODE_MODEL_PROFILE,
   OPEN_CODE_SESSION,
   type OpenCodeFixtureTurn,
   openCodeExport,
@@ -119,6 +119,7 @@ describe('OpenCode engine integration', () => {
             adapter: 'opencode',
             provider: 'openai-compatible',
             model: OPEN_CODE_MODEL,
+            model_profile: OPEN_CODE_MODEL_PROFILE,
           },
           ...(mode === 'multi_turn'
             ? {
@@ -126,15 +127,6 @@ describe('OpenCode engine integration', () => {
                 rolePlayer: { provider: 'harness', model: 'scripted' },
               }
             : {}),
-          caseSetup: [
-            {
-              uses: 'forge/write',
-              with: {
-                target: 'opencode.json',
-                source: { content: JSON.stringify(OPEN_CODE_CONFIG) },
-              },
-            },
-          ],
           checks: { files_created: ['answer.txt'] },
         });
         const resolved: string[] = [];
@@ -167,6 +159,10 @@ describe('OpenCode engine integration', () => {
         assert.equal(verified.result.evaluation.status, 'passed');
         assert.equal(verified.result.evidence.completeness, 'complete');
         assert.equal(verified.result.agent.session_id, OPEN_CODE_SESSION);
+        assert.deepEqual(
+          verified.result.selection.agent.model_profile,
+          OPEN_CODE_MODEL_PROFILE,
+        );
         assert.equal(turns.length, mode === 'multi_turn' ? 2 : 1);
         assert.deepEqual(resolved, ['opencode.api-key']);
         const native = verified.result.supplemental_artifacts.find(
