@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { observeAgentTokenUsage, sumAgentTokenUsage } from '../agentUsage.ts';
 import {
   ATIF_SCHEMA_VERSION,
@@ -60,6 +61,14 @@ import type {
 } from '../contracts/runtime.ts';
 import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
 import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
+import {
+  assertAttemptDiagnosticsIdentity,
+  attemptDiagnosticsIdentity,
+} from '../diagnostics/model.ts';
+import {
+  type AttemptDiagnosticsRecorder,
+  createAttemptRecorder,
+} from '../diagnostics/recorder.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
@@ -144,6 +153,7 @@ import {
   type PreparedCompletionRuntime,
   prepareCompletionRuntime,
 } from './completionRuntime.ts';
+import { createAttemptDiagnosticsWriter } from './diagnosticsIO.ts';
 import {
   executionError,
   ForgeExecutionError,
@@ -164,6 +174,8 @@ export interface ExecuteEvalInput {
   readonly signal?: AbortSignal;
   /** Additional per-run observer; failures are isolated like composition observers. */
   readonly observer?: RunObserver;
+  /** Supplied by the scheduler after persisting reservation, before dispatch. */
+  readonly attemptDiagnostics?: AttemptDiagnosticsRecorder;
   /** Test seam; production uses the wall clock. */
   readonly now?: () => Date;
 }
@@ -468,8 +480,6 @@ export async function executeEvalWithTestHooks(
     );
   }
   const externalSignal = input.signal ?? new AbortController().signal;
-  const timeoutSignal = AbortSignal.timeout(input.plan.limits.run_timeout_ms);
-  const signal = AbortSignal.any([externalSignal, timeoutSignal]);
   const now = input.now ?? (() => new Date());
   const startedAt = now();
   const events = createRunEventEmitter(
@@ -479,6 +489,24 @@ export async function executeEvalWithTestHooks(
     ),
     now,
   );
+  assertRunId(input.runId);
+  const diagnostics =
+    input.attemptDiagnostics ??
+    createAttemptRecorder({
+      identity: attemptDiagnosticsIdentity(input.runId, input.plan),
+      reservedAt: startedAt.toISOString(),
+      write: createAttemptDiagnosticsWriter(
+        input.composition.attemptDiagnosticsStore,
+      ),
+    });
+  assertAttemptDiagnosticsIdentity(
+    diagnostics.snapshot.identity,
+    attemptDiagnosticsIdentity(
+      input.runId,
+      input.plan,
+      diagnostics.snapshot.identity.experiment_run_id,
+    ),
+  );
   let phase: RunPhase = 'preflight';
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
@@ -486,6 +514,12 @@ export async function executeEvalWithTestHooks(
   let runtimeDisposed = false;
   let diagnosticSecrets: readonly string[] | undefined;
 
+  await diagnostics.start(startedAt.toISOString(), false);
+  const executionTimeout = createExecutionTimeout(
+    input.plan.limits.run_timeout_ms,
+  );
+  const timeoutSignal = executionTimeout.signal;
+  const signal = AbortSignal.any([externalSignal, timeoutSignal]);
   try {
     const preflight = await events.phase('preflight', async () => {
       phase = 'preflight';
@@ -498,6 +532,8 @@ export async function executeEvalWithTestHooks(
       );
     });
 
+    await executionTimeout.withoutRecordingTime(() => diagnostics.flush());
+
     const environment = await resolveEnvironment(
       input,
       preflight.environmentSpecification,
@@ -509,6 +545,7 @@ export async function executeEvalWithTestHooks(
         runId: input.runId,
         bindings: preflight.completionBindings,
         credentialResolver: input.composition.credentialResolver,
+        onObservation: diagnostics.completions,
         redactionSecrets: credentialValues(environment),
         signal,
       });
@@ -529,6 +566,9 @@ export async function executeEvalWithTestHooks(
 
     prepared = await events.phase('runtime_prepare', async () => {
       phase = 'runtime_prepare';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('runtime_prepare'),
+      );
       throwIfAborted(signal, phase);
       return input.composition.runtime.prepare({
         runId: input.runId,
@@ -553,6 +593,9 @@ export async function executeEvalWithTestHooks(
 
     const setupArtifact = await events.phase('setup', async () => {
       phase = 'setup';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('setup'),
+      );
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
         runId: input.runId,
@@ -577,8 +620,24 @@ export async function executeEvalWithTestHooks(
 
     const interaction = await events.phase('interaction', async () => {
       phase = 'interaction';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('interaction'),
+      );
       throwIfAborted(signal, phase);
+      const capture = diagnostics.agentCapture(
+        secrets,
+        input.composition.restrictedDiagnosticExcerpts,
+      );
       const session = await preflight.agent.openSession({
+        diagnostics: {
+          ...capture,
+          record: (record, excerpts, publication) =>
+            publication === 'invocation_boundary'
+              ? executionTimeout.withoutRecordingTime(() =>
+                  capture.record(record, excerpts),
+                )
+              : capture.record(record, excerpts),
+        },
         runId: input.runId,
         plan: input.plan,
         selection: input.plan.agent,
@@ -599,11 +658,17 @@ export async function executeEvalWithTestHooks(
 
     sealed = await events.phase('quiesce', async () => {
       phase = 'quiesce';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('quiesce'),
+      );
       return prepared!.quiesce();
     });
 
     const selectedEvidence = await events.phase('evidence', async () => {
       phase = 'evidence';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('evidence'),
+      );
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
         return {
@@ -674,6 +739,9 @@ export async function executeEvalWithTestHooks(
 
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('evaluation'),
+      );
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
@@ -836,6 +904,9 @@ export async function executeEvalWithTestHooks(
 
     await events.phase('artifact_stage', async () => {
       phase = 'artifact_stage';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('artifact_stage'),
+      );
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
@@ -848,6 +919,9 @@ export async function executeEvalWithTestHooks(
     ];
     await events.phase('runtime_dispose', async () => {
       phase = 'runtime_dispose';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('runtime_dispose'),
+      );
       try {
         await prepared!.dispose();
       } catch {
@@ -856,10 +930,12 @@ export async function executeEvalWithTestHooks(
           message:
             'Runtime cleanup failed after canonical artifacts were staged.',
         };
+        diagnostics.cleanupFailure('runtime_dispose_failed');
         warnings.push(cleanupWarning);
         await events.warning('runtime_dispose', cleanupWarning.message);
       } finally {
         runtimeDisposed = true;
+        diagnostics.cleanupCompleted();
       }
     });
 
@@ -885,12 +961,21 @@ export async function executeEvalWithTestHooks(
 
     const committed = await events.phase('result_commit', async () => {
       phase = 'result_commit';
+      await executionTimeout.withoutRecordingTime(() =>
+        diagnostics.phase('result_commit'),
+      );
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
     });
     transaction = undefined;
     const committedResult = parseRunResult(committed.result);
+    await diagnostics.finish('completed');
+    if (diagnostics.recordingFailed)
+      void events.warning(
+        phase,
+        'Attempt diagnostics could not be fully recorded.',
+      );
     return {
       runId: committed.runId,
       location: committed.location,
@@ -903,30 +988,90 @@ export async function executeEvalWithTestHooks(
       aborted &&
       timeoutSignal.aborted &&
       signal.reason === timeoutSignal.reason;
-    await transaction?.rollback().catch(() => undefined);
-    if (prepared && !runtimeDisposed) {
-      await prepared.dispose().catch(() => undefined);
-    }
-    if (aborted) {
-      throw new ForgeExecutionError(
-        'aborted',
-        phase,
-        timedOut
-          ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
-          : 'The Forge run was cancelled by the caller.',
-        {
-          cause: signal.reason,
-          diagnostic: {
-            reason: timedOut ? 'timeout' : 'cancelled',
-            message: timedOut
-              ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
-              : 'Caller cancellation stopped the run.',
+    const primary = aborted
+      ? new ForgeExecutionError(
+          'aborted',
+          phase,
+          timedOut
+            ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
+            : 'The Forge run was cancelled by the caller.',
+          {
+            cause: signal.reason,
+            diagnostic: {
+              reason: timedOut ? 'timeout' : 'cancelled',
+              message: timedOut
+                ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
+                : 'Caller cancellation stopped the run.',
+            },
           },
-        },
-      );
+        )
+      : mapExecutionError(error, phase, diagnosticSecrets);
+    await diagnostics.failure({
+      error_code: primary.code,
+      phase: primary.phase,
+      reason: primary.diagnostic?.reason ?? 'failure',
+      message: primary.diagnostic?.message ?? primary.message,
+    });
+    await transaction
+      ?.rollback()
+      .catch(() => diagnostics.cleanupFailure('rollback_failed'));
+    if (prepared && !runtimeDisposed) {
+      await prepared
+        .dispose()
+        .catch(() => diagnostics.cleanupFailure('runtime_dispose_failed'));
     }
-    throw mapExecutionError(error, phase, diagnosticSecrets);
+    diagnostics.cleanupCompleted();
+    await diagnostics.finish('errored');
+    if (diagnostics.recordingFailed)
+      void events.warning(
+        phase,
+        'Attempt diagnostics could not be fully recorded.',
+      );
+    throw primary;
+  } finally {
+    executionTimeout.dispose();
   }
+}
+
+function createExecutionTimeout(durationMs: number) {
+  const controller = new AbortController();
+  let remaining = durationMs;
+  let resumedAt = performance.now();
+  let timer: ReturnType<typeof setTimeout>;
+  const expire = () =>
+    controller.abort(
+      new DOMException(
+        'The operation was aborted due to timeout',
+        'TimeoutError',
+      ),
+    );
+  function resume() {
+    resumedAt = performance.now();
+    if (!controller.signal.aborted) {
+      if (remaining <= 0) expire();
+      else {
+        timer = setTimeout(expire, remaining);
+        timer.unref();
+      }
+    }
+  }
+  resume();
+  return {
+    signal: controller.signal,
+    async withoutRecordingTime(record: () => Promise<void>) {
+      clearTimeout(timer);
+      remaining -= performance.now() - resumedAt;
+      if (remaining <= 0) expire();
+      try {
+        await record();
+      } finally {
+        resume();
+      }
+    },
+    dispose() {
+      clearTimeout(timer);
+    },
+  };
 }
 
 interface ExecutedInteraction {

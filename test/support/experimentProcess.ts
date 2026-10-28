@@ -40,11 +40,22 @@ const summary = await runExperiment({
   runIdFactory: () => `${resume ? 'resumed' : 'crashed'}-${++nextId}`,
   async execute(input) {
     if (!resume && input.plan.selection.case_id === 'testing/interrupted') {
-      // Reservation is already durable when execute is called. Keep the real
-      // owner process alive until the parent kills it, without allocating a runtime.
-      setInterval(() => undefined, 1_000);
-      process.send!({ type: 'reserved', run_id: input.runId });
-      return await new Promise<never>(() => undefined);
+      const scoped = composition();
+      return defaultForgeEngine.executeEval({
+        ...input,
+        composition: {
+          ...scoped,
+          runtime: {
+            ...scoped.runtime,
+            async prepare() {
+              // Execution entry and runtime phase are durable before this signal.
+              setInterval(() => undefined, 1_000);
+              process.send!({ type: 'started', run_id: input.runId });
+              return await new Promise<never>(() => undefined);
+            },
+          },
+        },
+      });
     }
     return defaultForgeEngine.executeEval({
       ...input,

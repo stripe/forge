@@ -159,6 +159,10 @@ export async function prepareCompletionRuntime(input: {
   /** Other resolved run credentials which must be redacted from prompts. */
   readonly redactionSecrets?: readonly string[];
   readonly signal: AbortSignal;
+  readonly onObservation?: (
+    calls: readonly CompletionCallSummaryV1[],
+    totals: CompletionCallTotalsV1,
+  ) => void;
 }): Promise<PreparedCompletionRuntime> {
   const prepared = new Map<
     CompletionPurpose,
@@ -218,6 +222,23 @@ export async function prepareCompletionRuntime(input: {
   let totalCalls = 0;
   let failedCalls = 0;
   let rateLimitWaitMs = 0;
+  function observe() {
+    try {
+      input.onObservation?.(
+        callSlots.filter(
+          (call): call is CompletionCallSummaryV1 => call !== undefined,
+        ),
+        {
+          calls: totalCalls,
+          failed: failedCalls,
+          omitted: Math.max(0, totalCalls - MAX_COMPLETION_CALL_SUMMARIES),
+          rate_limit_wait_ms: rateLimitWaitMs,
+        },
+      );
+    } catch {
+      /* Recording cannot affect a provider call. */
+    }
+  }
   const required = (purpose: CompletionPurpose) => {
     const selected = prepared.get(purpose);
     if (selected === undefined) {
@@ -262,6 +283,7 @@ export async function prepareCompletionRuntime(input: {
           retry_wait_ms: decision.wait_ms,
           disposition: decision.disposition,
         });
+      observe();
     },
     has: (purpose: CompletionPurpose) => prepared.has(purpose),
     model: (purpose: CompletionPurpose) => required(purpose).binding.model,
@@ -342,6 +364,8 @@ export async function prepareCompletionRuntime(input: {
         );
         failures.set(invocationError, sequence - 1);
         throw invocationError;
+      } finally {
+        observe();
       }
     },
   });

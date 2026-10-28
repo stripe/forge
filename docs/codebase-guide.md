@@ -471,6 +471,7 @@ implementations.
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
+| [`attemptDiagnostics.ts`](https://github.com/stripe/forge/blob/main/src/contracts/attemptDiagnostics.ts) | `AttemptDiagnosticsStore` | Independent bounded attempt snapshots; supplied by the experiment controller or an embedding host |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code, Codex, and OpenCode; selected by `setup/forgePlugin.ts` |
@@ -647,7 +648,8 @@ selector.
 | [`layout.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
 | [`pluginConfig.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/pluginConfig.ts) | Bound and filter run-owned TOML to native plugin, project trust, and hook state | Called before native installation and every session send |
 | [`plugins.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/plugins.ts) | Implement `AgentPluginInstaller`: native commands, catalog/source verification, installed inventory and receipt | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
-| [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
+| [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn`, validate session continuity, and expose typed rejection locations | Called by `AgentSession.send` in `index.ts` |
+| [`diagnostics.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/diagnostics.ts) | Bound per-invocation structural history and opt-in redacted failure excerpts independently of stream acceptance | Called by `index.ts`; records through the session's optional diagnostics capability |
 | [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
 | [`toolEvidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/toolEvidence.ts) | Normalize command/file/MCP/search outputs and validate native MCP snapshots | Used only by `evidence.ts` |
 | [`nativeJson.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/nativeJson.ts) | Extract bounded compact JSON fragments from native source without a broad reserialization | Low-level helper for evidence validation |
@@ -780,6 +782,21 @@ The verifier deliberately imports:
 
 Those dependencies make verification a second semantic boundary rather than a
 generic checksum utility.
+
+## `src/diagnostics`: observations outside results
+
+`model.ts` owns the strict attempt parser, identity checks, and size limits;
+`agent.ts` owns optional process/protocol records and restricted descriptors;
+`timing.ts` supplies UTC timing schemas shared with checkpoints and reports.
+`localStore.ts` serializes atomic, private snapshot writes independently of result
+transactions, including excerpt publication and digest checks. `recorder.ts` owns
+the bounded completion and invocation records, the explicit agent capture
+capability, and freezes finished state. `execution/diagnosticsIO.ts` owns the
+engine write budget, with reserved failure and terminal allowances.
+`experiment.ts` reserves attempts before dispatch and degrades unavailable history
+on resume while rejecting readable identity conflicts; `execute.ts` flushes start,
+phases, first failure, and cleanup. Recording failures must not change results. See the
+[attempt contract](architecture.md#attempt-diagnostics) for bounds and capture gaps.
 
 ## `src/security`: secret handling
 

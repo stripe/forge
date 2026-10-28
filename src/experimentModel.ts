@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { attemptTimestampSchema } from './diagnostics/timing.ts';
 
 import { isSha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
@@ -51,15 +52,31 @@ export const experimentRunDiagnosticSchema = z
   })
   .strict();
 
+export const attemptObservationFields = {
+  reserved_at: attemptTimestampSchema.optional(),
+  started_at: attemptTimestampSchema.optional(),
+  finished_at: attemptTimestampSchema.optional(),
+  diagnostics_status: z.enum(['available', 'unavailable']).optional(),
+};
+
 const attemptSchema = z.discriminatedUnion('state', [
   z
-    .object({ run_id: experimentRunIdSchema, state: z.literal('running') })
-    .strict(),
-  z
-    .object({ run_id: experimentRunIdSchema, state: z.literal('completed') })
+    .object({
+      ...attemptObservationFields,
+      run_id: experimentRunIdSchema,
+      state: z.literal('running'),
+    })
     .strict(),
   z
     .object({
+      ...attemptObservationFields,
+      run_id: experimentRunIdSchema,
+      state: z.literal('completed'),
+    })
+    .strict(),
+  z
+    .object({
+      ...attemptObservationFields,
       run_id: experimentRunIdSchema,
       state: z.literal('errored'),
       error_code: experimentRunErrorCodeSchema,

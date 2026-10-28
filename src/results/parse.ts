@@ -524,7 +524,7 @@ const judgeEvidenceSchema = z
   })
   .strict();
 
-const completionCallSummary = z
+export const completionCallSummarySchema = z
   .object({
     sequence: z.number().int().positive(),
     purpose: z.enum(['role_player', 'judge']),
@@ -779,7 +779,7 @@ const runResultFields = {
     .strict()
     .optional(),
   completion_calls: z
-    .array(completionCallSummary)
+    .array(completionCallSummarySchema)
     .superRefine((calls, context) => {
       for (const [index, call] of calls.entries()) {
         if (call.sequence !== index + 1) {

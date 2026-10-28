@@ -531,6 +531,7 @@ contains:
 | `CredentialResolver` | Resolve opaque references | Secret lookup only for explicitly requested references |
 | `RunInputProvider` | Read dataset payloads | Read-only access below one dataset root |
 | `RunArtifactStore` | Stage and atomically commit results | One run namespace in the result store |
+| Optional `AttemptDiagnosticsStore` | Persist bounded observations independently of results | Attempt namespace only; never scoring authority |
 | `RunObserver` | Receive lifecycle and agent usage events | No control; failures are ignored |
 | `RunArtifactContributor` list | Add supplemental files | Only below `extensions/<contributor-id>/` |
 
@@ -678,7 +679,7 @@ All resolved secret values become inputs to the output-safety boundary. Forge
 redacts them from host-completion prompts and responses, normalized evidence,
 interaction audit, and judge workspace evidence; setup receipts, ordinary core
 artifacts, contributed artifacts, and result metadata must pass secret scans.
-Native source artifacts are the deliberate restricted exception.
+Native source artifacts and explicitly enabled diagnostic excerpts are restricted exceptions.
 
 ### 3. Prepare runtime and agent
 
@@ -1232,7 +1233,8 @@ include waits from the source run. Runs without judging criteria retain
 their source-run totals with the unchanged evaluation. Reused older regrades
 without counters leave the wait total absent. Older results may omit the new
 fields. These are observations and do not change plan digests. Attempts that
-fail before result commit do not persist these records.
+fail before result commit retain a bounded projection in attempt diagnostics when
+recording is available.
 
 ## Evidence architecture
 
@@ -1931,6 +1933,130 @@ Duplicate run IDs, paths, missing descriptors, descriptor mismatches, unsafe
 paths, and collisions fail the transaction. Restricted native artifacts are
 mode `0600`; ordinary artifacts are mode `0644`.
 
+### Attempt diagnostics
+
+`AttemptDiagnosticsStore` is an explicit, optional composition capability, separate
+from `RunArtifactStore`. The experiment controller supplies a local store by
+default at `diagnostics/<eval-run-id>/attempt.json`. Single-eval hosts may supply
+`createAttemptDiagnosticsStore({root})` through `composition.attemptDiagnosticsStore`.
+The root's parents must exist. The store resolves that explicit host root once,
+so output aliases remain usable; links beneath the resolved root are rejected. The host owns
+retention and deletion; there is no background retention service.
+
+`attempt.json` uses `schema_version: forge-attempt-v1` and its own Forge producer
+identity. Its strict, canonical record binds the run ID, optional experiment run
+ID, selection, and plan digest. Reservation is flushed before dispatch; execution
+start is recorded at entry and flushed after pure preflight. UTC fields record
+reservation, start, first failure, cleanup completion, and finish. Monotonic
+elapsed milliseconds measure failure, cleanup, and finish from execution entry;
+wall-clock changes do not determine durations. Checkpoints and report rows expose
+known start/finish times and recording availability. Older records may omit them.
+
+The recorder persists phase boundaries and completed host-call observations. It
+retains at most 256 completion subattempt summaries within 128 KiB, using the
+result's shared retry fields and provider/model identity, with totals and omitted counts afterward. Calls still in flight
+may lack summaries in an interrupted snapshot. Records and referenced excerpts
+share a 512 KiB retained-byte cap. Safe failure messages follow the existing
+credential-redaction boundary.
+
+Codex sessions receive an optional `AgentDiagnosticsCapture` capability with
+redaction callbacks; resolved secrets remain inside execution. Each invocation records an exec/resume
+operation label, verified CLI version, process metadata, and typed rejection
+locations. `CommandResult.capture` and `CommandExecutionError.capture` optionally
+expose bounded partial stdout/stderr, observed byte counts, truncation flags,
+monotonic duration, exit code, and an observed signal. These bytes are local to
+the adapter; ordinary diagnostics use a positive structural projection. The
+built-in command runner captures while running under the combined output bound
+and delivers stdout lines and decoded stderr chunks. Observation exceptions
+cannot control command execution. Signals describe the command-runner process
+(the Docker CLI for `docker exec`), not proof of container or agent termination.
+Custom runners may omit partial capture.
+
+The final 20 structural stdout event summaries and first failure survive parser
+rejection. They include known event/item types, observation times, safe status,
+and tool exit codes, without messages, reasoning, commands, arguments, or output.
+Unknown names become `unknown`. Pre-turn advisories accepted by the parser do
+not reserve the first-failure slot. Optional HTTP statuses from typed error fields
+or recognized HTTP/status text carry origin `agent_reported`, not direct
+transport attribution. Nonzero tool exits are recorded without making the turn
+fatal. A nonzero process exit remains fatal even if its stdout parses; a parser
+rejection is retained alongside the process rejection. Rejections carry an
+adapter-owned code, a one-based line index when available, and a fixed schema
+path, never an untrusted field name. An incomplete stream is rejected at end of
+stream without a line index; it does not make the last event a failure. Capture
+only reconstructs a rejected event at an observed, nonblank line. See the
+[typed record schemas](https://github.com/stripe/forge/blob/main/src/diagnostics/agent.ts).
+This diagnoses `codex exec --json` stdout; the native rollout reader in
+`evidence.ts` remains a separate source.
+
+Invocation boundaries are flushed before launching the command and after it
+settles. Boundary records pass `'invocation_boundary'` as the capture callback's
+third argument so the engine excludes those waits from the execution timeout.
+Adapters must not mark observations made while the command is running as
+boundaries. New structural observations trigger background flushes at most once
+per five seconds; the execution clock keeps running during those writes. At most
+64 invocation records fit within 64 KiB, dropping the oldest with an omitted
+count. Process capture is partial when the command output cap drops bytes, and
+unsupported when a rejecting custom runner provides no metadata. Claude Code
+and OpenCode do not yet supply
+these invocation records.
+
+Restricted failure excerpts default to off. Hosts enable
+`composition.restrictedDiagnosticExcerpts`, or users pass the README's
+[run option](../README.md#results-and-scores). This policy never enters authored
+inputs, plans, or their digests. Stores must advertise `supportsRestrictedExcerpts`
+and honor the optional excerpt argument to `write`; otherwise restricted capture
+is marked unsupported. Only the latest saved failed Codex invocation has excerpt
+references: at most 128 KiB of the last 20 event excerpts plus the first
+failure/rejected event, and a 32 KiB stderr tail. Event text is individually bounded; truncation is explicit even
+when fewer than 20 fit. Failure text gets space before preceding events. Each
+excerpt includes its line index, including malformed JSON. The operation label
+replaces argv. Redaction precedes truncation and retains overlap across stderr
+chunks; unresolved text at an output cutoff is withheld.
+These remain sensitive excerpts, not exact native evidence. They never enter
+reports, progress, scoring, or shared result artifacts. The optional native
+session tail is not implemented.
+
+Each attempt has one serialized writer, atomic replacement, increasing revisions,
+and idempotent identical terminal writes. Concurrent observations coalesce while
+a write is active. Restricted excerpts are synced and atomically renamed below
+`restricted/<sha256>.json` (CLI events) and `restricted/<sha256>.txt` (stderr)
+before their descriptors enter `attempt.json`. Reads verify their size and digest;
+missing or mismatched excerpts reject that diagnostic record independently of
+completed results. Superseded excerpts and interrupted writes can leave
+unreferenced private files. The store keeps earlier digest files so readers
+holding older snapshots can still verify them; hosts own retention and deletion.
+The retained-byte cap covers the current snapshot and its references, not all
+historical files in the directory. The local store uses fixed or digest-derived
+filenames, private directories (`0700`), private files (`0600`), and rejects symlinks. One host process owns the
+root; the experiment lock supplies process exclusion. As with the result store,
+trusted host code must not replace ancestor directories during I/O.
+
+The engine partitions a fixed two-second total write allowance: one second for
+reservation and progress, half a second for the first failure, and half a second
+for terminal publication. Exhausted progress cannot consume the failure or
+terminal allowance. Awaited diagnostic writes pause the execution time allowance;
+caller cancellation remains active. Recording failures yield a generic warning
+without changing committed artifacts or scores. Diagnostic warnings do not await
+observers. Stores must honor cancellation before publishing a snapshot. Finished
+snapshots ignore late observations and lifecycle updates. Abrupt host loss can
+lose pending observations.
+
+Resume preserves historical files and checks supported, readable records against
+the selected attempt identity, separately from scored artifacts. All diagnostic
+history reads share one two-second deadline and caller cancellation. After the
+deadline, remaining attempts become unavailable without further store reads.
+Missing, malformed, newer-format, unsafe-permission, unreadable, or timed-out
+diagnostics become `unavailable` in checkpoints and reports. Resume continues
+with at most one generic history warning per invocation; it does not repair or
+relax file modes. An identity conflict in a readable record checked before the
+deadline stops resume and releases the lock. Custom stores
+signal that conflict with the exported `AttemptDiagnosticsIdentityError`; other
+read failures mean unavailable history. Returned host records are also parsed
+and identity-checked by the controller. Caller cancellation still stops resume.
+Diagnostics cannot satisfy completed-run verification and are never used for
+judging, fallback evidence, scoring, or regrade. Plan digests exclude observations.
+
 ### Completed-run verification
 
 [`verifyCompletedRun`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) does more than verify
@@ -1992,6 +2118,8 @@ Other important safeguards include:
   sensitive non-credential data such as prompt bodies and file contents;
   credential-resolution failures retain generic execution messages because the
   complete redaction set is not yet available;
+- opt-in diagnostic excerpts remain restricted after redaction and use the
+  independent [attempt store](#attempt-diagnostics), outside reports and results;
 - judge inputs are derived by allowlist after credential redaction;
 - native source is explicitly marked restricted, excluded from judging and
   scoring, and selected by exact session identity rather than “newest session”;
@@ -2020,9 +2148,11 @@ even if the other signal fires during cleanup. A new abort during cleanup does
 not replace the fatal error that started it. Caller-provided abort reasons
 are not persisted. On any failure Forge:
 
-1. rolls back an open artifact transaction;
-2. disposes a prepared runtime if it has not already been disposed; and
-3. surfaces an abort-specific error when the combined signal fired.
+1. freezes the first failure, its UTC time, and elapsed time;
+2. flushes attempt diagnostics before rolling back an open artifact transaction;
+3. disposes a prepared runtime, stopping mutation with teardown authority; and
+4. records cleanup failures separately, finalizes diagnostics, and surfaces the
+   frozen error.
 
 Cleanup does not rely on an already-aborted execution signal. Runtime disposal
 is idempotent, and the Docker implementation waits for an in-progress quiesce
@@ -2043,7 +2173,7 @@ be committed; failures before that point remain fatal.
 
 | Entry point | Purpose |
 | --- | --- |
-| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation (including choice decisions and the completion adapter), results, setup, and composition contracts |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation (including choice decisions and the completion adapter), results, attempt diagnostics, setup, and composition contracts |
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |

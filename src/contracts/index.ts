@@ -1,5 +1,14 @@
 export * from './agent.ts';
 export * from './artifacts.ts';
+export type {
+  AgentDiagnosticsCapture,
+  AgentEventSummary,
+  AgentInvocationRecord,
+  AttemptDiagnosticsStore,
+  ProtocolRejection,
+  RedactedDiagnosticTail,
+  RestrictedAgentExcerpts,
+} from './attemptDiagnostics.ts';
 export * from './command.ts';
 export * from './completion.ts';
 export * from './composition.ts';

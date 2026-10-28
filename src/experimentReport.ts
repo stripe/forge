@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { agentTokenUsageSchema, sumAgentTokenUsage } from './agentUsage.ts';
 import { parseAgentPluginInstallationReceipt } from './contracts/pluginReceipt.ts';
 import { UNKNOWN_EVIDENCE_WARNINGS } from './evaluation/criterionEvidence.ts';
-
 import {
+  attemptObservationFields,
   experimentRunDiagnosticSchema,
   experimentRunErrorCodeSchema,
   experimentRunIdSchema,
@@ -270,6 +270,7 @@ const evaluationSchema = z
   );
 const runSchema = z
   .object({
+    ...attemptObservationFields,
     selection_index: count,
     selection: selectionSchema,
     run_id: experimentRunIdSchema.nullable(),

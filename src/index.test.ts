@@ -5,8 +5,11 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type AgentDiagnosticsCapture,
+  type AgentInvocationRecord,
   type ChoiceAnswer,
   type ChoiceQuestion,
+  type CommandCapture,
   type CompletionCallTotalsV1,
   CompletionInvocationError,
   type CompletionSubattemptRecordV1,
@@ -46,6 +49,7 @@ import {
   type ModelProbeReason,
   type ModelProbeResult,
   normalizeEnvironmentSpecification,
+  type ProtocolRejection,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -53,6 +57,8 @@ import {
   parseResolvedRunPlan,
   parseSetupArtifact,
   preflightEval,
+  type RedactedDiagnosticTail,
+  type RestrictedAgentExcerpts,
   type RuntimeAdapter,
   type RuntimePreflight,
   resolveManifestCaseIdFromFile,
@@ -187,6 +193,13 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof parseResolvedRunPlan, 'function');
     assert.equal(typeof resolveManifestCaseIdFromFile, 'function');
     assert.equal(typeof createArtifactStore, 'function');
+    assert.equal(typeof rootExports.createAttemptDiagnosticsStore, 'function');
+    assert.equal(
+      typeof rootExports.AttemptDiagnosticsIdentityError,
+      'function',
+    );
+    assert.equal(typeof rootExports.parseAttemptDiagnostics, 'function');
+    assert.equal(typeof rootExports.serializeAttemptDiagnostics, 'function');
     assert.equal(typeof createForgeEngine, 'function');
     assert.equal(typeof createForgeEngine().validateRuntime, 'function');
     assert.equal(typeof createSetupExecutor, 'function');
@@ -223,6 +236,12 @@ describe('@stripe/forge package root', () => {
 
     const _acceptsPublicContracts = (
       _agent: AgentAdapter,
+      _capture: AgentDiagnosticsCapture,
+      _invocation: AgentInvocationRecord,
+      _commandCapture: CommandCapture,
+      _rejection: ProtocolRejection,
+      _redactedTail: RedactedDiagnosticTail,
+      _excerpts: RestrictedAgentExcerpts,
       _transport: CompletionTransportObservation,
       _subattempt: CompletionSubattemptRecordV1,
       _totals: CompletionCallTotalsV1,

@@ -490,6 +490,7 @@ results/experiments/<experiment-run-id>/
 ├── experiment.json
 ├── events.jsonl
 ├── report.json
+├── diagnostics/<eval-run-id>/attempt.json
 └── runs/<eval-run-id>/
     ├── result.json
     ├── plan.json
@@ -503,6 +504,7 @@ results/experiments/<experiment-run-id>/
 | `experiment.json` | Checkpoint, selected plans, and attempt history used for resume. |
 | `report.json` | Scorecard across the saved experiment selections. |
 | `events.jsonl` | Timestamped progress history, appended on resume. |
+| `diagnostics/<eval-run-id>/attempt.json` | Private attempt timing, failure, cleanup, and bounded completion metadata, even without a result. |
 | `result.json` | Evaluation at `.evaluation`, provenance, and companion artifact descriptors. |
 | `plan.json` | Resolved input for one eval run. |
 | `setup.json` | Ordered, bounded setup receipts. |
@@ -760,6 +762,34 @@ callback failures may have only `error_code`. For a committed Ava failure, `resu
 records the final request or output rejection reason; raw rejected responses
 are not saved.
 
+For an execution error, read `diagnostics/<eval-run-id>/attempt.json` under the
+experiment run. It records reservation and execution start separately, the first
+failure, cleanup outcome, and finish time. Checkpoint attempts and report rows
+include known start/finish times and `diagnostics_status`. Missing times stay
+unknown. A killed process may leave a `reserved` or `running` snapshot; resume
+keeps it and checks its identity before retrying with a new ID. Unreadable or
+unsupported diagnostics, including files moved with different owners or modes,
+become `unavailable` without blocking resume. A readable identity conflict still
+stops resume. Recording can fail or time out, so absence of detail does not
+establish success. These records are owner-only and never enter scoring or regrade.
+
+For Codex, optional `agent_invocations` records retain process exit or command
+failure details, typed stream rejections, and the last 20 structural event
+summaries plus the first failure. Tool exit codes are observations; they do not
+make a successful agent turn fail. HTTP statuses carry `agent_reported` origin.
+These summaries contain no messages, commands, arguments, or output.
+
+To retain redacted failure excerpts, pass `--restricted-diagnostic-excerpts` to
+`forge run`, including on resume. It defaults to off and has no environment or
+benchmark setting. Excerpts of CLI events and stderr live under
+`diagnostics/<eval-run-id>/restricted/`; `attempt.json` names their size and
+SHA-256. Only the latest saved failed Codex call has excerpt references. Older
+digest files can remain on disk for readers holding prior snapshots; hosts own
+deletion. Excerpts stay out of reports and progress output. Treat them as sensitive:
+exact credential redaction cannot remove all private data.
+See the [capture contract](docs/architecture.md#attempt-diagnostics) for bounds,
+embedding options, and capture gaps.
+
 Ava and the judge back off through rate limits and temporary provider failures;
 see the [host completion retry policy](docs/architecture.md#host-side-completion-providers).
 `result.json.completion_calls` keeps bounded records of failed calls even when
@@ -768,7 +798,8 @@ When available, `report.json` includes `rate_limit_wait_ms` in run rows, case
 groups, and the summary. It sums measured host-completion retry waits from the
 latest verified results, including waits from calls omitted by the cap. Parallel
 waits are added, so this total can exceed wall-clock run time. Older records and
-attempts without a committed result have no measured value.
+report rows without a committed result have no measured value. Attempt diagnostics
+retain their own bounded subattempt records and counters.
 
 ### Inspect evidence
 

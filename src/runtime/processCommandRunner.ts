@@ -10,6 +10,7 @@ export interface HostCommandOptions {
   readonly timeoutMs: number;
   readonly maxOutputBytes: number;
   readonly onStdoutLine?: (line: string) => void;
+  readonly onStderrChunk?: (chunk: string) => void;
 }
 
 export interface HostCommandRunner {
@@ -26,10 +27,26 @@ export function createHostCommandRunner(): HostCommandRunner {
       validateArgv(argv);
       positive(options.timeoutMs, 'timeoutMs');
       positive(options.maxOutputBytes, 'maxOutputBytes');
-      options.signal?.throwIfAborted();
+      if (options.signal?.aborted)
+        throw new CommandExecutionError(
+          'Command was aborted.',
+          'command_aborted',
+          {
+            cause: options.signal.reason,
+            capture: {
+              stdout: '',
+              stderr: '',
+              durationMs: 0,
+              stdoutBytes: 0,
+              stderrBytes: 0,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            },
+          },
+        );
 
       return new Promise<CommandResult>((resolve, reject) => {
-        const startedAt = Date.now();
+        const startedAt = performance.now();
         const child = spawn(argv[0]!, argv.slice(1), {
           ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
           env: { ...process.env, ...options.environment },
@@ -40,6 +57,12 @@ export function createHostCommandRunner(): HostCommandRunner {
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
         let outputBytes = 0;
+        let retainedBytes = 0;
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
+        let stdoutRetained = 0;
+        let stderrRetained = 0;
+        const stderrDecoder = new StringDecoder('utf8');
         let lineBuffer = '';
         const stdoutDecoder = new StringDecoder('utf8');
         let failure: CommandExecutionError | undefined;
@@ -57,6 +80,16 @@ export function createHostCommandRunner(): HostCommandRunner {
           stdoutChunk: boolean,
         ): void => {
           outputBytes += chunk.byteLength;
+          if (stdoutChunk) stdoutBytes += chunk.byteLength;
+          else stderrBytes += chunk.byteLength;
+          const retained = chunk.subarray(
+            0,
+            Math.max(0, options.maxOutputBytes - retainedBytes),
+          );
+          retainedBytes += retained.length;
+          if (stdoutChunk) stdoutRetained += retained.length;
+          else stderrRetained += retained.length;
+          if (retained.length > 0) target.push(retained);
           if (outputBytes > options.maxOutputBytes) {
             terminate(
               new CommandExecutionError(
@@ -64,14 +97,27 @@ export function createHostCommandRunner(): HostCommandRunner {
                 'command_output_limit',
               ),
             );
-            return;
           }
-          target.push(chunk);
+          if (retained.length === 0) return;
+          chunk = retained;
+          if (!stdoutChunk && options.onStderrChunk) {
+            try {
+              options.onStderrChunk(stderrDecoder.write(chunk));
+            } catch {
+              /* Observation cannot control commands. */
+            }
+          }
           if (stdoutChunk && options.onStdoutLine) {
             lineBuffer += stdoutDecoder.write(chunk);
             const lines = lineBuffer.split(/\r?\n/);
             lineBuffer = lines.pop() ?? '';
-            for (const line of lines) options.onStdoutLine(line);
+            for (const line of lines) {
+              try {
+                options.onStdoutLine(line);
+              } catch {
+                /* Observation cannot control commands. */
+              }
+            }
           }
         };
 
@@ -121,17 +167,47 @@ export function createHostCommandRunner(): HostCommandRunner {
           options.signal?.removeEventListener('abort', abort);
           if (options.onStdoutLine) {
             lineBuffer += stdoutDecoder.end();
-            if (lineBuffer) options.onStdoutLine(lineBuffer);
+            if (lineBuffer) {
+              try {
+                options.onStdoutLine(lineBuffer);
+              } catch {
+                /* Observation cannot control commands. */
+              }
+            }
           }
+          if (options.onStderrChunk) {
+            try {
+              options.onStderrChunk(stderrDecoder.end());
+            } catch {
+              /* Observation cannot control commands. */
+            }
+          }
+          const capture = {
+            stdout: Buffer.concat(stdout).toString('utf8'),
+            stderr: Buffer.concat(stderr).toString('utf8'),
+            durationMs: Math.max(0, performance.now() - startedAt),
+            stdoutBytes,
+            stderrBytes,
+            stdoutTruncated: stdoutBytes > stdoutRetained,
+            stderrTruncated: stderrBytes > stderrRetained,
+            ...(exitCode === null ? {} : { exitCode }),
+            ...(signal === null ? {} : { signal }),
+          };
           if (failure) {
-            reject(failure);
+            reject(
+              new CommandExecutionError(failure.message, failure.code, {
+                cause: failure.cause,
+                capture,
+              }),
+            );
             return;
           }
           resolve({
-            stdout: Buffer.concat(stdout).toString('utf8'),
-            stderr: Buffer.concat(stderr).toString('utf8'),
+            capture,
+            stdout: capture.stdout,
+            stderr: capture.stderr,
             exitCode: exitCode ?? (signal ? 128 : 1),
-            durationMs: Date.now() - startedAt,
+            durationMs: Math.max(0, performance.now() - startedAt),
           });
         });
       });

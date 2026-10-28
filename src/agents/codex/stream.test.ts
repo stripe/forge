@@ -920,3 +920,23 @@ it('keeps a completed Codex transcript when a native usage counter is malformed'
     reasoning_tokens: null,
   });
 });
+
+it.each(['', '\n'])(
+  'locates an incomplete stream at end of stream without blaming a line (ending %j)',
+  (ending) => {
+    for (const prefix of ['', jsonl(started), jsonl(started, turnStarted)]) {
+      const error = assertInvalid(prefix + ending);
+      assert.equal(error.rejection.code, 'invalid_event_order');
+      assert.equal(error.rejection.line_index, undefined);
+      assert.match(error.message, /stream ended/);
+    }
+  },
+);
+
+it('counts physical lines at the stream limit without adding a trailing phantom line', () => {
+  const stdout = stream() + '\n'.repeat(100_000 - 2);
+  assert.equal(parseCodexStream(stdout).sessionId, SESSION_ID);
+  const error = assertInvalid(`${stdout}\n`);
+  assert.equal(error.rejection.code, 'output_limit');
+  assert.equal(error.rejection.line_index, 100_001);
+});

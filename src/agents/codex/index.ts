@@ -3,7 +3,12 @@ import type {
   AgentRuntimeRequirements,
   AgentSession,
   AgentTokenUsage,
+  AgentTurn,
 } from '../../contracts/agent.ts';
+import {
+  CommandExecutionError,
+  type CommandResult,
+} from '../../contracts/command.ts';
 import {
   assertEnvironmentName,
   type CredentialReference,
@@ -12,6 +17,7 @@ import {
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
 import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
+import { codexRejection, createCodexInvocationCapture } from './diagnostics.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
 import {
   assertCodexRuntimeLayout,
@@ -179,6 +185,7 @@ export function createCodexAdapter(
       let currentSessionId: string | undefined;
       let previousUsage: AgentTokenUsage | undefined;
       let sending = false;
+      let invocationSequence = 0;
       return {
         sessionId: () => currentSessionId,
         async send(message, sendOptions) {
@@ -197,39 +204,107 @@ export function createCodexAdapter(
               throw new TypeError('Codex run-owned state is unavailable.');
             await prepareCodexPluginConfiguration(home);
             const automation = context.selection.hook_trust === 'automation';
-            const result = await context.runtime.commands.agent.run(
-              [
-                executable,
-                'exec',
-                ...configuration,
-                '--json',
-                '--skip-git-repo-check',
-                '--dangerously-bypass-approvals-and-sandbox',
-                ...(automation ? ['--dangerously-bypass-hook-trust'] : []),
-                '--model',
-                context.selection.model,
-                ...(currentSessionId === undefined
-                  ? []
-                  : ['resume', currentSessionId]),
-                '--',
-                message,
-              ],
-              {
-                cwd: '.',
-                signal: sendOptions.signal,
-                timeoutMs: context.plan.limits.run_timeout_ms,
-                maxOutputBytes: 16 * 1024 * 1024,
-              },
-            );
-            if (result.exitCode !== 0)
-              throw new Error(
-                `Codex exited with status ${result.exitCode} without a successful completed turn.`,
-              );
-            const turn = parseCodexStream(result.stdout, currentSessionId, {
+            const streamOptions = {
               hookAutomation: automation,
               workspacePath: layout.workspace,
               model: context.selection.model,
+            };
+            const capture = createCodexInvocationCapture({
+              sequence: ++invocationSequence,
+              resume: currentSessionId !== undefined,
+              cliVersion: expectedVersion,
+              capture: context.diagnostics,
+              streamOptions,
             });
+            if (context.diagnostics) await capture.start();
+            let result: CommandResult;
+            try {
+              result = await context.runtime.commands.agent.run(
+                [
+                  executable,
+                  'exec',
+                  ...configuration,
+                  '--json',
+                  '--skip-git-repo-check',
+                  '--dangerously-bypass-approvals-and-sandbox',
+                  ...(automation ? ['--dangerously-bypass-hook-trust'] : []),
+                  '--model',
+                  context.selection.model,
+                  ...(currentSessionId === undefined
+                    ? []
+                    : ['resume', currentSessionId]),
+                  '--',
+                  message,
+                ],
+                {
+                  cwd: '.',
+                  onStdoutLine: capture.onStdoutLine,
+                  onStderrChunk: capture.onStderrChunk,
+                  signal: sendOptions.signal,
+                  timeoutMs: context.plan.limits.run_timeout_ms,
+                  maxOutputBytes: 16 * 1024 * 1024,
+                },
+              );
+            } catch (error) {
+              if (error instanceof CommandExecutionError) {
+                let extractionRejection:
+                  | ReturnType<typeof codexRejection>
+                  | undefined;
+                try {
+                  parseCodexStream(
+                    error.capture?.stdout ?? '',
+                    currentSessionId,
+                    streamOptions,
+                  );
+                } catch (extractionError) {
+                  extractionRejection = codexRejection(extractionError);
+                }
+                await capture.finish({
+                  commandError: error,
+                  rejection: {
+                    code:
+                      error.code === 'command_output_limit'
+                        ? 'output_limit'
+                        : 'unknown',
+                  },
+                  ...(extractionRejection === undefined
+                    ? {}
+                    : { extractionRejection }),
+                });
+              } else await capture.finish({ rejection: { code: 'unknown' } });
+              throw error;
+            }
+            let turn: AgentTurn | undefined;
+            let parserError: unknown;
+            try {
+              turn = parseCodexStream(
+                result.stdout,
+                currentSessionId,
+                streamOptions,
+              );
+            } catch (error) {
+              parserError = error;
+            }
+            if (result.exitCode !== 0) {
+              await capture.finish({
+                result,
+                rejection: { code: 'process_nonzero_exit' },
+                ...(parserError === undefined
+                  ? {}
+                  : { extractionRejection: codexRejection(parserError) }),
+              });
+              throw new Error(
+                `Codex exited with status ${result.exitCode} without a successful completed turn.`,
+              );
+            }
+            if (parserError !== undefined || turn === undefined) {
+              await capture.finish({
+                result,
+                rejection: codexRejection(parserError),
+              });
+              throw parserError;
+            }
+            await capture.finish({ result });
             const usage =
               turn.usage === undefined
                 ? undefined
