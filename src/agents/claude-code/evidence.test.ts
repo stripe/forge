@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { parseAtifTrajectory } from '../../atif/index.ts';
+import {
+  createNormalizedTrajectory,
+  parseAtifTrajectory,
+} from '../../atif/index.ts';
+import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
+import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 
@@ -53,6 +58,51 @@ async function nativeEvidence(raw: string) {
     model: 'claude-test',
     signal: new AbortController().signal,
   });
+}
+
+function queuedCommandRecord(
+  commandMode = 'task-notification',
+  prompt = '<task-notification>Background task finished.</task-notification>',
+) {
+  return {
+    type: 'attachment',
+    sessionId: 'session-1',
+    timestamp: '2026-09-17T16:02:51.921Z',
+    attachment: {
+      type: 'queued_command',
+      commandMode,
+      prompt,
+      timestamp: '2026-09-17T16:02:50.000Z',
+    },
+    rendered: [
+      {
+        content:
+          commandMode === 'task-notification'
+            ? `<system-reminder>\nSynthetic background event.\n${prompt}\n</system-reminder>`
+            : prompt,
+      },
+    ],
+  };
+}
+
+async function conversationEvidence(records: readonly unknown[]) {
+  return nativeEvidence(
+    [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: 'Do the task' },
+      },
+      ...records,
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: 'Done' },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n'),
+  );
 }
 
 describe('Claude native evidence', () => {
@@ -137,14 +187,16 @@ describe('Claude native evidence', () => {
     });
   });
 
-  for (const { description, marker } of [
+  for (const { description, marker, diagnosticKind } of [
     {
       description: 'compact summary flag',
       marker: { type: 'summary', isCompactSummary: true },
+      diagnosticKind: 'compact summary',
     },
     {
       description: 'compact boundary subtype',
       marker: { type: 'system', subtype: 'compact_boundary' },
+      diagnosticKind: 'system/compact_boundary',
     },
   ]) {
     it(`classifies the ${description} as incomplete native evidence`, async () => {
@@ -168,7 +220,7 @@ describe('Claude native evidence', () => {
         kind: 'unavailable',
         reason: {
           code: 'source_incomplete',
-          message: 'Claude session evidence could not be normalized safely.',
+          message: `Claude compaction may replace earlier turns; complete conversation coverage cannot be established (${diagnosticKind} at line 1).`,
         },
       });
     });
@@ -200,6 +252,29 @@ describe('Claude native evidence', () => {
           'Claude session evidence could not be normalized safely (unrecognized record at line 3).',
       },
     });
+  });
+
+  it('keeps unknown record and attachment payloads out of diagnostics', async () => {
+    for (const record of [
+      { type: 'Synthetic private message with a URL https://example.invalid' },
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'synthetic_private_value',
+          content: 'Private content',
+        },
+      },
+    ]) {
+      const evidence = await conversationEvidence([record]);
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind !== 'unavailable') continue;
+      assert.equal(evidence.reason.code, 'source_incomplete');
+      assert.match(evidence.reason.message, /at line 2/);
+      assert.doesNotMatch(
+        evidence.reason.message,
+        /Synthetic|synthetic_private|Private|https/,
+      );
+    }
   });
 
   for (const { description, records } of [
@@ -573,6 +648,328 @@ describe('Claude native evidence', () => {
       },
     ]);
   });
+
+  it('omits batching reminder bookkeeping with an explicit warning', async () => {
+    const evidence = await conversationEvidence([
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'batching_reminder_sent',
+          model: 'claude-test',
+          text: 'Synthetic bookkeeping marker',
+        },
+        rendered: [],
+      },
+    ]);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    assert.deepEqual(
+      parseAtifTrajectory(evidence.trajectory).steps.map(
+        ({ source }) => source,
+      ),
+      ['user', 'agent'],
+    );
+    assert.deepEqual(evidence.warnings, [
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Claude batching reminder bookkeeping was omitted from ATIF (records: 1).',
+        path: 'line:2',
+      },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(evidence),
+      /Synthetic bookkeeping marker/,
+    );
+  });
+
+  it('retains queued task notifications as system context without adding a driver turn', async () => {
+    const record = queuedCommandRecord();
+    const evidence = await conversationEvidence([record]);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    assert.deepEqual(trajectory.steps[1], {
+      step_id: 2,
+      source: 'system',
+      message: record.rendered[0]!.content,
+      timestamp: record.timestamp,
+      extra: {
+        native_record_type: 'attachment',
+        attachment_type: 'queued_command',
+      },
+    });
+    assert.equal(
+      trajectoryCoversCompletedTurns(
+        trajectory,
+        [{ user: 'Do the task', assistant: 'Done', toolCalls: [] }],
+        evidence.source,
+      ),
+      true,
+    );
+    assert.deepEqual(
+      JSON.parse(createJudgeTranscriptProjection(trajectory).transcriptJson),
+      [
+        { step_id: 1, source: 'user', message: 'Do the task' },
+        { step_id: 3, source: 'agent', message: 'Done' },
+      ],
+    );
+    assert.deepEqual(evidence.warnings, []);
+  });
+
+  it('fails closed on an unsupported queued prompt even when its rendering matches', async () => {
+    const record = queuedCommandRecord('prompt');
+    const evidence = await conversationEvidence([record]);
+    assert.deepEqual(evidence, {
+      kind: 'unavailable',
+      reason: {
+        code: 'source_incomplete',
+        message:
+          'Claude session evidence could not be normalized safely (attachment/queued_command at line 2).',
+      },
+    });
+  });
+
+  it('retains a short notification only when its whole delimited payload matches', async () => {
+    const evidence = await conversationEvidence([
+      queuedCommandRecord(
+        'task-notification',
+        '<task-notification>a</task-notification>',
+      ),
+    ]);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    assert.equal(
+      parseAtifTrajectory(evidence.trajectory).steps[1]?.message,
+      '<system-reminder>\nSynthetic background event.\n<task-notification>a</task-notification>\n</system-reminder>',
+    );
+    assert.deepEqual(evidence.warnings, []);
+  });
+
+  it('omits API retry metadata without copying error bodies into evidence', async () => {
+    const evidence = await conversationEvidence([
+      {
+        type: 'system',
+        subtype: 'api_error',
+        source: 'request_retry',
+        level: 'error',
+        retryAttempt: 1,
+        maxRetries: 3,
+        retryInMs: 1000,
+        error: { message: 'Synthetic response body' },
+      },
+    ]);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    assert.equal(parseAtifTrajectory(evidence.trajectory).steps.length, 2);
+    assert.deepEqual(evidence.warnings, [
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Claude API retry metadata was omitted from ATIF (records: 1).',
+        path: 'line:2',
+      },
+    ]);
+    assert.doesNotMatch(JSON.stringify(evidence), /Synthetic response body/);
+  });
+
+  it('summarizes repeated bookkeeping with counts and first locations under normalization bounds', async () => {
+    const evidence = await conversationEvidence(
+      Array.from({ length: 300 }, () => [
+        {
+          type: 'attachment',
+          attachment: {
+            type: 'batching_reminder_sent',
+            model: 'claude-test',
+            text: 'Synthetic bookkeeping',
+          },
+        },
+        {
+          type: 'system',
+          subtype: 'api_error',
+          source: 'request_retry',
+          error: { message: 'Synthetic error body' },
+        },
+      ]).flat(),
+    );
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    const normalized = createNormalizedTrajectory({
+      trajectory: evidence.trajectory,
+      provenance: {
+        source: evidence.source,
+        adapter: { id: 'claude-code', version: 'test' },
+      },
+      completeness: 'partial',
+      warnings: evidence.warnings,
+    });
+    assert.deepEqual(normalized.warnings, [
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Claude batching reminder bookkeeping was omitted from ATIF (records: 300).',
+        path: 'line:2',
+      },
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Claude API retry metadata was omitted from ATIF (records: 300).',
+        path: 'line:3',
+      },
+    ]);
+    assert.equal(normalized.trajectory.steps.length, 2);
+    assert.doesNotMatch(
+      JSON.stringify(normalized),
+      /Synthetic bookkeeping|Synthetic error body/,
+    );
+  });
+
+  for (const mode of ['task-notification', 'prompt']) {
+    for (const parts of [0, 2, 3]) {
+      it(`rejects ${parts} rendered parts for queued ${mode} with its type and line`, async () => {
+        const record = queuedCommandRecord(mode);
+        const evidence = await conversationEvidence([
+          {
+            ...record,
+            rendered: Array.from({ length: parts }, () => record.rendered[0]),
+          },
+        ]);
+        assert.deepEqual(evidence, {
+          kind: 'unavailable',
+          reason: {
+            code: 'source_incomplete',
+            message:
+              'Claude session evidence could not be normalized safely (attachment/queued_command at line 2).',
+          },
+        });
+      });
+    }
+  }
+
+  for (const { description, record } of [
+    {
+      description: 'missing queued rendering',
+      record: { ...queuedCommandRecord(), rendered: [] },
+    },
+    {
+      description: 'nontext queued rendering',
+      record: { ...queuedCommandRecord(), rendered: [{ content: 42 }] },
+    },
+    {
+      description: 'mismatched notification rendering',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [{ content: 'Different notification' }],
+      },
+    },
+    {
+      description: 'mismatched prompt rendering',
+      record: {
+        ...queuedCommandRecord('prompt'),
+        rendered: [{ content: 'Different prompt' }],
+      },
+    },
+    {
+      description: 'short prompt embedded in unrelated task text',
+      record: {
+        ...queuedCommandRecord(),
+        attachment: { ...queuedCommandRecord().attachment, prompt: 'a' },
+      },
+    },
+    {
+      description: 'extra text after a matching notification payload',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [
+          {
+            content: `<system-reminder>\n${queuedCommandRecord().attachment.prompt}\nUnexpected extra text\n</system-reminder>`,
+          },
+        ],
+      },
+    },
+    {
+      description: 'duplicate notification payloads',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [
+          {
+            content: `<system-reminder>\n${queuedCommandRecord().attachment.prompt}\n${queuedCommandRecord().attachment.prompt}\n</system-reminder>`,
+          },
+        ],
+      },
+    },
+    {
+      description: 'notification without its outer system reminder',
+      record: {
+        ...queuedCommandRecord(),
+        rendered: [{ content: queuedCommandRecord().attachment.prompt }],
+      },
+    },
+    {
+      description: 'unknown queued mode',
+      record: queuedCommandRecord('future-mode'),
+    },
+    {
+      description: 'empty queued prompt',
+      record: {
+        ...queuedCommandRecord(),
+        attachment: { ...queuedCommandRecord().attachment, prompt: '' },
+      },
+    },
+    {
+      description: 'new queued field',
+      record: {
+        ...queuedCommandRecord(),
+        attachment: {
+          ...queuedCommandRecord().attachment,
+          futureContent: 'Unknown',
+        },
+      },
+    },
+    {
+      description: 'missing batching model',
+      record: {
+        type: 'attachment',
+        attachment: { type: 'batching_reminder_sent', text: 'Unknown' },
+      },
+    },
+    {
+      description: 'new batching field',
+      record: {
+        type: 'attachment',
+        attachment: {
+          type: 'batching_reminder_sent',
+          model: 'claude-test',
+          text: 'Bookkeeping',
+          futureContent: 'Unknown',
+        },
+      },
+    },
+    {
+      description: 'unexpected batching rendering',
+      record: {
+        type: 'attachment',
+        attachment: {
+          type: 'batching_reminder_sent',
+          model: 'claude-test',
+          text: 'Bookkeeping',
+        },
+        rendered: [{ content: 'Unrepresented reminder' }],
+      },
+    },
+    {
+      description: 'unknown API error source',
+      record: { type: 'system', subtype: 'api_error', source: 'future-source' },
+    },
+  ]) {
+    it(`rejects ${description} without discarding the diagnostic location`, async () => {
+      const evidence = await conversationEvidence([record]);
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind !== 'unavailable') return;
+      assert.equal(evidence.reason.code, 'source_incomplete');
+      assert.match(evidence.reason.message, /at line 2/);
+    });
+  }
 
   for (const { description, record, diagnosticKind } of [
     {
