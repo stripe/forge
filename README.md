@@ -61,9 +61,9 @@ For the built-in CLI, you need:
 | Workload | Coding-agent credential | Ava/judge credential |
 | --- | --- | --- |
 | Claude Code, one-shot with checks only | `ANTHROPIC_API_KEY` | None |
-| Claude Code with Ava or judging criteria | `ANTHROPIC_API_KEY` | Uses the same Anthropic configuration |
-| Codex, one-shot with checks only | `CODEX_API_KEY` | None |
-| Codex with Ava or judging criteria | `CODEX_API_KEY` | Independently configured Anthropic credential |
+| Claude Code with Ava or judging criteria | `ANTHROPIC_API_KEY` | Selected host provider credential |
+| Codex, one-shot with checks only | `OPENAI_API_KEY` | None |
+| Codex with Ava or judging criteria | `OPENAI_API_KEY` | Selected host provider credential |
 | `validate` or `plan` | None | None |
 
 Export the required variables in your shell or credential manager before
@@ -71,9 +71,31 @@ running or resuming pending work. Use restricted, short-lived keys with
 appropriate account limits: the evaluated agent receives its credential and
 outbound network access. Keep secrets outside dataset and experiment files.
 
-The built-in Ava/judge provider is Anthropic and requires Claude 4.5-or-newer
-model identifiers with strict structured-output support. Selecting Codex as
-coding agent does not change that provider.
+Ava and the judge each default to `provider: openai`, `model: gpt-6.1-sol`
+when their model is omitted. Override either independently with
+`models.role_player` or `models.judge`; the other keeps its default. Both
+accept `provider: anthropic` or `provider: openai`. Selecting a coding agent
+does not change either host model. For example, to use Sonnet for both:
+
+```yaml
+models:
+  role_player: { provider: anthropic, model: claude-sonnet-4-6 }
+  judge: { provider: anthropic, model: claude-sonnet-4-6 }
+```
+
+OpenAI host completions use the Responses API with strict JSON Schema,
+`store: false`, and `OPENAI_API_KEY` (credential reference
+`openai.completion-api-key`). `OPENAI_BASE_URL` optionally sets the complete
+API root, including `/v1`; Forge appends `/responses`. Codex uses the same
+endpoint setting and the same `OPENAI_API_KEY` credential (reference
+`openai.api-key`) by default; bind `--credential-env openai.api-key=<name>`
+to give Codex a different key. GPT-5 and later and o-series model
+identifiers omit `temperature` and receive an output budget of at least
+16,000 tokens to allow for reasoning. Reasoning blocks are excluded from
+completion text.
+
+The Anthropic provider requires Claude 4.5-or-newer model identifiers with
+strict structured-output support.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present, the CLI requires that token
@@ -82,7 +104,7 @@ used by Claude Code and host-side `/v1/messages`, including structured output.
 
 Codex optionally accepts `OPENAI_BASE_URL`, a complete Responses-compatible
 API root such as `https://gateway.example.com/v1`. The CLI reads
-`CODEX_API_KEY`, without falling back to `OPENAI_API_KEY`. Remote endpoints
+`OPENAI_API_KEY`, the same credential used for host completions. Remote endpoints
 must use HTTPS and be reachable from the container; host-side completions
 must also reach their endpoint. A host loopback address points at the
 container when used by the agent, including names ending in `.localhost`.
@@ -189,7 +211,8 @@ my-eval/
 ```
 
 The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
-and a criterion judge. All three use the configured Anthropic credential.
+and a criterion judge. Claude Code uses the Anthropic credential; Ava and
+the judge use the default Sol model and the OpenAI completion credential.
 The release inputs are separate from the installed Forge package; preserve
 their bytes. The experiment's
 `dataset.path: ./datasets/stripe-integration-public-evals` resolves relative
@@ -197,11 +220,12 @@ to the experiment file. Copy the whole release directory so configuration
 needs no rewriting.
 
 Validate without Docker allocation or model credentials, then run with your
-Anthropic key configured:
+Anthropic and OpenAI keys configured:
 
 ```sh
 npx --no-install forge validate --experiment ./my-eval/experiment.yaml
 export ANTHROPIC_API_KEY=your-restricted-key
+export OPENAI_API_KEY=your-openai-key
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
   --output ./results --run-id payments-001 > run-summary.json

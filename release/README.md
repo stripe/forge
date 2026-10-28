@@ -28,8 +28,10 @@ The [baseline experiment](experiment.yaml) uses
 `dataset.path: ./datasets/stripe-integration-public-evals` and pins the
 dataset ID and version. Copy `release/` to run it elsewhere without rewriting
 configuration. It selects this case once with Claude Code and Sonnet 4.6,
-using public Anthropic models for Ava and judging. Runtime and model choices
-belong to the experiment rather than the dataset.
+using the [default host models](../README.md#requirements--credentials)
+for Ava and judging. Override either with `models.role_player` or `models.judge`
+in the experiment. Runtime and model choices belong to the experiment rather
+than the dataset.
 
 ## Validate and run
 
@@ -44,10 +46,12 @@ node dist/cli.js plan \
 ```
 
 Validation and planning verify the case inventory and experiment pin without
-Docker or credentials. To execute the evaluation, use Docker and an Anthropic key:
+Docker or credentials. To execute the evaluation, use Docker, an Anthropic key
+for Claude Code, and an OpenAI key for Ava and judging:
 
 ```sh
 ANTHROPIC_API_KEY=your-restricted-key \
+OPENAI_API_KEY=your-openai-key \
 node dist/cli.js run \
   --experiment release/experiment.yaml \
   --output ./results
