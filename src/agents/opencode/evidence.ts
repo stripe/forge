@@ -7,11 +7,13 @@ import {
   parseAtifTrajectory,
 } from '../../atif/index.ts';
 import type {
+  AgentEvidenceContext,
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import { reportNativeArtifactUnavailable } from '../nativeArtifactError.ts';
 import { OpenCodeExportParseError, readOpenCodeExport } from './export.ts';
 import {
   array,
@@ -25,7 +27,8 @@ import {
   tool,
 } from './native.ts';
 
-export interface LoadOpenCodeEvidenceInput {
+export interface LoadOpenCodeEvidenceInput
+  extends Pick<AgentEvidenceContext, 'onNativeArtifactUnavailable'> {
   readonly state: ReadonlyWorkspace | undefined;
   readonly sessionId: string;
   readonly agentVersion: string;
@@ -34,11 +37,17 @@ export interface LoadOpenCodeEvidenceInput {
 }
 
 export async function loadOpenCodeNativeArtifact(
-  input: Pick<LoadOpenCodeEvidenceInput, 'state' | 'sessionId' | 'signal'>,
+  input: Pick<
+    LoadOpenCodeEvidenceInput,
+    'state' | 'sessionId' | 'signal' | 'onNativeArtifactUnavailable'
+  >,
 ): Promise<AgentNativeArtifact | undefined> {
   try {
     const captured = await readOpenCodeExport(input);
-    if (!captured) return undefined;
+    if (!captured) {
+      reportNativeArtifactUnavailable(input);
+      return undefined;
+    }
     return {
       format: OPENCODE_FORMAT,
       sessionId: input.sessionId,
@@ -46,8 +55,9 @@ export async function loadOpenCodeNativeArtifact(
       extension: 'json',
       body: Uint8Array.from(captured.body),
     };
-  } catch {
+  } catch (error) {
     input.signal.throwIfAborted();
+    reportNativeArtifactUnavailable(input, error);
     return undefined;
   }
 }

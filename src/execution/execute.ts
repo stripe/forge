@@ -15,6 +15,7 @@ import type {
   AgentEvidenceIdentity,
   AgentEvidenceRuntime,
   AgentNativeArtifact,
+  AgentNativeArtifactUnavailableReason,
   AgentNativeEvidenceResult,
   AgentPrepareRuntime,
   AgentRuntimeRequirements,
@@ -59,6 +60,12 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
+import {
+  createFailureEvidenceCapture,
+  type FailureNativeCapture,
+  failureEvidenceReasonSchema,
+  MAX_FAILURE_NATIVE_SOURCE_BYTES,
+} from '../diagnostics/failureEvidence.ts';
 import {
   assertAttemptDiagnosticsIdentity,
   attemptDiagnosticsIdentity,
@@ -513,6 +520,14 @@ export async function executeEvalWithTestHooks(
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
   let diagnosticSecrets: readonly string[] | undefined;
+  let restrictedCapture = false;
+  let observedSessionId: string | undefined;
+  let ambiguousSession = false;
+  let failedSession: AgentSession | undefined;
+  let failedAgent: AgentAdapter | undefined;
+  let failureEvidence:
+    | ReturnType<typeof createFailureEvidenceCapture>
+    | undefined;
 
   await diagnostics.start(startedAt.toISOString(), false);
   const executionTimeout = createExecutionTimeout(
@@ -565,6 +580,18 @@ export async function executeEvalWithTestHooks(
     ]);
 
     diagnosticSecrets = secrets;
+    const capture = diagnostics.agentCapture(
+      secrets,
+      input.composition.restrictedDiagnosticExcerpts,
+    );
+    restrictedCapture = capture.restrictedExcerpts;
+    failureEvidence = createFailureEvidenceCapture({
+      capture,
+      identity: preflight.agentEvidenceIdentity,
+      model: input.plan.agent.model,
+      requested: input.composition.restrictedDiagnosticExcerpts === true,
+    });
+    failedAgent = preflight.agent;
 
     prepared = await events.phase('runtime_prepare', async () => {
       phase = 'runtime_prepare';
@@ -626,13 +653,19 @@ export async function executeEvalWithTestHooks(
         diagnostics.phase('interaction'),
       );
       throwIfAborted(signal, phase);
-      const capture = diagnostics.agentCapture(
-        secrets,
-        input.composition.restrictedDiagnosticExcerpts,
-      );
       const session = await preflight.agent.openSession({
         diagnostics: {
           ...capture,
+          observeSessionId(id) {
+            if (
+              !isSafeSessionIdentity(id) ||
+              (observedSessionId !== undefined && observedSessionId !== id)
+            )
+              ambiguousSession = true;
+            else observedSessionId = id;
+          },
+          nativeSession: failureEvidence!.nativeSession,
+          nativeSessionUnavailable: failureEvidence!.nativeSessionUnavailable,
           record: (record, excerpts, publication) =>
             publication === 'invocation_boundary'
               ? executionTimeout.withoutRecordingTime(() =>
@@ -647,6 +680,7 @@ export async function executeEvalWithTestHooks(
         inputs: input.composition.inputProvider,
         signal,
       });
+      failedSession = session;
       const completed = await executeInteraction(
         input.plan,
         session,
@@ -655,6 +689,7 @@ export async function executeEvalWithTestHooks(
         signal,
         hooks.waitBeforeCompletionRetry,
         events.agentUsage,
+        failureEvidence!.completed,
       );
       throwIfAborted(signal, phase);
       return completed;
@@ -1041,12 +1076,37 @@ export async function executeEvalWithTestHooks(
           },
         )
       : mapExecutionError(error, phase, diagnosticSecrets);
+    if (failureEvidence) {
+      const initial = failureEvidence.finish();
+      diagnostics.failureEvidence(initial.record, initial.bodies);
+    }
     await diagnostics.failure({
       error_code: primary.code,
       phase: primary.phase,
       reason: primary.diagnostic?.reason ?? 'failure',
       message: primary.diagnostic?.message ?? primary.message,
     });
+    if (failureEvidence) {
+      const native: FailureNativeCapture =
+        restrictedCapture &&
+        prepared &&
+        !runtimeDisposed &&
+        failedSession &&
+        failedAgent
+          ? await collectFailedNativeArtifact({
+              prepared,
+              sealed,
+              agent: failedAgent,
+              session: failedSession,
+              observedSessionId,
+              ambiguousSession,
+              runId: input.runId,
+              plan: input.plan,
+            })
+          : { reason: failedSession ? 'read_failed' : 'not_started' };
+      const captured = failureEvidence.finish(native);
+      diagnostics.failureEvidence(captured.record, captured.bodies);
+    }
     await transaction
       ?.rollback()
       .catch(() => diagnostics.cleanupFailure('rollback_failed'));
@@ -1065,6 +1125,89 @@ export async function executeEvalWithTestHooks(
     throw primary;
   } finally {
     executionTimeout.dispose();
+  }
+}
+
+const FAILURE_QUIESCE_TIMEOUT_MS = 60_000;
+const FAILURE_NATIVE_CAPTURE_TIMEOUT_MS = 500;
+async function collectFailedNativeArtifact(input: {
+  prepared: PreparedRuntime;
+  sealed: SealedRuntime | undefined;
+  agent: AgentAdapter;
+  session: AgentSession;
+  observedSessionId: string | undefined;
+  ambiguousSession: boolean;
+  runId: string;
+  plan: ResolvedRunPlanV1;
+}): Promise<FailureNativeCapture> {
+  const controller = new AbortController();
+  let unavailableReason: AgentNativeArtifactUnavailableReason = 'read_failed';
+  async function withinBudget<T>(
+    operation: () => Promise<T>,
+    durationMs: number,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(operation),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error('Failure evidence capture timed out.'));
+          }, durationMs);
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  try {
+    const completedSessionId = input.session.sessionId();
+    if (
+      input.ambiguousSession ||
+      (completedSessionId !== undefined &&
+        input.observedSessionId !== undefined &&
+        completedSessionId !== input.observedSessionId)
+    )
+      return { reason: 'identity_conflict' };
+    const sessionId = input.observedSessionId ?? completedSessionId;
+    if (!sessionId) return { reason: 'not_started' };
+    if (!isSafeSessionIdentity(sessionId))
+      return { reason: 'identity_conflict' };
+    if (!input.agent.collectNativeArtifact) return { reason: 'not_supported' };
+    const sealed =
+      input.sealed ??
+      (await withinBudget(
+        () => input.prepared.quiesce(),
+        FAILURE_QUIESCE_TIMEOUT_MS,
+      ));
+    return await withinBudget(async (): Promise<FailureNativeCapture> => {
+      const native = await input.agent.collectNativeArtifact!({
+        runId: input.runId,
+        plan: input.plan,
+        selection: input.plan.agent,
+        runtime: projectAgentEvidenceRuntime(sealed),
+        sessionId,
+        signal: controller.signal,
+        onNativeArtifactUnavailable(reason) {
+          const parsed = failureEvidenceReasonSchema.safeParse(reason);
+          unavailableReason = parsed.success ? parsed.data : 'read_failed';
+        },
+      });
+      if (!native) return { reason: unavailableReason };
+      if (native.sessionId !== sessionId)
+        return { reason: 'identity_conflict' };
+      if (native.body.byteLength > MAX_FAILURE_NATIVE_SOURCE_BYTES)
+        return { reason: 'too_large' };
+      return { artifact: native };
+    }, FAILURE_NATIVE_CAPTURE_TIMEOUT_MS);
+  } catch {
+    return {
+      reason: controller.signal.aborted ? 'timed_out' : unavailableReason,
+    };
+  } finally {
+    controller.abort();
   }
 }
 
@@ -1160,6 +1303,7 @@ async function executeInteraction(
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
   onUsage: (turn: number, usage: AgentTokenUsage) => Promise<void>,
+  completedTurn: (message: string, turn: AgentTurn) => void,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   const usages: (AgentTokenUsage | undefined)[] = [];
@@ -1207,6 +1351,7 @@ async function executeInteraction(
       usages.push(turn.usage);
       if (turn.usage !== undefined) await onUsage(usages.length, turn.usage);
       lastTurnSessionId = turn.sessionId;
+      completedTurn(message, turn);
       return turn;
     },
   });

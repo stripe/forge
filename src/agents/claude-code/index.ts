@@ -12,6 +12,11 @@ import {
 import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.ts';
 import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
+import {
+  createInvocationCapture,
+  runCapturedAgentCommand,
+} from '../invocationDiagnostics.ts';
+import { summarizeNativeStreamLine } from '../streamDiagnostics.ts';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 import {
   assertClaudeRuntimeLayout,
@@ -185,7 +190,13 @@ export function createClaudeCodeAdapter(
           'Claude session ID factory returned an unsafe value.',
         );
       }
+      try {
+        context.diagnostics?.observeSessionId?.(initialSessionId);
+      } catch {
+        /* Observation cannot control execution. */
+      }
       let currentSessionId: string | undefined;
+      let invocationSequence = 0;
       return {
         sessionId: () => currentSessionId,
         async send(message, sendOptions): Promise<AgentTurn> {
@@ -193,38 +204,61 @@ export function createClaudeCodeAdapter(
           const sessionArguments = currentSessionId
             ? ['--resume', currentSessionId]
             : ['--session-id', initialSessionId];
-          const result = await context.runtime.commands.agent.run(
-            [
-              executable,
-              '-p',
-              message,
-              ...sessionArguments,
-              '--output-format',
-              'stream-json',
-              '--verbose',
-              '--dangerously-skip-permissions',
-              ...(disallowedTools.length === 0
-                ? []
-                : ['--disallowedTools', disallowedTools.join(',')]),
-              '--model',
-              context.selection.model,
-            ],
-            {
-              cwd: '.',
-              signal: sendOptions.signal,
-              timeoutMs: context.plan.limits.run_timeout_ms,
-              maxOutputBytes: 16 * 1024 * 1024,
+          const capture = createInvocationCapture({
+            sequence: ++invocationSequence,
+            resume: currentSessionId !== undefined,
+            cliVersion: expectedVersion,
+            isFailure: (summary) =>
+              summary.event_type === 'error' || summary.status === 'failed',
+            source: 'claude_stream_json',
+            capture: context.diagnostics,
+            summarizeLine: (line, sequence, at) =>
+              summarizeNativeStreamLine(
+                'claude_stream_json',
+                line,
+                sequence,
+                at,
+              ),
+          });
+          const turn = await runCapturedAgentCommand({
+            capture,
+            run: (callbacks) =>
+              context.runtime.commands.agent.run(
+                [
+                  executable,
+                  '-p',
+                  message,
+                  ...sessionArguments,
+                  '--output-format',
+                  'stream-json',
+                  '--verbose',
+                  '--dangerously-skip-permissions',
+                  ...(disallowedTools.length === 0
+                    ? []
+                    : ['--disallowedTools', disallowedTools.join(',')]),
+                  '--model',
+                  context.selection.model,
+                ],
+                {
+                  ...callbacks,
+                  cwd: '.',
+                  signal: sendOptions.signal,
+                  timeoutMs: context.plan.limits.run_timeout_ms,
+                  maxOutputBytes: 16 * 1024 * 1024,
+                },
+              ),
+            parse(result) {
+              if (
+                result.exitCode !== 0 &&
+                !result.stdout.includes('"type":"result"')
+              ) {
+                throw new Error(
+                  `Claude Code exited with status ${result.exitCode} without a completed result event.`,
+                );
+              }
+              return parseClaudeStream(result.stdout);
             },
-          );
-          if (
-            result.exitCode !== 0 &&
-            !result.stdout.includes('"type":"result"')
-          ) {
-            throw new Error(
-              `Claude Code exited with status ${result.exitCode} without a completed result event.`,
-            );
-          }
-          const turn = parseClaudeStream(result.stdout);
+          });
           currentSessionId = turn.sessionId;
           return turn;
         },
@@ -246,6 +280,7 @@ export function createClaudeCodeAdapter(
         project: context.runtime.stateDirectories.get(CLAUDE_PROJECTS_STATE_ID),
         sessionId: context.sessionId,
         signal: context.signal,
+        onNativeArtifactUnavailable: context.onNativeArtifactUnavailable,
       });
     },
   };

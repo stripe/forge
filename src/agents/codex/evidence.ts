@@ -11,12 +11,17 @@ import {
   parseAtifTrajectory,
 } from '../../atif/index.ts';
 import type {
+  AgentEvidenceContext,
   AgentMcpToolRefusals,
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import {
+  NativeArtifactReadError,
+  reportNativeArtifactUnavailable,
+} from '../nativeArtifactError.ts';
 import {
   CodexToolEvidenceError,
   codexToolSearchArguments,
@@ -45,7 +50,8 @@ interface RolloutRecord {
   readonly raw: string;
 }
 
-export interface LoadCodexEvidenceInput {
+export interface LoadCodexEvidenceInput
+  extends Pick<AgentEvidenceContext, 'onNativeArtifactUnavailable'> {
   /** The isolated CODEX_HOME, read only after runtime quiescence. */
   readonly home: ReadonlyWorkspace | undefined;
   readonly sessionId: string;
@@ -56,9 +62,20 @@ export interface LoadCodexEvidenceInput {
 
 /** Retain only the exact root rollout, without altering even malformed later records. */
 export async function loadCodexNativeArtifact(
-  input: Pick<LoadCodexEvidenceInput, 'home' | 'sessionId' | 'signal'>,
+  input: Pick<
+    LoadCodexEvidenceInput,
+    'home' | 'sessionId' | 'signal' | 'onNativeArtifactUnavailable'
+  >,
 ): Promise<AgentNativeArtifact | undefined> {
-  if (!input.home || !SESSION_ID.test(input.sessionId)) return undefined;
+  if (!input.home || !SESSION_ID.test(input.sessionId)) {
+    reportNativeArtifactUnavailable(
+      input,
+      !SESSION_ID.test(input.sessionId)
+        ? new NativeArtifactReadError('identity_conflict')
+        : undefined,
+    );
+    return undefined;
+  }
   input.signal.throwIfAborted();
   try {
     const bytes = await readExactRollout(
@@ -66,7 +83,10 @@ export async function loadCodexNativeArtifact(
       input.sessionId,
       input.signal,
     );
-    if (!bytes) return undefined;
+    if (!bytes) {
+      reportNativeArtifactUnavailable(input);
+      return undefined;
+    }
     return {
       format: FORMAT,
       sessionId: input.sessionId,
@@ -74,8 +94,9 @@ export async function loadCodexNativeArtifact(
       extension: 'jsonl',
       body: Uint8Array.from(bytes),
     };
-  } catch {
+  } catch (error) {
     if (input.signal.aborted) input.signal.throwIfAborted();
+    reportNativeArtifactUnavailable(input, error);
     return undefined;
   }
 }
@@ -119,6 +140,8 @@ export async function loadCodexEvidence(
   } catch (error) {
     if (input.signal.aborted) input.signal.throwIfAborted();
     const reason =
+      (error instanceof NativeArtifactReadError &&
+        error.reason === 'too_large') ||
       error instanceof IncompleteRolloutError ||
       error instanceof CodexToolEvidenceError
         ? 'source_incomplete'
@@ -197,7 +220,7 @@ async function readExactRollout(
   );
   if (candidates.length === 0) return undefined;
   if (candidates.length !== 1)
-    throw new Error('Codex rollout identity is ambiguous.');
+    throw new NativeArtifactReadError('identity_conflict');
   const selected = candidates[0]!;
   if (selected.kind !== 'file')
     throw new Error('Codex rollout is not a regular file.');
@@ -215,19 +238,24 @@ async function readExactRollout(
   if (inspected.kind !== 'file')
     throw new Error('Codex rollout changed before reading.');
   if (inspected.size !== undefined && inspected.size > MAX_SESSION_BYTES)
-    throw new IncompleteRolloutError();
+    throw new NativeArtifactReadError('too_large');
   const bytes = await home.readFile(selected.path, {
     maxBytes: MAX_SESSION_BYTES,
   });
   signal.throwIfAborted();
-  if (bytes.byteLength > MAX_SESSION_BYTES) throw new IncompleteRolloutError();
+  if (bytes.byteLength > MAX_SESSION_BYTES)
+    throw new NativeArtifactReadError('too_large');
   const newline = bytes.indexOf(10);
   const firstBytes = newline < 0 ? bytes : bytes.subarray(0, newline);
   if (firstBytes.byteLength === 0 || firstBytes.byteLength > MAX_LINE_BYTES)
     throw new IncompleteRolloutError();
   const first = new TextDecoder('utf-8', { fatal: true }).decode(firstBytes);
   const metadata = parseRecord(first, { nodes: 0 });
-  validateSessionMetadata(metadata, sessionId);
+  try {
+    validateSessionMetadata(metadata, sessionId);
+  } catch {
+    throw new NativeArtifactReadError('identity_conflict');
+  }
   return bytes;
 }
 

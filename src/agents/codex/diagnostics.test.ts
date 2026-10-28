@@ -22,6 +22,19 @@ import { parseCodexStream } from './stream.ts';
 const time = new Date('2026-01-01T00:00:00.000Z');
 
 describe('bounded Codex diagnostic capture', () => {
+  it('does not treat another harness event type as a Codex event', () => {
+    for (const type of ['assistant', 'result', 'step_finish']) {
+      assert.deepEqual(
+        summarizeCodexLine(
+          JSON.stringify({ type, message: 'private text' }),
+          1,
+          time.toISOString(),
+        ),
+        { sequence: 1, observed_at: time.toISOString(), event_type: 'unknown' },
+      );
+    }
+  });
+
   it('keeps the first failure and final 20 events, with periodic durable observations', async () => {
     let elapsed = 0;
     const records: AgentInvocationRecord[] = [];

@@ -12,11 +12,16 @@ import {
   parseAtifTrajectory,
 } from '../../atif/index.ts';
 import type {
+  AgentEvidenceContext,
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import {
+  NativeArtifactReadError,
+  reportNativeArtifactUnavailable,
+} from '../nativeArtifactError.ts';
 import { isSafeSessionId } from './stream.ts';
 
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
@@ -111,7 +116,8 @@ interface LocatedSessionRecord {
   line: number;
 }
 
-export interface LoadClaudeEvidenceInput {
+export interface LoadClaudeEvidenceInput
+  extends Pick<AgentEvidenceContext, 'onNativeArtifactUnavailable'> {
   readonly project: ReadonlyWorkspace | undefined;
   readonly sessionId: string;
   readonly agentVersion: string;
@@ -121,9 +127,20 @@ export interface LoadClaudeEvidenceInput {
 
 /** Capture the exact selected Claude project JSONL without transforming it. */
 export async function loadClaudeNativeArtifact(
-  input: Pick<LoadClaudeEvidenceInput, 'project' | 'sessionId' | 'signal'>,
+  input: Pick<
+    LoadClaudeEvidenceInput,
+    'project' | 'sessionId' | 'signal' | 'onNativeArtifactUnavailable'
+  >,
 ): Promise<AgentNativeArtifact | undefined> {
-  if (!input.project || !isSafeSessionId(input.sessionId)) return undefined;
+  if (!input.project || !isSafeSessionId(input.sessionId)) {
+    reportNativeArtifactUnavailable(
+      input,
+      !isSafeSessionId(input.sessionId)
+        ? new NativeArtifactReadError('identity_conflict')
+        : undefined,
+    );
+    return undefined;
+  }
   input.signal.throwIfAborted();
   try {
     const bytes = await readExactSessionBytes(
@@ -131,7 +148,10 @@ export async function loadClaudeNativeArtifact(
       input.sessionId,
       input.signal,
     );
-    if (bytes === undefined) return undefined;
+    if (bytes === undefined) {
+      reportNativeArtifactUnavailable(input);
+      return undefined;
+    }
     return {
       format: 'claude-code-jsonl',
       sessionId: input.sessionId,
@@ -139,8 +159,9 @@ export async function loadClaudeNativeArtifact(
       extension: 'jsonl',
       body: Uint8Array.from(bytes),
     };
-  } catch {
+  } catch (error) {
     if (input.signal.aborted) input.signal.throwIfAborted();
+    reportNativeArtifactUnavailable(input, error);
     return undefined;
   }
 }
@@ -213,10 +234,14 @@ async function readExactSessionBytes(
   const relativePath = `${sessionId}.jsonl`;
   const entry = await project.inspect(relativePath);
   if (entry.kind !== 'file') return undefined;
+  if ((entry.size ?? 0) > MAX_SESSION_BYTES)
+    throw new NativeArtifactReadError('too_large');
   const bytes = await project.readFile(relativePath, {
     maxBytes: MAX_SESSION_BYTES,
   });
   signal.throwIfAborted();
+  if (bytes.byteLength > MAX_SESSION_BYTES)
+    throw new NativeArtifactReadError('too_large');
   return bytes;
 }
 

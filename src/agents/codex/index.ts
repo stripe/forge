@@ -347,6 +347,7 @@ export function createCodexAdapter(
         home: context.runtime.stateDirectories.get(CODEX_HOME_STATE_ID),
         sessionId: context.sessionId,
         signal: context.signal,
+        onNativeArtifactUnavailable: context.onNativeArtifactUnavailable,
       });
     },
   } satisfies AgentAdapter);

@@ -3,6 +3,7 @@ import type {
   MutableWorkspace,
   ReadonlyWorkspace,
 } from '../../contracts/runtime.ts';
+import { NativeArtifactReadError } from '../nativeArtifactError.ts';
 import { isJsonPrefix } from './jsonPrefix.ts';
 import {
   EXPORT_PATH,
@@ -88,8 +89,9 @@ export async function readOpenCodeExport(input: {
       throw new OpenCodeNativeError();
     throw new OpenCodeExportParseError(true, 0);
   }
-  if (entry.kind !== 'file' || (entry.size ?? 0) > MAX_NATIVE_BYTES)
-    throw new OpenCodeNativeError();
+  if (entry.kind !== 'file') throw new OpenCodeNativeError();
+  if ((entry.size ?? 0) > MAX_NATIVE_BYTES)
+    throw new NativeArtifactReadError('too_large');
   const body = await input.state.readFile(EXPORT_PATH, {
     maxBytes: MAX_NATIVE_BYTES,
   });
@@ -118,7 +120,7 @@ export async function readOpenCodeExport(input: {
   }
   const value = record(parsed);
   if (record(value.info).id !== input.sessionId)
-    throw new OpenCodeNativeError();
+    throw new NativeArtifactReadError('identity_conflict');
   return { body, value };
 }
 
