@@ -815,18 +815,27 @@ describe('Codex exact rollout evidence', () => {
     );
   });
 
-  it('requires native result metadata to be an object', async () => {
-    for (const _meta of [null, [], 'metadata', 0, false])
-      assert.equal(
-        (
-          await loadToolSequence(
-            capturedMcp({
-              result: { content: [{ type: 'text', text: MCP_TEXT }], _meta },
-            }),
-          )
-        ).kind,
-        'unavailable',
+  it('accepts null native result metadata as absent', async () => {
+    const result = { content: [{ type: 'text', text: MCP_TEXT }] };
+    const withoutMetadata = await loadToolSequence(capturedMcp({ result }));
+    assert.equal(withoutMetadata.kind, 'available');
+    const withNullMetadata = await loadToolSequence(
+      capturedMcp({ result: { ...result, _meta: null } }),
+    );
+    assert.deepEqual(withNullMetadata, withoutMetadata);
+  });
+
+  it('falls back explicitly for unsupported native result metadata types', async () => {
+    for (const _meta of [[], 'metadata', 0, false]) {
+      const evidence = await loadToolSequence(
+        capturedMcp({
+          result: { content: [{ type: 'text', text: MCP_TEXT }], _meta },
+        }),
       );
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_incomplete');
+    }
   });
 
   it('does not inject snapshot-only metadata into structured or text-array output', async () => {

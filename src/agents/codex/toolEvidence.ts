@@ -146,7 +146,8 @@ export function validateCodexMcpSnapshot(
     const result = object(item.result);
     onlyKeys(result, ['content', 'structuredContent', 'isError', '_meta']);
     // Result metadata is snapshot-only; bounds apply before normalization.
-    if (result._meta !== undefined) object(result._meta);
+    if (result._meta !== undefined && result._meta !== null)
+      object(result._meta);
     failed = result.isError === undefined ? false : boolean(result.isError);
     expectedContent = array(result.content).map((part) => {
       const block = object(part);

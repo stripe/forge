@@ -357,6 +357,28 @@ describe('Codex exec stream', () => {
     });
   });
 
+  it('ignores result metadata of any bounded JSON type', () => {
+    for (const _meta of ['metadata', ['metadata'], null, 0, false]) {
+      const parsed = parseCodexStream(
+        stream(
+          item('mcp_tool_call', {
+            id: 'call',
+            server: 'fixture',
+            tool: 'probe',
+            arguments: {},
+            status: 'completed',
+            result: { content: [], _meta },
+          }),
+        ),
+      );
+      assert.deepEqual(parsed, {
+        text: '',
+        sessionId: SESSION_ID,
+        toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+      });
+    }
+  });
+
   it('bounds opaque MCP result data and rejects unknown result fields', () => {
     let nested: unknown = 'leaf';
     for (let depth = 0; depth < 70; depth++) nested = { nested };
