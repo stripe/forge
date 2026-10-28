@@ -12,6 +12,7 @@ import {
 import type {
   HostFileImport,
   MutableWorkspace,
+  PluginMcpConnections,
   PreparedRuntime,
   ReadonlyWorkspace,
   RuntimeAdapter,
@@ -25,11 +26,21 @@ import {
   DockerProxySchema,
   dockerProxyEnvironment,
 } from '../../model/dockerNetwork.ts';
+import { PLUGIN_MCP_CREDENTIALS } from '../../model/pluginCredentials.ts';
 import type {
   ForgeDockerRuntimeV1,
   ForgeRuntimeV1,
+  PluginMcpServerId,
 } from '../../model/types.ts';
+import { serializeCanonicalJson } from '../../serialization.ts';
 import { hashStateFile, importHostFileIntoState } from '../hostFileImport.ts';
+import {
+  type McpCredentialRelay,
+  type McpCredentialRelayLimits,
+  resolveMcpCredentialRelayLimits,
+  startMcpCredentialRelay,
+} from '../mcpCredentialRelay.ts';
+import { mergeMcpToolCallCounts } from '../mcpToolCallCounts.ts';
 import {
   createHostCommandRunner,
   type HostCommandRunner,
@@ -42,6 +53,7 @@ import {
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.ts';
 import { DockerCommandController } from './commandRunner.ts';
+import { resolveMcpRelayNetwork } from './mcpRelayNetwork.ts';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -79,6 +91,11 @@ export interface DockerRuntimeAdapterOptions {
   readonly operationTimeoutMs?: number;
   readonly buildTimeoutMs?: number;
   readonly maximumCommandOutputBytes?: number;
+  /** Explicit host HTTP transport for MCP relays; the upstream URL stays fixed. */
+  readonly mcpRelayFetch?: typeof globalThis.fetch;
+  readonly mcpRelayLimits?: Partial<McpCredentialRelayLimits>;
+  /** Host OS used for relay routing; defaults to the current process platform. */
+  readonly hostPlatform?: NodeJS.Platform;
 }
 
 export interface ValidateDockerRuntimeHostOptions {
@@ -191,6 +208,10 @@ export function createDockerRuntimeAdapter(
   }
   const temporaryRoot = path.resolve(options.temporaryRoot ?? os.tmpdir());
   const hostCommands = options.hostCommands ?? createHostCommandRunner();
+  const mcpRelayLimits = resolveMcpCredentialRelayLimits(
+    options.mcpRelayLimits,
+  );
+  const hostPlatform = options.hostPlatform ?? process.platform;
   const operationTimeoutMs = positive(
     options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
     'operationTimeoutMs',
@@ -272,11 +293,14 @@ export function createDockerRuntimeAdapter(
 
   return Object.freeze({
     id: 'forge/docker',
+    supportsMcpCredentialRelay: true as const,
     preflight({ plan, requirements, environment }: RuntimePreflight) {
       const runtime = validateRuntime(plan.runtime);
       assertProxyBindings(runtime.proxy, environment);
       validateExecutableRequirements(requirements.executables);
       validateStateRequirements(requirements.stateDirectories);
+      validateMcpRelayRequirements(requirements.mcpRelays ?? []);
+      assertRelayProxyBindings(requirements.mcpRelays ?? [], environment);
     },
     async prepare(input: RuntimePreparation): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
@@ -289,6 +313,36 @@ export function createDockerRuntimeAdapter(
       const stateRequirements = validateStateRequirements(
         input.requirements.stateDirectories,
       );
+      const relayCredentials = input.mcpRelayCredentials ?? [];
+      validateMcpRelayRequirements(input.requirements.mcpRelays ?? []);
+      assertRelayProxyBindings(
+        input.requirements.mcpRelays ?? [],
+        input.environment,
+      );
+      if (
+        JSON.stringify(relayCredentials.map(({ server }) => server).sort()) !==
+          JSON.stringify([...(input.requirements.mcpRelays ?? [])].sort()) ||
+        relayCredentials.some(
+          ({ server, value }) =>
+            !Object.hasOwn(PLUGIN_MCP_CREDENTIALS, server) ||
+            !value ||
+            /[\r\n]/.test(value),
+        )
+      )
+        throw new TypeError(
+          'MCP relay credentials do not match runtime requirements.',
+        );
+      const relayNetwork =
+        relayCredentials.length === 0
+          ? undefined
+          : await resolveMcpRelayNetwork({
+              hostPlatform,
+              ...(runtime.network ? { network: runtime.network } : {}),
+              dockerExecutable,
+              hostCommands,
+              timeoutMs: operationTimeoutMs,
+              signal: input.signal,
+            });
       const image = await imageFor(
         runtime.platform,
         input.signal,
@@ -400,6 +454,11 @@ export function createDockerRuntimeAdapter(
         });
       }
       const containerName = containerNameFor(input.runId);
+      const relays: McpCredentialRelay[] = [];
+      const pluginMcpConnections: Partial<PluginMcpConnections> = {};
+      const closeRelays = async () => {
+        await Promise.all(relays.map((relay) => relay.close()));
+      };
       const startArgv = (sealSetupState: boolean): readonly string[] =>
         dockerRunArgv({
           cidFile,
@@ -408,6 +467,9 @@ export function createDockerRuntimeAdapter(
           homeRoot,
           image: image.id,
           platform: runtime.platform,
+          ...(relayNetwork?.hostMapping
+            ? { hostRelayMapping: relayNetwork.hostMapping }
+            : {}),
           ...(runtime.network ? { network: runtime.network } : {}),
           resources: runtime.resources,
           sealSetupState,
@@ -416,6 +478,25 @@ export function createDockerRuntimeAdapter(
         });
       let containerExists = false;
       try {
+        for (const { server, value } of relayCredentials) {
+          const relay = await startMcpCredentialRelay({
+            upstreamUrl: PLUGIN_MCP_CREDENTIALS[server].url,
+            credential: value,
+            listenHost: relayNetwork!.listenHost,
+            connectHost: relayNetwork!.connectHost,
+            limits: mcpRelayLimits,
+            signal: input.signal,
+            ...(options.mcpRelayFetch === undefined
+              ? {}
+              : { fetch: options.mcpRelayFetch }),
+          });
+          relays.push(relay);
+          Object.defineProperty(pluginMcpConnections, server, {
+            value: relay.connection,
+            enumerable: true,
+          });
+        }
+        Object.freeze(pluginMcpConnections);
         const started = await hostCommands.run(startArgv(false), {
           maxOutputBytes: maximumCommandOutputBytes,
           signal: input.signal,
@@ -428,6 +509,7 @@ export function createDockerRuntimeAdapter(
         }
         containerExists = true;
       } catch (error) {
+        await closeRelays();
         const partialContainerId = await readContainerId(cidFile);
         await bestEffortRemoveContainer(
           dockerExecutable,
@@ -440,6 +522,18 @@ export function createDockerRuntimeAdapter(
         throw error;
       }
 
+      const commandVariables = {
+        ...dockerProxyEnvironment(runtime.proxy),
+        ...input.environment.variables,
+      };
+      if (relays.length > 0) {
+        const relayHost =
+          runtime.network === 'host' ? '127.0.0.1' : 'host.docker.internal';
+        for (const name of ['NO_PROXY', 'no_proxy'])
+          commandVariables[name] = [commandVariables[name], relayHost]
+            .filter(Boolean)
+            .join(',');
+      }
       const controller = new DockerCommandController({
         containerName,
         defaultTimeoutMs: Math.min(
@@ -448,10 +542,7 @@ export function createDockerRuntimeAdapter(
         ),
         dockerExecutable,
         environment: {
-          variables: {
-            ...dockerProxyEnvironment(runtime.proxy),
-            ...input.environment.variables,
-          },
+          variables: commandVariables,
           credentials: input.environment.credentials,
         },
         environmentFileRoot,
@@ -486,6 +577,7 @@ export function createDockerRuntimeAdapter(
         mutationOpen = false;
         importsOpen = false;
         disposePromise ??= (async () => {
+          await closeRelays();
           // A started quiesce owns the stop barrier. Cleanup never races it.
           await sealedPromise?.catch(() => undefined);
           await waitForImports().catch(() => undefined);
@@ -525,6 +617,28 @@ export function createDockerRuntimeAdapter(
             platform: runtime.platform,
             network: runtime.network ?? 'default',
             buildNetwork: runtime.build_network ?? 'default',
+            ...(relays.length === 0
+              ? {}
+              : {
+                  pluginMcpLimits: serializeCanonicalJson(mcpRelayLimits),
+                  pluginMcpToolCalls: serializeCanonicalJson(
+                    mergeMcpToolCallCounts(
+                      relays.map((relay) => relay.toolCalls()),
+                    ),
+                  ),
+                  pluginMcpRequests: String(
+                    relays.reduce(
+                      (count, relay) => count + relay.counts().requests,
+                      0,
+                    ),
+                  ),
+                  pluginMcpErrors: String(
+                    relays.reduce(
+                      (count, relay) => count + relay.counts().errors,
+                      0,
+                    ),
+                  ),
+                }),
           }),
         });
 
@@ -536,6 +650,7 @@ export function createDockerRuntimeAdapter(
           home: CONTAINER_HOME,
         }),
         stateDirectories,
+        ...(relays.length === 0 ? {} : { pluginMcpConnections }),
         importHostFile(
           request: HostFileImport,
           signal?: AbortSignal,
@@ -694,6 +809,7 @@ export function createDockerRuntimeAdapter(
           mutationOpen = false;
           importsOpen = false;
           sealedPromise ??= (async () => {
+            await closeRelays();
             await waitForImports();
             await controller.closeAndWait();
             const stopped = await hostCommands.run(
@@ -716,6 +832,30 @@ export function createDockerRuntimeAdapter(
       });
     },
   });
+}
+
+function validateMcpRelayRequirements(
+  servers: readonly PluginMcpServerId[],
+): void {
+  if (
+    !Array.isArray(servers) ||
+    new Set(servers).size !== servers.length ||
+    servers.some((server) => !Object.hasOwn(PLUGIN_MCP_CREDENTIALS, server))
+  )
+    throw new TypeError('Unsupported MCP relay requirements.');
+}
+
+function assertRelayProxyBindings(
+  servers: readonly PluginMcpServerId[],
+  environment: { readonly credentials?: Readonly<Record<string, unknown>> },
+): void {
+  if (
+    servers.length > 0 &&
+    ['NO_PROXY', 'no_proxy'].some((name) =>
+      Object.hasOwn(environment.credentials ?? {}, name),
+    )
+  )
+    throw new TypeError('MCP relay proxy bypass cannot be credential-backed.');
 }
 
 function credentialEnvironmentNamesForScope(
@@ -880,6 +1020,7 @@ function dockerRunArgv(input: {
   image: string;
   platform: RuntimePlatform;
   network?: 'host';
+  hostRelayMapping?: string;
   resources: ForgeDockerRuntimeV1['resources'];
   sealSetupState: boolean;
   stateMounts: readonly {
@@ -893,6 +1034,7 @@ function dockerRunArgv(input: {
     input.dockerExecutable,
     'run',
     ...(input.network ? ['--network', input.network] : []),
+    ...(input.hostRelayMapping ? ['--add-host', input.hostRelayMapping] : []),
     '--detach',
     '--name',
     input.containerName,

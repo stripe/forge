@@ -297,14 +297,20 @@ export function createCodexPluginInstaller(options: {
             identity.name,
             installed.version,
           );
-          const mcpServers = context.mcpServers;
-          if (mcpServers)
-            await configurePluginMcp(home, relative, 'codex', mcpServers);
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,
             signal,
           );
+          const mcpServers = context.mcpServers;
+          if (mcpServers)
+            await configurePluginMcp(
+              home,
+              relative,
+              'codex',
+              mcpServers,
+              installContext.pluginMcpConnections,
+            );
           return Object.freeze({
             adapter: options.adapterId,
             plugin: selected.plugin,

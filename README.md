@@ -113,18 +113,18 @@ must use HTTPS and be reachable from the container; host-side completions
 must also reach their endpoint. A host loopback address points at the
 container when used by the agent, including names ending in `.localhost`.
 A successful host-side request does not prove coding-agent connectivity.
-The public CLI creates no host bridge; supply an endpoint reachable from
-the container. The development live suite has separate
+The public CLI creates no host bridge for model endpoints; supply an endpoint
+reachable from the container. The development live suite has separate
 [gateway bridge support](docs/codebase-guide.md#opt-in-live-tests).
 
 For the [Stripe plugin treatment](docs/plugin-action.md), use
 `with: {plugin: stripe}` and export `STRIPE_API_KEY` with an Agent API key.
 To use a different host variable, pass
-`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`; the agent still receives
-`STRIPE_API_KEY`.
-Forge selects the distribution for the run's agent and configures its bundled
-MCP connection. The token reaches only agent commands; prepare the account or
-merchant outside Forge.
+`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`. Forge keeps this key on
+the host and routes the bundled MCP connection through a run-owned credential
+relay. The container receives a temporary relay token. Plugin runs need a local
+Docker daemon with host reachability; see the [relay contract](docs/plugin-action.md#credentials-and-limitations).
+Prepare the account or merchant outside Forge.
 
 OpenCode requires `OPENCODE_BASE_URL`, a Chat Completions API root such as
 `https://gateway.example.com/v1`, and `OPENCODE_API_KEY`. This supports the
@@ -189,7 +189,8 @@ Embedding hosts resolve `env:API_TOKEN` through their credential resolver.
 
 This action adds requirements without adding automatic host bindings. Existing
 bindings still apply: selecting `forge/plugin` with `plugin: stripe` already
-declares and binds `STRIPE_API_KEY`, so there is no need to repeat it here.
+binds `STRIPE_API_KEY` for its host relay. Declaring that key for command
+environments in the same run is rejected.
 
 ## Installation
 
@@ -379,9 +380,9 @@ npx --no-install forge run --experiment ./my-eval/experiment.yaml --agent openco
 For a plugin comparison, use two named treatments, `no-plugin` and
 `stripe-plugin`, with the same model configuration above in each. Add
 `uses: forge/plugin` with `with: {plugin: stripe}` only to `stripe-plugin`.
-If both arms need Stripe account access, declare `forge/credentials` with
-`env: [STRIPE_API_KEY]` in both and pass
-`--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`. Keep shared treatment
+The plugin arm receives account access through MCP. Use `forge/credentials`
+only for arms that need direct API access; that action exposes its declared
+key to tool shells and cannot share the plugin relay key. Keep shared treatment
 setup out of the reserved `baseline`, which requires an empty setup list.
 
 OpenCode loads Stripe's standard skills-and-MCP bundle from the source commit

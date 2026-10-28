@@ -1603,7 +1603,7 @@ describe('Forge CLI', () => {
     );
   });
 
-  it('remaps a plugin host credential while preserving its runtime name and agent scope', async () => {
+  it('remaps a plugin host credential while keeping it outside the agent environment', async () => {
     const fixture = await createBenchmarkFixture();
     const config = parseExperimentConfigYaml(
       await fs.readFile(fixture.experimentPath, 'utf8'),
@@ -1683,9 +1683,10 @@ describe('Forge CLI', () => {
 
     assert.equal(exitCode, 0, stderr);
     assert.equal(runtime.runs.length, 1);
-    assert.deepEqual(runtime.runs[0]!.input.environment.credentials, {
-      STRIPE_API_KEY: { value: 'explicit-plugin-key', scopes: ['agent'] },
-    });
+    assert.deepEqual(runtime.runs[0]!.input.environment.credentials, {});
+    assert.deepEqual(runtime.runs[0]!.input.mcpRelayCredentials, [
+      { server: 'stripe', value: 'explicit-plugin-key' },
+    ]);
     assert.deepEqual(
       runtime.runs[0]!.commands.map(({ argv, credentialEnvironmentNames }) => ({
         argv,
@@ -1695,7 +1696,7 @@ describe('Forge CLI', () => {
         { argv: ['probe-plugin-setup'], credentialEnvironmentNames: [] },
         {
           argv: ['probe-agent'],
-          credentialEnvironmentNames: ['STRIPE_API_KEY'],
+          credentialEnvironmentNames: [],
         },
       ],
     );

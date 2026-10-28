@@ -60,6 +60,7 @@ export function createOpenCodePluginInstaller(options: {
           stateDirectories,
           commands,
           signal,
+          pluginMcpConnections,
         }): Promise<OpenCodeBundleInstallationReceipt> {
           assertOpenCodeRuntimeLayout(layout, paths);
           const state = stateDirectories.get(OPENCODE_STATE_ID);
@@ -163,9 +164,15 @@ export function createOpenCodePluginInstaller(options: {
               await state.readFile(entry.path, { maxBytes: 64 * 1024 * 1024 }),
             );
           }
+          const installedTree = await inspectInstalledPluginTree(
+            state,
+            PLUGIN_ROOT,
+            signal,
+          );
           const configuration = stripeOpenCodeConfiguration(
             await readJson(state, `${bundle}/mcp.json`),
             layout.stateDirectory,
+            pluginMcpConnections?.stripe,
           );
           await state.writeFile(
             PLUGIN_CONFIG_PATH,
@@ -183,11 +190,7 @@ export function createOpenCodePluginInstaller(options: {
               commit: sourceCommit,
               path: BUNDLE_SOURCE_PATH,
             }),
-            installed_tree: await inspectInstalledPluginTree(
-              state,
-              PLUGIN_ROOT,
-              signal,
-            ),
+            installed_tree: installedTree,
           });
         },
       };

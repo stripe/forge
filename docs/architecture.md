@@ -531,6 +531,11 @@ from the declaration source rather than trusting an adapter-supplied scope:
 - an agent requirement receives agent scope;
 - a setup action may separately declare a credential the later agent needs.
 
+Registered plugin MCP credentials resolve separately into host-only relay inputs,
+never into command environments. The runtime exposes only a relay URL and
+per-run token to plugin setup and closes the relay on abort, quiescence, or
+disposal. See the [plugin credential contract](plugin-action.md#credentials-and-limitations).
+
 The resolver is called only for the selected plan's declared bindings. Plain
 variables remain structurally separate from resolved secrets, and the ambient
 host environment is never copied wholesale.
@@ -562,6 +567,7 @@ state-directory requirements. It returns a `PreparedRuntime` with:
 
 - mutable workspace and declared state directories;
 - an optional host-only bounded file import into declared state;
+- optional `pluginMcpConnections` containing run-scoped relay capabilities;
 - logical runtime paths;
 - uncredentialed, setup-scoped, and agent-scoped command projections;
 - `finalizeSetup`, `quiesce`, and idempotent `dispose` lifecycle methods.
@@ -699,7 +705,17 @@ URL credentials, query strings, and fragments are rejected. Docker's standard
 proxy build args supply cold builds; upper- and lowercase variables supply
 setup and agent commands. Proxy bindings cannot conflict with agent/setup
 environment requirements. Proxy settings do not alter packaged image assets.
-The built-in runtime has no domain allowlist.
+Plugin MCP relays use the host reachability described in the
+[plugin contract](plugin-action.md#credentials-and-limitations).
+`DockerRuntimeAdapterOptions.mcpRelayFetch` permits an explicit host transport
+for embedding and local fixtures; the default uses native fetch. The relay
+upstream remains code-owned. `mcpRelayLimits` accepts explicit overrides of the
+typed relay bounds exported with their defaults from `@stripe/forge/runtime/docker`;
+`hostPlatform` selects host routing independently of the image architecture.
+The relay does not restrict general egress or change the selected network and
+proxy settings. It appends only its host to proxy bypass lists. Other traffic
+has no domain allowlist. Bounded per-tool relay counts are observations described
+in the plugin contract; they do not block writes or affect scoring.
 
 #### Run-owned paths and mounts
 
@@ -804,9 +820,9 @@ and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
 Plans retain `forge/plugin`'s short registered name. Pure preflight selects its
-native distribution and declares agent-scoped MCP credential requirements using
+native distribution. The engine declares host-only MCP relay credentials using
 policy fixed by the Forge version. Setup installs the current marketplace entry,
-configures its existing MCP connection, and fingerprints the installation.
+fingerprints its installed content, then configures its existing MCP connection.
 The `setup.json` receipt records resolved native IDs, catalog commit, installed
 version, reported source commit when available, and the installed-tree
 fingerprint. These identify the catalog snapshot and observed contents; plugin
@@ -1530,7 +1546,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/agents/opencode` | Experimental OpenCode Chat Completions adapter, stream parser, and exact-session export loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
 | `@stripe/forge/providers/openai` | OpenAI Responses-compatible host completion provider |
-| `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
+| `@stripe/forge/runtime/docker` | Forge Docker adapter, typed relay limits and defaults, and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
 | `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
 | `@stripe/forge/package.json` | Package metadata |

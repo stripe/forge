@@ -6,11 +6,12 @@ import type {
   ResolvedRunPlanV1,
 } from './types.ts';
 
-/** Code-owned credential policy; native adapters use the runtime name. */
+/** Code-owned host credential and upstream policy. */
 export const PLUGIN_MCP_CREDENTIALS = Object.freeze({
   stripe: Object.freeze({
     credentialEnvironmentVariable: 'STRIPE_API_KEY',
     credentialReference: credentialReference('env:STRIPE_API_KEY'),
+    url: 'https://mcp.stripe.com/',
   }),
 });
 
@@ -26,7 +27,7 @@ export function pluginMcpCredentials(servers: readonly PluginMcpServerId[]) {
   );
 }
 
-/** Default selected credentials to their runtime names; explicit host bindings win. */
+/** Default plugin references to public host variable names; explicit bindings win. */
 export function pluginMcpEnvironmentBindings(
   plans: readonly ResolvedRunPlanV1[],
   explicit: Readonly<Record<string, string>> = {},

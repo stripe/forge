@@ -285,6 +285,7 @@ export function createFakeRuntimeAdapter(
 
   const adapter: RuntimeAdapter = {
     id,
+    supportsMcpCredentialRelay: true,
     preflight() {},
     async prepare(input): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
@@ -388,6 +389,17 @@ export function createFakeRuntimeAdapter(
 
       const prepared: PreparedRuntime = Object.freeze({
         runtimeId: input.runId,
+        pluginMcpConnections: Object.freeze(
+          Object.fromEntries(
+            (input.requirements.mcpRelays ?? []).map((server) => [
+              server,
+              Object.freeze({
+                url: 'http://127.0.0.1:12345/mcp',
+                token: 'a'.repeat(64),
+              }),
+            ]),
+          ),
+        ),
         workspace: workspace.mutable,
         paths: Object.freeze({ workspace: '/workspace', home: '/home/forge' }),
         stateDirectories: new Map(
