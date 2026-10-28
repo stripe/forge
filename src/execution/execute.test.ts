@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import type {
   AgentAdapter,
   AgentNativeEvidenceResult,
@@ -32,7 +33,6 @@ import type {
   SetupStepHandler,
 } from '../setup/types.ts';
 import { createScriptedCompletionProvider } from '../testing/completionProvider.ts';
-import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.ts';
 import { ForgeExecutionError } from './errors.ts';
 import {
