@@ -17,6 +17,7 @@ function initialResponse(
   return JSON.stringify({
     user_needs: descriptions.map((description) => ({
       description,
+      acceptance: 'The requested outcome is complete.',
       status: 'remaining',
     })),
     message,
@@ -146,8 +147,16 @@ describe('runConversation', () => {
     ]);
     assert.deepEqual(result.avaAudit, {
       needs: [
-        { id: 'need_1', description: needs[0] },
-        { id: 'need_2', description: needs[1] },
+        {
+          id: 'need_1',
+          description: needs[0],
+          acceptance: 'The requested outcome is complete.',
+        },
+        {
+          id: 'need_2',
+          description: needs[1],
+          acceptance: 'The requested outcome is complete.',
+        },
       ],
       decisions: [
         {
@@ -514,8 +523,92 @@ describe('runConversation', () => {
     assert.doesNotMatch(JSON.stringify(result), /secret-token/);
   });
 
+  it('continues when generated messages overlap private text without retrying', async () => {
+    const acceptance = 'The requested outcome is complete.';
+    const completion = completions(
+      initialResponse(
+        ['Complete the access flow'],
+        `Could you confirm: ${acceptance}`,
+      ),
+      continuationResponse(['need_1'], `Could you confirm: ${acceptance}`),
+      continuationResponse([], ''),
+    );
+    const agent = session([
+      {
+        text: 'Here is the first part.',
+        sessionId: 'persistent-session',
+        toolCalls: [],
+      },
+      {
+        text: 'Here is the rest.',
+        sessionId: 'persistent-session',
+        toolCalls: [],
+      },
+    ]);
+    const signal = new AbortController().signal;
+    const result = await runConversation({
+      session: agent.value,
+      ava: new AvaRolePlayer(
+        { task: 'Explain the access flow.', signal },
+        completion.invoke,
+        noRetryWait,
+      ),
+      maxTurns: 3,
+      signal,
+    });
+
+    assert.equal(result.stopReason, 'task_complete');
+    assert.equal(result.failure, null);
+    assert.equal(completion.calls.length, 3);
+    const message = `Could you confirm: ${acceptance}`;
+    assert.deepEqual(
+      agent.sent.map(({ message }) => message),
+      [message, message],
+    );
+    assert.deepEqual(completion.calls[1]!.messages, [
+      { role: 'assistant', content: message },
+      { role: 'user', content: 'Here is the first part.' },
+    ]);
+    assert.equal(result.turns.length, 2);
+  });
+
+  for (const response of [new Error('Completion unavailable.'), '{invalid']) {
+    it(`records a zero-turn role-player failure for ${typeof response === 'string' ? 'invalid' : 'failed'} opening initialization`, async () => {
+      const completion = completions(response);
+      const agent = session([]);
+      const signal = new AbortController().signal;
+      const result = await runConversation({
+        session: agent.value,
+        ava: new AvaRolePlayer(
+          {
+            task: 'Do the work',
+            initialPrompt: 'Please inspect the repository.',
+            signal,
+          },
+          completion.invoke,
+          noRetryWait,
+        ),
+        maxTurns: 3,
+        signal,
+      });
+
+      assert.equal(agent.sent.length, 0);
+      assert.deepEqual(result.turns, []);
+      assert.equal(result.stopReason, 'role_player_error');
+      assert.equal(
+        result.failure?.errorType,
+        typeof response === 'string' ? 'parse_error' : 'request_error',
+      );
+      assert.equal(result.failure?.attempts, 3);
+      assert.equal(completion.calls.length, 3);
+      assert.equal(result.avaAudit.needs, null);
+      assert.equal(result.avaAudit.decisions[0]!.message, '');
+      assert.equal(result.avaAudit.decisions[0]!.codingAgentInvoked, false);
+    });
+  }
+
   it('preserves configured stop-sentinel behavior and validates completed turns', async () => {
-    const completion = completions(new Error('must not be called'));
+    const completion = completions(new Error('Ava must not be called.'));
     const signal = new AbortController().signal;
     const agent = session([
       { text: 'Done.', sessionId: 'persistent-session', toolCalls: [] },
@@ -530,6 +623,7 @@ describe('runConversation', () => {
           signal,
         },
         completion.invoke,
+        noRetryWait,
       ),
       maxTurns: 3,
       signal,
@@ -538,8 +632,10 @@ describe('runConversation', () => {
 
     assert.equal(completion.calls.length, 0);
     assert.equal(agent.sent.length, 1);
+    assert.equal(agent.sent[0]!.message, 'Finish this request.');
     assert.equal(result.stopReason, 'task_complete');
-    assert.deepEqual(result.avaAudit.needs, null);
+    assert.equal(result.avaAudit.needs, null);
+    assert.equal(result.avaAudit.decisions[0]!.remainingNeedIds, null);
     assert.deepEqual(validatedLengths, [1]);
   });
 

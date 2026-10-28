@@ -521,6 +521,60 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
   });
 
+  it('reads older needs without acceptance and bounds recorded acceptance when present', () => {
+    const need = { id: 'need_1', description: 'Complete the requested work' };
+    const interaction = (recordedNeed: object) => ({
+      mode: 'multi_turn',
+      stop_reason: 'task_complete',
+      turns: [
+        { turn: 1, user: 'Do the work.', assistant: 'Done.', tool_calls: [] },
+      ],
+      role_player: {
+        model: { provider: 'test-provider', model: 'role-model' },
+        needs: [recordedNeed],
+        decisions: [
+          {
+            sequence: 1,
+            after_agent_turn: null,
+            message: 'Do the work.',
+            stop: true,
+            remaining_need_ids: ['need_1'],
+            focus_need_id: null,
+            coding_agent_invoked: true,
+            source: 'configured_initial_prompt',
+          },
+        ],
+      },
+      failure: null,
+    });
+    const older = interaction(need);
+    assert.deepEqual(parseInteractionArtifact(older, CONTEXT), older);
+    assert.equal(
+      Object.hasOwn(
+        parseInteractionArtifact(older, CONTEXT).role_player!.needs![0]!,
+        'acceptance',
+      ),
+      false,
+    );
+    const current = interaction({ ...need, acceptance: 'x'.repeat(240) });
+    assert.deepEqual(parseInteractionArtifact(current, CONTEXT), current);
+    for (const acceptance of ['', '  ', 'x'.repeat(241), null, 42]) {
+      assert.throws(() =>
+        parseInteractionArtifact(interaction({ ...need, acceptance }), CONTEXT),
+      );
+    }
+    assert.throws(() =>
+      parseInteractionArtifact(
+        interaction({
+          ...need,
+          acceptance: 'The work is complete.',
+          extra: true,
+        }),
+        CONTEXT,
+      ),
+    );
+  });
+
   it('preserves configured opening prompts while retaining generated message bounds', () => {
     const interaction = (message: string, source: string) => ({
       mode: 'multi_turn',

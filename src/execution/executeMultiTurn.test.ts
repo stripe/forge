@@ -89,14 +89,22 @@ describe('executeEval multi-turn and judging integration', () => {
       id: 'test-provider',
       responses: [
         (request) => {
-          assert.deepEqual(agent.messages, [initialPrompt]);
-          assert.equal(request.messages[0]?.content, initialPrompt);
+          assert.deepEqual(agent.messages, []);
+          assert.ok(request.messages.every(({ role }) => role === 'user'));
           return JSON.stringify({
             user_needs: [
-              { description: 'Create the answer file', status: 'satisfied' },
+              {
+                description: 'Create the answer file',
+                acceptance: 'The requested answer file is complete.',
+                status: 'remaining',
+              },
             ],
-            message: '',
           });
+        },
+        (request) => {
+          assert.deepEqual(agent.messages, [initialPrompt]);
+          assert.equal(request.messages[0]?.content, initialPrompt);
+          return JSON.stringify({ remaining_need_ids: [], message: '' });
         },
       ],
     });
@@ -211,7 +219,8 @@ describe('executeEval multi-turn and judging integration', () => {
         JSON.stringify({
           user_needs: [
             {
-              description: 'Produce the requested answer file',
+              description: 'Deliver an answer in the specified file',
+              acceptance: 'The requested answer file is complete.',
               status: 'remaining',
             },
           ],
@@ -438,7 +447,11 @@ describe('executeEval multi-turn and judging integration', () => {
       responses: [
         JSON.stringify({
           user_needs: [
-            { description: 'Complete both parts', status: 'remaining' },
+            {
+              description: 'Complete both parts',
+              acceptance: 'Both requested parts are complete.',
+              status: 'remaining',
+            },
           ],
           message: firstUser,
         }),
@@ -1117,7 +1130,11 @@ describe('executeEval multi-turn and judging integration', () => {
       responses: [
         JSON.stringify({
           user_needs: [
-            { description: 'Finish both steps', status: 'remaining' },
+            {
+              description: 'Finish both steps',
+              acceptance: 'Both requested steps are complete.',
+              status: 'remaining',
+            },
           ],
           message: 'Please do the first step.',
         }),
