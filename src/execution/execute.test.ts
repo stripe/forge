@@ -32,6 +32,7 @@ import type {
   SetupStepHandler,
 } from '../setup/types.ts';
 import { createScriptedCompletionProvider } from '../testing/completionProvider.ts';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.ts';
 import { ForgeExecutionError } from './errors.ts';
 import {
@@ -2324,9 +2325,7 @@ function judgedPlan(
 }
 
 function judgment(): string {
-  return JSON.stringify({
-    results: [{ index: 0, passed: true, explanation: 'The greeting exists.' }],
-  });
+  return JSON.stringify(criterionJudgment(true, 'The greeting exists.'));
 }
 
 function resolvedPlan(): ResolvedRunPlanV1 {
