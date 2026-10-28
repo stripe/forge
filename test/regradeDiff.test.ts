@@ -168,15 +168,17 @@ describe('regrade diff', () => {
       await fs.readFile(file, 'utf8'),
     ) as RegradeResultV1;
     const evaluation = scoreEvaluation(
-      saved.evaluation.judging_criteria.map(({ decision: _decision, ...criterion }) => ({
-        ...criterion,
-        passed: null,
-        error: {
-          type: 'request_error',
-          attempts: 3,
-          message: 'Judge unavailable.',
-        },
-      })),
+      saved.evaluation.judging_criteria.map(
+        ({ decision: _decision, ...criterion }) => ({
+          ...criterion,
+          passed: null,
+          error: {
+            type: 'request_error',
+            attempts: 3,
+            message: 'Judge unavailable.',
+          },
+        }),
+      ),
       saved.evaluation.checks,
     );
     await fs.writeFile(file, JSON.stringify({ ...saved, evaluation }));
@@ -510,15 +512,17 @@ describe('regrade diff', () => {
       JSON.stringify({
         ...saved,
         evaluation: scoreEvaluation(
-          saved.evaluation.judging_criteria.map(({ decision: _decision, ...criterion }) => ({
-            ...criterion,
-            passed: null,
-            error: {
-              type: 'request_error',
-              attempts: 3,
-              message: 'PRIVATE_PAYLOAD',
-            },
-          })),
+          saved.evaluation.judging_criteria.map(
+            ({ decision: _decision, ...criterion }) => ({
+              ...criterion,
+              passed: null,
+              error: {
+                type: 'request_error',
+                attempts: 3,
+                message: 'PRIVATE_PAYLOAD',
+              },
+            }),
+          ),
           saved.evaluation.checks,
         ),
       }),

@@ -28,7 +28,6 @@ export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 const MIN_AVA_DESCRIPTION_MATCH_WORDS = 4;
 const MIN_AVA_DESCRIPTION_MATCH_CHARACTERS = 24;
 
-const AVA_RETRY_DELAYS_MS = [1_000, 5_000] as const;
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
 export interface AvaRolePlayerOptions extends AvaPromptInputs {

@@ -2,12 +2,12 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
-import type { CompletionProviderErrorCode } from '../contracts/completionObservation.ts';
 import type {
-  AgentTokenUsage,
   AgentMcpToolRefusals,
+  AgentTokenUsage,
   AgentToolCall,
 } from '../contracts/agent.ts';
+import type { CompletionProviderErrorCode } from '../contracts/completionObservation.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
