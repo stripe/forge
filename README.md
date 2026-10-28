@@ -55,25 +55,25 @@ For the built-in CLI, you need:
   to their public GitHub marketplace and selected source.
 - Capacity for each concurrent eval run. Default runtime limits are 4 GiB
   memory, 2 CPUs, and 512 processes.
-- Credentials for the selected coding agent and any host completion models.
+- Credentials for the selected coding agent and any Ava/judge models.
   Execution makes potentially billable model calls; ordinary validation does not.
 
-| Workload | Coding-agent grant | Ava/judge grant |
-| --- | --- | --- |
-| Claude Code, one-shot with checks only | `--credential-env ANTHROPIC_API_KEY` | None |
-| Claude Code with Ava or judging criteria | `--credential-env ANTHROPIC_API_KEY` | Selected host provider grant below |
-| Codex, one-shot with checks only | `--credential-env OPENAI_API_KEY` | None |
-| Codex with Ava or judging criteria | `--credential-env OPENAI_API_KEY` | Selected host provider grant below |
-| `validate` or `plan` | None | None |
+| Workload | Required grants |
+| --- | --- |
+| Claude Code, one-shot with checks only | `--credential-env ANTHROPIC_API_KEY` |
+| Claude Code with default Ava or judge models | `--credential-env ANTHROPIC_API_KEY --credential-env OPENAI_API_KEY` |
+| Codex, one-shot with checks only | `--credential-env OPENAI_API_KEY` |
+| Codex with default Ava or judge models | `--credential-env OPENAI_API_KEY` |
+| `validate` or `plan` | None |
 
 Export the required variables in your shell or credential manager and grant
-each credential explicitly when running or resuming pending work. Selecting an
-agent, provider, or plugin does not authorize access to host secrets.
-`--credential-env NAME` lets a selected runtime credential named `NAME` read
-the host variable of the same name; it does not forward undeclared variables.
-`--credential-env reference=HOST_VAR` instead binds an opaque credential
-reference to a named host variable. Host completion references require their
-own grants even when they read the same host variable as the coding agent.
+each one explicitly when running or resuming pending work. Exporting a variable
+or selecting an agent, provider, or plugin does not authorize access to secrets.
+`--credential-env NAME` authorizes all selected built-in consumers that need
+that variable: the coding agent, declared application or plugin credentials,
+and Ava/judge providers. One `--credential-env OPENAI_API_KEY` therefore covers
+Codex, Ava, and the judge when all use OpenAI. Grants do not forward undeclared
+variables or bind providers unused by the selected run.
 Use restricted, short-lived keys with appropriate account limits: the evaluated
 agent receives its credential and outbound network access. Keep secrets outside
 dataset and experiment files.
@@ -90,32 +90,27 @@ models:
   judge: { provider: anthropic, model: claude-sonnet-4-6 }
 ```
 
-OpenAI host completions require
-`--credential-env openai.completion-api-key=OPENAI_API_KEY`. They use the
+OpenAI Ava/judge models use `--credential-env OPENAI_API_KEY`. They use the
 Responses API with strict JSON Schema and `store: false`. `OPENAI_BASE_URL`
 optionally sets the complete API root, including `/v1`; Forge appends
 `/responses`. GPT-5 and later and o-series model identifiers omit `temperature`
 and receive an output budget of at least 16,000 tokens to allow for reasoning.
 Reasoning blocks are excluded from completion text.
 
-Anthropic host completions require
-`--credential-env anthropic.completion-api-key=ANTHROPIC_API_KEY` and Claude
-4.5-or-newer model identifiers with strict structured-output support.
+Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
+Claude 4.5-or-newer model identifiers with strict structured-output support.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
-`ANTHROPIC_AUTH_TOKEN`. When the URL is present, grant
-`--credential-env ANTHROPIC_AUTH_TOKEN` for Claude Code and
-`--credential-env anthropic.completion-auth-token=ANTHROPIC_AUTH_TOKEN` for
-Anthropic host completions. The CLI requires that token instead of selecting
+`ANTHROPIC_AUTH_TOKEN`. When the URL is present,
+`--credential-env ANTHROPIC_AUTH_TOKEN` covers selected Claude Code and
+Anthropic Ava/judge models. The CLI requires that token instead of selecting
 `ANTHROPIC_API_KEY`. The service must support the APIs used by Claude Code and
 host-side `/v1/messages`, including structured output.
 
 Codex optionally accepts `OPENAI_BASE_URL`, a complete Responses-compatible
 API root such as `https://gateway.example.com/v1`. Grant
-`--credential-env OPENAI_API_KEY`, or use
-`--credential-env openai.api-key=CODEX_KEY` to read a different host variable.
-Codex receives the value as `OPENAI_API_KEY` in either case. Remote endpoints
-must use HTTPS and be reachable from the container; host-side completions must
+`--credential-env OPENAI_API_KEY`. Remote endpoints must use HTTPS and be
+reachable from the container; host-side completions must
 also reach their endpoint. A host loopback address points at the
 container when used by the agent, including names ending in `.localhost`.
 A successful host-side request does not prove coding-agent connectivity.
@@ -134,6 +129,25 @@ merchant outside Forge.
 
 The runtime installs pinned Claude Code and Codex CLI releases from npm.
 Their use remains subject to their providers' terms.
+
+### Advanced credential bindings
+
+Use `--credential-env reference=HOST_VAR` to grant a single credential reference
+for narrower access or separate keys. For example, Codex and OpenAI Ava/judge
+models can use different exported variables:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml \
+  --credential-env openai.api-key=CODEX_KEY \
+  --credential-env openai.completion-api-key=EVAL_KEY
+```
+
+Codex receives `CODEX_KEY` as `OPENAI_API_KEY`; only Ava and the judge receive
+`EVAL_KEY`. Anthropic's corresponding completion references are
+`anthropic.completion-api-key` and, for a compatible service,
+`anthropic.completion-auth-token`. Conflicting bindings are rejected: a
+same-name grant cannot also bind one of its selected consumers to a different
+host variable. Use explicit reference bindings for each consumer when keys differ.
 
 ### Additional API credentials
 
@@ -168,12 +182,12 @@ treatments:
 `env` accepts 1–128 unique names matching `[A-Za-z_][A-Za-z0-9_]*`, each at most
 255 characters. Supply names only; values stay outside authored files and plans.
 The CLI requires an explicit grant for each credential. For the sample's Claude
-Code and default OpenAI host models, with `API_TOKEN` declared as above:
+Code and default OpenAI Ava/judge models, with `API_TOKEN` declared as above:
 
 ```sh
 npx --no-install forge run --experiment ./my-eval/experiment.yaml \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --credential-env API_TOKEN
 ```
 
@@ -244,7 +258,7 @@ export OPENAI_API_KEY=your-openai-key
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
@@ -286,7 +300,7 @@ select existing combinations; `plan` requires exactly one match:
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --case stripe-integration-public-evals/payments-onetime --treatment baseline --agent claude-code
 ```
 
@@ -307,7 +321,7 @@ Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
 ```sh
 npx --no-install forge run --experiment ./my-eval/experiment.yaml \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --jobs 4
 ```
 
@@ -323,7 +337,7 @@ credentials configured and granted again if work remains:
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --output ./results --resume EXPERIMENT_RUN_ID --jobs 2
 ```
 

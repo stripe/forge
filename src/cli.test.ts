@@ -16,7 +16,11 @@ import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import { FORGE_VERSION, ForgeExecutionError } from './execution/index.ts';
-import { parseExperimentConfigYaml, type SetupStepV1 } from './model/index.ts';
+import {
+  type ExperimentConfigV1,
+  parseExperimentConfigYaml,
+  type SetupStepV1,
+} from './model/index.ts';
 import { serializeResolvedRunPlan } from './planning/index.ts';
 import { type CompletedRunV1, createArtifactStore } from './results/index.ts';
 import { defineSetupActionBundle } from './setup/index.ts';
@@ -24,7 +28,10 @@ import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
+  createScriptedCompletionProvider,
   createStaticCredentialResolver,
+  type RecordedCompletionCall,
+  type ScriptedCompletionHandler,
 } from './testing/index.ts';
 
 const temporaryDirectories: string[] = [];
@@ -55,8 +62,26 @@ async function executeOffline(input: ExecuteEvalInput) {
 
 function createCredentialExecution() {
   const runtime = createFakeRuntimeAdapter();
+  const completionCalls: RecordedCompletionCall[] = [];
+  const respond: ScriptedCompletionHandler = (request, context) => {
+    completionCalls.push({ request, context });
+    if (request.purpose === 'judge') {
+      return JSON.stringify({
+        results: [{ index: 0, passed: true, explanation: 'Task completed.' }],
+      });
+    }
+    return request.responseSchema?.name === 'ava_initial_turn'
+      ? JSON.stringify({
+          user_needs: [
+            { description: 'Complete the task', status: 'remaining' },
+          ],
+          message: 'Complete the task.',
+        })
+      : JSON.stringify({ remaining_need_ids: [], message: '' });
+  };
   return {
     runtime,
+    completionCalls,
     async execute(input: ExecuteEvalInput) {
       const selection = input.plan.selection.agent;
       const builtin = input.composition.agents.get(selection.adapter)!;
@@ -74,12 +99,28 @@ function createCredentialExecution() {
           return scripted.adapter.openSession(context);
         },
       };
+      const completionProviders = new Map(
+        [
+          ...(input.composition.completionProviders as ReadonlyMap<
+            string,
+            CompletionProvider
+          >),
+        ].map(([id, provider]) => [
+          id,
+          createScriptedCompletionProvider({
+            id,
+            requirements: (request) => provider.requirements(request),
+            responses: [respond, respond, respond],
+          }).provider,
+        ]),
+      );
       return defaultForgeEngine.executeEval({
         ...input,
         composition: {
           ...input.composition,
           runtime: runtime.adapter,
           agents: new Map([[agent.id, agent]]),
+          completionProviders,
         },
       });
     },
@@ -1673,6 +1714,100 @@ describe('Forge CLI', () => {
       }
     });
 
+    it(`shares one ${variant.label} grant across the agent, application, Ava, and judge`, async () => {
+      const provider = variant.agent === 'codex' ? 'openai' : 'anthropic';
+      const model = {
+        provider,
+        model: provider === 'openai' ? 'gpt-6.1-sol' : 'claude-sonnet-4-6',
+      };
+      const fixture = await createBenchmarkFixture({
+        agent: variant.agent,
+        withHostCompletions: true,
+        ...(provider === 'openai'
+          ? {}
+          : { models: { role_player: model, judge: model } }),
+        caseSetup: [
+          { uses: 'forge/credentials', with: { env: [variant.name] } },
+          { uses: 'forge/command', with: { argv: ['probe-setup'] } },
+        ],
+      });
+      const execution = createCredentialExecution();
+      let output = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          variant.name,
+        ],
+        {
+          environment: {
+            ...variant.environment,
+            [variant.name]: 'shared-consumer-secret',
+          },
+          stdout: (text) => {
+            output += text;
+          },
+          stderr: (text) => {
+            output += text;
+          },
+          execute: async (input) => {
+            const unusedReference =
+              provider === 'openai'
+                ? 'anthropic.completion-api-key'
+                : variant.name === 'ANTHROPIC_API_KEY'
+                  ? 'anthropic.completion-auth-token'
+                  : 'anthropic.completion-api-key';
+            await assert.rejects(
+              input.composition.credentialResolver.resolve(
+                credentialReference(unusedReference),
+                {
+                  runId: input.runId,
+                  purpose: 'judge',
+                  signal: input.signal ?? new AbortController().signal,
+                },
+              ),
+              /No environment binding exists/,
+            );
+            return execution.execute(input);
+          },
+        },
+      );
+      assert.equal(exitCode, 0, output);
+      assert.deepEqual(
+        execution.completionCalls.map(({ request, context }) => ({
+          purpose: request.purpose,
+          provider: request.model.provider,
+          credentials: context.credentials,
+        })),
+        ['role_player', 'role_player', 'judge'].map((purpose) => ({
+          purpose,
+          provider,
+          credentials: {
+            [variant.name === 'ANTHROPIC_AUTH_TOKEN' ? 'authToken' : 'apiKey']:
+              'shared-consumer-secret',
+          },
+        })),
+      );
+      assert.deepEqual(
+        execution.runtime.runs[0]!.input.environment.credentials,
+        {
+          [variant.name]: {
+            value: 'shared-consumer-secret',
+            scopes: ['agent'],
+          },
+        },
+      );
+      assert.deepEqual(
+        execution.runtime.runs[0]!.commands.map(
+          ({ credentialEnvironmentNames }) => credentialEnvironmentNames,
+        ),
+        [[], [variant.name]],
+      );
+      assert.ok(!output.includes('shared-consumer-secret'));
+    });
+
     it(`keeps a ${variant.label} host-completion grant from authorizing the runtime`, async () => {
       const fixture = await createBenchmarkFixture({ agent: variant.agent });
       const execution = createCredentialExecution();
@@ -1736,10 +1871,204 @@ describe('Forge CLI', () => {
       );
       assert.equal(exitCode, 1, output);
       assert.equal(execution.runtime.runs.length, 0);
-      assert.ok(output.includes(`--credential-env ${variant.reference}=`));
+      assert.ok(output.includes(`--credential-env ${variant.name}`));
       assert.ok(!output.includes('host-completion-secret'));
     });
   }
+
+  it('keeps independently selected host providers scoped with shorthand and explicit host grants', async () => {
+    const fixture = await createBenchmarkFixture({
+      withHostCompletions: true,
+      models: {
+        role_player: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      },
+    });
+    for (const hostGrant of [
+      'OPENAI_API_KEY',
+      'openai.completion-api-key=JUDGE_KEY',
+    ]) {
+      const execution = createCredentialExecution();
+      let output = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'ANTHROPIC_API_KEY',
+          '--credential-env',
+          hostGrant,
+        ],
+        {
+          environment: {
+            ANTHROPIC_API_KEY: 'agent-and-ava-key',
+            OPENAI_API_KEY: 'host-only-key',
+            JUDGE_KEY: 'host-only-key',
+          },
+          stdout: (text) => {
+            output += text;
+          },
+          stderr: (text) => {
+            output += text;
+          },
+          execute: async (input) => {
+            await assert.rejects(
+              input.composition.credentialResolver.resolve(
+                credentialReference('openai.api-key'),
+                {
+                  runId: input.runId,
+                  purpose: 'agent',
+                  signal: input.signal ?? new AbortController().signal,
+                },
+              ),
+              /No environment binding exists/,
+            );
+            return execution.execute(input);
+          },
+        },
+      );
+      assert.equal(exitCode, 0, output);
+      assert.deepEqual(
+        execution.completionCalls.map(({ request, context }) => ({
+          purpose: request.purpose,
+          provider: request.model.provider,
+          credentials: context.credentials,
+        })),
+        [
+          {
+            purpose: 'role_player',
+            provider: 'anthropic',
+            credentials: { apiKey: 'agent-and-ava-key' },
+          },
+          {
+            purpose: 'role_player',
+            provider: 'anthropic',
+            credentials: { apiKey: 'agent-and-ava-key' },
+          },
+          {
+            purpose: 'judge',
+            provider: 'openai',
+            credentials: { apiKey: 'host-only-key' },
+          },
+        ],
+      );
+      assert.deepEqual(
+        execution.runtime.runs[0]!.input.environment.credentials,
+        {
+          ANTHROPIC_API_KEY: { value: 'agent-and-ava-key', scopes: ['agent'] },
+        },
+      );
+      assert.ok(!output.includes('host-only-key'));
+      assert.ok(!output.includes('agent-and-ava-key'));
+    }
+  });
+
+  it('requires a host completion grant even when an agent grant reads the same exported variable', async () => {
+    const fixture = await createBenchmarkFixture({
+      agent: 'codex',
+      withHostCompletions: true,
+    });
+    const execution = createCredentialExecution();
+    let output = '';
+    const exitCode = await runCli(
+      [
+        'run',
+        '--experiment',
+        fixture.experimentPath,
+        '--credential-env',
+        'openai.api-key=OPENAI_API_KEY',
+      ],
+      {
+        environment: { OPENAI_API_KEY: 'agent-only-secret' },
+        stdout: (text) => {
+          output += text;
+        },
+        stderr: (text) => {
+          output += text;
+        },
+        execute: execution.execute,
+      },
+    );
+    assert.equal(exitCode, 1, output);
+    assert.equal(execution.runtime.runs.length, 0);
+    assert.equal(execution.completionCalls.length, 0);
+    assert.ok(output.includes('openai.completion-api-key'));
+    assert.ok(output.includes('--credential-env OPENAI_API_KEY'));
+    assert.ok(!output.includes('agent-only-secret'));
+  });
+
+  it('expands host grants only for filtered selections and restores that scope on resume', async () => {
+    const fixture = await createBenchmarkFixture({
+      withHostCompletions: true,
+      includeUnselectedCase: true,
+    });
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    assert.ok(config.matrix.groups === undefined);
+    config.matrix.cases.push('cases/unselected.case.yaml');
+    await fs.writeFile(fixture.experimentPath, JSON.stringify(config));
+    const execution = createCredentialExecution();
+    let attempts = 0;
+    let output = '';
+    const options: RunCliOptions = {
+      environment: {
+        ANTHROPIC_API_KEY: 'agent-secret',
+        OPENAI_API_KEY: 'unused-host-secret',
+      },
+      experimentRunIdFactory: () => 'filtered-grants',
+      stdout: (text) => {
+        output += text;
+      },
+      stderr: (text) => {
+        output += text;
+      },
+      execute: async (input) => {
+        attempts += 1;
+        assert.equal(input.plan.selection.case_id, 'case/unselected');
+        await assert.rejects(
+          input.composition.credentialResolver.resolve(
+            credentialReference('openai.completion-api-key'),
+            {
+              runId: input.runId,
+              purpose: 'judge',
+              signal: input.signal ?? new AbortController().signal,
+            },
+          ),
+          /No environment binding exists/,
+        );
+        if (attempts === 1) throw new Error('Retry this selected case.');
+        return execution.execute(input);
+      },
+    };
+    const args = [
+      'run',
+      '--experiment',
+      fixture.experimentPath,
+      '--credential-env',
+      'ANTHROPIC_API_KEY',
+      '--credential-env',
+      'OPENAI_API_KEY',
+    ];
+    assert.equal(
+      await runCli([...args, '--case', 'case/unselected'], options),
+      1,
+      output,
+    );
+    output = '';
+    assert.equal(
+      await runCli([...args, '--resume', 'filtered-grants'], options),
+      0,
+      output,
+    );
+    assert.equal(attempts, 2);
+    assert.equal(execution.runtime.runs.length, 1);
+    assert.equal(execution.completionCalls.length, 0);
+    assert.deepEqual(execution.runtime.runs[0]!.input.environment.credentials, {
+      ANTHROPIC_API_KEY: { value: 'agent-secret', scopes: ['agent'] },
+    });
+    assert.ok(!output.includes('unused-host-secret'));
+  });
 
   it('rejects incomplete or different-source duplicate grants before reading secret values', async () => {
     const fixture = await createBenchmarkFixture({
@@ -1831,7 +2160,7 @@ describe('Forge CLI', () => {
       stderr,
     );
     assert.equal(execution.runtime.runs.length, 0);
-    assert.ok(stderr.includes('--credential-env env:ANTHROPIC_API_KEY='));
+    assert.ok(stderr.includes('--credential-env ANTHROPIC_API_KEY'));
     assert.ok(!stderr.includes('application-secret'));
     stderr = '';
     assert.equal(
@@ -2106,7 +2435,7 @@ describe('Forge CLI', () => {
     assert.equal(exitCode, 1, output);
     assert.equal(stripeReads, 0);
     assert.equal(execution.runtime.runs.length, 0);
-    assert.ok(output.includes('--credential-env env:STRIPE_API_KEY='));
+    assert.ok(output.includes('--credential-env STRIPE_API_KEY'));
     assert.ok(!output.includes('ungranted-plugin-secret'));
     assert.ok(!output.includes('selected-agent-secret'));
   });
@@ -2349,9 +2678,7 @@ describe('Forge CLI', () => {
       assert.equal(runtime.runs.length, 0);
       assert.ok(
         stderr.includes(
-          explicitBinding
-            ? 'Set EVAL_API_TOKEN'
-            : '--credential-env env:API_TOKEN=',
+          explicitBinding ? 'Set EVAL_API_TOKEN' : '--credential-env API_TOKEN',
         ),
       );
       assert.ok(!stderr.includes('same-name-does-not-grant-access'));
@@ -2383,8 +2710,8 @@ describe('Forge CLI', () => {
     assert.ok(!stderr.includes(accidentalSecret));
   });
 
-  it('rejects conflicting credential mappings without echoing host variable names', async () => {
-    const fixture = await createBenchmarkFixture();
+  it('rejects conflicting credential mappings without reading values or echoing host variable names', async () => {
+    const fixture = await createBenchmarkFixture({ withHostCompletions: true });
     for (const { reference, grants } of [
       {
         reference: 'stripe.token',
@@ -2397,8 +2724,16 @@ describe('Forge CLI', () => {
         reference: 'anthropic.api-key',
         grants: ['ANTHROPIC_API_KEY', 'anthropic.api-key=SECOND_SECRET_NAME'],
       },
+      {
+        reference: 'openai.completion-api-key',
+        grants: [
+          'OPENAI_API_KEY',
+          'openai.completion-api-key=SECOND_SECRET_NAME',
+        ],
+      },
     ]) {
       let stderr = '';
+      let secretReads = 0;
       const exitCode = await runCli(
         [
           'run',
@@ -2407,7 +2742,16 @@ describe('Forge CLI', () => {
           ...grants.flatMap((grant) => ['--credential-env', grant]),
         ],
         {
-          environment: {},
+          environment: {
+            get OPENAI_API_KEY() {
+              secretReads += 1;
+              return 'unread-secret';
+            },
+            get SECOND_SECRET_NAME() {
+              secretReads += 1;
+              return 'unread-secret';
+            },
+          },
           stderr: (text) => {
             stderr += text;
           },
@@ -2415,6 +2759,7 @@ describe('Forge CLI', () => {
       );
 
       assert.equal(exitCode, 2);
+      assert.equal(secretReads, 0);
       assert.ok(stderr.includes(reference));
       assert.ok(!stderr.includes('FIRST_SECRET_NAME'));
       assert.ok(!stderr.includes('SECOND_SECRET_NAME'));
@@ -2509,6 +2854,8 @@ async function createBenchmarkFixture(
     repetitions?: number;
     includeUnselectedCase?: boolean;
     caseSetup?: readonly SetupStepV1[];
+    withHostCompletions?: boolean;
+    models?: ExperimentConfigV1['models'];
   } = {},
 ): Promise<{
   root: string;
@@ -2530,9 +2877,9 @@ async function createBenchmarkFixture(
   const caseBody = `id: case/example
 version: 0.1.0
 task: Do the thing
-execution_mode: one_shot
+execution_mode: ${options.withHostCompletions ? 'multi_turn' : 'one_shot'}
 setup: ${JSON.stringify(options.caseSetup ?? [])}
-judging_criteria: []
+judging_criteria: ${JSON.stringify(options.withHostCompletions ? ['Completes the requested task.'] : [])}
 `;
   const casePath = 'cases/example.case.yaml';
   const caseFilePath = path.join(datasetRoot, casePath);
@@ -2592,7 +2939,7 @@ runtime:
     memory_bytes: 4294967296
     cpu_count: 2
     process_count: 512
-models: {}
+models: ${JSON.stringify(options.models ?? {})}
 treatments:
   baseline:
     setup: []

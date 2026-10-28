@@ -56,7 +56,7 @@ OPENAI_API_KEY=your-openai-key \
 node dist/cli.js run \
   --experiment release/experiment.yaml \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --output ./results
 ```
 

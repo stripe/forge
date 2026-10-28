@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
-import type { AgentAdapter } from './contracts/agent.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
   createEnvironmentCredentialResolver,
@@ -15,6 +14,7 @@ import {
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
+import { completionBindingsForPlan } from './execution/completionRuntime.ts';
 import {
   type executeEval,
   FORGE_VERSION,
@@ -63,8 +63,18 @@ const ANTHROPIC_COMPLETION_AUTH_TOKEN_REFERENCE =
   'anthropic.completion-auth-token';
 const ANTHROPIC_BASE_URL_ENVIRONMENT = 'ANTHROPIC_BASE_URL';
 const OPENAI_API_KEY_REFERENCE = 'openai.api-key';
+const OPENAI_COMPLETION_API_KEY_REFERENCE = 'openai.completion-api-key';
 const OPENAI_API_KEY_ENVIRONMENT = 'OPENAI_API_KEY';
 const OPENAI_BASE_URL_ENVIRONMENT = 'OPENAI_BASE_URL';
+// Names used by the public host's shorthand and diagnostics, never automatic grants.
+const CLI_CREDENTIAL_ENVIRONMENTS: ReadonlyMap<string, string> = new Map([
+  [ANTHROPIC_API_KEY_REFERENCE, ANTHROPIC_API_KEY_ENVIRONMENT],
+  [ANTHROPIC_AUTH_TOKEN_REFERENCE, ANTHROPIC_AUTH_TOKEN_ENVIRONMENT],
+  [ANTHROPIC_COMPLETION_API_KEY_REFERENCE, ANTHROPIC_API_KEY_ENVIRONMENT],
+  [ANTHROPIC_COMPLETION_AUTH_TOKEN_REFERENCE, ANTHROPIC_AUTH_TOKEN_ENVIRONMENT],
+  [OPENAI_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
+  [OPENAI_COMPLETION_API_KEY_REFERENCE, OPENAI_API_KEY_ENVIRONMENT],
+]);
 
 const HOST_CLI_OPTIONS = {
   experiment: { type: 'string', short: 'e' },
@@ -118,9 +128,9 @@ Run options:
   --resume <id>        Resume this experiment run; an ID is required
   --jobs <count>       Maximum simultaneous evals (default: 1)
   --credential-env <environment-name>
-                        Authorize declared runtime credentials from this host variable
+                        Authorize selected consumers of this host variable
   --credential-env <reference>=<environment-name>
-                        Bind one credential reference (including host completions)
+                        Bind one credential reference for scoped access or separate keys
 
 Validation options:
   --host                Build and inspect the selected Docker runtime image
@@ -212,6 +222,7 @@ async function createCliComposition(
   });
   const codexBaseUrl = environment[OPENAI_BASE_URL_ENVIRONMENT];
   const openaiCompletionProvider = createOpenAICompletionProvider({
+    credential: OPENAI_COMPLETION_API_KEY_REFERENCE,
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const codex = createCodexAdapter({
@@ -559,7 +570,7 @@ async function runPublicExperiment(
         const credentialBindings = expandCredentialEnvironmentBindings(
           grants,
           plans,
-          composition.agents,
+          composition,
         );
         composition = await factory({
           ...compositionOptions,
@@ -741,7 +752,7 @@ function parseCredentialEnvironmentBindings(
 function expandCredentialEnvironmentBindings(
   grants: CredentialEnvironmentGrants,
   plans: readonly ResolvedRunPlanV1[],
-  agents: ReadonlyMap<string, AgentAdapter>,
+  composition: ForgeComposition,
 ): Readonly<Record<string, string>> {
   const bindings = new Map(Object.entries(grants.references));
   const bind = (reference: string, name: string): void => {
@@ -753,11 +764,11 @@ function expandCredentialEnvironmentBindings(
     }
     bindings.set(reference, name);
   };
-  // An unused grant does not inject a variable: runtime resolution still uses
-  // only declarations in each selected plan. Never expand completion aliases.
+  // An unused grant does not inject a variable: resolution still uses only
+  // declarations in each selected plan, including its host completion models.
   for (const name of grants.environmentNames) bind(`env:${name}`, name);
   for (const plan of plans) {
-    const agent = agents.get(plan.agent.adapter);
+    const agent = composition.agents.get(plan.agent.adapter);
     if (agent === undefined) continue; // Engine preflight diagnoses missing adapters.
     const requirements = normalizeEnvironmentSpecification(
       agent.requirements(plan.agent).environment,
@@ -765,6 +776,16 @@ function expandCredentialEnvironmentBindings(
     for (const name of grants.environmentNames) {
       if (Object.hasOwn(requirements.credentials, name)) {
         bind(requirements.credentials[name]!.reference, name);
+      }
+    }
+    for (const completion of completionBindingsForPlan(plan, composition)) {
+      for (const { reference } of Object.values(
+        completion.requirements.credentials,
+      )) {
+        const name = CLI_CREDENTIAL_ENVIRONMENTS.get(reference);
+        if (name !== undefined && grants.environmentNames.includes(name)) {
+          bind(reference, name);
+        }
       }
     }
   }
@@ -786,8 +807,14 @@ function createCliCredentialResolver(
       const [reference, context] = args;
       context.signal.throwIfAborted();
       if (!Object.hasOwn(bindings, reference)) {
+        const name =
+          CLI_CREDENTIAL_ENVIRONMENTS.get(reference) ??
+          (/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(reference)
+            ? reference.slice(4)
+            : undefined);
+        const grant = name ?? `${reference}=HOST_VARIABLE`;
         throw new CliCredentialError(
-          `No environment binding exists for credential reference ${JSON.stringify(reference)}. Add --credential-env ${reference}=HOST_VARIABLE.`,
+          `No environment binding exists for credential reference ${JSON.stringify(reference)}. Add --credential-env ${grant}.`,
         );
       }
       try {

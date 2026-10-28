@@ -521,9 +521,13 @@ host environment is never copied wholesale.
 by runtime environment name. Each name maps to the opaque reference `env:NAME`;
 the declaration grants no automatic host lookup. The public CLI requires an
 explicit grant for every credential, including built-in agent and plugin
-requirements. `--credential-env NAME` authorizes a selected runtime requirement
-named `NAME` to read the same host variable; it cannot forward undeclared names.
-`--credential-env reference=HOST_VAR` binds a reference to another host variable.
+requirements. `--credential-env NAME` authorizes all selected built-in consumers
+that need the same host variable: matching agent or setup declarations and the
+Ava/judge providers used by the plan. It cannot forward undeclared names or bind
+unselected providers. `--credential-env reference=HOST_VAR` grants one reference
+for narrower access or separate keys. A same-name grant and an explicit binding
+for one of its selected references must name the same host source; neither
+overrides the other.
 Repeated runtime names can combine when their references are explicitly
 authorized to the same host source; different sources conflict. Embedding hosts
 authorize and resolve opaque references through their credential resolver.
@@ -534,9 +538,10 @@ case, treatment, and launch configuration.
 
 Completion-provider credentials use a separate path. They are resolved per
 purpose (`role_player` or `judge`), remain host-side, and are passed only to the
-selected provider. The public CLI requires a separate reference grant for host
-completions even when the coding agent reads the same host variable. An optional
-provider `preflight` runs here, after resolution but before runtime allocation.
+selected provider. The CLI preserves distinct completion references even when
+a same-name grant authorizes both the provider and a coding agent to read one
+host variable. An optional provider `preflight` runs here, after resolution but
+before runtime allocation.
 
 All resolved secret values become inputs to the output-safety boundary. Forge
 redacts them from host-completion prompts and responses, normalized evidence,

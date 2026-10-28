@@ -180,12 +180,12 @@ quiesces all mutation before evidence selection.
 Selecting `plugin: stripe` automatically configures bearer authentication for
 its bundled HTTP MCP connection and declares `STRIPE_API_KEY` for the agent.
 The CLI requires an explicit grant to read the key. For a Claude Code experiment
-using the default OpenAI host models:
+using the default OpenAI Ava/judge models:
 
 ```sh
 npx --no-install forge run --experiment ./experiment.yaml --output ./results \
   --credential-env ANTHROPIC_API_KEY \
-  --credential-env openai.completion-api-key=OPENAI_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --credential-env STRIPE_API_KEY
 ```
 
@@ -197,7 +197,7 @@ Account or merchant provisioning remains external to Forge.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Ordinary validation and planning need neither grants nor
 secret values. See the README for other
-[coding-agent and host completion grants](../README.md#requirements--credentials).
+[credential grants](../README.md#requirements--credentials).
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference
