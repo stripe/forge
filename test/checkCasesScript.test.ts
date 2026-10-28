@@ -1,21 +1,32 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it } from 'vitest';
 import type { DatasetManifestV1 } from '../src/index.ts';
-import { loadDataset } from '../src/index.ts';
+import {
+  loadDataset,
+  MAX_DATASET_MANIFEST_BYTES,
+  parseDatasetManifestJson,
+} from '../src/index.ts';
 
 const repositoryRoot = process.cwd();
 const scriptPath = path.join(repositoryRoot, 'scripts', 'check-cases.mjs');
 const {
   checkRepositoryCases,
   datasetVersionViolations,
+  gitBaselineReader,
   REPOSITORY_DATASET_ROOTS,
 } = (await import(pathToFileURL(scriptPath).href)) as {
   REPOSITORY_DATASET_ROOTS: readonly string[];
+  gitBaselineReader(options: {
+    root: string;
+    baseRef: string;
+    parseDatasetManifestJson: typeof parseDatasetManifestJson;
+    maxManifestBytes: number;
+  }): (relativeRoot: string) => DatasetManifestV1 | undefined;
   datasetVersionViolations(
     baseline: DatasetManifestV1,
     candidate: DatasetManifestV1,
@@ -48,12 +59,13 @@ describe('repository case check', () => {
   });
 
   it('lists every checked-in dataset for version checks', async () => {
-    const datasets = await fs.readdir(path.join(repositoryRoot, 'datasets'), {
-      withFileTypes: true,
-    });
+    const datasets = await fs.readdir(
+      path.join(repositoryRoot, 'release/datasets'),
+      { withFileTypes: true },
+    );
     for (const entry of datasets) {
       if (!entry.isDirectory()) continue;
-      const root = `datasets/${entry.name}`;
+      const root = `release/datasets/${entry.name}`;
       const tracked = spawnSync(
         'git',
         ['ls-files', '--error-unmatch', `${root}/manifest.json`],
@@ -137,7 +149,110 @@ describe('repository case check', () => {
     );
   });
 
-  it('uses the public loader and enforces version bumps against a git base', async (context) => {
+  it('reads parser-valid baseline manifests larger than the default subprocess buffer', {
+    timeout: 20_000,
+  }, async (context) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-large-baseline-'),
+    );
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const manifest: DatasetManifestV1 = {
+      dataset: { id: 'large', version: '1' },
+      cases: Array.from({ length: 4000 }, (_, index) => ({
+        id: `large/task-${index}`,
+        version: '1',
+        path: `cases/${'a'.repeat(220)}/task-${index}.case.yaml`,
+      })),
+    };
+    const source = JSON.stringify(manifest, null, 2);
+    assert.ok(Buffer.byteLength(source) > 1024 * 1024);
+    assert.deepEqual(parseDatasetManifestJson(source), manifest);
+    await fs.mkdir(path.join(root, 'dataset'));
+    await fs.writeFile(path.join(root, 'dataset/manifest.json'), source);
+    const git = (...args: string[]) =>
+      execFileSync(
+        'git',
+        [
+          '-C',
+          root,
+          '-c',
+          'user.name=forge',
+          '-c',
+          'user.email=forge@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          ...args,
+        ],
+        { encoding: 'utf8', stdio: 'pipe' },
+      );
+    git('init', '-q');
+    git('add', 'dataset/manifest.json');
+    git('commit', '-q', '-m', 'baseline');
+    const read = gitBaselineReader({
+      root,
+      baseRef: 'HEAD',
+      parseDatasetManifestJson,
+      maxManifestBytes: MAX_DATASET_MANIFEST_BYTES,
+    });
+    assert.deepEqual(read('dataset'), manifest);
+  });
+
+  it('enforces version bumps when a dataset moves into release/datasets/', async (context) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-moved-dataset-'),
+    );
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const formerRoot = 'datasets/sample';
+    const dataset = `release/${formerRoot}`;
+    const baseline: DatasetManifestV1 = {
+      dataset: { id: 'sample', version: '1.0.0' },
+      cases: [
+        { id: 'sample/task', version: '1.0.0', path: 'cases/task.case.yaml' },
+      ],
+    };
+    await fs.mkdir(path.join(root, formerRoot), { recursive: true });
+    await fs.writeFile(
+      path.join(root, formerRoot, 'manifest.json'),
+      JSON.stringify(baseline),
+    );
+    const git = (...args: string[]) =>
+      execFileSync(
+        'git',
+        [
+          '-C',
+          root,
+          '-c',
+          'user.name=forge',
+          '-c',
+          'user.email=forge@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          ...args,
+        ],
+        { encoding: 'utf8', stdio: 'pipe' },
+      );
+    git('init', '-q');
+    git('add', `${formerRoot}/manifest.json`);
+    git('commit', '-q', '-m', 'baseline');
+    const read = gitBaselineReader({
+      root,
+      baseRef: 'HEAD',
+      parseDatasetManifestJson,
+      maxManifestBytes: MAX_DATASET_MANIFEST_BYTES,
+    });
+    const prior = read(dataset);
+    assert.deepEqual(prior, baseline);
+    const changed = structuredClone(baseline);
+    changed.cases[0]!.version = '1.1.0';
+    assert.deepEqual(datasetVersionViolations(prior!, changed), [
+      'case versions or membership changed, so dataset version 1.0.0 must change.',
+    ]);
+    assert.equal(read('release/datasets/new'), undefined);
+  });
+
+  it('uses the public loader and enforces version bumps against a git base', {
+    timeout: 20_000,
+  }, async (context) => {
     const root = await fixture();
     context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     await fs.mkdir(path.join(root, 'scripts'));

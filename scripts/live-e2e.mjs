@@ -28,7 +28,14 @@ process.once('SIGTERM', abort);
 let runtimeRoot;
 try {
   let report;
-  if (mode === 'setup') {
+  if (mode === 'completions') {
+    const { runOpenAICompletionSuite } = await import('./live/completions.mjs');
+    report = await runOpenAICompletionSuite({
+      ...configuration,
+      signal,
+      progress,
+    });
+  } else if (mode === 'setup') {
     const { runSetupIntegrationSuite } = await import('./live/setup.mjs');
     const setup = await runSetupIntegrationSuite({
       ...configuration,

@@ -1,5 +1,9 @@
 import { sha256Digest } from '../model/hashes.ts';
-import { indexLoadedDatasetCases } from '../model/loaders.ts';
+import {
+  ancestorDirectories,
+  assertDatasetSetupInputs,
+  indexLoadedDatasetCases,
+} from '../model/loaders.ts';
 import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
 import {
   type AgentSelectionV1,
@@ -11,6 +15,7 @@ import {
   type ForgeDockerRuntimeV1,
   type LoadedDatasetV1,
   type LoadedExperimentConfigV1,
+  type ModelRefV1,
   type ResolvedRunPlanV1,
   type RunSelection,
 } from '../model/types.ts';
@@ -19,6 +24,11 @@ import {
   type SetupActionRegistry,
 } from '../setup/registry.ts';
 import { FORGE_BUILD_IDENTITY } from '../version.ts';
+
+const DEFAULT_HOST_MODEL: Readonly<ModelRefV1> = Object.freeze({
+  provider: 'openai',
+  model: 'gpt-6.1-sol',
+});
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'
@@ -30,6 +40,7 @@ export type PlanningErrorCode =
   | 'missing_role_player'
   | 'missing_judge'
   | 'invalid_loaded_dataset'
+  | 'invalid_dataset_input'
   | 'action_bundle_mismatch'
   | 'missing_runtime_platform';
 
@@ -144,26 +155,22 @@ export function resolveRunPlanWithSetupActions(
     );
   }
   const definition = loadedCase.definition;
-  if (
-    definition.execution_mode === 'multi_turn' &&
-    config.models.role_player === undefined
-  ) {
-    throw new PlanningError(
-      'missing_role_player',
-      'A multi_turn case requires models.role_player in the experiment config.',
-    );
-  }
-  if (
-    definition.judging_criteria.length > 0 &&
-    config.models.judge === undefined
-  ) {
-    throw new PlanningError(
-      'missing_judge',
-      'A case with success criteria requires models.judge in the experiment config.',
-    );
-  }
 
   const setup = [...cloneJson(definition.setup), ...cloneJson(treatment.setup)];
+  try {
+    assertDatasetSetupInputs(
+      setup,
+      ancestorDirectories(dataset.manifest.cases.map(({ path }) => path)),
+      dataset.inputPaths,
+      'Selected setup',
+    );
+  } catch (error) {
+    throw new PlanningError(
+      'invalid_dataset_input',
+      error instanceof Error ? error.message : 'Invalid setup dataset source.',
+      { cause: error },
+    );
+  }
   const configuredActionBundles = config.forge?.action_bundles ?? [];
   try {
     setupActions.assertStepsDeclared(setup, configuredActionBundles);
@@ -242,15 +249,17 @@ export function resolveRunPlanWithSetupActions(
       ...(definition.example_answer === undefined
         ? {}
         : { example_answer: definition.example_answer }),
-      ...(definition.judging_criteria.length === 0 ||
-      config.models.judge === undefined
+      ...(definition.judging_criteria.length === 0
         ? {}
-        : { judge: cloneJson(config.models.judge) }),
+        : { judge: cloneJson(config.models.judge ?? DEFAULT_HOST_MODEL) }),
     },
-    ...(definition.execution_mode !== 'multi_turn' ||
-    config.models.role_player === undefined
+    ...(definition.execution_mode !== 'multi_turn'
       ? {}
-      : { role_player: cloneJson(config.models.role_player) }),
+      : {
+          role_player: cloneJson(
+            config.models.role_player ?? DEFAULT_HOST_MODEL,
+          ),
+        }),
     agent: resolveAgentSelection(selection.agent),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),

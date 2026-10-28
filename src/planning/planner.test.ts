@@ -812,44 +812,74 @@ describe('experiment expansion and run planning', () => {
     );
   });
 
-  it('requires harness models only when their behavior is selected', () => {
-    const noModels = inputs({ experiment: experimentConfig({ models: {} }) });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...noModels,
-          selection: selection(
-            'case/a',
-            'baseline',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
-        }),
-      { code: 'missing_role_player' },
+  it('defaults omitted host models to Sol without changing authored inputs', () => {
+    const loaded = inputs({ experiment: experimentConfig({ models: {} }) });
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+    const plan = resolveRunPlan({ ...loaded, selection: selected });
+    const expected = { provider: 'openai', model: 'gpt-6.1-sol' };
+
+    assert.deepEqual(plan.role_player, expected);
+    assert.deepEqual(plan.evaluation.judge, expected);
+    assert.deepEqual(loaded.experiment.config.models, {});
+    assert.notEqual(plan.role_player, plan.evaluation.judge);
+    assert.equal(Object.isFrozen(plan.role_player), true);
+    assert.equal(Object.isFrozen(plan.evaluation.judge), true);
+    assert.deepEqual(
+      JSON.parse(serializeResolvedRunPlan(plan)).role_player,
+      expected,
     );
 
-    const noJudge = inputs({
+    const explicit = inputs({
       experiment: experimentConfig({
-        models: { role_player: { provider: 'anthropic', model: 'role-model' } },
+        models: { role_player: expected, judge: expected },
       }),
     });
-    assert.throws(
-      () =>
-        resolveRunPlan({
-          ...noJudge,
-          selection: selection(
-            'case/a',
-            'baseline',
-            'claude-code',
-            'anthropic',
-            'sonnet',
-            0,
-          ),
-        }),
-      { code: 'missing_judge' },
+    assert.equal(
+      resolvedRunPlanSha256(plan),
+      resolvedRunPlanSha256(
+        resolveRunPlan({ ...explicit, selection: selected }),
+      ),
     );
+  });
+
+  it.each(['role_player', 'judge'] as const)(
+    'allows an independent %s override while the other host model defaults',
+    (purpose) => {
+      const override = { provider: 'anthropic', model: 'claude-sonnet-4-6' };
+      const loaded = inputs({
+        experiment: experimentConfig({ models: { [purpose]: override } }),
+      });
+      const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+      const plan = resolveRunPlan({ ...loaded, selection: selected });
+      assert.deepEqual(
+        plan.role_player,
+        purpose === 'role_player'
+          ? override
+          : { provider: 'openai', model: 'gpt-6.1-sol' },
+      );
+      assert.deepEqual(
+        plan.evaluation.judge,
+        purpose === 'judge'
+          ? override
+          : { provider: 'openai', model: 'gpt-6.1-sol' },
+      );
+    },
+  );
+
+  it('omits unused default models from one-shot checks-only plans', () => {
+    const loaded = inputs({
+      experiment: experimentConfig({ models: {} }),
+      caseDefinition: {
+        ...evalCase(),
+        execution_mode: 'one_shot',
+        judging_criteria: [],
+        checks: { files_created: ['answer.txt'] },
+      },
+    });
+    const selected = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+    const plan = resolveRunPlan({ ...loaded, selection: selected });
+    assert.equal(plan.role_player, undefined);
+    assert.equal(plan.evaluation.judge, undefined);
   });
 
   it('requires every component of a programmatic selection to match the matrix', () => {
@@ -930,35 +960,58 @@ describe('experiment expansion and run planning', () => {
     }
   });
 
-  it('leaves treatment dataset inputs to setup instead of checking them while planning', () => {
+  it('validates treatment fixture sources before execution, including directories and case exclusions', () => {
     const treatmentSetup = (datasetPath: string) => ({
       uses: 'forge/write',
       with: { target: 'seed.txt', source: { dataset_path: datasetPath } },
     });
-    const plan = resolveRunPlan({
-      ...inputs({
+    const planFor = (datasetPath: string, withIndex = true) => {
+      const loaded = inputs({
         experiment: experimentConfig({
           treatments: {
-            missing: { setup: [treatmentSetup('fixtures/missing.txt')] },
+            fixture: { setup: [treatmentSetup(datasetPath)] },
           },
           matrix: {
             ...getMatrixGroups(experimentConfig().matrix)[0]!,
-            treatments: ['missing'],
+            treatments: ['fixture'],
             repetitions: 1,
             retries: 0,
           },
         }),
-      }),
-      selection: selection(
-        'case/a',
-        'missing',
-        'claude-code',
-        'anthropic',
-        'sonnet',
-        0,
-      ),
+      });
+      if (!withIndex) delete loaded.dataset.inputPaths;
+      return resolveRunPlan({
+        ...loaded,
+        selection: selection(
+          'case/a',
+          'fixture',
+          'claude-code',
+          'anthropic',
+          'sonnet',
+          0,
+        ),
+      });
+    };
+    for (const source of ['fixtures/seed.txt', 'fixtures']) {
+      assert.deepEqual(planFor(source).setup.at(-1), treatmentSetup(source));
+    }
+    assert.throws(() => planFor('fixtures/missing.txt'), {
+      code: 'invalid_dataset_input',
+      message: /absent from the dataset/,
     });
-    assert.deepEqual(plan.setup.at(-1), treatmentSetup('fixtures/missing.txt'));
+    for (const source of [CASE_A_PATH, 'cases/case', 'cases']) {
+      for (const withIndex of [true, false]) {
+        assert.throws(() => planFor(source, withIndex), {
+          code: 'invalid_dataset_input',
+          message: /contains case definitions/,
+        });
+      }
+    }
+    // Hosts with virtual inputs may omit the filesystem index and own existence checks.
+    assert.deepEqual(
+      planFor('fixtures/virtual.txt', false).setup.at(-1),
+      treatmentSetup('fixtures/virtual.txt'),
+    );
   });
 
   it('serializes plans canonically and hashes equivalent object key order equally', () => {
@@ -1133,6 +1186,15 @@ function inputs(
             path: `/dataset/${CASE_B_PATH}`,
           },
         ],
+      ]),
+      inputPaths: new Set([
+        CASE_A_PATH,
+        CASE_B_PATH,
+        'cases',
+        'cases/case',
+        'cases/case/a',
+        'fixtures',
+        'fixtures/seed.txt',
       ]),
     },
     experiment: {

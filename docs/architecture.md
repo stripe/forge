@@ -155,13 +155,16 @@ case inventory:
 - case IDs and paths are unique, and each case definition must declare the
   same `id` and `version` as its manifest entry.
 
-Fixtures a case uses are the `dataset_path` sources of its `forge/write`
-setup; `loadDataset` rejects a case whose source names neither a payload file
-nor a directory containing one, or names a case definition or a directory
-containing one. Custom setup actions, treatment setup, and agents may read any
-payload file; Forge cannot infer those reads. `validate` and `plan` therefore
-do not catch a missing treatment source, which fails each attempt when setup
-applies it. Hosts that supply a loaded dataset directly own these checks.
+Fixtures used by built-in `forge/write` steps are their `dataset_path`
+sources. A source must name a payload file or a directory containing one,
+excluding case definitions and directories containing them. `loadDataset`
+checks case setup and retains discovered file and nonempty directory paths in
+`LoadedDatasetV1.inputPaths`. Planning checks the combined case and selected
+treatment setup against that index without reading the filesystem, so
+`validate` and `plan` reject missing treatment sources before execution.
+Hosts constructing loaded datasets may supply the index or own existence
+validation themselves; planning still excludes case definitions. Custom
+actions and agents may read payloads outside these built-in write checks.
 
 Case and dataset versions are independent labels. Change the dataset
 `version` whenever any case version changes or a case is added or removed.
@@ -182,12 +185,16 @@ directly; the location is excluded from resolved plans and execution
 semantics. Planning refuses to combine a loaded dataset with a different ID
 or version.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
-access to dataset payloads.
+access to dataset payloads. The path index records load-time existence, not
+content integrity or later filesystem changes. Setup reads current bytes and
+rejects an empty source directory instead of silently skipping its copy.
 
-Because every file under the root is readable payload, experiments and
-documentation live outside the dataset root and point at it with
-`dataset.path`. See the
-[sample experiment](https://github.com/stripe/forge/blob/main/experiments/stripe-integration-public-evals/README.md)
+Public datasets under `release/datasets/<name>/` contain the manifest, cases,
+and fixtures. The runnable experiment at `release/experiment.yaml` and its
+documentation at `release/README.md` stay outside the payload root where
+every file is readable input. The experiment's dataset path is relative to its
+file, so `release/` can be relocated as one folder. See the
+[sample release](https://github.com/stripe/forge/blob/main/release/README.md)
 for the layout and commands.
 
 ### Cases, treatments, and setup ordering
@@ -368,16 +375,23 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 - checks dataset and experiment compatibility;
 - checks that the selection is present in the matrix;
-- requires `models.role_player` for a multi-turn case;
-- requires `models.judge` when judging criteria are non-empty;
+- resolves a role-player model for multi-turn cases and a judge model when
+  judging criteria are non-empty, using each experiment override or the
+  `openai` / `gpt-6.1-sol` default;
 - concatenates case and treatment setup;
-- validates action-bundle pins;
+- validates built-in dataset sources against the available path index and
+  action-bundle pins;
 - chooses the effective prompt and records its source;
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
   host-supplied platform selection; and
 - records the dataset, experiment, and case identities, installed
   Forge package, and action-bundle implementation pins.
+
+Unused host models are omitted from the plan. Used models are cloned and
+frozen in the plan before provider preflight or credential lookup; runtime
+execution and saved-plan parsing never infer a missing model. See the README
+for [model overrides and credentials](../README.md#requirements--credentials).
 
 Plans use canonical JSON with recursively sorted object keys and retained array
 order. The `plan.json` artifact descriptor binds these bytes to `result.json`.
@@ -740,8 +754,8 @@ handler during application.
 
 The built-ins are:
 
-- `forge/write`: copy inline bytes or a dataset file to a safe
-  workspace-relative path;
+- `forge/write`: copy inline bytes, a dataset file, or a nonempty dataset
+  directory tree to a safe workspace-relative path;
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials;
 - `forge/credentials`: declare agent-scoped credentials without issuing setup
@@ -859,9 +873,16 @@ The completion runtime:
 - validates response size, usage, cost, and stop metadata; and
 - retains only safe call summaries in `result.json`.
 
-The built-in Anthropic provider uses Node's native `fetch` and the Messages API
-with strict structured output. Compatible endpoints are explicit adapter
-configuration; neither endpoints nor credentials enter plans or results.
+The built-in Anthropic and OpenAI providers use Node's native `fetch` with
+strict structured output through Messages and Responses respectively. The
+OpenAI provider disables response storage, normalizes cached input usage, and
+ignores reasoning blocks. Both bound requests, responses, and duration, reject
+redirects, and expose errors without provider response bodies. OpenAI projects
+`uniqueItems` out of generation schemas; Ava still validates uniqueness locally.
+Provider-specific output budgets account for reasoning tokens without changing
+Ava or judge validation. Compatible endpoints and credentials are explicit host
+configuration; neither enters plans or results. See the README's
+[credentials](../README.md#requirements--credentials) for CLI bindings.
 
 ## Evidence architecture
 
@@ -951,8 +972,11 @@ semantics can be normalized faithfully.
 
 Codex selects a single matching root UUID rollout under its isolated
 `CODEX_HOME/sessions`, validates session metadata, and records source format
-`codex-rollout-jsonl`. Actual user turns are distinguished from injected
-AGENTS.md and environment context, which become system steps. Function and
+`codex-rollout-jsonl`. The exported evidence loader defaults to primary `exec`
+sessions; embedding hosts can explicitly set `sessionSource: 'cli'` to normalize
+primary terminal sessions without changing their native bytes. Session identity,
+version, and subagent exclusions still apply. Actual user turns are distinguished
+from injected AGENTS.md and environment context, which become system steps. Function and
 custom-tool calls retain native call IDs, arguments, and correlated outputs;
 tool-search calls and returned tool definitions remain correlated tool behavior.
 Every MCP call requires a matching `McpToolCall` completion snapshot verified
@@ -1098,7 +1122,19 @@ Each judging criterion is judged independently against:
 - the optional authored example answer.
 
 Workspace collection skips symlinks, agent state, dependencies, build output,
-lockfiles, and common binary formats. Its hard bounds are 10,000 listed entries,
+and lockfiles. Known binary filename formats (including databases and archives)
+are omitted without reading them. Other files are omitted if their bytes contain
+non-text controls or cannot be decoded as strict UTF-8; Forge never strips or
+replaces these bytes to make a file judge-visible. Binary omissions record the
+path, reason, and size when known in bounded `workspace_binary_omitted` warnings.
+They mark workspace evidence incomplete, without implying a failed criterion.
+The judge receives the same omission markers saved in `judge-evidence.json`.
+Intelligible representations of databases, archives, and other binary artifacts
+are an area for future expansion; no extraction or conversion is performed.
+These exclusions apply to workspace text collection; deterministic file checks
+and transcript tool results retain their existing evidence policies.
+
+Its hard bounds are 10,000 listed entries,
 depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
 rendered characters total. Truncation and unavailable evidence are recorded
 explicitly. `judge-evidence.json` records the redacted workspace subset and
@@ -1353,6 +1389,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
+| `@stripe/forge/providers/openai` | OpenAI Responses-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
 | `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
@@ -1376,7 +1413,7 @@ engine APIs:
   experiment run command stage for bounded execution and explicit resume.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
-Codex agent adapters, the Anthropic host completion provider, an explicit
+Codex agent adapters, Anthropic and OpenAI host completion providers, an explicit
 environment-backed credential resolver, a directory input provider, and the
 local artifact store. Embedding hosts can replace this composition or use an
 external runtime without changing core lifecycle semantics.
@@ -1400,10 +1437,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets, each holding only its latest version |
-| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments and release documentation for the sample datasets |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads in `datasets/`, with a runnable `experiment.yaml` and release documentation at the root; holds only the latest versions |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 
 ## Current limitations
 
@@ -1412,8 +1447,8 @@ The public CLI and built-in composition currently have these limits:
 - Claude Code and Codex are the built-in agents. Cursor and interactive human
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
-- Multi-turn automation uses fixed Ava semantics. Anthropic is the only
-  built-in host completion provider; other providers require an explicit
+- Multi-turn automation uses fixed Ava semantics. Anthropic and OpenAI are
+  built-in host completion providers; other providers require an explicit
   [completion-provider implementation](#host-side-completion-providers) and
   cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content

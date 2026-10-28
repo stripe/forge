@@ -154,6 +154,37 @@ describe('benchmark filesystem loaders', () => {
     }
   });
 
+  it('supplies discovered fixture paths to pure treatment planning', async () => {
+    const fixture = await createDataset();
+    const dataset = await loadDataset(fixture.root);
+    const experimentPath = path.join(
+      await temporaryDirectory(),
+      'experiment.yaml',
+    );
+    await fs.writeFile(experimentPath, experimentConfigYaml());
+    const experiment = await loadExperimentConfig(experimentPath);
+    const selection = expandExperiment(experiment, dataset)[0]!;
+    for (const source of ['fixtures', 'fixtures/missing.txt']) {
+      experiment.config.treatments.baseline = {
+        setup: [
+          {
+            uses: 'forge/write',
+            with: { target: 'app', source: { dataset_path: source } },
+          },
+        ],
+      };
+      const plan = () => resolveRunPlan({ dataset, experiment, selection });
+      if (source === 'fixtures') {
+        assert.equal(plan().setup.length, 2);
+      } else {
+        assert.throws(plan, {
+          code: 'invalid_dataset_input',
+          message: /absent from the dataset/,
+        });
+      }
+    }
+  });
+
   it('rejects duplicate authored IDs across every case', async () => {
     const fixture = await createDataset();
     await appendCase(

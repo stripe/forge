@@ -66,6 +66,10 @@
       "types": "./dist/providers/anthropic/index.d.ts",
       "import": "./dist/providers/anthropic/index.js"
     },
+    "./providers/openai": {
+      "types": "./dist/providers/openai/index.d.ts",
+      "import": "./dist/providers/openai/index.js"
+    },
     "./runtime/docker": {
       "types": "./dist/runtime/docker/index.d.ts",
       "import": "./dist/runtime/docker/index.js"

@@ -11,7 +11,7 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 export const REPOSITORY_DATASET_ROOTS = Object.freeze([
   'test/fixtures/one-shot/dataset',
   'test/fixtures/multi-turn/dataset',
-  'datasets/stripe-integration-public-evals',
+  'release/datasets/stripe-integration-public-evals',
 ]);
 
 export async function checkRepositoryCases({
@@ -70,17 +70,34 @@ export function datasetVersionViolations(baseline, candidate) {
 }
 
 /** Read each dataset's manifest at the merge-base with `baseRef`, if it exists. */
-export function gitBaselineReader({ root, baseRef, parseDatasetManifestJson }) {
+export function gitBaselineReader({
+  root,
+  baseRef,
+  parseDatasetManifestJson,
+  maxManifestBytes,
+}) {
   const git = (...args) =>
-    execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+    execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      maxBuffer: maxManifestBytes,
+    });
   const mergeBase = git('merge-base', baseRef, 'HEAD').trim();
   return (relativeRoot) => {
-    const manifestPath = `${relativeRoot}/manifest.json`;
-    try {
-      git('cat-file', '-e', `${mergeBase}:${manifestPath}`);
-    } catch {
-      return undefined; // New dataset: nothing to compare against.
-    }
+    const candidates = [`${relativeRoot}/manifest.json`];
+    // Preserve version comparisons across the move into release/datasets/.
+    if (relativeRoot.startsWith('release/datasets/'))
+      candidates.push(`${relativeRoot.slice('release/'.length)}/manifest.json`);
+    const manifestPath = candidates.find((candidate) => {
+      try {
+        git('cat-file', '-e', `${mergeBase}:${candidate}`);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (manifestPath === undefined) return undefined; // New dataset.
     const source = git('show', `${mergeBase}:${manifestPath}`);
     try {
       return parseDatasetManifestJson(source);
@@ -103,9 +120,11 @@ if (
       args: process.argv.slice(2).filter((arg) => arg !== '--'),
       options: { base: { type: 'string', default: 'origin/main' } },
     });
-    const { loadDataset, parseDatasetManifestJson } = await import(
-      '../dist/index.js'
-    );
+    const {
+      loadDataset,
+      parseDatasetManifestJson,
+      MAX_DATASET_MANIFEST_BYTES,
+    } = await import('../dist/index.js');
     const result = await checkRepositoryCases({
       root: repositoryRoot,
       loadDataset,
@@ -113,6 +132,7 @@ if (
         root: repositoryRoot,
         baseRef: values.base,
         parseDatasetManifestJson,
+        maxManifestBytes: MAX_DATASET_MANIFEST_BYTES,
       }),
     });
     if (result.errors.length > 0) {

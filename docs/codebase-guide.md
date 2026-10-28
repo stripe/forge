@@ -58,15 +58,16 @@ compares each manifest with its copy at the merge-base with `origin/main`
 (override with `-- --base <ref>`) and fails when a case version or membership
 change keeps the dataset version.
 Each dataset keeps only its latest version; earlier versions live in Git
-history. Sample datasets live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets),
-their experiments under [`experiments`](https://github.com/stripe/forge/tree/main/experiments),
-and harness inputs under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+history. Public inputs under [`release`](https://github.com/stripe/forge/tree/main/release)
+keep dataset payloads in `datasets/`, with `experiment.yaml` and release
+documentation at the release root; harness inputs live under
+[`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
 
 ### Opt-in live tests
 
 The single live suite under
 [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
-is separate from `pnpm test` and `pnpm check`. Both modes require Docker and
+is separate from `pnpm test` and `pnpm check`. Setup and full modes require Docker and
 network access. Setup mode exercises real setup actions and plugin installation
 without model credentials or upstream model calls:
 
@@ -94,6 +95,19 @@ mode uses scripted host completions for multi-turn coverage, so it needs no
 Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
 setup without upstream calls.
 
+Completion mode checks the real OpenAI host provider through Ava initialization,
+continuation, criterion judging, and committed artifact verification. It uses a
+scripted coding agent and an in-memory runtime, so it needs no Docker or agent
+credential. It makes billable host model calls and requires an explicit model:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=completions FORGE_LIVE_COMPLETION_MODEL=gpt-5.4 OPENAI_API_KEY=your-restricted-key pnpm test:live
+```
+
+Optional `OPENAI_BASE_URL` selects a compatible Responses API root. This mode
+checks host transport and schemas; use the public CLI to establish real
+coding-agent connectivity to the selected endpoint.
+
 The live suite can create temporary authenticated host bridges for Codex
 Responses requests and loopback Claude endpoints. The real upstream key
 stays host-side; the container receives a per-run bridge credential. The host
@@ -114,7 +128,7 @@ endpoints reachable from the container. See the README's
 Results default to `results/live`. `FORGE_LIVE_RUN_ID` sets the suite/run ID
 prefix; `FORGE_LIVE_RESULTS_ROOT` changes the root; `FORGE_LIVE_TIMEOUT_MS` sets
 the positive overall timeout (30 minutes by default); and
-`FORGE_DOCKER_EXECUTABLE` selects another Docker CLI. Both modes verify removal
+`FORGE_DOCKER_EXECUTABLE` selects another Docker CLI. Setup and full modes verify removal
 of containers and host runtime files; completed evals with cleanup warnings fail
 live verification. The helpers under `scripts/live/` are safe to import; Docker
 or model calls begin only when the entry point runs a selected mode.
@@ -375,7 +389,7 @@ is selected.
 | [`matrix.ts`](https://github.com/stripe/forge/blob/main/src/model/matrix.ts) | `getMatrixGroups` and shared agent identity after defaults | Provides shared matrix views and agent identity for parsing and planning. |
 | [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest case inventory, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
 | [`paths.ts`](https://github.com/stripe/forge/blob/main/src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
-| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for dataset pins, bundle identity checks, plugin snapshot fingerprints, and artifact verification |
+| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for bundle identity checks, plugin snapshot fingerprints, and artifact verification |
 | [`checks.ts`](https://github.com/stripe/forge/blob/main/src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
 | [`errors.ts`](https://github.com/stripe/forge/blob/main/src/model/errors.ts) | `BenchmarkModelError` and stable model/loading error codes | Thrown by safe loaders and exposed through `model/index.ts` |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/model/index.ts) | Public model barrel | Re-exported by the package root |
@@ -432,7 +446,7 @@ implementations.
 | [`composition.ts`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
 | [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
-| [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
+| [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic`, `providers/openai`, and scripted tests; managed by `execution/completionRuntime.ts` |
 | [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
 | [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
@@ -629,14 +643,14 @@ tree receipt.
 
 ## `src/providers`: host-side model transport
 
-[`src/providers/anthropic/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/anthropic/index.ts) is the
-current built-in `CompletionProvider`. It contains construction, model
-capability validation, request validation and schema projection, fetch,
-bounded-response reading, provider-response parsing, usage normalization, and
-safe error classes in one file.
+[`src/providers/anthropic/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/anthropic/index.ts) and
+[`src/providers/openai/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/openai/index.ts)
+implement Messages and Responses host transports. Each owns request validation,
+schema projection, bounded fetch, response parsing, usage normalization, and safe
+error classes. They have no SDK dependency or ambient credential reads.
 
-It is used only through `execution/completionRuntime.ts`. Ava and criterion
-judging depend on the provider-neutral completion contract, not this provider.
+Both are used only through `execution/completionRuntime.ts`. Ava and criterion
+judging depend on the provider-neutral completion contract.
 That distinction lets an embedding host register another provider without
 changing `interaction` or `evaluation`.
 
@@ -787,9 +801,7 @@ gateway behavior, and suite configuration.
 
 | Path | Role |
 | --- | --- |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Sample datasets. Each holds only its latest version; earlier versions live in Git history. |
-| [`experiments`](https://github.com/stripe/forge/tree/main/experiments) | Runnable experiments for the sample datasets. Each `experiment.yaml` pins its dataset with `dataset.path` and selects treatments and models. |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads under `datasets/`, with a runnable `experiment.yaml` and documentation at the root. Holds only the latest versions; earlier versions live in Git history. |
 | [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`vitest.config.ts`](https://github.com/stripe/forge/blob/main/vitest.config.ts) | Vitest discovery, Node environment, process isolation, and mock restoration. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |

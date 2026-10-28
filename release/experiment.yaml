@@ -1,7 +1,7 @@
 id: stripe-integration-public-evals/baseline
 version: 0.2.0
 dataset:
-  path: ../../datasets/stripe-integration-public-evals
+  path: ./datasets/stripe-integration-public-evals
   id: stripe-integration-public-evals
   version: 0.2.0
 runtime:
@@ -13,13 +13,6 @@ runtime:
     memory_bytes: 4294967296
     cpu_count: 2
     process_count: 512
-models:
-  role_player:
-    provider: anthropic
-    model: claude-sonnet-4-6
-  judge:
-    provider: anthropic
-    model: claude-sonnet-4-6
 treatments:
   baseline:
     setup: []
