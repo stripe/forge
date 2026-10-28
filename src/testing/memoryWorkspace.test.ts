@@ -1,9 +1,59 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import { WorkspaceEntryLimitError } from '../contracts/runtime.ts';
 
 import { createMemoryWorkspace } from './memoryWorkspace.ts';
 
 describe('createMemoryWorkspace', () => {
+  it('omits excluded trees from both views without counting them', async () => {
+    const fixture = createMemoryWorkspace({
+      'node_modules/pkg/a.js': 'dependency',
+      'node_modules/pkg/b.js': 'dependency',
+      'src/node_modules/pkg/a.js': 'nested dependency',
+      'src/app.ts': 'app',
+      'node_modules-extra/app.ts': 'keep',
+      vendor: 'a file',
+    });
+    const options = {
+      maxEntries: 5,
+      excludeDirectoryNames: ['node_modules', 'vendor'],
+    };
+    for (const workspace of [fixture.mutable, fixture.readonly]) {
+      assert.deepEqual(
+        (await workspace.listFiles(options)).map(({ path }) => path),
+        [
+          'node_modules-extra',
+          'node_modules-extra/app.ts',
+          'src',
+          'src/app.ts',
+          'vendor',
+        ],
+      );
+      assert.deepEqual(
+        await workspace.listFiles({ ...options, under: 'src/node_modules' }),
+        [],
+      );
+      await assert.rejects(
+        workspace.listFiles({ ...options, maxEntries: 4 }),
+        (error) => {
+          assert.ok(error instanceof WorkspaceEntryLimitError);
+          assert.equal(error.maxEntries, 4);
+          assert.deepEqual(
+            error.entries.map(({ path }) => path),
+            [
+              'node_modules-extra',
+              'node_modules-extra/app.ts',
+              'src',
+              'vendor',
+            ],
+          );
+          assert.ok(Object.isFrozen(error.entries));
+          return true;
+        },
+      );
+    }
+  });
+
   it('isolates initial bytes, written bytes, and snapshots from the workspace', async () => {
     const initial = Buffer.from('initial');
     const written = Buffer.from('written');

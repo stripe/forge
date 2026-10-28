@@ -203,7 +203,14 @@ export interface JudgeEvidenceV1 {
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];
+    /** False when any warning or bound leaves evidence incomplete. */
     readonly complete: boolean;
+    /**
+     * Any collection or rendering bound was hit, including per-file text limits.
+     * Omissions or read failures alone set complete false without setting this true.
+     * Older artifacts may omit this field; absence does not mean false.
+     */
+    readonly truncated?: boolean;
     readonly warnings: readonly {
       readonly code: string;
       readonly message: string;

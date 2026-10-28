@@ -6,7 +6,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 import type { CommandResult } from '../../contracts/command.ts';
-import type { RuntimePreparation } from '../../contracts/runtime.ts';
+import {
+  type RuntimePreparation,
+  WorkspaceEntryLimitError,
+} from '../../contracts/runtime.ts';
 import type { ResolvedRunPlanV1 } from '../../model/types.ts';
 import type {
   HostCommandOptions,
@@ -269,6 +272,61 @@ describe('explicit Docker networking', () => {
 });
 
 describe('Forge Docker runtime', () => {
+  it('preserves listing exclusions and partial limits in prepared and sealed workspace views', async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-docker-listing-'),
+    );
+    roots.push(root);
+    const adapter = createDockerRuntimeAdapter({
+      hostCommands: fakeDocker().runner,
+      temporaryRoot: root,
+    });
+    const prepared = await adapter.prepare(preparation());
+    for (const workspace of [
+      prepared.workspace,
+      ...prepared.stateDirectories.values(),
+    ]) {
+      await workspace.writeFile(
+        'node_modules/pkg/index.js',
+        Buffer.from('skip'),
+      );
+      await workspace.writeFile(
+        'nested/node_modules/pkg/index.js',
+        Buffer.from('skip'),
+      );
+      await workspace.writeFile('nested/app.ts', Buffer.from('keep'));
+      await workspace.writeFile('z.txt', Buffer.from('keep'));
+    }
+    const sealed = await prepared.quiesce();
+    for (const workspace of [
+      prepared.workspace,
+      ...prepared.stateDirectories.values(),
+      sealed.workspace,
+      ...sealed.stateDirectories.values(),
+    ]) {
+      const options = {
+        excludeDirectoryNames: ['node_modules'],
+        maxEntries: 3,
+      };
+      assert.deepEqual(
+        (await workspace.listFiles(options)).map(({ path }) => path),
+        ['nested', 'nested/app.ts', 'z.txt'],
+      );
+      await assert.rejects(
+        workspace.listFiles({ ...options, maxEntries: 2 }),
+        (error) => {
+          assert.ok(error instanceof WorkspaceEntryLimitError);
+          assert.equal(error.entries.length, 2);
+          assert.ok(
+            error.entries.every(({ path }) => !path.includes('node_modules')),
+          );
+          return true;
+        },
+      );
+    }
+    await prepared.dispose();
+  });
+
   it('uses an unversioned built-in adapter identity', () => {
     const adapter = createDockerRuntimeAdapter();
     assert.equal(adapter.id, 'forge/docker');

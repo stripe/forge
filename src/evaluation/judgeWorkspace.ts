@@ -1,6 +1,7 @@
-import type {
-  ReadonlyWorkspace,
-  WorkspaceEntry,
+import {
+  type ReadonlyWorkspace,
+  type WorkspaceEntry,
+  WorkspaceEntryLimitError,
 } from '../contracts/runtime.ts';
 export const MAX_JUDGE_WORKSPACE_ENTRIES = 10_000;
 export const MAX_JUDGE_WORKSPACE_DEPTH = 32;
@@ -101,7 +102,9 @@ export interface JudgeWorkspaceEvidenceEntryV1 {
 /** JSON-safe evidence which can be persisted beside the judge result. */
 export interface JudgeWorkspaceEvidenceV1 {
   readonly entries: readonly JudgeWorkspaceEvidenceEntryV1[];
+  /** False when any warning or bound leaves evidence incomplete. */
   readonly complete: boolean;
+  /** Any collection or rendering bound was hit, including per-file text limits. */
   readonly truncated: boolean;
   readonly bytes_read: number;
   readonly warnings: readonly JudgeWorkspaceWarningV1[];
@@ -199,6 +202,7 @@ export async function collectJudgeWorkspaceEvidence(
       workspace.listFiles({
         under: '.',
         maxEntries: limits.maxEntries,
+        excludeDirectoryNames: Object.freeze([...SKIP_DIRECTORIES]),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       }),
       deadline,
@@ -207,23 +211,33 @@ export async function collectJudgeWorkspaceEvidence(
     );
   } catch (error) {
     if (isCallerAbort(options.signal)) throw abortReason(options.signal);
-    if (error instanceof CollectionStop) {
-      stop(error);
-    } else if (isLimitError(error)) {
-      stop(entryLimit(limits.maxEntries));
+    if (error instanceof WorkspaceEntryLimitError) {
+      listed = error.entries;
+      stop(entryLimit(Math.min(error.maxEntries, limits.maxEntries)));
     } else {
-      warnings.push({
-        code: 'workspace_listing_unavailable',
-        message: 'The sealed workspace could not be listed safely.',
-      });
+      if (error instanceof CollectionStop) {
+        stop(error);
+      } else if (isLimitError(error)) {
+        stop(entryLimit(limits.maxEntries));
+        warnings.push({
+          code: 'workspace_listing_unavailable',
+          message:
+            'The runtime supplied no partial listing after reporting an entry limit; workspace text is unavailable.',
+        });
+      } else {
+        warnings.push({
+          code: 'workspace_listing_unavailable',
+          message: 'The sealed workspace could not be listed safely.',
+        });
+      }
+      return collected(
+        entries,
+        warnings,
+        bytesRead,
+        truncated,
+        limits.maxTotalCharacters,
+      );
     }
-    return collected(
-      entries,
-      warnings,
-      bytesRead,
-      truncated,
-      limits.maxTotalCharacters,
-    );
   }
 
   const ordered = [...listed].sort((left, right) =>
@@ -231,13 +245,7 @@ export async function collectJudgeWorkspaceEvidence(
   );
   if (ordered.length > limits.maxEntries) {
     stop(entryLimit(limits.maxEntries));
-    return collected(
-      entries,
-      warnings,
-      bytesRead,
-      truncated,
-      limits.maxTotalCharacters,
-    );
+    ordered.length = limits.maxEntries;
   }
   const symlinkRoots = ordered
     .filter(({ kind }) => kind === 'symlink')
@@ -680,7 +688,7 @@ function assertBeforeDeadline(deadline: number, durationMs: number): void {
 function entryLimit(limit: number): CollectionStop {
   return new CollectionStop(
     'workspace_entry_limit_reached',
-    `Workspace entry limit of ${limit} reached.`,
+    `Workspace listing was truncated at the entry limit of ${limit}; only files reached before the cutoff were considered.`,
   );
 }
 

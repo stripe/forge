@@ -1,14 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type {
-  MutableWorkspace,
-  WorkspaceEntry,
-  WorkspaceEntryKind,
-  WorkspaceListOptions,
-  WorkspaceWriteOptions,
+import {
+  type MutableWorkspace,
+  type WorkspaceEntry,
+  type WorkspaceEntryKind,
+  WorkspaceEntryLimitError,
+  type WorkspaceListOptions,
+  type WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
 import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
+import {
+  compareWorkspaceListingPaths,
+  workspaceDirectoryExclusions,
+} from './workspaceListing.ts';
 
 const DEFAULT_READ_LIMIT = 64 * 1024 * 1024;
 const DEFAULT_ENTRY_LIMIT = 100_000;
@@ -85,11 +90,15 @@ export async function createOwnedWorkspace(
       return body;
     },
     async listFiles(options: WorkspaceListOptions = {}) {
+      options.signal?.throwIfAborted();
       const under = options.under ?? '.';
       assertWorkspacePath(under, true);
       const limit = positiveInteger(
         options.maxEntries ?? DEFAULT_ENTRY_LIMIT,
         'maxEntries',
+      );
+      const excluded = workspaceDirectoryExclusions(
+        options.excludeDirectoryNames,
       );
       const start = resolveCandidate(canonicalRoot, under);
       const startStat = await fs.lstat(start);
@@ -101,39 +110,53 @@ export async function createOwnedWorkspace(
       }
       await assertRealPathWithinRoot(canonicalRoot, start);
 
+      if (
+        under !== '.' &&
+        under.split('/').some((name) => excluded.has(name))
+      ) {
+        return Object.freeze([]);
+      }
       const entries: WorkspaceEntry[] = [];
-      const pending = [under];
+      let pending = [under];
       while (pending.length > 0) {
-        options.signal?.throwIfAborted();
-        const directory = pending.pop()!;
-        const children = await fs.readdir(
-          resolveCandidate(canonicalRoot, directory),
-          {
-            withFileTypes: true,
-          },
+        // A trailing slash orders directory prefixes like their child paths.
+        pending.sort((left, right) =>
+          compareWorkspaceListingPaths(`${left}/`, `${right}/`),
         );
-        children.sort((left, right) => comparePaths(left.name, right.name));
-        for (const child of children) {
-          const childPath =
-            directory === '.' ? child.name : `${directory}/${child.name}`;
-          const childStat = await fs.lstat(
-            resolveCandidate(canonicalRoot, childPath),
+        const nextDepth: string[] = [];
+        for (const directory of pending) {
+          options.signal?.throwIfAborted();
+          const children = await fs.readdir(
+            resolveCandidate(canonicalRoot, directory),
+            { withFileTypes: true },
           );
-          const kind = entryKind(childStat);
-          entries.push(
-            Object.freeze({
-              path: childPath,
-              kind,
-              ...(childStat.isFile() ? { size: childStat.size } : {}),
-            }),
-          );
-          if (entries.length > limit) {
-            throw new Error(
-              `Workspace listing exceeds its ${limit} entry limit.`,
+          children.sort((left, right) => comparePaths(left.name, right.name));
+          for (const child of children) {
+            options.signal?.throwIfAborted();
+            const childPath =
+              directory === '.' ? child.name : `${directory}/${child.name}`;
+            const childStat = await fs.lstat(
+              resolveCandidate(canonicalRoot, childPath),
             );
+            const kind = entryKind(childStat);
+            if (kind === 'directory' && excluded.has(child.name)) continue;
+            if (entries.length === limit) {
+              entries.sort((left, right) =>
+                comparePaths(left.path, right.path),
+              );
+              throw new WorkspaceEntryLimitError(limit, entries);
+            }
+            entries.push(
+              Object.freeze({
+                path: childPath,
+                kind,
+                ...(childStat.isFile() ? { size: childStat.size } : {}),
+              }),
+            );
+            if (kind === 'directory') nextDepth.push(childPath);
           }
-          if (kind === 'directory') pending.push(childPath);
         }
+        pending = nextDepth;
       }
       entries.sort((left, right) => comparePaths(left.path, right.path));
       return Object.freeze(entries);
