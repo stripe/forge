@@ -188,6 +188,7 @@ describe('Codex exec stream', () => {
       {
         text: 'Repo contains docs and examples.',
         sessionId: SESSION_ID,
+        usage: { ...completed.usage, reasoning_tokens: 0 },
         toolCalls: [
           {
             id: 'item_1',
@@ -232,6 +233,7 @@ describe('Codex exec stream', () => {
       {
         text: 'I will inspect the project.\n\nFinished.',
         sessionId: SESSION_ID,
+        usage: { ...completed.usage, reasoning_tokens: null },
         toolCalls: [
           {
             id: 'item_1',
@@ -280,11 +282,23 @@ describe('Codex exec stream', () => {
     assert.deepEqual(firstTurn, {
       text: 'First response.',
       sessionId: SESSION_ID,
+      usage: {
+        input_tokens: 10,
+        cached_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_tokens: 0,
+      },
       toolCalls: [],
     });
     assert.deepEqual(parseCodexStream(resumed, firstTurn.sessionId), {
       text: 'Second response.',
       sessionId: SESSION_ID,
+      usage: {
+        input_tokens: 20,
+        cached_input_tokens: 0,
+        output_tokens: 10,
+        reasoning_tokens: 0,
+      },
       toolCalls: [],
     });
     assertInvalid(resumed, OTHER_SESSION_ID);
@@ -361,6 +375,12 @@ describe('Codex exec stream', () => {
       {
         text: 'Created codex-tool.txt and checked its size.',
         sessionId: SESSION_ID,
+        usage: {
+          input_tokens: 50,
+          cached_input_tokens: 0,
+          output_tokens: 25,
+          reasoning_tokens: 0,
+        },
         toolCalls: [
           ...changes.map((change, index) => ({
             id: `item_${index + 1}`,
@@ -530,7 +550,7 @@ describe('Codex exec stream', () => {
     }
   });
 
-  it('rejects malformed JSON, banners, payloads, statuses, and terminal usage', () => {
+  it('rejects malformed transcript structure while degrading invalid terminal usage', () => {
     for (const line of [
       'null',
       '[]',
@@ -593,7 +613,16 @@ describe('Codex exec stream', () => {
       { ...completed.usage, cache_write_input_tokens: -1 },
       { ...completed.usage, cache_write_input_tokens: '0' },
     ])
-      assertInvalid(jsonl(started, turnStarted, { ...completed, usage }));
+      assert.deepEqual(
+        parseCodexStream(jsonl(started, turnStarted, { ...completed, usage }))
+          .usage,
+        {
+          input_tokens: null,
+          cached_input_tokens: null,
+          output_tokens: null,
+          reasoning_tokens: null,
+        },
+      );
     assertInvalid(
       stream(
         item('mcp_tool_call', {
@@ -697,5 +726,23 @@ describe('Codex exec stream', () => {
         .toolCalls.length,
       1,
     );
+  });
+});
+
+it('keeps a completed Codex transcript when a native usage counter is malformed', () => {
+  const turn = parseCodexStream(
+    jsonl(
+      started,
+      turnStarted,
+      item('agent_message', { id: 'kept', text: 'Kept response' }),
+      { ...completed, usage: { ...completed.usage, input_tokens: 1.5 } },
+    ),
+  );
+  assert.equal(turn.text, 'Kept response');
+  assert.deepEqual(turn.usage, {
+    input_tokens: null,
+    cached_input_tokens: null,
+    output_tokens: null,
+    reasoning_tokens: null,
   });
 });

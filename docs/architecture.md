@@ -317,6 +317,104 @@ owner's marker and an empty lock directory, so delayed cleanup cannot remove
 a replacement owner's lock. Committed artifact locations are compared after
 resolving filesystem aliases, including symlinked output directories.
 
+Alongside `experiment.json` and `report.json`, the experiment root holds
+`events.jsonl`. The controller sends progress to its callback immediately and
+queues each validated event for one background writer as canonical JSON with
+`experiment_run_id` and an `observed_at` UTC observation time. The states are `started`, `resumed`, `running`, `completed`, `skipped`,
+and `errored`, plus `agent_usage` after each completed agent turn with counters.
+Usage events carry a one-based `turn` and per-invocation `usage`; selection events
+retain `selection` and `run_id`, and errors
+retain the same stable code and optional credential-redacted diagnostic as
+stderr. Resume appends a `resumed` marker after inspecting prior attempts
+and before scheduling pending work.
+The callback and stderr keep their existing `resuming` state name. Both stderr
+and `events.jsonl` also receive `agent_usage` records, one per reported completed
+turn. A saved usage event advances `last_event_at`. Readers from older Forge
+releases may classify this new state as unavailable.
+
+The log format belongs to the checkpoint's Forge release. Records are bounded
+to 64 KiB and new logs use mode `0600`. Controller observation policy bounds the
+pending queue to 1 MiB, each append to 250 ms, and final drain to 500 ms.
+Scheduling and stderr do not wait for individual appends. A timed-out append
+disables further recording for that invocation and cancels unissued writes;
+an already-issued filesystem operation may settle later. Permanent filesystem
+failures, such as a permission error, also disable recording. Transient failures
+are not retried for the same event; later events may record recovery. Log I/O
+failures and queue overflow are counted as gaps. Returned summaries include optional
+`progress_log: {state: "unavailable", reason, affected_events}` when gaps occurred.
+Reasons are `io_error`, `io_timeout`, `buffer_full`, and `recording_error`
+(the first observed reason is kept). The next successfully saved event includes optional `recording_gap`
+with the same shape for preceding gaps. Counts include dropped events and
+writes whose completion is unknown after failure or timeout. Unexpected background
+writer errors disable recording with `recording_error`; they cannot reject a
+completed experiment or replace its primary error. Direct validation of progress
+contracts still throws for schema drift, and low-level parser/writer functions
+still surface programming errors to their callers.
+
+Writes are not synced. Separator and body use one write, and short writes count
+as I/O failures. Interruption can leave a torn line. The read-only tail reader
+bounds reads to 128 KiB and 250 ms, tolerates interrupted final records, and
+reports missing, empty, interrupted, invalid, unsafe, oversized, unreadable,
+timed-out, or identity-mismatched observations as typed unavailable states. The compatibility reader
+returns no event when unavailable. Neither last-event time nor the absence of
+a terminal event establishes liveness or completion; use checkpoint outcomes
+and the lock owner together. The log is optional for older folders and is never
+an input to resume decisions, judging, scoring, verification, or regrade.
+Completed-run file inventories apply only within `runs/<eval-run-id>/`.
+
+`forge status --experiment-run <directory> [--json]` observes the checkpoint,
+last complete event, and local lock owner without locking or writing. Its pure
+summary counts latest selection states, treating an empty attempt list as
+`pending`; failure groups include all errored attempts, including retries later
+completed. Group keys are error code and optional diagnostic phase, reason,
+and message; absent diagnostics form their own group. In-flight groups use
+adapter, provider, and model and list the latest `running` eval IDs.
+The JSON summary contains `experiment_run_id`, `counts`, `failures`,
+`in_flight`, `last_event_at` (null without an event), `event_log`, `token_rates`, and
+`liveness`. `event_log` preserves the tail reader's bounded unavailability
+reason or reports `available` with a `complete` or `interrupted` tail. It never
+copies the raw event payload. Liveness records `state` (`alive`, `stale`,
+`no_lock`, or `unknown`) and `pid` (null without a known owner). Unknown
+liveness adds a fixed reason: `invalid_lock`, `io_error`, `io_timeout`,
+`probe_error`, or `observation_error`.
+`token_rates` uses a trailing 60-second window at `observed_at`, with basis
+`per_turn` and a typed availability state. Its model groups sum input plus output
+for exact checkpoint attempts and selections, including errored attempts;
+duplicate run/turn records count once. Future and expired records do not
+contribute. Each group records `turns` and `turns_with_total`; an unknown input
+or output makes its rate null with reason `missing_counters`. An unsafe sum
+makes it null with reason `overflow`. No usage events means unavailable with
+reason `no_usage`. A model with only expired or future usage reports has a null
+rate with reason `no_recent_usage`; a recent turn reporting zero tokens gives zero.
+
+The recent-rate reader shares the event reader's fixed unavailability reasons
+and 250 ms wait budget. It allocates from the file size, up to an 8 MiB tail.
+Missing, invalid, unsafe, unreadable, timed-out, or identity-mismatched logs make
+rates unavailable. Interrupted tails, an omitted prefix (`truncated`), and saved
+`recording_gap` markers also make rates unavailable; partial totals are not
+presented as a current rate. It retains `truncated` and `invalid_records`
+metadata for coverage. Unexpected recent-reader failures degrade to bounded
+`observation_error`. Undetectable recording gaps can still undercount. Completed
+eval totals are never treated as recent turn deltas. Usage arrives after
+`AgentSession.send`, not during a CLI invocation.
+
+Bounded checkpoint reads use one open file handle, so an atomic replacement
+does not mix versions. Buffers use the observed file size plus one byte;
+growth during the read is rejected instead of parsing a truncated prefix.
+Each file observation uses the shared 250 ms read budget. Timeout stops the
+command waiting and prevents new reads once an issued operation settles;
+already-issued filesystem calls can settle later. Other files are separate
+observations; no consistent
+cross-file snapshot or artifact verification is implied. Empty lock directories
+are stale and a disappearing owner is reported as no lock. Lock enumeration
+reads at most two entries. Malformed or unreadable locks report unknown;
+missing, torn, invalid, newer-format, or mismatched event logs report their
+availability without failing the checkpoint summary. Only an unreadable or
+invalid checkpoint or a checkpoint/directory identity mismatch fails status. PID probes use signal zero on this host; permission
+denied still indicates a live process. Locks record no host or process start
+identity, so copied folders and PID reuse can mislead liveness. See the README's
+[status workflow](../README.md#results-and-scores) for usage and exit codes.
+
 `--resume <experiment-run-id>` requires an explicit ID and loads that
 experiment run's saved selections. Bare `--resume` is rejected. The resolved
 plans must retain their original checksums. Resume independently verifies prior eval run
@@ -433,7 +531,7 @@ contains:
 | `CredentialResolver` | Resolve opaque references | Secret lookup only for explicitly requested references |
 | `RunInputProvider` | Read dataset payloads | Read-only access below one dataset root |
 | `RunArtifactStore` | Stage and atomically commit results | One run namespace in the result store |
-| `RunObserver` | Receive lifecycle events | No control; failures are ignored |
+| `RunObserver` | Receive lifecycle and agent usage events | No control; failures are ignored |
 | `RunArtifactContributor` list | Add supplemental files | Only below `extensions/<contributor-id>/` |
 
 The composition does not define setup semantics. Conversely, the engine's
@@ -622,9 +720,46 @@ immutable for interaction.
 
 Forge opens one persistent `AgentSession`. Every completed turn must report a
 safe, stable session ID; changing identity between turns is a contract
-violation. Agent text, tool calls, tool inputs, optional cost, and session
-identity are snapshotted at the boundary so later adapter mutation cannot
+violation. Agent text, tool calls, tool inputs, optional cost and usage, and
+session identity are snapshotted at the boundary so later adapter mutation cannot
 change the driver ledger.
+
+`AgentTurn.usage` optionally supplies `AgentTokenUsage`: strict nonnegative safe
+integer or null counters named `input_tokens`, `cached_input_tokens`,
+`output_tokens`, and `reasoning_tokens`. Input includes cache reads and writes;
+reasoning is a subset of output. Codex's stream parser returns cumulative thread
+snapshots. Its agent session subtracts the prior snapshot to report each invocation;
+a new thread starts from zero. An unknown counter or baseline, or a counter reset,
+makes that delta null. Each snapshot becomes the next baseline, so known counters
+can recover on the following invocation. A failed Codex send invalidates the
+baseline: the next resumed invocation has unknown deltas and establishes a new
+baseline, so failed-invocation spend is not attributed to a later turn.
+Claude Code supplies per-invocation
+`result.usage` for the main agent loop, with cache reads and creation added to
+input. Its output already includes reasoning; the reasoning breakdown stays null.
+OpenCode sums unique step-finish usage with cache reads and writes added to input,
+and adds native reasoning to native output to make output inclusive. Missing output
+or reasoning leaves inclusive output null; an unsafe sum also becomes null.
+Malformed optional native counters degrade to null without invalidating a
+completed transcript. OpenCode native evidence omits malformed optional metrics
+with a fixed `value_omitted` warning. Execution converts malformed third-party
+usage blocks to all-null counters. Saved result and report schemas remain strict;
+invalid stored contracts are not silently rewritten.
+Unsupported counters remain null. Execution clones and freezes counters, sums
+them across completed turns into optional `result.agent.usage`, and emits an
+`agent_usage` observer event with a one-based turn index. An absent turn counter
+makes that total null; wholly absent usage omits the result field. Overflowing
+sums become null. `ExecuteEvalInput.observer` adds a per-run observer alongside
+the composition observer; experiments use it without replacing host compositions.
+Observer failures cannot change interaction outcomes. These
+observations do not enter plans, digests, scoring, or transcript selection.
+
+Reports retain optional `agent_usage` in completed run rows and validate optional
+`agent_usage_by_model` sums against those rows. Groups span cases and treatments
+by adapter, provider, and model, with eval counts and counts with usage; missing
+counters propagate null. Only latest completed effective outcomes contribute.
+Regrade reports keep source agent usage. Results and reports without usage
+remain valid. Host completion usage stays in `completion_calls`.
 
 One-shot and multi-turn interaction are described separately below.
 
@@ -1634,9 +1769,10 @@ engine APIs:
 - `validate` loads inputs, expands every selection, resolves plans, constructs
   the default composition, and runs pure preflight; optional model probes test
   selected endpoints, while `--host` checks runtime readiness;
-- `plan` selects one entry and prints canonical plan JSON; and
+- `plan` selects one entry and prints canonical plan JSON;
 - `run` supplies its argument validation and input loader to the shared
   experiment run command stage for bounded execution and explicit resume;
+- `status` summarizes saved experiment progress and probes its local lock owner;
 - `regrade` judges saved evidence again with a selected model; and
 - `regrade diff` compares saved evaluations without a host composition or credentials.
 

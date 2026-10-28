@@ -1,3 +1,4 @@
+import { sumObservedTokens } from '../../agentUsage.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifAgentStep,
@@ -196,8 +197,12 @@ export async function loadOpenCodeEvidence(
         if (!texts.length) throw new OpenCodeNativeError(true);
         steps.push({ ...base, source: 'user' });
       } else {
-        const tokens = record(meta.tokens);
-        const cache = record(tokens.cache);
+        const metrics = openCodeMetrics(meta);
+        if (metrics === undefined)
+          warnings.push({
+            code: 'value_omitted',
+            message: 'OpenCode usage metrics were omitted.',
+          });
         steps.push({
           ...base,
           source: 'agent',
@@ -208,16 +213,7 @@ export async function loadOpenCodeEvidence(
           ...(calls.length
             ? { tool_calls: calls, observation: { results } }
             : {}),
-          metrics: {
-            prompt_tokens: nonnegative(tokens.input),
-            completion_tokens: nonnegative(tokens.output),
-            cached_tokens: nonnegative(cache.read),
-            cost_usd: nonnegative(meta.cost),
-            extra: {
-              reasoning_tokens: nonnegative(tokens.reasoning),
-              cache_write_tokens: nonnegative(cache.write),
-            },
-          },
+          ...(metrics === undefined ? {} : { metrics }),
         });
       }
       const created = record(meta.time).created;
@@ -275,4 +271,36 @@ function unavailable(
         'The exact OpenCode session export is unavailable, invalid, or incomplete.',
     },
   };
+}
+
+/** Accounting detail is optional; malformed metrics must not discard the transcript. */
+function openCodeMetrics(
+  meta: Record<string, unknown>,
+): AtifAgentStep['metrics'] | undefined {
+  try {
+    const tokens = record(meta.tokens);
+    const cache = record(tokens.cache);
+    if (
+      [
+        tokens.input,
+        tokens.output,
+        tokens.reasoning,
+        cache.read,
+        cache.write,
+      ].some((value) => sumObservedTokens(value) === null)
+    )
+      return undefined;
+    return {
+      prompt_tokens: tokens.input as number,
+      completion_tokens: tokens.output as number,
+      cached_tokens: cache.read as number,
+      cost_usd: nonnegative(meta.cost),
+      extra: {
+        reasoning_tokens: tokens.reasoning as number,
+        cache_write_tokens: cache.write as number,
+      },
+    };
+  } catch {
+    return undefined;
+  }
 }

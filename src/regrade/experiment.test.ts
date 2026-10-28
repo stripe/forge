@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { defaultForgeEngine } from '../engine.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
 import {
   createScriptedCompletionProvider,
@@ -42,10 +43,39 @@ function dependencies(responses: string[]) {
 }
 
 describe('regradeExperimentRun', () => {
+  it('uses worker-verified source data without a serial report verification pass', async () => {
+    const root = await temporaryRoot('forge-regrade-verify-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    let verifications = 0;
+    const deps = dependencies([failingJudgment]);
+    const engine = {
+      ...defaultForgeEngine,
+      async verifyCompletedRun(location: string) {
+        verifications += 1;
+        return defaultForgeEngine.verifyCompletedRun(location);
+      },
+    };
+    const summary = await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
+        output: path.join(root, 'regrade'),
+      },
+      { ...deps.dependencies, engine },
+    );
+    assert.deepEqual(summary.failed, []);
+    assert.equal(summary.regraded, 1);
+    assert.equal(verifications, 2); // Source inspection and regrade worker, with no third report pass.
+  });
+
   it('regrades completed runs into a separate report and reuses them on rerun', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
     roots.push(root);
     const source = await runJudgedFixture(root);
+    const log = path.join(source.experimentLocation, 'events.jsonl');
+    const events = await fs.readFile(log);
+    assert.ok(events.byteLength > 0);
     const output = path.join(root, 'regrade-opus');
     const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
     const first = dependencies([failingJudgment]);
@@ -97,6 +127,7 @@ describe('regradeExperimentRun', () => {
       ),
     );
     assert.equal(sourceReport.runs[0]!.evaluation!.score, 1);
+    assert.deepEqual(await fs.readFile(log), events);
   });
 
   it('refuses to mix judges in one output and leaves that run unscored', async () => {

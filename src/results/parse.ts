@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentTokenUsageSchema } from '../agentUsage.ts';
 import { assertBoundedJsonValue } from '../atif/parser.ts';
 import {
   agentAdapterMetadataSchema,
@@ -644,6 +645,7 @@ const runResultFields = {
       model: safeText,
       session_id: z.string().max(4096).nullable(),
       cost_usd: z.number().finite().nonnegative().nullable(),
+      usage: agentTokenUsageSchema.optional(),
     })
     .strict(),
   completion_calls: z

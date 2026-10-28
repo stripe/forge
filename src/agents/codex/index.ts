@@ -2,6 +2,7 @@ import type {
   AgentAdapter,
   AgentRuntimeRequirements,
   AgentSession,
+  AgentTokenUsage,
 } from '../../contracts/agent.ts';
 import {
   assertEnvironmentName,
@@ -176,6 +177,7 @@ export function createCodexAdapter(
       requirements(context.selection);
       assertCodexRuntimeLayout(layout, context.runtime.paths);
       let currentSessionId: string | undefined;
+      let previousUsage: AgentTokenUsage | undefined;
       let sending = false;
       return {
         sessionId: () => currentSessionId,
@@ -228,8 +230,26 @@ export function createCodexAdapter(
               workspacePath: layout.workspace,
               model: context.selection.model,
             });
+            const usage =
+              turn.usage === undefined
+                ? undefined
+                : invocationUsage(
+                    turn.usage,
+                    currentSessionId === undefined
+                      ? {
+                          input_tokens: 0,
+                          cached_input_tokens: 0,
+                          output_tokens: 0,
+                          reasoning_tokens: 0,
+                        }
+                      : previousUsage,
+                  );
+            previousUsage = turn.usage;
             currentSessionId = turn.sessionId;
-            return turn;
+            return { ...turn, ...(usage === undefined ? {} : { usage }) };
+          } catch (error) {
+            previousUsage = undefined;
+            throw error;
           } finally {
             sending = false;
           }
@@ -255,6 +275,26 @@ export function createCodexAdapter(
       });
     },
   } satisfies AgentAdapter);
+}
+
+/** Native counters span resumed turns; a reset or missing baseline hides the delta. */
+function invocationUsage(
+  current: AgentTokenUsage,
+  previous: AgentTokenUsage | undefined,
+): AgentTokenUsage {
+  const delta = (key: keyof AgentTokenUsage): number | null => {
+    const total = current[key];
+    const baseline = previous?.[key];
+    return total === null || baseline == null || total < baseline
+      ? null
+      : total - baseline;
+  };
+  return {
+    input_tokens: delta('input_tokens'),
+    cached_input_tokens: delta('cached_input_tokens'),
+    output_tokens: delta('output_tokens'),
+    reasoning_tokens: delta('reasoning_tokens'),
+  };
 }
 
 function validateBaseUrl(value: string): string {

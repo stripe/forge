@@ -2379,3 +2379,28 @@ function resultFor(
     warnings: [],
   };
 }
+
+it('reads old results without usage and round-trips strict nullable agent token counters', () => {
+  const old = resultFor([]);
+  assert.equal(parseRunResult(old).agent.usage, undefined);
+  const usage = {
+    input_tokens: 10,
+    cached_input_tokens: 0,
+    output_tokens: 3,
+    reasoning_tokens: null,
+  };
+  const result = { ...old, agent: { ...old.agent, usage } };
+  assert.deepEqual(
+    parseRunResult(JSON.parse(serializeCanonicalJson(result))).agent.usage,
+    usage,
+  );
+  for (const invalid of [
+    { ...usage, output_tokens: -1 },
+    { ...usage, reasoning_tokens: 0.5 },
+    { ...usage, extra: 1 },
+    { input_tokens: 1 },
+  ])
+    assert.throws(() =>
+      parseRunResult({ ...result, agent: { ...result.agent, usage: invalid } }),
+    );
+});

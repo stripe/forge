@@ -360,6 +360,16 @@ try {
       assert.equal(commandResume.skipped, 2);
       assert.deepEqual(commandResume.outcomes, command.outcomes);
       assert.equal(commandResume.checkpoint, command.checkpoint);
+      let statusOutput = '';
+      assert.equal(await cli.runCli(['status', '--experiment-run', command.location, '--json'], {
+        stdout: (text) => { statusOutput += text; },
+        stderr: (text) => { throw new Error(text); },
+      }), 0);
+      const status = JSON.parse(statusOutput);
+      assert.equal(status.experiment_run_id, command.experiment_run_id);
+      assert.deepEqual(status.counts, {pending: 0, running: 0, completed: 2, errored: 0});
+      assert.deepEqual(status.liveness, {state: 'no_lock', pid: null});
+      assert.ok(status.last_event_at);
     `,
   );
   run(process.execPath, ['esm.mjs'], consumerRoot);

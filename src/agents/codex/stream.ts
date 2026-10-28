@@ -1,6 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
+import { observeAgentTokenUsage } from '../../agentUsage.ts';
 
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type {
+  AgentTokenUsage,
+  AgentToolCall,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;
@@ -17,7 +22,10 @@ interface StreamItem {
   readonly toolCall?: AgentToolCall;
 }
 
-/** Parse one completed `codex exec --json` or `codex exec resume --json` invocation. */
+/**
+ * Parse one completed exec invocation. Usage is the native cumulative thread
+ * snapshot; AgentSession converts it to per-invocation counters before delivery.
+ */
 export function parseCodexStream(
   stdout: string,
   expectedSessionId?: string,
@@ -41,6 +49,7 @@ export function parseCodexStream(
   let sessionId: string | undefined;
   let started = false;
   let completed = false;
+  let usage: AgentTokenUsage | undefined;
   let lineStart = 0;
   let lineCount = 0;
   let toolCount = 0;
@@ -159,7 +168,7 @@ export function parseCodexStream(
       case 'turn.completed':
         onlyKeys(event, ['type', 'usage']);
         if (!started) invalidStream();
-        validateUsage(event.usage);
+        usage = validateUsage(event.usage);
         completed = true;
         break;
       default:
@@ -181,6 +190,7 @@ export function parseCodexStream(
       )
       .join('\n\n'),
     sessionId,
+    ...(usage === undefined ? {} : { usage }),
     toolCalls: [...items.values()].flatMap((item) =>
       item.toolCall === undefined ? [] : [item.toolCall],
     ),
@@ -325,22 +335,37 @@ function parseItem(item: JsonRecord): StreamItem {
   }
 }
 
-function validateUsage(value: unknown): void {
-  const usage = requiredRecord(value);
-  onlyKeys(usage, [
-    'input_tokens',
-    'cached_input_tokens',
-    'cache_write_input_tokens',
-    'output_tokens',
-    'reasoning_output_tokens',
-  ]);
-  for (const key of ['input_tokens', 'cached_input_tokens', 'output_tokens']) {
-    nonnegativeInteger(usage[key]);
+function validateUsage(value: unknown): AgentTokenUsage {
+  try {
+    const usage = requiredRecord(value);
+    onlyKeys(usage, [
+      'input_tokens',
+      'cached_input_tokens',
+      'cache_write_input_tokens',
+      'output_tokens',
+      'reasoning_output_tokens',
+    ]);
+    for (const key of [
+      'input_tokens',
+      'cached_input_tokens',
+      'output_tokens',
+    ]) {
+      nonnegativeInteger(usage[key]);
+    }
+    if (usage.reasoning_output_tokens !== undefined)
+      nonnegativeInteger(usage.reasoning_output_tokens);
+    if (usage.cache_write_input_tokens !== undefined)
+      nonnegativeInteger(usage.cache_write_input_tokens);
+    return {
+      input_tokens: usage.input_tokens as number,
+      cached_input_tokens: usage.cached_input_tokens as number,
+      output_tokens: usage.output_tokens as number,
+      reasoning_tokens:
+        (usage.reasoning_output_tokens as number | undefined) ?? null,
+    };
+  } catch {
+    return observeAgentTokenUsage(null);
   }
-  if (usage.reasoning_output_tokens !== undefined)
-    nonnegativeInteger(usage.reasoning_output_tokens);
-  if (usage.cache_write_input_tokens !== undefined)
-    nonnegativeInteger(usage.cache_write_input_tokens);
 }
 
 function validateStatus(value: unknown): void {

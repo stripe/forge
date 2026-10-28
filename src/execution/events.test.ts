@@ -55,3 +55,48 @@ describe('run events', () => {
     ]);
   });
 });
+
+it('isolates observers of usage and freezes counters before delivery', async () => {
+  const usage = {
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    output_tokens: 1,
+    reasoning_tokens: null,
+  };
+  const observed: RunEvent[] = [];
+  const emitter = createRunEventEmitter(
+    'run-1',
+    [
+      {
+        observe(event) {
+          if (event.type === 'agent_usage')
+            Object.assign(event.usage, { input_tokens: 999 });
+        },
+      },
+      {
+        observe(event) {
+          observed.push(event);
+        },
+      },
+    ],
+    () => new Date('2026-01-01T00:00:00Z'),
+  );
+  await emitter.agentUsage(2, usage);
+  usage.input_tokens = 10;
+  assert.deepEqual(observed, [
+    {
+      runId: 'run-1',
+      sequence: 0,
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'agent_usage',
+      phase: 'interaction',
+      turn: 2,
+      usage: {
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 1,
+        reasoning_tokens: null,
+      },
+    },
+  ]);
+});

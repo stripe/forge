@@ -1,18 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { z } from 'zod';
+import type { AgentTokenUsage } from './contracts/agent.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
+import type { ExperimentLogGap } from './experimentEvents.ts';
 import {
   type ExperimentRunAttempt as Attempt,
+  EXPERIMENT_LOCK_OWNER_NAME,
   type ExperimentRunCheckpoint,
+  experimentRunLockOwnerSchema,
+  MAX_EXPERIMENT_LOCK_OWNER_BYTES,
+  MAX_EXPERIMENT_RUN_BYTES,
   parseExperimentRunCheckpoint,
   experimentRunIdSchema as runIdSchema,
   type SettledExperimentRunAttempt as SettledAttempt,
 } from './experimentModel.ts';
+import { createExperimentProgress } from './experimentProgress.ts';
 import {
   buildExperimentRunReport,
   type ExperimentRunReportEvaluationV1,
@@ -34,8 +40,6 @@ export {
   type ExperimentRunReportV1,
   parseExperimentRunReport,
 } from './experimentReport.ts';
-
-const MAX_EXPERIMENT_RUN_BYTES = 16 * 1024 * 1024;
 
 /** A report failure does not invalidate committed evaluations or their checkpoint. */
 export class ExperimentRunReportError extends Error {
@@ -83,6 +87,13 @@ export interface ExperimentRunInspection {
 export type ExperimentRunProgressEvent =
   | { readonly state: 'started' | 'resuming'; readonly location: string }
   | {
+      readonly state: 'agent_usage';
+      readonly selection: RunSelection;
+      readonly run_id: string;
+      readonly turn: number;
+      readonly usage: AgentTokenUsage;
+    }
+  | {
       readonly state: 'running' | 'completed' | 'skipped';
       readonly selection: RunSelection;
       readonly run_id: string;
@@ -99,6 +110,8 @@ export type ExperimentRunProgressEvent =
     };
 
 export interface ExperimentRunSummary {
+  /** Optional recording gaps; evaluation outcomes remain authoritative. */
+  readonly progress_log?: ExperimentLogGap;
   readonly checkpoint: string;
   readonly report: string;
   readonly total: number;
@@ -263,6 +276,21 @@ export async function runExperiment(
     inspections.set(runId, { identity, inspected });
     return inspected;
   };
+  const recording = createExperimentProgress({
+    root,
+    progress(event) {
+      if (event.state !== 'agent_usage') {
+        options.progress(event);
+        return;
+      }
+      try {
+        options.progress(event);
+      } catch {
+        // A usage callback failure must not drop the saved observation.
+      }
+    },
+  });
+  const progress = recording.record;
   let reportReady = false;
   let succeeded = false;
   try {
@@ -334,7 +362,7 @@ export async function runExperiment(
             experimentRunOutcome(entry, recovered, inspected.artifact),
             index,
           );
-          options.progress({
+          progress({
             selection: entry.selection,
             run_id: last.run_id,
             state: 'skipped',
@@ -345,7 +373,7 @@ export async function runExperiment(
       pending.push(index);
     }
     await writeExperimentRunCheckpoint(checkpoint, experimentRun);
-    options.progress({
+    progress({
       state: options.resume ? 'resuming' : 'started',
       location: root,
     });
@@ -399,7 +427,7 @@ export async function runExperiment(
             runIds.add(runId);
             entry.attempts.push({ run_id: runId, state: 'running' });
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            options.progress({
+            progress({
               selection: entry.selection,
               run_id: runId,
               state: 'running',
@@ -417,6 +445,20 @@ export async function runExperiment(
               runId,
               plan: options.plans[index]!,
               composition: options.composition,
+              observer: {
+                async observe(event) {
+                  if (event.type !== 'agent_usage') return;
+                  await update(async () => {
+                    progress({
+                      state: 'agent_usage',
+                      selection: entry.selection,
+                      run_id: runId,
+                      turn: event.turn,
+                      usage: event.usage,
+                    });
+                  });
+                },
+              },
               signal,
             });
             const [actualLocation, expectedLocation] = await Promise.all([
@@ -455,7 +497,7 @@ export async function runExperiment(
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
-            options.progress({ selection: entry.selection, ...attempt });
+            progress({ selection: entry.selection, ...attempt });
             if (attempt.state === 'completed') completed += 1;
             else errored += 1;
             options.onOutcome?.(
@@ -475,8 +517,10 @@ export async function runExperiment(
     );
     if (failed) throw failure;
     options.signal.throwIfAborted();
+    const progressLog = await recording.finish();
     succeeded = true;
     return {
+      ...(progressLog === undefined ? {} : { progress_log: progressLog }),
       checkpoint,
       report: reportPath,
       total: experimentRun.entries.length,
@@ -539,6 +583,10 @@ export async function runExperiment(
                 inspected.artifact === null
                   ? null
                   : `runs/${last.run_id}/result.json`,
+              ...(effective.state === 'completed' &&
+              inspected.usage !== undefined
+                ? { agent_usage: inspected.usage }
+                : {}),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -564,7 +612,11 @@ export async function runExperiment(
       }
       if (succeeded) options.signal.throwIfAborted();
     } finally {
-      await release();
+      try {
+        await recording.finish();
+      } finally {
+        await release();
+      }
     }
   }
 }
@@ -573,6 +625,7 @@ interface AttemptInspection {
   attempt: SettledAttempt;
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
+  usage?: AgentTokenUsage;
 }
 interface CachedInspection {
   identity: string;
@@ -619,6 +672,9 @@ async function inspectAttempt(
     return {
       attempt,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(completed.result.agent.usage === undefined
+        ? {}
+        : { usage: completed.result.agent.usage }),
       artifact: {
         location,
         evaluation: {
@@ -790,7 +846,7 @@ async function reclaimExperimentRunLock(lock: string): Promise<void> {
     return;
   }
   const ownerName = entries[0]!;
-  if (entries.length !== 1 || !/^owner-[0-9a-f-]{36}\.json$/.test(ownerName)) {
+  if (entries.length !== 1 || !EXPERIMENT_LOCK_OWNER_NAME.test(ownerName)) {
     throw new Error('Invalid experiment run lock owner.');
   }
   const ownerFile = path.join(lock, ownerName);
@@ -798,14 +854,13 @@ async function reclaimExperimentRunLock(lock: string): Promise<void> {
   if (
     !ownerStat.isFile() ||
     ownerStat.isSymbolicLink() ||
-    ownerStat.size > 128
+    ownerStat.size > MAX_EXPERIMENT_LOCK_OWNER_BYTES
   ) {
     throw new Error('Invalid experiment run lock owner.');
   }
-  const owner = z
-    .object({ pid: z.number().int().positive() })
-    .strict()
-    .parse(JSON.parse(await fs.readFile(ownerFile, 'utf8')));
+  const owner = experimentRunLockOwnerSchema.parse(
+    JSON.parse(await fs.readFile(ownerFile, 'utf8')),
+  );
   try {
     process.kill(owner.pid, 0);
   } catch (error) {

@@ -1,5 +1,14 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import {
+  observeAgentTokenUsage,
+  sumAgentTokenUsage,
+  sumObservedTokens,
+} from '../../agentUsage.ts';
+import type {
+  AgentTokenUsage,
+  AgentToolCall,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 import {
   identifier,
   MAX_NATIVE_BYTES,
@@ -27,6 +36,7 @@ export function parseOpenCodeStream(
     let stepHasTools = false;
     let completed = false;
     let cost = 0;
+    const usages: (AgentTokenUsage | undefined)[] = [];
     const parts = new Map<string, NativeRecord>();
     const calls = new Map<string, AgentToolCall>();
     const texts: string[] = [];
@@ -80,6 +90,8 @@ export function parseOpenCodeStream(
         if (event.type === 'step_finish' && part.type === 'step-finish') {
           completed = terminal(part.reason) && !stepHasTools;
           cost += nonnegative(part.cost);
+          if (part.tokens === undefined) usages.push(undefined);
+          else usages.push(openCodeUsage(part.tokens));
           activeMessage = undefined;
         } else if (event.type === 'text' && part.type === 'text') {
           texts.push(string(part.text));
@@ -95,15 +107,39 @@ export function parseOpenCodeStream(
     }
     if (!completed || id === undefined || !Number.isFinite(cost))
       throw new Error();
+    const usage = sumAgentTokenUsage(usages);
     return {
       text: texts.join('\n\n'),
       sessionId: id,
       toolCalls: [...calls.values()],
       costUsd: cost,
+      ...(usage === undefined ? {} : { usage }),
     };
   } catch {
     throw new OpenCodeStreamError();
   }
+}
+
+function openCodeUsage(value: unknown): AgentTokenUsage {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return observeAgentTokenUsage(null);
+  const tokens = value as Record<string, unknown>;
+  const cache =
+    tokens.cache !== null &&
+    typeof tokens.cache === 'object' &&
+    !Array.isArray(tokens.cache)
+      ? (tokens.cache as Record<string, unknown>)
+      : {};
+  return {
+    input_tokens: sumObservedTokens(
+      tokens.input,
+      cache.read,
+      cache.write === undefined ? 0 : cache.write,
+    ),
+    cached_input_tokens: sumObservedTokens(cache.read),
+    output_tokens: sumObservedTokens(tokens.output, tokens.reasoning),
+    reasoning_tokens: sumObservedTokens(tokens.reasoning),
+  };
 }
 
 export class OpenCodeStreamError extends Error {

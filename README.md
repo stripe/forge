@@ -249,7 +249,8 @@ npx --no-install forge run \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
-Execution uses Docker and makes model calls. Progress goes to stderr;
+Execution uses Docker and makes model calls. Progress goes to stderr and the
+experiment run's `events.jsonl`.
 `run-summary.json` contains the experiment run ID, output location, and
 checkpoint/report paths. Every invocation without `--resume` starts a new
 experiment run. See [Results and Scores](#results-and-scores) to inspect it.
@@ -487,6 +488,7 @@ Artifacts are saved under the experiment run ID:
 ```text
 results/experiments/<experiment-run-id>/
 ├── experiment.json
+├── events.jsonl
 ├── report.json
 └── runs/<eval-run-id>/
     ├── result.json
@@ -500,11 +502,66 @@ results/experiments/<experiment-run-id>/
 | --- | --- |
 | `experiment.json` | Checkpoint, selected plans, and attempt history used for resume. |
 | `report.json` | Scorecard across the saved experiment selections. |
+| `events.jsonl` | Timestamped progress history, appended on resume. |
 | `result.json` | Evaluation at `.evaluation`, provenance, and companion artifact descriptors. |
 | `plan.json` | Resolved input for one eval run. |
 | `setup.json` | Ordered, bounded setup receipts. |
 | `trajectory.json` | Normalized, credential-redacted ATIF transcript. |
 | `interaction.json` | Turn history and stop reason, including Ava's private audit data. |
+
+Each line in `events.jsonl` is one canonical JSON progress event with an
+`observed_at` UTC timestamp. Resume appends a `resumed` marker and further
+events to the same file. `agent_usage` adds a record after each completed turn
+with counters, in stderr progress and in this log. It also advances the last-event
+time. Follow the log with `tail -f` while a run is active.
+Recording runs in the background with bounded memory and waits. Disk errors,
+slow writes, or a full queue can leave gaps: `run-summary.json` then includes
+`progress_log` with `state: unavailable`, a reason, and the affected event count.
+The next saved event carries `recording_gap` if recording recovers. A crash can
+leave a partial line. The last event alone does not prove a run is alive or
+finished. The log does not affect verification, scores, or regrade; older
+experiment folders may have no log.
+
+Inspect an active or saved experiment run without Docker or credentials:
+
+```sh
+npx --no-install forge status --experiment-run ./results/experiments/EXPERIMENT_RUN_ID
+npx --no-install forge status --experiment-run ./results/experiments/EXPERIMENT_RUN_ID --json
+```
+
+Status counts selections by their latest checkpoint state (`pending`, `running`,
+`completed`, or `errored`). It groups failures across all attempts by error code
+and, when present, diagnostic phase, reason, and message. In-flight eval IDs
+are grouped by agent adapter, provider, and model. The last-event time comes
+from the last readable `events.jsonl` record. `event_log` reports whether it
+is available, has an interrupted tail, or is unavailable with a fixed reason.
+Missing, torn, unreadable, newer-format, or mismatched logs do not hide the
+checkpoint summary; an unavailable event has a null `last_event_at`.
+
+Status also shows agent tokens per minute from turn usage reported in the trailing
+60 seconds. It adds input and output tokens; cached input and reasoning are
+already included. Rates include attempts that later fail. Missing counters make
+a model's rate unavailable with a reason. A model with no usage in the past
+minute also shows unavailable; a recent report of zero tokens shows zero.
+Missing, malformed, unreadable, or mismatched logs also make the rate unavailable,
+as do an interrupted tail,
+a bounded read that omits earlier records, and saved recording gaps. Without
+usage events, no rate is inferred from completed evals. Undetected gaps can
+undercount. Counters arrive when an agent invocation finishes, so long
+invocations produce bursts.
+
+Liveness checks the `.experiment.lock` owner PID on this host: alive, stale,
+or no lock. An unreadable or invalid lock reports `unknown` with a fixed
+reason. Run status on the host that owns the run. A live PID does not prove
+progress, and PID reuse can make a stale lock appear alive. Status takes no
+lock and writes nothing. Its file reads are separate observations, so they can
+briefly disagree while work advances; a `running` checkpoint can remain after
+a process dies. Status does not verify completed eval artifacts or scores.
+`--json` prints the same summary as canonical JSON. Exit code 0 means it read
+the checkpoint, even when observations are unavailable. An unreadable, invalid,
+or identity-mismatched checkpoint returns 1; invalid arguments return 2.
+File observations have bounded waits; a timed-out checkpoint read returns 1,
+while an event or lock timeout leaves that observation unavailable or unknown.
 
 For the first experiment, print its evaluation:
 
@@ -557,6 +614,15 @@ and one `runs` row per saved selection. With optional `jq`:
 jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, judging_score, criterion_scores, criteria_by_requirement}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
+
+When an adapter reports tokens, `result.json` includes `agent.usage`. Its
+input, cached input, output, and reasoning counters are nullable; an unknown
+counter is not zero. Experiment reports retain each completed row's
+`agent_usage` and sum it in `agent_usage_by_model`, grouped by adapter, provider,
+and model across cases and treatments. These groups count evals with usage.
+A counter stays unknown if any contributing eval lacks it. Old results and
+reports without these fields still parse. Host role-player and judge tokens
+remain separate in `completion_calls`.
 
 `coverage` is completed selections divided by all saved selections.
 `pass_rate` is passed evaluations divided by completed evaluations without
@@ -623,8 +689,8 @@ Execution errors appear in the experiment's `experiment.json` attempt history
 and `report.json` run rows. When available, `diagnostic` records the phase,
 a timeout/cancellation/failure reason, and a bounded, credential-redacted message,
 even if the run failed before saving artifacts. The same detail appears in
-stderr progress events. Older attempts and custom host callback failures may
-have only `error_code`. For a committed Ava failure, `result.json.failure.message`
+stderr progress events and `events.jsonl`. Older attempts and custom host
+callback failures may have only `error_code`. For a committed Ava failure, `result.json.failure.message`
 records the final request or output rejection reason; raw rejected responses
 are not saved.
 

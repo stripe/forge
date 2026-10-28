@@ -14,13 +14,15 @@ import {
 import { isSha256Digest, sha256Digest } from '../model/hashes.ts';
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../model/paths.ts';
 import type { ModelRefV1 } from '../model/types.ts';
+import type { RunResultV1 } from '../results/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
 import { RegradeReadError, readRegradeArtifact } from './read.ts';
 import {
   REGRADE_RESULT_FORMAT,
   type RegradeDependencies,
   type RegradeResultV1,
-  regradeCompletedRun,
+  type regradeCompletedRun,
+  regradeVerifiedRun,
 } from './run.ts';
 
 export const REGRADE_SUMMARY_FORMAT = 'forge-regrade-experiment-v1' as const;
@@ -60,8 +62,15 @@ export interface RegradeExperimentSummaryV1 {
 }
 
 type RegradeOutcome =
-  | { readonly kind: 'regraded' | 'reused'; readonly regrade: RegradeResultV1 }
-  | { readonly kind: 'not_judged' }
+  | {
+      readonly kind: 'regraded' | 'reused';
+      readonly regrade: RegradeResultV1;
+      readonly source: Pick<RunResultV1, 'agent' | 'evaluation'>;
+    }
+  | {
+      readonly kind: 'not_judged';
+      readonly source: Pick<RunResultV1, 'agent' | 'evaluation'>;
+    }
   | { readonly kind: 'failed'; readonly message: string };
 
 /**
@@ -141,6 +150,11 @@ export async function regradeExperimentRun(
   ): Promise<RegradeOutcome> => {
     const file = path.join(output, 'runs', `${runId}.json`);
     try {
+      const completed = await engine.verifyCompletedRun(location);
+      const source = {
+        agent: completed.result.agent,
+        evaluation: completed.result.evaluation,
+      };
       const resultSha256 = sha256Digest(
         await fs.readFile(path.join(location, 'result.json')),
       );
@@ -155,9 +169,10 @@ export async function regradeExperimentRun(
           throw new Error(
             'An existing regrade in the output uses a different judge or result.',
           );
-        return { kind: 'reused', regrade: existing };
+        return { kind: 'reused', regrade: existing, source };
       }
-      const regrade = await regradeCompletedRun(
+      const regrade = await regradeVerifiedRun(
+        completed,
         {
           location,
           judge: input.judge,
@@ -169,9 +184,9 @@ export async function regradeExperimentRun(
         },
         { ...dependencies, engine },
       );
-      if (regrade === undefined) return { kind: 'not_judged' };
+      if (regrade === undefined) return { kind: 'not_judged', source };
       await writeAtomic(file, `${JSON.stringify(regrade, null, 2)}\n`);
-      return { kind: 'regraded', regrade };
+      return { kind: 'regraded', regrade, source };
     } catch (error) {
       if (signal.aborted) throw error;
       return {
@@ -220,11 +235,11 @@ export async function regradeExperimentRun(
       });
       continue;
     }
+    const sourceResult = regraded!.source;
     const evaluation =
       regraded?.kind === 'regraded' || regraded?.kind === 'reused'
         ? regraded.regrade.evaluation
-        : (await engine.verifyCompletedRun(outcome.artifact!.location)).result
-            .evaluation;
+        : sourceResult.evaluation;
     runs.push({
       ...base,
       run_id: outcome.run_id,
@@ -232,6 +247,9 @@ export async function regradeExperimentRun(
       error_code: null,
       result_path: resultPath,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(sourceResult.agent.usage === undefined
+        ? {}
+        : { agent_usage: sourceResult.agent.usage }),
     });
   }
   const generatedAt = now().toISOString();

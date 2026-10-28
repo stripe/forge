@@ -1523,3 +1523,47 @@ async function experimentRunFixture() {
   };
   return { root, options };
 }
+
+it('sums usage by model across cases and treatments and verifies the aggregates', () => {
+  const usage = {
+    input_tokens: 10,
+    cached_input_tokens: 8,
+    output_tokens: 4,
+    reasoning_tokens: null,
+  };
+  const first = { ...row(0), agent_usage: usage };
+  const second = { ...row(1), agent_usage: usage };
+  second.selection.treatment = 'other';
+  const report = build([first, second]);
+  assert.deepEqual(report.agent_usage_by_model, [
+    {
+      agent: {
+        adapter: first.selection.agent.adapter,
+        provider: first.selection.agent.provider,
+        model: first.selection.agent.model,
+      },
+      evaluations: 2,
+      evaluations_with_usage: 2,
+      usage: {
+        input_tokens: 20,
+        cached_input_tokens: 16,
+        output_tokens: 8,
+        reasoning_tokens: null,
+      },
+    },
+  ]);
+  const withoutAggregate = structuredClone(report);
+  delete withoutAggregate.agent_usage_by_model;
+  assert.equal(
+    parseExperimentRunReport(withoutAggregate).runs[0]!.agent_usage!
+      .input_tokens,
+    10,
+  );
+  const invalid = structuredClone(report);
+  invalid.agent_usage_by_model![0]!.usage.input_tokens = 999;
+  assert.throws(() => parseExperimentRunReport(invalid), /token usage/);
+  const partial = build([first, row(1)]);
+  assert.equal(partial.agent_usage_by_model![0]!.usage.input_tokens, null);
+  assert.equal(partial.agent_usage_by_model![0]!.evaluations_with_usage, 1);
+  assert.equal(build([row(0)]).agent_usage_by_model, undefined);
+});

@@ -18,11 +18,20 @@ export interface AgentToolCall {
   readonly input?: unknown;
 }
 
+/** Per-invocation counters; input includes cached tokens, reasoning is part of output. */
+export interface AgentTokenUsage {
+  readonly input_tokens: number | null;
+  readonly cached_input_tokens: number | null;
+  readonly output_tokens: number | null;
+  readonly reasoning_tokens: number | null;
+}
+
 export interface AgentTurn {
   readonly text: string;
   readonly sessionId: string;
   readonly toolCalls: readonly AgentToolCall[];
   readonly costUsd?: number;
+  readonly usage?: AgentTokenUsage;
 }
 
 /** Coding-agent identity recorded in ATIF independently of adapter provenance. */
