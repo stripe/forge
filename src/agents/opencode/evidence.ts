@@ -12,17 +12,14 @@ import type {
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import { OpenCodeExportParseError, readOpenCodeExport } from './export.ts';
 import {
   array,
-  EXPORT_PATH,
   identifier,
-  MAX_NATIVE_BYTES,
   nonnegative,
   OPENCODE_FORMAT,
   OpenCodeNativeError,
-  parseJson,
   record,
-  sessionId,
   string,
   terminal,
   tool,
@@ -36,33 +33,11 @@ export interface LoadOpenCodeEvidenceInput {
   readonly signal: AbortSignal;
 }
 
-async function readExport(
-  input: Pick<LoadOpenCodeEvidenceInput, 'state' | 'sessionId' | 'signal'>,
-) {
-  input.signal.throwIfAborted();
-  if (!input.state) return undefined;
-  sessionId(input.sessionId);
-  const entry = await input.state.inspect(EXPORT_PATH);
-  if (entry.kind === 'absent' || entry.size === 0) return undefined;
-  if (entry.kind !== 'file' || (entry.size ?? 0) > MAX_NATIVE_BYTES)
-    throw new OpenCodeNativeError();
-  const body = await input.state.readFile(EXPORT_PATH, {
-    maxBytes: MAX_NATIVE_BYTES,
-  });
-  input.signal.throwIfAborted();
-  const value = record(
-    parseJson(new TextDecoder('utf-8', { fatal: true }).decode(body)),
-  );
-  if (record(value.info).id !== input.sessionId)
-    throw new OpenCodeNativeError();
-  return { body, value };
-}
-
 export async function loadOpenCodeNativeArtifact(
   input: Pick<LoadOpenCodeEvidenceInput, 'state' | 'sessionId' | 'signal'>,
 ): Promise<AgentNativeArtifact | undefined> {
   try {
-    const captured = await readExport(input);
+    const captured = await readOpenCodeExport(input);
     if (!captured) return undefined;
     return {
       format: OPENCODE_FORMAT,
@@ -82,7 +57,7 @@ export async function loadOpenCodeEvidence(
   input: LoadOpenCodeEvidenceInput,
 ): Promise<AgentNativeEvidenceResult> {
   try {
-    const captured = await readExport(input);
+    const captured = await readOpenCodeExport(input);
     if (!captured) return unavailable('source_unavailable');
     const { value } = captured;
     const info = record(value.info);
@@ -252,6 +227,14 @@ export async function loadOpenCodeEvidence(
     };
   } catch (error) {
     input.signal.throwIfAborted();
+    if (error instanceof OpenCodeExportParseError && error.truncated)
+      return {
+        kind: 'unavailable',
+        reason: {
+          code: 'source_truncated',
+          message: `The OpenCode session export ended before its JSON was complete (${error.byteCount} bytes).`,
+        },
+      };
     return unavailable(
       error instanceof OpenCodeNativeError && error.incomplete
         ? 'source_incomplete'

@@ -16,6 +16,7 @@ import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
+import { captureOpenCodeExport, invalidateOpenCodeExport } from './export.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
 import {
   assertOpenCodeRuntimeLayout,
@@ -24,7 +25,7 @@ import {
   resolveOpenCodeLayout,
   usesDefaultOpenCodeLayout,
 } from './layout.ts';
-import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.ts';
+import { MAX_NATIVE_BYTES } from './native.ts';
 import {
   mergeStripeOpenCodeConfiguration,
   PLUGIN_CONFIG_PATH,
@@ -231,9 +232,7 @@ export function createOpenCodeAdapter(
           sending = true;
           try {
             // Invalidate before any mutation: failed export must never expose an earlier turn.
-            await state.writeFile(EXPORT_PATH, new Uint8Array(), {
-              mode: 0o600,
-            });
+            await invalidateOpenCodeExport(state);
             await state.writeFile('config.json', Buffer.from(config), {
               mode: 0o600,
             });
@@ -274,33 +273,14 @@ export function createOpenCodeAdapter(
               );
             const turn = parseOpenCodeStream(result.stdout, currentSessionId);
             currentSessionId = turn.sessionId;
-            try {
-              const exported = await context.runtime.commands.agent.run(
-                [executable, 'export', currentSessionId],
-                {
-                  cwd: '.',
-                  signal,
-                  timeoutMs: 30_000,
-                  maxOutputBytes: MAX_NATIVE_BYTES,
-                },
-              );
-              signal.throwIfAborted();
-              if (
-                exported.exitCode === 0 &&
-                Buffer.byteLength(exported.stdout) <= MAX_NATIVE_BYTES
-              )
-                await state.writeFile(
-                  EXPORT_PATH,
-                  Buffer.from(exported.stdout),
-                  { mode: 0o600 },
-                );
-            } catch {
-              // Native capture is optional; cancellation is not an evidence failure.
-              signal.throwIfAborted();
-              await state
-                .writeFile(EXPORT_PATH, new Uint8Array(), { mode: 0o600 })
-                .catch(() => undefined);
-            }
+            await captureOpenCodeExport({
+              state,
+              commands: context.runtime.commands.agent,
+              stateDirectory: layout.stateDirectory,
+              executable,
+              sessionId: currentSessionId,
+              signal,
+            });
             signal.throwIfAborted();
             return turn;
           } finally {
