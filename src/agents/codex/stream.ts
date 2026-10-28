@@ -307,7 +307,8 @@ function parseItem(item: JsonRecord): StreamItem {
       let output: AgentToolCall['result'];
       if (item.result !== undefined && item.result !== null) {
         const result = requiredRecord(item.result);
-        onlyKeys(result, ['content', 'structured_content']);
+        // Opaque result data is bounded with the event and omitted from AgentTurn.
+        onlyKeys(result, ['content', '_meta', 'structured_content']);
         requiredArray(result.content);
         output = textToolResult(result.content);
         if (result.structured_content != null) {
