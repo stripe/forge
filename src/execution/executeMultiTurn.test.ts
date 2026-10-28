@@ -242,7 +242,11 @@ describe('executeEval multi-turn and judging integration', () => {
         }),
         JSON.stringify({
           user_needs: [
-            { description: 'Create the answer', status: 'remaining' },
+            {
+              description: 'Create the answer',
+              acceptance: 'The answer file is complete.',
+              status: 'remaining',
+            },
           ],
           message: 'Create the answer.',
         }),

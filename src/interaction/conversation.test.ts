@@ -26,7 +26,7 @@ it('snapshots tool results so later adapter mutation cannot rewrite evidence', (
 it('bounds snapshotted results with a visible marker without splitting an emoji', () => {
   const marker = '\n[Forge truncated the tool result.]';
   const prefixLength = 1_048_576 - marker.length;
-  const original = 'x'.repeat(prefixLength - 1) + '😀' + 'x'.repeat(100);
+  const original = `${'x'.repeat(prefixLength - 1)}😀${'x'.repeat(100)}`;
   const [call] = snapshotAgentToolCalls([
     {
       name: 'Read',

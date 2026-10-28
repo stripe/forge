@@ -176,7 +176,13 @@ describe('resumable CLI experiment runs', () => {
         id: 'scripted',
         responses: [
           JSON.stringify({
-            user_needs: [{ description: 'Both parts', status: 'remaining' }],
+            user_needs: [
+              {
+                description: 'Both parts',
+                acceptance: 'Both parts are present.',
+                status: 'remaining',
+              },
+            ],
             message: 'Part one',
           }),
           JSON.stringify({

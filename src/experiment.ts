@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { z } from 'zod';
 import type { AgentTokenUsage } from './contracts/agent.ts';
 import type { AttemptDiagnosticsStore } from './contracts/attemptDiagnostics.ts';
 import type { ForgeComposition } from './contracts/composition.ts';

@@ -59,8 +59,6 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
-import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
-import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   assertAttemptDiagnosticsIdentity,
   attemptDiagnosticsIdentity,
@@ -69,6 +67,8 @@ import {
   type AttemptDiagnosticsRecorder,
   createAttemptRecorder,
 } from '../diagnostics/recorder.ts';
+import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,

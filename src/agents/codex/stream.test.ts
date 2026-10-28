@@ -467,7 +467,9 @@ describe('Codex exec stream', () => {
           id: 'call',
           name: 'mcp__fixture__probe',
           input: {},
-          result: { content: 'Synthetic answer.\nStructured result:\n{"answer":42}' },
+          result: {
+            content: 'Synthetic answer.\nStructured result:\n{"answer":42}',
+          },
         },
       ],
       usage: {
