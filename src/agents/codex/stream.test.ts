@@ -462,7 +462,20 @@ describe('Codex exec stream', () => {
     assert.deepEqual(parsed, {
       text: 'Done.',
       sessionId: SESSION_ID,
-      toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+      toolCalls: [
+        {
+          id: 'call',
+          name: 'mcp__fixture__probe',
+          input: {},
+          result: { content: 'Synthetic answer.\nStructured result:\n{"answer":42}' },
+        },
+      ],
+      usage: {
+        input_tokens: 24763,
+        cached_input_tokens: 24448,
+        output_tokens: 122,
+        reasoning_tokens: null,
+      },
     });
   });
 
@@ -483,7 +496,20 @@ describe('Codex exec stream', () => {
       assert.deepEqual(parsed, {
         text: '',
         sessionId: SESSION_ID,
-        toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+        toolCalls: [
+          {
+            id: 'call',
+            name: 'mcp__fixture__probe',
+            input: {},
+            result: { content: '' },
+          },
+        ],
+        usage: {
+          input_tokens: 24763,
+          cached_input_tokens: 24448,
+          output_tokens: 122,
+          reasoning_tokens: null,
+        },
       });
     }
   });
