@@ -630,7 +630,7 @@ const runResultFields = {
       adapter: safeText,
       runtime_id: safeText,
       platform: safeText,
-      metadata: z.record(z.string().max(64 * 1024)),
+      metadata: z.record(z.string(), z.string().max(64 * 1024)),
     })
     .strict(),
   agent: z

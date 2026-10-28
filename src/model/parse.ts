@@ -265,10 +265,9 @@ const CompatibleEvalCaseSchema = z
     }
   });
 
-const EvalCaseSchema = z.intersection(
-  CompatibleEvalCaseSchema,
-  z.object({ id: AuthoredCaseIdSchema }),
-);
+const EvalCaseSchema = CompatibleEvalCaseSchema.safeExtend({
+  id: AuthoredCaseIdSchema,
+});
 
 const DatasetIdentitySchema = z
   .object({
@@ -362,7 +361,7 @@ const DockerRuntimeSchema = z
         ),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict();
 
@@ -507,8 +506,8 @@ const ExperimentConfigSchema = z
         judge: ModelRefSchema.optional(),
       })
       .strict()
-      .default({}),
-    treatments: z.record(z.string(), TreatmentSchema).default({}),
+      .prefault({}),
+    treatments: z.record(z.string(), TreatmentSchema).prefault({}),
     matrix: ExperimentMatrixSchema,
     limits: z
       .object({
@@ -517,7 +516,7 @@ const ExperimentConfigSchema = z
         ),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict()
   .superRefine((config, context) => {
@@ -613,17 +612,12 @@ const ExperimentConfigSchema = z
   });
 
 /** Resolved plans require every defaulted authoring field to be materialized. */
-const MaterializedEvalCaseSchema = z.intersection(
-  z
-    .object({
-      id: CaseIdSchema,
-      execution_mode: z.enum(['multi_turn', 'one_shot']),
-      setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
-      judging_criteria: JudgingCriteriaSchema,
-    })
-    .passthrough(),
-  CompatibleEvalCaseSchema,
-);
+const MaterializedEvalCaseSchema = CompatibleEvalCaseSchema.safeExtend({
+  id: CaseIdSchema,
+  execution_mode: z.enum(['multi_turn', 'one_shot']),
+  setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
+  judging_criteria: JudgingCriteriaSchema,
+});
 
 const ResolvedDockerRuntimeSchema = z
   .object({

@@ -11,6 +11,7 @@ import {
   parseExperimentConfigYaml,
   parseSetupStep,
 } from './parse.ts';
+import { DEFAULT_RUN_TIMEOUT_MS } from './types.ts';
 
 describe('public benchmark parsing', () => {
   it('requires an explicit lowercase kebab-case authored identity and version', () => {
@@ -27,7 +28,7 @@ describe('public benchmark parsing', () => {
     );
     assert.throws(
       () => parseEvalCase({ id: 'suite/task', task: 'Complete the task.' }),
-      /Required/,
+      /expected string, received undefined/,
     );
     assert.throws(
       () =>
@@ -148,7 +149,7 @@ describe('public benchmark parsing', () => {
             'adapter: codex\n      hook_trust: unknown',
           ),
         ),
-      /Invalid enum/,
+      /Invalid option/,
     );
     const config = parseExperimentConfigYaml(codex);
     const agents = getMatrixGroups(config.matrix)[0]!.agents;
@@ -481,6 +482,7 @@ task: safe
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     assert.equal(config.forge, undefined);
     assert.deepEqual(config.models, {});
+    assert.deepEqual(config.limits, { run_timeout_ms: DEFAULT_RUN_TIMEOUT_MS });
     assert.deepEqual(config.treatments, { baseline: { setup: [] } });
     {
       const actual = config.matrix;
@@ -905,18 +907,18 @@ treatments:
     };
 
     const invalidManifests = [
-      { value: { ...manifest, cases: [] }, reason: 'at least 1' },
+      { value: { ...manifest, cases: [] }, reason: '>=1 items' },
       {
         value: { ...manifest, files: [] },
         reason: 'Unrecognized key',
       },
       {
         value: { ...manifest, cases: ['cases/smoke/write/case.yaml'] },
-        reason: 'Expected object',
+        reason: 'expected object',
       },
       {
         value: { ...manifest, cases: [{ ...entry, version: undefined }] },
-        reason: 'Required',
+        reason: 'expected string, received undefined',
       },
       ...['size', 'sha256', 'files'].map((key) => ({
         value: { ...manifest, cases: [{ ...entry, [key]: 0 }] },
