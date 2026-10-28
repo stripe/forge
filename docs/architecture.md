@@ -1351,6 +1351,45 @@ Resume retains committed judge-error evaluations, preserving the coding-agent
 execution and evidence. A CLI run can exit successfully with judge errors;
 consumers must inspect the report to establish grading completeness.
 
+Regrade comparison separates artifact loading from pure analysis.
+`diffRegradeExperimentRun` uses experiment inspection and completed-run
+verification to select source attempts. The loader separately reads the checkpoint
+through its existing parser to distinguish never-attempted selections,
+uncommitted running attempts, recorded execution errors, and completed attempts
+that fail verification. Recorded state stays internal to the diff; public
+experiment outcomes are unchanged. The loader checks each recorded selection,
+plan digest, and latest attempt ID against the inspected outcome before using
+that state. A changed identity is unavailable; reads are not a transactional
+snapshot. Running without a verified commit means in progress or interrupted;
+inspection does not determine liveness. Verification failures exclude that
+source, without discarding valid pairs.
+
+The shared saved-regrade reader checks format, run ID, source digest, and judge
+identity before reuse or comparison. It reads only regular files without
+following a final symlink, up to 16 MiB per file. Before reading, it allocates
+from the reported file size plus one probe byte; growth beyond that reported
+size makes the record unavailable. The diff loader reserves at most 64 MiB for
+its result and regrade read buffers, including probe bytes and failed reads.
+Per-file and shared limits are checked before allocation or reading. Exhausting
+the shared budget stops loading with a read-limit issue and retains loaded
+pairs. Checkpoint reads and the existing verifier have separate bounds.
+It visits at most 100,000 regrade directory entries. Its 30-second read deadline
+and caller cancellation return an unavailable summary even if a dependency does
+not settle. They do not cancel an underlying filesystem operation. Inspection
+uses the existing checkpoint parser and artifact verifier; these comparison
+limits do not replace those components' bounds.
+
+`compareRegradeResults` pairs evaluations by run ID and source result digest,
+validates evaluation scores and statuses, and requires matching ordered criterion
+definitions and deterministic checks. Invalid pairs produce typed issues;
+remaining eligible pairs must share one regrade judge before aggregation. Judge
+errors are separate from paired pass/fail agreement, with source errors visible
+even when a regrade is missing. Output contains criterion indexes and error
+categories, excluding rubric text, explanations, and raw error messages. Neither
+operation changes artifacts, scores, plans, or judge inputs, or invokes a model.
+See the README's [regrade workflow](../README.md#regrade-saved-runs) for coverage,
+denominators, and exit codes.
+
 ## Result and artifact architecture
 
 A completed run always contains:
@@ -1539,7 +1578,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
 | `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
 | `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
-| `@stripe/forge/regrade` | Judge verified saved runs again from their artifacts with a chosen judge, into a separate directory |
+| `@stripe/forge/regrade` | Regrade verified saved runs with a chosen judge, and compare saved verdicts and scores |
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/agents/opencode` | Experimental OpenCode Chat Completions adapter, stream parser, and exact-session export loader |
@@ -1566,7 +1605,9 @@ engine APIs:
   selected endpoints, while `--host` checks runtime readiness;
 - `plan` selects one entry and prints canonical plan JSON; and
 - `run` supplies its argument validation and input loader to the shared
-  experiment run command stage for bounded execution and explicit resume.
+  experiment run command stage for bounded execution and explicit resume;
+- `regrade` judges saved evidence again with a selected model; and
+- `regrade diff` compares saved evaluations without a host composition or credentials.
 
 Its default composition registers the built-in Docker runtime, Claude Code,
 Codex, and OpenCode agent adapters, Anthropic and OpenAI host completion providers, an explicit

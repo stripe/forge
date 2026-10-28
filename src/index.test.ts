@@ -101,6 +101,17 @@ describe('@stripe/forge package root', () => {
     assert.equal('ExperimentRunReportError' in rootExports, false);
   });
 
+  it('keeps regrade comparison on its documented subpath', async () => {
+    const regrade = await import('./regrade/index.ts');
+    for (const name of [
+      'compareRegradeResults',
+      'diffRegradeExperimentRun',
+    ] as const) {
+      assert.equal(name in rootExports, false);
+      assert.equal(typeof regrade[name], 'function');
+    }
+  });
+
   it('exports the engine, wire model, persistence, and composition contracts', () => {
     for (const removed of [
       'BENCHMARK_SCHEMA_VERSION',
