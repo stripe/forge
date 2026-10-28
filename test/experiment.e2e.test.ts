@@ -244,6 +244,13 @@ describe('resumable CLI experiment runs', () => {
       assert.deepEqual(completed.result.agent.usage, expected);
       const report = await readReport(fixture.root);
       assert.deepEqual(report.agent_usage_by_model![0]!.usage, expected);
+      assert.equal(report.runs[0]!.agent_estimated_cost_usd, null);
+      assert.equal(
+        report.runs[0]!.agent_pricing_version,
+        completed.result.agent.pricing_version,
+      );
+      assert.equal(report.agent_cost_by_model![0]!.priced_evaluations, 0);
+      assert.equal(report.agent_cost_by_model![0]!.evaluations, 1);
       const status = await readExperimentRunStatus(
         fixture.root,
         () => new Date(events.at(-1)!.observed_at),
@@ -312,6 +319,12 @@ describe('resumable CLI experiment runs', () => {
     const report = await readReport(fixture.root);
     assert.equal(report.agent_usage_by_model![0]!.usage.input_tokens, 20);
     assert.equal(report.agent_usage_by_model![0]!.usage.output_tokens, 8);
+    assert.equal(report.agent_cost_by_model![0]!.priced_evaluations, 2);
+    assert.equal(report.agent_cost_by_model![0]!.evaluations, 2);
+    assert.ok(
+      Math.abs(report.agent_cost_by_model![0]!.estimated_cost_usd! - 0.000153) <
+        1e-12,
+    );
     for (const entry of (await fixture.readCheckpoint()).entries) {
       const completed = await verifyCompletedRun(
         path.join(fixture.root, 'runs', entry.attempts[0]!.run_id),
@@ -324,6 +337,10 @@ describe('resumable CLI experiment runs', () => {
     );
     assert.equal(status.token_rates!.models[0]!.tokens_per_minute, 28);
     assert.equal((await fixture.run(['--resume', 'exp-1'])).code, 0);
+    assert.deepEqual(
+      (await readReport(fixture.root)).agent_cost_by_model,
+      report.agent_cost_by_model,
+    );
     assert.deepEqual(
       (await readReport(fixture.root)).agent_usage_by_model,
       report.agent_usage_by_model,
@@ -340,6 +357,18 @@ describe('resumable CLI experiment runs', () => {
       },
     );
     assert.deepEqual(regrade.failed, []);
+    const regradeReport = await readReport(
+      path.join(fixture.output, 'regrade'),
+    );
+    assert.deepEqual(
+      regradeReport.agent_cost_by_model,
+      report.agent_cost_by_model,
+    );
+    assert.deepEqual(regradeReport.agent_cost_by_arm, report.agent_cost_by_arm);
+    assert.deepEqual(
+      regradeReport.runs.map((row) => row.agent_pricing_version),
+      report.runs.map((row) => row.agent_pricing_version),
+    );
     assert.deepEqual(
       (await readReport(path.join(fixture.output, 'regrade')))
         .agent_usage_by_model,
@@ -1979,6 +2008,9 @@ async function createFixture(
   );
   assert.ok(config.matrix.groups === undefined);
   config.matrix.repetitions = options.repetitions ?? 3;
+  if (options.usage) {
+    for (const agent of config.matrix.agents) agent.model = 'claude-sonnet-4-6';
+  }
   const initialFiles = options.initialFiles;
   const includeUsage = options.usage;
   const dataset = path.join(temporary, 'dataset');
@@ -2033,6 +2065,7 @@ async function createFixture(
                 usage: {
                   input_tokens: 10,
                   cached_input_tokens: 5,
+                  cache_write_input_tokens: 0,
                   output_tokens: 4,
                   reasoning_tokens: null,
                 },

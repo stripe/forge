@@ -234,6 +234,13 @@ export async function regradeExperimentRun(
       error_code: null,
       result_path: resultPath,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(sourceResult.agent.estimated_cost_usd !== undefined &&
+      sourceResult.agent.pricing_version !== undefined
+        ? {
+            agent_estimated_cost_usd: sourceResult.agent.estimated_cost_usd,
+            agent_pricing_version: sourceResult.agent.pricing_version,
+          }
+        : {}),
       ...(sourceResult.agent.usage === undefined
         ? {}
         : { agent_usage: sourceResult.agent.usage }),

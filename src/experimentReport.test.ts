@@ -1781,3 +1781,119 @@ it('sums usage by model across cases and treatments and verifies the aggregates'
   assert.equal(partial.agent_usage_by_model![0]!.evaluations_with_usage, 1);
   assert.equal(build([row(0)]).agent_usage_by_model, undefined);
 });
+
+it('sums saved estimates by model and complete arm with priced counts for mixed coverage', () => {
+  const version = `sha256:${'1'.repeat(64)}`;
+  const first = {
+    ...row(0),
+    agent_estimated_cost_usd: 1.25,
+    agent_pricing_version: version,
+  };
+  const second = {
+    ...row(1),
+    agent_estimated_cost_usd: 2.5,
+    agent_pricing_version: `sha256:${'2'.repeat(64)}`,
+  };
+  second.selection.treatment = 'other';
+  const unknown = {
+    ...row(2),
+    agent_estimated_cost_usd: null,
+    agent_pricing_version: version,
+  };
+  const old = row(3);
+  const otherModel = {
+    ...row(4),
+    agent_estimated_cost_usd: null,
+    agent_pricing_version: version,
+  };
+  otherModel.selection.agent.model = 'unpriced';
+  const zero = {
+    ...row(5),
+    agent_estimated_cost_usd: 0,
+    agent_pricing_version: version,
+  };
+  const errored = {
+    ...row(6),
+    state: 'errored' as const,
+    evaluation: null,
+    result_path: null,
+    error_code: 'execution_error' as const,
+  };
+  const pending = {
+    ...row(7),
+    state: 'pending' as const,
+    run_id: null,
+    attempt_count: 0,
+    evaluation: null,
+    result_path: null,
+  };
+  const report = build([
+    first,
+    second,
+    unknown,
+    old,
+    otherModel,
+    zero,
+    errored,
+    pending,
+  ]);
+  assert.deepEqual(
+    report.agent_cost_by_model!.map(({ agent: _, ...cost }) => cost),
+    [
+      { estimated_cost_usd: 3.75, priced_evaluations: 3, evaluations: 5 },
+      { estimated_cost_usd: null, priced_evaluations: 0, evaluations: 1 },
+    ],
+  );
+  assert.deepEqual(
+    report.agent_cost_by_arm!.map(({ agent: _, ...cost }) => cost),
+    [
+      {
+        treatment: 'baseline',
+        estimated_cost_usd: 1.25,
+        priced_evaluations: 2,
+        evaluations: 4,
+      },
+      {
+        treatment: 'other',
+        estimated_cost_usd: 2.5,
+        priced_evaluations: 1,
+        evaluations: 1,
+      },
+      {
+        treatment: 'baseline',
+        estimated_cost_usd: null,
+        priced_evaluations: 0,
+        evaluations: 1,
+      },
+    ],
+  );
+  assert.equal(
+    parseExperimentRunReport(JSON.parse(serializeExperimentRunReport(report)))
+      .runs[1]!.agent_pricing_version,
+    second.agent_pricing_version,
+  );
+  for (const field of ['agent_cost_by_model', 'agent_cost_by_arm'] as const) {
+    const invalid = structuredClone(report);
+    invalid[field]![0]!.estimated_cost_usd = 999;
+    assert.throws(() => parseExperimentRunReport(invalid), /agent cost/);
+    const invalidCount = structuredClone(report);
+    invalidCount[field]![0]!.priced_evaluations += 1;
+    assert.throws(() => parseExperimentRunReport(invalidCount), /agent cost/);
+    const missing = structuredClone(report);
+    delete missing[field];
+    assert.throws(() => parseExperimentRunReport(missing), /agent cost/);
+  }
+  assert.throws(() => build([{ ...first, agent_pricing_version: undefined }]));
+  assert.throws(() =>
+    build([
+      {
+        ...first,
+        state: 'errored',
+        evaluation: null,
+        error_code: 'execution_error',
+      },
+    ]),
+  );
+  assert.equal(build([row(0)]).agent_cost_by_model, undefined);
+  assert.equal(build([row(0)]).agent_cost_by_arm, undefined);
+});
