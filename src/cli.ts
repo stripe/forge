@@ -217,6 +217,10 @@ export async function createDefaultCliComposition(
   const credentialResolver =
     options.credentialResolver ??
     createCliCredentialResolver(bindings, environment);
+  configureCliCredentialBindings.get(credentialResolver)?.(
+    bindings,
+    environment,
+  );
 
   return Object.freeze({
     runtime: createDockerRuntimeAdapter(),
@@ -771,6 +775,16 @@ function expandCredentialEnvironmentBindings(
 
 class CliCredentialError extends Error {}
 
+// Only CLI-owned handles accept default-composition configuration. Keep the
+// resolver identity stable for factories that capture it in execution closures.
+const configureCliCredentialBindings = new WeakMap<
+  CredentialResolver,
+  (
+    bindings: Readonly<Record<string, string>>,
+    environment: Readonly<Record<string, string | undefined>>,
+  ) => void
+>();
+
 function createCliCredentialBindingSession(
   grants: CredentialEnvironmentGrants,
   environment: Readonly<Record<string, string | undefined>>,
@@ -778,34 +792,63 @@ function createCliCredentialBindingSession(
   readonly resolver: CredentialResolver;
   finalize(uses: readonly EvalCredentialUse[]): void;
 } {
-  const provisional = createCliCredentialResolver(
-    grants.references,
-    environment,
+  let references = grants.references;
+  let selectedEnvironment = environment;
+  let provisional = createCliCredentialResolver(
+    references,
+    selectedEnvironment,
   );
+  let configured = false;
   let finalized: CredentialResolver | undefined;
+  const resolver: CredentialResolver = Object.freeze({
+    sourceIdentity(reference, context) {
+      return (finalized ?? provisional).sourceIdentity?.(reference, context);
+    },
+    async resolve(reference, context) {
+      context.signal.throwIfAborted();
+      if (finalized === undefined) {
+        throw new CliCredentialError(
+          'Credential lookup is unavailable during composition construction. Forge binds selected requirements before execution.',
+        );
+      }
+      return finalized.resolve(reference, context);
+    },
+  } satisfies CredentialResolver);
+  configureCliCredentialBindings.set(resolver, (bindings, environment) => {
+    if (configured) {
+      if (
+        environment !== selectedEnvironment ||
+        Object.keys(bindings).length !== Object.keys(references).length ||
+        Object.entries(bindings).some(
+          ([reference, source]) =>
+            !Object.hasOwn(references, reference) ||
+            references[reference] !== source,
+        )
+      ) {
+        throw new CliUsageError(
+          'A CLI credential resolver cannot use conflicting composition configurations.',
+        );
+      }
+      return;
+    }
+    if (finalized !== undefined) {
+      throw new Error('Credential bindings have already been finalized.');
+    }
+    provisional = createCliCredentialResolver(bindings, environment);
+    references = bindings;
+    selectedEnvironment = environment;
+    configured = true;
+  });
   return {
-    resolver: Object.freeze({
-      sourceIdentity(reference, context) {
-        return (finalized ?? provisional).sourceIdentity?.(reference, context);
-      },
-      async resolve(reference, context) {
-        context.signal.throwIfAborted();
-        if (finalized === undefined) {
-          throw new CliCredentialError(
-            'Credential lookup is unavailable during composition construction. Forge binds selected requirements before execution.',
-          );
-        }
-        return finalized.resolve(reference, context);
-      },
-    } satisfies CredentialResolver),
+    resolver,
     finalize(uses) {
       if (finalized !== undefined) {
         throw new Error('Credential bindings have already been finalized.');
       }
       finalized = createCliCredentialResolver(
-        grants.references,
-        environment,
-        expandCredentialEnvironmentBindings(grants, uses),
+        references,
+        selectedEnvironment,
+        expandCredentialEnvironmentBindings({ ...grants, references }, uses),
       );
     },
   };

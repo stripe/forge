@@ -1781,6 +1781,222 @@ describe('Forge CLI', () => {
     assert.equal(execution.runtime.runs.length, 1);
   });
 
+  for (const override of [
+    'missing environment',
+    'different environment',
+    'binding',
+  ]) {
+    it(`honors a factory credential ${override} override through the captured resolver`, async () => {
+      const fixture = await createBenchmarkFixture({ agent: 'codex' });
+      const execution = createCredentialExecution();
+      const reads: string[] = [];
+      const outerEnvironment = {
+        get FACTORY_KEY() {
+          reads.push('factory');
+          return 'factory-key';
+        },
+      };
+      if (override !== 'missing environment') {
+        Object.defineProperty(outerEnvironment, 'OPENAI_API_KEY', {
+          enumerable: true,
+          get() {
+            reads.push('outer');
+            return 'outer-key';
+          },
+        });
+      }
+      const factoryEnvironment = {
+        OPENAI_BASE_URL: 'https://factory.example.test/v1',
+        get OPENAI_API_KEY() {
+          reads.push('factory');
+          return 'factory-key';
+        },
+      };
+      let captured: ((input: ExecuteEvalInput) => Promise<string>) | undefined;
+      let stderr = '';
+      assert.equal(
+        await runCli(
+          [
+            'run',
+            '--experiment',
+            fixture.experimentPath,
+            '--credential-env',
+            override === 'missing environment'
+              ? 'OPENAI_API_KEY'
+              : 'openai.api-key=OPENAI_API_KEY',
+          ],
+          {
+            environment: outerEnvironment,
+            compositionFactory: async (options) => {
+              const resolver = options.credentialResolver!;
+              captured = (input) => {
+                assert.equal(input.composition.credentialResolver, resolver);
+                return resolver.resolve(credentialReference('openai.api-key'), {
+                  runId: input.runId,
+                  purpose: 'forge-eval:OPENAI_API_KEY',
+                  signal: input.signal ?? new AbortController().signal,
+                });
+              };
+              const composition = await createDefaultCliComposition({
+                ...options,
+                ...(override === 'binding'
+                  ? { credentialBindings: { 'openai.api-key': 'FACTORY_KEY' } }
+                  : { environment: factoryEnvironment }),
+              });
+              await assert.rejects(
+                resolver.resolve(credentialReference('openai.api-key'), {
+                  runId: 'construction',
+                  purpose: 'forge-eval:OPENAI_API_KEY',
+                  signal: new AbortController().signal,
+                }),
+                /lookup is unavailable during composition construction/,
+              );
+              assert.deepEqual(reads, []);
+              return { ...composition };
+            },
+            stdout: () => undefined,
+            stderr: (text) => {
+              stderr += text;
+            },
+            execute: async (input) => {
+              assert.deepEqual(reads, []);
+              assert.equal(await captured!(input), 'factory-key');
+              assert.equal(
+                input.composition.agents.get('codex')!.metadata?.endpoint_mode,
+                override === 'binding' ? 'default' : 'custom',
+              );
+              return execution.execute(input);
+            },
+          },
+        ),
+        0,
+        stderr,
+      );
+      assert.deepEqual(reads, ['factory', 'factory']);
+      assert.deepEqual(
+        execution.runtime.runs[0]!.input.environment.credentials,
+        {
+          OPENAI_API_KEY: { value: 'factory-key', scopes: ['agent'] },
+        },
+      );
+    });
+  }
+
+  for (const conflict of ['environment', 'binding']) {
+    it(`rejects conflicting factory ${conflict} configurations without rebinding the resolver`, async () => {
+      const fixture = await createBenchmarkFixture({ agent: 'codex' });
+      const execution = createCredentialExecution();
+      let reads = 0;
+      const environment = {
+        get OPENAI_API_KEY() {
+          reads += 1;
+          return 'factory-key';
+        },
+      };
+      let rebuild: (() => Promise<ForgeComposition>) | undefined;
+      let reconfigure: (() => Promise<ForgeComposition>) | undefined;
+      let stderr = '';
+      assert.equal(
+        await runCli(
+          [
+            'run',
+            '--experiment',
+            fixture.experimentPath,
+            '--credential-env',
+            'openai.api-key=OPENAI_API_KEY',
+          ],
+          {
+            environment: {},
+            compositionFactory: async (options) => {
+              const configured = { ...options, environment };
+              rebuild = () => createDefaultCliComposition(configured);
+              reconfigure = () =>
+                createDefaultCliComposition({
+                  ...configured,
+                  ...(conflict === 'environment'
+                    ? { environment: Object.create(environment) }
+                    : {
+                        credentialBindings: { 'openai.api-key': 'OTHER_KEY' },
+                      }),
+                });
+              const composition = await createDefaultCliComposition(configured);
+              await createDefaultCliComposition({
+                ...configured,
+                credentialBindings: { ...configured.credentialBindings },
+              });
+              await assert.rejects(
+                reconfigure(),
+                /conflicting composition configurations/,
+              );
+              assert.equal(reads, 0);
+              return composition;
+            },
+            stdout: () => undefined,
+            stderr: (text) => {
+              stderr += text;
+            },
+            execute: async (input) => {
+              assert.equal(
+                (await rebuild!()).credentialResolver,
+                input.composition.credentialResolver,
+              );
+              await assert.rejects(
+                reconfigure!(),
+                /conflicting composition configurations/,
+              );
+              assert.equal(reads, 0);
+              return execution.execute(input);
+            },
+          },
+        ),
+        0,
+        stderr,
+      );
+      assert.equal(reads, 1);
+      assert.equal(execution.runtime.runs.length, 1);
+    });
+  }
+
+  it('checks factory reference mappings against same-name grants before secret lookup', async () => {
+    const fixture = await createBenchmarkFixture({ agent: 'codex' });
+    let reads = 0;
+    let stderr = '';
+    assert.equal(
+      await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'OPENAI_API_KEY',
+        ],
+        {
+          environment: {
+            get OPENAI_API_KEY() {
+              reads += 1;
+              return 'outer-key';
+            },
+          },
+          compositionFactory: (options) =>
+            createDefaultCliComposition({
+              ...options,
+              credentialBindings: { 'openai.api-key': 'FACTORY_KEY' },
+            }),
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          execute: async () =>
+            assert.fail('Conflicting bindings must not execute.'),
+        },
+      ),
+      2,
+      stderr,
+    );
+    assert.equal(reads, 0);
+    assert.match(stderr, /conflicting environment bindings/);
+  });
+
   it('resumes completed duplicate-credential runs without grants or secret reads', async () => {
     const fixture = await createBenchmarkFixture({
       agent: 'codex',

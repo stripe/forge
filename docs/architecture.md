@@ -1475,12 +1475,18 @@ finalization fails. The same composition then preflights and executes pending
 work. Validation constructs one composition per concrete runtime platform.
 
 Forwarding wrappers preserve this behavior by passing options to
-`createDefaultCliComposition`. A factory that replaces the resolver retains
-its own authorization and source-proof policy. `credentialBindings` supplies
-only immutable explicit-reference mappings at construction; factories needing
-discovered bare-name grants must use the resolver handle. Direct calls without
-the handle use `credentialBindings`. Custom engines without the optional
-inspection method support explicit-reference grants only.
+`createDefaultCliComposition`, which configures the CLI-owned handle with the
+wrapper's `environment` and `credentialBindings` before grant finalization.
+Each handle accepts one default-composition configuration before finalization.
+Reusing it to construct multiple default compositions requires the same
+environment object and equal explicit-reference mappings; conflicting
+configurations fail. Factories using the handle directly retain `runCli`'s
+environment and explicit mappings. A factory that replaces the resolver
+retains its own authorization and source-proof policy. `credentialBindings`
+supplies immutable explicit-reference mappings;
+factories needing discovered bare-name grants must use the resolver handle.
+Direct calls without the handle use `credentialBindings`. Custom engines
+without the optional inspection method support explicit-reference grants only.
 
 The public CLI configures Codex to receive `OPENAI_API_KEY`. The library's
 `createCodexAdapter` still defaults to reference `openai.api-key` and runtime
