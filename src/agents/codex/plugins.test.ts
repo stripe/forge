@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import type { CommandRunner } from '../../contracts/command.ts';
-import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.ts';
+import {
+  isNativePluginInstallationReceipt,
+  parseAgentPluginInstallationReceipt,
+} from '../../contracts/pluginReceipt.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { createTestResolvedRunPlan } from '../../testing/plans.ts';
 import { CODEX_HOME_STATE_ID } from './layout.ts';
@@ -210,6 +213,47 @@ describe('Codex native plugin installer', () => {
     );
     assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
   });
+
+  for (const [exitCode, reason] of [
+    [2, 'plugin server missing or disconnected'],
+    [3, 'bearer authentication unavailable'],
+    [4, 'no usable tools discovered'],
+    [1, 'native discovery failed'],
+  ] as const)
+    it(`reports ${reason} without exposing native output`, async () => {
+      const test = fixture();
+      const receipt = await test.install();
+      assert.ok(isNativePluginInstallationReceipt(receipt));
+      const installer = createCodexPluginInstaller({
+        adapterId: 'codex',
+        executable: 'codex',
+      });
+      await assert.rejects(
+        installer.checkMcp!({
+          receipt,
+          servers: ['stripe'],
+          stateDirectories: new Map([
+            [CODEX_HOME_STATE_ID, test.state.mutable],
+          ]),
+          signal: new AbortController().signal,
+          commands: {
+            async run() {
+              return {
+                exitCode,
+                stdout: 'sensitive native output',
+                stderr: 'sensitive native output',
+                durationMs: 1,
+              };
+            },
+          },
+        }),
+        (error) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.message, `Codex MCP readiness failed: ${reason}.`);
+          return true;
+        },
+      );
+    });
 
   it('binds installation without commands and shares the adapter home mount', async () => {
     const test = fixture();

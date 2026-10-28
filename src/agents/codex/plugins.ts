@@ -22,7 +22,7 @@ import {
   type CodexLayout,
   resolveCodexLayout,
 } from './layout.ts';
-import { CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
+import { CODEX_MCP_PROBE_EXIT, CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
 import {
   prepareCodexPluginConfiguration,
   qualifiedPluginId,
@@ -68,10 +68,17 @@ export function createCodexPluginInstaller(options: {
         ],
         { signal, timeoutMs: 90_000, maxOutputBytes: 1024 * 1024 },
       );
-      if (result.exitCode !== 0)
-        throw new Error(
-          'Codex MCP servers did not connect and discover tools.',
-        );
+      if (result.exitCode !== CODEX_MCP_PROBE_EXIT.success) {
+        const reason =
+          result.exitCode === CODEX_MCP_PROBE_EXIT.serverUnavailable
+            ? 'plugin server missing or disconnected'
+            : result.exitCode === CODEX_MCP_PROBE_EXIT.authenticationUnavailable
+              ? 'bearer authentication unavailable'
+              : result.exitCode === CODEX_MCP_PROBE_EXIT.toolsUnavailable
+                ? 'no usable tools discovered'
+                : 'native discovery failed';
+        throw new Error(`Codex MCP readiness failed: ${reason}.`);
+      }
     },
     preflight(
       distribution: PluginSelectionV1,

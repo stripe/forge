@@ -69,8 +69,21 @@ export type AgentNativeEvidenceSource =
       readonly sessionId: string;
     };
 
+/** Content-free observation from the exact native session, independent of ATIF. */
+export type AgentMcpToolRefusals =
+  | { readonly state: 'available'; readonly count: number }
+  | {
+      readonly state: 'unavailable';
+      readonly reason:
+        | 'source_unavailable'
+        | 'source_invalid'
+        | 'source_incomplete';
+    };
+
 export interface AgentNativeEvidenceAvailable {
   readonly kind: 'available';
+  /** Omitted when this adapter did not record MCP refusal counts. */
+  readonly mcpToolRefusals?: AgentMcpToolRefusals;
   /**
    * JSON-shaped ATIF normalized by the adapter. Forge performs the
    * authoritative parse; malformed `available` data is a contract violation.
@@ -93,6 +106,8 @@ export interface AgentNativeEvidenceWarning {
 
 export interface AgentNativeEvidenceUnavailable {
   readonly kind: 'unavailable';
+  /** Omitted when this adapter did not record MCP refusal counts. */
+  readonly mcpToolRefusals?: AgentMcpToolRefusals;
   readonly reason: {
     readonly code:
       | 'source_unavailable'

@@ -79,6 +79,7 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
+import { mcpToolRefusalWarnings } from '../mcpToolRefusals.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
@@ -607,6 +608,7 @@ export async function executeEvalWithTestHooks(
             preflight.agentEvidenceIdentity,
           ),
           nativeArtifact: undefined,
+          warnings: [],
         };
       }
       if (interaction.sessionId === null) {
@@ -644,7 +646,11 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return { evidence, nativeArtifact };
+      return {
+        evidence,
+        nativeArtifact,
+        warnings: mcpToolRefusalWarnings(collected.mcpToolRefusals),
+      };
     });
     const redacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
@@ -780,7 +786,10 @@ export async function executeEvalWithTestHooks(
         evaluation: evaluated.evaluation,
         coreDescriptors,
         supplementalDescriptors: nativeDescriptors,
-        warnings: rolePlayerWarnings(interaction.failure),
+        warnings: [
+          ...rolePlayerWarnings(interaction.failure),
+          ...selectedEvidence.warnings,
+        ],
         startedAt,
         completedAt: now(),
       });
@@ -805,7 +814,10 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
+    const warnings: RunWarningV1[] = [
+      ...rolePlayerWarnings(interaction.failure),
+      ...selectedEvidence.warnings,
+    ];
     await events.phase('runtime_dispose', async () => {
       phase = 'runtime_dispose';
       try {

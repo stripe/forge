@@ -6,6 +6,7 @@ import {
   experimentRunErrorCodeSchema,
   experimentRunIdSchema,
 } from './experimentModel.ts';
+import { mcpToolRefusalWarningSchema } from './mcpToolRefusals.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
 import type { RequirementLevelV1 } from './model/types.ts';
@@ -150,6 +151,7 @@ const runSchema = z
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
     agent_usage: agentTokenUsageSchema.optional(),
+    warnings: z.array(mcpToolRefusalWarningSchema).max(1).optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -164,6 +166,7 @@ const runSchema = z
       (run.state !== 'errored' && run.diagnostic !== undefined) ||
       (!completed && run.agent_usage !== undefined) ||
       (completed && run.result_path === null) ||
+      (run.warnings !== undefined && run.result_path === null) ||
       (run.result_path !== null &&
         run.result_path !== `runs/${run.run_id}/result.json`)
     ) {

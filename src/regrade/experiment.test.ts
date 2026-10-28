@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 import { defaultForgeEngine } from '../engine.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
+import { mcpToolRefusalWarnings } from '../mcpToolRefusals.ts';
 import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
@@ -76,6 +77,12 @@ describe('regradeExperimentRun', () => {
     const log = path.join(source.experimentLocation, 'events.jsonl');
     const events = await fs.readFile(log);
     assert.ok(events.byteLength > 0);
+    const resultPath = path.join(source.runLocation, 'result.json');
+    const result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
+    result.warnings.push(
+      ...mcpToolRefusalWarnings({ state: 'available', count: 1 }),
+    );
+    await fs.writeFile(resultPath, JSON.stringify(result));
     const output = path.join(root, 'regrade-opus');
     const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
     const first = dependencies([failingJudgment]);
@@ -93,6 +100,10 @@ describe('regradeExperimentRun', () => {
       JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
     );
     assert.equal(report.summary.completed, 1);
+    assert.deepEqual(report.runs[0]!.warnings?.[0]?.mcp_tool_refusals, {
+      state: 'available',
+      count: 1,
+    });
     assert.equal(report.runs[0]!.evaluation!.score, 0);
     assert.equal(
       report.runs[0]!.result_path,
@@ -116,6 +127,10 @@ describe('regradeExperimentRun', () => {
     assert.equal(rerun.reused, 1);
     assert.equal(rerun.regraded, 0);
     assert.equal(second.scripted.calls.length, 0);
+    const reusedReport = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.deepEqual(reusedReport.runs[0]!.warnings, report.runs[0]!.warnings);
 
     // The source experiment run is untouched and still has its original score.
     const sourceReport = parseExperimentRunReport(

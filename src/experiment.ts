@@ -26,6 +26,7 @@ import {
   serializeExperimentRunReport,
   summarizeReportEvaluation,
 } from './experimentReport.ts';
+import { mcpToolRefusalWarnings } from './mcpToolRefusals.ts';
 import type { ResolvedRunPlanV1, RunSelection } from './model/types.ts';
 import { resolvedRunPlanSha256 } from './planning/planner.ts';
 import type { CompletedRunV1, EvalStatus } from './results/types.ts';
@@ -56,6 +57,7 @@ export class ExperimentRunReportError extends Error {
 
 /** Bounded metadata from a verified local commit, independent of publication. */
 export interface ExperimentRunArtifact {
+  readonly warnings?: ExperimentRunReportRunV1['warnings'];
   readonly location: string;
   readonly evaluation: {
     readonly status: EvalStatus;
@@ -578,6 +580,9 @@ export async function runExperiment(
               effective.diagnostic !== undefined
                 ? { diagnostic: effective.diagnostic }
                 : {}),
+              ...(inspected.artifact?.warnings?.length
+                ? { warnings: inspected.artifact.warnings }
+                : {}),
               attempt_count: entry.attempts.length,
               result_path:
                 inspected.artifact === null
@@ -669,6 +674,11 @@ async function inspectAttempt(
             },
           };
     const evaluation = completed.result.evaluation;
+    const warnings = mcpToolRefusalWarnings(
+      completed.result.warnings.find(
+        (warning) => warning.mcp_tool_refusals !== undefined,
+      )?.mcp_tool_refusals,
+    );
     return {
       attempt,
       evaluation: summarizeReportEvaluation(evaluation),
@@ -676,6 +686,7 @@ async function inspectAttempt(
         ? {}
         : { usage: completed.result.agent.usage }),
       artifact: {
+        ...(warnings.length ? { warnings } : {}),
         location,
         evaluation: {
           status: completed.result.evaluation.status,

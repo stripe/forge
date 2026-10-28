@@ -2,7 +2,7 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
-import type { AgentTokenUsage } from '../contracts/agent.ts';
+import type { AgentTokenUsage, AgentMcpToolRefusals } from '../contracts/agent.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
@@ -229,6 +229,8 @@ export interface ArtifactDescriptorV1 {
 }
 
 export interface RunWarningV1 {
+  /** Content-free count or unavailable state on an MCP refusal warning. */
+  readonly mcp_tool_refusals?: AgentMcpToolRefusals;
   readonly code: string;
   readonly message: string;
 }

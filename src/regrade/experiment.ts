@@ -222,6 +222,7 @@ export async function regradeExperimentRun(
       });
       continue;
     }
+    const warnings = outcome.artifact?.warnings;
     const resultPath =
       outcome.artifact === null ? null : `runs/${outcome.run_id}/result.json`;
     if (outcome.state === 'errored') {
@@ -230,6 +231,7 @@ export async function regradeExperimentRun(
         run_id: outcome.run_id,
         state: 'errored',
         error_code: outcome.error_code,
+        ...(warnings?.length ? { warnings } : {}),
         result_path: resultPath,
         evaluation: null,
       });
@@ -246,6 +248,7 @@ export async function regradeExperimentRun(
       state: 'completed',
       error_code: null,
       result_path: resultPath,
+      ...(warnings?.length ? { warnings } : {}),
       evaluation: summarizeReportEvaluation(evaluation),
       ...(sourceResult.agent.usage === undefined
         ? {}

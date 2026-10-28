@@ -1068,6 +1068,90 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
+  it('counts local MCP dispatch refusals once without depending on normalization', async () => {
+    const refused = capturedMcp({
+      error: {
+        message: 'MCP tool `fixture/probe` is not available to the model',
+      },
+    });
+    const valid = await loadToolSequence(refused);
+    assert.deepEqual(valid.mcpToolRefusals, { state: 'available', count: 1 });
+    const anotherCall = structuredClone(refused[3]!);
+    (anotherCall.payload.item as Record<string, unknown>).id = 'another-call';
+    assert.deepEqual(
+      (await loadToolSequence([...refused, anotherCall])).mcpToolRefusals,
+      { state: 'available', count: 2 },
+    );
+    const duplicate = await loadToolSequence([...refused, refused[3]!]);
+    assert.deepEqual(duplicate.mcpToolRefusals, {
+      state: 'available',
+      count: 1,
+    });
+    const unknown = await loadToolSequence([
+      ...refused,
+      capturedResponse({ type: 'future_conversation' }),
+    ]);
+    assert.equal(unknown.kind, 'unavailable');
+    assert.deepEqual(unknown.mcpToolRefusals, { state: 'available', count: 1 });
+    for (const sequence of [
+      capturedMcp(),
+      capturedMcp({ error: { message: 'Connection unavailable' } }),
+      capturedMcp({
+        output: 'MCP tool `fixture/probe` is not available to the model',
+      }),
+    ]) {
+      assert.deepEqual((await loadToolSequence(sequence)).mcpToolRefusals, {
+        state: 'available',
+        count: 0,
+      });
+    }
+  });
+
+  it('marks unreadable and malformed refusal observations unavailable', async () => {
+    const missing = await loadCodexEvidence(context(undefined));
+    assert.deepEqual(missing.mcpToolRefusals, {
+      state: 'unavailable',
+      reason: 'source_unavailable',
+    });
+    const home = createMemoryWorkspace({
+      [PATH]: jsonl([METADATA, ...capturedTurn()]),
+    }).readonly;
+    const unreadable = await loadCodexEvidence(
+      context({
+        ...home,
+        async readFile() {
+          throw new Error('Untrusted storage details.');
+        },
+      }),
+    );
+    assert.deepEqual(unreadable.mcpToolRefusals, {
+      state: 'unavailable',
+      reason: 'source_invalid',
+    });
+    const wrongSession = capturedMcp();
+    wrongSession[3]!.payload.thread_id = OTHER_SESSION;
+    assert.deepEqual((await loadToolSequence(wrongSession)).mcpToolRefusals, {
+      state: 'unavailable',
+      reason: 'source_invalid',
+    });
+    for (const item of [null, [], 'invalid']) {
+      const malformed = capturedMcp();
+      malformed[3]!.payload.item = item;
+      assert.deepEqual((await loadToolSequence(malformed)).mcpToolRefusals, {
+        state: 'unavailable',
+        reason: 'source_incomplete',
+      });
+    }
+    for (const status of ['future_status', ['failed'], {}, null]) {
+      const malformed = capturedMcp();
+      (malformed[3]!.payload.item as Record<string, unknown>).status = status;
+      assert.deepEqual((await loadToolSequence(malformed)).mcpToolRefusals, {
+        state: 'unavailable',
+        reason: 'source_incomplete',
+      });
+    }
+  });
+
   it('accepts captured native plugin MCP attribution and rejects malformed identities', async () => {
     for (const pluginId of [
       'fixture@forge-fixture',
