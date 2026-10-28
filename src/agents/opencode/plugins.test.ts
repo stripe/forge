@@ -119,6 +119,7 @@ describe('OpenCode Stripe bundle installation', () => {
     const receipt = await test.install();
     assert.equal(receipt.installation, 'opencode-bundle');
     assert.equal(receipt.marketplace_commit, catalogCommit);
+    assert.deepEqual(receipt.dropped_parts, ['hooks', 'commands', 'agents']);
     assert.deepEqual(receipt.source, {
       kind: 'git-subdir',
       commit: sourceCommit,

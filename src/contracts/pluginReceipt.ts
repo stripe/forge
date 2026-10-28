@@ -3,6 +3,7 @@ import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeVersion,
+  isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
 import type {
   AgentPluginInstallationReceipt,
@@ -33,6 +34,7 @@ export function parseAgentPluginInstallationReceipt(
       'version',
       'source',
       'installed_tree',
+      ...(Object.hasOwn(input, 'dropped_parts') ? ['dropped_parts'] : []),
     ]) ||
     typeof input.adapter !== 'string' ||
     !isSafeSimpleIdentifier(input.adapter) ||
@@ -57,6 +59,9 @@ export function parseAgentPluginInstallationReceipt(
     marketplace_commit: input.marketplace_commit,
     version: input.version,
     installed_tree: parseInstalledPluginTree(input.installed_tree),
+    ...(Object.hasOwn(input, 'dropped_parts')
+      ? { dropped_parts: parseDroppedParts(input.dropped_parts) }
+      : {}),
   };
   if (input.installation === 'opencode-bundle') {
     const source = input.source;
@@ -99,20 +104,45 @@ function parsePluginSourceReceipt(
   ) {
     throw new TypeError('Agent plugin source receipt is invalid.');
   }
-  if (hasExactKeys(input, ['kind'])) {
-    return Object.freeze({ kind: input.kind });
-  }
   if (
-    (input.kind === 'github' ||
-      input.kind === 'url' ||
-      input.kind === 'git-subdir') &&
-    hasExactKeys(input, ['kind', 'commit']) &&
-    typeof input.commit === 'string' &&
-    isFullGitCommit(input.commit)
+    !hasExactKeys(input, [
+      'kind',
+      ...(Object.hasOwn(input, 'commit') ? ['commit'] : []),
+      ...(Object.hasOwn(input, 'path') ? ['path'] : []),
+    ]) ||
+    (Object.hasOwn(input, 'commit') &&
+      (input.kind === 'archive' ||
+        typeof input.commit !== 'string' ||
+        !isFullGitCommit(input.commit))) ||
+    (Object.hasOwn(input, 'path') &&
+      (typeof input.path !== 'string' ||
+        (input.path !== '.' && !isSafeWorkspaceRelativePath(input.path))))
+  )
+    throw new TypeError('Agent plugin source receipt is invalid.');
+  return Object.freeze({
+    kind: input.kind,
+    ...(typeof input.commit === 'string' ? { commit: input.commit } : {}),
+    ...(typeof input.path === 'string' ? { path: input.path } : {}),
+  });
+}
+
+function parseDroppedParts(
+  input: unknown,
+): ('hooks' | 'commands' | 'agents')[] {
+  if (
+    !Array.isArray(input) ||
+    input.length > 3 ||
+    Reflect.ownKeys(input).length !== input.length + 1 ||
+    Array.from(input).some(
+      (kind) => kind !== 'hooks' && kind !== 'commands' && kind !== 'agents',
+    ) ||
+    new Set(input).size !== input.length
   ) {
-    return Object.freeze({ kind: input.kind, commit: input.commit });
+    throw new TypeError('Agent plugin dropped parts receipt is invalid.');
   }
-  throw new TypeError('Agent plugin source receipt is invalid.');
+  const parts: ('hooks' | 'commands' | 'agents')[] = [...input];
+  Object.freeze(parts);
+  return parts;
 }
 
 function isQualifiedPluginId(value: string): boolean {

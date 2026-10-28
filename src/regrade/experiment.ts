@@ -223,6 +223,11 @@ export async function regradeExperimentRun(
       continue;
     }
     const warnings = outcome.artifact?.warnings;
+    const pluginInstallations = outcome.artifact?.plugin_installations;
+    const bundleMetadata =
+      pluginInstallations === undefined
+        ? {}
+        : { plugin_installations: pluginInstallations };
     const resultPath =
       outcome.artifact === null ? null : `runs/${outcome.run_id}/result.json`;
     if (outcome.state === 'errored') {
@@ -230,6 +235,7 @@ export async function regradeExperimentRun(
         ...base,
         run_id: outcome.run_id,
         state: 'errored',
+        ...bundleMetadata,
         error_code: outcome.error_code,
         ...(warnings?.length ? { warnings } : {}),
         result_path: resultPath,
@@ -246,6 +252,7 @@ export async function regradeExperimentRun(
       ...base,
       run_id: outcome.run_id,
       state: 'completed',
+      ...bundleMetadata,
       error_code: null,
       result_path: resultPath,
       ...(warnings?.length ? { warnings } : {}),

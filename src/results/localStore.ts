@@ -482,6 +482,9 @@ function verifySetupArtifact(
     );
   }
 
+  const pluginInstallations: ReturnType<
+    typeof parseAgentPluginInstallationReceipt
+  >[] = [];
   for (const [index, step] of setup.steps.entries()) {
     if (step.uses === 'forge/plugin') {
       if (step.resolution === undefined) {
@@ -498,6 +501,7 @@ function verifySetupArtifact(
           { cause: error },
         );
       }
+      pluginInstallations.push(receipt);
       const planned = plan.setup[index] as PluginSetupStepV1;
       const distribution = pluginDefinitionForAgent(
         planned.with.plugin,
@@ -535,6 +539,16 @@ function verifySetupArtifact(
     ) {
       throw new ArtifactStoreError(
         `Static setup action ${step.uses} cannot record a resolution.`,
+      );
+    }
+  }
+  if (result.plugin_installations !== undefined) {
+    if (
+      serializeCanonicalJson(pluginInstallations) !==
+      serializeCanonicalJson(result.plugin_installations)
+    ) {
+      throw new ArtifactStoreError(
+        'Result plugin installations do not match setup.json.',
       );
     }
   }

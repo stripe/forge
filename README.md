@@ -613,6 +613,21 @@ warnings in saved results and report rows, even when native evidence falls back.
 Codex reports missing counts as unavailable. The absence of a warning does not
 prove that tools work.
 See the [artifact contract](docs/architecture.md) for scope and format.
+Verified run rows retain optional
+`plugin_installations` from the eval result, including in regrade reports.
+`plugin_bundle_comparisons` groups saved-result rows within each treatment
+across cases, repetitions, models, and adapters; it does not compare separate
+treatments. `different` means at least one known bundle field differs, even if
+other fields are missing. `same` means the compared fields match. Each entry's
+optional `compared_fields` lists those fields by installation index. Fields
+absent in every run are skipped; missing receipt sets or a field recorded in
+only some runs yield `unknown` if no difference is known.
+Native adapter IDs and catalog commits alone do not imply different bundles.
+Readers recompute stored comparisons from run rows, while still checking scored
+statistics. See the [receipt contract](docs/plugin-action.md#execution-and-receipt)
+for identity fields and provenance limits. These fields do not change scores or
+plan hashes.
+
 With optional `jq`:
 
 ```sh

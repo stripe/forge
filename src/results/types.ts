@@ -11,6 +11,7 @@ import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
 } from '../contracts/metadata.ts';
+import type { AgentPluginInstallationReceipt } from '../contracts/plugin.ts';
 import type {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -308,6 +309,8 @@ interface RunResultCommon {
     cost_usd: number | null;
     usage?: AgentTokenUsage;
   };
+  /** Built-in plugin receipts in setup order; absence means not recorded. */
+  readonly plugin_installations?: readonly AgentPluginInstallationReceipt[];
   readonly completion_calls: readonly CompletionCallSummaryV1[];
   readonly interaction: {
     readonly mode: 'multi_turn' | 'one_shot';

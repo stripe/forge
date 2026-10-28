@@ -5,6 +5,7 @@ import {
   agentAdapterMetadataSchema,
   completionProviderMetadataSchema,
 } from '../contracts/metadata.ts';
+import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -586,6 +587,10 @@ const evidenceV1 = z
   });
 
 const runResultFields = {
+  plugin_installations: z
+    .array(z.unknown().transform(parseAgentPluginInstallationReceipt))
+    .max(2_000)
+    .optional(),
   run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
   selection: z.unknown().transform((value, context) => {
     try {

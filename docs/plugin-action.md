@@ -46,7 +46,8 @@ The plugin action intentionally follows the marketplace's current default branch
 2. Forge fetches the selected marketplace, using the native CLI where supported.
 3. The marketplace entry selects the plugin source and installed version.
 4. Forge validates the installation and records its identity, version,
-   catalog commit, source commit when reported, and installed-content fingerprint.
+   catalog commit, distribution path, available source commit, and installed-content
+   fingerprint.
 5. Plugin state remains writable during interaction.
 
 The experiment therefore has no plugin-version, marketplace-commit, or source
@@ -87,9 +88,10 @@ path, or a credential-free HTTPS `url` or `git-subdir` source with optional
 `ref`, full 40-hex Git `sha`, and subdirectory. Forge checks that native source
 metadata retains the catalog's selectors. Codex applies the pin during install;
 Forge does not independently verify the checkout commit. It rejects archives,
-npm, `github` source objects, and dependencies. Codex receipts omit the optional
-resolved source commit and use the installed-tree fingerprint to identify
-observed bytes.
+npm, `github` source objects, and dependencies. Codex receipts record the full
+source pin when supplied, or the catalog commit for a marketplace-relative
+source. An unpinned remote source has no recorded commit. This records the
+selected revision; the installed-tree fingerprint identifies observed bytes.
 
 Codex selects the first native catalog present in this order:
 
@@ -129,9 +131,13 @@ plugin config and restores it before every turn, including resume.
 OpenCode receipts use `installation: opencode-bundle` instead of
 `native_plugin_id`. They retain the selected catalog identity and commit, record
 `source: {kind: git-subdir, commit, path}` for the actual standard bundle, and
-fingerprint the copied bundle plus generated config. The native Claude/Codex
-receipt shape is unchanged. Like other plugin state, bundle files remain writable
-during interaction; the receipt describes installation-time contents.
+fingerprint the copied bundle plus generated config. `dropped_parts` lists
+`hooks`, `commands`, and `agents`: these behavior kinds are excluded by the
+OpenCode distribution policy. This is a policy record, not a count of removed
+files; unsupported declarations still fail setup. Native Claude/Codex receipts
+omit this field because Forge does not inspect their exclusion policies. Like
+other plugin state, bundle files remain writable during interaction; the receipt
+describes installation-time contents.
 
 ## Hook policy and writable state
 
@@ -182,7 +188,11 @@ The receipt includes:
 - the resolved marketplace and native plugin selection;
 - the exact catalog commit used to read the marketplace entry;
 - the native plugin ID or bundle installation kind, and installed version;
-- the selected source kind and installer-reported Git commit when available; and
+- the selected source kind, distribution path in `source.path` (`.` for a source
+  root), and reported Git commit or full source pin when available;
+- inspected policy exclusions in optional `dropped_parts`: absence means not
+  inspected, `[]` means inspected with no excluded kinds, and a nonempty list
+  names excluded behavior kinds; and
 - a deterministic digest and size/count summary of the installed tree.
 
 Forge bounds and validates the installed tree, rejecting symbolic links and
@@ -191,12 +201,37 @@ the exact regular-file bytes read after installation in stable path order,
 independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
-Git commits identify the catalog snapshot and the source revision reported by
-the installer. Claude must report any source commit pinned by its
-catalog; Codex reports the requested selectors; OpenCode verifies the checked-out
-source commit. The tree
-fingerprint identifies observed installation-time contents separately from
-those source identities.
+Git commits identify the catalog snapshot and the available source revision. Claude must report any source commit pinned by its
+catalog; Codex records the selected source pin; OpenCode verifies the checked-out
+source commit. The tree fingerprint identifies observed installation-time
+contents separately from those source identities.
+
+New eval results copy built-in plugin receipts to `plugin_installations` in setup
+order. An empty array means no built-in plugin was installed; an absent field
+means it was not recorded. Completed-run verification requires this copy, when
+present, to match `setup.json`. Old receipts may omit `source.path` and
+`dropped_parts`; readers retain that absence rather than guessing.
+
+Reports compare each treatment's ordered installation set across its saved runs,
+including regraded, reused, checks-only, and saved errored runs. Identity includes
+plugin and marketplace names, version, source kind/path/commit, the entire
+`installed_tree` descriptor (format, hash, entry/file counts, bytes), and the
+set of `dropped_parts`. Native adapter/plugin IDs and the catalog commit are
+excluded. Installation count and setup order always participate when receipts
+are recorded. Missing receipt arrays yield `unknown` unless a known difference
+exists. At each installation position, a field absent from every run is skipped;
+a field present in only some runs yields `unknown` unless a known difference
+exists. Thus identical native installations can be `same` on their recorded
+fields without asserting that their exclusion policies were inspected.
+
+Each comparison's optional `compared_fields` records the basis as entries with
+`installation_index` (zero-based setup order) and `fields`. The field names are
+`plugin`, `marketplace`, `version`, `source.kind`, `source.path`, `source.commit`,
+`installed_tree`, and `dropped_parts`. A field is listed when at least one run
+records it at that position; uniformly absent fields are omitted. `installed_tree`
+compares the complete descriptor. An empty basis covers either an empty recorded
+installation set or unrecorded receipts, distinguished by the status and run
+rows. Old comparisons can omit the basis; readers recompute it from run rows.
 
 The receipt is recorded at installation and does not attest to final state.
 Later setup actions, the coding agent, hooks, or native update behavior may

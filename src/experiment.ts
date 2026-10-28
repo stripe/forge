@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentTokenUsage } from './contracts/agent.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
+import type { AgentPluginInstallationReceipt } from './contracts/plugin.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
@@ -64,6 +65,7 @@ export interface ExperimentRunArtifact {
     readonly score: number | null;
   };
   readonly failure: 'role_player_error' | null;
+  readonly plugin_installations?: readonly AgentPluginInstallationReceipt[];
 }
 
 /** The effective latest attempt for one selection, in saved selection order. */
@@ -592,6 +594,12 @@ export async function runExperiment(
               inspected.usage !== undefined
                 ? { agent_usage: inspected.usage }
                 : {}),
+              ...(inspected.artifact?.plugin_installations === undefined
+                ? {}
+                : {
+                    plugin_installations:
+                      inspected.artifact.plugin_installations,
+                  }),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -688,6 +696,9 @@ async function inspectAttempt(
       artifact: {
         ...(warnings.length ? { warnings } : {}),
         location,
+        ...(completed.result.plugin_installations === undefined
+          ? {}
+          : { plugin_installations: completed.result.plugin_installations }),
         evaluation: {
           status: completed.result.evaluation.status,
           score: completed.result.evaluation.score,

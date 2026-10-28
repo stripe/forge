@@ -792,6 +792,7 @@ export async function executeEvalWithTestHooks(
         agentMetadata: preflight.agentMetadata,
         runtime: sealed,
         interaction,
+        setupArtifact,
         completionCalls: completions.calls,
         evidence: redacted.evidence,
         redactionCount: redacted.replacements,
@@ -853,6 +854,7 @@ export async function executeEvalWithTestHooks(
       agentMetadata: preflight.agentMetadata,
       runtime: sealed,
       interaction,
+      setupArtifact,
       completionCalls: completions.calls,
       evidence: redacted.evidence,
       redactionCount: redacted.replacements,
@@ -2096,6 +2098,7 @@ function buildResult(input: {
   agentMetadata: AgentAdapterMetadata | undefined;
   runtime: SealedRuntime;
   interaction: ExecutedInteraction;
+  setupArtifact: SetupArtifactV1;
   completionCalls: readonly CompletionCallSummaryV1[];
   evidence: NormalizedTrajectory;
   redactionCount: number;
@@ -2140,6 +2143,11 @@ function buildResult(input: {
         ? {}
         : { usage: input.interaction.usage }),
     },
+    plugin_installations: input.setupArtifact.steps.flatMap((step) =>
+      step.uses === 'forge/plugin'
+        ? [parseAgentPluginInstallationReceipt(step.resolution)]
+        : [],
+    ),
     completion_calls: input.completionCalls.map((call) => ({ ...call })),
     interaction: {
       mode: input.input.plan.interaction.mode,

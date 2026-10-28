@@ -990,9 +990,13 @@ native distribution and declares agent-scoped MCP credential requirements using
 policy fixed by the Forge version. Setup installs the current marketplace entry,
 configures its existing MCP connection, and fingerprints the installation.
 The `setup.json` receipt records resolved native IDs, catalog commit, installed
-version, reported source commit when available, and the installed-tree
-fingerprint. These identify the catalog snapshot and observed contents; plugin
-state remains writable during interaction. See
+version, distribution path, available source commit, inspected policy exclusions,
+and the installed-tree fingerprint. Uninspected policy exclusions remain absent.
+Results and verified `ExperimentRunArtifact` metadata copy built-in plugin
+receipts in setup order under optional `plugin_installations`; absence means not
+recorded. Both experiment and regrade reports retain these verified observations.
+These identify the catalog snapshot and observed contents; plugin state remains
+writable during interaction. See
 [Marketplace plugin treatments](plugin-action.md) for registered names and
 installation semantics.
 
@@ -1752,7 +1756,8 @@ hashes. It also requires:
 - canonical plan bytes to match their artifact descriptor and result summary;
 - recorded criterion text, labels, and requirement levels to match the plan;
 - workspace evidence with no unknown fields;
-- `setup.json` to match ordered plan actions and valid plugin receipts;
+- `setup.json` to match ordered plan actions and valid plugin receipts, plus
+  any `result.json.plugin_installations` copy;
 - `interaction.json` to match result summaries;
 - trajectory session identity and completed-turn coverage to match the
   interaction;
