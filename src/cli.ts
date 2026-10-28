@@ -703,6 +703,10 @@ interface CredentialEnvironmentGrants {
   readonly environmentNames: readonly string[];
 }
 
+interface CredentialEnvironmentUseBinding extends EvalCredentialUse {
+  readonly source: string;
+}
+
 function parseCredentialEnvironmentBindings(
   values: readonly string[] | undefined,
 ): CredentialEnvironmentGrants {
@@ -743,27 +747,26 @@ function parseCredentialEnvironmentBindings(
 function expandCredentialEnvironmentBindings(
   grants: CredentialEnvironmentGrants,
   uses: readonly EvalCredentialUse[],
-): Readonly<Record<string, string>> {
-  const bindings = new Map(Object.entries(grants.references));
-  const bind = (reference: string, name: string): void => {
-    const previous = bindings.get(reference);
-    if (previous !== undefined && previous !== name) {
-      throw new CliUsageError(
-        `Credential reference ${JSON.stringify(reference)} has conflicting environment bindings.`,
-      );
-    }
-    bindings.set(reference, name);
-  };
+): readonly CredentialEnvironmentUseBinding[] {
+  const bindings: CredentialEnvironmentUseBinding[] = [];
   // Only actual selected declarations receive grants. Runtime uses include
-  // custom setup actions; host providers keep their separate references.
+  // custom setup actions; references reused by other purposes gain no access.
   for (const use of uses) {
     const name =
       use.environmentName ?? CLI_CREDENTIAL_ENVIRONMENTS.get(use.reference);
     if (name !== undefined && grants.environmentNames.includes(name)) {
-      bind(use.reference, name);
+      if (
+        Object.hasOwn(grants.references, use.reference) &&
+        grants.references[use.reference] !== name
+      ) {
+        throw new CliUsageError(
+          `Credential reference ${JSON.stringify(use.reference)} has conflicting environment bindings.`,
+        );
+      }
+      bindings.push(Object.freeze({ ...use, source: name }));
     }
   }
-  return Object.freeze(Object.fromEntries(bindings));
+  return Object.freeze(bindings);
 }
 
 class CliCredentialError extends Error {}
@@ -800,8 +803,9 @@ function createCliCredentialBindingSession(
         throw new Error('Credential bindings have already been finalized.');
       }
       finalized = createCliCredentialResolver(
-        expandCredentialEnvironmentBindings(grants, uses),
+        grants.references,
         environment,
+        expandCredentialEnvironmentBindings(grants, uses),
       );
     },
   };
@@ -819,15 +823,56 @@ function credentialEnvironmentName(reference: string): string | undefined {
 function createCliCredentialResolver(
   bindings: Readonly<Record<string, string>>,
   environment: Readonly<Record<string, string | undefined>>,
+  uses: readonly CredentialEnvironmentUseBinding[] = [],
 ): CredentialResolver {
   const resolver = createEnvironmentCredentialResolver({
     bindings,
     environment,
   });
+  const scoped = new Map<
+    string,
+    Map<
+      string,
+      CredentialEnvironmentUseBinding & { resolver: CredentialResolver }
+    >
+  >();
+  for (const use of uses) {
+    let purposes = scoped.get(use.reference);
+    if (purposes === undefined) {
+      purposes = new Map();
+      scoped.set(use.reference, purposes);
+    }
+    const previous = purposes.get(use.purpose);
+    if (previous !== undefined) {
+      if (
+        previous.source !== use.source ||
+        previous.environmentName !== use.environmentName
+      ) {
+        throw new CliUsageError(
+          `Credential reference ${JSON.stringify(use.reference)} has conflicting environment bindings.`,
+        );
+      }
+      continue;
+    }
+    purposes.set(use.purpose, {
+      ...use,
+      resolver: createEnvironmentCredentialResolver({
+        bindings: { [use.reference]: use.source },
+        environment,
+      }),
+    });
+  }
   return {
     sourceIdentity(reference, context) {
       const source = resolver.sourceIdentity?.(reference, context);
       if (source !== undefined) return source;
+      const use = scoped.get(reference)?.get(context.purpose);
+      if (
+        use !== undefined &&
+        use.environmentName === context.environmentName
+      ) {
+        return use.source;
+      }
       // Known aliases may be structurally compatible without granting access.
       // Execution always requires actual, explicitly authorized source IDs.
       if (
@@ -842,21 +887,24 @@ function createCliCredentialResolver(
       const [reference, context] = args;
       context.signal.throwIfAborted();
       const name =
-        credentialEnvironmentName(reference) ??
-        /^forge-eval:([A-Za-z_][A-Za-z0-9_]*)$/.exec(context.purpose)?.[1];
-      if (!Object.hasOwn(bindings, reference)) {
+        /^forge-eval:([A-Za-z_][A-Za-z0-9_]*)$/.exec(context.purpose)?.[1] ??
+        credentialEnvironmentName(reference);
+      const binding = Object.hasOwn(bindings, reference)
+        ? { source: bindings[reference]!, resolver }
+        : scoped.get(reference)?.get(context.purpose);
+      if (binding === undefined) {
         const grant = name ?? `${reference}=HOST_VARIABLE`;
         throw new CliCredentialError(
           `No environment binding exists for ${name ?? 'the requested credential'}. Add --credential-env ${grant}.`,
         );
       }
       try {
-        return await resolver.resolve(...args);
+        return await binding.resolver.resolve(...args);
       } catch (error) {
         context.signal.throwIfAborted();
         // The environment resolver never includes values in its diagnostics.
         throw new CliCredentialError(
-          `Set ${bindings[reference]}: no value is available for ${name ?? 'the requested credential'}.`,
+          `Set ${binding.source}: no value is available for ${name ?? 'the requested credential'}.`,
           { cause: error },
         );
       }

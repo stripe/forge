@@ -1466,8 +1466,11 @@ uses from the returned adapters, providers, and engine-bound setup actions.
 Each use retains its `reference` and `purpose`; runtime uses also have an
 `environmentName`. Inspection runs pure preflight while deferring source proof.
 The CLI expands bare-name grants over these selected uses and its known
-completion aliases, rejects conflicting source bindings across plans, and
-finalizes the resolver's immutable nonsecret table once. Lookup before
+completion aliases, binding each exact `(reference, purpose)` pair. With bare
+grants, uses of one reference as `FIRST_TOKEN` and `SECOND_TOKEN` need both flags
+and read those host variables independently. Explicit reference bindings apply
+across purposes and conflict with any bare-name binding to a different host
+variable. The CLI finalizes this immutable nonsecret table once; lookup before
 finalization fails. The same composition then preflights and executes pending
 work. Validation constructs one composition per concrete runtime platform.
 

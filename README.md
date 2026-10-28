@@ -69,11 +69,12 @@ For the built-in CLI, you need:
 Export the required variables in your shell or credential manager and grant
 each one explicitly when running or resuming pending work. Exporting a variable
 or selecting an agent, provider, or plugin does not authorize access to secrets.
-`--credential-env NAME` authorizes selected agent and setup declarations that
+`--credential-env NAME` authorizes only selected agent and setup declarations that
 request that runtime variable, including custom declarations, plus built-in
 Ava/judge providers that use it. One `--credential-env OPENAI_API_KEY` therefore
-covers Codex, Ava, and the judge when all use OpenAI. Grants do not forward
-undeclared variables or bind providers unused by the selected run.
+covers Codex, Ava, and the judge when all use OpenAI. Reusing a credential
+reference under a different requested variable name needs its own grant.
+Grants do not forward undeclared variables or bind unused providers.
 Use restricted, short-lived keys with appropriate account limits: the evaluated
 agent receives its credential and outbound network access. Keep secrets outside
 dataset and experiment files.
@@ -132,8 +133,8 @@ Their use remains subject to their providers' terms.
 
 ### Advanced credential bindings
 
-Use `--credential-env reference=HOST_VAR` to grant a single credential reference
-for narrower access or separate keys. The text before `=` always names a
+Use `--credential-env reference=HOST_VAR` to bind every use of one credential
+reference to a host variable. The text before `=` always names a
 reference, even when it looks like an environment variable name. For example,
 Codex and OpenAI Ava/judge models can use different exported variables:
 
