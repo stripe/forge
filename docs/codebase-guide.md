@@ -68,8 +68,10 @@ documentation at the release root; harness inputs live under
 The single live suite under
 [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
 is separate from `pnpm test` and `pnpm check`. Setup and full modes require Docker and
-network access. Setup mode exercises real setup actions and plugin installation
-without model credentials or upstream model calls:
+network access. Setup mode exercises real setup actions and plugin installation,
+plus the standard CLI's native MCP readiness checks against a local HTTP mock.
+The mock verifies bearer headers, initialization and discovery, auth/discovery
+failures, absent servers, and cleanup without model credentials or upstream calls:
 
 ```sh
 FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live

@@ -1,0 +1,37 @@
+id: stripe-integration-public-evals/plugin
+version: 0.2.0
+dataset:
+  path: ./datasets/stripe-integration-public-evals
+  id: stripe-integration-public-evals
+  version: 0.2.0
+runtime:
+  adapter: docker
+  image:
+    kind: forge
+  platform: native
+  resources:
+    memory_bytes: 4294967296
+    cpu_count: 2
+    process_count: 512
+treatments:
+  stripe-plugin:
+    setup:
+      - uses: forge/plugin
+        with:
+          plugin: stripe
+matrix:
+  cases:
+    - cases/payments-onetime.case.yaml
+  treatments:
+    - stripe-plugin
+  agents:
+    - adapter: claude-code
+      provider: anthropic
+      model: claude-sonnet-4-6
+    - adapter: codex
+      provider: openai
+      model: gpt-5.4
+  repetitions: 1
+  retries: 0
+limits:
+  run_timeout_ms: 900000

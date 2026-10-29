@@ -25,6 +25,7 @@ import {
   type CodexLayout,
   resolveCodexLayout,
 } from './layout.ts';
+import { CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
 import {
   declareCodexMcpServers,
   prepareCodexPluginConfiguration,
@@ -50,6 +51,32 @@ export function createCodexPluginInstaller(options: {
   const layout = resolveCodexLayout(options.layout);
   return Object.freeze({
     supportsMcpBearerAuth: true as const,
+    async checkMcp({
+      receipt,
+      servers,
+      stateDirectories,
+      commands,
+      signal,
+    }: Parameters<NonNullable<AgentPluginInstaller['checkMcp']>>[0]) {
+      const home = stateDirectories.get(CODEX_HOME_STATE_ID);
+      if (!home) throw new Error('Codex MCP readiness state is unavailable.');
+      await prepareCodexPluginConfiguration(home);
+      const result = await commands.run(
+        [
+          'node',
+          '-e',
+          CODEX_MCP_PROBE_SCRIPT,
+          options.executable,
+          receipt.native_plugin_id,
+          JSON.stringify(servers),
+        ],
+        { signal, timeoutMs: 90_000, maxOutputBytes: 1024 * 1024 },
+      );
+      if (result.exitCode !== 0)
+        throw new Error(
+          'Codex MCP servers did not connect and discover tools.',
+        );
+    },
     preflight(
       distribution: PluginSelectionV1,
       context: AgentPluginPreflightContext,
@@ -78,7 +105,12 @@ export function createCodexPluginInstaller(options: {
       const marketplacePath = `${layout.configDirectory}/${marketplaceRelative}`;
       return Object.freeze({
         requirements: Object.freeze({
-          executables: Object.freeze([options.executable, 'env', 'git']),
+          executables: Object.freeze([
+            options.executable,
+            'env',
+            'git',
+            ...(context.mcpServers ? ['node'] : []),
+          ]),
           stateDirectories: Object.freeze([
             Object.freeze({
               id: CODEX_HOME_STATE_ID,

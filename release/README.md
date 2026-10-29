@@ -15,7 +15,8 @@ release/
 │   ├── manifest.json
 │   └── cases/
 │       └── payments-onetime.case.yaml
-└── experiment.yaml
+├── experiment.yaml
+└── plugin-experiment.yaml
 ```
 
 The release holds only the latest version; earlier versions live in Git
@@ -62,6 +63,25 @@ node dist/cli.js run \
 
 Execution makes model calls for the agent, Ava, and the criterion judge.
 Forge prints the experiment run identity and artifact locations.
+
+The [plugin experiment](plugin-experiment.yaml) uses the same dataset with
+Stripe's registered plugin (`with: {plugin: stripe}`), bundled HTTP MCP bearer
+auth, and both Claude Code and Codex. Export a Stripe Agent API key as
+`STRIPE_API_KEY`, grant it, then check setup and tool discovery:
+
+```sh
+STRIPE_API_KEY=your-agent-api-key \
+node dist/cli.js validate --host \
+  --experiment release/plugin-experiment.yaml \
+  --credential-env STRIPE_API_KEY
+```
+
+This check makes no model calls and does not test model authentication. To run
+the payment eval, also grant `ANTHROPIC_API_KEY` for Claude Code and
+`OPENAI_API_KEY` for Codex and the default host models, then use `run` with that
+experiment and `--output ./results`. Use `--agent claude-code` or `--agent codex`
+to select one. Prepare the account or merchant outside Forge; any account
+accepted by the plugin's endpoint uses the same credential interface.
 
 ## Update the dataset
 

@@ -214,6 +214,7 @@ const coordinates = z
         model: z.string().min(1).max(4096),
         hook_trust: z.enum(['native', 'automation']).optional(),
         model_profile: ModelProfileSchema.optional(),
+        disable_experimental_betas: z.literal(true).optional(),
       })
       .strict(),
   })

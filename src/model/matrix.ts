@@ -27,6 +27,7 @@ export function agentSelectionKey(agent: {
   model: string;
   hook_trust?: 'native' | 'automation' | undefined;
   model_profile?: AgentSelectionV1['model_profile'] | undefined;
+  disable_experimental_betas?: true | undefined;
 }): string {
   return JSON.stringify([
     agent.adapter,
@@ -39,6 +40,7 @@ export function agentSelectionKey(agent: {
           ModelProfileSchema,
           ModelProfileSchema.parse(agent.model_profile),
         ),
+    ...(agent.disable_experimental_betas === undefined ? [] : [true]),
   ]);
 }
 

@@ -97,6 +97,7 @@ export function createClaudeCodeAdapter(
     provider: string;
     hook_trust?: string;
     model_profile?: unknown;
+    disable_experimental_betas?: true;
   }): AgentRuntimeRequirements => {
     if (selection.model_profile !== undefined) {
       throw new TypeError('model_profile is not supported by Claude Code.');
@@ -112,9 +113,17 @@ export function createClaudeCodeAdapter(
     return {
       executables: [executable],
       environment: {
-        ...(Object.keys(variables).length === 0
+        ...(Object.keys(variables).length === 0 &&
+        !selection.disable_experimental_betas
           ? {}
-          : { variables: { ...variables } }),
+          : {
+              variables: {
+                ...variables,
+                ...(selection.disable_experimental_betas
+                  ? { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' }
+                  : {}),
+              },
+            }),
         credentials: {
           [credentialEnvironmentName]: {
             reference: credential,

@@ -111,6 +111,7 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof resolveManifestCaseIdFromFile, 'function');
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof createForgeEngine, 'function');
+    assert.equal(typeof createForgeEngine().validateRuntime, 'function');
     assert.equal(typeof createSetupExecutor, 'function');
     assert.equal(credentialsSetupHandler.uses, 'forge/credentials');
     assert.equal(typeof defineSetupActionBundle, 'function');
