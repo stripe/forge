@@ -2,11 +2,13 @@ import type {
   EvalCredentialUse,
   ExecuteEvalInput,
   PreflightEvalInput,
+  RuntimeReadinessResult,
 } from './execution/execute.ts';
 import {
   executeEvalWithSetupActions,
   inspectEvalCredentialsWithSetupActions,
   preflightEvalWithSetupActions,
+  validateRuntimeWithSetupActions,
 } from './execution/execute.ts';
 import {
   loadDatasetWithSetupActions,
@@ -69,6 +71,11 @@ export interface ForgeEngine {
   inspectEvalCredentials?(
     request: PreflightEvalInput,
   ): readonly EvalCredentialUse[];
+  /** Apply setup and check configured native MCP servers, without model calls. */
+  validateRuntime(
+    requests: readonly PreflightEvalInput[],
+    signal?: AbortSignal,
+  ): Promise<readonly RuntimeReadinessResult[]>;
   executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1>;
   verifyCompletedRun(location: string): Promise<CompletedRun>;
 }
@@ -121,6 +128,9 @@ export function createForgeEngine(
     },
     inspectEvalCredentials(request) {
       return inspectEvalCredentialsWithSetupActions(request, setupActions);
+    },
+    validateRuntime(requests, signal) {
+      return validateRuntimeWithSetupActions(requests, setupActions, signal);
     },
     executeEval(request) {
       return executeEvalWithSetupActions(request, setupActions);

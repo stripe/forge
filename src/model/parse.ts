@@ -419,6 +419,7 @@ const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
   model_profile: ModelProfileSchema.optional(),
+  disable_experimental_betas: z.literal(true).optional(),
 })
   .strict()
   .superRefine((agent, context) => {
@@ -432,6 +433,15 @@ const AgentSelectionSchema = ModelRefSchema.extend({
         message: `model_profile is not supported by ${agent.adapter}`,
       });
     }
+    if (
+      agent.disable_experimental_betas !== undefined &&
+      agent.adapter !== 'claude-code'
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['disable_experimental_betas'],
+        message: 'disable_experimental_betas is supported only by Claude Code',
+      });
     if (agent.adapter === 'claude-code' && agent.hook_trust !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
 import { createOpenCodeAdapter } from './agents/opencode/index.ts';
+import { resolveCliRuntime } from './cliRuntime.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
   type CredentialResolver,
@@ -35,6 +36,7 @@ import {
   getMatrixGroups,
   type LoadedDatasetV1,
   parseRunSelection,
+  type ResolvedRunPlanV1,
   type RunSelection,
 } from './model/index.ts';
 import {
@@ -54,7 +56,6 @@ import { createArtifactStore } from './results/index.ts';
 import {
   createDockerRuntimeAdapter,
   detectDockerRuntimePlatform,
-  validateDockerRuntimeHost,
 } from './runtime/docker/index.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 
@@ -143,7 +144,9 @@ Run options:
                         Bind one credential reference for scoped access or separate keys
 
 Validation options:
-  --host                Build and inspect the selected Docker runtime image
+  --host                Apply setup and check native MCP connections without model calls
+  --credential-env <environment-name>
+                        With --host, authorize the host variables used by native MCP checks
 
 Regrade options:
   --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
@@ -192,7 +195,6 @@ export interface RunCliOptions {
   /** Concrete target for authored `platform: native`; defaults to Docker detection. */
   readonly runtimePlatform?: RuntimePlatform;
   readonly detectDockerPlatform?: typeof detectDockerRuntimePlatform;
-  readonly validateDockerHost?: typeof validateDockerRuntimeHost;
 }
 
 /** The portable composition used by the public executable. */
@@ -319,7 +321,13 @@ export async function runCli(
 
     const allowed: CliOptionName[] = [
       'experiment',
-      ...(command === 'validate' ? (['host'] as const) : SELECTOR_OPTIONS),
+      ...SELECTOR_OPTIONS,
+      ...(command === 'validate'
+        ? ([
+            'host',
+            ...(parsed.values.host ? ['credential-env' as const] : []),
+          ] as const)
+        : []),
       ...(command === 'run'
         ? [
             ...(Object.keys(
@@ -352,7 +360,11 @@ export async function runCli(
       'case-file',
       cwd,
     );
-    const experiment = await engine.loadExperimentConfig(experimentPath);
+    const experiment = resolveCliRuntime(
+      await engine.loadExperimentConfig(experimentPath),
+      options.environment ?? process.env,
+      engine.parseExperimentConfig,
+    );
     if (experiment.config.dataset.path === undefined) {
       throw new CliUsageError(
         'The experiment must declare dataset.path, relative to the experiment file.',
@@ -366,7 +378,18 @@ export async function runCli(
       experiment.config.runtime.platform === 'native';
 
     if (command === 'validate') {
-      const selections = expandExperiment(experiment, dataset);
+      let caseId = parsed.values.case;
+      if (caseFilePath !== undefined)
+        caseId = await resolveManifestCaseIdFromFile(dataset, caseFilePath);
+      const selections = selectMatching(experiment.config, dataset, {
+        caseId,
+        groupId: parsed.values.group,
+        treatment: parsed.values.treatment,
+        adapter: parsed.values.agent,
+        provider: parsed.values.provider,
+        model: parsed.values.model,
+        repetition: parseRepetition(parsed.values.repetition),
+      });
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
       let hostSelection:
@@ -399,6 +422,20 @@ export async function runCli(
             ? ['linux/amd64', 'linux/arm64']
             : [hostSelection.runtime_platform]
           : [undefined];
+      const grants = parseCredentialEnvironmentBindings(
+        parsed.values['credential-env'],
+      );
+      const credentials =
+        hostSelection === undefined
+          ? undefined
+          : createCliCredentialBindingSession(
+              grants,
+              options.environment ?? process.env,
+            );
+      const readinessRequests: Array<{
+        plan: ResolvedRunPlanV1;
+        composition: ForgeComposition;
+      }> = [];
       for (const runtimePlatform of validationPlatforms) {
         const plans = selections.map((selection) =>
           engine.resolveRunPlan({
@@ -412,31 +449,46 @@ export async function runCli(
           datasetRoot: dataset.root,
           ...(plans[0] === undefined ? {} : { runtime: plans[0].runtime }),
           resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
+          ...(credentials === undefined
+            ? {}
+            : { credentialResolver: credentials.resolver }),
+          ...(Object.keys(grants.references).length === 0
+            ? {}
+            : { credentialBindings: grants.references }),
           ...(options.environment === undefined
             ? {}
             : { environment: options.environment }),
         });
         for (const plan of plans) {
           engine.preflightEval({ plan, composition });
+          readinessRequests.push({ plan, composition });
         }
+      }
+      if (credentials !== undefined) {
+        if (
+          grants.environmentNames.length > 0 &&
+          engine.inspectEvalCredentials === undefined
+        ) {
+          throw new CliUsageError(
+            'Same-name credential grants require an engine with inspectEvalCredentials. Use explicit reference=HOST_VAR bindings with this engine.',
+          );
+        }
+        credentials.finalize(
+          readinessRequests.flatMap(
+            (request) => engine.inspectEvalCredentials?.(request) ?? [],
+          ),
+        );
       }
       const host =
         hostSelection === undefined
           ? undefined
-          : await (async () => {
-              const validated = await (
-                options.validateDockerHost ?? validateDockerRuntimeHost
-              )({
-                platform: hostSelection.runtime_platform,
-                ...(options.signal === undefined
-                  ? {}
-                  : { signal: options.signal }),
-              });
-              return {
-                ...hostSelection,
-                image_id: validated.imageId,
-              };
-            })();
+          : {
+              ...hostSelection,
+              checks: await engine.validateRuntime(
+                readinessRequests,
+                options.signal,
+              ),
+            };
       stdout(
         serializeCanonicalJson({
           dataset: dataset.manifest.dataset,
@@ -528,8 +580,12 @@ async function runPublicExperiment(
       parseCredentialEnvironmentBindings(values['credential-env']);
     },
     loadExperiment: async ({ values, cwd, root, savedSelections, signal }) => {
-      const experiment = await engine.loadExperimentConfig(
-        resolveRequiredPath(values.experiment, 'experiment', cwd),
+      const experiment = resolveCliRuntime(
+        await engine.loadExperimentConfig(
+          resolveRequiredPath(values.experiment, 'experiment', cwd),
+        ),
+        options.environment ?? process.env,
+        engine.parseExperimentConfig,
       );
       if (experiment.config.dataset.path === undefined) {
         throw new CliUsageError(
