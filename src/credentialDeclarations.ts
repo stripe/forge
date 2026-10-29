@@ -20,6 +20,15 @@ export interface RuntimeCredentialDeclaration {
   readonly setupStepIndex?: number;
 }
 
+/** Structured conflict details for internal diagnostics. */
+export class CredentialReferenceConflictError extends TypeError {
+  constructor(readonly environmentName: string) {
+    super(
+      `Credential binding ${environmentName} has conflicting references without a proven shared source.`,
+    );
+  }
+}
+
 /** Validate every group before the first authority-bearing lookup. */
 export function validateCredentialDeclarations(
   declarations: readonly RuntimeCredentialDeclaration[],
@@ -42,9 +51,7 @@ export function validateCredentialDeclarations(
         identity.length === 0 ||
         (source !== undefined && source !== identity)
       ) {
-        throw new TypeError(
-          `Credential binding ${environmentName} has conflicting references without a proven shared source.`,
-        );
+        throw new CredentialReferenceConflictError(environmentName);
       }
       source = identity;
     }
