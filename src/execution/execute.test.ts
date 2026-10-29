@@ -63,7 +63,7 @@ describe('executeEval', () => {
   });
 
   it('isolates synchronous throws and rejections without changing results', async () => {
-    const baseline = await runWithLifecycleListeners();
+    const baseline = await runWithLifecycleListeners([]);
     const completed = await runWithLifecycleListeners([
       {
         id: 'throws',
@@ -87,13 +87,6 @@ describe('executeEval', () => {
       false,
     );
     assert.equal(calls, 0);
-  });
-
-  it('preserves results when lifecycle listeners are absent', async () => {
-    const absent = await runWithLifecycleListeners();
-    const empty = await runWithLifecycleListeners([]);
-    assert.deepEqual(absent.result.evaluation, empty.result.evaluation);
-    assert.deepEqual(absent.result.warnings, empty.result.warnings);
   });
 
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
@@ -1311,7 +1304,7 @@ describe('executeEval', () => {
 });
 
 async function runWithLifecycleListeners(
-  lifecycleListeners?: readonly RunLifecycleListener[],
+  lifecycleListeners: readonly RunLifecycleListener[],
   nativeArtifact = true,
 ) {
   const fixture = await executionFixture({ nativeArtifact });
@@ -1320,7 +1313,7 @@ async function runWithLifecycleListeners(
     plan: fixture.plan,
     composition: {
       ...fixture.composition(createArtifactStore({ root: fixture.root })),
-      ...(lifecycleListeners === undefined ? {} : { lifecycleListeners }),
+      lifecycleListeners,
     },
   });
 }

@@ -486,17 +486,21 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return { evidence, nativeArtifact };
+      return { evidence, nativeArtifact, sessionId: interaction.sessionId };
     });
     if (
       selectedEvidence.nativeArtifact !== undefined &&
       input.composition.lifecycleListeners?.length
     ) {
+      const nativeArtifact = selectedEvidence.nativeArtifact;
       notifyAfterTask(input.composition.lifecycleListeners, {
         runId: input.runId,
         plan: input.plan,
-        sessionId: interaction.sessionId!,
-        nativeArtifact: selectedEvidence.nativeArtifact,
+        sessionId: selectedEvidence.sessionId,
+        nativeArtifact: {
+          ...nativeArtifact,
+          body: Uint8Array.from(nativeArtifact.body),
+        },
       });
     }
     const redacted = redactNormalizedTrajectory(
