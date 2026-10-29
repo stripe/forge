@@ -163,6 +163,7 @@ describe('executeEval', () => {
       root: path.join(fixture.root, 'artifacts'),
     });
     const contexts: RunAfterTaskContext[] = [];
+    const received: Buffer[] = [];
     const stages: string[] = [];
     const composition: ForgeComposition = {
       ...fixture.composition(recordingStore(localStore, fixture.calls)),
@@ -172,6 +173,8 @@ describe('executeEval', () => {
           afterTask(context) {
             stages.push('listener');
             contexts.push(context);
+            received.push(Buffer.from(context.nativeArtifact.body));
+            context.nativeArtifact.body.fill(0);
           },
         },
       ],
@@ -282,10 +285,7 @@ describe('executeEval', () => {
     assert.deepEqual(context.plan, fixture.plan);
     assert.equal(context.sessionId, 'canonical-session');
     assert.equal(context.nativeArtifact.sensitivity, 'restricted');
-    assert.deepEqual(
-      Buffer.from(context.nativeArtifact.body),
-      await fs.readFile(nativePath),
-    );
+    assert.deepEqual(received[0], await fs.readFile(nativePath));
     assert.equal(await fs.readFile(nativePath, 'utf8'), RAW_NATIVE_SESSION);
     assert.equal((await fs.stat(nativePath)).mode & 0o777, 0o600);
     assert.ok(!('plan_sha256' in completed.result));
