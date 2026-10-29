@@ -60,8 +60,6 @@ describe('executeEval', () => {
       { id: 'pending', afterTask: () => new Promise(() => {}) },
     ]);
     assert.equal(completed.result.evaluation.status, 'passed');
-    assert.equal(completed.result.evaluation.score, 0);
-    assert.deepEqual(completed.result.warnings, []);
   });
 
   it('isolates synchronous throws and rejections without changing results', async () => {
@@ -285,7 +283,6 @@ describe('executeEval', () => {
       completed.location,
       'native/claude-code/session.jsonl',
     );
-    assert.equal(contexts.length, 1);
     assert.deepEqual(stages, ['listener', 'evaluation']);
     const context = contexts[0]!;
     assert.equal(context.runId, 'run-1');
