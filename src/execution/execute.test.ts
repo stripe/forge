@@ -16,6 +16,10 @@ import type {
 import type { ForgeComposition } from '../contracts/composition.ts';
 import { credentialReference } from '../contracts/credentials.ts';
 import type { RunInputProvider } from '../contracts/inputs.ts';
+import type {
+  RunAfterTaskContext,
+  RunLifecycleListener,
+} from '../contracts/lifecycle.ts';
 import type { RunEvent } from '../contracts/observability.ts';
 import type {
   PreparedRuntime,
@@ -51,6 +55,49 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('completes normally without waiting for lifecycle listeners', async () => {
+    const completed = await runWithLifecycleListeners([
+      { id: 'pending', afterTask: () => new Promise(() => {}) },
+    ]);
+    assert.equal(completed.result.evaluation.status, 'passed');
+    assert.equal(completed.result.evaluation.score, 0);
+    assert.deepEqual(completed.result.warnings, []);
+  });
+
+  it('isolates synchronous throws and rejections without changing results', async () => {
+    const baseline = await runWithLifecycleListeners();
+    const completed = await runWithLifecycleListeners([
+      {
+        id: 'throws',
+        afterTask() {
+          throw new Error('listener failed');
+        },
+      },
+      {
+        id: 'rejects',
+        afterTask: () => Promise.reject(new Error('listener rejected')),
+      },
+    ]);
+    assert.deepEqual(completed.result.evaluation, baseline.result.evaluation);
+    assert.deepEqual(completed.result.warnings, baseline.result.warnings);
+  });
+
+  it('does not notify listeners when no native artifact is captured', async () => {
+    let calls = 0;
+    await runWithLifecycleListeners(
+      [{ id: 'unused', afterTask: () => calls++ }],
+      false,
+    );
+    assert.equal(calls, 0);
+  });
+
+  it('preserves results when lifecycle listeners are absent', async () => {
+    const absent = await runWithLifecycleListeners();
+    const empty = await runWithLifecycleListeners([]);
+    assert.deepEqual(absent.result.evaluation, empty.result.evaluation);
+    assert.deepEqual(absent.result.warnings, empty.result.warnings);
+  });
+
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
     const fixture = await executionFixture();
     const store = createArtifactStore({
@@ -119,14 +166,31 @@ describe('executeEval', () => {
     assert.deepEqual(fixture.calls, []);
   });
 
-  it('runs the shared lifecycle, redacts credentials, and atomically commits', async () => {
+  it('delivers the session once before evaluation, redacts credentials, and commits exact native bytes', async () => {
     const fixture = await executionFixture({ nativeArtifact: true });
     const localStore = createArtifactStore({
       root: path.join(fixture.root, 'artifacts'),
     });
-    const composition = fixture.composition(
-      recordingStore(localStore, fixture.calls),
-    );
+    const contexts: RunAfterTaskContext[] = [];
+    const stages: string[] = [];
+    const composition: ForgeComposition = {
+      ...fixture.composition(recordingStore(localStore, fixture.calls)),
+      lifecycleListeners: [
+        {
+          id: 'capture',
+          afterTask(context) {
+            stages.push('listener');
+            contexts.push(context);
+          },
+        },
+      ],
+      observer: {
+        observe(event) {
+          if (event.phase === 'evaluation' && event.type === 'phase_started')
+            stages.push('evaluation');
+        },
+      },
+    };
 
     const completed = await executeEval({
       runId: 'run-1',
@@ -220,6 +284,17 @@ describe('executeEval', () => {
     const nativePath = path.join(
       completed.location,
       'native/claude-code/session.jsonl',
+    );
+    assert.equal(contexts.length, 1);
+    assert.deepEqual(stages, ['listener', 'evaluation']);
+    const context = contexts[0]!;
+    assert.equal(context.runId, 'run-1');
+    assert.deepEqual(context.plan, fixture.plan);
+    assert.equal(context.sessionId, 'canonical-session');
+    assert.equal(context.nativeArtifact.sensitivity, 'restricted');
+    assert.deepEqual(
+      Buffer.from(context.nativeArtifact.body),
+      await fs.readFile(nativePath),
     );
     assert.equal(await fs.readFile(nativePath, 'utf8'), RAW_NATIVE_SESSION);
     assert.equal((await fs.stat(nativePath)).mode & 0o777, 0o600);
@@ -1237,6 +1312,21 @@ describe('executeEval', () => {
     assert.equal(runtimePrepared, false);
   });
 });
+
+async function runWithLifecycleListeners(
+  lifecycleListeners?: readonly RunLifecycleListener[],
+  nativeArtifact = true,
+) {
+  const fixture = await executionFixture({ nativeArtifact });
+  return executeEval({
+    runId: 'lifecycle-test',
+    plan: fixture.plan,
+    composition: {
+      ...fixture.composition(createArtifactStore({ root: fixture.root })),
+      ...(lifecycleListeners === undefined ? {} : { lifecycleListeners }),
+    },
+  });
+}
 
 async function executionFixture(
   options: {

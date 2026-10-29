@@ -143,6 +143,7 @@ import {
   throwIfAborted,
 } from './errors.ts';
 import { createRunEventEmitter } from './events.ts';
+import { notifyAfterTask } from './lifecycleListeners.ts';
 
 const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;
@@ -487,6 +488,17 @@ export async function executeEvalWithTestHooks(
       );
       return { evidence, nativeArtifact };
     });
+    if (
+      selectedEvidence.nativeArtifact !== undefined &&
+      input.composition.lifecycleListeners?.length
+    ) {
+      notifyAfterTask(input.composition.lifecycleListeners, {
+        runId: input.runId,
+        plan: input.plan,
+        sessionId: interaction.sessionId!,
+        nativeArtifact: selectedEvidence.nativeArtifact,
+      });
+    }
     const redacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,

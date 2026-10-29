@@ -6,6 +6,7 @@ import type {
 } from './completion.ts';
 import type { CredentialResolver } from './credentials.ts';
 import type { RunInputProvider } from './inputs.ts';
+import type { RunLifecycleListener } from './lifecycle.ts';
 import type { RunObserver } from './observability.ts';
 import type { RuntimeAdapter } from './runtime.ts';
 
@@ -26,4 +27,5 @@ export interface ForgeComposition {
   readonly artifactStore: RunArtifactStore;
   readonly observer?: RunObserver;
   readonly contributors?: readonly RunArtifactContributor[];
+  readonly lifecycleListeners?: readonly RunLifecycleListener[];
 }

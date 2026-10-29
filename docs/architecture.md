@@ -432,6 +432,7 @@ contains:
 | `RunArtifactStore` | Stage and atomically commit results | One run namespace in the result store |
 | `RunObserver` | Receive lifecycle events | No control; failures are ignored |
 | `RunArtifactContributor` list | Add supplemental files | Only below `extensions/<contributor-id>/` |
+| `RunLifecycleListener` list | Notified at run stages; today only `afterTask`, with the captured native session before evaluation, when available | No control; not awaited; failures are ignored |
 
 The composition does not define setup semantics. Conversely, the engine's
 setup registry does not provide runtime authority.
@@ -1369,6 +1370,7 @@ trusted.
 | Workspace and native logs | Untrusted evidence | Read only after quiescence, path and byte limits, no symlink traversal; normalized outputs are redacted while exact native bytes are restricted |
 | Observer | Non-authoritative | Receives only lifecycle metadata; rejection cannot affect the run |
 | Artifact contributor | Trusted extension | Namespaced paths, collision checks, secret scan, store validation |
+| Lifecycle listener | Trusted host code with access to unredacted native session bytes | Notified after evidence capture, before evaluation; not awaited; failures are ignored |
 
 Other important safeguards include:
 

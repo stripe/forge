@@ -5,6 +5,7 @@ export * from './completion.ts';
 export * from './composition.ts';
 export * from './credentials.ts';
 export * from './inputs.ts';
+export * from './lifecycle.ts';
 export type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
