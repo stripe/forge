@@ -11,7 +11,7 @@ import {
 } from '../version.ts';
 import { JudgingCriterionSchema } from './criteria.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
-import { isSha256Digest, isSha256Hex } from './hashes.ts';
+import { isSha256Digest } from './hashes.ts';
 import { agentSelectionKey } from './matrix.ts';
 import {
   isAuthoredCaseId,
@@ -217,6 +217,7 @@ const ChecksSchema = z
 const CompatibleEvalCaseSchema = z
   .object({
     id: CaseIdSchema,
+    version: VersionSchema,
     display_name: TrimmedTextSchema.optional(),
     task: TrimmedTextSchema.optional(),
     initial_prompt: TrimmedTextSchema.optional(),
@@ -264,10 +265,9 @@ const CompatibleEvalCaseSchema = z
     }
   });
 
-const EvalCaseSchema = z.intersection(
-  CompatibleEvalCaseSchema,
-  z.object({ id: AuthoredCaseIdSchema }),
-);
+const EvalCaseSchema = CompatibleEvalCaseSchema.safeExtend({
+  id: AuthoredCaseIdSchema,
+});
 
 const DatasetIdentitySchema = z
   .object({
@@ -276,39 +276,33 @@ const DatasetIdentitySchema = z
   })
   .strict();
 
-const ManifestFileSchema = z
+const ManifestCaseSchema = z
   .object({
-    path: DatasetPathSchema,
-    size: NonnegativeIntegerSchema,
-    sha256: z.string().refine(isSha256Hex, 'must be lowercase SHA-256 hex'),
+    id: AuthoredCaseIdSchema,
+    version: VersionSchema,
+    path: CasePathSchema,
   })
   .strict();
 
 const DatasetManifestSchema = z
   .object({
     dataset: DatasetIdentitySchema,
-    cases: z.array(CasePathSchema).min(1).max(10_000),
-    files: z.array(ManifestFileSchema).min(1).max(50_000),
+    cases: z.array(ManifestCaseSchema).min(1).max(10_000),
   })
   .strict()
   .superRefine((manifest, context) => {
-    addDuplicateIssues(manifest.cases, context, ['cases'], 'path');
     addDuplicateIssues(
-      manifest.files.map(({ path }) => path),
+      manifest.cases.map(({ path }) => path),
       context,
-      ['files'],
+      ['cases'],
       'path',
     );
-    const files = new Set(manifest.files.map(({ path }) => path));
-    for (const [index, casePath] of manifest.cases.entries()) {
-      if (!files.has(casePath)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['cases', index],
-          message: 'case path must be present in the file manifest',
-        });
-      }
-    }
+    addDuplicateIssues(
+      manifest.cases.map(({ id }) => id),
+      context,
+      ['cases'],
+      'id',
+    );
   });
 
 const ModelRefSchema = z
@@ -335,6 +329,7 @@ const AgentSelectionSchema = ModelRefSchema.extend({
 
 const RunSelectionSchema = z
   .object({
+    group_id: SimpleIdentifierSchema.optional(),
     case_id: CaseIdSchema,
     treatment: SimpleIdentifierSchema,
     agent: AgentSelectionSchema,
@@ -366,7 +361,7 @@ const DockerRuntimeSchema = z
         ),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict();
 
@@ -445,7 +440,7 @@ function assertRuntimeConfigBytes(value: unknown): void {
   }
 }
 
-const ExperimentMatrixGroupSchema = z
+const ExperimentMatrixAxesSchema = z
   .object({
     cases: z.array(CasePathSchema).min(1).max(10_000),
     treatments: z.array(z.string()).min(1).max(1_000),
@@ -453,12 +448,16 @@ const ExperimentMatrixGroupSchema = z
   })
   .strict();
 
+const ExperimentMatrixGroupSchema = ExperimentMatrixAxesSchema.extend({
+  id: SimpleIdentifierSchema.optional(),
+}).strict();
+
 const MatrixRunPolicySchema = {
   repetitions: PositiveIntegerSchema.max(10_000).default(1),
   retries: NonnegativeIntegerSchema.max(100).default(0),
 };
 
-const FlatExperimentMatrixSchema = ExperimentMatrixGroupSchema.extend(
+const FlatExperimentMatrixSchema = ExperimentMatrixAxesSchema.extend(
   MatrixRunPolicySchema,
 ).strict();
 const GroupedExperimentMatrixSchema = z
@@ -498,9 +497,6 @@ const ExperimentConfigSchema = z
           'must be a non-empty dataset location without NUL bytes',
         )
         .optional(),
-      manifest_sha256: z
-        .string()
-        .refine(isSha256Digest, 'must be a sha256: digest'),
     }).strict(),
     forge: AuthoredForgeSchema.optional(),
     runtime: RuntimeSchema,
@@ -510,8 +506,8 @@ const ExperimentConfigSchema = z
         judge: ModelRefSchema.optional(),
       })
       .strict()
-      .default({}),
-    treatments: z.record(z.string(), TreatmentSchema).default({}),
+      .prefault({}),
+    treatments: z.record(z.string(), TreatmentSchema).prefault({}),
     matrix: ExperimentMatrixSchema,
     limits: z
       .object({
@@ -520,7 +516,7 @@ const ExperimentConfigSchema = z
         ),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict()
   .superRefine((config, context) => {
@@ -545,6 +541,20 @@ const ExperimentConfigSchema = z
     const matrix = config.matrix;
     const grouped = 'groups' in matrix;
     const groups = 'groups' in matrix ? matrix.groups : [matrix];
+    if (grouped) {
+      const ids = new Set<string>();
+      for (const [index, group] of matrix.groups.entries()) {
+        if (group.id === undefined) continue;
+        if (ids.has(group.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['matrix', 'groups', index, 'id'],
+            message: 'matrix group IDs must be unique',
+          });
+        }
+        ids.add(group.id);
+      }
+    }
     const treatmentNames = new Set([
       'baseline',
       ...Object.keys(config.treatments),
@@ -602,17 +612,12 @@ const ExperimentConfigSchema = z
   });
 
 /** Resolved plans require every defaulted authoring field to be materialized. */
-const MaterializedEvalCaseSchema = z.intersection(
-  z
-    .object({
-      id: CaseIdSchema,
-      execution_mode: z.enum(['multi_turn', 'one_shot']),
-      setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
-      judging_criteria: JudgingCriteriaSchema,
-    })
-    .passthrough(),
-  CompatibleEvalCaseSchema,
-);
+const MaterializedEvalCaseSchema = CompatibleEvalCaseSchema.safeExtend({
+  id: CaseIdSchema,
+  execution_mode: z.enum(['multi_turn', 'one_shot']),
+  setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS),
+  judging_criteria: JudgingCriteriaSchema,
+});
 
 const ResolvedDockerRuntimeSchema = z
   .object({
@@ -639,11 +644,7 @@ const ResolvedRunPlanSchema = z
     selection: RunSelectionSchema,
     provenance: z
       .object({
-        dataset: DatasetIdentitySchema.extend({
-          manifest_sha256: z
-            .string()
-            .refine(isSha256Digest, 'must be a sha256: digest'),
-        }).strict(),
+        dataset: DatasetIdentitySchema,
         experiment: z
           .object({
             id: CaseIdSchema,

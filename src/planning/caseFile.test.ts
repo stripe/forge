@@ -4,7 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
-import { sha256Hex } from '../model/hashes.ts';
 import { loadDataset } from '../model/loaders.ts';
 import type { LoadedDatasetV1 } from '../model/types.ts';
 import {
@@ -209,6 +208,7 @@ async function createDataset(): Promise<{
   const caseBody = Buffer.from(
     [
       'id: sample/write',
+      'version: 0.1.0',
       'execution_mode: one_shot',
       'initial_prompt: Write a file.',
       '',
@@ -216,7 +216,7 @@ async function createDataset(): Promise<{
   );
   const fixtureBody = Buffer.from('fixture');
   const otherCaseBody = Buffer.from(
-    'id: unselected\nexecution_mode: one_shot\ninitial_prompt: Another task.\n',
+    'id: unselected\nversion: 0.1.0\nexecution_mode: one_shot\ninitial_prompt: Another task.\n',
   );
   await fs.mkdir(path.dirname(fixtureFile), { recursive: true });
   await fs.writeFile(caseFile, caseBody);
@@ -227,22 +227,16 @@ async function createDataset(): Promise<{
     path.join(root, 'manifest.json'),
     JSON.stringify({
       dataset: { id: 'case-file-test', version: '1.0.0' },
-      cases: [casePath, otherCasePath],
-      files: [
+      cases: [
         {
+          id: 'sample/write',
+          version: '0.1.0',
           path: casePath,
-          size: caseBody.byteLength,
-          sha256: sha256Hex(caseBody),
         },
         {
-          path: fixturePath,
-          size: fixtureBody.byteLength,
-          sha256: sha256Hex(fixtureBody),
-        },
-        {
+          id: 'unselected',
+          version: '0.1.0',
           path: otherCasePath,
-          size: otherCaseBody.byteLength,
-          sha256: sha256Hex(otherCaseBody),
         },
       ],
     }),

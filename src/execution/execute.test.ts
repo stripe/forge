@@ -41,7 +41,6 @@ import {
 const roots: string[] = [];
 const SECRET = 'sk-ant-test-secret-value';
 const RAW_NATIVE_SESSION = `{"type":"system","credential":"${SECRET}"}\n`;
-const DIGEST_A = `sha256:${'a'.repeat(64)}` as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -648,7 +647,7 @@ describe('executeEval', () => {
     assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
-  it('assigns credential scope from a first-party setup capability', async () => {
+  it('authorizes original shared-source references and preserves declared scopes', async () => {
     const fixture = await executionFixture();
     const step: ResolvedRunPlanV1['setup'][number] = {
       uses: 'forge/command',
@@ -670,7 +669,7 @@ describe('executeEval', () => {
                   reference: credentialReference('setup.token'),
                 }),
                 SHARED_TOKEN: Object.freeze({
-                  reference: credentialReference('shared.token'),
+                  reference: credentialReference('shared.agent-token'),
                 }),
               }),
               agent: Object.freeze({
@@ -696,6 +695,9 @@ describe('executeEval', () => {
     });
     const composition = fixture.composition(localStore);
     const runtime = composition.runtime;
+    const originalAgent = composition.agents.get('claude-code')!;
+    const calls: Array<{ reference: string; purpose: string; runId: string }> =
+      [];
 
     await executeEvalWithTestHooks(
       {
@@ -703,6 +705,44 @@ describe('executeEval', () => {
         plan,
         composition: {
           ...composition,
+          agents: new Map([
+            [
+              originalAgent.id,
+              {
+                ...originalAgent,
+                requirements(selection) {
+                  const requirements = originalAgent.requirements(selection);
+                  return {
+                    ...requirements,
+                    environment: {
+                      ...requirements.environment,
+                      credentials: {
+                        ...requirements.environment.credentials,
+                        SHARED_TOKEN: {
+                          reference: credentialReference('shared.agent-token'),
+                        },
+                      },
+                    },
+                  };
+                },
+              },
+            ],
+          ]),
+          credentialResolver: {
+            sourceIdentity(reference) {
+              return reference.startsWith('shared.')
+                ? 'shared-source'
+                : undefined;
+            },
+            async resolve(reference, context) {
+              calls.push({
+                reference,
+                purpose: context.purpose,
+                runId: context.runId,
+              });
+              return SECRET;
+            },
+          },
           runtime: {
             ...runtime,
             async prepare(input) {
@@ -731,10 +771,127 @@ describe('executeEval', () => {
       {
         setupExecutor: createSetupExecutorWithHandlers(
           new Map([[handler.uses, handler]]),
+          true,
         ),
       },
     );
+    assert.deepEqual(
+      calls.filter(({ purpose }) => purpose === 'forge-eval:SHARED_TOKEN'),
+      [
+        {
+          reference: 'shared.agent-token',
+          purpose: 'forge-eval:SHARED_TOKEN',
+          runId: 'run-scoped-credentials',
+        },
+        {
+          reference: 'shared.token',
+          purpose: 'forge-eval:SHARED_TOKEN',
+          runId: 'run-scoped-credentials',
+        },
+      ],
+    );
   });
+
+  for (const failure of [
+    'unproven',
+    'execution-unproven',
+    'denied',
+    'inconsistent',
+  ] as const) {
+    it(`rejects ${failure} authorization of a second original reference`, async () => {
+      const fixture = await executionFixture();
+      const step: ResolvedRunPlanV1['setup'][number] = {
+        uses: 'forge/credentials',
+        with: { env: ['ANTHROPIC_API_KEY'] },
+      };
+      const plan = {
+        ...fixture.plan,
+        treatment: { id: fixture.plan.treatment.id, setup: [step] },
+        setup: [step],
+      };
+      const calls: Array<{ reference: string; purpose: string }> = [];
+      const composition = fixture.composition(inertStore());
+      const agent = composition.agents.get('claude-code')!;
+      await assert.rejects(
+        executeEval({
+          runId: `shared-reference-${failure}`,
+          plan,
+          composition: {
+            ...composition,
+            agents: new Map([
+              [
+                agent.id,
+                {
+                  ...agent,
+                  requirements(selection) {
+                    const requirements = agent.requirements(selection);
+                    return {
+                      ...requirements,
+                      environment: {
+                        ...requirements.environment,
+                        credentials: {
+                          FIRST_TOKEN: {
+                            reference: credentialReference('first.token'),
+                          },
+                          ...requirements.environment.credentials,
+                        },
+                      },
+                    };
+                  },
+                },
+              ],
+            ]),
+            credentialResolver: {
+              ...(failure === 'unproven'
+                ? {}
+                : {
+                    sourceIdentity: (
+                      _reference: unknown,
+                      context: { phase: string },
+                    ) =>
+                      failure === 'execution-unproven' &&
+                      context.phase === 'execution'
+                        ? undefined
+                        : 'source',
+                  }),
+              async resolve(reference, context) {
+                calls.push({ reference, purpose: context.purpose });
+                if (reference === 'env:ANTHROPIC_API_KEY') {
+                  if (failure === 'denied') throw new Error('access denied');
+                  return 'different-source-value';
+                }
+                return SECRET;
+              },
+            },
+          },
+        }),
+        {
+          code: failure === 'unproven' ? 'invalid_plan' : 'credential_failed',
+          phase: 'preflight',
+        },
+      );
+      assert.deepEqual(
+        calls,
+        failure === 'unproven' || failure === 'execution-unproven'
+          ? []
+          : [
+              {
+                reference: 'first.token',
+                purpose: 'forge-eval:FIRST_TOKEN',
+              },
+              {
+                reference: 'anthropic.api-key',
+                purpose: 'forge-eval:ANTHROPIC_API_KEY',
+              },
+              {
+                reference: 'env:ANTHROPIC_API_KEY',
+                purpose: 'forge-eval:ANTHROPIC_API_KEY',
+              },
+            ],
+      );
+      assert.equal(fixture.calls.includes('runtime:prepare'), false);
+    });
+  }
 
   for (const [description, credential] of [
     ['an unescaped credential', SECRET],
@@ -1321,13 +1478,14 @@ function resolvedPlan(): ResolvedRunPlanV1 {
       repetition: 0,
     },
     provenance: {
-      dataset: { id: 'sample', version: '1', manifest_sha256: DIGEST_A },
+      dataset: { id: 'sample', version: '1' },
       experiment: { id: 'local', version: '1' },
       case: { id: 'sample/case', path: 'cases/case.yaml' },
       forge: { ...FORGE_BUILD_IDENTITY },
     },
     case: {
       id: 'sample/case',
+      version: '0.1.0',
       initial_prompt: 'Create greeting.txt',
       execution_mode: 'one_shot',
       setup: [],

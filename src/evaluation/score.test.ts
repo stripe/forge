@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { REQUIREMENT_LEVELS } from '../model/types.ts';
-
+import type { CriterionResultV1 } from '../results/types.ts';
 import { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
 
 describe('scoreEvaluation', () => {
@@ -96,6 +96,101 @@ describe('scoreEvaluation', () => {
         assert.equal(result.judging_criteria_passed, passed ? 1 : 0);
         assert.deepEqual(result.judging_criteria, criteria);
       }
+    }
+  });
+
+  it('excludes judge errors while retaining valid agent failures and error details', () => {
+    const error: CriterionResultV1 = {
+      requirement_level: 'SHOULD' as const,
+      criterion: 'unavailable',
+      passed: null,
+      error: {
+        type: 'request_error',
+        attempts: 3,
+        message: 'Service unavailable.',
+      },
+      explanation: 'Request failed.',
+    };
+    const scored = scoreEvaluation(
+      [
+        {
+          requirement_level: 'SHOULD' as const,
+          criterion: 'one',
+          passed: true,
+          explanation: 'yes',
+        },
+        {
+          requirement_level: 'SHOULD' as const,
+          criterion: 'two',
+          passed: false,
+          explanation: 'no',
+        },
+        error,
+      ],
+      [{ name: 'file', passed: true }],
+    );
+    assert.equal(scored.score, 0.5);
+    assert.equal(scored.status, 'judge_error');
+    assert.equal(scored.judging_criteria_total, 3);
+    assert.equal(scored.judging_criteria_passed, 1);
+    assert.equal(scored.judging_criteria_errored, 1);
+    assert.deepEqual(scored.judging_criteria[2], error);
+    assert.notEqual(scored.judging_criteria[2]!.error, error.error);
+  });
+
+  it('retains observational errors without changing scoring totals or evaluation status', () => {
+    const observational: CriterionResultV1 = {
+      criterion: 'Read docs',
+      label: 'source',
+      requirement_level: 'OPTIONAL',
+      passed: null,
+      error: {
+        type: 'request_error',
+        attempts: 3,
+        message: 'Service unavailable.',
+      },
+      explanation: '',
+    };
+    for (const passed of [true, false]) {
+      const result = scoreEvaluation(
+        [
+          {
+            requirement_level: 'SHOULD',
+            criterion: 'Correct answer',
+            label: 'correctness',
+            passed,
+            explanation: '',
+          },
+          observational,
+        ],
+        [],
+      );
+      assert.equal(result.status, passed ? 'passed' : 'failed');
+      assert.equal(result.score, passed ? 1 : 0);
+      assert.equal(result.judging_criteria_total, 1);
+      assert.equal(result.judging_criteria_errored, 0);
+      assert.deepEqual(result.judging_criteria[1], observational);
+    }
+  });
+
+  it('does not fabricate a score or an agent pass/fail when all judgments error', () => {
+    const error: CriterionResultV1 = {
+      requirement_level: 'SHOULD' as const,
+      criterion: 'unavailable',
+      passed: null,
+      error: { type: 'parse_error', attempts: 3, message: 'Invalid JSON.' },
+      explanation: 'Malformed response.',
+    };
+    for (const checks of [
+      [],
+      [{ name: 'file', passed: true }],
+      [{ name: 'file', passed: false }],
+    ]) {
+      const scored = scoreEvaluation([error], checks);
+      assert.equal(scored.score, null);
+      assert.equal(scored.status, 'judge_error');
+      assert.equal(scored.judging_criteria_errored, 1);
+      assert.deepEqual(scored.checks, checks);
     }
   });
 

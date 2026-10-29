@@ -36,8 +36,9 @@ truth for feature details; do not duplicate their full specifications here.
   their owning schemas. Resolve explicit inputs and defaults into canonical,
   cloned, deeply frozen plans without mutating inputs or introducing hidden
   execution defaults.
-- Verify exact dataset inventories, sizes, hashes, and experiment pins. Add
-  other digests only for a defined integrity or identity purpose.
+- Verify exact dataset case inventories, case identities, and experiment pins.
+  Case and fixture content integrity is governed outside Forge; add digests
+  only for a defined integrity or identity purpose.
 - Finish parsing and pure capability preflight before credential lookup,
   provider requests, allocation, or workspace mutation.
 - `executeEval` owns lifecycle and scoring order. Apply case setup before
@@ -66,11 +67,16 @@ implementation. Prose and formatting-only changes do not need new tests.
 Place focused unit tests beside source files as `*.test.ts`; put cross-module,
 CLI, package, and embedding tests under `test/`. Keep harness test inputs under
 `test/fixtures/`. Prefer deterministic fakes for the normal test suite.
-Versioned public release bundles belong under `datasets/<name>/<version>/`,
-with a runnable `experiment.yaml` beside the exact-manifest `dataset/` tree.
-Use `dataset.path: ./dataset` so the complete bundle can be moved or archived
-without rewriting its experiment. Keep release documentation outside the
-exact-manifest dataset tree.
+Public datasets belong under `release/datasets/<name>/`, holding only the latest
+version; earlier versions live in Git history. Keep the manifest, cases, and
+fixtures there. Put the runnable experiment at `release/experiment.yaml` and
+release documentation at `release/README.md`, outside the dataset payload.
+Set `dataset.path` relative to the experiment file so `release/` can be relocated
+without rewriting configuration. Cases read fixtures through `forge/write`
+`dataset_path` sources.
+When a case version changes or a case is added or removed, update the manifest
+and bump the dataset version; `pnpm check:cases` enforces this against
+`origin/main`.
 
 While iterating, run the narrowest relevant tests, plus applicable type, build,
 or package checks from `package.json`:
@@ -82,7 +88,7 @@ pnpm test path/to/file.test.ts
 Use Biome for formatting, import organization, and linting. Run `pnpm lint`
 for code changes; it is also included in `pnpm check`. Use `pnpm lint:fix`
 for safe automatic fixes, and preserve the exclusions in `biome.json` for
-integrity-pinned inputs and assets.
+pinned inputs and assets.
 
 Run `pnpm check` before handing off changes that affect code, public types,
 exports, execution, packaging, or release artifacts. For a documentation-only
@@ -118,17 +124,48 @@ documentation, and tests. Do not inherit the implementation conversation.
 Keep the reviewer read-only, address actionable findings, and obtain another
 review when fixes materially change the reviewed diff.
 
-Every PR description must include these sections:
+### PR descriptions
 
-- **Context:** Explain the problem, its consequences, and intended behavior for
-  a reader unfamiliar with the task.
-- **Changes:** Describe the final changes and consequential decisions. Use
-  tables or diagrams when they make the change easier to understand, and
-  include before/after comparisons when applicable.
+Write for an experienced engineer who is unfamiliar with this part of Forge.
+Start with the system context, the concrete problem, and the resulting
+behavior; define Forge-specific terms when they first matter. Explain the main
+workflow and the conditions that let a reviewer predict its outcomes: what
+starts work, when results are reused, what counts as success, and what can
+remain afterward.
 
-When useful, include a **Validation** section describing checks that add signal
-beyond routine CI and any remaining validation gaps. Keep the description
-proportional to the change and focused on the final implementation.
+Ground every behavioral claim in the current diff and the relevant
+implementation, tests, and config — not in prior PR prose or discussion. Keep
+material conditions next to the claims they limit, and distinguish inferred
+intent from observed behavior. Use plain, direct language and precise
+technical names; cut secondary topics rather than packing them into dense
+sentences. Scale detail to the change — simple PRs can be brief.
+
+Every PR description must include these sections, in this order:
+
+- **Context:** the concrete problem — the input or situation, what the system
+  does today, and how that was observed (a run, a reproduction, a test) — and
+  its impact: who or what it hurts and how much. Keep measured impact separate
+  from inferred impact.
+- **Changes:** the changed behavior, the main workflow, and its important
+  boundaries and consequential decisions. Use a before/after or a table when it
+  helps, and a diagram when it materially improves understanding. Say why this
+  approach and not the obvious alternatives — name them and say why they lose —
+  and how the change degrades, rather than breaks, when its inputs are missing
+  or malformed, plus what it deliberately doesn't do.
+
+When useful, include a **Validation** section with the exact commands a
+reviewer can run and what they should see; which tests fail without the fix;
+the commands actually run and their results; and any proposed check that adds
+signal beyond routine CI. Code containing a test is not proof it passed —
+state when results are unavailable, and label proposed checks as proposed.
+Note any remaining validation gaps.
+
+Before submitting, challenge the description's consequential claims. Look for
+a permitted input, state change, or failure path that would contradict each
+one, especially words like "only," "every," and "always." Distinguish an
+attempted action from a verified outcome, and narrow or qualify claims the
+code permits a counterexample to. Keep the description proportional to the
+change and focused on the final implementation.
 
 ## Documentation maintenance
 
@@ -162,9 +199,9 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   serialization, tests, and public documentation together.
 - When adding or changing an entry point, update `package.json`, root and
   subpath export tests, the package smoke test, and `docs/architecture.md`.
-- When changing checked-in dataset snapshots or eval fixtures, update dependent
-  sizes and SHA-256 digests in dataset manifests and experiment configs, plus
-  mirrored README snippets.
+- When changing case versions or membership in a checked-in dataset manifest,
+  bump the manifest's dataset version and the `dataset.version` of dependent
+  experiment configs, plus mirrored README snippets.
 - When changing packaged Docker assets or tool pins, update their recorded
   digests, runtime metadata, and tests.
 - Keep ATIF changes tied to a specific upstream version and update provenance,

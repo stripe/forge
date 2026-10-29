@@ -4,8 +4,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
+import { credentialReference } from './contracts/credentials.ts';
 import { defaultForgeEngine } from './engine.ts';
+import { parseCriterionJudgment } from './evaluation/criterionJudge.ts';
 import { scoreEvaluation } from './evaluation/score.ts';
+import { executeEvalWithTestHooks } from './execution/execute.ts';
 import {
   type ExperimentRunOptions,
   ExperimentRunReportError,
@@ -193,6 +196,7 @@ describe('experiment run scorecards', () => {
       failed: 1,
       attempts_total: 6,
       retry_attempts: 1,
+      judge_errors: { evaluations: 0, criteria: 0 },
       coverage: 4 / 6,
       pass_rate: 0.5,
       judging_score: { mean: 0.5, evaluations: 3 },
@@ -206,6 +210,9 @@ describe('experiment run scorecards', () => {
           passed: 0,
           total: 0,
           evaluations: 0,
+          judged_evaluations: 0,
+          fully_judged_evaluations: 0,
+          errored: 0,
           strict_pass_rate: null,
           average_pass_rate: null,
         },
@@ -213,6 +220,9 @@ describe('experiment run scorecards', () => {
           passed: 3,
           total: 6,
           evaluations: 3,
+          judged_evaluations: 3,
+          fully_judged_evaluations: 3,
+          errored: 0,
           strict_pass_rate: 1 / 3,
           average_pass_rate: 0.5,
         },
@@ -220,6 +230,9 @@ describe('experiment run scorecards', () => {
           passed: 0,
           total: 0,
           evaluations: 0,
+          judged_evaluations: 0,
+          fully_judged_evaluations: 0,
+          errored: 0,
           strict_pass_rate: null,
           average_pass_rate: null,
         },
@@ -314,6 +327,9 @@ describe('experiment run scorecards', () => {
         passed: 2,
         total: 3,
         evaluations: 2,
+        judged_evaluations: 2,
+        fully_judged_evaluations: 2,
+        errored: 0,
         strict_pass_rate: 0.5,
         average_pass_rate: 0.75,
       },
@@ -321,6 +337,9 @@ describe('experiment run scorecards', () => {
         passed: 1,
         total: 2,
         evaluations: 2,
+        judged_evaluations: 2,
+        fully_judged_evaluations: 2,
+        errored: 0,
         strict_pass_rate: 0.5,
         average_pass_rate: 0.5,
       },
@@ -328,6 +347,9 @@ describe('experiment run scorecards', () => {
         passed: 1,
         total: 2,
         evaluations: 2,
+        judged_evaluations: 2,
+        fully_judged_evaluations: 2,
+        errored: 0,
         strict_pass_rate: 0.5,
         average_pass_rate: 0.5,
       },
@@ -425,6 +447,64 @@ describe('experiment run scorecards', () => {
       blend: { score: 0 },
     },
     {
+      name: 'an errored MUST does not gate valid SHOULD judgments',
+      criteria: [judgment('MUST', null), judgment('SHOULD', true)],
+      required: { strict: null, avg: null },
+      recommended: { strict: 1, avg: 1 },
+      blend: { score: 1 },
+    },
+    {
+      name: 'errored MUST and SHOULD do not dilute a SHOULD average',
+      criteria: [
+        judgment('MUST', null),
+        judgment('SHOULD', null),
+        judgment('SHOULD', true),
+        judgment('SHOULD', false),
+      ],
+      required: { strict: null, avg: null },
+      recommended: { strict: 0, avg: 0.5 },
+      blend: { score: 0.5 },
+    },
+    {
+      name: 'an errored MUST does not dilute valid Required judgments',
+      criteria: [judgment('MUST', null), judgment('MUST', true)],
+      required: { strict: 1, avg: 1 },
+      recommended: { strict: 1, avg: 1 },
+      blend: { score: 1 },
+    },
+    {
+      name: 'an errored SHOULD leaves the valid MUST-only view',
+      criteria: [judgment('MUST', true), judgment('SHOULD', null)],
+      required: { strict: 1, avg: 1 },
+      recommended: { strict: 1, avg: 1 },
+      blend: { score: 1 },
+    },
+    {
+      name: 'a valid MUST failure still gates Blend alongside judge errors',
+      criteria: [
+        judgment('MUST', false),
+        judgment('MUST', null),
+        judgment('SHOULD', true),
+      ],
+      required: { strict: 0, avg: 0 },
+      recommended: { strict: 0, avg: 0.5 },
+      blend: { score: 0 },
+    },
+    {
+      name: 'all-error MUST and SHOULD leave every view empty',
+      criteria: [judgment('MUST', null), judgment('SHOULD', null)],
+      required: { strict: null, avg: null },
+      recommended: { strict: null, avg: null },
+      blend: { score: null },
+    },
+    {
+      name: 'an OPTIONAL error does not affect any score',
+      criteria: [judgment('MUST', true), judgment('OPTIONAL', null)],
+      required: { strict: 1, avg: 1 },
+      recommended: { strict: 1, avg: 1 },
+      blend: { score: 1 },
+    },
+    {
       name: 'OPTIONAL alone leaves both sets empty',
       criteria: [judgment('OPTIONAL', false)],
       required: { strict: null, avg: null },
@@ -455,6 +535,61 @@ describe('experiment run scorecards', () => {
       });
     },
   );
+
+  it('excludes all-error views from aggregates while retaining valid judgments from judge-error runs', () => {
+    const criteria = [
+      [
+        judgment('MUST', null),
+        judgment('SHOULD', true),
+        judgment('SHOULD', false),
+      ],
+      [judgment('MUST', true), judgment('SHOULD', null)],
+      [judgment('MUST', null), judgment('SHOULD', null)],
+    ];
+    const runs = criteria.map((judgments, index) => ({
+      ...row(index),
+      evaluation: summarizeReportEvaluation(scoreEvaluation(judgments, [])),
+    }));
+    const report = build(runs);
+    assert.deepEqual(report.summary.criterion_scores, {
+      required: { strict: 1, avg: 1, evaluations: 1 },
+      recommended: { strict: 0.5, avg: 2 / 3, evaluations: 2 },
+      blend: { score: 0.75, evaluations: 2 },
+    });
+    assert.deepEqual(
+      report.cases[0]!.criterion_scores,
+      report.summary.criterion_scores,
+    );
+    assert.deepEqual(report.summary.judge_errors, {
+      evaluations: 3,
+      criteria: 4,
+    });
+    assert.equal(report.summary.pass_rate, null);
+    assert.deepEqual(report.summary.judging_score, {
+      mean: 0.75,
+      evaluations: 2,
+    });
+    assert.deepEqual(
+      report.runs.map((run) => run.evaluation!.status),
+      ['judge_error', 'judge_error', 'judge_error'],
+    );
+    for (const view of ['required', 'recommended', 'blend'] as const) {
+      const changed = structuredClone(report);
+      const scores = changed.runs[2]!.evaluation!.criterion_scores;
+      if (view === 'blend') scores.blend.score = 0;
+      else scores[view].strict = 0;
+      assert.throws(
+        () => parseExperimentRunReport(changed),
+        /Criterion scores must match/,
+      );
+    }
+    assert.deepEqual(
+      parseExperimentRunReport(
+        JSON.parse(serializeExperimentRunReport(report)),
+      ),
+      report,
+    );
+  });
 
   it('averages Blend per evaluation after gating and keeps failed MUST runs in the denominator', () => {
     const runs = [row(0), row(1), row(2), row(3), row(4), row(5)];
@@ -510,6 +645,128 @@ describe('experiment run scorecards', () => {
       ),
       report,
     );
+  });
+
+  it('excludes unavailable judgments from requirement-group rates and verifies their error counts', () => {
+    function judgment(
+      requirement_level: 'MUST' | 'SHOULD' | 'OPTIONAL',
+      passed: boolean | null,
+    ) {
+      const raw =
+        passed === null
+          ? '{}'
+          : JSON.stringify({
+              results: [{ index: 0, passed, explanation: 'Judged.' }],
+            });
+      return parseCriterionJudgment(raw, {
+        value: 'The answer MUST be complete.',
+        requirement_level,
+      });
+    }
+    const runs = [row(0), row(1), row(2)];
+    const judgments = [
+      [
+        judgment('MUST', true),
+        judgment('MUST', null),
+        judgment('SHOULD', false),
+        judgment('OPTIONAL', null),
+      ],
+      [
+        judgment('MUST', false),
+        judgment('SHOULD', null),
+        judgment('OPTIONAL', true),
+      ],
+      [
+        judgment('MUST', null),
+        judgment('SHOULD', true),
+        judgment('OPTIONAL', null),
+      ],
+    ];
+    for (const [index, run] of runs.entries()) {
+      run.evaluation = summarizeReportEvaluation(
+        scoreEvaluation(judgments[index]!, []),
+      );
+    }
+    const report = build(runs);
+    assert.deepEqual(report.summary.criteria_by_requirement, {
+      MUST: {
+        passed: 1,
+        total: 4,
+        errored: 2,
+        evaluations: 3,
+        judged_evaluations: 2,
+        fully_judged_evaluations: 1,
+        strict_pass_rate: 0,
+        average_pass_rate: 0.5,
+      },
+      SHOULD: {
+        passed: 1,
+        total: 3,
+        errored: 1,
+        evaluations: 3,
+        judged_evaluations: 2,
+        fully_judged_evaluations: 2,
+        strict_pass_rate: 0.5,
+        average_pass_rate: 0.5,
+      },
+      OPTIONAL: {
+        passed: 1,
+        total: 3,
+        errored: 2,
+        evaluations: 3,
+        judged_evaluations: 1,
+        fully_judged_evaluations: 1,
+        strict_pass_rate: 1,
+        average_pass_rate: 1,
+      },
+    });
+    assert.deepEqual(report.summary.judge_errors, {
+      evaluations: 3,
+      criteria: 5,
+    });
+    assert.deepEqual(report.summary.criterion_scores, {
+      required: { strict: 0.5, avg: 0.5, evaluations: 2 },
+      recommended: { strict: 1 / 3, avg: 0.5, evaluations: 3 },
+      blend: { score: 1 / 3, evaluations: 3 },
+    });
+    assert.deepEqual(
+      report.cases[0]!.criterion_scores,
+      report.summary.criterion_scores,
+    );
+    const changedScores = structuredClone(report);
+    changedScores.runs[2]!.evaluation!.criterion_scores.blend.score = 0;
+    assert.throws(
+      () => parseExperimentRunReport(changedScores),
+      /Criterion scores must match/,
+    );
+    assert.equal(report.summary.pass_rate, null);
+    assert.equal(report.summary.judging_score.mean, 0.5);
+    assert.deepEqual(
+      report.cases[0]!.criteria_by_requirement,
+      report.summary.criteria_by_requirement,
+    );
+    for (const requirement of ['MUST', 'OPTIONAL'] as const) {
+      const changed = structuredClone(report);
+      changed.runs[0]!.evaluation!.criteria_by_requirement[
+        requirement
+      ].errored = 0;
+      assert.throws(
+        () => parseExperimentRunReport(changed),
+        /counts must match/,
+      );
+    }
+    for (const field of [
+      'errored',
+      'judged_evaluations',
+      'fully_judged_evaluations',
+    ] as const) {
+      const changed = structuredClone(report);
+      changed.summary.criteria_by_requirement.MUST[field] += 1;
+      assert.throws(
+        () => parseExperimentRunReport(changed),
+        /statistics do not match/,
+      );
+    }
   });
 
   it('rejects false classifications, scores, and requirement-group aggregates', () => {
@@ -575,7 +832,7 @@ describe('experiment run scorecards', () => {
       },
       (value: typeof report) => {
         Object.assign(value.runs[0]!.evaluation!.criteria_by_requirement, {
-          EXCLUDE: { passed: 0, total: 0 },
+          EXCLUDE: { passed: 0, total: 0, errored: 0 },
         });
       },
     ]) {
@@ -613,6 +870,53 @@ describe('experiment run scorecards', () => {
     });
     assert.equal(report.runs[0]!.evaluation!.score, 0);
     assert.equal(report.runs[0]!.evaluation!.checks_passed, 1);
+  });
+
+  it('reports all-error judgments separately with unavailable score and pass rate', () => {
+    const run = row(0);
+    run.evaluation = summarizeReportEvaluation(
+      scoreEvaluation([judgment('SHOULD', null)], []),
+    );
+    const report = build([run]);
+    assert.deepEqual(report.summary.judge_errors, {
+      evaluations: 1,
+      criteria: 1,
+    });
+    assert.equal(report.summary.failed, 0);
+    assert.equal(report.summary.errored, 0);
+    assert.equal(report.summary.pass_rate, null);
+    assert.deepEqual(report.summary.criteria_by_requirement.SHOULD, {
+      passed: 0,
+      total: 1,
+      errored: 1,
+      evaluations: 1,
+      judged_evaluations: 0,
+      fully_judged_evaluations: 0,
+      strict_pass_rate: null,
+      average_pass_rate: null,
+    });
+    assert.deepEqual(report.summary.judging_score, {
+      mean: null,
+      evaluations: 0,
+    });
+    for (const evaluation of [
+      { ...run.evaluation, score: 0 },
+      { ...run.evaluation, status: 'failed' as const },
+      { ...run.evaluation, judging_criteria_errored: 2 },
+      { ...run.evaluation, judging_criteria_passed: 1 },
+    ])
+      assert.throws(() => build([{ ...run, evaluation }]));
+    assert.throws(
+      () =>
+        parseExperimentRunReport({
+          ...report,
+          summary: {
+            ...report.summary,
+            judge_errors: { evaluations: 0, criteria: 0 },
+          },
+        }),
+      /statistics/,
+    );
   });
 
   it('rejects unknown fields, false aggregates and invalid run references', () => {
@@ -847,10 +1151,12 @@ describe('experiment run scorecards', () => {
             blend: { score: 1 },
           },
           criteria_by_requirement: {
-            MUST: { passed: 1, total: 1 },
-            SHOULD: { passed: 0, total: 0 },
-            OPTIONAL: { passed: 0, total: 1 },
+            MUST: { passed: 1, total: 1, errored: 0 },
+            SHOULD: { passed: 0, total: 0, errored: 0 },
+            OPTIONAL: { passed: 0, total: 1, errored: 0 },
           },
+          judging_criteria_errored: 0,
+          judging_criteria_excluded_errored: 0,
           checks_passed: 0,
           checks_total: 1,
         },
@@ -865,10 +1171,12 @@ describe('experiment run scorecards', () => {
             blend: { score: 0 },
           },
           criteria_by_requirement: {
-            MUST: { passed: 0, total: 1 },
-            SHOULD: { passed: 0, total: 0 },
-            OPTIONAL: { passed: 1, total: 1 },
+            MUST: { passed: 0, total: 1, errored: 0 },
+            SHOULD: { passed: 0, total: 0, errored: 0 },
+            OPTIONAL: { passed: 1, total: 1, errored: 0 },
           },
+          judging_criteria_errored: 0,
+          judging_criteria_excluded_errored: 0,
           checks_passed: 0,
           checks_total: 1,
         },
@@ -885,6 +1193,158 @@ describe('experiment run scorecards', () => {
       (await readReport(resumed.report)).summary.criterion_scores,
       report.summary.criterion_scores,
     );
+  });
+
+  it('commits mixed judge outcomes, reports errors separately, and preserves them on resume', async () => {
+    const fixture = await experimentRunFixture();
+    const plan = createTestResolvedRunPlan({
+      caseId: 'testing/judge-errors',
+      checks: {},
+      judgingCriteria: [
+        'Available criterion.',
+        'Unavailable criterion.',
+        {
+          value: 'Observational criterion.',
+          label: 'source',
+          requirement_level: 'OPTIONAL',
+        },
+      ],
+      judge: { provider: 'scripted', model: 'judge' },
+    });
+    fixture.options.plans = Array.from({ length: 4 }, (_, repetition) => {
+      const repeated = structuredClone(plan);
+      repeated.selection.repetition = repetition;
+      return defaultForgeEngine.parseResolvedRunPlan(repeated);
+    });
+    const requirements = {
+      credentials: { token: { reference: credentialReference('test.judge') } },
+    };
+    const credentialResolver = createStaticCredentialResolver({
+      'test.judge': 'scripted-token',
+    });
+    const preflight = createScriptedCompletionProvider({
+      id: 'scripted',
+      requirements,
+    }).provider;
+    fixture.options.composition = {
+      ...composition(fixture.root),
+      credentialResolver,
+      completionProviders: new Map([[preflight.id, preflight]]),
+    };
+    fixture.options.execute = (input) => {
+      const repetition = input.plan.selection.repetition;
+      const provider = createScriptedCompletionProvider({
+        id: 'scripted',
+        requirements,
+        responses: Array.from({ length: 9 }, () => (request) => {
+          if (repetition === 2)
+            throw new Error('Service unavailable for scripted-token');
+          if (
+            repetition === 0 &&
+            request.systemPrompt!.includes(
+              'Success Criterion:\nObservational criterion.\n',
+            )
+          )
+            return '{}';
+          if (
+            repetition === 1 &&
+            request.systemPrompt!.includes(
+              'Success Criterion:\nUnavailable criterion.\n',
+            )
+          )
+            return '{}';
+          return JSON.stringify({
+            results: [
+              {
+                index: 0,
+                passed: repetition !== 3,
+                explanation: 'Valid judgment.',
+              },
+            ],
+          });
+        }),
+      }).provider;
+      return executeEvalWithTestHooks(
+        {
+          ...input,
+          composition: {
+            ...composition(fixture.root),
+            credentialResolver,
+            completionProviders: new Map([[provider.id, provider]]),
+          },
+        },
+        { waitBeforeCompletionRetry: async () => undefined },
+      );
+    };
+    const first = await runExperiment(fixture.options);
+    const report = await readReport(first.report);
+    assert.equal(report.summary.completed, 4);
+    assert.equal(report.summary.errored, 0);
+    assert.equal(report.summary.passed, 1);
+    assert.equal(report.summary.failed, 1);
+    assert.equal(report.summary.partial, 0);
+    assert.equal(report.summary.coverage, 1);
+    assert.equal(report.summary.pass_rate, 0.5);
+    assert.deepEqual(report.summary.judge_errors, {
+      evaluations: 3,
+      criteria: 5,
+    });
+    assert.deepEqual(
+      report.cases[0]!.judge_errors,
+      report.summary.judge_errors,
+    );
+    assert.deepEqual(report.summary.judging_score, {
+      mean: 2 / 3,
+      evaluations: 3,
+    });
+    assert.deepEqual(
+      report.runs.map((run) => run.evaluation!.judging_criteria_errored),
+      [0, 1, 2, 0],
+    );
+    assert.deepEqual(
+      report.runs.map(
+        (run) => run.evaluation!.judging_criteria_excluded_errored,
+      ),
+      [1, 0, 1, 0],
+    );
+    assert.deepEqual(
+      report.runs.map((run) => run.evaluation!.score),
+      [1, 1, null, 0],
+    );
+    const stored = await defaultForgeEngine.verifyCompletedRun(
+      path.join(fixture.root, 'runs', report.runs[2]!.run_id!),
+    );
+    assert.equal(stored.result.evaluation.status, 'judge_error');
+    assert.deepEqual(stored.result.evaluation.judging_criteria[0]!.error, {
+      type: 'request_error',
+      attempts: 3,
+      message: 'Service unavailable for [REDACTED]',
+    });
+    const malformed = await defaultForgeEngine.verifyCompletedRun(
+      path.join(fixture.root, 'runs', report.runs[1]!.run_id!),
+    );
+    assert.deepEqual(malformed.result.evaluation.judging_criteria[1]!.error, {
+      type: 'parse_error',
+      attempts: 3,
+      message:
+        'Judge response did not match the required schema at response.results (invalid_type).',
+    });
+    assert.equal(stored.result.completion_calls.length, 9);
+    assert.ok(
+      stored.result.completion_calls.every((call) => call.status === 'failed'),
+    );
+    assert.doesNotMatch(JSON.stringify(stored.result), /scripted-token/);
+    const resumed = await runExperiment({
+      ...fixture.options,
+      resume: true,
+      execute: async () => {
+        throw new Error(
+          'Committed judge errors must not rerun the coding agent.',
+        );
+      },
+    });
+    assert.equal(resumed.executed, 0);
+    assert.deepEqual((await readReport(resumed.report)).runs, report.runs);
   });
 
   it('writes a cancellation report after cleanup, including cases that never started', async () => {
@@ -1051,18 +1511,27 @@ function evaluation(
       blend: { score: total === 0 ? null : passed / total },
     },
     criteria_by_requirement: {
-      MUST: { passed: 0, total: 0 },
-      SHOULD: { passed, total },
-      OPTIONAL: { passed: 0, total: 0 },
+      MUST: { passed: 0, total: 0, errored: 0 },
+      SHOULD: { passed, total, errored: 0 },
+      OPTIONAL: { passed: 0, total: 0, errored: 0 },
     },
-    checks_passed: 1,
+
+    judging_criteria_errored: 0,
+    judging_criteria_excluded_errored: 0,
+    checks_passed: status === 'failed' ? 0 : 1,
     checks_total: 1,
   };
 }
 function judgment(
   requirement_level: 'MUST' | 'SHOULD' | 'OPTIONAL' = 'SHOULD',
-  passed: boolean,
+  passed: boolean | null,
 ) {
+  if (passed === null) {
+    return parseCriterionJudgment('{}', {
+      value: 'The answer MUST be complete.',
+      requirement_level,
+    });
+  }
   return {
     criterion: 'The answer MUST be complete.',
     requirement_level,

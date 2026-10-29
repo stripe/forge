@@ -9,7 +9,7 @@
     "includes": [
       "**/*.{js,mjs,cjs,ts,tsx,json,jsonc}",
       "!**/package.json",
-      "!!datasets",
+      "!!release/datasets",
       "!!test/fixtures",
       "!!src/runtime/docker/assets"
     ]

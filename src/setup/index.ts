@@ -3,6 +3,7 @@ export {
   firstPartySetupHandlers,
 } from './executor.ts';
 export { commandSetupHandler } from './forgeCommand.ts';
+export { credentialsSetupHandler } from './forgeCredentials.ts';
 export { pluginSetupHandler } from './forgePlugin.ts';
 export { writeSetupHandler } from './forgeWrite.ts';
 export {

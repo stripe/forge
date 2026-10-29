@@ -92,6 +92,7 @@ describe('canonical interaction and judge evidence parsing', () => {
       status: 'partial',
       judging_criteria_passed: 1,
       judging_criteria_total: 2,
+      judging_criteria_errored: 0,
       judging_criteria: [
         {
           criterion: 'Complete the task.',
@@ -172,6 +173,7 @@ describe('canonical interaction and judge evidence parsing', () => {
       status: 'passed',
       judging_criteria_passed: 1,
       judging_criteria_total: 1,
+      judging_criteria_errored: 0,
       judging_criteria: [
         {
           criterion: 'Correct answer',
@@ -194,6 +196,25 @@ describe('canonical interaction and judge evidence parsing', () => {
     assert.throws(
       () => parseEvaluationResult({ ...evaluation, judging_criteria_total: 2 }),
       /Criterion totals/,
+    );
+    const observationalError = {
+      ...evaluation,
+      judging_criteria: [
+        evaluation.judging_criteria[0],
+        {
+          ...evaluation.judging_criteria[1],
+          passed: null,
+          error: {
+            type: 'request_error',
+            attempts: 3,
+            message: 'Service unavailable.',
+          },
+        },
+      ],
+    };
+    assert.deepEqual(
+      parseEvaluationResult(observationalError),
+      observationalError,
     );
     for (const changed of [
       { label: 'bad-label' },
@@ -223,6 +244,81 @@ describe('canonical interaction and judge evidence parsing', () => {
         }),
       /MUST criteria must use the uppercase RFC keyword MUST/,
     );
+  });
+
+  it('validates judge errors, their score denominator, and incomplete evaluation status', () => {
+    const evaluation = {
+      score: 1,
+      status: 'judge_error',
+      judging_criteria_passed: 1,
+      judging_criteria_total: 2,
+      judging_criteria_errored: 1,
+      judging_criteria: [
+        {
+          criterion: 'valid',
+          requirement_level: 'SHOULD',
+          passed: true,
+          explanation: 'Done.',
+        },
+        {
+          criterion: 'unavailable',
+          requirement_level: 'SHOULD',
+          passed: null,
+          error: { type: 'parse_error', attempts: 3, message: 'Invalid JSON.' },
+          explanation: 'Invalid output.',
+        },
+      ],
+      checks: [],
+    };
+    assert.deepEqual(parseEvaluationResult(evaluation), evaluation);
+    for (const changed of [
+      { ...evaluation, judging_criteria_errored: 0 },
+      { ...evaluation, judging_criteria_passed: 2 },
+      { ...evaluation, score: 0.5 },
+      { ...evaluation, score: null },
+      { ...evaluation, status: 'passed' },
+      {
+        ...evaluation,
+        judging_criteria: [
+          { ...evaluation.judging_criteria[1], passed: false },
+        ],
+      },
+      {
+        ...evaluation,
+        judging_criteria: [
+          { criterion: 'unavailable', passed: null, explanation: 'No error.' },
+        ],
+      },
+      {
+        ...evaluation,
+        judging_criteria: [
+          {
+            ...evaluation.judging_criteria[1],
+            error: { type: 'parse_error', attempts: 4 },
+          },
+        ],
+      },
+      ...[undefined, '', ' ', 'x'.repeat(4097)].map((message) => ({
+        ...evaluation,
+        judging_criteria: [
+          evaluation.judging_criteria[0],
+          {
+            ...evaluation.judging_criteria[1],
+            error: { type: 'parse_error', attempts: 3, message },
+          },
+        ],
+      })),
+    ])
+      assert.throws(() => parseEvaluationResult(changed));
+    const onlyErrors = {
+      ...evaluation,
+      score: null,
+      judging_criteria_passed: 0,
+      judging_criteria_total: 1,
+      judging_criteria: [evaluation.judging_criteria[1]],
+    };
+    assert.deepEqual(parseEvaluationResult(onlyErrors), onlyErrors);
+    assert.throws(() => parseEvaluationResult({ ...onlyErrors, score: 0 }));
   });
 
   it('strictly parses one-shot and multi-turn interaction audits', () => {

@@ -66,6 +66,10 @@
       "types": "./dist/providers/anthropic/index.d.ts",
       "import": "./dist/providers/anthropic/index.js"
     },
+    "./providers/openai": {
+      "types": "./dist/providers/openai/index.d.ts",
+      "import": "./dist/providers/openai/index.js"
+    },
     "./runtime/docker": {
       "types": "./dist/runtime/docker/index.d.ts",
       "import": "./dist/runtime/docker/index.js"
@@ -101,9 +105,9 @@
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
-    "toml": "5.0.0",
+    "toml": "5.0.1",
     "yaml": "^2.8.1",
-    "zod": "^3.25.76"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",

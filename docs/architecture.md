@@ -125,7 +125,7 @@ Forge keeps authored definitions, resolved inputs, and execution identities dist
 
 | Object | Responsibility | Important contents |
 | --- | --- | --- |
-| Dataset | Versioned evaluation payload | Manifest, cases, fixture files, exact sizes and SHA-256 hashes |
+| Dataset | Versioned evaluation payload | Manifest of case identities, case definitions, fixture files |
 | Eval case | What is evaluated | Task or prompt, context, invariant setup, interaction mode, turn limit, checks, judging criteria, example answer |
 | Experiment | How cases run, defined by an experiment config | Dataset pin, treatments, agent/model matrix, runtime, harness models, resources, repetitions, retry policy, timeout |
 | Experiment run | One resumable batch from an experiment | Experiment run ID, selected plans, checkpoint, attempt history, and aggregate report |
@@ -141,32 +141,60 @@ inputs independently of Forge format compatibility.
 ### Dataset loading and integrity
 
 [`loadDataset`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) treats the manifest as an exact
-inventory, not a best-effort index:
+case inventory:
 
-- `manifest.json` identifies the dataset and every case and payload file;
-- every payload must be a regular file with the declared size and hash;
-- missing, extra, modified, symbolic-link, or special-file entries fail;
+- `manifest.json` identifies the dataset and lists one entry per case: its
+  `id`, `version`, and case-definition `path`;
+- every manifest case path must exist, and every `case.yaml` or `*.case.yaml`
+  file under `cases/` must appear in the manifest;
+- every other regular file under the root is a fixture;
+- symbolic links and special files fail;
 - paths must be canonical, dataset-relative POSIX paths;
 - entry count, depth, individual document size, and total bytes are bounded;
-- the manifest lists case paths; IDs come from case definitions and must be
-  unique within the loaded dataset release.
+  and
+- case IDs and paths are unique, and each case definition must declare the
+  same `id` and `version` as its manifest entry.
 
-The experiment pins the dataset ID, version, and digest of the raw manifest
-bytes. Its optional `dataset.path` locates those bytes for the CLI, relative to
-the experiment file. Programmatic hosts can continue supplying a loaded dataset
-directly; the location is excluded from resolved plans and execution semantics. Planning refuses to combine a loaded dataset with a different pin.
+Fixtures used by built-in `forge/write` steps are their `dataset_path`
+sources. A source must name a payload file or a directory containing one,
+excluding case definitions and directories containing them. `loadDataset`
+checks case setup and retains discovered file and nonempty directory paths in
+`LoadedDatasetV1.inputPaths`. Planning checks the combined case and selected
+treatment setup against that index without reading the filesystem, so
+`validate` and `plan` reject missing treatment sources before execution.
+Hosts constructing loaded datasets may supply the index or own existence
+validation themselves; planning still excludes case definitions. Custom
+actions and agents may read payloads outside these built-in write checks.
+
+Case and dataset versions are independent labels. Change the dataset
+`version` whenever any case version changes or a case is added or removed.
+Forge records the case version in resolved plans through the case
+definition; it does not compare versions at load time.
+
+Forge does not hash the manifest, case definitions, or fixtures. The
+experiment pins only the dataset ID and version, so the dataset version is the
+identity of its case set and must change with it. Each resolved plan embeds
+the full case definition, so `plan.json` and the experiment checkpoint bind
+the case content that ran; fixture bytes are not recorded. Hosts that need
+content integrity must govern it outside Forge, for example by requiring a
+case version change for every case or fixture edit.
+
+The optional `dataset.path` locates the manifest for the CLI, relative to the
+experiment file. Programmatic hosts can continue supplying a loaded dataset
+directly; the location is excluded from resolved plans and execution
+semantics. Planning refuses to combine a loaded dataset with a different ID
+or version.
 `RunInputProvider` later gives setup and agent adapters read-only, path-safe
-access to dataset payloads. The directory provider accepts the verified
-manifest, checks each returned buffer against its declared size and hash, and
-requires directory listings to match the pinned inventory. The public CLI
-supplies that manifest automatically. This closes the gap between initial
-verification and later setup reads.
+access to dataset payloads. The path index records load-time existence, not
+content integrity or later filesystem changes. Setup reads current bytes and
+rejects an empty source directory instead of silently skipping its copy.
 
-A release bundle can contain `experiment.yaml` beside its exact-manifest
-`dataset/` tree. The experiment uses `dataset.path: ./dataset`, keeping runtime
-choices outside the dataset inventory while allowing the complete bundle to be
-archived and extracted without path changes. See the
-[sample bundle](https://github.com/stripe/forge/blob/main/datasets/stripe-integration-public-evals/README.md)
+Public datasets under `release/datasets/<name>/` contain the manifest, cases,
+and fixtures. The runnable experiment at `release/experiment.yaml` and its
+documentation at `release/README.md` stay outside the payload root where
+every file is readable input. The experiment's dataset path is relative to its
+file, so `release/` can be relocated as one folder. See the
+[sample release](https://github.com/stripe/forge/blob/main/release/README.md)
 for the layout and commands.
 
 ### Cases, treatments, and setup ordering
@@ -201,7 +229,8 @@ matrix:
   repetitions: 2
   retries: 0
   groups:
-    - cases:
+    - id: payment
+      cases:
         - cases/examples/payment.case.yaml
       treatments:
         - baseline
@@ -213,7 +242,8 @@ matrix:
         - adapter: claude-code
           provider: anthropic
           model: claude-opus-4-6
-    - cases:
+    - id: marketplace
+      cases:
         - cases/examples/marketplace/case.yaml
       treatments:
         - baseline
@@ -236,10 +266,22 @@ authored order:
 group → case → treatment → agent → repetition
 ```
 
-The flat form behaves as one group. Groups flatten into ordinary selections;
-group identity does not enter plans, checkpoints, or reports. Membership checks
-require the complete case/treatment/agent tuple to coexist in one group, which
-prevents combinations from crossing group boundaries.
+The flat form behaves as one unnamed group. Explicit groups may declare an
+optional `id`, unique within the experiment and matching
+`[a-z0-9][a-z0-9._-]*` with at most 128 characters. Flat matrices do not accept
+`id`. Unnamed groups retain their existing selection format; no positional ID
+is generated. Distinct group IDs do not permit duplicate resolved combinations.
+
+Named groups retain their ID as `selection.group_id` in plans, results,
+checkpoints, and report run rows. Membership checks require the complete
+case/treatment/agent tuple to coexist in one group and any supplied group ID
+to match it. Planning fills an omitted ID from the matching group. Adding,
+removing, or renaming a group ID changes its plan digests and prevents resume
+against the original saved plans.
+
+The CLI's `--group <id>` selector intersects with other filters; unknown group
+IDs and empty intersections are errors. Resume uses the saved selections and
+rejects new selectors, including `--group`.
 
 The experiment-level `retries` value is experiment run policy and does not
 create a new semantic selection. `executeEval` executes one resolved plan once;
@@ -248,9 +290,10 @@ an experiment run controller is responsible for retrying that selection.
 A `RunSelection` chooses exactly one case, treatment, complete agent selection,
 and zero-based repetition. Codex selections include `hook_trust`; new plans
 materialize its `native` default, while saved plans may omit it. The CLI requires
-filters to resolve to one entry for `plan`. `run` resolves and purely preflights
-every matching plan before executing them with bounded concurrency. The CLI loads the dataset from
-the experiment config and permits selectors such as `--case` to restrict execution.
+filters to resolve to one entry for `plan`. `run` resolves every matching plan
+and preflights pending work before executing it with bounded concurrency. The
+CLI loads the dataset from the experiment config and permits selectors such as
+`--case` to restrict execution.
 
 The shared controller exposed through `@stripe/forge/experiment` checkpoints
 attempts in a strict `experiment.json` under
@@ -328,21 +371,28 @@ exit policy.
 
 ### Plan resolution
 
-[`resolveRunPlan`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) validates all references and
+[`resolveRunPlan`](https://github.com/stripe/forge/blob/main/src/planning/planner.ts) validates experiment references and
 produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 - checks dataset and experiment compatibility;
 - checks that the selection is present in the matrix;
-- requires `models.role_player` for a multi-turn case;
-- requires `models.judge` when judging criteria are non-empty;
+- resolves a role-player model for multi-turn cases and a judge model when
+  judging criteria are non-empty, using each experiment override or the
+  `openai` / `gpt-6.1-sol` default;
 - concatenates case and treatment setup;
-- validates referenced dataset inputs and action-bundle pins;
+- validates built-in dataset sources against the available path index and
+  action-bundle pins;
 - chooses the effective prompt and records its source;
 - materializes the turn limit and other defaults;
 - materializes an authored Docker `native` platform from an explicit
   host-supplied platform selection; and
-- records the dataset manifest pin, experiment and case identities, installed
+- records the dataset, experiment, and case identities, installed
   Forge package, and action-bundle implementation pins.
+
+Unused host models are omitted from the plan. Used models are cloned and
+frozen in the plan before provider preflight or credential lookup; runtime
+execution and saved-plan parsing never infer a missing model. See the README
+for [model overrides and credentials](../README.md#requirements--credentials).
 
 Plans use canonical JSON with recursively sorted object keys and retained array
 order. The `plan.json` artifact descriptor binds these bytes to `result.json`.
@@ -357,6 +407,7 @@ registry and closes over it for every operation:
 - parse cases, experiment configs, setup steps, and resolved plans;
 - load datasets and experiment configs;
 - resolve run plans;
+- inspect selected credential uses without resolving them;
 - preflight and execute runs; and
 - verify completed runs.
 
@@ -455,23 +506,71 @@ Docker server, builds the selected image, and executes a network-disabled
 disposable probe from its immutable image ID, but does not alter preflight or
 execute an evaluation.
 
+On resume, the experiment scheduler uses the engine's credential inspection
+to check every selected plan structurally before verifying completed artifacts,
+deferring source proof. It then preflights only pending plans before checkpoint
+writes and execution. A resume that verifies every selection as complete needs
+no grants, credential lookup, or runtime allocation, including for custom
+reference groups. Engines without the optional inspection method retain normal
+preflight for all selections.
+
 ### 2. Resolve credentials and completion transports
 
-Runtime credentials begin as opaque references. Forge assigns their scopes
-from the declaration source rather than trusting an adapter-supplied scope:
+Runtime credentials use opaque references whose identities remain unchanged by
+validation or CLI grants. Forge assigns their scopes from the declaration
+source rather than trusting an adapter-supplied scope:
 
 - a setup action may request a setup-scoped credential;
 - an agent requirement receives agent scope;
 - a setup action may separately declare a credential the later agent needs.
 
-The resolver is called only for the selected plan's declared bindings. Plain
-variables remain structurally separate from resolved secrets, and the ambient
-host environment is never copied wholesale.
+Preparation retains every declaration's original reference, runtime name,
+source, assigned scope, and setup step where applicable. Both setup aggregation
+and the final agent/setup merge use the same compatibility rule. Repeated
+identical references combine directly. Distinct references for one runtime
+name require nonsecret proof from the resolver; a matching name alone is
+insufficient. Plain-variable/secret collisions and declaration structure are
+validated before source proof or secret lookup.
+
+The optional synchronous `CredentialResolver.sourceIdentity(reference,
+{environmentName, purpose, phase})` returns a nonempty source ID or `undefined`.
+Equal IDs attest interchangeable source values for that context. Every distinct
+reference in a group must have the same ID; absent or conflicting IDs fail.
+Resolvers without this method retain exact-reference-only merging. The method
+must not read secrets. `createEnvironmentCredentialResolver` uses explicitly
+bound host variable names as IDs, so different host variables conflict even
+when their values match.
+
+For `phase: 'preflight'`, hosts may describe conditional compatibility without
+granting access. The default CLI recognizes its known aliases; unknown distinct
+custom references need host-supplied proof. Execution repeats source validation
+with `phase: 'execution'` for all groups before any secret lookup, requiring
+actual bindings. It then resolves every distinct original reference once per
+runtime name with purpose `forge-eval:NAME`. A denied member fails the run;
+different returned values after successful source proof also fail. Value
+comparison never establishes equivalence, and resolution is not cached across
+different names or completion purposes.
+
+The runtime preflight environment retains one deterministic original reference
+per name and the union of declared scopes. This is a summary; the internal
+declaration ledger governs authorization. Sharing a source adds no scope, and
+each setup step still receives only its declared setup credentials. Plain
+variables stay separate from resolved secrets; the host environment is never
+copied wholesale.
+
+`forge/credentials` maps each declared runtime name to the opaque reference
+`env:NAME`. That prefix is a host convention, not an implicit core lookup.
+The public CLI requires explicit grants, with missing grants or values failing
+before allocation. See the README's [credential grants](../README.md#requirements--credentials)
+for normal usage and [advanced bindings](../README.md#advanced-credential-bindings)
+for selecting different host variables.
 
 Completion-provider credentials use a separate path. They are resolved per
 purpose (`role_player` or `judge`), remain host-side, and are passed only to the
-selected provider. An optional provider `preflight` runs here, after resolution
-but before runtime allocation.
+selected provider. The CLI preserves distinct completion references even when
+a same-name grant authorizes both the provider and a coding agent to read one
+host variable. An optional provider `preflight` runs here, after resolution but
+before runtime allocation.
 
 All resolved secret values become inputs to the output-safety boundary. Forge
 redacts them from host-completion prompts and responses, normalized evidence,
@@ -696,12 +795,14 @@ handler during application.
 
 The built-ins are:
 
-- `forge/write`: copy inline bytes or a manifest-listed dataset file to a
-  safe workspace-relative path;
+- `forge/write`: copy inline bytes, a dataset file, or a nonempty dataset
+  directory tree to a safe workspace-relative path;
 - `forge/command`: execute an explicit argv vector from a safe
-  workspace-relative directory, without credentials; and
-- `forge/plugin`: delegate native plugin installation to the selected agent
-  adapter, currently Claude Code or Codex, and retain a verified installation receipt.
+  workspace-relative directory, without credentials;
+- `forge/credentials`: declare agent-scoped credentials without issuing setup
+  commands or mutating state; and
+- `forge/plugin`: resolve a registered plugin name for the selected agent
+  adapter, install it, and retain a verified installation receipt.
 
 Action IDs are namespaced but have no individual version suffix. Breaking
 changes to their payload or behavior require updating affected benchmark
@@ -710,17 +811,16 @@ extension bundles own exactly one other namespace, cannot replace built-ins,
 and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
-`forge/plugin` intentionally resolves the current marketplace entry at
-execution time. Its `setup.json` receipt records the selected IDs, catalog
-commit, installed version, reported source commit when available, and an
-installation-time tree fingerprint. These identify the catalog snapshot and
-observed installed contents; plugin state remains writable during interaction.
-This is a documented mutable-treatment semantic, not general plan
-reproducibility; see
-[Marketplace plugin treatments](plugin-action.md). Supported Stripe plugin
-selections also declare agent-scoped MCP credentials during pure preflight;
-Forge configures their existing connection before fingerprinting the installation.
-Other plugin selections do not request Stripe credentials.
+Plans retain `forge/plugin`'s short registered name. Pure preflight selects its
+native distribution and declares agent-scoped MCP credential requirements using
+policy fixed by the Forge version. Setup installs the current marketplace entry,
+configures its existing MCP connection, and fingerprints the installation.
+The `setup.json` receipt records resolved native IDs, catalog commit, installed
+version, reported source commit when available, and the installed-tree
+fingerprint. These identify the catalog snapshot and observed contents; plugin
+state remains writable during interaction. See
+[Marketplace plugin treatments](plugin-action.md) for registered names and
+installation semantics.
 
 ## Interaction architecture
 
@@ -814,9 +914,16 @@ The completion runtime:
 - validates response size, usage, cost, and stop metadata; and
 - retains only safe call summaries in `result.json`.
 
-The built-in Anthropic provider uses Node's native `fetch` and the Messages API
-with strict structured output. Compatible endpoints are explicit adapter
-configuration; neither endpoints nor credentials enter plans or results.
+The built-in Anthropic and OpenAI providers use Node's native `fetch` with
+strict structured output through Messages and Responses respectively. The
+OpenAI provider disables response storage, normalizes cached input usage, and
+ignores reasoning blocks. Both bound requests, responses, and duration, reject
+redirects, and expose errors without provider response bodies. OpenAI projects
+`uniqueItems` out of generation schemas; Ava still validates uniqueness locally.
+Provider-specific output budgets account for reasoning tokens without changing
+Ava or judge validation. Compatible endpoints and credentials are explicit host
+configuration; neither enters plans or results. See the README's
+[credentials](../README.md#requirements--credentials) for CLI bindings.
 
 ## Evidence architecture
 
@@ -906,8 +1013,11 @@ semantics can be normalized faithfully.
 
 Codex selects a single matching root UUID rollout under its isolated
 `CODEX_HOME/sessions`, validates session metadata, and records source format
-`codex-rollout-jsonl`. Actual user turns are distinguished from injected
-AGENTS.md and environment context, which become system steps. Function and
+`codex-rollout-jsonl`. The exported evidence loader defaults to primary `exec`
+sessions; embedding hosts can explicitly set `sessionSource: 'cli'` to normalize
+primary terminal sessions without changing their native bytes. Session identity,
+version, and subagent exclusions still apply. Actual user turns are distinguished
+from injected AGENTS.md and environment context, which become system steps. Function and
 custom-tool calls retain native call IDs, arguments, and correlated outputs;
 tool-search calls and returned tool definitions remain correlated tool behavior.
 Every MCP call requires a matching `McpToolCall` completion snapshot verified
@@ -1053,7 +1163,19 @@ Each judging criterion is judged independently against:
 - the optional authored example answer.
 
 Workspace collection skips symlinks, agent state, dependencies, build output,
-lockfiles, and common binary formats. Its hard bounds are 10,000 listed entries,
+and lockfiles. Known binary filename formats (including databases and archives)
+are omitted without reading them. Other files are omitted if their bytes contain
+non-text controls or cannot be decoded as strict UTF-8; Forge never strips or
+replaces these bytes to make a file judge-visible. Binary omissions record the
+path, reason, and size when known in bounded `workspace_binary_omitted` warnings.
+They mark workspace evidence incomplete, without implying a failed criterion.
+The judge receives the same omission markers saved in `judge-evidence.json`.
+Intelligible representations of databases, archives, and other binary artifacts
+are an area for future expansion; no extraction or conversion is performed.
+These exclusions apply to workspace text collection; deterministic file checks
+and transcript tool results retain their existing evidence policies.
+
+Its hard bounds are 10,000 listed entries,
 depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
 rendered characters total. Truncation and unavailable evidence are recorded
 explicitly. `judge-evidence.json` records the redacted workspace subset and
@@ -1061,45 +1183,84 @@ exact projected transcript for audit; it is not an input to a later judge call.
 
 At most four criteria run concurrently, with temperature 0, a 1,024-token
 response limit, and a strict one-criterion JSON schema. Each gets up to three
-attempts with fixed one- and five-second retry waits. Repeated malformed
-output fails only that criterion closed. A final provider transport failure is
-fatal: cleanup runs and no result is committed. Before dispatch, Forge verifies
-that its final defensive redaction pass would not change the already-audited
-judge evidence.
+attempts with fixed one- and five-second retry waits. Exhaustion records that
+criterion with `passed: null`, a bounded explanation, and an `error` containing
+`type` (`parse_error` or `request_error`), `attempts`, and `message`. The final
+unsuccessful attempt determines the error type. Other criteria continue, and
+the run commits its evidence, valid judgments, checks, and safe completion-call
+summaries.
+Request diagnostics retain only the final error's message, redacting all
+resolved credentials before truncating to 4,096 characters. They omit stacks,
+causes, and other error properties; non-Error throws use a generic message.
+Custom completion providers must keep messages free of sensitive
+non-credential data such as request/response bodies. Role-player request
+errors remain generic. Standalone `judgeCriteria` callers can supply
+`redactionSecrets` in execution options for their custom invoker's diagnostics.
+Parse diagnostics identify invalid JSON or the first schema violation's path
+and category, never raw responses, unknown keys, or received values.
+`parseCriterionJudgment` reports malformed input as a one-attempt parse error.
+
+Cancellation, oversized prompts, and dispatch invariant failures remain fatal.
+The execution controller supplies `validateRequest` to the judge's execution
+options to ensure final defensive redaction cannot change the already-audited
+evidence. This validation runs outside the retryable provider call; failure
+cancels peer judgments and prevents commit.
 
 ### Score and status
 
-The numeric score is the fraction of MUST and SHOULD judging criteria that pass,
-with equal weight per criterion. `judging_criteria_passed` and
-`judging_criteria_total` count those two groups. OPTIONAL criteria affect neither
-score nor status. File checks are independent pass constraints and do not change
-that ratio. Only `requirement_level` determines scoring inclusion.
+The numeric score is passes divided by valid MUST and SHOULD judgments, with
+equal weight per criterion. `judging_criteria_passed`, `judging_criteria_total`,
+and `judging_criteria_errored` count those two groups; the denominator is total
+minus errored. OPTIONAL criteria affect neither score nor status. File checks
+are independent pass constraints and do not change that ratio. Any scored
+judge error takes precedence over normal evaluation statuses, without discarding
+valid judgments or check outcomes. Only `requirement_level` determines scoring
+inclusion.
 
-Reports preserve per-run passed/total counts for all three classifications and
-verify that MUST plus SHOULD match the scored counts and ratio. Each run's
+Reports preserve per-run passed, total, and errored counts for all three
+classifications and verify that MUST plus SHOULD match the scored counts and
+ratio, while OPTIONAL errors match the excluded error count. Each run's
 `criterion_scores` reports Required (MUST) and Recommended (MUST + SHOULD), each
-with Strict and Avg scores. Blend gates each evaluation on all MUST passing,
-then uses only its SHOULD pass fraction. MUST-only evaluations receive `1` or `0`;
-SHOULD-only evaluations use their pass fraction. Empty evaluations are unscored.
-Blend aggregates average eligible evaluation scores after applying each gate.
-These report views ignore checks and do not change saved evaluation scores or
-status. Parsing verifies each view against the per-classification counts, then
-verifies summary and case/configuration scores against the run rows. Aggregates
-use only the latest completed effective outcome per selection. Disjoint
-`criteria_by_requirement` groups preserve required failures, recommended failures,
-and OPTIONAL telemetry. The README defines the
+with Strict and Avg scores. These views exclude errored judgments from their
+counts. Blend gates each evaluation on all valid MUST passing, then uses only
+its valid SHOULD pass fraction. MUST-only evaluations receive `1` or `0`;
+SHOULD-only evaluations use their pass fraction. Views with no valid judgments
+are unscored. Blend aggregates average eligible evaluation scores after applying
+each gate. These report views ignore checks and do not change saved evaluation
+scores, status, pass rates, or judge-error reporting. Parsing verifies each view
+against the per-classification counts, then verifies summary and
+case/configuration scores against the run rows. Aggregates use only the latest
+completed effective outcome per selection. Disjoint `criteria_by_requirement`
+groups preserve required failures, recommended failures, and OPTIONAL telemetry.
+The README defines the
 [score formulas and aggregate denominators](../README.md#understand-scores).
 
 | Situation | Status | Score |
 | --- | --- | --- |
 | No judging criteria; all checks pass | `passed` | `0` |
 | No judging criteria; a check fails | `failed` | `0` |
+| Some scored criteria errored; at least one received a valid judgment | `judge_error` | Passes / valid scored judgments |
+| Every scored criterion errored | `judge_error` | `null` |
 | All scored criteria and checks pass | `passed` | `1` |
 | Some scored criteria pass, or checks pass while scored criteria do not all pass | `partial` | Criterion pass ratio |
 | No scored criterion passes and checks do not establish partial success | `failed` | `0` |
 
 Interaction stop reason and evaluation status are separate. For example, a
 `max_turns` run can still pass its evidence-based evaluation.
+
+Experiment reports keep execution `errored` counts separate from
+`judge_errors: {evaluations, criteria}` in the overall and case/configuration
+statistics, including OPTIONAL errors excluded from scoring. Rows retain
+`judging_criteria_errored` and `judging_criteria_excluded_errored`; per-criterion
+error details remain in the referenced result. `completed` and execution
+coverage include committed judge-error evaluations. Pass rate excludes only
+evaluations with scored judge errors from its denominator. The judging mean
+averages per-evaluation scores with at least one valid scored judgment,
+including incomplete evaluations; all-error and checks-only scores are
+excluded. Ratios are `null` when their denominator is zero.
+Resume retains committed judge-error evaluations, preserving the coding-agent
+execution and evidence. A CLI run can exit successfully with judge errors;
+consumers must inspect the report to establish grading completeness.
 
 ## Result and artifact architecture
 
@@ -1212,7 +1373,7 @@ trusted.
 
 | Boundary | What is trusted | What Forge still enforces |
 | --- | --- | --- |
-| Authored YAML/JSON and dataset bytes | Untrusted data | Strict schemas, bounded input, canonical paths, exact inventory and hashes |
+| Authored YAML/JSON and dataset bytes | Untrusted data | Strict schemas, bounded input, canonical paths, exact case inventory |
 | Setup action bundle code | Trusted host code | Explicit import, pinned identity, namespace isolation, pure preflight, constrained apply capabilities |
 | Runtime adapter | Trusted mechanism | Exact plan adapter ID/config validation, pure preflight, lifecycle-shaped capability projections |
 | Agent adapter | Trusted integration, untrusted output | Exact selection match, bounded turns, stable session ID, native-evidence parsing and coverage |
@@ -1226,8 +1387,9 @@ Other important safeguards include:
 - credentials are opaque references in authored data, plans, events, and
   results;
 - command contracts are argv arrays, so shell parsing is opt-in and visible;
-- provider/setup error details and setup-command output are not persisted as
-  ordinary metadata;
+- only bounded, credential-redacted judge request messages are retained as
+  diagnostics; other provider/setup error details and setup-command output are
+  not persisted as ordinary metadata;
 - judge inputs are derived by allowlist after credential redaction;
 - native source is explicitly marked restricted, excluded from judging and
   scoring, and selected by exact session identity rather than “newest session”;
@@ -1236,8 +1398,8 @@ Other important safeguards include:
 
 Redaction matches exact resolved secret values; it does not detect transformed
 or partially leaked values. The evaluated agent receives its selected provider
-credential and outbound network access, so it can intentionally disclose that
-credential. Use restricted, short-lived keys with appropriate account limits.
+and API credentials and outbound network access, so it can intentionally disclose
+those credentials. Use restricted, short-lived keys with appropriate account limits.
 The built-in runtime provides no domain allowlisting or offline execution mode;
 custom network policy requires an explicit runtime implementation. Ava and judge
 providers receive benchmark prompts and the evidence needed for their roles.
@@ -1260,8 +1422,8 @@ Two retry systems are internal score semantics, separate from experiment run
 retries:
 
 - Ava exhaustion commits `role_player_error` as a completed run; and
-- malformed judge output fails a criterion closed, while exhausted judge
-  transport failure aborts the run with no commit.
+- judge exhaustion commits a distinct per-criterion error, preserving other
+  judgments and excluding errors from scores.
 
 Observer failures never change execution. A runtime disposal failure after
 artifact staging becomes a result warning so the completed evidence can still
@@ -1280,6 +1442,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |
+| `@stripe/forge/providers/openai` | OpenAI Responses-compatible host completion provider |
 | `@stripe/forge/runtime/docker` | Forge Docker adapter and pinned runtime metadata |
 | `@stripe/forge/setup` | Built-in handlers plus action-bundle and setup-executor contracts |
 | `@stripe/forge/testing` | In-memory inputs/workspaces/stores, fake runtime and agent adapters, scripted completion providers, test plans, and runtime conformance checks |
@@ -1303,10 +1466,43 @@ engine APIs:
   experiment run command stage for bounded execution and explicit resume.
 
 Its default composition registers the built-in Docker runtime, Claude Code and
-Codex agent adapters, the Anthropic host completion provider, an explicit
+Codex agent adapters, Anthropic and OpenAI host completion providers, an explicit
 environment-backed credential resolver, a directory input provider, and the
 local artifact store. Embedding hosts can replace this composition or use an
 external runtime without changing core lifecycle semantics.
+
+`run` constructs its composition once. It passes a CLI-owned resolver through
+the optional `DefaultCliCompositionOptions.credentialResolver` field, then uses
+`ForgeEngine.inspectEvalCredentials({plan, composition})` to collect normalized
+uses from the returned adapters, providers, and engine-bound setup actions.
+Each use retains its `reference` and `purpose`; runtime uses also have an
+`environmentName`. Inspection runs pure preflight while deferring source proof.
+The CLI expands bare-name grants over these selected uses and its known
+completion aliases, binding each exact `(reference, purpose)` pair. With bare
+grants, uses of one reference as `FIRST_TOKEN` and `SECOND_TOKEN` need both flags
+and read those host variables independently. Explicit reference bindings apply
+across purposes and conflict with any bare-name binding to a different host
+variable. The CLI finalizes this immutable nonsecret table once; lookup before
+finalization fails. The same composition then preflights and executes pending
+work. Validation constructs one composition per concrete runtime platform.
+
+Forwarding wrappers preserve this behavior by passing options to
+`createDefaultCliComposition`, which configures the CLI-owned handle with the
+wrapper's `environment` and `credentialBindings` before grant finalization.
+Each handle accepts one default-composition configuration before finalization.
+Reusing it to construct multiple default compositions requires the same
+environment object and equal explicit-reference mappings; conflicting
+configurations fail. Factories using the handle directly retain `runCli`'s
+environment and explicit mappings. A factory that replaces the resolver
+retains its own authorization and source-proof policy. `credentialBindings`
+supplies immutable explicit-reference mappings;
+factories needing discovered bare-name grants must use the resolver handle.
+Direct calls without the handle use `credentialBindings`. Custom engines
+without the optional inspection method support explicit-reference grants only.
+
+The public CLI configures Codex to receive `OPENAI_API_KEY`. The library's
+`createCodexAdapter` still defaults to reference `openai.api-key` and runtime
+variable `CODEX_API_KEY`; embedding hosts choose and authorize its source.
 
 ## Repository map
 
@@ -1327,9 +1523,8 @@ external runtime without changing core lifecycle semantics.
 | [`src/results`](https://github.com/stripe/forge/tree/main/src/results) | Result schemas, two-phase local store, and cross-artifact verification |
 | [`src/security`](https://github.com/stripe/forge/tree/main/src/security) | Credential redaction and secret scanning |
 | [`src/testing`](https://github.com/stripe/forge/tree/main/src/testing) | Public fakes, memory adapters, fixtures, and conformance helpers |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles with runnable experiments and exact-manifest dataset trees |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads in `datasets/`, with a runnable `experiment.yaml` and release documentation at the root; holds only the latest versions |
 | [`test`](https://github.com/stripe/forge/tree/main/test) | Package-level and end-to-end orchestration tests, with eval inputs under `fixtures/` |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo |
 
 ## Current limitations
 
@@ -1338,8 +1533,8 @@ The public CLI and built-in composition currently have these limits:
 - Claude Code and Codex are the built-in agents. Cursor and interactive human
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
-- Multi-turn automation uses fixed Ava semantics. Anthropic is the only
-  built-in host completion provider; other providers require an explicit
+- Multi-turn automation uses fixed Ava semantics. Anthropic and OpenAI are
+  built-in host completion providers; other providers require an explicit
   [completion-provider implementation](#host-side-completion-providers) and
   cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content
@@ -1349,9 +1544,9 @@ The public CLI and built-in composition currently have these limits:
 - Execution is local, with bounded concurrency and explicit resume. There is no
   distributed scheduler, automatic experiment retry loop, remote publisher, or
   hosted execution service. `matrix.retries` does not schedule automatic attempts.
-- Marketplace plugins follow the current public catalog entry. Exact authored
-  pins, private repository authentication, transitive dependencies, and
-  user-defined plugin options are unsupported; see the authoritative
+- `forge/plugin` accepts registered names and follows the current public catalog
+  entry. Exact authored pins, private repository authentication, transitive
+  dependencies, and user-defined plugin options are unsupported; see the
   [plugin limitations](plugin-action.md#credentials-and-limitations).
 - Host-file imports verify transferred bytes without emitting a core setup
   receipt; this leaves a provenance gap when imported contents affect evaluation.

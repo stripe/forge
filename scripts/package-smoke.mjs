@@ -70,6 +70,7 @@ try {
       import * as claude from '@stripe/forge/agents/claude-code';
       import * as codex from '@stripe/forge/agents/codex';
       import * as anthropic from '@stripe/forge/providers/anthropic';
+      import * as openai from '@stripe/forge/providers/openai';
       import * as docker from '@stripe/forge/runtime/docker';
       import * as setup from '@stripe/forge/setup';
       import * as testing from '@stripe/forge/testing';
@@ -100,6 +101,12 @@ try {
       assert.equal(evaluation.judging_criteria_passed, 1);
       assert.equal(evaluation.judging_criteria_total, 1);
       assert.deepEqual(evaluation.judging_criteria, [criterion]);
+      const judgeError = forge.parseCriterionJudgment('{}', 'Unavailable criterion.');
+      assert.equal(typeof judgeError.error.message, 'string');
+      const incomplete = forge.parseEvaluationResult(forge.scoreEvaluation([judgeError], []));
+      assert.equal(incomplete.status, 'judge_error');
+      assert.equal(incomplete.score, null);
+      assert.equal(incomplete.judging_criteria_errored, 1);
       assert.equal(typeof docker.detectDockerRuntimePlatform, 'function');
       assert.equal(typeof docker.validateDockerRuntimeHost, 'function');
       assert.equal(typeof forge.createJudgeTranscriptProjection, 'function');
@@ -152,6 +159,9 @@ try {
       assert.equal(codex.createCodexAdapter().version, forge.FORGE_VERSION);
       assert.equal(docker.FORGE_CODEX_VERSION, '0.149.0');
       assert.equal(claude.createClaudeCodeAdapter({baseUrl: 'https://gateway.example.com'}).version, forge.FORGE_VERSION);
+      assert.equal(typeof openai.createOpenAICompletionProvider, 'function');
+      assert.equal(openai.createOpenAICompletionProvider().version, forge.FORGE_VERSION);
+      assert.deepEqual(openai.createOpenAICompletionProvider().metadata, {endpoint_mode: 'default'});
       assert.equal(typeof anthropic.createAnthropicCompletionProvider, 'function');
       assert.equal(anthropic.createAnthropicCompletionProvider().version, forge.FORGE_VERSION);
       assert.deepEqual(codex.createCodexAdapter().metadata, {endpoint_mode: 'default', layout_mode: 'default'});
@@ -168,6 +178,10 @@ try {
       }
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
       assert.equal(typeof setup.createSetupExecutor, 'function');
+      assert.equal(setup.credentialsSetupHandler, forge.credentialsSetupHandler);
+      assert.deepEqual(forge.parseSetupStep({
+        uses: 'forge/credentials', with: {env: ['API_TOKEN']},
+      }), {uses: 'forge/credentials', with: {env: ['API_TOKEN']}});
       assert.equal(typeof setup.defineSetupActionBundle, 'function');
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
 
@@ -317,6 +331,7 @@ try {
   );
   const consumerImports = new Map([
     ['index', '@stripe/forge'],
+    ['cli', '@stripe/forge/cli'],
     ['experiment', '@stripe/forge/experiment'],
     ['experimentCli', '@stripe/forge/experiment/cli'],
   ]);

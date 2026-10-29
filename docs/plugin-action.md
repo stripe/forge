@@ -2,17 +2,16 @@
 
 ## Purpose
 
-`forge/plugin` is a built-in setup action for installing a complete
-agent-native plugin from a GitHub marketplace. It is intended for experiments
-that deliberately evaluate the plugin currently published by that marketplace.
+`forge/plugin` installs a registered plugin through the selected agent's native
+installer. Forge owns the distribution mapping; experiments evaluate the plugin
+currently published by its GitHub marketplace.
 
 The action's schema and lifecycle are public Forge behavior. Agent-specific
 commands stay behind the narrow `AgentPluginInstaller` capability, implemented
 by the built-in Claude Code and Codex adapters.
 
-This action is distinct from a [setup action bundle](setup-action-bundles.md):
-`forge/plugin` ships with Forge, while bundles let an embedding host add its
-own setup semantics.
+Embedding hosts can use `AgentPluginInstaller` from a trusted
+[setup action bundle](setup-action-bundles.md) to install other distributions.
 
 ## Experiment configuration
 
@@ -20,37 +19,32 @@ own setup semantics.
 treatments:
   baseline:
     setup: []
-  marketplace-plugin:
+  stripe-plugin:
     setup:
       - uses: forge/plugin
         with:
-          agents:
-            claude-code:
-              plugin: example-plugin@example-marketplace
-              marketplace: example-org/example-marketplace
-            codex:
-              plugin: example-plugin@example-marketplace
-              marketplace: example-org/example-marketplace
+          plugin: stripe
 ```
 
-The names above are illustrative and must be replaced with a real marketplace
-and qualified plugin ID.
+`stripe` is currently the only registered name. Both `claude-code` and `codex`
+use the compatible Claude-format distribution `stripe@claude-plugins-official`
+from `anthropics/claude-plugins-official`.
 
-`agents` is keyed by adapter ID. Forge validates every authored branch, then
-selects only the branch for the run's coding agent during pure preflight. A
-missing branch or an adapter without `AgentPluginInstaller` fails before
-credentials are resolved or a runtime is allocated.
+`with` accepts only `plugin`. Plans retain this short name; the producing Forge
+version defines its native distribution and credential mapping. During pure
+preflight, Forge resolves the name for the run's adapter and checks its installer
+and authentication capabilities. Unsupported adapters fail before credentials
+are resolved or a runtime is allocated.
 
-The plugin ID remains qualified as `plugin@marketplace`. Its marketplace name
-must match the fetched catalog, and its plugin name must select exactly one
-entry.
+The resolved marketplace name must match the fetched catalog, and the native
+plugin name must select exactly one entry.
 
 ## “Latest” and reproducibility
 
 The plugin action intentionally follows the marketplace's current default branch:
 
 1. Each run starts with fresh, run-owned agent state.
-2. Forge registers the authored marketplace through the agent's native CLI.
+2. Forge registers the selected marketplace through the agent's native CLI.
 3. The marketplace entry selects the plugin source and installed version.
 4. Forge validates the native installation and records its IDs, version,
    catalog commit, source commit when reported, and installed-content fingerprint.
@@ -144,20 +138,21 @@ and hook execution behavior.
 
 ## Execution and receipt
 
-During pure preflight, Forge selects the agent branch, binds the adapter's
-plugin installer, and declares its executable and state requirements. During
-setup, the prepared operation:
+During pure preflight, Forge resolves the registered plugin, binds the adapter's
+installer, and declares executable, state, and agent credential requirements.
+During setup, the prepared operation:
 
 1. registers the marketplace;
 2. validates the catalog and selected source;
 3. installs through the agent's native CLI;
 4. validates the native plugin identity, version, path, load status, and source
-   provenance; and
-5. records an installation receipt in `setup.json`.
+   provenance;
+5. configures the bundled MCP connection; and
+6. fingerprints the configured installation and records a receipt in `setup.json`.
 
 The receipt includes:
 
-- the authored marketplace and plugin IDs;
+- the resolved marketplace and native plugin selection;
 - the exact catalog commit used to read the marketplace entry;
 - the native plugin ID and installed version;
 - the selected source kind and installer-reported Git commit when available; and
@@ -182,45 +177,42 @@ quiesces all mutation before evidence selection.
 
 ## Credentials and limitations
 
-Selecting either supported Stripe plugin distribution below automatically
-configures bearer authentication for its bundled HTTP MCP connection:
+Selecting `plugin: stripe` automatically configures bearer authentication for
+its bundled HTTP MCP connection and declares `STRIPE_API_KEY` for the agent.
+The CLI requires an explicit grant to read the key. For a Claude Code experiment
+using the default OpenAI Ava/judge models:
 
-```yaml
-with:
-  agents:
-    claude-code:
-      plugin: stripe@claude-plugins-official
-      marketplace: anthropics/claude-plugins-official
-    codex:
-      plugin: stripe@claude-plugins-official
-      marketplace: anthropics/claude-plugins-official
+```sh
+npx --no-install forge run --experiment ./experiment.yaml --output ./results \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
+  --credential-env STRIPE_API_KEY
 ```
 
-Export `STRIPE_API_KEY` with an Agent API key before starting the eval; account
-or merchant provisioning remains external to Forge. Forge recognizes the exact
-adapter, plugin ID, and marketplace pairs above. Other plugin selections are
-installed unchanged and do not require this key. Experiments declare no MCP
-server or authentication fields.
+Export the selected host variables before starting the eval, using an Agent API
+key for `STRIPE_API_KEY`. To read another host variable, replace the Stripe grant
+with `--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`. Missing grants or
+values fail before runtime allocation, without fallback to another variable.
+Account or merchant provisioning remains external to Forge.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
-credential resolver. Missing values fail before runtime allocation. Ordinary
-validation and planning need no values.
+credential resolver. Ordinary validation and planning need neither grants nor
+secret values. See the README for other
+[credential grants](../README.md#requirements--credentials).
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
 Authorization header template; Codex uses `bearer_token_env_var`. Both reference
 `STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
 use the same key. Tokens reach only agent commands, never setup commands.
-Forge fingerprints the configured installation. Credential mappings are part
-of the Forge version.
+Forge fingerprints the configured installation. Runtime credential names and
+references are part of the Forge version; the host variable name is not recorded
+in the plan.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
-source fails setup. Codex can install the Claude-format distribution shown above.
-The newer `stripe@stripe` distribution from `stripe/ai` is recognized, but fails
-with a message to use that compatible choice: Codex's Agent Plugins 1.0
-`mcp.json` cannot read bearer tokens from environment variables. Custom MCP
-config paths, OAuth, and host login passthrough are unsupported.
+source fails setup. Custom MCP config paths, OAuth, and host login passthrough
+are unsupported.
 
-Plugin installation receives an uncredentialed setup command runner. It never receives the coding agent's model credential. Fetches
-therefore work only for credential-free HTTPS sources accepted by the action.
+Plugin installation receives an uncredentialed setup command runner. Fetches
+therefore work only for credential-free HTTPS sources accepted by the installer.
 
 Current limitations are:
 

@@ -1,0 +1,13 @@
+{
+  "dataset": {
+    "id": "stripe-integration-public-evals",
+    "version": "0.2.0"
+  },
+  "cases": [
+    {
+      "id": "stripe-integration-public-evals/payments-onetime",
+      "version": "0.1.0",
+      "path": "cases/payments-onetime.case.yaml"
+    }
+  ]
+}

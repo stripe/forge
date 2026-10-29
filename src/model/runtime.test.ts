@@ -26,7 +26,6 @@ function experiment(selectedRuntime: unknown): unknown {
     dataset: {
       id: 'test',
       version: '1',
-      manifest_sha256: `sha256:${'a'.repeat(64)}`,
     },
     runtime: selectedRuntime,
     matrix: {

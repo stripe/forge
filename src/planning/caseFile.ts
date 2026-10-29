@@ -166,13 +166,18 @@ function validatedManifestCases(
     );
   }
   for (const entry of dataset.manifest.cases) {
-    if (typeof entry !== 'string' || !isCaseDefinitionPath(entry)) {
+    if (
+      entry === null ||
+      typeof entry !== 'object' ||
+      typeof entry.path !== 'string' ||
+      !isCaseDefinitionPath(entry.path)
+    ) {
       throw invalidLoadedDataset(
         'The loaded dataset manifest contains an invalid case entry.',
       );
     }
   }
-  return dataset.manifest.cases;
+  return dataset.manifest.cases.map(({ path }) => path);
 }
 
 async function canonicalCaseFile(

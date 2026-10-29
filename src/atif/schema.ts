@@ -39,7 +39,10 @@ const AUDIO_MEDIA_TYPE_ALIASES: Readonly<Record<string, string>> = {
 };
 
 const FiniteNumberSchema = z.number().finite();
-const IntegerSchema = FiniteNumberSchema.int();
+// ATIF integers are not restricted to JavaScript's safe integer range.
+const IntegerSchema = FiniteNumberSchema.refine(Number.isInteger, {
+  message: 'must be an integer',
+});
 const NonEmptyStringSchema = z.string().min(1);
 
 const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>

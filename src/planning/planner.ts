@@ -1,5 +1,9 @@
 import { sha256Digest } from '../model/hashes.ts';
-import { indexLoadedDatasetCases } from '../model/loaders.ts';
+import {
+  ancestorDirectories,
+  assertDatasetSetupInputs,
+  indexLoadedDatasetCases,
+} from '../model/loaders.ts';
 import { agentSelectionKey, getMatrixGroups } from '../model/matrix.ts';
 import {
   type AgentSelectionV1,
@@ -7,19 +11,24 @@ import {
   type DatasetRelativePath,
   DEFAULT_MAX_TURNS,
   type ExperimentConfigV1,
+  type ExperimentMatrixGroupV1,
   type ForgeDockerRuntimeV1,
   type LoadedDatasetV1,
   type LoadedExperimentConfigV1,
+  type ModelRefV1,
   type ResolvedRunPlanV1,
   type RunSelection,
-  type SetupStepV1,
-  type WriteSetupStepV1,
 } from '../model/types.ts';
 import {
   defaultSetupActionRegistry,
   type SetupActionRegistry,
 } from '../setup/registry.ts';
 import { FORGE_BUILD_IDENTITY } from '../version.ts';
+
+const DEFAULT_HOST_MODEL: Readonly<ModelRefV1> = Object.freeze({
+  provider: 'openai',
+  model: 'gpt-6.1-sol',
+});
 
 export type PlanningErrorCode =
   | 'dataset_experiment_mismatch'
@@ -30,8 +39,8 @@ export type PlanningErrorCode =
   | 'invalid_repetition'
   | 'missing_role_player'
   | 'missing_judge'
-  | 'missing_dataset_input'
   | 'invalid_loaded_dataset'
+  | 'invalid_dataset_input'
   | 'action_bundle_mismatch'
   | 'missing_runtime_platform';
 
@@ -80,6 +89,7 @@ export function expandExperiment(
             repetition += 1
           ) {
             selections.push({
+              ...(group.id === undefined ? {} : { group_id: group.id }),
               case_id: caseId,
               treatment,
               agent: resolveAgentSelection(agent),
@@ -119,7 +129,7 @@ export function resolveRunPlanWithSetupActions(
   const casePath = [...caseIdsByPath].find(
     ([, id]) => id === selection.case_id,
   )?.[0];
-  assertSelection(config, selection, casePath);
+  const group = assertSelection(config, selection, casePath);
 
   const loadedCase = dataset.cases.get(selection.case_id);
   if (!loadedCase) {
@@ -145,26 +155,22 @@ export function resolveRunPlanWithSetupActions(
     );
   }
   const definition = loadedCase.definition;
-  if (
-    definition.execution_mode === 'multi_turn' &&
-    config.models.role_player === undefined
-  ) {
-    throw new PlanningError(
-      'missing_role_player',
-      'A multi_turn case requires models.role_player in the experiment config.',
-    );
-  }
-  if (
-    definition.judging_criteria.length > 0 &&
-    config.models.judge === undefined
-  ) {
-    throw new PlanningError(
-      'missing_judge',
-      'A case with success criteria requires models.judge in the experiment config.',
-    );
-  }
 
   const setup = [...cloneJson(definition.setup), ...cloneJson(treatment.setup)];
+  try {
+    assertDatasetSetupInputs(
+      setup,
+      ancestorDirectories(dataset.manifest.cases.map(({ path }) => path)),
+      dataset.inputPaths,
+      'Selected setup',
+    );
+  } catch (error) {
+    throw new PlanningError(
+      'invalid_dataset_input',
+      error instanceof Error ? error.message : 'Invalid setup dataset source.',
+      { cause: error },
+    );
+  }
   const configuredActionBundles = config.forge?.action_bundles ?? [];
   try {
     setupActions.assertStepsDeclared(setup, configuredActionBundles);
@@ -176,7 +182,6 @@ export function resolveRunPlanWithSetupActions(
     );
   }
   const requiredActionBundles = setupActions.requiredActionBundles(setup);
-  assertDatasetInputsExist(setup, dataset);
 
   const initialPromptSource =
     definition.initial_prompt === undefined
@@ -194,13 +199,11 @@ export function resolveRunPlanWithSetupActions(
   const plan: ResolvedRunPlanV1 = {
     selection: {
       ...cloneJson(selection),
+      ...(group.id === undefined ? {} : { group_id: group.id }),
       agent: resolveAgentSelection(selection.agent),
     },
     provenance: {
-      dataset: {
-        ...cloneJson(dataset.manifest.dataset),
-        manifest_sha256: dataset.manifestSha256,
-      },
+      dataset: cloneJson(dataset.manifest.dataset),
       experiment: {
         id: config.id,
         version: config.version,
@@ -246,15 +249,17 @@ export function resolveRunPlanWithSetupActions(
       ...(definition.example_answer === undefined
         ? {}
         : { example_answer: definition.example_answer }),
-      ...(definition.judging_criteria.length === 0 ||
-      config.models.judge === undefined
+      ...(definition.judging_criteria.length === 0
         ? {}
-        : { judge: cloneJson(config.models.judge) }),
+        : { judge: cloneJson(config.models.judge ?? DEFAULT_HOST_MODEL) }),
     },
-    ...(definition.execution_mode !== 'multi_turn' ||
-    config.models.role_player === undefined
+    ...(definition.execution_mode !== 'multi_turn'
       ? {}
-      : { role_player: cloneJson(config.models.role_player) }),
+      : {
+          role_player: cloneJson(
+            config.models.role_player ?? DEFAULT_HOST_MODEL,
+          ),
+        }),
     agent: resolveAgentSelection(selection.agent),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),
@@ -316,8 +321,7 @@ function assertDatasetCompatibility(
   }
   if (
     dataset.manifest.dataset.id !== config.dataset.id ||
-    dataset.manifest.dataset.version !== config.dataset.version ||
-    dataset.manifestSha256 !== config.dataset.manifest_sha256
+    dataset.manifest.dataset.version !== config.dataset.version
   ) {
     throw new PlanningError(
       'dataset_experiment_mismatch',
@@ -342,7 +346,7 @@ function assertSelection(
   config: ExperimentConfigV1,
   selection: RunSelection,
   casePath: DatasetRelativePath | undefined,
-): void {
+): ExperimentMatrixGroupV1 {
   const groups = getMatrixGroups(config.matrix);
   if (
     casePath === undefined ||
@@ -379,41 +383,25 @@ function assertSelection(
       'Run selection repetition is outside the benchmark matrix.',
     );
   }
-  if (
-    !groups.some(
-      (group) =>
-        group.cases.includes(casePath) &&
-        group.treatments.includes(selection.treatment) &&
-        group.agents.some((agent) => agentsEqual(agent, selection.agent)),
-    )
-  ) {
+  const group = groups.find(
+    (group) =>
+      group.cases.includes(casePath) &&
+      group.treatments.includes(selection.treatment) &&
+      group.agents.some((agent) => agentsEqual(agent, selection.agent)),
+  );
+  if (group === undefined) {
     throw new PlanningError(
       'invalid_selection',
       'Run selection does not belong to a single benchmark matrix group.',
     );
   }
-}
-
-function assertDatasetInputsExist(
-  steps: readonly SetupStepV1[],
-  dataset: LoadedDatasetV1,
-): void {
-  const files = dataset.manifest.files.map(({ path }) => path);
-  for (const step of steps) {
-    if (!isWriteSetupStep(step)) continue;
-    const source = step.with.source;
-    if (!('dataset_path' in source)) continue;
-    if (!files.includes(source.dataset_path)) {
-      throw new PlanningError(
-        'missing_dataset_input',
-        'A setup step references an input absent from the dataset manifest.',
-      );
-    }
+  if (selection.group_id !== undefined && selection.group_id !== group.id) {
+    throw new PlanningError(
+      'invalid_selection',
+      'Run selection group ID does not match its benchmark matrix group.',
+    );
   }
-}
-
-function isWriteSetupStep(step: SetupStepV1): step is WriteSetupStepV1 {
-  return step.uses === 'forge/write';
+  return group;
 }
 
 function agentsEqual(left: AgentSelectionV1, right: AgentSelectionV1): boolean {

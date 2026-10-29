@@ -13,8 +13,26 @@ export function readLiveConfiguration(environment, repositoryRoot) {
   }
 
   const mode = optionalEnvironment('FORGE_LIVE_MODE') ?? 'full';
-  if (mode !== 'full' && mode !== 'setup') {
-    throw new Error('FORGE_LIVE_MODE must be full or setup.');
+  if (mode !== 'full' && mode !== 'setup' && mode !== 'completions') {
+    throw new Error('FORGE_LIVE_MODE must be full or setup or completions.');
+  }
+  // Host completion coverage uses a scripted agent and needs no Docker or agent key.
+  if (mode === 'completions') {
+    return Object.freeze({
+      mode,
+      completionModel: requiredEnvironment('FORGE_LIVE_COMPLETION_MODEL'),
+      upstreamCredential: requiredEnvironment('OPENAI_API_KEY'),
+      gatewayBaseUrl: optionalEnvironment('OPENAI_BASE_URL'),
+      resultsRoot: path.resolve(
+        repositoryRoot,
+        optionalEnvironment('FORGE_LIVE_RESULTS_ROOT') ?? 'results/live',
+      ),
+      suiteId: liveSuiteId(optionalEnvironment('FORGE_LIVE_RUN_ID')),
+      timeoutMs: positiveIntegerEnvironment(
+        'FORGE_LIVE_TIMEOUT_MS',
+        DEFAULT_TIMEOUT_MS,
+      ),
+    });
   }
   const liveAgent = optionalEnvironment('FORGE_LIVE_AGENT') ?? 'claude-code';
   if (liveAgent !== 'claude-code' && liveAgent !== 'codex') {

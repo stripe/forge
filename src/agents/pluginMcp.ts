@@ -1,61 +1,6 @@
-import { credentialReference } from '../contracts/credentials.ts';
 import type { MutableWorkspace } from '../contracts/runtime.ts';
-import { pluginMcpServersForDistribution } from '../model/pluginMcp.ts';
-import type {
-  PluginMcpServerId,
-  PluginSetupStepV1,
-  ResolvedRunPlanV1,
-} from '../model/types.ts';
-
-/** Named server presets own auth details instead of experiment YAML. */
-const PLUGIN_MCP_SERVERS = Object.freeze({
-  stripe: Object.freeze({
-    credentialEnvironmentVariable: 'STRIPE_API_KEY',
-    credentialReference: credentialReference('env:STRIPE_API_KEY'),
-  }),
-});
-
-export function pluginMcpCredentials(servers: readonly PluginMcpServerId[]) {
-  return Object.fromEntries(
-    servers.map((name) => {
-      const server = PLUGIN_MCP_SERVERS[name];
-      return [
-        server.credentialEnvironmentVariable,
-        { reference: server.credentialReference },
-      ];
-    }),
-  );
-}
-
-/** Bind only registered credentials selected by plans, without reading values. */
-export function pluginMcpEnvironmentBindings(
-  plans: readonly ResolvedRunPlanV1[],
-  explicit: Readonly<Record<string, string>> = {},
-): Record<string, string> {
-  const bindings = { ...explicit };
-  for (const plan of plans)
-    for (const step of plan.setup) {
-      if (step.uses !== 'forge/plugin') continue;
-      const distribution = (step as PluginSetupStepV1).with.agents[
-        plan.agent.adapter
-      ];
-      for (const name of pluginMcpServersForDistribution(
-        plan.agent.adapter,
-        distribution,
-      ) ?? []) {
-        const server = PLUGIN_MCP_SERVERS[name];
-        const env = server.credentialEnvironmentVariable;
-        const reference = server.credentialReference;
-        if (Object.hasOwn(bindings, reference) && bindings[reference] !== env) {
-          throw new TypeError(
-            `Plugin credential ${reference} must be bound to ${env}.`,
-          );
-        }
-        bindings[reference] = env;
-      }
-    }
-  return bindings;
-}
+import { PLUGIN_MCP_CREDENTIALS } from '../model/pluginCredentials.ts';
+import type { PluginMcpServerId } from '../model/types.ts';
 
 /** Change one existing connection; never add a second global MCP server. */
 export async function configurePluginMcp(
@@ -81,7 +26,7 @@ export async function configurePluginMcp(
     );
     if (manifest === 'plugin.json' && adapter === 'codex')
       throw new Error(
-        'Codex Agent Plugins mcp.json does not support environment-backed bearer auth. Select stripe@claude-plugins-official from anthropics/claude-plugins-official instead.',
+        'Codex Agent Plugins mcp.json does not support environment-backed bearer auth. The registered Stripe plugin requires a compatible Claude-format distribution.',
       );
     if (
       !record(value) ||
@@ -149,7 +94,7 @@ export function configurePluginMcpDocument(
         `Plugin MCP server ${name} has unsupported auth configuration.`,
       );
     const environmentName =
-      PLUGIN_MCP_SERVERS[name].credentialEnvironmentVariable;
+      PLUGIN_MCP_CREDENTIALS[name].credentialEnvironmentVariable;
     if (adapter === 'claude-code') {
       if (server.headers !== undefined && !record(server.headers))
         throw new Error(`Plugin MCP server ${name} has invalid headers.`);

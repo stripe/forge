@@ -47,12 +47,17 @@ export interface LoadCodexEvidenceInput {
   readonly sessionId: string;
   readonly agentVersion: string;
   readonly model: string;
+  /** Defaults to exec; embedding hosts may select primary terminal sessions. */
+  readonly sessionSource?: 'exec' | 'cli';
   readonly signal: AbortSignal;
 }
 
 /** Retain only the exact root rollout, without altering even malformed later records. */
 export async function loadCodexNativeArtifact(
-  input: Pick<LoadCodexEvidenceInput, 'home' | 'sessionId' | 'signal'>,
+  input: Pick<
+    LoadCodexEvidenceInput,
+    'home' | 'sessionId' | 'signal' | 'sessionSource'
+  >,
 ): Promise<AgentNativeArtifact | undefined> {
   if (!input.home || !SESSION_ID.test(input.sessionId)) return undefined;
   input.signal.throwIfAborted();
@@ -61,6 +66,7 @@ export async function loadCodexNativeArtifact(
       input.home,
       input.sessionId,
       input.signal,
+      input.sessionSource,
     );
     if (!bytes) return undefined;
     return {
@@ -88,6 +94,7 @@ export async function loadCodexEvidence(
       input.home,
       input.sessionId,
       input.signal,
+      input.sessionSource,
     );
     if (!bytes) return unavailable('source_unavailable');
     const records = parseRecords(bytes, input.signal);
@@ -117,6 +124,7 @@ async function readExactRollout(
   home: ReadonlyWorkspace,
   sessionId: string,
   signal: AbortSignal,
+  sessionSource: 'exec' | 'cli' = 'exec',
 ): Promise<Uint8Array | undefined> {
   signal.throwIfAborted();
   const root = await home.inspect('sessions');
@@ -165,7 +173,7 @@ async function readExactRollout(
     throw new IncompleteRolloutError();
   const first = new TextDecoder('utf-8', { fatal: true }).decode(firstBytes);
   const metadata = parseRecord(first, { nodes: 0 });
-  validateSessionMetadata(metadata, sessionId);
+  validateSessionMetadata(metadata, sessionId, sessionSource);
   return bytes;
 }
 
@@ -210,12 +218,13 @@ function parseRecord(line: string, budget: { nodes: number }): RolloutRecord {
 function validateSessionMetadata(
   record: RolloutRecord,
   sessionId: string,
+  sessionSource: 'exec' | 'cli' = 'exec',
 ): void {
   const payload = record.payload;
   if (
     record.type !== 'session_meta' ||
     payload.id !== sessionId ||
-    payload.source !== 'exec' ||
+    payload.source !== sessionSource ||
     (payload.session_id !== undefined && payload.session_id !== sessionId) ||
     (payload.thread_source !== undefined && payload.thread_source !== 'user') ||
     (payload.parent_thread_id !== undefined &&
@@ -223,7 +232,7 @@ function validateSessionMetadata(
     (payload.forked_from_id !== undefined && payload.forked_from_id !== null)
   ) {
     throw new Error(
-      'Codex rollout does not identify the exact primary exec session.',
+      'Codex rollout does not identify the exact primary session.',
     );
   }
 }
@@ -233,7 +242,7 @@ function normalizeRecords(
   input: LoadCodexEvidenceInput,
 ): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
   if (!records[0]) throw new Error('Codex rollout is empty.');
-  validateSessionMetadata(records[0], input.sessionId);
+  validateSessionMetadata(records[0], input.sessionId, input.sessionSource);
   if (records[0].payload.cli_version !== input.agentVersion)
     throw new Error('Codex rollout version differs from the adapter pin.');
   const actualUsers = identifyUserMessages(records);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import type { DefaultCliCompositionOptions } from '../src/cli.ts';
 import type {
   ExperimentRunArtifact,
   ExperimentRunInspection,
@@ -28,15 +29,19 @@ import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
 
 describe('experiment public entry points', () => {
-  it('exports dataset case entries as file paths', () => {
+  it('exports versioned dataset case entries with their paths', () => {
+    const entry: root.DatasetManifestCaseV1 = {
+      id: 'first',
+      version: '0.1.0',
+      path: 'cases/first.case.yaml',
+    };
     const manifest: root.DatasetManifestV1 = {
       dataset: { id: 'public-api', version: '1.0.0' },
-      cases: ['cases/first.case.yaml'],
-      files: [
-        { path: 'cases/first.case.yaml', size: 1, sha256: 'a'.repeat(64) },
-      ],
+      cases: [entry],
     };
-    const casePaths: root.DatasetRelativePath[] = manifest.cases;
+    const casePaths: root.DatasetRelativePath[] = manifest.cases.map(
+      ({ path }) => path,
+    );
     assert.deepEqual(casePaths, ['cases/first.case.yaml']);
     assert.deepEqual(root.parseDatasetManifest(manifest), manifest);
   });
@@ -69,6 +74,18 @@ describe('experiment public entry points', () => {
     assert.equal(evaluation.judging_criteria_total, 1);
     assert.deepEqual(evaluation.judging_criteria, [criterion]);
     assert.equal(evaluation.score, 1);
+    const error: root.CriterionResultV1 = root.parseCriterionJudgment(
+      '{}',
+      'Unavailable criterion.',
+    );
+    assert.equal(typeof error.error!.message, 'string');
+    const incomplete = root.parseEvaluationResult(
+      root.scoreEvaluation([criterion, error], []),
+    );
+    assert.equal(incomplete.status, 'judge_error');
+    assert.equal(incomplete.judging_criteria_errored, 1);
+    assert.equal(incomplete.score, 1);
+    assert.equal(root.scoreEvaluation([error], []).score, null);
     const judge = (
       input: root.CriterionJudgeInput,
       invoke: root.CriterionCompletionInvoker,
@@ -253,10 +270,25 @@ describe('experiment public entry points', () => {
       engine,
       loadExperiment,
     });
+    const acceptsCredentialInspection = (
+      engine: root.ForgeEngine,
+      request: root.PreflightEvalInput,
+      context: root.CredentialSourceContext,
+      options: DefaultCliCompositionOptions,
+    ): readonly root.EvalCredentialUse[] => {
+      const uses = engine.inspectEvalCredentials?.(request) ?? [];
+      for (const use of uses) {
+        const source: string | undefined =
+          options.credentialResolver?.sourceIdentity?.(use.reference, context);
+        void source;
+      }
+      return uses;
+    };
     assert.equal(typeof acceptsCoreTypes, 'function');
     assert.equal(typeof acceptsReportTypes, 'function');
     assert.equal(typeof acceptsReferences, 'function');
     assert.equal(typeof acceptsCommandLoader, 'function');
+    assert.equal(typeof acceptsCredentialInspection, 'function');
   });
 
   it('exposes usage and execution errors with experiment run references', () => {

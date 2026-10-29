@@ -1096,14 +1096,7 @@ describe('local artifact store', () => {
       treatmentSetup: [
         {
           uses: 'forge/plugin',
-          with: {
-            agents: {
-              'claude-code': {
-                plugin: 'stripe@claude-plugins-official',
-                marketplace: 'anthropics/claude-plugins-official',
-              },
-            },
-          },
+          with: { plugin: 'stripe' },
         },
       ],
       agent: { adapter: 'claude-code', provider: 'anthropic', model: 'test' },
@@ -1201,6 +1194,36 @@ describe('local artifact store', () => {
     await assert.rejects(
       verifyCompletedRun(mismatched),
       /does not match the completed run plan/,
+    );
+  });
+
+  it('rejects fabricated resolutions for credential declarations', async () => {
+    const plan = createTestResolvedRunPlan({
+      caseSetup: [{ uses: 'forge/credentials', with: { env: ['API_TOKEN'] } }],
+    });
+    const location = await commitArtifacts(
+      [
+        { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+        { path: 'trajectory.json', body: oneShotTrajectory },
+        {
+          path: 'setup.json',
+          body: jsonBody({
+            steps: [
+              {
+                index: 0,
+                uses: 'forge/credentials',
+                resolution: { host: 'UNDECLARED_TOKEN' },
+              },
+            ],
+          }),
+        },
+      ],
+      (result) => result,
+      { plan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(location),
+      /Static setup action forge\/credentials cannot record a resolution\./,
     );
   });
 
@@ -2188,6 +2211,7 @@ function withPassingCriterion(result: RunResultV1): RunResultV1 {
       score: 1,
       judging_criteria_passed: 1,
       judging_criteria_total: 1,
+      judging_criteria_errored: 0,
       judging_criteria: [
         {
           requirement_level: 'SHOULD' as const,
@@ -2301,6 +2325,7 @@ function resultFor(
       status: 'passed',
       judging_criteria_passed: 0,
       judging_criteria_total: 0,
+      judging_criteria_errored: 0,
       judging_criteria: [],
       checks: [],
     },

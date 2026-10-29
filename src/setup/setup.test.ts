@@ -43,7 +43,7 @@ function result(exitCode = 0): CommandResult {
 }
 
 describe('portable setup actions', () => {
-  it('applies forge/write and forge/command in source order', async () => {
+  it('applies static actions in source order without exposing agent credentials to setup', async () => {
     const events: string[] = [];
     const writes = new Map<string, Uint8Array>();
     const workspace: MutableWorkspace = {
@@ -77,12 +77,19 @@ describe('portable setup actions', () => {
         },
       },
       {
+        uses: 'forge/credentials',
+        with: { env: ['API_TOKEN'] },
+      },
+      {
         uses: 'forge/command',
         with: { argv: ['node', '--version'], cwd: '.', timeout_ms: 1234 },
       },
     ];
 
     const prepared = createSetupExecutor().preflight(steps, setupTarget);
+    assert.deepEqual(prepared.requirements.credentials, {
+      agent: { API_TOKEN: { reference: 'env:API_TOKEN' } },
+    });
     const applied = await prepared.apply({
       runId: 'run-1',
       paths: { workspace: '/workspace', home: '/home/forge' },
@@ -126,7 +133,8 @@ describe('portable setup actions', () => {
     assert.deepEqual(applied.steps, [
       { index: 0, uses: 'forge/write' },
       { index: 1, uses: 'forge/write' },
-      { index: 2, uses: 'forge/command' },
+      { index: 2, uses: 'forge/credentials' },
+      { index: 3, uses: 'forge/command' },
     ]);
     assert.equal(
       Buffer.from(writes.get('notes/fixture.txt')!).toString(),
@@ -134,10 +142,11 @@ describe('portable setup actions', () => {
     );
   });
 
-  it('routes forge/plugin through only the selected agent capability', async () => {
+  it('resolves the named plugin and installs through the selected agent capability', async () => {
     const events: string[] = [];
     const pluginState = emptyWorkspace();
     const installer: AgentPluginInstaller = {
+      supportsMcpBearerAuth: true,
       preflight(distribution, context) {
         events.push(
           `preflight:${context.selection.adapter}:${distribution.plugin}`,
@@ -177,7 +186,7 @@ describe('portable setup actions', () => {
               plugin: distribution.plugin,
               marketplace: distribution.marketplace,
               marketplace_commit: 'a'.repeat(40),
-              native_plugin_id: 'formatter@forge-test',
+              native_plugin_id: 'stripe@forge-test',
               version: '1.0.0',
               source: { kind: 'marketplace-path' },
               installed_tree: {
@@ -194,24 +203,17 @@ describe('portable setup actions', () => {
     };
     const step = parseSetupStep({
       uses: 'forge/plugin',
-      with: {
-        agents: {
-          'test-agent': {
-            plugin: 'formatter@example-marketplace',
-            marketplace: 'example/marketplace',
-          },
-          'other-agent': {
-            plugin: 'other@other-marketplace',
-            marketplace: 'other/marketplace',
-          },
-        },
-      },
+      with: { plugin: 'stripe' },
     });
     const prepared = createSetupExecutor().preflight([step], {
       ...setupTarget,
+      selection: { ...setupTarget.selection, adapter: 'claude-code' },
       pluginInstaller: installer,
     });
     assert.deepEqual(prepared.requirements, {
+      credentials: {
+        agent: { STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' } },
+      },
       executables: ['git'],
       stateDirectories: [
         {
@@ -235,7 +237,7 @@ describe('portable setup actions', () => {
       signal: new AbortController().signal,
     });
     assert.deepEqual(events, [
-      'preflight:test-agent:formatter@example-marketplace',
+      'preflight:claude-code:stripe@claude-plugins-official',
       'install',
     ]);
     assert.deepEqual(applied.steps, [
@@ -243,11 +245,11 @@ describe('portable setup actions', () => {
         index: 0,
         uses: 'forge/plugin',
         resolution: {
-          adapter: 'test-agent',
-          plugin: 'formatter@example-marketplace',
-          marketplace: 'example/marketplace',
+          adapter: 'claude-code',
+          plugin: 'stripe@claude-plugins-official',
+          marketplace: 'anthropics/claude-plugins-official',
           marketplace_commit: 'a'.repeat(40),
-          native_plugin_id: 'formatter@forge-test',
+          native_plugin_id: 'stripe@forge-test',
           version: '1.0.0',
           source: { kind: 'marketplace-path' },
           installed_tree: {
@@ -262,23 +264,11 @@ describe('portable setup actions', () => {
     ]);
   });
 
-  for (const [adapter, plugin, marketplace] of [
-    [
-      'claude-code',
-      'stripe@claude-plugins-official',
-      'anthropics/claude-plugins-official',
-    ],
-    ['codex', 'stripe@stripe', 'stripe/ai'],
-    [
-      'codex',
-      'stripe@claude-plugins-official',
-      'anthropics/claude-plugins-official',
-    ],
-  ] as const) {
-    it(`automatically requests agent-scoped Stripe authentication for ${adapter}`, () => {
+  for (const adapter of ['claude-code', 'codex'] as const) {
+    it(`selects the compatible Stripe distribution and agent credentials for ${adapter}`, () => {
       const step = parseSetupStep({
         uses: 'forge/plugin',
-        with: { agents: { [adapter]: { plugin, marketplace } } },
+        with: { plugin: 'stripe' },
       });
       const target = {
         ...setupTarget,
@@ -287,7 +277,10 @@ describe('portable setup actions', () => {
       const installer: AgentPluginInstaller = {
         supportsMcpBearerAuth: true,
         preflight(distribution, context) {
-          assert.deepEqual(distribution, { plugin, marketplace });
+          assert.deepEqual(distribution, {
+            plugin: 'stripe@claude-plugins-official',
+            marketplace: 'anthropics/claude-plugins-official',
+          });
           assert.deepEqual(context.mcpServers, ['stripe']);
           return {
             requirements: { executables: [], stateDirectories: [] },
@@ -306,6 +299,22 @@ describe('portable setup actions', () => {
           STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
         },
       });
+      const augmented = createSetupExecutor().preflight(
+        [
+          step,
+          parseSetupStep({
+            uses: 'forge/credentials',
+            with: { env: ['STRIPE_API_KEY', 'API_TOKEN'] },
+          }),
+        ],
+        { ...target, pluginInstaller: installer },
+      );
+      assert.deepEqual(augmented.requirements.credentials, {
+        agent: {
+          STRIPE_API_KEY: { reference: 'env:STRIPE_API_KEY' },
+          API_TOKEN: { reference: 'env:API_TOKEN' },
+        },
+      });
       assert.throws(
         () =>
           createSetupExecutor().preflight([step], {
@@ -317,35 +326,21 @@ describe('portable setup actions', () => {
     });
   }
 
-  it('rejects an unsupported or missing selected plugin realization in preflight', () => {
+  it('rejects unsupported agents and missing installers in preflight', () => {
     const step = parseSetupStep({
       uses: 'forge/plugin',
-      with: {
-        agents: {
-          'other-agent': {
-            plugin: 'formatter@example-marketplace',
-            marketplace: 'example/marketplace',
-          },
-        },
-      },
+      with: { plugin: 'stripe' },
     });
     assert.throws(
       () => createSetupExecutor().preflight([step], setupTarget),
-      /does not define a distribution/,
+      /does not support agent/,
     );
-    const selected = parseSetupStep({
-      uses: 'forge/plugin',
-      with: {
-        agents: {
-          'test-agent': {
-            plugin: 'formatter@example-marketplace',
-            marketplace: 'example/marketplace',
-          },
-        },
-      },
-    });
     assert.throws(
-      () => createSetupExecutor().preflight([selected], setupTarget),
+      () =>
+        createSetupExecutor().preflight([step], {
+          ...setupTarget,
+          selection: { ...setupTarget.selection, adapter: 'codex' },
+        }),
       /does not support forge\/plugin/,
     );
   });
@@ -1103,6 +1098,46 @@ describe('portable setup actions', () => {
     assert.deepEqual(applied.steps, [{ index: 0, uses: 'forge/write' }]);
   });
 
+  it('rejects empty dataset directories instead of silently skipping a write', async () => {
+    const prepared = createSetupExecutor().preflight(
+      [
+        {
+          uses: 'forge/write',
+          with: {
+            target: 'out.txt',
+            source: { dataset_path: 'fixtures/source.txt' },
+          },
+        },
+      ],
+      setupTarget,
+    );
+    await assert.rejects(
+      prepared.apply(
+        setupApplyContext({
+          inputs: {
+            async inspect(path) {
+              return { path, kind: 'directory' };
+            },
+            async listFiles() {
+              return [];
+            },
+            async read() {
+              throw new Error('Must not read an empty tree');
+            },
+          },
+        }),
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof SetupActionError);
+        assert.match(
+          String(error.cause),
+          /directory contains no files: fixtures\/source.txt/,
+        );
+        return true;
+      },
+    );
+  });
+
   it('rejects an oversized dataset tree before reading or writing any file', async () => {
     let read = false;
     let written = false;
@@ -1163,8 +1198,6 @@ describe('portable setup actions', () => {
   });
 
   it('honors cancellation after a dataset read before file or directory handler writes', async () => {
-    // Directory inputs exercise the lower-level handler; the public planner
-    // intentionally accepts only manifest-listed dataset files.
     for (const kind of ['file', 'directory'] as const) {
       const controller = new AbortController();
       const cancellation = new Error(`cancelled after ${kind} read`);

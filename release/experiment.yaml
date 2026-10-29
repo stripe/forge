@@ -1,10 +1,9 @@
 id: stripe-integration-public-evals/baseline
-version: 0.1.0
+version: 0.2.0
 dataset:
-  path: ./dataset
+  path: ./datasets/stripe-integration-public-evals
   id: stripe-integration-public-evals
-  version: 0.1.0
-  manifest_sha256: sha256:6b52bcfd75334b251060c996a6803a62b75b9425c26c2b6bf46c9240e2e81a19
+  version: 0.2.0
 runtime:
   adapter: docker
   image:
@@ -14,13 +13,6 @@ runtime:
     memory_bytes: 4294967296
     cpu_count: 2
     process_count: 512
-models:
-  role_player:
-    provider: anthropic
-    model: claude-sonnet-4-6
-  judge:
-    provider: anthropic
-    model: claude-sonnet-4-6
 treatments:
   baseline:
     setup: []

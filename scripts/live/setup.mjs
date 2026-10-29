@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -102,11 +101,7 @@ const cases = [
     setup: [
       {
         uses: 'forge/plugin',
-        with: {
-          agents: {
-            'claude-code': { plugin: PLUGIN, marketplace: MARKETPLACE },
-          },
-        },
+        with: { plugin: 'stripe' },
       },
     ],
     files: { 'plugin-verified.txt': 'native plugin verified\n' },
@@ -131,17 +126,7 @@ export async function runSetupIntegrationSuite({
       : {
           ...spec,
           setup: [
-            {
-              uses: 'forge/plugin',
-              with: {
-                agents: {
-                  [liveAgent]: {
-                    plugin: selectedPlugin,
-                    marketplace: selectedMarketplace,
-                  },
-                },
-              },
-            },
+            ...spec.setup,
             command([
               'node',
               '-e',
@@ -193,9 +178,7 @@ export async function runSetupIntegrationSuite({
       specs,
       liveAgent,
     );
-    const inputProvider = await createDirectoryRunInputProvider(dataset.root, {
-      manifest: dataset.manifest,
-    });
+    const inputProvider = await createDirectoryRunInputProvider(dataset.root);
     const nativeAgent = codex
       ? createCodexAdapter()
       : createClaudeCodeAdapter();
@@ -502,12 +485,11 @@ async function verifyCodexPlugin(runtime, signal, pluginId) {
 
 async function createFixture(root, platform, specs, liveAgent) {
   const datasetRoot = path.join(root, 'dataset');
-  const files = {
-    'fixtures/seed.txt': 'dataset seed\n',
-  };
+  const files = { 'fixtures/seed.txt': 'dataset seed\n' };
   for (const spec of specs) {
     files[`cases/setup/${spec.id}.case.yaml`] = stringify({
       id: `setup/${spec.id}`,
+      version: '0.1.0',
       initial_prompt: `Verify ${spec.id} setup.`,
       execution_mode: 'one_shot',
       setup: spec.setup,
@@ -526,11 +508,10 @@ async function createFixture(root, platform, specs, liveAgent) {
   }
   const manifest = {
     dataset: { id: 'forge-live-setup', version: '1.0.0' },
-    cases: specs.map(({ id }) => `cases/setup/${id}.case.yaml`),
-    files: Object.entries(files).map(([file, body]) => ({
-      path: file,
-      size: Buffer.byteLength(body),
-      sha256: sha256(body),
+    cases: specs.map((spec) => ({
+      id: `setup/${spec.id}`,
+      version: '0.1.0',
+      path: `cases/setup/${spec.id}.case.yaml`,
     })),
   };
   for (const [file, body] of Object.entries(files)) {
@@ -549,7 +530,6 @@ async function createFixture(root, platform, specs, liveAgent) {
       dataset: {
         ...manifest.dataset,
         path: './dataset',
-        manifest_sha256: `sha256:${sha256(manifestBody)}`,
       },
       runtime: {
         adapter: 'docker',
@@ -583,8 +563,4 @@ async function createFixture(root, platform, specs, liveAgent) {
     dataset: await engine.loadDataset(datasetRoot),
     experiment: await engine.loadExperimentConfig(experimentPath),
   };
-}
-
-function sha256(body) {
-  return createHash('sha256').update(body).digest('hex');
 }

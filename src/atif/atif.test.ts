@@ -51,7 +51,7 @@ describe('parseAtifTrajectory', () => {
 
     expectInvalid(
       { ...minimalTrajectory(), schema_version: 'ATIF-v1.7' },
-      'Invalid literal value',
+      'Invalid input: expected',
     );
     const withoutVersion = { ...minimalTrajectory() } as Record<
       string,
@@ -415,6 +415,21 @@ describe('parseAtifTrajectory', () => {
       },
       'session_id is informational only',
     );
+  });
+
+  it('preserves finite integer metrics beyond the safe integer range', () => {
+    const total_prompt_tokens = Number.MAX_SAFE_INTEGER + 1;
+    assert.equal(
+      parseAtifTrajectory({
+        ...minimalTrajectory(),
+        final_metrics: { total_prompt_tokens },
+      }).final_metrics?.total_prompt_tokens,
+      total_prompt_tokens,
+    );
+    expectInvalid({
+      ...minimalTrajectory(),
+      final_metrics: { total_prompt_tokens: 1.5 },
+    });
   });
 
   it('requires a note when aggregate total_steps differs', () => {

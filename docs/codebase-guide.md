@@ -43,7 +43,7 @@ pnpm test path/to/file.test.ts
 without changing files. Use `pnpm lint:fix` to apply safe fixes, or `pnpm format`
 to format only. The [Biome configuration](https://github.com/stripe/forge/blob/main/biome.json)
 excludes dataset releases, test fixtures, and packaged Docker assets so their
-integrity-pinned bytes are not rewritten.
+bytes are not rewritten.
 
 `pnpm check` runs Biome, type checking, tests, build, dataset validation,
 documentation validation, and package checks. PRs targeting `main`, including drafts, run the
@@ -52,16 +52,22 @@ The publishing workflow checks and publishes versioned development snapshots
 after pushes to `main`; stable release commits are skipped.
 
 `pnpm check:docs` checks documentation links, the public export inventory, and
-structured snippets. `pnpm check:cases` validates checked-in release datasets
-and harness fixtures through the public loader without model calls. Sample
-release bundles live under [`datasets`](https://github.com/stripe/forge/tree/main/datasets);
-harness inputs live under [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
+structured snippets. `pnpm check:cases` validates checked-in datasets and
+harness fixtures through the public loader without model calls. It also
+compares each manifest with its copy at the merge-base with `origin/main`
+(override with `-- --base <ref>`) and fails when a case version or membership
+change keeps the dataset version.
+Each dataset keeps only its latest version; earlier versions live in Git
+history. Public inputs under [`release`](https://github.com/stripe/forge/tree/main/release)
+keep dataset payloads in `datasets/`, with `experiment.yaml` and release
+documentation at the release root; harness inputs live under
+[`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures).
 
 ### Opt-in live tests
 
 The single live suite under
 [`scripts/live-e2e.mjs`](https://github.com/stripe/forge/blob/main/scripts/live-e2e.mjs)
-is separate from `pnpm test` and `pnpm check`. Both modes require Docker and
+is separate from `pnpm test` and `pnpm check`. Setup and full modes require Docker and
 network access. Setup mode exercises real setup actions and plugin installation
 without model credentials or upstream model calls:
 
@@ -89,6 +95,19 @@ mode uses scripted host completions for multi-turn coverage, so it needs no
 Anthropic credential. Set `FORGE_LIVE_AGENT=codex` with setup mode to test Codex
 setup without upstream calls.
 
+Completion mode checks the real OpenAI host provider through Ava initialization,
+continuation, criterion judging, and committed artifact verification. It uses a
+scripted coding agent and an in-memory runtime, so it needs no Docker or agent
+credential. It makes billable host model calls and requires an explicit model:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=completions FORGE_LIVE_COMPLETION_MODEL=gpt-5.4 OPENAI_API_KEY=your-restricted-key pnpm test:live
+```
+
+Optional `OPENAI_BASE_URL` selects a compatible Responses API root. This mode
+checks host transport and schemas; use the public CLI to establish real
+coding-agent connectivity to the selected endpoint.
+
 The live suite can create temporary authenticated host bridges for Codex
 Responses requests and loopback Claude endpoints. The real upstream key
 stays host-side; the container receives a per-run bridge credential. The host
@@ -109,7 +128,7 @@ endpoints reachable from the container. See the README's
 Results default to `results/live`. `FORGE_LIVE_RUN_ID` sets the suite/run ID
 prefix; `FORGE_LIVE_RESULTS_ROOT` changes the root; `FORGE_LIVE_TIMEOUT_MS` sets
 the positive overall timeout (30 minutes by default); and
-`FORGE_DOCKER_EXECUTABLE` selects another Docker CLI. Both modes verify removal
+`FORGE_DOCKER_EXECUTABLE` selects another Docker CLI. Setup and full modes verify removal
 of containers and host runtime files; completed evals with cleanup warnings fail
 live verification. The helpers under `scripts/live/` are safe to import; Docker
 or model calls begin only when the entry point runs a selected mode.
@@ -206,7 +225,8 @@ If you are following the public executable, start instead at
 | --- | --- | --- |
 | [`src/index.ts`](https://github.com/stripe/forge/blob/main/src/index.ts) | Root re-exports | Defines the stable package-root API. Specialized implementations such as Docker and agent adapters are exported through package subpaths instead. |
 | [`src/engine.ts`](https://github.com/stripe/forge/blob/main/src/engine.ts) | `ForgeEngine`, `createForgeEngine`, `defaultForgeEngine` | Snapshots a setup action registry and binds model parsing, loading, planning, preflight, execution, and verification to that exact registry. Delegates to `model`, `planning`, `execution`, and `results`. |
-| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, filters matrix entries, creates adapters, and calls the engine or experiment run controller. It is composition code, not benchmark semantics. |
+| [`src/cli.ts`](https://github.com/stripe/forge/blob/main/src/cli.ts) | `runCli`, `createDefaultCliComposition` | CLI host for `validate`, `plan`, and `run`. Loads inputs, filters matrix entries, constructs each composition once, binds selected credential grants, and calls the engine or experiment run controller. |
+| [`src/credentialDeclarations.ts`](https://github.com/stripe/forge/blob/main/src/credentialDeclarations.ts) | `validateCredentialDeclarations`, `resolveCredentialDeclarations` | Internal declaration ledger and shared source-proof rules for setup aggregation and execution; resolves every distinct reference before producing one runtime binding per name. |
 | [`src/experiment.ts`](https://github.com/stripe/forge/blob/main/src/experiment.ts) | `runExperiment`, `readExperimentRunSelections`, `inspectExperimentRun` | Experiment run controller, checkpoint/report persistence under the lock, bounded verified outcome collection, and read-only inspection of latest attempts. |
 | [`src/experimentModel.ts`](https://github.com/stripe/forge/blob/main/src/experimentModel.ts) | Checkpoint schemas and attempt types | Strict execution checkpoint model shared by the controller and report schemas. |
 | [`src/experimentReport.ts`](https://github.com/stripe/forge/blob/main/src/experimentReport.ts) | `parseExperimentRunReport`, report types, internal builder/serializer | Bounded scorecard schema, case/configuration aggregation, and verification that statistics match run rows. Public parser/types are re-exported through the experiment subpath. |
@@ -228,6 +248,7 @@ parseExperimentConfig/Yaml     →  model/parse.ts
 parseResolvedRunPlan           →  model/parse.ts
 loadDataset/config             →  model/loaders.ts
 resolveRunPlan                 →  planning/planner.ts, then reparses
+inspectEvalCredentials        →  execution/execute.ts
 preflightEval/executeEval      →  execution/execute.ts
 verifyCompletedRun             →  results/localStore.ts
 ```
@@ -296,6 +317,7 @@ executeEvalWithTestHooks
 │   ├── completionBindingsForPlan
 │   └── runtime.preflight
 ├── resolveEnvironment
+│   └── resolveCredentialDeclarations
 ├── prepareCompletionRuntime
 │   ├── credentialResolver.resolve
 │   └── completionProvider.preflight
@@ -368,9 +390,9 @@ is selected.
 | [`types.ts`](https://github.com/stripe/forge/blob/main/src/model/types.ts) | TypeScript wire types for manifests, cases, experiments, selections, setup steps, runtimes, and resolved plans | Imported across nearly every directory; contains data only |
 | [`parse.ts`](https://github.com/stripe/forge/blob/main/src/model/parse.ts) | Strict Zod schemas, YAML/JSON decoding, defaults, cross-field checks, and action-specific `with` parsing | Uses `setup/registry.ts` to validate setup action semantics; called by loaders, engine, planner boundaries, and result verification |
 | [`matrix.ts`](https://github.com/stripe/forge/blob/main/src/model/matrix.ts) | `getMatrixGroups` and shared agent identity after defaults | Provides shared matrix views and agent identity for parsing and planning. |
-| [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest inventory, hashing, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
+| [`loaders.ts`](https://github.com/stripe/forge/blob/main/src/model/loaders.ts) | Filesystem-safe dataset and experiment loading, exact manifest case inventory, and case parsing | Calls `parse.ts`; returns `LoadedDatasetV1` and `LoadedExperimentConfigV1` to CLI/planning |
 | [`paths.ts`](https://github.com/stripe/forge/blob/main/src/model/paths.ts) | Shared predicates for dataset paths, workspace paths, IDs, action names, versions, repositories, and bounded metadata | Used by parsers, setup, runtime, results, agents, and provider adapters |
-| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for dataset pins, bundle identity checks, plugin snapshot fingerprints, and artifact verification |
+| [`hashes.ts`](https://github.com/stripe/forge/blob/main/src/model/hashes.ts) | SHA-256 validation and helpers | Used for bundle identity checks, plugin snapshot fingerprints, and artifact verification |
 | [`checks.ts`](https://github.com/stripe/forge/blob/main/src/model/checks.ts) | Detect whether a plan actually contains deterministic workspace checks | Used by execution and result inventory verification |
 | [`errors.ts`](https://github.com/stripe/forge/blob/main/src/model/errors.ts) | `BenchmarkModelError` and stable model/loading error codes | Thrown by safe loaders and exposed through `model/index.ts` |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/model/index.ts) | Public model barrel | Re-exported by the package root |
@@ -384,7 +406,7 @@ raw YAML/JSON
    │ parse.ts
    ▼
 EvalCaseV1 / ExperimentConfigV1 / DatasetManifestV1
-   │ loaders.ts verifies dataset bytes and adds source paths
+   │ loaders.ts checks the case inventory and setup inputs and adds source paths
    ▼
 LoadedDatasetV1 + LoadedExperimentConfigV1
    │ planning/planner.ts
@@ -427,10 +449,10 @@ implementations.
 | [`composition.ts`](https://github.com/stripe/forge/blob/main/src/contracts/composition.ts) | `ForgeComposition`, `CompletionProviderCollection` | Consumed by `execution`; constructed by the CLI or embedding host |
 | [`runtime.ts`](https://github.com/stripe/forge/blob/main/src/contracts/runtime.ts) | `RuntimeAdapter`, `PreparedRuntime`, `SealedRuntime`, workspace interfaces | Implemented by `runtime/docker` and testing fakes; projected by `execution` into narrower agent/setup views |
 | [`agent.ts`](https://github.com/stripe/forge/blob/main/src/contracts/agent.ts) | `AgentAdapter`, `AgentSession`, native evidence types, runtime projections | Implemented by Claude Code, Codex, and testing fakes; consumed by `execution` and `evidence` |
-| [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic` and scripted tests; managed by `execution/completionRuntime.ts` |
-| [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Used by agent/setup/provider declarations and execution; default CLI resolver maps opaque references to explicitly named host variables |
+| [`completion.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completion.ts) | `CompletionProvider`, requests/responses, strict schema and usage types | Implemented by `providers/anthropic`, `providers/openai`, and scripted tests; managed by `execution/completionRuntime.ts` |
+| [`credentials.ts`](https://github.com/stripe/forge/blob/main/src/contracts/credentials.ts) | `CredentialResolver`, `CredentialSourceContext`, environment requirement types, normalization, `createEnvironmentResolver`, `createEnvironmentCredentialResolver` | Defines secret resolution and optional pure source proof; used by agent/setup/provider declarations and execution |
 | [`command.ts`](https://github.com/stripe/forge/blob/main/src/contracts/command.ts) | `CommandRunner`, `CommandResult`, `CommandExecutionError` | Implemented by Docker command controller and testing fakes; consumed by runtime, setup, and agents |
-| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; manifest-backed directory providers check returned bytes and inventory |
+| [`inputs.ts`](https://github.com/stripe/forge/blob/main/src/contracts/inputs.ts) | `RunInputProvider`, `createDirectoryRunInputProvider` | Used by setup and agent contexts; directory providers enforce path, symlink, and byte-limit safety |
 | [`artifacts.ts`](https://github.com/stripe/forge/blob/main/src/contracts/artifacts.ts) | Store transaction, contributor, committed run, publisher interfaces | Local store implements transactions; execution invokes contributors; publication remains caller-owned |
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code and Codex; selected by `setup/forgePlugin.ts` |
@@ -477,7 +499,8 @@ application across several files.
 | [`executor.ts`](https://github.com/stripe/forge/blob/main/src/setup/executor.ts) | `createSetupExecutorForRegistry`, `PreparedSetup` implementation | Calls each action's pure `preflight`, merges requirements, freezes prepared operations, and later applies them in order with least-privileged projections. Called by `execute.ts`. |
 | [`forgeWrite.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
 | [`forgeCommand.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
-| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Selects the current agent's `AgentPluginInstaller`, incorporates its requirements, installs, and validates its receipt. |
+| [`forgeCredentials.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCredentials.ts) | `credentialsSetupHandler` | Declares agent-scoped credentials from runtime environment names; application performs no commands or mutations. |
+| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Resolves a registered plugin for the selected agent, declares credentials and installer requirements, installs, and validates its receipt. |
 | [`resolution.ts`](https://github.com/stripe/forge/blob/main/src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
 
@@ -623,14 +646,14 @@ tree receipt.
 
 ## `src/providers`: host-side model transport
 
-[`src/providers/anthropic/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/anthropic/index.ts) is the
-current built-in `CompletionProvider`. It contains construction, model
-capability validation, request validation and schema projection, fetch,
-bounded-response reading, provider-response parsing, usage normalization, and
-safe error classes in one file.
+[`src/providers/anthropic/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/anthropic/index.ts) and
+[`src/providers/openai/index.ts`](https://github.com/stripe/forge/blob/main/src/providers/openai/index.ts)
+implement Messages and Responses host transports. Each owns request validation,
+schema projection, bounded fetch, response parsing, usage normalization, and safe
+error classes. They have no SDK dependency or ambient credential reads.
 
-It is used only through `execution/completionRuntime.ts`. Ava and criterion
-judging depend on the provider-neutral completion contract, not this provider.
+Both are used only through `execution/completionRuntime.ts`. Ava and criterion
+judging depend on the provider-neutral completion contract.
 That distinction lets an embedding host register another provider without
 changing `interaction` or `evaluation`.
 
@@ -766,8 +789,8 @@ Tests use `node:assert/strict` with explicit field assertions for partial object
 Keep native parser inputs and expected canonical bytes independent of the
 implementation being tested. Checked-in eval inputs under
 [`test/fixtures`](https://github.com/stripe/forge/tree/main/test/fixtures) serve
-deterministic tests and the opt-in live suite; their manifest sizes and hashes
-are verified by `pnpm check:cases` and loader tests.
+deterministic tests and the opt-in live suite; their manifests are validated
+by `pnpm check:cases` and loader tests.
 
 The normal suite combines focused unit tests, deterministic integration tests,
 real local subprocesses, and loopback HTTP transport tests. Subprocess tests
@@ -781,8 +804,7 @@ gateway behavior, and suite configuration.
 
 | Path | Role |
 | --- | --- |
-| [`datasets`](https://github.com/stripe/forge/tree/main/datasets) | Versioned sample release bundles. Each version contains a runnable `experiment.yaml` which pins its nested exact-manifest `dataset/` tree and selects treatments and models. |
-| [`examples`](https://github.com/stripe/forge/tree/main/examples) | Offline external-runtime composition demo. |
+| [`release`](https://github.com/stripe/forge/tree/main/release) | Public dataset payloads under `datasets/`, with a runnable `experiment.yaml` and documentation at the root. Holds only the latest versions; earlier versions live in Git history. |
 | [`docs`](.) | [Architecture](architecture.md) and contributor guides. `plugin-action.md` and `setup-action-bundles.md` own their feature contracts. |
 | [`vitest.config.ts`](https://github.com/stripe/forge/blob/main/vitest.config.ts) | Vitest discovery, Node environment, process isolation, and mock restoration. |
 | [`scripts/copy-assets.mjs`](https://github.com/stripe/forge/blob/main/scripts/copy-assets.mjs) | Copies packaged Docker assets after TypeScript compilation. |
@@ -818,7 +840,7 @@ Usually touch:
 4. `execution` or the relevant subsystem that consumes it;
 5. `results/types.ts` and `results/parse.ts` if persisted output changes;
 6. verifier logic in `results/localStore.ts` when artifacts must agree; and
-7. adjacent tests, affected dataset snapshots and eval fixtures, manifest sizes/hashes,
+7. adjacent tests, affected dataset snapshots and eval fixtures, experiment dataset versions,
    and the architecture guide's [data model](architecture.md#the-benchmark-data-model).
 
 Do not let runtime code infer a new default. Materialize it during parsing or

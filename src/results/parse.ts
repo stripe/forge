@@ -13,6 +13,7 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
+import { scoreEvaluation } from '../evaluation/score.ts';
 import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
@@ -24,6 +25,7 @@ import {
   DEFAULT_REQUIREMENT_LEVEL,
   REQUIREMENT_LEVELS,
 } from '../model/types.ts';
+import { MAX_ERROR_MESSAGE_CHARACTERS } from '../security/errorMessage.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import {
   assertCompatibleForgeVersion,
@@ -132,63 +134,6 @@ const checkResult = z
   })
   .strict();
 
-const criterionResult = z
-  .object({
-    label: z
-      .string()
-      .regex(/^[a-z][a-z0-9_]*$/)
-      .optional(),
-    requirement_level: z
-      .enum(REQUIREMENT_LEVELS)
-      .default(DEFAULT_REQUIREMENT_LEVEL),
-    criterion: z
-      .string()
-      .min(1)
-      .max(64 * 1024),
-    passed: z.boolean(),
-    explanation: z.string().max(64 * 1024),
-  })
-  .strict()
-  .superRefine((criterion, context) => {
-    const wordingIssue = criterionRequirementWordingIssue(
-      criterion.criterion,
-      criterion.requirement_level,
-    );
-    if (wordingIssue !== undefined) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['criterion'],
-        message: wordingIssue,
-      });
-    }
-  });
-
-export const evaluationResultSchema = z
-  .object({
-    score: z.number().finite().min(0).max(1),
-    status: z.enum(['passed', 'partial', 'failed']),
-    judging_criteria_passed: z.number().int().nonnegative(),
-    judging_criteria_total: z.number().int().nonnegative(),
-    judging_criteria: z.array(criterionResult),
-    checks: z.array(checkResult),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    const included = value.judging_criteria.filter(
-      (criterion) => criterion.requirement_level !== 'OPTIONAL',
-    );
-    const passed = included.filter((criterion) => criterion.passed).length;
-    if (
-      value.judging_criteria_total !== included.length ||
-      value.judging_criteria_passed !== passed
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Criterion totals do not match criterion results.',
-      });
-    }
-  });
-
 const artifactDescriptor = z
   .object({
     path: safeText,
@@ -227,6 +172,88 @@ const interactionTurn = z
     tool_calls: z.array(interactionToolCall).max(100_000),
   })
   .strict();
+const criterionFields = {
+  label: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
+  requirement_level: z
+    .enum(REQUIREMENT_LEVELS)
+    .default(DEFAULT_REQUIREMENT_LEVEL),
+  criterion: z
+    .string()
+    .min(1)
+    .max(64 * 1024),
+  explanation: z.string().max(64 * 1024),
+};
+const criterionResult = z
+  .union([
+    z.object({ ...criterionFields, passed: z.boolean() }).strict(),
+    z
+      .object({
+        ...criterionFields,
+        passed: z.null(),
+        error: z
+          .object({
+            type: z.enum(['parse_error', 'request_error']),
+            attempts: z.number().int().min(1).max(3),
+            message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
+          })
+          .strict(),
+      })
+      .strict(),
+  ])
+  .superRefine((criterion, context) => {
+    const wordingIssue = criterionRequirementWordingIssue(
+      criterion.criterion,
+      criterion.requirement_level,
+    );
+    if (wordingIssue !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['criterion'],
+        message: wordingIssue,
+      });
+    }
+  });
+
+export const evaluationResultSchema = z
+  .object({
+    score: z.number().finite().min(0).max(1).nullable(),
+    status: z.enum(['passed', 'partial', 'failed', 'judge_error']),
+    judging_criteria_passed: z.number().int().nonnegative(),
+    judging_criteria_total: z.number().int().nonnegative(),
+    judging_criteria_errored: z.number().int().nonnegative(),
+    judging_criteria: z.array(criterionResult),
+    checks: z.array(checkResult),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const expected = scoreEvaluation(
+      value.judging_criteria.map(({ label, ...criterion }) => ({
+        ...criterion,
+        ...(label === undefined ? {} : { label }),
+      })),
+      value.checks.map(({ name, passed }) => ({ name, passed })),
+    );
+    if (
+      value.judging_criteria_total !== expected.judging_criteria_total ||
+      value.judging_criteria_passed !== expected.judging_criteria_passed ||
+      value.judging_criteria_errored !== expected.judging_criteria_errored
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Criterion totals do not match criterion results.',
+      });
+    }
+    if (value.score !== expected.score || value.status !== expected.status) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Evaluation score and status do not match criterion and check results.',
+      });
+    }
+  });
 
 const avaNeed = z
   .object({
@@ -603,7 +630,7 @@ const runResultFields = {
       adapter: safeText,
       runtime_id: safeText,
       platform: safeText,
-      metadata: z.record(z.string().max(64 * 1024)),
+      metadata: z.record(z.string(), z.string().max(64 * 1024)),
     })
     .strict(),
   agent: z

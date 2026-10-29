@@ -4,6 +4,7 @@ import { parseEvalCase, parseEvalCaseYaml } from './parse.ts';
 
 const CASE = {
   id: 'sample/requirements',
+  version: '0.1.0',
   task: 'Implement a payment endpoint.',
 };
 
@@ -20,6 +21,7 @@ describe('criterion requirement levels', () => {
     assert.deepEqual(object, { value: `  ${text}  ` });
     assert.deepEqual(
       parseEvalCaseYaml(`id: sample/shorthand
+version: 0.1.0
 task: Complete the task.
 judging_criteria:
   - ${text}

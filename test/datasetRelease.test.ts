@@ -11,28 +11,46 @@ import {
   resolveRunPlan,
 } from '../src/index.ts';
 
-const releaseRoot = path.resolve(
-  'datasets/stripe-integration-public-evals/0.1.0',
-);
-const datasetRoot = path.join(releaseRoot, 'dataset');
-const experimentPath = path.join(releaseRoot, 'experiment.yaml');
+const releaseRoot = path.resolve('release');
+const datasetPath = 'datasets/stripe-integration-public-evals';
+const experimentFile = 'experiment.yaml';
+const datasetRoot = path.join(releaseRoot, datasetPath);
+const experimentPath = path.join(releaseRoot, experimentFile);
 
 describe('sample dataset release', () => {
-  it('validates the bundled dataset and plans its pinned public baseline without credentials', async () => {
+  it('validates the released dataset and plans its pinned public baseline without credentials', async () => {
     const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),
       loadExperimentConfig(experimentPath),
     ]);
     assert.deepEqual(dataset.manifest.dataset, {
       id: 'stripe-integration-public-evals',
-      version: '0.1.0',
+      version: '0.2.0',
     });
-    assert.deepEqual(dataset.manifest.cases, [
-      'cases/payments-onetime.case.yaml',
-    ]);
+    assert.deepEqual(
+      dataset.manifest.cases.map(({ id, version, path }) => ({
+        id,
+        version,
+        path,
+      })),
+      [
+        {
+          id: 'stripe-integration-public-evals/payments-onetime',
+          version: '0.1.0',
+          path: 'cases/payments-onetime.case.yaml',
+        },
+      ],
+    );
+    assert.deepEqual(
+      {
+        id: experiment.config.dataset.id,
+        version: experiment.config.dataset.version,
+      },
+      dataset.manifest.dataset,
+    );
     assert.equal(
-      dataset.manifestSha256,
-      experiment.config.dataset.manifest_sha256,
+      experiment.config.dataset.path,
+      './datasets/stripe-integration-public-evals',
     );
 
     const selections = expandExperiment(experiment, dataset);
@@ -55,8 +73,14 @@ describe('sample dataset release', () => {
     assert.equal(plan.interaction.mode, 'multi_turn');
     assert.equal(plan.interaction.max_turns, 10);
     assert.equal(plan.evaluation.judging_criteria.length, 8);
-    assert.equal(plan.role_player?.provider, 'anthropic');
-    assert.equal(plan.evaluation.judge?.provider, 'anthropic');
+    assert.deepEqual(plan.role_player, {
+      provider: 'openai',
+      model: 'gpt-6.1-sol',
+    });
+    assert.deepEqual(plan.evaluation.judge, {
+      provider: 'openai',
+      model: 'gpt-6.1-sol',
+    });
 
     for (const command of ['validate', 'plan']) {
       let stdout = '';
@@ -86,7 +110,7 @@ describe('sample dataset release', () => {
     }
   });
 
-  it('relocates the complete release without rewriting the experiment or changing its plan', async (context) => {
+  it('relocates the dataset and experiment together without rewriting the experiment or changing its plan', async (context) => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-dataset-release-'),
     );
@@ -103,9 +127,9 @@ describe('sample dataset release', () => {
 
     const relocatedRoot = path.join(root, 'release');
     await fs.cp(releaseRoot, relocatedRoot, { recursive: true });
-    const relocatedExperimentPath = path.join(relocatedRoot, 'experiment.yaml');
+    const relocatedExperimentPath = path.join(relocatedRoot, experimentFile);
     const [relocated, consumer] = await Promise.all([
-      loadDataset(path.join(relocatedRoot, 'dataset')),
+      loadDataset(path.join(relocatedRoot, datasetPath)),
       loadExperimentConfig(relocatedExperimentPath),
     ]);
     assert.equal(relocated.manifestRaw, dataset.manifestRaw);

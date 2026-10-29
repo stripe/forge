@@ -1,9 +1,11 @@
 import type {
+  EvalCredentialUse,
   ExecuteEvalInput,
   PreflightEvalInput,
 } from './execution/execute.ts';
 import {
   executeEvalWithSetupActions,
+  inspectEvalCredentialsWithSetupActions,
   preflightEvalWithSetupActions,
 } from './execution/execute.ts';
 import {
@@ -63,6 +65,10 @@ export interface ForgeEngine {
     readonly runtimePlatform?: ForgeDockerRuntimeV1['platform'];
   }): ResolvedRunPlanV1;
   preflightEval(request: PreflightEvalInput): void;
+  /** Pure selected-consumer inventory; defers only credential-source proof. */
+  inspectEvalCredentials?(
+    request: PreflightEvalInput,
+  ): readonly EvalCredentialUse[];
   executeEval(request: ExecuteEvalInput): Promise<CompletedRunV1>;
   verifyCompletedRun(location: string): Promise<CompletedRun>;
 }
@@ -112,6 +118,9 @@ export function createForgeEngine(
     },
     preflightEval(request) {
       preflightEvalWithSetupActions(request, setupActions);
+    },
+    inspectEvalCredentials(request) {
+      return inspectEvalCredentialsWithSetupActions(request, setupActions);
     },
     executeEval(request) {
       return executeEvalWithSetupActions(request, setupActions);

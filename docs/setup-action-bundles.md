@@ -12,8 +12,8 @@ code imports a bundle and supplies it when constructing an immutable
 JavaScript package to download or import.
 
 Use a bundle when an action belongs to an embedding environment rather than to
-portable Forge. Built-in actions such as `forge/write`, `forge/command`, and
-`forge/plugin` continue to ship with the installed Forge version.
+portable Forge. Built-in actions such as `forge/write`, `forge/command`,
+`forge/credentials`, and `forge/plugin` ship with the installed Forge version.
 
 ## Defining and registering a bundle
 

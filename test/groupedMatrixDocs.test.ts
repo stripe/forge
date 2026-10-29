@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -28,10 +27,11 @@ it('expands the architecture guide grouped matrix into its documented selections
       path: 'cases/examples/marketplace/case.yaml',
     },
   ];
-  const files = [];
+  const manifestCases = [];
   for (const entry of cases) {
     const body = JSON.stringify({
       id: entry.id,
+      version: '0.1.0',
       initial_prompt: 'Complete the task.',
       execution_mode: 'one_shot',
       setup: [],
@@ -39,18 +39,17 @@ it('expands the architecture guide grouped matrix into its documented selections
     });
     await mkdir(path.dirname(path.join(root, entry.path)), { recursive: true });
     await writeFile(path.join(root, entry.path), body);
-    files.push({
+    manifestCases.push({
+      id: entry.id,
+      version: '0.1.0',
       path: entry.path,
-      size: Buffer.byteLength(body),
-      sha256: createHash('sha256').update(body).digest('hex'),
     });
   }
   await writeFile(
     path.join(root, 'manifest.json'),
     JSON.stringify({
       dataset: { id: 'grouped-matrix-docs', version: '0.1.0' },
-      cases: cases.map(({ path }) => path),
-      files,
+      cases: manifestCases,
     }),
   );
   const dataset = await loadDataset(root);
@@ -61,7 +60,6 @@ version: 0.1.0
 dataset:
   id: grouped-matrix-docs
   version: 0.1.0
-  manifest_sha256: ${dataset.manifestSha256}
 runtime:
   adapter: docker
   image:

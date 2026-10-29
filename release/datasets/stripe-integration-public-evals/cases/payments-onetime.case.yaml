@@ -1,4 +1,5 @@
 id: stripe-integration-public-evals/payments-onetime
+version: 0.1.0
 task: |-
   I'm building an e-commerce site that sells a single product: a printed photography book for $50. When a customer clicks "Buy Now" on my product page, they should be taken through a payment flow and land on a confirmation page when done.
 

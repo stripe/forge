@@ -19,6 +19,7 @@ import {
   type ResolvedRunPlanV1,
 } from '../model/index.ts';
 import { isSafeDatasetRelativePath } from '../model/paths.ts';
+import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import { assertCompatibleForgeVersion } from '../version.ts';
@@ -498,7 +499,10 @@ function verifySetupArtifact(
         );
       }
       const planned = plan.setup[index] as PluginSetupStepV1;
-      const distribution = planned.with.agents[plan.agent.adapter];
+      const distribution = pluginDefinitionForAgent(
+        planned.with.plugin,
+        plan.agent.adapter,
+      )?.distribution;
       const requestedName =
         distribution === undefined
           ? undefined
@@ -519,7 +523,9 @@ function verifySetupArtifact(
         );
       }
     } else if (
-      (step.uses === 'forge/write' || step.uses === 'forge/command') &&
+      (step.uses === 'forge/write' ||
+        step.uses === 'forge/command' ||
+        step.uses === 'forge/credentials') &&
       step.resolution !== undefined
     ) {
       throw new ArtifactStoreError(

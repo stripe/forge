@@ -10,6 +10,7 @@ import {
   createJudgeTranscriptProjection,
   createSetupExecutor,
   credentialReference,
+  credentialsSetupHandler,
   criterionResultMatchesDefinition,
   defineSetupActionBundle,
   evaluateRunEvidence,
@@ -43,6 +44,16 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('keeps the OpenAI provider on its documented implementation subpath', async () => {
+    assert.equal('createOpenAICompletionProvider' in rootExports, false);
+    const openai = await import('./providers/openai/index.ts');
+    assert.equal(typeof openai.createOpenAICompletionProvider, 'function');
+    assert.equal(
+      openai.createOpenAICompletionProvider().version,
+      FORGE_VERSION,
+    );
+  });
+
   it('keeps experiment run orchestration on its documented subpath', () => {
     assert.equal('runExperiment' in rootExports, false);
     assert.equal('readExperimentRunSelections' in rootExports, false);
@@ -86,9 +97,11 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof createArtifactStore, 'function');
     assert.equal(typeof createForgeEngine, 'function');
     assert.equal(typeof createSetupExecutor, 'function');
+    assert.equal(credentialsSetupHandler.uses, 'forge/credentials');
     assert.equal(typeof defineSetupActionBundle, 'function');
     assert.deepEqual([...firstPartySetupHandlers.keys()].sort(), [
       'forge/command',
+      'forge/credentials',
       'forge/plugin',
       'forge/write',
     ]);

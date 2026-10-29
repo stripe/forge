@@ -32,7 +32,6 @@ function validPlan(): ResolvedRunPlanV1 {
       dataset: {
         id: 'sample',
         version: '1.0.0',
-        manifest_sha256: DIGEST,
       },
       experiment: {
         id: 'sample/experiment',
@@ -46,6 +45,7 @@ function validPlan(): ResolvedRunPlanV1 {
     },
     case: {
       id: 'sample/write',
+      version: '0.1.0',
       initial_prompt: 'Create the requested file.',
       execution_mode: 'one_shot',
       setup,
@@ -370,6 +370,22 @@ describe('parseResolvedRunPlan', () => {
     assert.throws(
       () => parseResolvedRunPlan({ ...validPlan(), private_overlay: true }),
       BenchmarkModelError,
+    );
+
+    const stalePin = validPlan();
+    assert.throws(
+      () =>
+        parseResolvedRunPlan({
+          ...stalePin,
+          provenance: {
+            ...stalePin.provenance,
+            dataset: {
+              ...stalePin.provenance.dataset,
+              manifest_sha256: `sha256:${'a'.repeat(64)}`,
+            },
+          },
+        }),
+      /Unrecognized key.*manifest_sha256/,
     );
   });
 

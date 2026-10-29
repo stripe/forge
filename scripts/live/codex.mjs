@@ -16,6 +16,69 @@ const command = (argv) => ({
   with: { argv, timeout_ms: 30_000 },
 });
 
+/** Keep the synthetic native plugin outside the public plugin registry. */
+export async function createCodexPluginFixture(forge) {
+  const bundle = forge.defineSetupActionBundle({
+    manifest: {
+      namespace: 'forge-live',
+      version: '1.0.0',
+      sha256: forge.sha256Digest(await fs.readFile(new URL(import.meta.url))),
+    },
+    actions: [
+      {
+        uses: 'forge-live/plugin',
+        parseWith(input) {
+          assert.deepEqual(input, {});
+          return {};
+        },
+        preflight(_step, context) {
+          assert.ok(context.pluginInstaller);
+          const prepared = context.pluginInstaller.preflight(
+            { plugin: PLUGIN, marketplace: MARKETPLACE },
+            { selection: context.selection, runtime: context.runtime },
+          );
+          return {
+            requirements: prepared.requirements,
+            async apply(context) {
+              return forge.parseAgentPluginInstallationReceipt(
+                await prepared.install({
+                  runId: context.runId,
+                  paths: context.paths,
+                  stateDirectories: context.stateDirectories,
+                  commands: context.commands,
+                  signal: context.signal,
+                }),
+              );
+            },
+          };
+        },
+      },
+    ],
+  });
+  const engine = forge.createForgeEngine({ setupActionBundles: [bundle] });
+  return {
+    engine,
+    withPlugin(base) {
+      const step = { uses: 'forge-live/plugin', with: {} };
+      return engine.parseResolvedRunPlan({
+        ...base,
+        treatment: {
+          ...base.treatment,
+          setup: [...base.treatment.setup, step],
+        },
+        setup: [...base.setup, step],
+        provenance: {
+          ...base.provenance,
+          forge: {
+            ...base.provenance.forge,
+            action_bundles: [bundle.manifest],
+          },
+        },
+      });
+    },
+  };
+}
+
 /** Real pinned CLI, setup, hooks, MCP, resume and evidence; no upstream model calls. */
 export async function runCodexPluginIntegrationSuite({
   dockerExecutable,
@@ -33,6 +96,7 @@ export async function runCodexPluginIntegrationSuite({
       import('../../dist/testing/index.js'),
     ])),
   );
+  const fixture = await createCodexPluginFixture(forge);
   const fixtureRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), 'forge-live-codex-'),
   );
@@ -165,7 +229,7 @@ export async function runCodexPluginIntegrationSuite({
         inputProvider: forge.createMemoryRunInputProvider(),
         artifactStore: forge.createArtifactStore({ root: resultsRoot }),
       };
-      const plan = forge.parseResolvedRunPlan({
+      const basePlan = fixture.engine.parseResolvedRunPlan({
         ...forge.createTestResolvedRunPlan({
           caseId: `live/codex-${scenario.id}`,
           agent: {
@@ -182,18 +246,6 @@ export async function runCodexPluginIntegrationSuite({
             : {}),
           caseSetup: fixtureSetup(scenario),
           treatment: scenario.plugin ? 'plugin' : 'baseline',
-          treatmentSetup: scenario.plugin
-            ? [
-                {
-                  uses: 'forge/plugin',
-                  with: {
-                    agents: {
-                      codex: { plugin: PLUGIN, marketplace: MARKETPLACE },
-                    },
-                  },
-                },
-              ]
-            : [],
           checks: {
             file_checks: [
               { file: 'requests.json', exists: true },
@@ -225,7 +277,9 @@ export async function runCodexPluginIntegrationSuite({
                 file: 'workspace-hook.txt',
                 exists: scenario.trust === 'automation',
                 ...(scenario.trust === 'automation'
-                  ? { contains: scenario.multi ? '^ran\\nran\\n$' : '^ran\\n$' }
+                  ? {
+                      contains: scenario.multi ? '^ran\\nran\\n$' : '^ran\\n$',
+                    }
                   : {}),
               },
             ],
@@ -243,14 +297,17 @@ export async function runCodexPluginIntegrationSuite({
         }),
         limits: { run_timeout_ms: 5 * 60_000 },
       });
+      const plan = scenario.plugin ? fixture.withPlugin(basePlan) : basePlan;
       try {
-        const completed = await forge.executeEval({
+        const completed = await fixture.engine.executeEval({
           runId,
           plan,
           composition,
           signal,
         });
-        const verified = await forge.verifyCompletedRun(completed.location);
+        const verified = await fixture.engine.verifyCompletedRun(
+          completed.location,
+        );
         assert.equal(
           verified.result.evaluation.status,
           'passed',

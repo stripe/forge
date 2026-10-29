@@ -11,10 +11,19 @@ import { describe, it } from 'vitest';
 import { parseAtifTrajectory } from '../src/atif/index.ts';
 import * as forge from '../src/index.ts';
 import { createAnthropicCompletionProvider } from '../src/providers/anthropic/index.ts';
+import { createOpenAICompletionProvider } from '../src/providers/openai/index.ts';
 import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
 } from '../src/runtime/docker/assets.ts';
+import * as testing from '../src/testing/index.ts';
+import {
+  createFakeRuntimeAdapter,
+  createMemoryRunInputProvider,
+  createScriptedAgentAdapter,
+  createStaticCredentialResolver,
+  createTestResolvedRunPlan,
+} from '../src/testing/index.ts';
 import { FORGE_VERSION } from '../src/version.ts';
 
 const repositoryRoot = process.cwd();
@@ -31,6 +40,7 @@ const { assertRuntimeCleanup } = await liveModule('cleanup');
 const { startLoopbackGatewayBridge, assertDockerCanReachBridge } =
   await liveModule('gateway');
 const { runCriterionJudgmentRegression } = await liveModule('judgment');
+const { createCodexPluginFixture } = await liveModule('codex');
 const verifiers = createRunVerifiers({
   ...forge,
   parseAtifTrajectory,
@@ -38,6 +48,110 @@ const verifiers = createRunVerifiers({
 });
 
 describe('unified live end-to-end suite', () => {
+  it('runs OpenAI host completion coverage through verified Ava and judge artifacts', async () => {
+    const { runOpenAICompletionSuite } = await liveModule('completions');
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-live-completion-test-'),
+    );
+    const answers = [
+      {
+        user_needs: [{ description: 'Receive HELLO', status: 'remaining' }],
+        message: 'Please reply with HELLO.',
+      },
+      { remaining_need_ids: [], message: '' },
+      {
+        results: [
+          {
+            index: 0,
+            passed: true,
+            explanation: 'The assistant replied HELLO.',
+          },
+        ],
+      },
+    ];
+    let calls = 0;
+    try {
+      const report = await runOpenAICompletionSuite(
+        {
+          completionModel: 'gpt-6.1-sol',
+          upstreamCredential: 'synthetic-host-key',
+          resultsRoot: root,
+          suiteId: 'completion-test',
+          signal: new AbortController().signal,
+          progress() {},
+        },
+        {
+          ...forge,
+          ...testing,
+          createOpenAICompletionProvider: () =>
+            createOpenAICompletionProvider({
+              fetch: async () =>
+                Response.json({
+                  object: 'response',
+                  status: 'completed',
+                  output: [
+                    {
+                      type: 'message',
+                      role: 'assistant',
+                      content: [
+                        {
+                          type: 'output_text',
+                          text: JSON.stringify(answers[calls++]),
+                        },
+                      ],
+                    },
+                  ],
+                  usage: { input_tokens: 1, output_tokens: 1 },
+                }),
+            }),
+        },
+      );
+      assert.equal(report.verified, true);
+      assert.equal(calls, 3);
+      assert.deepEqual(report.schemas, [
+        'ava_initial_turn',
+        'ava_turn',
+        'criterion_judgment',
+      ]);
+      const verified = await forge.verifyCompletedRun(report.location);
+      assert.equal(
+        verified.result.completion_calls.every(
+          (call) => call.provider === 'openai' && call.model === 'gpt-6.1-sol',
+        ),
+        true,
+      );
+      assert.equal(verified.result.evaluation.judging_criteria_errored, 0);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires only explicit host configuration for completion live mode', () => {
+    const options = configuration({
+      FORGE_LIVE: '1',
+      FORGE_LIVE_MODE: 'completions',
+      FORGE_LIVE_COMPLETION_MODEL: 'gpt-6.1-sol',
+      OPENAI_API_KEY: 'host-key',
+      OPENAI_BASE_URL: 'https://gateway.example/v1',
+      ANTHROPIC_API_KEY: '\0',
+      CODEX_API_KEY: '\0',
+    });
+    assert.equal(options.mode, 'completions');
+    assert.equal(options.completionModel, 'gpt-6.1-sol');
+    assert.equal(options.upstreamCredential, 'host-key');
+    assert.equal(options.gatewayBaseUrl, 'https://gateway.example/v1');
+    assert.throws(
+      () =>
+        configuration({
+          FORGE_LIVE: '1',
+          FORGE_LIVE_MODE: 'completions',
+          FORGE_LIVE_COMPLETION_MODEL: 'gpt-6.1-sol',
+          CODEX_API_KEY: 'agent-key',
+        }),
+      /OPENAI_API_KEY is required/,
+    );
+  });
+
   it('is the only live package command and has valid JavaScript syntax', async () => {
     const packageJson = JSON.parse(
       await fs.readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
@@ -64,6 +178,100 @@ describe('unified live end-to-end suite', () => {
         encoding: 'utf8',
       });
       assert.equal(syntax.status, 0, syntax.stderr);
+    }
+  });
+
+  it('executes and verifies the synthetic Codex plugin through its explicit fixture bundle', async () => {
+    const fixture = await createCodexPluginFixture(forge);
+    const base = createTestResolvedRunPlan({
+      agent: { adapter: 'codex', provider: 'openai', model: 'fixture' },
+    });
+    const plan = fixture.withPlugin(base);
+    assert.equal(base.setup.length, 0);
+    const runtime = createFakeRuntimeAdapter();
+    let installed = false;
+    const receipt: forge.AgentPluginInstallationReceipt = {
+      adapter: 'codex',
+      plugin: 'fixture@forge-fixture',
+      marketplace: 'forge-fixture/plugins',
+      marketplace_commit: 'a'.repeat(40),
+      native_plugin_id: 'fixture@forge-fixture',
+      version: '1.0.0',
+      source: { kind: 'marketplace-path' },
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: `sha256:${'b'.repeat(64)}`,
+        entry_count: 1,
+        file_count: 1,
+        size_bytes: 1,
+      },
+    };
+    const agent: forge.AgentAdapter = {
+      ...createScriptedAgentAdapter({ id: 'codex' }).adapter,
+      pluginInstaller: {
+        preflight(distribution, context) {
+          assert.deepEqual(distribution, {
+            plugin: receipt.plugin,
+            marketplace: receipt.marketplace,
+          });
+          assert.equal(context.mcpServers, undefined);
+          return {
+            requirements: {
+              executables: ['fixture-install'],
+              stateDirectories: [
+                { id: 'fixture-plugin', containerPath: '/run/fixture-plugin' },
+              ],
+            },
+            async install(context) {
+              assert.deepEqual(
+                [...context.stateDirectories.keys()],
+                ['fixture-plugin'],
+              );
+              await context.commands.run(['fixture-install']);
+              installed = true;
+              return receipt;
+            },
+          };
+        },
+      },
+    };
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-live-bundle-'));
+    try {
+      const composition: forge.ForgeComposition = {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.id, agent]]),
+        credentialResolver: createStaticCredentialResolver(),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: forge.createArtifactStore({ root }),
+      };
+      fixture.engine.preflightEval({ plan, composition });
+      assert.equal(installed, false);
+      assert.equal(runtime.runs.length, 0);
+      const completed = await fixture.engine.executeEval({
+        runId: 'fixture-plugin',
+        plan,
+        composition,
+      });
+      const verified = await fixture.engine.verifyCompletedRun(
+        completed.location,
+      );
+      assert.deepEqual(
+        verified.result.forge.action_bundles,
+        plan.provenance.forge.action_bundles,
+      );
+      assert.equal(installed, true);
+      assert.deepEqual(
+        runtime.runs[0]?.commands.map(({ scope }) => scope),
+        ['uncredentialed'],
+      );
+      const setup = JSON.parse(
+        await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8'),
+      );
+      assert.deepEqual(setup.steps, [
+        { index: 0, uses: 'forge-live/plugin', resolution: receipt },
+      ]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 

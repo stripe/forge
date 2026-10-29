@@ -1,4 +1,4 @@
-export type { PluginMcpServerId } from './pluginMcp.ts';
+export type { PluginMcpServerId } from './plugins.ts';
 
 import type { ForgeBuildIdentity } from '../version.ts';
 
@@ -26,17 +26,16 @@ export interface DatasetIdentityV1 {
   version: string;
 }
 
-export interface DatasetManifestFileV1 {
+/** One case definition file and the identity it declares. */
+export interface DatasetManifestCaseV1 {
+  id: CaseId;
+  version: string;
   path: DatasetRelativePath;
-  size: number;
-  sha256: Sha256Hex;
 }
 
 export interface DatasetManifestV1 {
   dataset: DatasetIdentityV1;
-  /** Case definition paths; each definition declares its own stable ID. */
-  cases: DatasetRelativePath[];
-  files: DatasetManifestFileV1[];
+  cases: DatasetManifestCaseV1[];
 }
 
 /** Exact host-supplied implementation identity for one setup-action namespace. */
@@ -73,7 +72,18 @@ export interface CommandSetupStepV1 extends SetupStepV1<CommandSetupWithV1> {
   with: CommandSetupWithV1;
 }
 
-/** One agent's marketplace-backed native plugin selection. */
+export interface CredentialsSetupWithV1 extends JsonObject {
+  /** Agent environment names; the host resolves each opaque env:<NAME> reference. */
+  env: string[];
+}
+
+export interface CredentialsSetupStepV1
+  extends SetupStepV1<CredentialsSetupWithV1> {
+  uses: 'forge/credentials';
+  with: CredentialsSetupWithV1;
+}
+
+/** Native distribution supplied to an agent's plugin installer. */
 export interface PluginSelectionV1 extends JsonObject {
   /** Agent-native qualified identity, such as `stripe@claude-plugins-official`. */
   plugin: string;
@@ -82,8 +92,8 @@ export interface PluginSelectionV1 extends JsonObject {
 }
 
 export interface PluginSetupWithV1 extends JsonObject {
-  /** Adapter ID to native selection. Only the selected branch is realized. */
-  agents: Record<string, PluginSelectionV1>;
+  /** Forge resolves the compatible native distribution for the selected agent. */
+  plugin: 'stripe';
 }
 
 export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
@@ -95,6 +105,7 @@ export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
 export type BuiltInSetupStepV1 =
   | WriteSetupStepV1
   | CommandSetupStepV1
+  | CredentialsSetupStepV1
   | PluginSetupStepV1;
 
 export interface FilesystemCheckV1 {
@@ -141,6 +152,7 @@ export interface JudgingCriterionV1 {
  */
 export interface EvalCaseV1 {
   id: CaseId;
+  version: string;
   display_name?: string;
   task?: string;
   initial_prompt?: string;
@@ -204,14 +216,18 @@ export type ForgeRuntimeConfigV1 =
   | ForgeExternalRuntimeV1;
 
 /** One authored Cartesian product; selections never cross group boundaries. */
-export interface ExperimentMatrixGroupV1 {
+interface ExperimentMatrixAxesV1 {
   /** Manifest-listed case YAML paths, relative to the dataset root. */
   cases: DatasetRelativePath[];
   treatments: TreatmentId[];
   agents: AgentSelectionV1[];
 }
 
-export interface FlatExperimentMatrixV1 extends ExperimentMatrixGroupV1 {
+export interface ExperimentMatrixGroupV1 extends ExperimentMatrixAxesV1 {
+  id?: string;
+}
+
+export interface FlatExperimentMatrixV1 extends ExperimentMatrixAxesV1 {
   groups?: never;
   /** Number of independent samples; selections use a zero-based index. */
   repetitions: number;
@@ -238,7 +254,6 @@ export interface ExperimentConfigV1 {
   id: string;
   version: string;
   dataset: DatasetIdentityV1 & {
-    manifest_sha256: Sha256Digest;
     /** CLI dataset location, relative to the experiment file; not run semantics. */
     path?: string;
   };
@@ -265,9 +280,13 @@ export interface LoadedDatasetV1 {
   root: string;
   manifestPath: string;
   manifestRaw: string;
-  manifestSha256: Sha256Digest;
   manifest: DatasetManifestV1;
   cases: ReadonlyMap<CaseId, LoadedEvalCaseV1>;
+  /**
+   * Payload files and nonempty ancestor directories discovered at load time.
+   * Hosts omitting this index own setup-source existence checks.
+   */
+  inputPaths?: ReadonlySet<DatasetRelativePath>;
 }
 
 export interface LoadedExperimentConfigV1 {
@@ -278,6 +297,7 @@ export interface LoadedExperimentConfigV1 {
 }
 
 export interface RunSelection {
+  group_id?: string;
   case_id: CaseId;
   treatment: TreatmentId;
   agent: AgentSelectionV1;
@@ -290,7 +310,7 @@ export type InitialPromptSourceV1 = 'case.task' | 'case.initial_prompt';
 export interface ResolvedRunPlanV1 {
   selection: RunSelection;
   provenance: {
-    dataset: DatasetIdentityV1 & { manifest_sha256: Sha256Digest };
+    dataset: DatasetIdentityV1;
     experiment: {
       id: string;
       version: string;

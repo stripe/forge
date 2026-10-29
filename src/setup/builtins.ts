@@ -1,19 +1,17 @@
 import { z } from 'zod';
 import {
   isSafeDatasetRelativePath,
-  isSafeGitHubRepository,
-  isSafeSimpleIdentifier,
   isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
 import type { JsonObject } from '../model/types.ts';
 import { commandSetupHandler } from './forgeCommand.ts';
+import { credentialsSetupHandler } from './forgeCredentials.ts';
 import { pluginSetupHandler } from './forgePlugin.ts';
 import { writeSetupHandler } from './forgeWrite.ts';
 import type { SetupActionDefinition } from './registry.ts';
 
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_COMMAND_ARGUMENTS = 256;
-const MAX_PLUGIN_DISTRIBUTIONS = 100;
 
 const DatasetPathSchema = z
   .string()
@@ -56,45 +54,25 @@ const CommandSetupWithSchema = z
   })
   .strict();
 
-const GitHubRepositorySchema = z
-  .string()
-  .max(512)
-  .refine(isSafeGitHubRepository, 'must be a GitHub owner/repository');
-const PluginIdSchema = z
-  .string()
-  .refine(
-    isQualifiedPluginId,
-    'must be plugin@marketplace using safe identifiers',
-  );
-
-const PluginDistributionSchema = z
+const PluginSetupWithSchema = z
   .object({
-    plugin: PluginIdSchema,
-    marketplace: GitHubRepositorySchema,
+    plugin: z.literal('stripe'),
   })
   .strict();
 
-const PluginSetupWithSchema = z
+const CredentialsSetupWithSchema = z
   .object({
-    agents: z
-      .record(z.string(), PluginDistributionSchema)
-      .superRefine((agents, context) => {
-        const names = Object.keys(agents);
-        if (names.length === 0 || names.length > MAX_PLUGIN_DISTRIBUTIONS) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'must contain a bounded non-empty agent map',
-          });
-        }
-        for (const name of names) {
-          if (!isSafeSimpleIdentifier(name)) {
-            context.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [name],
-              message: 'agent key must be a safe adapter identifier',
-            });
-          }
-        }
+    env: z
+      .array(
+        z
+          .string()
+          .max(255)
+          .regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+      )
+      .min(1)
+      .max(128)
+      .refine((names) => new Set(names).size === names.length, {
+        message: 'credential environment names must be unique',
       }),
   })
   .strict();
@@ -120,21 +98,23 @@ const pluginSetupAction: SetupActionDefinition = Object.freeze({
   },
 });
 
+const credentialsSetupAction: SetupActionDefinition = Object.freeze({
+  ...credentialsSetupHandler,
+  parseWith(input: unknown): JsonObject {
+    return CredentialsSetupWithSchema.parse(input) as JsonObject;
+  },
+});
+
 export const builtInSetupActions: readonly SetupActionDefinition[] =
-  Object.freeze([writeSetupAction, commandSetupAction, pluginSetupAction]);
+  Object.freeze([
+    writeSetupAction,
+    commandSetupAction,
+    pluginSetupAction,
+    credentialsSetupAction,
+  ]);
 
 function isBoundedText(value: string): boolean {
   return (
     Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES && !value.includes('\0')
-  );
-}
-
-function isQualifiedPluginId(value: string): boolean {
-  const separator = value.indexOf('@');
-  return (
-    separator > 0 &&
-    separator === value.lastIndexOf('@') &&
-    isSafeSimpleIdentifier(value.slice(0, separator)) &&
-    isSafeSimpleIdentifier(value.slice(separator + 1))
   );
 }

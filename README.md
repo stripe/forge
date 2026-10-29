@@ -21,7 +21,7 @@ when designing a benchmark.
 | Concept | What it means |
 | --- | --- |
 | Case | One task, its shared setup, interaction mode, checks, and judging criteria. |
-| Dataset | A versioned collection of cases and fixtures, with an exact inventory of their sizes and hashes. |
+| Dataset | A versioned collection of cases and fixtures, with a manifest listing each case's ID, version, and path. |
 | Treatment | Setup applied after case setup, such as installing a plugin. A baseline has no additional setup. |
 | Experiment | A dataset pin, treatments, agents/models, runtime choices, and a matrix of cases to evaluate. |
 | Experiment run | One resumable execution of the selected matrix, with a checkpoint and report. |
@@ -55,50 +55,159 @@ For the built-in CLI, you need:
   to their public GitHub marketplace and selected source.
 - Capacity for each concurrent eval run. Default runtime limits are 4 GiB
   memory, 2 CPUs, and 512 processes.
-- Credentials for the selected coding agent and any host completion models.
+- Credentials for the selected coding agent and any Ava/judge models.
   Execution makes potentially billable model calls; ordinary validation does not.
 
-| Workload | Coding-agent credential | Ava/judge credential |
-| --- | --- | --- |
-| Claude Code, one-shot with checks only | `ANTHROPIC_API_KEY` | None |
-| Claude Code with Ava or judging criteria | `ANTHROPIC_API_KEY` | Uses the same Anthropic configuration |
-| Codex, one-shot with checks only | `CODEX_API_KEY` | None |
-| Codex with Ava or judging criteria | `CODEX_API_KEY` | Independently configured Anthropic credential |
-| `validate` or `plan` | None | None |
+| Workload | Required grants |
+| --- | --- |
+| Claude Code, one-shot with checks only | `--credential-env ANTHROPIC_API_KEY` |
+| Claude Code with default Ava or judge models | `--credential-env ANTHROPIC_API_KEY --credential-env OPENAI_API_KEY` |
+| Codex, one-shot with checks only | `--credential-env OPENAI_API_KEY` |
+| Codex with default Ava or judge models | `--credential-env OPENAI_API_KEY` |
+| `validate` or `plan` | None |
 
-Export the required variables in your shell or credential manager before
-running or resuming pending work. Use restricted, short-lived keys with
-appropriate account limits: the evaluated agent receives its credential and
-outbound network access. Keep secrets outside dataset and experiment files.
+Export the required variables in your shell or credential manager and grant
+each one explicitly when running or resuming pending work. Exporting a variable
+or selecting an agent, provider, or plugin does not authorize access to secrets.
+`--credential-env NAME` authorizes only selected agent and setup declarations that
+request that runtime variable, including custom declarations, plus built-in
+Ava/judge providers that use it. One `--credential-env OPENAI_API_KEY` therefore
+covers Codex, Ava, and the judge when all use OpenAI. Reusing a credential
+reference under a different requested variable name needs its own grant.
+Grants do not forward undeclared variables or bind unused providers.
+Use restricted, short-lived keys with appropriate account limits: the evaluated
+agent receives its credential and outbound network access. Keep secrets outside
+dataset and experiment files.
 
-The built-in Ava/judge provider is Anthropic and requires Claude 4.5-or-newer
-model identifiers with strict structured-output support. Selecting Codex as
-coding agent does not change that provider.
+Ava and the judge each default to `provider: openai`, `model: gpt-6.1-sol`
+when their model is omitted. Override either independently with
+`models.role_player` or `models.judge`; the other keeps its default. Both
+accept `provider: anthropic` or `provider: openai`. Selecting a coding agent
+does not change either host model. For example, to use Sonnet for both:
+
+```yaml
+models:
+  role_player: { provider: anthropic, model: claude-sonnet-4-6 }
+  judge: { provider: anthropic, model: claude-sonnet-4-6 }
+```
+
+OpenAI Ava/judge models use `--credential-env OPENAI_API_KEY`. They use the
+Responses API with strict JSON Schema and `store: false`. `OPENAI_BASE_URL`
+optionally sets the complete API root, including `/v1`; Forge appends
+`/responses`. GPT-5 and later and o-series model identifiers omit `temperature`
+and receive an output budget of at least 16,000 tokens to allow for reasoning.
+Reasoning blocks are excluded from completion text.
+
+Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
+Claude 4.5-or-newer model identifiers with strict structured-output support.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
-`ANTHROPIC_AUTH_TOKEN`. When the URL is present, the CLI requires that token
-instead of selecting `ANTHROPIC_API_KEY`. The service must support the APIs
-used by Claude Code and host-side `/v1/messages`, including structured output.
+`ANTHROPIC_AUTH_TOKEN`. When the URL is present,
+`--credential-env ANTHROPIC_AUTH_TOKEN` covers selected Claude Code and
+Anthropic Ava/judge models. The CLI requires that token instead of selecting
+`ANTHROPIC_API_KEY`. The service must support the APIs used by Claude Code and
+host-side `/v1/messages`, including structured output.
 
 Codex optionally accepts `OPENAI_BASE_URL`, a complete Responses-compatible
-API root such as `https://gateway.example.com/v1`. The CLI reads
-`CODEX_API_KEY`, without falling back to `OPENAI_API_KEY`. Remote endpoints
-must use HTTPS and be reachable from the container; host-side completions
-must also reach their endpoint. A host loopback address points at the
+API root such as `https://gateway.example.com/v1`. Grant
+`--credential-env OPENAI_API_KEY`. Remote endpoints must use HTTPS and be
+reachable from the container; host-side completions must
+also reach their endpoint. A host loopback address points at the
 container when used by the agent, including names ending in `.localhost`.
 A successful host-side request does not prove coding-agent connectivity.
 The public CLI creates no host bridge; supply an endpoint reachable from
 the container. The development live suite has separate
 [gateway bridge support](docs/codebase-guide.md#opt-in-live-tests).
 
-For the supported [Stripe plugin distributions](docs/plugin-action.md#credentials-and-limitations),
-export `STRIPE_API_KEY`. Selecting the plugin automatically configures its
-bundled MCP connection; the experiment declares no server or auth details.
-Forge passes that token only to agent commands and retains the plugin's endpoint.
-Stripe MCP uses an Agent API key; prepare the account or merchant outside Forge.
+For the [Stripe plugin treatment](docs/plugin-action.md), use
+`with: {plugin: stripe}`, export `STRIPE_API_KEY` with an Agent API key, and
+grant `--credential-env STRIPE_API_KEY`. To use a different host variable, pass
+`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`; the agent still receives
+`STRIPE_API_KEY`.
+Forge selects the distribution for the run's agent and configures its bundled
+MCP connection. The token reaches only agent commands; prepare the account or
+merchant outside Forge.
 
 The runtime installs pinned Claude Code and Codex CLI releases from npm.
 Their use remains subject to their providers' terms.
+
+### Advanced credential bindings
+
+Use `--credential-env reference=HOST_VAR` to bind every use of one credential
+reference to a host variable. The text before `=` always names a
+reference, even when it looks like an environment variable name. For example,
+Codex and OpenAI Ava/judge models can use different exported variables:
+
+```sh
+npx --no-install forge run --experiment ./experiment.yaml \
+  --credential-env openai.api-key=CODEX_KEY \
+  --credential-env openai.completion-api-key=EVAL_KEY
+```
+
+Codex receives `CODEX_KEY` as `OPENAI_API_KEY`; only Ava and the judge receive
+`EVAL_KEY`. Anthropic's corresponding completion references are
+`anthropic.completion-api-key` and, for a compatible service,
+`anthropic.completion-auth-token`. Conflicting bindings are rejected: a
+same-name grant cannot also bind one of its selected consumers to a different
+host variable. Use explicit reference bindings for each consumer when keys differ.
+
+### Additional API credentials
+
+Use `forge/credentials` when agent code needs an API credential independently of
+a plugin. Declare variable names in case setup when every treatment, including
+baseline, needs them:
+
+```yaml
+# case.yaml excerpt
+setup:
+  - uses: forge/credentials
+    with:
+      env:
+        - API_TOKEN
+```
+
+For access specific to one treatment, put the same action in the experiment:
+
+```yaml
+# experiment.yaml excerpt
+treatments:
+  baseline:
+    setup: []
+  authenticated-api:
+    setup:
+      - uses: forge/credentials
+        with:
+          env:
+            - API_TOKEN
+```
+
+`env` accepts 1–128 unique names matching `[A-Za-z_][A-Za-z0-9_]*`, each at most
+255 characters. Supply names only; values stay outside authored files and plans.
+The CLI requires an explicit grant for each credential. For the sample's Claude
+Code and default OpenAI Ava/judge models, with `API_TOKEN` declared as above:
+
+```sh
+npx --no-install forge run --experiment ./my-eval/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
+  --credential-env API_TOKEN
+```
+
+Export `API_TOKEN` before running. To read `EVAL_API_TOKEN` instead, replace its
+grant with `--credential-env env:API_TOKEN=EVAL_API_TOKEN`. The agent and its child
+processes receive the value as `API_TOKEN`; setup commands do not. Missing
+grants or values fail before runtime allocation. `validate` and `plan` require
+neither grants nor secret values. Embedding hosts resolve the opaque reference
+`env:API_TOKEN` through their credential resolver.
+
+If a selected agent or plugin already declares a runtime name, there is no need
+to repeat it in `forge/credentials`. Duplicate declarations for one runtime name
+can combine when every reference is explicitly authorized to the same host
+variable, including declarations from custom setup actions. Different host
+variables conflict even if their values happen to match. Validation checks
+declarations and known aliases without reading secrets; custom references need
+nonsecret compatibility information from the embedding host when they differ.
+Successful validation does not establish that a future run has grants or values.
 
 ## Installation
 
@@ -123,33 +232,39 @@ For work on Forge itself, see [Development](#development).
 
 ### Run your first experiment
 
-Dataset releases include an experiment and its dataset bundle. Run the
-supplied experiment with the released inputs. For a working example, copy
-`experiment.yaml` and the complete `dataset/` directory from the
-[Stripe integration sample release](https://github.com/stripe/forge/tree/main/datasets/stripe-integration-public-evals/0.1.0)
-into `my-eval/` in the project where you installed Forge:
+Released datasets ship with experiments that run them. Copy the contents of
+[`release/`](https://github.com/stripe/forge/tree/main/release) into `my-eval/`
+in the project where you installed Forge:
 
 ```text
 my-eval/
-├── experiment.yaml
-└── dataset/
-    ├── manifest.json
-    └── cases/payments-onetime.case.yaml
+├── README.md
+├── datasets/stripe-integration-public-evals/
+│   ├── manifest.json
+│   └── cases/payments-onetime.case.yaml
+└── experiment.yaml
 ```
 
 The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
-and a criterion judge. All three use the configured Anthropic credential.
-The bundle is separate from the installed Forge package; preserve its dataset
-bytes and keep `experiment.yaml` beside `dataset/`.
+and a criterion judge. Claude Code uses the Anthropic credential; Ava and
+the judge use the default Sol model and the OpenAI completion credential.
+The release inputs are separate from the installed Forge package; preserve
+their bytes. The experiment's
+`dataset.path: ./datasets/stripe-integration-public-evals` resolves relative
+to the experiment file. Copy the whole release directory so configuration
+needs no rewriting.
 
 Validate without Docker allocation or model credentials, then run with your
-Anthropic key configured:
+Anthropic and OpenAI keys configured:
 
 ```sh
 npx --no-install forge validate --experiment ./my-eval/experiment.yaml
 export ANTHROPIC_API_KEY=your-restricted-key
+export OPENAI_API_KEY=your-openai-key
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --output ./results --run-id payments-001 > run-summary.json
 ```
 
@@ -170,7 +285,7 @@ builds the runtime image and probes the host without making model calls.
 
 ### Select from an experiment
 
-The bundled experiment defines the available cases, treatments, and agents.
+The released experiment defines the available cases, treatments, and agents.
 CLI case filters use the IDs declared inside the released case files.
 `dataset.path` resolves relative to the experiment file.
 
@@ -182,6 +297,7 @@ select existing combinations; `plan` requires exactly one match:
 --treatment <treatment-id>        --agent <adapter-id>
 --provider <provider-id>          --model <model-id>
 --repetition <zero-based-index>
+--group <group-id>
 ```
 
 `--case` and `--case-file` are mutually exclusive. For example:
@@ -189,8 +305,17 @@ select existing combinations; `plan` requires exactly one match:
 ```sh
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --case stripe-integration-public-evals/payments-onetime --treatment baseline --agent claude-code
 ```
+
+Groups may declare a unique optional `id`; see the
+[grouped matrix contract](docs/architecture.md#matrix-expansion-and-selection).
+Use `--group <id>` to select that group's combinations, intersected with any
+other filters. Unknown IDs and filters matching no combinations are errors.
+Plans, results, checkpoints, and report run rows retain `selection.group_id`
+for named groups. Omit `--group` on resume; the saved group scope is restored.
 
 `--run-id` names an **eval run** and requires one matching selection. Omit it
 for an automatically generated ID. Experiment runs receive their own IDs.
@@ -200,7 +325,10 @@ for an automatically generated ID. Experiment runs receive their own IDs.
 Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
 
 ```sh
-npx --no-install forge run --experiment ./my-eval/experiment.yaml --jobs 4
+npx --no-install forge run --experiment ./my-eval/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
+  --jobs 4
 ```
 
 Each run owns its runtime and artifacts. Size concurrency for host resources
@@ -209,11 +337,13 @@ continue. Each invocation attempts pending selections once; `matrix.retries`
 does not schedule automatic retries.
 
 To resume, use the printed experiment run ID and original output root, with
-credentials configured again if work remains:
+credentials configured and granted again if work remains:
 
 ```sh
 npx --no-install forge run \
   --experiment ./my-eval/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --credential-env OPENAI_API_KEY \
   --output ./results --resume EXPERIMENT_RUN_ID --jobs 2
 ```
 
@@ -225,7 +355,8 @@ Forge verifies completed artifacts before skipping them. Failed or partial
 evaluations remain completed; execution errors and missing or invalid artifacts
 are retried with fresh eval run IDs. Earlier attempts remain saved. Only one
 process may execute an experiment run at a time. Resume can also rebuild a
-missing or corrupt report without rerunning valid completed evals.
+missing or corrupt report without rerunning valid completed evals. When every
+eval is verified complete, resume needs no credential grants or secret values.
 
 Exit code 0 means execution completed and the report was saved, regardless of
 evaluation scores. Exit code 1 means execution errors remain or report generation
@@ -274,7 +405,8 @@ JS
 
 ### Understand scores
 
-Numeric `score` is the fraction of scored judging criteria that passed.
+Numeric `score` is the fraction of valid MUST and SHOULD judgments that passed.
+Judge errors are excluded; the score is `null` if every scored criterion errored.
 `requirement_level` classifies each criterion as `MUST` (required),
 `SHOULD` (recommended), or `OPTIONAL` (non-scoring telemetry). Omitted values
 default to `SHOULD`. Both MUST and SHOULD contribute equally to the score;
@@ -291,9 +423,13 @@ This writing guardrail does not infer or change the requirement level. See
 | `passed` | All checks and scored criteria passed. A checks-only pass has score `0`. |
 | `partial` | Some scored criteria passed, or checks passed while scored criteria did not all pass. |
 | `failed` | The completed evaluation did not establish a pass or partial success. |
+| `judge_error` | At least one scored criterion could not be judged; valid judgments and checks remain recorded. |
 | Execution error | The selection did not complete successfully and can be retried. |
 
-For example, passing six of eight criteria gives a score of `0.75`.
+For nine scored criteria, six passes, two failures, and one judge error give a
+score of `0.75` and status `judge_error`. Each errored criterion records
+`passed: null` and an `error` with its type, attempt count, and diagnostic
+message; `judging_criteria_errored` counts MUST and SHOULD errors.
 Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
@@ -301,20 +437,29 @@ Interaction stop reasons are separate from evaluation status: reaching
 and one `runs` row per saved selection. With optional `jq`:
 
 ```sh
-jq '.cases[] | {case_id, treatment, agent, completed, errored, pass_rate, criterion_scores}' \
+jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
 
 `coverage` is completed selections divided by all saved selections.
-`pass_rate` is passed evaluations divided by completed evaluations, or `null`
-when none completed. `judging_score.mean` includes only completed evaluations
-with judging criteria; checks-only runs contribute to pass rate. Ratios range
-from 0 to 1. Only the latest verified effective outcome contributes for each
-selection, so retries do not add scores. Compare treatments on matched cases
-and agent configurations. See [scoring semantics](docs/architecture.md#evaluation-and-scoring).
+`pass_rate` is passed evaluations divided by completed evaluations without
+scored judge errors, or `null` when none qualify. `judging_score.mean` includes
+completed evaluations with at least one valid scored judgment; checks-only
+runs contribute to pass rate. `judge_errors` separately counts affected
+evaluations and errored criteria in the summary and each case/configuration,
+including errors on OPTIONAL criteria.
+These errors remain committed outcomes on resume; they do not rerun the coding
+agent. Ratios range from 0 to 1. Only the latest verified effective outcome
+contributes for each selection, so retries do not add scores. Compare treatments
+on matched cases and agent configurations. See
+[scoring semantics](docs/architecture.md#evaluation-and-scoring).
 
 `criterion_scores` reports Required and Recommended scores in each run's
-`evaluation`, the overall summary, and each case/configuration group:
+`evaluation`, the overall summary, and each case/configuration group. These
+views use only valid pass/fail judgments: judge errors are excluded from every
+numerator, denominator, and MUST gate, and remain reported separately through
+`judge_errors`.
+In the formulas below, totals count only valid judgments:
 
 | Criteria set | `strict` | `avg` |
 | --- | --- | --- |
@@ -327,31 +472,35 @@ and file checks do not affect these scores. An empty set has `null` scores.
 For summary and case groups, `strict` is the fraction of eligible evaluations
 where all relevant criteria passed. `avg` pools their passed/total counts, so
 each criterion result has equal weight across runs. Each set's `evaluations`
-counts completed evaluations with at least one relevant criterion; empty sets,
-pending runs, and execution errors do not enter either denominator.
+counts completed evaluations with at least one valid relevant judgment; empty
+and all-error sets, pending runs, and execution errors do not enter either
+denominator.
 
 `criterion_scores.blend.score` combines a hard MUST gate with the SHOULD average.
 Any failed MUST gives `0`; otherwise the score is passed SHOULD / total SHOULD.
 For example, passing all MUST and half the SHOULD gives `0.5`; failing one MUST
-gives `0` even if every SHOULD passes. Without MUST, Blend is the SHOULD average.
-Without SHOULD, it is `1` if all MUST pass, else `0`. With neither, it is `null`.
-OPTIONAL criteria and file checks do not affect Blend.
+gives `0` even if every SHOULD passes. Without valid MUST, Blend is the SHOULD
+average.
+Without valid SHOULD, it is `1` if all valid MUST pass, else `0`. With neither,
+it is `null`. OPTIONAL criteria and file checks do not affect Blend.
 
 Summary and case groups average the per-evaluation Blend scores with equal
 weight, including zeros from failed MUST gates. Their `blend.evaluations` counts
-completed evaluations with any MUST or SHOULD; empty, pending, and errored runs
-are excluded. Blend is a report view; saved evaluation `score`, `status`, and
-`pass_rate` retain the rules above.
+completed evaluations with any valid MUST or SHOULD judgment; empty, all-error,
+pending, and execution-error runs are excluded. Blend is a report view; saved
+evaluation `score`, `status`, and `pass_rate` retain the rules above.
 
-`criteria_by_requirement` separately breaks out MUST, SHOULD, and OPTIONAL counts
-in the summary, case groups, and run rows. Each aggregate includes passed/total
-criterion counts and the number of completed evaluations with that classification.
-`strict_pass_rate` is the fraction of those evaluations where every criterion
-in that group passed. `average_pass_rate` is the mean of each evaluation's
-fraction passed in that group; like `judging_score.mean`, it gives each evaluation
-equal weight. Empty groups have `null` rates. These group rates ignore file checks.
-MUST failures identify unmet requirements; SHOULD failures identify unmet
-recommendations. OPTIONAL statistics are non-scoring telemetry.
+`criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
+case groups, and run rows, retaining passed, total, and errored criterion counts.
+Aggregate `evaluations` counts completed evaluations containing that group.
+`fully_judged_evaluations` counts those with no errors in that group;
+`strict_pass_rate` is the fraction of them where every criterion in the group
+passed. `judged_evaluations` counts evaluations with at least one valid judgment
+in the group; `average_pass_rate` is their mean fraction of valid judgments that
+passed, giving each evaluation equal weight. Rates are `null` when no evaluations
+qualify. These group rates ignore file checks. MUST failures identify unmet
+requirements; SHOULD failures identify unmet recommendations. OPTIONAL
+statistics are telemetry and do not enter either scored group.
 
 ### Inspect evidence
 
