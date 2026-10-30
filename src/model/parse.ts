@@ -315,10 +315,29 @@ const ModelRefSchema = z
   })
   .strict();
 
+// The unrefined object defines profile identity: refinements wrap objects in
+// ZodEffects under Zod 3, which would hide their fields from the key walk.
+export const ModelProfileShapeSchema = z
+  .object({
+    limit: z
+      .object({ context: PositiveIntegerSchema, output: PositiveIntegerSchema })
+      .strict(),
+    reasoning: z.boolean(),
+    temperature: z.boolean(),
+    attachment: z.boolean(),
+  })
+  .strict();
+
+export const ModelProfileSchema = ModelProfileShapeSchema.refine(
+  (profile) => profile.limit.output <= profile.limit.context,
+  { path: ['limit', 'output'], message: 'output must not exceed context' },
+);
+
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
   disable_experimental_betas: z.literal(true).optional(),
+  model_profile: ModelProfileSchema.optional(),
 })
   .strict()
   .superRefine((agent, context) => {
@@ -331,6 +350,16 @@ const AgentSelectionSchema = ModelRefSchema.extend({
         path: ['disable_experimental_betas'],
         message: 'disable_experimental_betas is supported only by Claude Code',
       });
+    if (
+      ['claude-code', 'codex'].includes(agent.adapter) &&
+      agent.model_profile !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['model_profile'],
+        message: `model_profile is not supported by ${agent.adapter}`,
+      });
+    }
     if (agent.adapter === 'claude-code' && agent.hook_trust !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

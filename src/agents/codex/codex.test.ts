@@ -182,6 +182,25 @@ describe('Codex adapter', () => {
     );
   });
 
+  it('rejects model profiles even with a custom adapter ID', () => {
+    const adapter = createCodexAdapter({ id: 'custom-agent' });
+    assert.throws(
+      () =>
+        adapter.requirements({
+          adapter: 'custom-agent',
+          provider: 'openai',
+          model: 'test',
+          model_profile: {
+            limit: { context: 32000, output: 4000 },
+            reasoning: false,
+            temperature: true,
+            attachment: false,
+          },
+        }),
+      /model_profile is not supported/,
+    );
+  });
+
   it('applies hook policy and refreshed native plugin settings on initial and resumed turns', async () => {
     for (const hookTrust of ['native', 'automation'] as const) {
       const test = fixture({ hookTrust });

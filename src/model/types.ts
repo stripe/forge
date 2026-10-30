@@ -177,6 +177,13 @@ export interface AgentSelectionV1 extends ModelRefV1 {
   hook_trust?: 'native' | 'automation';
   /** Claude gateway compatibility; omit to retain the native beta behavior. */
   disable_experimental_betas?: true;
+  /** Explicit model limits and capabilities; required by OpenCode. */
+  model_profile?: {
+    limit: { context: number; output: number };
+    reasoning: boolean;
+    temperature: boolean;
+    attachment: boolean;
+  };
 }
 
 export interface TreatmentV1 {

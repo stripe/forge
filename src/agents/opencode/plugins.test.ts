@@ -257,35 +257,24 @@ describe('OpenCode installed plugin configuration', () => {
   const installed = JSON.stringify(
     stripeOpenCodeConfiguration(mcp, layout.stateDirectory),
   );
-  it('combines authored model configuration with skills and MCP without mutating inputs', () => {
-    const authored = JSON.stringify({
+  it('combines generated model configuration with skills and MCP without mutating inputs', () => {
+    const generated = JSON.stringify({
       provider: { forge: { models: { test: {} } } },
-      skills: { paths: ['/workspace/skills'] },
     });
     const result = JSON.parse(
       mergeStripeOpenCodeConfiguration(
-        authored,
+        generated,
         installed,
         layout.stateDirectory,
       ),
     );
-    assert.deepEqual(result.provider, JSON.parse(authored).provider);
+    assert.deepEqual(result.provider, JSON.parse(generated).provider);
     assert.deepEqual(result.skills.paths, [
-      '/workspace/skills',
       `${layout.stateDirectory}/${PLUGIN_ROOT}/bundle/skills`,
     ]);
     assert.equal(result.mcp.stripe.url, mcp.mcpServers.stripe.url);
   });
-  it('rejects an authored Stripe override or model changes in the installed fragment', () => {
-    assert.throws(
-      () =>
-        mergeStripeOpenCodeConfiguration(
-          '{"mcp":{"stripe":{"enabled":false}}}',
-          installed,
-          layout.stateDirectory,
-        ),
-      /conflicts/,
-    );
+  it('rejects model changes in the installed fragment', () => {
     assert.throws(
       () =>
         mergeStripeOpenCodeConfiguration(

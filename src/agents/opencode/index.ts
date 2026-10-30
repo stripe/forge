@@ -18,7 +18,6 @@ import {
 } from '../invocationDiagnostics.ts';
 import { reportNativeArtifactUnavailable } from '../nativeArtifactError.ts';
 import { summarizeNativeStreamLine } from '../streamDiagnostics.ts';
-import { readOpenCodeConfiguration } from './config.ts';
 import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
@@ -115,6 +114,8 @@ export function createOpenCodeAdapter(
       throw new TypeError(
         'OpenCode requires an explicit baseUrl (OPENCODE_BASE_URL in the CLI) or a model route.',
       );
+    if (selection.model_profile === undefined)
+      throw new TypeError('OpenCode requires an explicit model_profile.');
     const model = `forge/${selection.model}`;
     return {
       executables: [executable, 'node'],
@@ -143,6 +144,12 @@ export function createOpenCodeAdapter(
               forge: {
                 npm: '@ai-sdk/openai-compatible',
                 name: 'Forge',
+                models: {
+                  [selection.model]: {
+                    ...selection.model_profile,
+                    tool_call: true,
+                  },
+                },
                 env: ['OPENCODE_API_KEY'],
                 options: {
                   baseURL: endpoint,
@@ -201,15 +208,12 @@ export function createOpenCodeAdapter(
         );
     },
     async openSession(context): Promise<AgentSession> {
-      requirements(context.selection);
+      const required = requirements(context.selection);
       assertOpenCodeRuntimeLayout(layout, context.runtime.paths);
       const state = context.runtime.stateDirectories.get(OPENCODE_STATE_ID);
       if (!state)
         throw new TypeError('OpenCode run-owned state is unavailable.');
-      let config = await readOpenCodeConfiguration(
-        context.runtime.workspace,
-        context.selection.model,
-      );
+      let config = required.environment.variables!.OPENCODE_CONFIG_CONTENT!;
       if (context.plan.setup.some((step) => step.uses === 'forge/plugin')) {
         config = mergeStripeOpenCodeConfiguration(
           config,

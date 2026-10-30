@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 
 import { serializeResolvedRunPlan } from '../planning/planner.ts';
 import { FORGE_VERSION } from '../version.ts';
@@ -144,6 +145,23 @@ describe('parseResolvedRunPlan', () => {
     assert.throws(() => parseResolvedRunPlan(input), {
       message: /selection agent must match/,
     });
+  });
+
+  it('retains model profiles and rejects drift between selection and agent', () => {
+    const input = validPlan();
+    input.agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    input.selection.agent = structuredClone(input.agent);
+    assert.deepEqual(parseResolvedRunPlan(input), input);
+    input.selection.agent.model_profile!.reasoning = true;
+    assert.throws(
+      () => parseResolvedRunPlan(input),
+      /selection agent must match/,
+    );
   });
 
   it('rejects removed plan schema and source digest fields', () => {

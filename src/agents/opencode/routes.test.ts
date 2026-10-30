@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../../../test/support/opencode.ts';
 import {
   OpenCodeRouteConfigurationError,
   parseOpenCodeModelRoutes,
@@ -95,6 +96,7 @@ describe('CLI OpenCode model routing', () => {
           adapter: 'opencode',
           provider: 'openai-compatible',
           model,
+          model_profile: OPEN_CODE_MODEL_PROFILE,
         });
         const reference =
           requirements.environment.credentials!.OPENCODE_API_KEY!.reference;

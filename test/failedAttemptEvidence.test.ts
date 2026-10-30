@@ -40,8 +40,8 @@ import {
 import { createMemoryRunInputProvider } from '../src/testing/memoryInputs.ts';
 import { createTestResolvedRunPlan } from '../src/testing/plans.ts';
 import {
-  OPEN_CODE_CONFIG,
   OPEN_CODE_MODEL,
+  OPEN_CODE_MODEL_PROFILE,
   openCodeExport,
   openCodeStream,
 } from './support/opencode.ts';
@@ -94,6 +94,9 @@ async function fixture(
           ? 'openai'
           : 'openai-compatible',
     model: harness === 'opencode' ? OPEN_CODE_MODEL : 'test-model',
+    ...(harness === 'opencode'
+      ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+      : {}),
   };
   const original = createTestResolvedRunPlan({
     agent: selection,
@@ -181,10 +184,6 @@ async function fixture(
     );
   const runtime = createFakeRuntimeAdapter({
     stateFiles,
-    initialFiles:
-      harness === 'opencode'
-        ? { 'opencode.json': JSON.stringify(OPEN_CODE_CONFIG) }
-        : {},
     async command(command) {
       if (command.scope === 'uncredentialed')
         return {

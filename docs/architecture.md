@@ -287,7 +287,9 @@ an experiment run controller is responsible for retrying that selection.
 
 A `RunSelection` chooses exactly one case, treatment, complete agent selection,
 and zero-based repetition. Codex selections include `hook_trust`; new plans
-materialize its `native` default, while saved plans may omit it. The CLI requires
+materialize its `native` default, while saved plans may omit it. OpenCode selections
+include their explicit `model_profile` in selection identity, plans, results,
+checkpoints, and report grouping. The CLI requires
 filters to resolve to one entry for `plan`. `run` resolves and purely preflights
 every matching plan before executing them with bounded concurrency. The CLI loads the dataset from
 the experiment config and permits selectors such as `--case` to restrict execution.
@@ -1039,32 +1041,30 @@ Forge ships these adapters:
   `opencode-state` directory. Sharing, updates, and live model-catalog fetching
   are disabled; the main and small model are the selected gateway alias.
 
-OpenCode snapshots the setup-authored workspace `opencode.json` before opening
-the session and restores that snapshot before each invocation. JSONC and
-automatic project configuration, external skill, and AGENTS.md/CLAUDE.md
-discovery are disabled or unsupported; use explicit skill paths and instructions.
+OpenCode requires `model_profile` on the experiment's agent selection during
+pure capability preflight. Its strict shape is
+`{limit: {context, output}, reasoning, temperature, attachment}`: limits are
+positive safe integers, output cannot exceed context, and the three capabilities
+are explicit booleans. Claude Code and Codex reject the field. The adapter writes
+the profile plus `tool_call: true` into its generated
+`provider.forge.models[selection.model]` entry and supplies the provider package,
+endpoint, and scoped credential. The main and small model use that same alias.
+
+A workspace `opencode.json` is ignored. Automatic project configuration,
+external skill, and AGENTS.md/CLAUDE.md discovery are disabled or unsupported.
 Before each turn, the launcher rejects implicit global config files, discovered
 global agents/plugins/skills, the legacy home `.opencode` directory, and stored
 provider login state; these could otherwise change the selected model through
-native config merging. The selected
-`provider.forge.models` entry must declare positive context/output limits,
-boolean reasoning/temperature/attachment capabilities, and `tool_call: true`.
-Model aliases must equal the selection; per-model provider, headers, options,
-and variants, provider routing/authentication options, and authored per-agent
-model overrides are rejected. Only the selected model definition is loaded.
-The adapter supplies its provider package, endpoint, and scoped credential.
-Other native configuration, such as explicit MCP or skill paths, can enter
-through the authored file and setup commands. Because this file is relocated,
-local `{file:...}` references, instruction globs, skill paths, and local plugin
-paths must use absolute runtime paths (for example `/workspace/AGENTS.md`).
-Relative forms are rejected; HTTP(S) instruction URLs and npm plugin names
-remain usable. OpenCode's `forge/plugin` installer materializes Stripe's standard
-bundle into the same run-owned state and generates native skill paths and MCP
-configuration. The adapter merges that fragment with the authored model config,
-rejects an authored Stripe MCP collision, and restores the combined snapshot on
-every turn. See the [plugin contract](plugin-action.md) for source selection,
-authentication, supported bundle behavior, and installation receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`,
-`credential`, `id`, `executable`, `expectedVersion`, and logical `layout`
+native config merging.
+
+OpenCode's `forge/plugin` installer materializes the same Claude-format Stripe
+bundle used by Claude Code and Codex into run-owned state. It loads only the
+bundle's skills and MCP connection through generated native configuration.
+The adapter merges that fragment with its generated model config and restores
+the combined snapshot on every turn. See the [plugin contract](plugin-action.md)
+for source selection, authentication, supported bundle behavior, and installation
+receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`,
+`executable`, `expectedVersion`, and logical `layout`
 options; the CLI supplies its endpoint and credential binding as documented
 in the [README](../README.md#opencode-setup).
 
@@ -1428,7 +1428,11 @@ validates session/version/model identity and retains user text, assistant text,
 reasoning, correlated tool results and errors, and available usage. Compaction,
 attachments, unsupported conversation parts, or incomplete tools trigger
 explicit fallback. Exact parseable session exports remain restricted artifacts
-even when their content cannot be normalized.
+even when their content cannot be normalized. Native auto-compaction remains
+enabled; turn replies retain assistant text before and after compaction but
+exclude the summary message immediately preceding a synthetic continuation,
+rejecting ambiguous sequences. Compacted exports fall back before native text
+reconciliation, so the driver trajectory uses that summary-free reply.
 
 Before persistence or scoring, Forge redacts every resolved run and completion
 secret from the normalized trajectory. Provenance in `result.json` records:

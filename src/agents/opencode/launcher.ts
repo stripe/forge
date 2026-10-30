@@ -13,7 +13,7 @@ const extra = globalRoot ? ['config', 'config.json', 'opencode.json', 'opencode.
 if (process.env.HOME) extra.push(path.join(process.env.HOME, '.opencode'));
 if (process.env.XDG_DATA_HOME) extra.push(path.join(process.env.XDG_DATA_HOME, 'opencode', 'auth.json'));
 if (extra.some(file => existsSync(file))) {
-  process.stderr.write('OpenCode implicit global configuration is unsupported. Use the authored config.\\n');
+  process.stderr.write('OpenCode implicit global configuration is unsupported. Use the experiment agent selection and forge/plugin.\\n');
   process.exit(1);
 }
 const fd = openSync(prompt, 'r');

@@ -103,7 +103,11 @@ export function createClaudeCodeAdapter(
     provider: string;
     hook_trust?: string;
     disable_experimental_betas?: true;
+    model_profile?: unknown;
   }): AgentRuntimeRequirements => {
+    if (selection.model_profile !== undefined) {
+      throw new TypeError('model_profile is not supported by Claude Code.');
+    }
     if (selection.hook_trust !== undefined) {
       throw new TypeError('hook_trust is not supported by Claude Code.');
     }

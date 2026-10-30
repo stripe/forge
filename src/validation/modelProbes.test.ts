@@ -10,6 +10,7 @@ import type { ModelProbeOutcome } from '../contracts/modelProbe.ts';
 import { createAnthropicCompletionProvider } from '../providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from '../providers/openai/index.ts';
 import { createStaticCredentialResolver } from '../testing/index.ts';
+import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 import { classifyProbeHttpFailure, createHttpModelProbe } from './httpProbe.ts';
 import { runModelProbe } from './runProbe.ts';
 
@@ -74,6 +75,7 @@ describe('model probes', () => {
         adapter: 'opencode',
         provider: 'openai-compatible',
         model: 'vendor/unknown-model',
+        model_profile: OPEN_CODE_MODEL_PROFILE,
       });
       assert.equal((await probe.run(context)).outcome, 'unknown_model');
       assert.equal(calls, 1);
@@ -118,6 +120,9 @@ describe('model probes', () => {
             adapter: adapter.id,
             provider,
             model: 'example',
+            ...(provider === 'openai-compatible'
+              ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+              : {}),
           }).run(context)
         ).outcome,
         'ok',
@@ -328,6 +333,7 @@ describe('model probes', () => {
         adapter: 'opencode',
         provider: 'openai-compatible',
         model: 'o3',
+        model_profile: OPEN_CODE_MODEL_PROFILE,
       }).run(context),
       {
         outcome: 'other',
@@ -549,6 +555,9 @@ describe('model probes', () => {
         adapter: adapter.id,
         provider,
         model: 'vendor/example',
+        ...(provider === 'openai-compatible'
+          ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+          : {}),
       });
       assert.equal(calls, 0);
       assert.equal(probe.endpoint, endpoint);
@@ -572,6 +581,7 @@ describe('model probes', () => {
           adapter: 'opencode',
           provider: 'openai-compatible',
           model: 'unknown-example',
+          model_profile: OPEN_CODE_MODEL_PROFILE,
         }).run(context)
       ).outcome,
       'unknown_model',

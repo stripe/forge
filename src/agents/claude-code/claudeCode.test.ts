@@ -72,6 +72,25 @@ describe('Claude Code adapter', () => {
     });
   });
 
+  it('rejects model profiles even with a custom adapter ID', () => {
+    const adapter = createClaudeCodeAdapter({ id: 'custom-agent' });
+    assert.throws(
+      () =>
+        adapter.requirements({
+          adapter: 'custom-agent',
+          provider: 'anthropic',
+          model: 'test',
+          model_profile: {
+            limit: { context: 32000, output: 4000 },
+            reasoning: false,
+            temperature: true,
+            attachment: false,
+          },
+        }),
+      /model_profile is not supported/,
+    );
+  });
+
   it('rejects Codex hook policy even when registered with a custom adapter ID', () => {
     for (const id of ['claude-code', 'custom-claude']) {
       const adapter = createClaudeCodeAdapter({ id });

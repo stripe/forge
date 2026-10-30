@@ -35,8 +35,8 @@ import {
   createStaticCredentialResolver,
 } from '../src/testing/index.ts';
 import {
-  OPEN_CODE_CONFIG,
   OPEN_CODE_MODEL,
+  OPEN_CODE_MODEL_PROFILE,
   openCodeStream,
 } from './support/opencode.ts';
 
@@ -75,6 +75,9 @@ describe('resumable CLI experiment runs', () => {
                 ? 'openai-compatible'
                 : 'anthropic',
           model: kind === 'opencode' ? OPEN_CODE_MODEL : 'test-model',
+          ...(kind === 'opencode'
+            ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+            : {}),
         },
       ];
       config.models.role_player = { provider: 'scripted', model: 'role' };
@@ -91,12 +94,6 @@ describe('resumable CLI experiment runs', () => {
             'execution_mode: one_shot',
             'execution_mode: multi_turn\nmax_turns: 3\ntask: Complete both parts.\ncontext: Ask for both parts.',
           )
-          .replace(
-            'setup: []',
-            kind === 'opencode'
-              ? `setup: ${JSON.stringify([{ uses: 'forge/write', with: { target: 'opencode.json', source: { content: JSON.stringify(OPEN_CODE_CONFIG) } } }])}`
-              : 'setup: []',
-          ),
       );
       let calls = 0;
       const runtime = createFakeRuntimeAdapter({

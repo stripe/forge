@@ -14,20 +14,11 @@ import {
 } from './opencodePlugin.mjs';
 
 export const OPENCODE_FIXTURE_MODEL = 'forge-fixture/chat-model';
-export const OPENCODE_FIXTURE_CONFIG = {
-  provider: {
-    forge: {
-      models: {
-        [OPENCODE_FIXTURE_MODEL]: {
-          limit: { context: 32000, output: 4000 },
-          reasoning: false,
-          temperature: true,
-          attachment: false,
-          tool_call: true,
-        },
-      },
-    },
-  },
+export const OPENCODE_FIXTURE_MODEL_PROFILE = {
+  limit: { context: 32000, output: 4000 },
+  reasoning: false,
+  temperature: true,
+  attachment: false,
 };
 
 /** Local-only model simulator. Never forwards requests or accepts an upstream key. */
@@ -204,7 +195,7 @@ export async function runOpenCodeIntegrationSuite(options) {
     });
     const runs = [];
     let publishedPlugin;
-    for (const treatment of ['no-plugin', 'stripe-plugin']) {
+    for (const treatment of ['baseline', 'stripe-plugin']) {
       for (const mode of ['one_shot', 'multi_turn']) {
         progress(
           `checking OpenCode ${treatment} ${mode} tools, exact-session export, and cleanup`,
@@ -238,6 +229,7 @@ export async function runOpenCodeIntegrationSuite(options) {
             adapter: 'opencode',
             provider: 'openai-compatible',
             model: OPENCODE_FIXTURE_MODEL,
+            model_profile: OPENCODE_FIXTURE_MODEL_PROFILE,
           },
           runtime: {
             adapter: 'docker',
@@ -260,16 +252,7 @@ export async function runOpenCodeIntegrationSuite(options) {
             treatment === 'stripe-plugin'
               ? [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }]
               : [],
-          caseSetup: [
-            ...openCodePluginFixtureSetup(mcp.url),
-            {
-              uses: 'forge/write',
-              with: {
-                target: 'opencode.json',
-                source: { content: JSON.stringify(OPENCODE_FIXTURE_CONFIG) },
-              },
-            },
-          ],
+          caseSetup: openCodePluginFixtureSetup(mcp.url),
           checks: {
             files_created: ['answer.txt'],
             file_checks: [
