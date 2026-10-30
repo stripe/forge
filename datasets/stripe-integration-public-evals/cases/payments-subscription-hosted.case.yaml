@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-subscription-hosted
-version: 0.1.0
+version: 0.2.0
 task: |-
   I'm building a newsletter platform where readers can subscribe to premium content for $12/month. When a reader clicks "Subscribe," they should go through a payment flow. After subscribing, they should be able to manage or cancel their subscription on their own.
 
@@ -32,7 +32,7 @@ setup: []
 judging_criteria:
   - value: 'MUST: Uses checkout.sessions.create with mode ''subscription'''
     requirement_level: MUST
-  - value: 'Does NOT set ui_mode to ''embedded'' on the Checkout Session — the hosted redirect surface must be used. This PASSES if ui_mode is absent or set to ''hosted''.'
+  - value: 'Does NOT set ui_mode to ''embedded_page'' on the Checkout Session — the hosted redirect surface must be used. This PASSES if ui_mode is absent or set to ''hosted_page''.'
     requirement_level: SHOULD
   - value: 'MUST: Has success_url and cancel_url configured'
     requirement_level: MUST

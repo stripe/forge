@@ -1,6 +1,6 @@
 # Stripe integration sample dataset
 
-The `stripe-integration-public-evals` dataset contains 73 cases covering
+The `stripe-integration-public-evals` dataset contains 69 cases covering
 Stripe Connect, Payments, and Subscriptions integration scenarios — for
 example `stripe-integration-public-evals/payments-onetime`: implement hosted
 Stripe Checkout for a $50 photography book, a confirmation page, and a
@@ -17,7 +17,7 @@ datasets/stripe-integration-public-evals/
 └── cases/
     ├── payments-onetime.case.yaml
     ├── subscriptions-fixed.case.yaml
-    └── ... (73 cases total)
+    └── ... (69 cases total)
 experiments/stripe-integration-public-evals/
 ├── README.md
 ├── experiment.yaml

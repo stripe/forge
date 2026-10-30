@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-classic-to-flexible-migration
-version: 0.1.0
+version: 0.2.0
 task: |-
   We have existing Stripe subscriptions in classic billing mode and want to migrate selected subscriptions to flexible billing mode without changing the customer's Price, quantity, renewal date, or access. Build a safe migration command in Node.js/TypeScript that previews impact, migrates one subscription, verifies the result, and can be retried.
 initial_prompt: |-
@@ -24,7 +24,7 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: Treats classic-to-flexible migration as one-way and offers no automatic rollback to classic.'
     requirement_level: MUST
-  - value: 'MUST: Uses a deterministic idempotency key and a local per-subscription migration record so retries are no-ops after verified success.'
+  - value: 'MUST: Uses a idempotency key that is stable across retries and a local per-subscription migration record so retries are no-ops after verified success.'
     requirement_level: MUST
   - value: 'MUST: Re-fetches the subscription and reports success only after billing_mode.type is flexible and preserved fields match the snapshot.'
     requirement_level: MUST

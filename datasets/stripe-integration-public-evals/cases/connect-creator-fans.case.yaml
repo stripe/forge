@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/connect-creator-fans
-version: 0.1.0
+version: 0.2.0
 task: |-
   Build the Stripe Connect integration for a Patreon-like product where creators sell monthly access to fans. Fans pay monthly, creators receive 90%, and the platform keeps 10%. Keep signup and payment management integrated into the app. Provide Accounts v2 creation, embedded onboarding, recurring payment creation, fee collection, and readiness checks.
 initial_prompt: |-
@@ -10,11 +10,15 @@ execution_mode: multi_turn
 max_turns: 10
 setup: []
 judging_criteria:
-  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
-    requirement_level: MUST
+  - value: 'Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: SHOULD
   - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
     requirement_level: MUST
-  - value: 'MUST: Configures dashboard as express, fees_collector as stripe, and losses_collector as stripe.'
+  - value: 'Configures dashboard as express'
+    requirement_level: SHOULD
+  - value: 'Configures fees_collector as stripe'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures losses_collector as stripe.'
     requirement_level: MUST
   - value: 'MUST: Configures Merchant with card_payments for the connected business.'
     requirement_level: MUST
@@ -24,13 +28,9 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: Gates live SaaS charges on configuration.merchant.capabilities.card_payments.status === ''active''.'
     requirement_level: MUST
-  - value: 'MUST NOT use v1 charges_enabled or payouts_enabled as the Accounts v2 readiness check.'
-    requirement_level: MUST
   - value: 'MUST: Creates recurring payments on the creator connected account and sets application_fee_percent to 10 on the Subscription.'
     requirement_level: MUST
   - value: 'MUST: Configures Customer for the connected account and supplies customer_account on SetupIntent and Subscription creation.'
-    requirement_level: MUST
-  - value: 'MUST NOT create or reference a legacy v1 Customer on the connected account.'
     requirement_level: MUST
   - value: 'MUST: Provides an in-product path to the creator Express Dashboard.'
     requirement_level: MUST

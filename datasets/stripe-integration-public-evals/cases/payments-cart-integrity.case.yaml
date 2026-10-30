@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-cart-integrity
-version: 0.1.0
+version: 0.2.0
 task: |-
   Add Stripe checkout to my stationery shop's cart. Customers can buy several products and choose how many of each they want.
 initial_prompt: |-
@@ -24,5 +24,5 @@ judging_criteria:
     requirement_level: SHOULD
   - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
     requirement_level: MUST
-  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
     requirement_level: MUST

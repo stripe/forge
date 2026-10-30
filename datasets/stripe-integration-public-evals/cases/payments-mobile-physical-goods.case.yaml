@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-mobile-physical-goods
-version: 0.1.0
+version: 0.2.0
 task: |-
   I'm building a native iOS app for my handmade goods shop — we sell artisan candles, soaps, and home accessories (physical products, not digital goods). When a customer taps "Buy Now" on a product detail page, I want them to go through a one-step checkout experience and see a confirmation when payment is done. Build the Stripe integration for this. Use Swift (UIKit) on the iOS client and Node.js/Express on the backend. I want the simplest pre-built checkout UI — no custom payment form. Requirements: - Use the Stripe iOS SDK - From the docs, determine what type of mobile payment integration I should use and implement it from the iOS - Handle all payment result states on the client (success, cancellation, failure) - A webhook endpoint that listens for payment completion and triggers order fulfillment (stub the database write) - Amounts must be calculated server-side — never trust the client for pricing Assume a basic Express app and a UIKit UIViewController already exist. Just build out the Stripe pieces.
 initial_prompt: |-
@@ -14,7 +14,7 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: iOS client uses PaymentSheet'
     requirement_level: MUST
-  - value: 'MUST: iOS client calls paymentSheet.present with an IntentConfiguration'
+  - value: 'MUST: iOS client initializes PaymentSheet with paymentIntentClientSecret'
     requirement_level: MUST
   - value: 'MUST: Has a webhook endpoint that handles payment_intent.succeeded'
     requirement_level: MUST

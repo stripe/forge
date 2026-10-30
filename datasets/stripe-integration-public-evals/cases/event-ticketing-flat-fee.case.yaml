@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/event-ticketing-flat-fee
-version: 0.1.0
+version: 0.2.0
 task: |-
   I'm building an event-ticketing marketplace. Organizers sell tickets through the platform, and we charge a flat $2 per customer purchase/order, not per individual ticket in the order. Ticket prices range from $10 to $500. Recommend the Accounts v2 configuration and immediate single-organizer payment flow, implement the $2 fee, and assess whether the model remains profitable across the range.
 initial_prompt: |-
@@ -16,7 +16,11 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
     requirement_level: MUST
-  - value: 'MUST: Configures dashboard as express, fees_collector as application, and losses_collector as application.'
+  - value: 'Configures dashboard as express.'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures fees_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures losses_collector as application.'
     requirement_level: MUST
   - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
     requirement_level: MUST

@@ -1,22 +1,30 @@
 id: stripe-integration-public-evals/edge-inclusive-fee-language
-version: 0.1.0
+version: 0.2.0
 task: |-
-  I run a photography marketplace where photographers sell prints. My total platform take must be exactly 10% of the customer charge, inclusive of Stripe processing fees: Stripe fees come out of that 10%, not on top of it. Recommend the Accounts v2 configuration and implement the single-photographer payment and fee calculation.
+  I run a photography marketplace where photographers sell prints. My total platform take is calculated as 10% of the customer charge, rounded to the nearest minor currency unit when the result is fractional.
+
+  It should be inclusive of Stripe processing fees: Stripe fees come out of that 10%, not on top of it. Recommend the Accounts v2 configuration and implement the single-photographer payment and fee calculation.
 initial_prompt: |-
-  I run a photography marketplace where photographers sell prints. My total platform take must be exactly 10% of the customer charge, inclusive of Stripe processing fees: Stripe fees come out of that 10%, not on top of it. Recommend the Accounts v2 configuration and implement the single-photographer payment and fee calculation.
+  I run a photography marketplace where photographers sell prints. My total platform take is calculated as 10% of the customer charge, rounded to the nearest minor currency unit when the result is fractional.
+
+  It should be inclusive of Stripe processing fees: Stripe fees come out of that 10%, not on top of it. Recommend the Accounts v2 configuration and implement the single-photographer payment and fee calculation.
 context: |-
   If asked: each order has one photographer and routes immediately; the platform is merchant of record and owns disputes, refunds, pricing, and negative balances; photographers only receive transfers and want Express Dashboard access.
 execution_mode: multi_turn
 max_turns: 10
 setup: []
 judging_criteria:
-  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
-    requirement_level: MUST
+  - value: 'Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: SHOULD
   - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
     requirement_level: MUST
   - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
     requirement_level: MUST
-  - value: 'MUST: Configures dashboard as express, fees_collector as application, and losses_collector as application.'
+  - value: 'MUST: Configures dashboard as express'
+    requirement_level: MUST
+  - value: 'MUST: Configures fees_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures losses_collector as application.'
     requirement_level: MUST
   - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
     requirement_level: MUST

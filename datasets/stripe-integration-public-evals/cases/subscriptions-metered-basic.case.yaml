@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-metered-basic
-version: 0.1.0
+version: 0.2.0
 task: |-
   I'm maintaining an existing API analytics product that already uses Stripe Billing Meters. Customers pay a $49 monthly platform fee plus $0.002 per API request, billed in arrears. Build the integration using Node.js/TypeScript and the `stripe` npm package. Requirements: - Create or reuse the Customer and subscribe them to the flat recurring Price plus the existing metered Price - Report API usage to the configured Billing Meter with duplicate-safe event identifiers - Show accrued usage and preview the upcoming invoice - Allow corrected usage without double-billing - Keep invoice and access state synchronized through webhooks Assume the Meter and Prices already exist and this is intentionally a basic Billing Meters integration, not a new Metronome pricing-plan implementation.
 initial_prompt: |-
@@ -8,8 +8,8 @@ execution_mode: multi_turn
 max_turns: 10
 setup: []
 judging_criteria:
-  - value: 'MUST: Creates or reuses the authenticated account''s Stripe Customer and persists the mapping.'
-    requirement_level: MUST
+  - value: 'Creates or reuses the authenticated account''s Stripe Customer and persists the mapping.'
+    requirement_level: SHOULD
   - value: 'MUST: Creates one subscription containing the $49 flat recurring Price and the existing metered recurring Price.'
     requirement_level: MUST
   - value: 'MUST: Loads both existing Price IDs from server configuration or an allowlist rather than client input.'

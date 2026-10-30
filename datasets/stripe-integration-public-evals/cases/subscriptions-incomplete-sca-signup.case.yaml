@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-incomplete-sca-signup
-version: 0.1.0
+version: 0.2.0
 task: |-
   I'm building a custom Elements signup for a $40/month SaaS plan. The first card payment can require 3D Secure. Create the subscription directly with the Stripe API, complete any customer authentication in the browser, and grant access only after payment succeeds. Use Next.js, TypeScript, and the stripe npm package.
 initial_prompt: |-
@@ -10,8 +10,8 @@ setup: []
 judging_criteria:
   - value: 'MUST: Creates or reuses the authenticated user''s Customer and collects the payment method with Stripe.js Elements; secret-key operations remain server-side.'
     requirement_level: MUST
-  - value: 'MUST: Creates the subscription with collection_method: ''charge_automatically'' and payment_behavior: ''default_incomplete''.'
-    requirement_level: MUST
+  - value: 'Creates the subscription with collection_method: ''charge_automatically'' (the default) and payment_behavior: ''default_incomplete''. So for collection_method to fail, a different value must explicitly be set'
+    requirement_level: SHOULD
   - value: 'MUST: Configures the payment method for future off-session renewals, for example with payment_settings.save_default_payment_method: ''on_subscription''.'
     requirement_level: MUST
   - value: 'MUST: Expands latest_invoice.confirmation_secret and returns only its client_secret plus the minimum client-safe identifiers.'

@@ -1,9 +1,9 @@
 id: stripe-integration-public-evals/on-demand-services-uber-like
-version: 0.1.0
+version: 0.2.0
 task: |-
-  Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
+  Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding through Stripe embedded onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
 initial_prompt: |-
-  Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
+  Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding through Stripe embedded onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
 context: |-
   If asked: each order routes immediately to one driver; the platform is merchant of record and owns pricing, disputes, refunds, and losses; drivers are recipient-only accounts; weekly payout means automatic weekly payouts on Friday in the connected account's local payout settings.
 execution_mode: multi_turn

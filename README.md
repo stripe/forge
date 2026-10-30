@@ -225,10 +225,10 @@ my-eval/
 ├── experiments/stripe-integration-public-evals/experiment.yaml
 └── datasets/stripe-integration-public-evals/
     ├── manifest.json
-    └── cases/ (73 cases, including payments-onetime.case.yaml)
+    └── cases/ (69 cases, including payments-onetime.case.yaml)
 ```
 
-Copy the whole `cases/` directory — the manifest lists all 73 case paths and
+Copy the whole `cases/` directory — the manifest lists all 69 case paths and
 `loadDataset` requires each to exist, so a partial copy fails validation even
 though the bundled experiment only selects `payments-onetime`. The sample
 evaluates a Stripe Checkout integration using Claude Code, Ava, and a

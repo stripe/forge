@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/white-label-custom-platform
-version: 0.1.0
+version: 0.2.0
 task: |-
   I'm designing a fully branded payment platform for a franchise network. Each franchise location accepts payments under our brand, should not see Stripe branding, and needs onboarding and ongoing account operations. Recommend the best architecture; dashboard none is acceptable only if the white-label requirement truly justifies its operational burden. Explain charge-pattern and fee-model choices that depend on whether a franchise or the platform owns the customer transaction.
 initial_prompt: |-
@@ -20,7 +20,7 @@ judging_criteria:
     requirement_level: MUST
   - value: 'MUST: If recommending dashboard none, states that the platform owns KYC collection, remediation, refunds, disputes, and ongoing requirements surfaces.'
     requirement_level: MUST
-  - value: 'For franchise-owned customer payments, recommends Merchant with card_payments, direct charges, and a compatible Stripe-owned-fees and Stripe-owned-losses configuration.'
+  - value: 'For franchise-owned customer payments, recommends Merchant with card_payments and direct charges. It selects dashboard, fee-collector, and loss-collector settings from a currently supported configuration, explains whether embedded components satisfy the branding requirement, and does not assume that Stripe-owned fees and losses are compatible with dashboard: none.'
     requirement_level: SHOULD
   - value: 'For platform-owned single-franchise transactions, recommends Recipient with stripe_balance.stripe_transfers, destination charges, fees_collector application, and losses_collector application.'
     requirement_level: SHOULD
