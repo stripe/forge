@@ -1014,8 +1014,10 @@ condition; the action does not propagate itself to other treatments. The
 
 An embedding host explicitly supplies `ForgeComposition.webSearch` with a
 `baseUrl` and opaque `credential` reference. The base URL excludes the API
-version; Forge appends `/v1/responses`. Pure preflight validates this authority
-and the selected harness before any credential lookup or allocation. Docker
+version; Forge appends `/v1/responses`. It must use HTTPS, except HTTP for
+loopback tests, and contain no credentials, query, or fragment. Pure preflight
+validates this authority and the selected harness before any credential lookup
+or allocation. Docker
 requires the existing explicit `runtime.network: host`; external runtimes must
 also make host loopback reachable. The Docker daemon and Forge process must
 share host loopback; remote daemons are unsupported by this mechanism. The
@@ -1026,7 +1028,11 @@ eval, and grants its random bearer as agent-scoped `FORGE_WEB_SEARCH_TOKEN`
 credentials, commands, or workspace files. `SetupApplyContext.webSearchUrl`
 carries only the engine-owned endpoint during setup;
 `SetupPreflightContext.agentStateDirectories` supplies the selected adapter's
-layout declarations so Codex configuration uses the run-owned home.
+layout declarations so Codex configuration uses the run-owned home. The random
+route URL is routing metadata, not a credential: it is written into client
+configuration and can appear in workspace evidence or judge input. It is not
+in the redaction/secret-scan set; the separately required bearer and upstream
+key are. The route is inert after the listener closes before evidence selection.
 
 Setup preserves other MCP entries and writes `web_search` into Claude's
 workspace `.mcp.json`, Codex's run-owned `config.toml`, or OpenCode's workspace
@@ -1056,9 +1062,12 @@ absolute deadline and a 4 MiB response cap. The fixed request selects
 `gpt-4.1-mini`, `tools: [{type: "web_search", external_web_access: false}]`, and
 `include: ["web_search_call.action.sources"]`. The result contains the trimmed
 query, elapsed seconds, backend search count, and up to 200 deduplicated HTTP(S)
-URLs with optional titles. URLs containing credentials are excluded. Provider
+URLs with optional titles truncated to 512 UTF-16 code units. URLs containing
+credentials are excluded. Provider
 answer text and usage are withheld from the agent. Failures return a bounded,
-content-free MCP tool error. The engine closes and drains the listener at
+content-free MCP tool error. A response with a string status other than
+`completed`, including `failed` or `incomplete`, is a backend failure even with
+HTTP 200 and no error field. The engine closes and drains the listener at
 quiescence, before evidence selection, and in failure cleanup.
 
 `setup.json` records the tool, backend model, URL-only behavior, endpoint kind,
@@ -1068,7 +1077,7 @@ external-access flag, and native-search policy. `result.json.web_search` records
 | Counter | Meaning |
 | --- | --- |
 | `usage_complete` | False when any backend request failed or supplied unavailable usage, or a total overflowed; numeric counters then retain confirmed partial totals. |
-| `tool_calls` | Authenticated, accepted MCP calls to `call_web_search`, including invalid queries. Transport/auth/rate-limit rejections are excluded. |
+| `tool_calls` | Authenticated, parsed MCP `tools/call` requests for `call_web_search` with an ID, including invalid queries. Auth, method, oversized-body, malformed-JSON, invalid-envelope, and rate-limit rejections are excluded. |
 | `search_count` | Sum of upstream `web_search_call` output items; one agent call may perform multiple searches. |
 | `input_tokens`, `output_tokens`, `total_tokens` | Sum of Responses `usage` totals. |
 | `cached_input_tokens`, `reasoning_tokens` | Optional input-cache and output-reasoning subsets from Responses usage details. |
@@ -1091,6 +1100,21 @@ Forge does not claim they were opened or that reruns will return identical
 results. Host networking exposes reachable host services; it provides no network
 isolation. `validate --host` installs this configuration and tears down the listener, but
 does not probe this search connection through the native clients.
+
+**Validation gap:** Real harness runs have not established tool discovery,
+search invocation, or native-search exclusion for this action:
+
+- Claude Code: headless `-p` loading of project `.mcp.json` without approval.
+- Codex 0.149.0: effective MCP tool availability and enforcement of
+  `-c web_search="disabled"` on initial and resumed turns.
+- OpenCode 1.19.0: delivery of the action's MCP declaration to the run-owned
+  configuration (the adapter ignores workspace `opencode.json`), and native
+  search exclusion through the declared false flags.
+
+Before relying on comparisons, run a search-requiring one-case live smoke per
+harness. Confirm `tools/list` reaches the listener, `usage.tool_calls > 0`, and
+no native search event in the selected evidence. Configuration and fake-runtime
+checks alone do not establish these properties; zero tool calls prove no use.
 
 ## Interaction architecture
 
