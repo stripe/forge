@@ -313,9 +313,7 @@ export async function executeEvalWithTestHooks(
   const now = input.now ?? (() => new Date());
   const startedAt = now();
   const events = createRunEventEmitter(
-    input.runId,
     input.composition.observer ? [input.composition.observer] : [],
-    now,
   );
   let phase: RunPhase = 'preflight';
   let prepared: PreparedRuntime | undefined;
@@ -657,7 +655,6 @@ export async function executeEvalWithTestHooks(
             'Runtime cleanup failed after canonical artifacts were staged.',
         };
         warnings.push(cleanupWarning);
-        await events.warning('runtime_dispose', cleanupWarning.message);
       } finally {
         runtimeDisposed = true;
       }
