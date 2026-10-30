@@ -4,6 +4,7 @@ import {startWebSearchService} from './webSearchService.ts';
 import {parseSearchResponse, searchRequest} from './webSearchBackend.ts';
 
 const providerResult = {
+  usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14, input_tokens_details: { cached_tokens: 2 }, output_tokens_details: { reasoning_tokens: 1 } },
   output: [
     {
       type: 'web_search_call',
@@ -24,10 +25,12 @@ describe('runner-owned search', () => {
     expect(parseSearchResponse(JSON.stringify(providerResult))).toEqual({
       sources: [{url: 'https://docs.stripe.com/rate-limits'}],
       searchCount: 1,
+      usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 2, reasoning_tokens: 1 },
     });
     expect(parseSearchResponse('{"output":[]}')).toEqual({
       sources: [],
       searchCount: 0,
+      usage: { input_tokens: null, output_tokens: null, total_tokens: null, cached_input_tokens: null, reasoning_tokens: null },
     });
     expect(() =>
       parseSearchResponse('{"error":{"message":"secret"}}'),
@@ -94,6 +97,8 @@ describe('runner-owned search', () => {
         searchCount: 1,
       });
       expect(response.body).not.toContain('withheld');
+      expect(response.body).not.toContain('input_tokens');
+      expect(service.usage()).toEqual({ tool_calls: 1, search_count: 1, input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 2, reasoning_tokens: 1 });
       expect(requests).toEqual([
         {
           body: searchRequest('stripe rate limits'),
@@ -236,3 +241,54 @@ function post(
     request.end(body);
   });
 }
+
+it('records attempts and nulls unavailable backend usage without exposing provider text', async () => {
+  let count = 0;
+  const upstream = http.createServer((_request, response) => {
+    count += 1;
+    response.setHeader('content-type', 'application/json');
+    response.end(count === 1 ? JSON.stringify(providerResult) : count === 2 ? JSON.stringify({ ...providerResult, usage: { input_tokens: 'bad' } }) : '{"invalid":"private-provider-text"}');
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const address = upstream.address();
+  if (!address || typeof address === 'string') throw new Error('No port');
+  const service = await startWebSearchService({ upstreamBaseUrl: `http://127.0.0.1:${address.port}`, upstreamCredential: 'host-only', agentHostname: '127.0.0.1', signal: new AbortController().signal });
+  const message = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'call_web_search', arguments: { query: 'query' } } });
+  try {
+    await post(service.url, message, service.credential);
+    await post(service.url, message, service.credential);
+    expect(service.usage()).toEqual({ tool_calls: 2, search_count: 2, input_tokens: null, output_tokens: null, total_tokens: null, cached_input_tokens: null, reasoning_tokens: null });
+    const third = await post(service.url, message, service.credential);
+    expect(JSON.parse(third.body).result.isError).toBe(true);
+    expect(third.body).not.toContain('private-provider-text');
+    expect(service.usage().tool_calls).toBe(3);
+    expect(service.usage().search_count).toBeNull();
+  } finally {
+    await Promise.all([service.close(), service.close()]);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+it('limits concurrent requests to four and cancels them on teardown', async () => {
+  let started = 0;
+  let ready!: () => void;
+  const allStarted = new Promise<void>((resolve) => { ready = resolve; });
+  const upstream = http.createServer(() => { if (++started === 4) ready(); });
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const address = upstream.address();
+  if (!address || typeof address === 'string') throw new Error('No port');
+  const service = await startWebSearchService({ upstreamBaseUrl: `http://127.0.0.1:${address.port}`, upstreamCredential: 'host-only', agentHostname: '127.0.0.1', signal: new AbortController().signal });
+  const message = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'call_web_search', arguments: { query: 'query' } } });
+  const pending = Array.from({ length: 4 }, () => post(service.url, message, service.credential).catch(() => undefined));
+  try {
+    await allStarted;
+    expect((await post(service.url, message, service.credential)).status).toBe(429);
+    expect(started).toBe(4);
+    await service.close();
+    await Promise.all(pending);
+  } finally {
+    await service.close();
+    upstream.closeAllConnections();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});

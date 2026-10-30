@@ -1,7 +1,8 @@
+import type { WebSearchUsageV1 } from '../results/types.ts';
 import {createHash, randomBytes, timingSafeEqual} from 'node:crypto';
 import * as http from 'node:http';
 import type {Socket} from 'node:net';
-import {runWebSearch} from './webSearchBackend.ts';
+import {isRecord, parseSearchUsage, runWebSearch} from './webSearchBackend.ts';
 import {handleSearchMessage} from './webSearchProtocol.ts';
 
 export interface WebSearchConnection {
@@ -12,6 +13,7 @@ export interface WebSearchConnection {
 }
 export interface WebSearchService extends WebSearchConnection {
   close(): Promise<void>;
+  usage(): WebSearchUsageV1;
 }
 
 /** Per-run, authenticated MCP endpoint; never forwards arbitrary agent HTTP requests. */
@@ -43,6 +45,14 @@ export async function startWebSearchService(options: {
   const calls = new Set<AbortController>();
   const tasks = new Set<Promise<void>>();
   let active = 0;
+  const usage: { -readonly [K in keyof WebSearchUsageV1]: WebSearchUsageV1[K] } = {
+    tool_calls: 0, search_count: 0, input_tokens: 0, output_tokens: 0,
+    total_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0,
+  };
+  const add = (key: keyof WebSearchUsageV1, value: number | null) => {
+    const previous = usage[key];
+    usage[key] = previous === null || value === null || !Number.isSafeInteger(previous + value) ? null : previous + value;
+  };
   const server = http.createServer(
     {maxHeaderSize: 16 * 1024},
     (request, response) => {
@@ -112,9 +122,19 @@ export async function startWebSearchService(options: {
         return;
       }
       // Accept one bounded MCP request; batches are invalid requests.
-      const result = await handleSearchMessage(message, (query) =>
-        runWebSearch(query, {...options, signal: callSignal}),
-      );
+      if (isRecord(message) && message.jsonrpc === '2.0' && message.method === 'tools/call' && message.id != null && isRecord(message.params) && message.params.name === 'call_web_search') add('tool_calls', 1);
+      const result = await handleSearchMessage(message, async (query) => {
+        try {
+          const result = await runWebSearch(query, {...options, signal: callSignal});
+          add('search_count', result.searchCount);
+          for (const [key, value] of Object.entries(result.usage)) add(key as keyof WebSearchUsageV1, value);
+          return result;
+        } catch (error) {
+          add('search_count', null);
+          for (const key of Object.keys(parseSearchUsage(undefined))) add(key as keyof WebSearchUsageV1, null);
+          throw error;
+        }
+      });
       response.writeHead(result === undefined ? 202 : 200, {
         'content-type': 'application/json',
       });
@@ -140,7 +160,12 @@ export async function startWebSearchService(options: {
   const address = server.address();
   if (!address || typeof address === 'string')
     throw new Error('Search listener did not bind.');
-  async function close() {
+  let closing: Promise<void> | undefined;
+  function close(): Promise<void> {
+    closing ??= closeListener();
+    return closing;
+  }
+  async function closeListener() {
     lifetime.abort();
     for (const call of calls) call.abort();
     for (const socket of sockets) socket.destroy();
@@ -153,6 +178,7 @@ export async function startWebSearchService(options: {
   return {
     url: `http://${options.agentHostname}:${address.port}${route}`,
     credential,
+    usage: () => ({ ...usage }),
     close,
   };
 }

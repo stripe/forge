@@ -9,6 +9,37 @@ const SEARCH_TIMEOUT_MS = 120_000;
 export interface SearchResult {
   readonly sources: readonly {url: string; title?: string}[];
   readonly searchCount: number;
+  readonly usage: SearchTokenUsage;
+}
+
+export interface SearchTokenUsage {
+  readonly input_tokens: number | null;
+  readonly output_tokens: number | null;
+  readonly total_tokens: number | null;
+  readonly cached_input_tokens: number | null;
+  readonly reasoning_tokens: number | null;
+}
+
+export function parseSearchUsage(value: unknown): SearchTokenUsage {
+  const number = (entry: unknown): number | null =>
+    typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0 ? entry : null;
+  const usage = isRecord(value) ? value : {};
+  const input = number(usage.input_tokens);
+  const output = number(usage.output_tokens);
+  const total = number(usage.total_tokens);
+  const valid = input !== null && output !== null && total !== null &&
+    Number.isSafeInteger(input + output) && input + output === total;
+  const cached = isRecord(usage.input_tokens_details)
+    ? number(usage.input_tokens_details.cached_tokens) : null;
+  const reasoning = isRecord(usage.output_tokens_details)
+    ? number(usage.output_tokens_details.reasoning_tokens) : null;
+  return {
+    input_tokens: valid ? input : null,
+    output_tokens: valid ? output : null,
+    total_tokens: valid ? total : null,
+    cached_input_tokens: valid && cached !== null && cached <= input! ? cached : null,
+    reasoning_tokens: valid && reasoning !== null && reasoning <= output! ? reasoning : null,
+  };
 }
 
 export class SearchInputError extends Error {}
@@ -55,7 +86,7 @@ export function parseSearchResponse(raw: string): SearchResult {
       }
     }
   }
-  return {sources, searchCount};
+  return {sources, searchCount, usage: parseSearchUsage(payload.usage)};
 }
 
 /** Host-only transport with a fixed upstream request and bounded response. */

@@ -653,13 +653,11 @@ describe('OpenCode adapter', () => {
   });
 });
 
-it('disables native websearch only for forge/web-search', async () => {
-  for (const enabled of [false, true]) {
-    const test = await fixture();
-    const plan = createTestResolvedRunPlan({ agent: selection, treatmentSetup: enabled ? [{ uses: 'forge/web-search', with: {} }] : [] });
-    const session = await test.adapter.openSession({ ...test.context, plan });
-    await session.send('Do it', { signal: test.context.signal });
-    const config = JSON.parse(Buffer.from(await test.state.mutable.readFile('config.json')).toString());
-    assert.equal(config.tools?.websearch, enabled ? false : undefined);
-  }
+it('writes the same Forge-owned OpenCode configuration when Forge search owns availability', async () => {
+  const test = await fixture();
+  const plan = createTestResolvedRunPlan({ agent: selection, treatmentSetup: [{ uses: 'forge/web-search', with: {} }] });
+  const session = await test.adapter.openSession({ ...test.context, plan });
+  await session.send('Do it', { signal: test.context.signal });
+  const config = Buffer.from(await test.state.mutable.readFile('config.json')).toString();
+  assert.equal(config, test.adapter.requirements(selection).environment.variables!.OPENCODE_CONFIG_CONTENT);
 });

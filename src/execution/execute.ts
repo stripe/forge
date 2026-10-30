@@ -1,5 +1,3 @@
-import { assertWebSearchConfiguration } from '../setup/forgeWebSearch.ts';
-import { preflightWebSearch, prepareWebSearch, type PreparedWebSearch } from '../webSearch/runtime.ts';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -142,7 +140,11 @@ import {
   redactSecrets,
 } from '../security/redaction.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
+import {
+  preflightWebSearch, prepareWebSearch, type PreparedWebSearch,
+} from '../webSearch/runtime.ts';
 import { createSetupExecutorForRegistry } from '../setup/executor.ts';
+import { assertWebSearchConfiguration } from '../setup/forgeWebSearch.ts';
 import type {
   AppliedSetup,
   PreparedSetup,
@@ -305,142 +307,146 @@ export async function validateRuntimeWithSetupActions(
   const readinessSecrets: string[] = [];
   const readinessSearch: PreparedWebSearch[] = [];
   try {
-  // Resolve every selected check before the first runtime allocation.
-  for (const check of checks) {
-    signal.throwIfAborted();
-    try {
-      const webSearch = await prepareWebSearch(check.plan, check.composition, check.runId, signal);
-      if (webSearch) { readinessSearch.push(webSearch); readinessSecrets.push(...webSearch.secrets); }
-      const environment = await createEnvironmentResolver({
-        async resolve(reference, context) {
-          const value = await (webSearch?.credentialResolver ?? check.composition.credentialResolver).resolve(
-            reference,
-            context,
-          );
-          if (typeof value === 'string') readinessSecrets.push(value);
-          return value;
-        },
-      }).resolve(check.environmentSpecification, {
-        runId: check.runId,
-        purpose: 'readiness',
-        signal,
-      });
-      resolved.push({ ...check, environment, webSearch });
-    } catch (error) {
-      throw new Error(
-        `Runtime readiness failed at credentials: ${
-          redactSecrets(readinessErrorDetail(error), readinessSecrets).value
-        }`,
-      );
-    }
-  }
-  const results: RuntimeReadinessResult[] = [];
-  for (const { plan, composition, preflight, environment, runId, webSearch } of resolved) {
-    const runSignal = AbortSignal.any([
-      signal,
-      AbortSignal.timeout(plan.limits.run_timeout_ms),
-    ]);
-    let runtime: PreparedRuntime | undefined;
-    let stage = 'runtime';
-    let failure: Error | undefined;
-    try {
-      runSignal.throwIfAborted();
-      runtime = await composition.runtime.prepare({
-        runId,
-        plan,
-        requirements: preflight.requirements,
-        environment,
-        signal: runSignal,
-      });
-      stage = 'agent';
-      await preflight.agent.prepare({
-        runId,
-        plan,
-        selection: plan.agent,
-        runtime: projectAgentPrepareRuntime(runtime),
-        inputs: composition.inputProvider,
-        signal: runSignal,
-      });
-      stage = 'setup';
-      const applied = await preflight.setup.apply({
-        ...(webSearch ? { webSearchUrl: webSearch.service.url } : {}),
-        runId,
-        paths: runtime.paths,
-        workspace: runtime.workspace,
-        stateDirectories: runtime.stateDirectories,
-        commands: runtime.commands,
-        inputs: composition.inputProvider,
-        signal: runSignal,
-      });
-      stage = 'finalize';
-      if (webSearch) await assertWebSearchConfiguration(plan, runtime, webSearch.service.url);
-      await runtime.finalizeSetup();
-      stage = 'mcp';
-      let serverCount = 0;
-      for (const step of applied.steps) {
-        if (step.uses !== 'forge/plugin') continue;
-        const receipt = parseAgentPluginInstallationReceipt(step.resolution);
-        const planned = plan.setup[step.index] as PluginSetupStepV1;
-        const definition = pluginDefinitionForAgent(
-          planned.with.plugin,
-          plan.agent.adapter,
+    // Resolve every selected check before the first runtime allocation.
+    for (const check of checks) {
+      signal.throwIfAborted();
+      try {
+        const webSearch = await prepareWebSearch(check.plan, check.composition, check.runId, signal);
+        if (webSearch) {
+          readinessSearch.push(webSearch);
+          readinessSecrets.push(...webSearch.secrets);
+        }
+        const environment = await createEnvironmentResolver({
+          async resolve(reference, context) {
+            const value = await (webSearch?.credentialResolver ?? check.composition.credentialResolver).resolve(
+              reference,
+              context,
+            );
+            if (typeof value === 'string') readinessSecrets.push(value);
+            return value;
+          },
+        }).resolve(check.environmentSpecification, {
+          runId: check.runId,
+          purpose: 'readiness',
+          signal,
+        });
+        resolved.push({ ...check, environment, webSearch });
+      } catch (error) {
+        throw new Error(
+          `Runtime readiness failed at credentials: ${
+            redactSecrets(readinessErrorDetail(error), readinessSecrets).value
+          }`,
         );
-        if (
-          definition === undefined ||
-          receipt.adapter !== plan.agent.adapter ||
-          receipt.plugin !== definition.distribution.plugin ||
-          receipt.marketplace !== definition.distribution.marketplace
-        )
-          throw new Error(
-            'Plugin MCP receipt does not match the expected plugin and authentication.',
-          );
-        if (definition.mcpServers.length === 0) continue;
-        // Expected servers come from the code-owned definition, never the receipt.
-        if (
-          !isNativePluginInstallationReceipt(receipt) ||
-          receipt.native_plugin_id.split('@')[0] !==
-            definition.distribution.plugin.split('@')[0]
-        )
-          throw new Error(
-            'Plugin MCP receipt does not match the expected plugin and authentication.',
-          );
-        await preflight.agent.pluginInstaller!.checkMcp!({
-          receipt,
-          servers: definition.mcpServers,
-          stateDirectories: runtime.stateDirectories,
-          commands: runtime.commands.agent,
+      }
+    }
+    const results: RuntimeReadinessResult[] = [];
+    for (const { plan, composition, preflight, environment, runId, webSearch } of resolved) {
+      const runSignal = AbortSignal.any([
+        signal,
+        AbortSignal.timeout(plan.limits.run_timeout_ms),
+      ]);
+      let runtime: PreparedRuntime | undefined;
+      let stage = 'runtime';
+      let failure: Error | undefined;
+      try {
+        runSignal.throwIfAborted();
+        runtime = await composition.runtime.prepare({
+          runId,
+          plan,
+          requirements: preflight.requirements,
+          environment,
           signal: runSignal,
         });
-        serverCount += definition.mcpServers.length;
-      }
-      stage = 'quiesce';
-      const sealed = await runtime.quiesce();
-      results.push(
-        Object.freeze({
-          selection: plan.selection,
-          runtime: sealed.metadata,
-          mcp_servers_checked: serverCount,
-          mcp_authentication: serverCount > 0 ? 'verified' : 'untested',
-          model_authentication: 'untested',
-        }),
-      );
-    } catch (error) {
-      failure = new Error(
-        `Runtime readiness failed at ${stage} for ${plan.selection.case_id} (${plan.agent.adapter}/${plan.selection.treatment}): ${redactSecrets(readinessErrorDetail(error), credentialValues(environment)).value}`,
-      );
-    } finally {
-      try {
-        await webSearch?.service.close();
-        await runtime?.dispose();
-      } catch {
-        failure = new Error(
-          `${failure?.message ?? 'Runtime readiness check finished'}; runtime cleanup failed.`,
+        stage = 'agent';
+        await preflight.agent.prepare({
+          runId,
+          plan,
+          selection: plan.agent,
+          runtime: projectAgentPrepareRuntime(runtime),
+          inputs: composition.inputProvider,
+          signal: runSignal,
+        });
+        stage = 'setup';
+        const applied = await preflight.setup.apply({
+          ...(webSearch ? { webSearchUrl: webSearch.service.url } : {}),
+          runId,
+          paths: runtime.paths,
+          workspace: runtime.workspace,
+          stateDirectories: runtime.stateDirectories,
+          commands: runtime.commands,
+          inputs: composition.inputProvider,
+          signal: runSignal,
+        });
+        stage = 'finalize';
+        await runtime.finalizeSetup();
+        if (webSearch)
+          await assertWebSearchConfiguration(plan, runtime, webSearch.service.url);
+        stage = 'mcp';
+        let serverCount = 0;
+        for (const step of applied.steps) {
+          if (step.uses !== 'forge/plugin') continue;
+          const receipt = parseAgentPluginInstallationReceipt(step.resolution);
+          const planned = plan.setup[step.index] as PluginSetupStepV1;
+          const definition = pluginDefinitionForAgent(
+            planned.with.plugin,
+            plan.agent.adapter,
+          );
+          if (
+            definition === undefined ||
+            receipt.adapter !== plan.agent.adapter ||
+            receipt.plugin !== definition.distribution.plugin ||
+            receipt.marketplace !== definition.distribution.marketplace
+          )
+            throw new Error(
+              'Plugin MCP receipt does not match the expected plugin and authentication.',
+            );
+          if (definition.mcpServers.length === 0) continue;
+          // Expected servers come from the code-owned definition, never the receipt.
+          if (
+            !isNativePluginInstallationReceipt(receipt) ||
+            receipt.native_plugin_id.split('@')[0] !==
+              definition.distribution.plugin.split('@')[0]
+          )
+            throw new Error(
+              'Plugin MCP receipt does not match the expected plugin and authentication.',
+            );
+          await preflight.agent.pluginInstaller!.checkMcp!({
+            receipt,
+            servers: definition.mcpServers,
+            stateDirectories: runtime.stateDirectories,
+            commands: runtime.commands.agent,
+            signal: runSignal,
+          });
+          serverCount += definition.mcpServers.length;
+        }
+        stage = 'quiesce';
+        const sealed = await runtime.quiesce();
+        results.push(
+          Object.freeze({
+            selection: plan.selection,
+            runtime: sealed.metadata,
+            mcp_servers_checked: serverCount,
+            mcp_authentication: serverCount > 0 ? 'verified' : 'untested',
+            model_authentication: 'untested',
+          }),
         );
+      } catch (error) {
+        failure = new Error(
+          `Runtime readiness failed at ${stage} for ${plan.selection.case_id} (${plan.agent.adapter}/${plan.selection.treatment}): ${redactSecrets(readinessErrorDetail(error), credentialValues(environment)).value}`,
+        );
+      } finally {
+        try {
+          await webSearch?.service.close().catch(() => undefined);
+          await runtime?.dispose();
+        } catch {
+          failure = new Error(
+            `${failure?.message ?? 'Runtime readiness check finished'}; runtime cleanup failed.`,
+          );
+        }
       }
+      if (failure) throw failure;
     }
-    if (failure) throw failure;
-  }
-  return Object.freeze(results);
+    return Object.freeze(results);
   } finally {
     await Promise.allSettled(readinessSearch.map(({ service }) => service.close()));
   }
@@ -661,8 +667,9 @@ export async function executeEvalWithTestHooks(
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
       throwIfAborted(signal, phase);
-      if (webSearch) await assertWebSearchConfiguration(input.plan, prepared!, webSearch.service.url);
       await prepared!.finalizeSetup();
+      if (webSearch)
+        await assertWebSearchConfiguration(input.plan, prepared!, webSearch.service.url);
       return artifact;
     });
 
@@ -720,7 +727,7 @@ export async function executeEvalWithTestHooks(
         diagnostics.phase('quiesce'),
       );
       const runtime = await prepared!.quiesce();
-      await webSearch?.service.close();
+      await webSearch?.service.close().catch(() => undefined);
       return runtime;
     });
 
@@ -1009,6 +1016,7 @@ export async function executeEvalWithTestHooks(
             runtime: sealed!,
             interaction,
             setupArtifact,
+            ...(webSearch ? { webSearch: searchResultObservation(webSearch) } : {}),
             completionCalls: completions.calls,
             completionCallTotals: completions.totals,
             evidence: evaluated.redacted.evidence,
@@ -1081,6 +1089,7 @@ export async function executeEvalWithTestHooks(
       runtime: sealed,
       interaction,
       setupArtifact,
+      ...(webSearch ? { webSearch: searchResultObservation(webSearch) } : {}),
       completionCalls: completions.calls,
       completionCallTotals: completions.totals,
       evidence: evaluated.redacted.evidence,
@@ -2546,6 +2555,7 @@ function buildResult(input: {
   runtime: SealedRuntime;
   interaction: ExecutedInteraction;
   setupArtifact: SetupArtifactV1;
+  webSearch?: NonNullable<RunResultV1['web_search']>;
   completionCalls: readonly CompletionCallSummaryV1[];
   completionCallTotals: CompletionCallTotalsV1;
   evidence: NormalizedTrajectory;
@@ -2558,6 +2568,7 @@ function buildResult(input: {
   completedAt: Date;
 }): RunResultV1 {
   return {
+    ...(input.webSearch ? { web_search: input.webSearch } : {}),
     run_id: input.input.runId,
     selection: input.input.plan.selection,
     forge: {
@@ -2769,4 +2780,18 @@ function mapExecutionError(
           : boundedErrorMessage(error, message, secrets),
     },
   });
+}
+
+/** Optional accounting must never change execution or evaluation outcomes. */
+function searchResultObservation(search: PreparedWebSearch): NonNullable<RunResultV1['web_search']> {
+  let usage;
+  try {
+    usage = search.service.usage();
+  } catch {
+    usage = {
+      tool_calls: null, search_count: null, input_tokens: null, output_tokens: null,
+      total_tokens: null, cached_input_tokens: null, reasoning_tokens: null,
+    };
+  }
+  return { provider: 'forge/web-search', native_search: 'disabled', usage };
 }

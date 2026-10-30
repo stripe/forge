@@ -46,6 +46,7 @@ export {
   type RunWarningV1,
   type SetupArtifactStepV1,
   type SetupArtifactV1,
+  type WebSearchUsageV1,
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
 } from './types.ts';

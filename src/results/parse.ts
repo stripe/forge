@@ -694,7 +694,18 @@ const evidenceV1 = z
     }
   });
 
+const SearchCounterSchema = z.number().int().nonnegative().safe().nullable();
 const runResultFields = {
+  web_search: z.object({
+    provider: z.literal('forge/web-search'),
+    native_search: z.literal('disabled'),
+    usage: z.object({
+      tool_calls: SearchCounterSchema, search_count: SearchCounterSchema,
+      input_tokens: SearchCounterSchema, output_tokens: SearchCounterSchema,
+      total_tokens: SearchCounterSchema, cached_input_tokens: SearchCounterSchema,
+      reasoning_tokens: SearchCounterSchema,
+    }).strict(),
+  }).strict().optional(),
   plugin_installations: z
     .array(z.unknown().transform(parseAgentPluginInstallationReceipt))
     .max(2_000)

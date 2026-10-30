@@ -329,7 +329,25 @@ export interface RunEvidenceV1 {
   readonly redaction_count: number;
 }
 
+/** Bounded host search totals; null means unavailable, not zero spend.
+ * Future price estimation can consume these independently of scoring.
+ */
+export interface WebSearchUsageV1 {
+  readonly tool_calls: number | null;
+  readonly search_count: number | null;
+  readonly input_tokens: number | null;
+  readonly output_tokens: number | null;
+  readonly total_tokens: number | null;
+  readonly cached_input_tokens: number | null;
+  readonly reasoning_tokens: number | null;
+}
+
 interface RunResultCommon {
+  readonly web_search?: {
+    readonly provider: 'forge/web-search';
+    readonly native_search: 'disabled';
+    readonly usage: WebSearchUsageV1;
+  };
   readonly run_id: string;
   readonly selection: RunSelection;
   readonly forge: ForgeBuildIdentity & {

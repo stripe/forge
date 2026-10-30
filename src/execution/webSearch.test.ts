@@ -78,3 +78,86 @@ it('closes readiness listeners even if later selected credentials fail', async (
   ]));
   assert.equal(test.runtime.runs.length, 0);
 });
+
+for (const responseKind of ['valid', 'malformed-usage', 'malformed-response'] as const) {
+  it(`records the search condition and nullable usage for ${responseKind} without affecting scoring`, async () => {
+    const test = fixture();
+    const upstream = http.createServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify(responseKind === 'malformed-response' ? { error: { message: 'private-upstream-text' } } : {
+        output: [{ type: 'web_search_call', action: { sources: [{ url: 'https://example.com', title: 'Example' }] } }, { type: 'web_search_call' }],
+        usage: responseKind === 'malformed-usage' ? { input_tokens: 'invalid' } : { input_tokens: 10, output_tokens: 4, total_tokens: 14, input_tokens_details: { cached_tokens: 2 }, output_tokens_details: { reasoning_tokens: 1 } },
+      }));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const address = upstream.address();
+    if (!address || typeof address === 'string') throw new Error('No port');
+    const agent = { ...test.agent, async openSession(context: Parameters<typeof test.agent.openSession>[0]) {
+      const config = JSON.parse(Buffer.from(await context.runtime.workspace.readFile('.mcp.json')).toString());
+      const token = test.runtime.runs[0]!.input.environment.credentials.FORGE_WEB_SEARCH_TOKEN!.value;
+      for (let i = 0; i < 2; i++) {
+        const result = await fetch(config.mcpServers.web_search.url, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ jsonrpc: '2.0', id: i, method: 'tools/call', params: { name: 'call_web_search', arguments: { query: 'test query' } } }) });
+        assert.equal(result.status, 200);
+        assert.equal((await result.text()).includes('private-upstream-text'), false);
+      }
+      return test.agent.openSession(context);
+    } };
+    try {
+      const completed = await executeEval({ runId: `usage-${responseKind}`, plan: test.plan, composition: { ...test.composition, webSearch: { ...test.composition.webSearch!, baseUrl: `http://127.0.0.1:${address.port}` }, agents: new Map([[agent.id, agent]]) } });
+      assert.equal(completed.result.evaluation.status, 'passed');
+      assert.deepEqual(completed.result.web_search, { provider: 'forge/web-search', native_search: 'disabled', usage: {
+        tool_calls: 2, search_count: responseKind === 'malformed-response' ? null : 4,
+        input_tokens: responseKind === 'valid' ? 20 : null, output_tokens: responseKind === 'valid' ? 8 : null,
+        total_tokens: responseKind === 'valid' ? 28 : null, cached_input_tokens: responseKind === 'valid' ? 4 : null,
+        reasoning_tokens: responseKind === 'valid' ? 2 : null,
+      } });
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+}
+
+it('leaves results and credential lookup unchanged without the action', async () => {
+  const test = fixture();
+  const plan = createTestResolvedRunPlan({ agent: test.plan.agent });
+  const completed = await executeEval({ runId: 'no-search', plan, composition: { ...test.composition, webSearch: { ...test.composition.webSearch!, baseUrl: 'invalid-unused-endpoint' } } });
+  assert.equal(completed.result.web_search, undefined);
+  assert.deepEqual(test.resolutions, []);
+});
+
+it('verifies the saved condition against its plan and rejects forged result fields', async () => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createArtifactStore, verifyCompletedRun, parseRunResult } = await import('../results/index.ts');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-search-result-'));
+  const test = fixture();
+  try {
+    const completed = await executeEval({ runId: 'verified-search', plan: test.plan, composition: { ...test.composition, artifactStore: createArtifactStore({ root }) } });
+    await verifyCompletedRun(completed.location);
+    const condition = completed.result.web_search!;
+    assert.throws(() => parseRunResult({ ...completed.result, web_search: { ...condition, native_search: 'enabled' } }));
+    assert.throws(() => parseRunResult({ ...completed.result, web_search: { ...condition, extra: true } }));
+    assert.throws(() => parseRunResult({ ...completed.result, web_search: { ...condition, usage: { ...condition.usage, input_tokens: -1 } } }));
+    const { web_search: _, ...withoutCondition } = completed.result;
+    await fs.writeFile(path.join(completed.location, 'result.json'), JSON.stringify(withoutCondition));
+    await assert.rejects(verifyCompletedRun(completed.location), /web search condition/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it('closes the per-run listener when the caller cancels interaction', async () => {
+  const test = fixture();
+  const controller = new AbortController();
+  let url = '';
+  const agent = { ...test.agent, async openSession(context: Parameters<typeof test.agent.openSession>[0]) {
+    url = JSON.parse(Buffer.from(await context.runtime.workspace.readFile('.mcp.json')).toString()).mcpServers.web_search.url;
+    controller.abort(new Error('Cancelled'));
+    context.signal.throwIfAborted();
+    return test.agent.openSession(context);
+  } };
+  await assert.rejects(executeEval({ runId: 'cancelled-search', plan: test.plan, signal: controller.signal, composition: { ...test.composition, agents: new Map([[agent.id, agent]]) } }), { code: 'aborted' });
+  assert.ok(url);
+  await assert.rejects(fetch(url));
+});

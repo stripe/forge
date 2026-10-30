@@ -1,3 +1,4 @@
+import { hasWebSearch, WEB_SEARCH_RESOLUTION } from '../setup/forgeWebSearch.ts';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { type AtifTrajectoryV1_8, parseAtifTrajectory } from '../atif/index.ts';
@@ -488,11 +489,17 @@ function verifySetupArtifact(
     );
   }
 
+  if (hasWebSearch(plan) !== (result.web_search !== undefined))
+    throw new ArtifactStoreError('Result web search condition does not match plan.json.');
+
   const pluginInstallations: ReturnType<
     typeof parseAgentPluginInstallationReceipt
   >[] = [];
   for (const [index, step] of setup.steps.entries()) {
-    if (step.uses === 'forge/plugin') {
+    if (step.uses === 'forge/web-search') {
+      if (serializeCanonicalJson(step.resolution ?? null) !== serializeCanonicalJson(WEB_SEARCH_RESOLUTION))
+        throw new ArtifactStoreError('Web search resolution does not match the Forge contract.');
+    } else if (step.uses === 'forge/plugin') {
       if (step.resolution === undefined) {
         throw new ArtifactStoreError(
           'setup.json omitted a plugin installation resolution.',
