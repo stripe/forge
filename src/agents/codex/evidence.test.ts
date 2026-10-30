@@ -482,6 +482,19 @@ async function loadToolSequence(
   return load([METADATA, ...records]);
 }
 
+function capturedMcpListing(
+  tool: string,
+  options: Parameters<typeof capturedMcp>[0],
+) {
+  const sequence = capturedMcp(options).slice(2);
+  delete sequence[0]!.payload.namespace;
+  sequence[0]!.payload.name = tool;
+  const item = sequence[1]!.payload.item as Record<string, unknown>;
+  item.server = 'codex';
+  item.tool = tool;
+  return sequence;
+}
+
 describe('Codex exact rollout evidence', () => {
   it('normalizes web search actions once in either native record order', async () => {
     for (const action of [
@@ -659,6 +672,93 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
+  it.each(['turn-1', 'turn-2'])(
+    'rejects a web search response in %s paired with a completion in the other turn',
+    async (responseTurn) => {
+      const action = { type: 'search', query: 'synthetic query' };
+      const first = capturedTurn();
+      const second = capturedTurn(
+        'Second prompt.',
+        'Second response.',
+        'turn-2',
+      );
+      const completionTurn = responseTurn === 'turn-1' ? 'turn-2' : 'turn-1';
+      const response = capturedResponse(
+        { type: 'web_search_call', id: 'web-1', status: 'completed', action },
+        responseTurn,
+      );
+      const completion = capturedItem(
+        { type: 'WebSearch', id: 'web-1', query: 'synthetic query', action },
+        completionTurn,
+      );
+      first.splice(4, 0, responseTurn === 'turn-1' ? response : completion);
+      second.splice(4, 0, responseTurn === 'turn-2' ? response : completion);
+      const evidence = await load([METADATA, ...first, ...second]);
+      assert.equal(evidence.kind, 'unavailable', responseTurn);
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_incomplete');
+    },
+  );
+
+  it('rejects a function call reusing a web search ID in either order', async () => {
+    const action = { type: 'search', query: 'synthetic query' };
+    const web = [
+      capturedResponse({
+        type: 'web_search_call',
+        id: 'web-1',
+        status: 'completed',
+        action,
+      }),
+      capturedItem({ type: 'WebSearch', id: 'web-1', query: 'lookup', action }),
+    ];
+    const call = [
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'web-1',
+        name: 'read_file',
+        arguments: '{}',
+      }),
+      capturedResponse({
+        type: 'function_call_output',
+        call_id: 'web-1',
+        output: 'File contents.',
+      }),
+    ];
+    for (const sequence of [
+      [...web, ...call],
+      [...call, ...web],
+    ]) {
+      const evidence = await loadToolSequence(sequence);
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_incomplete');
+    }
+  });
+
+  it('rejects a web search response before the user message', async () => {
+    const action = { type: 'search', query: 'synthetic query' };
+    const records = capturedTurn();
+    records.splice(
+      4,
+      0,
+      capturedItem({ type: 'WebSearch', id: 'web-1', query: 'lookup', action }),
+    );
+    records.splice(
+      2,
+      0,
+      capturedResponse({
+        type: 'web_search_call',
+        id: 'web-1',
+        status: 'completed',
+        action,
+      }),
+    );
+    const evidence = await load([METADATA, ...records]);
+    assert.equal(evidence.kind, 'unavailable');
+    if (evidence.kind === 'unavailable')
+      assert.equal(evidence.reason.code, 'source_incomplete');
+  });
+
   it('correlates image view snapshots with their existing calls and marks omitted images', async () => {
     for (const { argumentPath, path } of [
       {
@@ -769,11 +869,11 @@ describe('Codex exact rollout evidence', () => {
     ];
     const first = capturedTurn();
     first[1]!.payload.cwd = '/workspace/second';
-    for (const cwd of [
-      '/workspace/second',
-      '/workspace',
-      undefined,
-      'relative',
+    for (const { cwd, omitContext } of [
+      ...['/workspace/second', '/workspace', undefined, 'relative'].map(
+        (cwd) => ({ cwd, omitContext: false }),
+      ),
+      { cwd: undefined, omitContext: true },
     ]) {
       const second = capturedTurn(
         'Second prompt.',
@@ -783,6 +883,7 @@ describe('Codex exact rollout evidence', () => {
       if (cwd === undefined) delete second[1]!.payload.cwd;
       else second[1]!.payload.cwd = cwd;
       second.splice(4, 0, ...image('turn-2'));
+      if (omitContext) second.splice(1, 1);
       const evidence = await load([METADATA, ...first, ...second]);
       assert.equal(
         evidence.kind,
@@ -860,6 +961,66 @@ describe('Codex exact rollout evidence', () => {
           assert.equal(evidence.reason.code, 'source_incomplete');
       }
     }
+  });
+
+  it('rejects an ImageView attached to a read_file call', async () => {
+    const evidence = await loadToolSequence([
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'image-1',
+        name: 'read_file',
+        arguments: '{"path":"/workspace/image.png"}',
+      }),
+      capturedItem({
+        type: 'ImageView',
+        id: 'image-1',
+        path: 'file:///workspace/image.png',
+      }),
+      capturedResponse({
+        type: 'function_call_output',
+        call_id: 'image-1',
+        output: 'Image unavailable.',
+      }),
+    ]);
+    assert.equal(evidence.kind, 'unavailable');
+    if (evidence.kind === 'unavailable')
+      assert.equal(evidence.reason.code, 'source_incomplete');
+  });
+
+  it('rejects an image snapshot in a later turn than its complete call and output', async () => {
+    const first = capturedTurn();
+    first.splice(
+      4,
+      0,
+      capturedResponse({
+        type: 'function_call',
+        call_id: 'image-1',
+        name: 'view_image',
+        arguments: '{"path":"/workspace/image.png"}',
+      }),
+      capturedResponse({
+        type: 'function_call_output',
+        call_id: 'image-1',
+        output: 'Image unavailable.',
+      }),
+    );
+    const second = capturedTurn('Second prompt.', 'Second response.', 'turn-2');
+    second.splice(
+      4,
+      0,
+      capturedItem(
+        {
+          type: 'ImageView',
+          id: 'image-1',
+          path: 'file:///workspace/image.png',
+        },
+        'turn-2',
+      ),
+    );
+    const evidence = await load([METADATA, ...first, ...second]);
+    assert.equal(evidence.kind, 'unavailable');
+    if (evidence.kind === 'unavailable')
+      assert.equal(evidence.reason.code, 'source_incomplete');
   });
 
   it('does not treat a namespaced view_image as the built-in image tool', async () => {
@@ -1004,16 +1165,11 @@ describe('Codex exact rollout evidence', () => {
           ? { resources: [] }
           : { resourceTemplates: [] },
       );
-      const makeSequence = () => {
-        const sequence = capturedMcp({
+      const makeSequence = () =>
+        capturedMcpListing(tool, {
           result: { content: [{ type: 'text', text }] },
           output: text,
         });
-        delete sequence[2]!.payload.namespace;
-        sequence[2]!.payload.name = tool;
-        (sequence[3]!.payload.item as Record<string, unknown>).tool = tool;
-        return sequence.slice(2);
-      };
       const evidence = await loadToolSequence(makeSequence());
       if (evidence.kind !== 'available')
         throw new Error('Expected resource evidence.');
@@ -1021,10 +1177,7 @@ describe('Codex exact rollout evidence', () => {
       const step = parseAtifTrajectory(evidence.trajectory).steps.find(
         (step) => step.tool_calls?.[0]?.tool_call_id === 'mcp-call',
       );
-      assert.equal(
-        step?.tool_calls?.[0]?.function_name,
-        `mcp__fixture.${tool}`,
-      );
+      assert.equal(step?.tool_calls?.[0]?.function_name, `mcp__codex.${tool}`);
       assert.equal(step?.observation?.results[0]?.content, text);
       const bare = makeSequence().filter((entry) => entry.type !== 'event_msg');
       const bareEvidence = await loadToolSequence(bare);
@@ -1149,6 +1302,49 @@ describe('Codex exact rollout evidence', () => {
         state: 'unavailable',
         reason: 'source_incomplete',
       });
+    }
+  });
+
+  it('preserves failed bare MCP listing observations', async () => {
+    for (const tool of ['list_mcp_resources', 'list_mcp_resource_templates']) {
+      const text = 'Resource listing failed.';
+      const evidence = await loadToolSequence(
+        capturedMcpListing(tool, { error: { message: text }, output: text }),
+      );
+      if (evidence.kind !== 'available')
+        throw new Error('Expected failed listing evidence.');
+      const step = parseAtifTrajectory(evidence.trajectory).steps.find(
+        (step) => step.tool_calls?.[0]?.tool_call_id === 'mcp-call',
+      );
+      assert.equal(step?.tool_calls?.[0]?.function_name, `mcp__codex.${tool}`);
+      assert.deepEqual(step?.observation?.results, [
+        {
+          source_call_id: 'mcp-call',
+          content: text,
+          extra: { is_error: true },
+        },
+      ]);
+    }
+  });
+
+  it('rejects bare non-listing MCP names and multi-block listing snapshots', async () => {
+    const text = '{"resources":[]}';
+    for (const { tool, content } of [
+      { tool: 'probe', content: [{ type: 'text', text }] },
+      ...['list_mcp_resources', 'list_mcp_resource_templates'].map((tool) => ({
+        tool,
+        content: [
+          { type: 'text', text },
+          { type: 'text', text: 'Extra block.' },
+        ],
+      })),
+    ]) {
+      const evidence = await loadToolSequence(
+        capturedMcpListing(tool, { result: { content }, output: text }),
+      );
+      assert.equal(evidence.kind, 'unavailable', tool);
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_incomplete');
     }
   });
 
@@ -1310,6 +1506,16 @@ describe('Codex exact rollout evidence', () => {
             if (evidence.kind !== 'available')
               throw new Error('Expected verified MCP evidence.');
             assert.deepEqual(evidence.warnings, []);
+            const calls = parseAtifTrajectory(
+              evidence.trajectory,
+            ).steps.flatMap((step) => step.tool_calls ?? []);
+            assert.equal(
+              calls.find((call) => call.tool_call_id === 'mcp-call')
+                ?.function_name,
+              naming === 'namespaced'
+                ? `mcp__${server}.probe`
+                : `mcp__${server}__probe`,
+            );
             const results = parseAtifTrajectory(
               evidence.trajectory,
             ).steps.flatMap((step) => step.observation?.results ?? []);
