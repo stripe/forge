@@ -86,15 +86,16 @@ export interface JudgeTranscriptProjectionV1 {
 }
 
 /** Canonical empty transcript with the same declared projection policy. */
-export const EMPTY_JUDGE_TRANSCRIPT: JudgeTranscriptProjectionV1 = Object.freeze({
-  source: JUDGE_TRANSCRIPT_SOURCE,
-  projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
-  trajectoryScope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
-  includedStepSources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
-  copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
-  includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
-  transcriptJson: serializeCanonicalJson([]),
-});
+export const EMPTY_JUDGE_TRANSCRIPT: JudgeTranscriptProjectionV1 =
+  Object.freeze({
+    source: JUDGE_TRANSCRIPT_SOURCE,
+    projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
+    trajectoryScope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+    includedStepSources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+    copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+    includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+    transcriptJson: serializeCanonicalJson([]),
+  });
 
 /**
  * Project canonical ATIF into the root-step evidence visible to a judge.

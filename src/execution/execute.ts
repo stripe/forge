@@ -505,8 +505,11 @@ export async function executeEvalWithTestHooks(
         criteria.length === 0
           ? undefined
           : redactJudgeWorkspaceEvidence(
-              (await collectJudgeWorkspaceEvidence(sealed!.workspace, { signal }))
-                .evidence,
+              (
+                await collectJudgeWorkspaceEvidence(sealed!.workspace, {
+                  signal,
+                })
+              ).evidence,
               secrets,
             );
       const workspace =
@@ -519,10 +522,14 @@ export async function executeEvalWithTestHooks(
                 truncated: entry.truncated,
               })),
               complete: safeWorkspace.complete,
-              warnings: safeWorkspace.warnings.map((warning) => ({ ...warning })),
+              warnings: safeWorkspace.warnings.map((warning) => ({
+                ...warning,
+              })),
             };
       const prompt =
-        workspace === undefined ? undefined : sizeJudgePrompt(input.plan, workspace);
+        workspace === undefined
+          ? undefined
+          : sizeJudgePrompt(input.plan, workspace);
       const resolved =
         prompt === undefined
           ? undefined

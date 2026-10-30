@@ -515,9 +515,11 @@ describe('executeEval judge evidence budget and local store round trips', () => 
         ({ code }) => code === 'workspace_file_truncated',
       ),
     );
-    assert.ok(provider.calls.every(({ request }) =>
-      request.systemPrompt?.includes(exampleAnswer),
-    ));
+    assert.ok(
+      provider.calls.every(({ request }) =>
+        request.systemPrompt?.includes(exampleAnswer),
+      ),
+    );
   });
 
   for (const resultCharacters of [100, 100_000]) {
@@ -529,7 +531,8 @@ describe('executeEval judge evidence budget and local store round trips', () => 
       const nativeSecret = 'synthetic-native-secret';
       const driverSecret = 'synthetic-driver-secret';
       const raw = nativeSession(resultCharacters).replace(
-        'x'.repeat(100), nativeSecret.repeat(3),
+        'x'.repeat(100),
+        nativeSecret.repeat(3),
       );
       const { completed, trajectoryBytes } = await runBudgetEval(root, {
         raw,
@@ -541,10 +544,16 @@ describe('executeEval judge evidence budget and local store round trips', () => 
         completed.result.evidence.provenance.source.kind,
         nativeFits ? 'native_log' : 'driver_fallback',
       );
-      assert.equal(completed.result.evidence.redaction_count, nativeFits ? 3 : 2);
+      assert.equal(
+        completed.result.evidence.redaction_count,
+        nativeFits ? 3 : 2,
+      );
       assert.ok(!trajectoryBytes.includes(nativeSecret));
       assert.ok(!trajectoryBytes.includes(driverSecret));
-      assert.equal(trajectoryBytes.split('[REDACTED]').length - 1, nativeFits ? 3 : 2);
+      assert.equal(
+        trajectoryBytes.split('[REDACTED]').length - 1,
+        nativeFits ? 3 : 2,
+      );
     });
   }
 
@@ -556,10 +565,13 @@ describe('executeEval judge evidence budget and local store round trips', () => 
     const { completed, trajectoryBytes } = await runBudgetEval(root, {
       assistant: 'y'.repeat(1_100_000),
     });
-    assert.ok(Buffer.byteLength(
-      createJudgeTranscriptProjection(JSON.parse(trajectoryBytes)).transcriptJson,
-      'utf8',
-    ) > MAX_CRITERION_JUDGE_PROMPT_BYTES);
+    assert.ok(
+      Buffer.byteLength(
+        createJudgeTranscriptProjection(JSON.parse(trajectoryBytes))
+          .transcriptJson,
+        'utf8',
+      ) > MAX_CRITERION_JUDGE_PROMPT_BYTES,
+    );
     const resultPath = path.join(completed.location, 'result.json');
     const result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
     result.evidence.provenance.source = {
@@ -572,7 +584,8 @@ describe('executeEval judge evidence budget and local store round trips', () => 
     await fs.writeFile(resultPath, serializeCanonicalJson(result));
     await assert.rejects(
       verifyCompletedRun(completed.location),
-      (error: unknown) => error instanceof ArtifactStoreError &&
+      (error: unknown) =>
+        error instanceof ArtifactStoreError &&
         /omission is not justified/.test(error.message),
     );
   });
@@ -585,10 +598,13 @@ describe('executeEval judge evidence budget and local store round trips', () => 
     const { completed, trajectoryBytes } = await runBudgetEval(root, {
       assistant: 'y'.repeat(1_100_000),
     });
-    assert.ok(Buffer.byteLength(
-      createJudgeTranscriptProjection(JSON.parse(trajectoryBytes)).transcriptJson,
-      'utf8',
-    ) > MAX_CRITERION_JUDGE_PROMPT_BYTES);
+    assert.ok(
+      Buffer.byteLength(
+        createJudgeTranscriptProjection(JSON.parse(trajectoryBytes))
+          .transcriptJson,
+        'utf8',
+      ) > MAX_CRITERION_JUDGE_PROMPT_BYTES,
+    );
     const resultPath = path.join(completed.location, 'result.json');
     const result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
     result.evidence.completeness = 'complete';
@@ -598,10 +614,13 @@ describe('executeEval judge evidence budget and local store round trips', () => 
     // driver provenance and fallback completeness together, before omission checks.
     await assert.rejects(
       verifyCompletedRun(completed.location),
-      (error: unknown) => error instanceof ZodError && error.issues.some(
-        ({ path, message }) => path.join('.') === 'evidence.completeness' &&
-          /fallback provenance and fallback completeness/.test(message),
-      ),
+      (error: unknown) =>
+        error instanceof ZodError &&
+        error.issues.some(
+          ({ path, message }) =>
+            path.join('.') === 'evidence.completeness' &&
+            /fallback provenance and fallback completeness/.test(message),
+        ),
     );
   });
 
@@ -626,7 +645,8 @@ describe('executeEval judge evidence budget and local store round trips', () => 
     });
     await assert.rejects(
       verifyCompletedRun(completed.location),
-      (error: unknown) => error instanceof ArtifactStoreError &&
+      (error: unknown) =>
+        error instanceof ArtifactStoreError &&
         /prompt budget could not be verified/.test(error.message) &&
         error.cause instanceof TypeError &&
         /Mandatory criterion judge prompt exceeds/.test(error.cause.message),

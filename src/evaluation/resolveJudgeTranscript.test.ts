@@ -7,7 +7,10 @@ import {
   EMPTY_JUDGE_TRANSCRIPT,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
-import { type RedactedJudgeEvidence, resolveJudgeTranscript } from './resolveJudgeTranscript.ts';
+import {
+  type RedactedJudgeEvidence,
+  resolveJudgeTranscript,
+} from './resolveJudgeTranscript.ts';
 
 function candidate(native: boolean, text: string): RedactedJudgeEvidence {
   return {
@@ -32,7 +35,8 @@ function candidate(native: boolean, text: string): RedactedJudgeEvidence {
 
 function bytes(selected: RedactedJudgeEvidence): number {
   return Buffer.byteLength(
-    createJudgeTranscriptProjection(selected.evidence.trajectory).transcriptJson,
+    createJudgeTranscriptProjection(selected.evidence.trajectory)
+      .transcriptJson,
     'utf8',
   );
 }
@@ -43,11 +47,15 @@ describe('resolveJudgeTranscript', () => {
     const resolved = resolveJudgeTranscript({
       selected,
       promptOverheadBytes: MAX_CRITERION_JUDGE_PROMPT_BYTES - bytes(selected),
-      buildDriver: () => assert.fail('Under-budget native evidence needs no driver.'),
+      buildDriver: () =>
+        assert.fail('Under-budget native evidence needs no driver.'),
     });
     assert.equal(resolved.redacted, selected);
     assert.equal(resolved.reason, 'within_budget');
-    assert.deepEqual(resolved.transcript, createJudgeTranscriptProjection(selected.evidence.trajectory));
+    assert.deepEqual(
+      resolved.transcript,
+      createJudgeTranscriptProjection(selected.evidence.trajectory),
+    );
   });
 
   it('builds a driver once after native overflow and retains its replacement count', () => {
@@ -79,7 +87,8 @@ describe('resolveJudgeTranscript', () => {
       let calls = 0;
       const resolved = resolveJudgeTranscript({
         selected,
-        promptOverheadBytes: MAX_CRITERION_JUDGE_PROMPT_BYTES - bytes(driver) + 1,
+        promptOverheadBytes:
+          MAX_CRITERION_JUDGE_PROMPT_BYTES - bytes(driver) + 1,
         buildDriver: () => {
           calls += 1;
           return driver;
@@ -88,20 +97,32 @@ describe('resolveJudgeTranscript', () => {
       assert.equal(calls, native ? 1 : 0);
       assert.equal(resolved.reason, 'judge_budget_exceeded');
       assert.equal(resolved.transcript, EMPTY_JUDGE_TRANSCRIPT);
-      assert.deepEqual(parseJudgeTranscriptProjection(resolved.transcript), EMPTY_JUDGE_TRANSCRIPT);
+      assert.deepEqual(
+        parseJudgeTranscriptProjection(resolved.transcript),
+        EMPTY_JUDGE_TRANSCRIPT,
+      );
       assert.equal(resolved.redacted.replacements, driver.replacements);
-      assert.ok(resolved.redacted.evidence.warnings.some(({ code, message }) =>
-        code === 'value_omitted' && message.includes('workspace evidence only'),
-      ));
+      assert.ok(
+        resolved.redacted.evidence.warnings.some(
+          ({ code, message }) =>
+            code === 'value_omitted' &&
+            message.includes('workspace evidence only'),
+        ),
+      );
       assert.deepEqual(driver, original);
     });
   }
 
   it('rejects oversized mandatory text before building driver evidence', () => {
-    assert.throws(() => resolveJudgeTranscript({
-      selected: candidate(true, 'Done.'),
-      promptOverheadBytes: MAX_CRITERION_JUDGE_PROMPT_BYTES - 2,
-      buildDriver: () => assert.fail('Mandatory prompt overflow needs no driver.'),
-    }), /Mandatory criterion judge prompt exceeds/);
+    assert.throws(
+      () =>
+        resolveJudgeTranscript({
+          selected: candidate(true, 'Done.'),
+          promptOverheadBytes: MAX_CRITERION_JUDGE_PROMPT_BYTES - 2,
+          buildDriver: () =>
+            assert.fail('Mandatory prompt overflow needs no driver.'),
+        }),
+      /Mandatory criterion judge prompt exceeds/,
+    );
   });
 });
