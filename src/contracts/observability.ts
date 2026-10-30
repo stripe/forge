@@ -14,7 +14,7 @@ export type RunEventType = 'phase_started' | 'phase_completed';
 
 export interface RunPhaseDetails {
   readonly phase: RunPhase;
-  readonly sessionId?: string | undefined;
+  readonly sessionId?: string | null;
 }
 
 export interface RunEvent extends RunPhaseDetails {

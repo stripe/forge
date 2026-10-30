@@ -439,7 +439,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const selectedEvidence = await events.phase(
-      { phase: 'evidence', sessionId: interaction.sessionId ?? undefined },
+      { phase: 'evidence', sessionId: interaction.sessionId },
       async () => {
         phase = 'evidence';
         throwIfAborted(signal, phase);
