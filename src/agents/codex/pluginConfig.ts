@@ -38,7 +38,19 @@ export async function declareCodexMcpServers(
   for (const [name, server] of Object.entries(servers)) {
     if (!isSafeSimpleIdentifier(name) || !server || !safeMcpServer(server))
       invalid();
-    mcpServers[name] = server;
+    const existing = Object.hasOwn(mcpServers, name)
+      ? mcpServers[name]
+      : undefined;
+    // An identical repeat is harmless; silently replacing a connection is not.
+    if (
+      existing &&
+      (existing.url !== server.url ||
+        existing.bearer_token_env_var !== server.bearer_token_env_var)
+    )
+      throw new Error(
+        'Codex MCP server conflicts with an existing declaration of the same name.',
+      );
+    mcpServers[name] = { ...server };
   }
   await writeConfiguration(home, {
     ...config,
@@ -58,9 +70,11 @@ async function writeConfiguration(
   home: MutableWorkspace,
   config: SanitizedConfiguration,
 ): Promise<void> {
-  await home.writeFile('config.toml', Buffer.from(stringify(config)), {
-    mode: 0o600,
-  });
+  // Hold the result to the limits the next read enforces, before writing.
+  if (Object.keys(config.mcp_servers ?? {}).length > MAX_ENTRIES) invalid();
+  const body = Buffer.from(stringify(config));
+  if (body.byteLength > MAX_CONFIG_BYTES) invalid();
+  await home.writeFile('config.toml', body, { mode: 0o600 });
 }
 
 async function readSanitizedConfiguration(
