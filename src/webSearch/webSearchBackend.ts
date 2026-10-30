@@ -203,7 +203,7 @@ function toSource(value: unknown): { url: string; title?: string } | undefined {
   return {
     url: value.url,
     ...(typeof value.title === 'string' && value.title
-      ? { title: value.title }
+      ? { title: value.title.slice(0, 512) }
       : {}),
   };
 }

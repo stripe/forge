@@ -157,6 +157,25 @@ it('bounds and deduplicates sources, retaining only safe URLs and optional title
   assert.equal(JSON.stringify(result).includes('private answer'), false);
 });
 
+it.each([511, 512, 513, 4096])(
+  'bounds source titles to 512 characters (length: %i)',
+  (length) => {
+    const result = parseSearchResponse(
+      JSON.stringify({
+        output: [
+          {
+            type: 'web_search_call',
+            action: {
+              sources: [{ url: 'https://example.com', title: 'x'.repeat(length) }],
+            },
+          },
+        ],
+      }),
+    );
+    assert.equal(result.sources[0]!.title, 'x'.repeat(Math.min(length, 512)));
+  },
+);
+
 it('makes missing, inconsistent, negative, overflowing and malformed token metadata nullable', () => {
   for (const value of [
     undefined,
