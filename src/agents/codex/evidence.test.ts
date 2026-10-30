@@ -1009,7 +1009,11 @@ describe('Codex exact rollout evidence', () => {
       4,
       0,
       capturedItem(
-        { type: 'ImageView', id: 'image-1', path: 'file:///workspace/image.png' },
+        {
+          type: 'ImageView',
+          id: 'image-1',
+          path: 'file:///workspace/image.png',
+        },
         'turn-2',
       ),
     );
@@ -1173,10 +1177,7 @@ describe('Codex exact rollout evidence', () => {
       const step = parseAtifTrajectory(evidence.trajectory).steps.find(
         (step) => step.tool_calls?.[0]?.tool_call_id === 'mcp-call',
       );
-      assert.equal(
-        step?.tool_calls?.[0]?.function_name,
-        `mcp__codex.${tool}`,
-      );
+      assert.equal(step?.tool_calls?.[0]?.function_name, `mcp__codex.${tool}`);
       assert.equal(step?.observation?.results[0]?.content, text);
       const bare = makeSequence().filter((entry) => entry.type !== 'event_msg');
       const bareEvidence = await loadToolSequence(bare);
@@ -1421,9 +1422,9 @@ describe('Codex exact rollout evidence', () => {
             if (evidence.kind !== 'available')
               throw new Error('Expected verified MCP evidence.');
             assert.deepEqual(evidence.warnings, []);
-            const calls = parseAtifTrajectory(evidence.trajectory).steps.flatMap(
-              (step) => step.tool_calls ?? [],
-            );
+            const calls = parseAtifTrajectory(
+              evidence.trajectory,
+            ).steps.flatMap((step) => step.tool_calls ?? []);
             assert.equal(
               calls.find((call) => call.tool_call_id === 'mcp-call')
                 ?.function_name,
