@@ -25,7 +25,10 @@ describe('whole-prompt judge evidence budget', () => {
         };
         // The multibyte criterion is shorter in code units but larger in UTF-8.
         const criteria = ['a'.repeat(10), { value: '界'.repeat(5) }];
-        const overhead = criterionJudgePromptOverheadBytes({ ...input, criteria });
+        const overhead = criterionJudgePromptOverheadBytes({
+          ...input,
+          criteria,
+        });
         const fullPrompt = buildCriterionJudgePrompt(
           { ...input, transcript },
           '界'.repeat(5),
@@ -96,29 +99,35 @@ describe('whole-prompt judge evidence budget', () => {
     );
     for (const extraBytes of [1, 2, 3]) {
       assert.throws(
-        () => selectJudgeEvidence({
-          promptOverheadBytes: MAX_CRITERION_JUDGE_PROMPT_BYTES - 3 + extraBytes,
-          driverTranscriptBytes: 4,
-        }),
+        () =>
+          selectJudgeEvidence({
+            promptOverheadBytes:
+              MAX_CRITERION_JUDGE_PROMPT_BYTES - 3 + extraBytes,
+            driverTranscriptBytes: 4,
+          }),
         /Mandatory criterion judge prompt exceeds/,
       );
     }
     assert.throws(
-      () => buildCriterionJudgePrompt(
-        {
-          transcript,
-          workspaceText: 'x'.repeat(MAX_CRITERION_JUDGE_PROMPT_BYTES),
-        },
-        'Criterion',
-      ),
+      () =>
+        buildCriterionJudgePrompt(
+          {
+            transcript,
+            workspaceText: 'x'.repeat(MAX_CRITERION_JUDGE_PROMPT_BYTES),
+          },
+          'Criterion',
+        ),
       /prompt exceeds/,
     );
   });
 
   it('can select native evidence before driver evidence is built', () => {
-    assert.equal(selectJudgeEvidence({
-      promptOverheadBytes: 100,
-      nativeTranscriptBytes: 100,
-    }).evidence, 'native');
+    assert.equal(
+      selectJudgeEvidence({
+        promptOverheadBytes: 100,
+        nativeTranscriptBytes: 100,
+      }).evidence,
+      'native',
+    );
   });
 });

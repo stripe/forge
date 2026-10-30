@@ -482,19 +482,17 @@ export function renderJudgeWorkspaceEvidence(
 }
 
 /** Internal renderer shared with verification of the persisted workspace subset. */
-export function renderRecordedJudgeWorkspaceEvidence(
-  evidence: {
-    readonly entries: readonly Pick<
-      JudgeWorkspaceEvidenceEntryV1,
-      'path' | 'content'
-    >[];
-    readonly warnings: readonly {
-      readonly code: string;
-      readonly message: string;
-      readonly path?: string;
-    }[];
-  },
-): string {
+export function renderRecordedJudgeWorkspaceEvidence(evidence: {
+  readonly entries: readonly Pick<
+    JudgeWorkspaceEvidenceEntryV1,
+    'path' | 'content'
+  >[];
+  readonly warnings: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly path?: string;
+  }[];
+}): string {
   if (evidence.entries.length === 0 && evidence.warnings.length === 0)
     return '';
   return `${WORKSPACE_SECTION_PREFIX}${[

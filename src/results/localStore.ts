@@ -648,7 +648,9 @@ function verifyJudgeEvidence(
       promptOverheadBytes: criterionJudgePromptOverheadBytes({
         criteria: plan.evaluation.judging_criteria,
         exampleAnswer: plan.evaluation.example_answer,
-        workspaceText: renderRecordedJudgeWorkspaceEvidence(judgeEvidence.workspace),
+        workspaceText: renderRecordedJudgeWorkspaceEvidence(
+          judgeEvidence.workspace,
+        ),
       }),
       driverTranscriptBytes: Buffer.byteLength(
         createJudgeTranscriptProjection(trajectory).transcriptJson,

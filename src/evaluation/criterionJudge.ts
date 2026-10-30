@@ -163,13 +163,11 @@ Give a concise, one- or two-sentence explanation for your decision.`;
 }
 
 /** Internal sizing seam: use the exact prompt template, without transcript bytes. */
-export function criterionJudgePromptOverheadBytes(
-  input: {
-    readonly criteria: CriterionJudgeInput['criteria'];
-    readonly exampleAnswer?: string | undefined;
-    readonly workspaceText?: string | undefined;
-  },
-): number {
+export function criterionJudgePromptOverheadBytes(input: {
+  readonly criteria: CriterionJudgeInput['criteria'];
+  readonly exampleAnswer?: string | undefined;
+  readonly workspaceText?: string | undefined;
+}): number {
   const evidence = {
     ...(input.exampleAnswer === undefined
       ? {}
