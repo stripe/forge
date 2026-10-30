@@ -1,21 +1,21 @@
 import type {
   RunEvent,
   RunObserver,
-  RunPhase,
+  RunPhaseDetails,
 } from '../contracts/observability.ts';
 
 export interface RunEventEmitter {
-  phase<T>(phase: RunPhase, operation: () => Promise<T>): Promise<T>;
+  phase<T>(details: RunPhaseDetails, operation: () => Promise<T>): Promise<T>;
 }
 
 /** Observer failures are isolated: observation must never change eval semantics. */
 export const createRunEventEmitter = (
   observers: RunObserver[] = [],
 ): RunEventEmitter => ({
-  async phase(phase, operation) {
-    await emit(observers, { type: 'phase_started', phase });
+  async phase(details, operation) {
+    await emit(observers, { ...details, type: 'phase_started' });
     const value = await operation();
-    await emit(observers, { type: 'phase_completed', phase });
+    await emit(observers, { ...details, type: 'phase_completed' });
     return value;
   },
 });

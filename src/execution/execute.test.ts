@@ -296,6 +296,40 @@ describe('executeEval', () => {
     assert.deepEqual(verified.result.evaluation, completed.result.evaluation);
   });
 
+  it('evidence events carry the run session ID', async () => {
+    const fixture = await executionFixture();
+    const observed: RunEvent[] = [];
+    const completed = await executeEval({
+      runId: 'run-evidence-session',
+      plan: fixture.plan,
+      composition: {
+        ...fixture.composition(
+          createArtifactStore({
+            root: path.join(fixture.root, 'evidence-session'),
+          }),
+        ),
+        observer: {
+          observe(event) {
+            observed.push(event);
+          },
+        },
+      },
+      now: monotonicClock(),
+    });
+
+    const sessionId = completed.result.agent.session_id;
+    assert.ok(sessionId);
+    assert.deepEqual(
+      observed
+        .filter((event) => event.sessionId !== undefined)
+        .map(({ type, phase, sessionId }) => ({ type, phase, sessionId })),
+      [
+        { type: 'phase_started', phase: 'evidence', sessionId },
+        { type: 'phase_completed', phase: 'evidence', sessionId },
+      ],
+    );
+  });
+
   it('isolates contributor result snapshots and captures returned artifact bytes', async () => {
     const nativeBody = Buffer.from(RAW_NATIVE_SESSION);
     const fixture = await executionFixture({

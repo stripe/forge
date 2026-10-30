@@ -12,9 +12,13 @@ export type RunPhase =
 
 export type RunEventType = 'phase_started' | 'phase_completed';
 
-export interface RunEvent {
-  readonly type: RunEventType;
+export interface RunPhaseDetails {
   readonly phase: RunPhase;
+  readonly sessionId?: string | undefined;
+}
+
+export interface RunEvent extends RunPhaseDetails {
+  readonly type: RunEventType;
 }
 
 /** Observers receive redacted lifecycle events and have no runtime authority. */

@@ -1403,7 +1403,7 @@ trusted.
 | Agent adapter | Trusted integration, untrusted output | Exact selection match, bounded turns, stable session ID, native-evidence parsing and coverage |
 | Completion provider | Trusted transport, untrusted response | Purpose-specific credentials, bounded requests/responses, strict output parsing and retries |
 | Workspace and native logs | Untrusted evidence | Read only after quiescence, path and byte limits, no symlink traversal; normalized outputs are redacted while exact native bytes are restricted |
-| Observer | Non-authoritative | Receives only lifecycle metadata; rejection cannot affect the run |
+| Observer | Non-authoritative | Receives only lifecycle metadata (`evidence` events also carry the agent's session ID once it completed a turn, never session content); rejection cannot affect the run |
 | Artifact contributor | Trusted extension | Namespaced paths, collision checks, secret scan, store validation |
 
 Other important safeguards include:

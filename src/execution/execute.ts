@@ -322,7 +322,7 @@ export async function executeEvalWithTestHooks(
   let runtimeDisposed = false;
 
   try {
-    const preflight = await events.phase('preflight', async () => {
+    const preflight = await events.phase({ phase: 'preflight' }, async () => {
       phase = 'preflight';
       throwIfAborted(signal, phase);
       assertRunId(input.runId);
@@ -362,7 +362,7 @@ export async function executeEvalWithTestHooks(
       ...completions.secrets,
     ]);
 
-    prepared = await events.phase('runtime_prepare', async () => {
+    prepared = await events.phase({ phase: 'runtime_prepare' }, async () => {
       phase = 'runtime_prepare';
       throwIfAborted(signal, phase);
       return input.composition.runtime.prepare({
@@ -386,7 +386,7 @@ export async function executeEvalWithTestHooks(
       signal,
     });
 
-    const setupArtifact = await events.phase('setup', async () => {
+    const setupArtifact = await events.phase({ phase: 'setup' }, async () => {
       phase = 'setup';
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
@@ -410,81 +410,88 @@ export async function executeEvalWithTestHooks(
       return artifact;
     });
 
-    const interaction = await events.phase('interaction', async () => {
-      phase = 'interaction';
-      throwIfAborted(signal, phase);
-      const session = await preflight.agent.openSession({
-        runId: input.runId,
-        plan: input.plan,
-        selection: input.plan.agent,
-        runtime: projectAgentSessionRuntime(prepared!),
-        inputs: input.composition.inputProvider,
-        signal,
-      });
-      return executeInteraction(
-        input.plan,
-        session,
-        completions,
-        signal,
-        hooks.waitBeforeCompletionRetry,
-      );
-    });
+    const interaction = await events.phase(
+      { phase: 'interaction' },
+      async () => {
+        phase = 'interaction';
+        throwIfAborted(signal, phase);
+        const session = await preflight.agent.openSession({
+          runId: input.runId,
+          plan: input.plan,
+          selection: input.plan.agent,
+          runtime: projectAgentSessionRuntime(prepared!),
+          inputs: input.composition.inputProvider,
+          signal,
+        });
+        return executeInteraction(
+          input.plan,
+          session,
+          completions,
+          signal,
+          hooks.waitBeforeCompletionRetry,
+        );
+      },
+    );
 
-    sealed = await events.phase('quiesce', async () => {
+    sealed = await events.phase({ phase: 'quiesce' }, async () => {
       phase = 'quiesce';
       return prepared!.quiesce();
     });
 
-    const selectedEvidence = await events.phase('evidence', async () => {
-      phase = 'evidence';
-      throwIfAborted(signal, phase);
-      if (interaction.turns.length === 0) {
-        return {
-          evidence: rolePlayerErrorEvidence(
-            input.plan,
-            preflight.agent,
-            preflight.agentEvidenceIdentity,
-          ),
-          nativeArtifact: undefined,
+    const selectedEvidence = await events.phase(
+      { phase: 'evidence', sessionId: interaction.sessionId ?? undefined },
+      async () => {
+        phase = 'evidence';
+        throwIfAborted(signal, phase);
+        if (interaction.turns.length === 0) {
+          return {
+            evidence: rolePlayerErrorEvidence(
+              input.plan,
+              preflight.agent,
+              preflight.agentEvidenceIdentity,
+            ),
+            nativeArtifact: undefined,
+          };
+        }
+        if (interaction.sessionId === null) {
+          throw new TypeError(
+            'A completed agent turn requires a session identity.',
+          );
+        }
+        const evidenceContext = {
+          runId: input.runId,
+          plan: input.plan,
+          selection: input.plan.agent,
+          runtime: projectAgentEvidenceRuntime(sealed!),
+          sessionId: interaction.sessionId,
+          signal,
         };
-      }
-      if (interaction.sessionId === null) {
-        throw new TypeError(
-          'A completed agent turn requires a session identity.',
+        const captured =
+          await preflight.agent.collectNativeArtifact?.(evidenceContext);
+        const collected =
+          await preflight.agent.collectEvidence(evidenceContext);
+        const nativeArtifact = buildNativeArtifact(
+          captured,
+          collected,
+          preflight.agent,
+          interaction.sessionId,
         );
-      }
-      const evidenceContext = {
-        runId: input.runId,
-        plan: input.plan,
-        selection: input.plan.agent,
-        runtime: projectAgentEvidenceRuntime(sealed!),
-        sessionId: interaction.sessionId,
-        signal,
-      };
-      const captured =
-        await preflight.agent.collectNativeArtifact?.(evidenceContext);
-      const collected = await preflight.agent.collectEvidence(evidenceContext);
-      const nativeArtifact = buildNativeArtifact(
-        captured,
-        collected,
-        preflight.agent,
-        interaction.sessionId,
-      );
-      const evidence = selectAgentEvidence({
-        agent: preflight.agent,
-        identity: preflight.agentEvidenceIdentity,
-        model: input.plan.agent.model,
-        sessionId: interaction.sessionId,
-        completedTurns: interaction.turns,
-        collected,
-      });
-      assertEvidenceMatchesRun(
-        evidence,
-        preflight.agent,
-        interaction.sessionId,
-      );
-      return { evidence, nativeArtifact };
-    });
+        const evidence = selectAgentEvidence({
+          agent: preflight.agent,
+          identity: preflight.agentEvidenceIdentity,
+          model: input.plan.agent.model,
+          sessionId: interaction.sessionId,
+          completedTurns: interaction.turns,
+          collected,
+        });
+        assertEvidenceMatchesRun(
+          evidence,
+          preflight.agent,
+          interaction.sessionId,
+        );
+        return { evidence, nativeArtifact };
+      },
+    );
     const redacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
@@ -493,7 +500,7 @@ export async function executeEvalWithTestHooks(
       redacted.evidence.trajectory,
     );
 
-    const evaluated = await events.phase('evaluation', async () => {
+    const evaluated = await events.phase({ phase: 'evaluation' }, async () => {
       phase = 'evaluation';
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
@@ -635,7 +642,7 @@ export async function executeEvalWithTestHooks(
       ...contributedArtifacts.map(describeArtifact),
     ];
 
-    await events.phase('artifact_stage', async () => {
+    await events.phase({ phase: 'artifact_stage' }, async () => {
       phase = 'artifact_stage';
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
@@ -644,7 +651,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
-    await events.phase('runtime_dispose', async () => {
+    await events.phase({ phase: 'runtime_dispose' }, async () => {
       phase = 'runtime_dispose';
       try {
         await prepared!.dispose();
@@ -678,12 +685,15 @@ export async function executeEvalWithTestHooks(
     });
     assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
-    const committed = await events.phase('result_commit', async () => {
-      phase = 'result_commit';
-      return transaction!.commit(
-        result as unknown as Readonly<Record<string, unknown>>,
-      );
-    });
+    const committed = await events.phase(
+      { phase: 'result_commit' },
+      async () => {
+        phase = 'result_commit';
+        return transaction!.commit(
+          result as unknown as Readonly<Record<string, unknown>>,
+        );
+      },
+    );
     transaction = undefined;
     const committedResult = parseRunResult(committed.result);
     return {
