@@ -374,6 +374,48 @@ it.each(advisories)(
   },
 );
 
+it('does not record in-turn compaction or reconnect notices as failures', async () => {
+  let final: AgentInvocationRecord | undefined;
+  const capture = createCodexInvocationCapture({
+    sequence: 1,
+    resume: true,
+    cliVersion: '1',
+    capture: {
+      restrictedExcerpts: false,
+      redact: (text) => text,
+      redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+      async record(record) {
+        final = record;
+      },
+    },
+  });
+  const lines = [
+    { type: 'thread.started' },
+    { type: 'turn.started' },
+    {
+      type: 'item.completed',
+      item: {
+        id: 'notice',
+        type: 'error',
+        message:
+          'Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.',
+      },
+    },
+    {
+      type: 'error',
+      message:
+        'Reconnecting... 1/5 (stream disconnected before completion: Transport error: network error: error decoding response body)',
+    },
+    { type: 'turn.completed' },
+  ];
+  for (const line of lines) capture.onStdoutLine(JSON.stringify(line));
+  await capture.finish({
+    result: { stdout: '', stderr: '', exitCode: 0, durationMs: 1 },
+  });
+  assert.equal(final!.first_failure, undefined);
+  assert.equal(final!.state, 'completed');
+});
+
 it('treats advisory text as a failure outside its accepted context', async () => {
   for (const midTurn of [false, true]) {
     let final: AgentInvocationRecord | undefined;

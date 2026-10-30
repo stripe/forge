@@ -835,19 +835,122 @@ describe('Codex exec stream', () => {
       assertInvalid('x'.repeat(16 * 1024 * 1024 + 1)).message,
       /byte limit/,
     );
-    assert.match(
-      assertInvalid(
-        stream(
-          item('agent_message', {
-            text: 'é'.repeat(600_000),
-          }),
-        ),
-      ).message,
-      /oversized line/,
+    // One completed item may exceed 1 MiB; only the stream as a whole is capped.
+    assert.equal(
+      parseCodexStream(
+        stream(item('agent_message', { text: 'é'.repeat(600_000) })),
+      ).text,
+      'é'.repeat(600_000),
     );
     assert.match(
       assertInvalid(`${'\n'.repeat(100_000)}${stream()}`).message,
       /line limit/,
+    );
+  });
+
+  it('keeps command output above 1 MiB for redaction and truncation at the boundary', () => {
+    const output = 'x'.repeat(2 * 1024 * 1024);
+    const [call] = parseCodexStream(
+      stream(
+        item('command_execution', {
+          command: 'cat big.txt',
+          aggregated_output: output,
+          exit_code: 0,
+          status: 'completed',
+        }),
+      ),
+    ).toolCalls;
+    assert.equal(call!.result?.content, output);
+  });
+
+  it('continues past in-turn compaction and reconnect notices but not other errors', () => {
+    const compaction = {
+      type: 'item.completed',
+      item: {
+        id: 'item_0',
+        type: 'error',
+        message:
+          'Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.',
+      },
+    };
+    const reconnect = (message: string, extra = {}) => ({
+      type: 'error',
+      message,
+      ...extra,
+    });
+    const retry =
+      'Reconnecting... 1/5 (stream disconnected before completion: Transport error: network error: error decoding response body)';
+    const answer = item('agent_message', { id: 'item_1', text: 'Done' });
+    assert.equal(
+      parseCodexStream(
+        jsonl(
+          started,
+          turnStarted,
+          compaction,
+          reconnect(retry),
+          answer,
+          completed,
+        ),
+      ).text,
+      'Done',
+    );
+    for (const events of [
+      // Outside the turn the same notices are not accepted.
+      [started, compaction, turnStarted, answer, completed],
+      [started, reconnect(retry), turnStarted, answer, completed],
+      [started, turnStarted, answer, completed, reconnect(retry)],
+      // Altered or unbounded forms still fail.
+      [
+        started,
+        turnStarted,
+        {
+          ...compaction,
+          item: { ...compaction.item, message: 'Heads up: synthetic-secret' },
+        },
+        completed,
+      ],
+      [started, turnStarted, reconnect(retry, { code: 'x' }), completed],
+      [
+        started,
+        turnStarted,
+        reconnect('Reconnecting... 6/5 (stream disconnected)'),
+        completed,
+      ],
+      [started, turnStarted, reconnect('Reconnecting... 1/5'), completed],
+      [
+        started,
+        turnStarted,
+        reconnect('synthetic-secret Reconnecting... 1/5 (x)'),
+        completed,
+      ],
+      // Exhausted retries end the turn as failed.
+      [
+        started,
+        turnStarted,
+        reconnect(retry),
+        { type: 'turn.failed', error: { message: 'synthetic-secret' } },
+      ],
+    ])
+      assert.doesNotMatch(
+        assertInvalid(jsonl(...events)).message,
+        /synthetic-secret/,
+      );
+  });
+
+  it('rejects oversized opaque MCP result data', () => {
+    assert.match(
+      assertInvalid(
+        stream(
+          item('mcp_tool_call', {
+            server: 'fixture',
+            tool: 'probe',
+            arguments: {},
+            status: 'completed',
+            result: { content: [], _meta: { text: 'x'.repeat(1024 * 1024) } },
+          }),
+        ),
+      ).message,
+      /oversized MCP result data/,
     );
   });
 

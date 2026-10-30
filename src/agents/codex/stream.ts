@@ -11,7 +11,16 @@ import { textToolResult } from '../toolResult.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;
-export const MAX_CODEX_STREAM_LINE_BYTES = 1024 * 1024;
+// One event may be as large as the bounded stream: agent commands can print
+// several megabytes in a single completed item. Tool result text is redacted
+// and then truncated at the interaction boundary (MAX_TOOL_RESULT_CODE_UNITS).
+export const MAX_CODEX_STREAM_LINE_BYTES = MAX_STREAM_BYTES;
+// Opaque MCP result fields are dropped before that boundary, so bound them here.
+const MAX_OPAQUE_RESULT_BYTES = 1024 * 1024;
+const COMPACTION_ADVISORY =
+  'Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.';
+const RECONNECT_ADVISORY =
+  /^Reconnecting\.\.\. ([1-9][0-9]?)\/([1-9][0-9]?) \(.{1,2048}\)$/s;
 const MAX_GRAPH_NODES = 100_000;
 const MAX_GRAPH_DEPTH = 64;
 const MAX_TOOL_CALLS = 2_000;
@@ -30,6 +39,11 @@ export interface CodexStreamOptions {
   readonly model?: string;
 }
 
+/**
+ * Codex reports some non-fatal notices as `error` events or items. Each one is
+ * accepted only in the exact form and turn position the pinned CLI emits it;
+ * any other error still fails the invocation.
+ */
 export function isCodexAdvisory(
   event: JsonRecord | undefined,
   options: CodexStreamOptions,
@@ -39,29 +53,56 @@ export function isCodexAdvisory(
     readonly turnCompleted: boolean;
   },
 ): boolean {
-  if (
-    !state.threadStarted ||
-    state.turnStarted ||
-    state.turnCompleted ||
-    event?.type !== 'item.completed'
-  )
-    return false;
-  const item = event.item;
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-  const raw = item as JsonRecord;
-  if (raw.type !== 'error') return false;
-  // The pinned CLI emits these advisories before starting the selected turn.
+  if (!event || !state.threadStarted || state.turnCompleted) return false;
+  return state.turnStarted
+    ? isInTurnAdvisory(event)
+    : isPreTurnAdvisory(event, options);
+}
+
+/** Settings and metadata notices the pinned CLI emits before starting the turn. */
+function isPreTurnAdvisory(
+  event: JsonRecord,
+  options: CodexStreamOptions,
+): boolean {
+  const message = advisoryItemMessage(event);
   return Boolean(
     (options.hookAutomation &&
-      raw.message ===
+      message ===
         '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.') ||
       (options.workspacePath !== undefined &&
-        raw.message ===
+        message ===
           `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`) ||
       (options.model !== undefined &&
-        raw.message ===
+        message ===
           `Model metadata for \`${options.model}\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`),
   );
+}
+
+/**
+ * Notices emitted while a turn continues: the long-thread compaction warning
+ * item, and stream reconnect attempts that Codex retries itself. Exhausted
+ * retries still end in `turn.failed` or a nonzero exit.
+ */
+function isInTurnAdvisory(event: JsonRecord): boolean {
+  if (advisoryItemMessage(event) === COMPACTION_ADVISORY) return true;
+  if (
+    event.type !== 'error' ||
+    Object.keys(event).length !== 2 ||
+    typeof event.message !== 'string'
+  )
+    return false;
+  const attempt = RECONNECT_ADVISORY.exec(event.message);
+  return attempt !== null && Number(attempt[1]) <= Number(attempt[2]);
+}
+
+/** The message of a completed native `error` item, if the event is one. */
+function advisoryItemMessage(event: JsonRecord): unknown {
+  if (event.type !== 'item.completed') return undefined;
+  const item = event.item;
+  if (!item || typeof item !== 'object' || Array.isArray(item))
+    return undefined;
+  const raw = item as JsonRecord;
+  return raw.type === 'error' ? raw.message : undefined;
 }
 
 /** Parse one completed `codex exec --json` or `codex exec resume --json` invocation. */
@@ -118,6 +159,14 @@ function parseStream(
     const event = parseLine(line, graphBudget);
 
     if (event.type === 'error' || event.type === 'turn.failed') {
+      if (
+        isCodexAdvisory(event, options, {
+          threadStarted: sessionId !== undefined,
+          turnStarted: started,
+          turnCompleted: completed,
+        })
+      )
+        continue;
       // Error messages and payloads can contain provider responses or secrets.
       throw new CodexStreamError(
         'Codex reported a failed turn.',
@@ -376,8 +425,18 @@ function parseItem(item: JsonRecord): StreamItem {
       let output: AgentToolCall['result'];
       if (item.result !== undefined && item.result !== null) {
         const result = requiredRecord(item.result);
-        // Opaque result data is bounded with the event and omitted from AgentTurn.
+        // Opaque result data is bounded here and omitted from AgentTurn.
         onlyKeys(result, ['content', '_meta', 'structured_content']);
+        for (const field of ['_meta', 'structured_content'] as const)
+          if (
+            result[field] != null &&
+            Buffer.byteLength(JSON.stringify(result[field])) >
+              MAX_OPAQUE_RESULT_BYTES
+          )
+            throw new CodexStreamError(
+              'Codex output contained oversized MCP result data.',
+              'output_limit',
+            );
         requiredArray(result.content);
         output = textToolResult(result.content);
         if (result.structured_content != null) {

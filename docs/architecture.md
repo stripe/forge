@@ -1386,8 +1386,11 @@ Supported Codex MCP text and image blocks may carry opaque `annotations` and
 accept a result-level `_meta` object or `null` (treated as absent); other types
 trigger `source_incomplete` fallback. This field remains snapshot-only. Exec
 stream results accept `_meta` of any JSON type and opaque `structured_content`
-within the per-line byte and depth limits and the stream-wide byte and node
-budgets, which every line of one `codex exec` invocation shares. These fields
+of at most 1 MiB each when serialized, within the depth limit and the
+stream-wide byte and node budgets, which every line of one `codex exec`
+invocation shares. A single line may use the whole 16 MiB stream budget, since
+one command can print several megabytes; its tool result text is redacted and
+then truncated at the interaction boundary. These fields
 are omitted from the driver turn. The discarded metadata's type cannot fail a live turn.
 Native evidence retains the verified rendered `structuredContent` or content
 mirror. Metadata in recorded rendered output is preserved after credential
@@ -1997,8 +2000,12 @@ Custom runners may omit partial capture.
 The final 20 structural stdout event summaries and first failure survive parser
 rejection. They include known event/item types, observation times, safe status,
 and tool exit codes, without messages, reasoning, commands, arguments, or output.
-Unknown names become `unknown`. Pre-turn advisories accepted by the parser do
-not reserve the first-failure slot. Optional HTTP statuses from typed error fields
+Unknown names become `unknown`. Advisories accepted by the parser do not
+reserve the first-failure slot. Before the turn these are the pinned CLI's
+settings and model-metadata notices. During the turn they are the exact
+long-thread compaction warning item and top-level `Reconnecting... n/m (…)`
+events, which Codex retries itself; exhausted retries still end in
+`turn.failed` or a nonzero exit. Any other error event or item is fatal. Optional HTTP statuses from typed error fields
 or recognized HTTP/status text carry origin `agent_reported`, not direct
 transport attribution. Nonzero tool exits are recorded without making the turn
 fatal. A nonzero process exit remains fatal even if its stdout parses; a parser
