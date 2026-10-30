@@ -1026,9 +1026,17 @@ output includes `is_error`; another completion type cannot substitute. A
 completed invocation does not override an MCP `isError` result.
 
 Supported Codex MCP text and image blocks may carry opaque `annotations` and
-`_meta` objects under the existing JSON graph bounds. Metadata in recorded
-rendered output is preserved after credential redaction; snapshot-only metadata
-is not added to judge evidence. Metadata alone does not reduce completeness.
+`_meta` objects under the existing JSON graph bounds. Native MCP results also
+accept a result-level `_meta` object or `null` (treated as absent); other types
+trigger `source_incomplete` fallback. This field remains snapshot-only. Exec
+stream results accept `_meta` of any JSON type and opaque `structured_content`
+within the per-line byte and depth limits and the stream-wide byte and node
+budgets, which every line of one `codex exec` invocation shares. These fields
+are omitted from the driver turn. The discarded metadata's type cannot fail a live turn.
+Native evidence retains the verified rendered `structuredContent` or content
+mirror. Metadata in recorded rendered output is preserved after credential
+redaction; snapshot-only metadata is not added to judge evidence. Supported
+metadata alone does not reduce completeness.
 Recognized MCP truncation retains exactly the shortened text, truncation, and
 omitted-item markers recorded in native output. Forge verifies the retained
 text and omission counts against the full snapshot without restoring hidden

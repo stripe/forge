@@ -3,7 +3,10 @@ import { describe, it } from 'vitest';
 
 import { parseAtifTrajectory } from '../../atif/index.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
-import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
+import {
+  createJudgeTranscriptProjection,
+  type JudgeVisibleStepV1,
+} from '../../evaluation/judgeTranscript.ts';
 import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
@@ -751,6 +754,90 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
+  it('accepts successful native MCP result metadata while checking the rendered mirror', async () => {
+    const result = {
+      content: [{ type: 'text', text: MCP_TEXT }],
+      structuredContent: { answer: 42 },
+      _meta: { fixture: 'RESULT_METADATA_ONLY' },
+    };
+    for (const options of [
+      { result },
+      { result: { content: result.content, _meta: result._meta } },
+      {
+        result: { content: result.content, _meta: result._meta },
+        output: [
+          { type: 'input_text', text: MCP_HEADER },
+          { type: 'input_text', text: MCP_TEXT },
+        ],
+      },
+    ]) {
+      const sequence = capturedMcp(options);
+      const evidence = await loadToolSequence(sequence);
+      assert.equal(evidence.kind, 'available');
+      if (evidence.kind !== 'available')
+        throw new Error('Expected successful MCP evidence.');
+      assert.deepEqual(evidence.warnings, []);
+      assert.doesNotMatch(
+        JSON.stringify(evidence.trajectory),
+        /RESULT_METADATA_ONLY/,
+      );
+      const projection = JSON.parse(
+        createJudgeTranscriptProjection(
+          parseAtifTrajectory(evidence.trajectory),
+        ).transcriptJson,
+      ) as JudgeVisibleStepV1[];
+      assert.deepEqual(
+        projection
+          .flatMap((step) =>
+            step.source === 'agent' ? (step.observation?.results ?? []) : [],
+          )
+          .find((entry) => entry.source_call_id === 'mcp-call'),
+        {
+          source_call_id: 'mcp-call',
+          content:
+            typeof sequence[4]!.payload.output === 'string'
+              ? sequence[4]!.payload.output
+              : [
+                  { type: 'text', text: MCP_HEADER },
+                  { type: 'text', text: MCP_TEXT },
+                ],
+          is_error: false,
+        },
+      );
+    }
+    assert.equal(
+      (
+        await loadToolSequence(
+          capturedMcp({ result, output: `${MCP_HEADER}\n{"answer":43}` }),
+        )
+      ).kind,
+      'unavailable',
+    );
+  });
+
+  it('accepts null native result metadata as absent', async () => {
+    const result = { content: [{ type: 'text', text: MCP_TEXT }] };
+    const withoutMetadata = await loadToolSequence(capturedMcp({ result }));
+    assert.equal(withoutMetadata.kind, 'available');
+    const withNullMetadata = await loadToolSequence(
+      capturedMcp({ result: { ...result, _meta: null } }),
+    );
+    assert.deepEqual(withNullMetadata, withoutMetadata);
+  });
+
+  it('falls back explicitly for unsupported native result metadata types', async () => {
+    for (const _meta of [[], 'metadata', 0, false]) {
+      const evidence = await loadToolSequence(
+        capturedMcp({
+          result: { content: [{ type: 'text', text: MCP_TEXT }], _meta },
+        }),
+      );
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_incomplete');
+    }
+  });
+
   it('does not inject snapshot-only metadata into structured or text-array output', async () => {
     const content = [
       {
@@ -858,7 +945,7 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
-  it('still rejects unknown content fields, result-level metadata, and metadata mirror mismatches', async () => {
+  it('still rejects unknown content fields and metadata mirror mismatches', async () => {
     const content = [
       {
         type: 'text',
@@ -869,14 +956,7 @@ describe('Codex exact rollout evidence', () => {
     ];
     for (const options of [
       { result: { content: [{ ...content[0], unknown: 'unclassified' }] } },
-      {
-        result: {
-          content,
-          _meta: {
-            source: 'result-level metadata is a separate format boundary',
-          },
-        },
-      },
+      { result: { content, _meta: {}, unknown: 'unclassified' } },
       {
         result: { content },
         output: `${MCP_HEADER}\n${JSON.stringify([{ ...content[0], _meta: { source: 'changed' } }])}`,
@@ -942,6 +1022,19 @@ describe('Codex exact rollout evidence', () => {
       { values: Array.from({ length: 100_001 }, () => 0) },
       { text: 'x'.repeat(1024 * 1024) },
     ]) {
+      assert.equal(
+        (
+          await loadToolSequence(
+            capturedMcp({
+              result: {
+                content: [{ type: 'text', text: MCP_TEXT }],
+                _meta: metadata,
+              },
+            }),
+          )
+        ).kind,
+        'unavailable',
+      );
       for (const field of ['annotations', '_meta']) {
         assert.equal(
           (

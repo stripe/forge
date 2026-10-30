@@ -330,6 +330,93 @@ describe('Codex exec stream', () => {
     );
   });
 
+  it('accepts successful MCP result metadata without copying it into the turn', () => {
+    const result = {
+      content: [{ type: 'text', text: 'Synthetic answer.' }],
+      _meta: { fixture: 'SNAPSHOT_ONLY' },
+      structured_content: { answer: 42 },
+    };
+    const parsed = parseCodexStream(
+      stream(
+        item('mcp_tool_call', {
+          id: 'call',
+          server: 'fixture',
+          tool: 'probe',
+          arguments: {},
+          status: 'completed',
+          error: null,
+          result,
+        }),
+        item('agent_message', { id: 'message', text: 'Done.' }),
+      ),
+    );
+    assert.deepEqual(parsed, {
+      text: 'Done.',
+      sessionId: SESSION_ID,
+      toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+    });
+  });
+
+  it('ignores result metadata of any bounded JSON type', () => {
+    for (const _meta of ['metadata', ['metadata'], null, 0, false]) {
+      const parsed = parseCodexStream(
+        stream(
+          item('mcp_tool_call', {
+            id: 'call',
+            server: 'fixture',
+            tool: 'probe',
+            arguments: {},
+            status: 'completed',
+            result: { content: [], _meta },
+          }),
+        ),
+      );
+      assert.deepEqual(parsed, {
+        text: '',
+        sessionId: SESSION_ID,
+        toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+      });
+    }
+  });
+
+  it('bounds opaque MCP result data and rejects unknown result fields', () => {
+    let nested: unknown = 'leaf';
+    for (let depth = 0; depth < 70; depth++) nested = { nested };
+    for (const field of ['_meta', 'structured_content']) {
+      for (const value of [
+        nested,
+        { values: Array.from({ length: 100_001 }, () => 0) },
+        { text: 'x'.repeat(1024 * 1024) },
+      ])
+        assertInvalid(
+          stream(
+            item('mcp_tool_call', {
+              server: 'fixture',
+              tool: 'probe',
+              arguments: {},
+              status: 'completed',
+              result: { content: [], [field]: value },
+            }),
+          ),
+        );
+    }
+    for (const result of [
+      { content: [], _meta: {}, unknown: {} },
+      { content: {}, _meta: {} },
+    ])
+      assertInvalid(
+        stream(
+          item('mcp_tool_call', {
+            server: 'fixture',
+            tool: 'probe',
+            arguments: {},
+            status: 'completed',
+            result,
+          }),
+        ),
+      );
+  });
+
   it('captures the supported tool families without turning a tool failure into a turn failure', () => {
     const changes = [{ path: 'hello.txt', kind: 'add' }];
     const argumentsValue = { query: 'sample', nested: ['one', 2, null] };
