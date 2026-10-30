@@ -1,8 +1,17 @@
 import type { ForgeComposition } from '../contracts/composition.ts';
-import { credentialReference, type CredentialResolver } from '../contracts/credentials.ts';
+import {
+  type CredentialResolver,
+  credentialReference,
+} from '../contracts/credentials.ts';
 import type { ResolvedRunPlanV1 } from '../model/types.ts';
-import { hasWebSearch, WEB_SEARCH_TOKEN_REFERENCE } from '../setup/forgeWebSearch.ts';
-import { startWebSearchService, type WebSearchService } from './webSearchService.ts';
+import {
+  hasWebSearch,
+  WEB_SEARCH_TOKEN_REFERENCE,
+} from '../setup/forgeWebSearch.ts';
+import {
+  startWebSearchService,
+  type WebSearchService,
+} from './webSearchService.ts';
 
 /** Pure validation, before any run credentials or runtime authority. */
 export function preflightWebSearch(
@@ -10,17 +19,25 @@ export function preflightWebSearch(
   composition: ForgeComposition,
 ): void {
   if (!hasWebSearch(plan)) return;
-  if (plan.setup.filter((step) => step.uses === 'forge/web-search').length !== 1)
+  if (
+    plan.setup.filter((step) => step.uses === 'forge/web-search').length !== 1
+  )
     throw new TypeError('forge/web-search must occur exactly once per run.');
   const config = composition.webSearch;
   if (!config)
-    throw new TypeError('The host must configure webSearch for forge/web-search.');
+    throw new TypeError(
+      'The host must configure webSearch for forge/web-search.',
+    );
   credentialReference(config.credential);
   const url = new URL(config.baseUrl);
   if (
-    !['http:', 'https:'].includes(url.protocol) || url.username ||
-    url.password || url.search || url.hash
-  ) throw new TypeError('Invalid web search upstream base URL.');
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
+    throw new TypeError('Invalid web search upstream base URL.');
 }
 
 export interface PreparedWebSearch {
@@ -38,13 +55,16 @@ export async function prepareWebSearch(
   if (!hasWebSearch(plan)) return undefined;
   const config = composition.webSearch!;
   const upstreamCredential = await composition.credentialResolver.resolve(
-    config.credential, { runId, purpose: 'web_search', signal },
+    config.credential,
+    { runId, purpose: 'web_search', signal },
   );
   signal.throwIfAborted();
   if (
-    typeof upstreamCredential !== 'string' || !upstreamCredential ||
+    typeof upstreamCredential !== 'string' ||
+    !upstreamCredential ||
     /[\0\r\n]/.test(upstreamCredential)
-  ) throw new TypeError('Invalid web search credential.');
+  )
+    throw new TypeError('Invalid web search credential.');
   const service = await startWebSearchService({
     upstreamBaseUrl: config.baseUrl,
     upstreamCredential,

@@ -23,7 +23,10 @@ export interface ForgeComposition {
    * baseUrl excludes /v1; the engine appends /v1/responses. The runtime must
    * reach host loopback (Docker requires explicit network: host).
    */
-  readonly webSearch?: Readonly<{ baseUrl: string; credential: CredentialReference }>;
+  readonly webSearch?: Readonly<{
+    baseUrl: string;
+    credential: CredentialReference;
+  }>;
   readonly runtime: RuntimeAdapter;
   readonly agents: ReadonlyMap<string, AgentAdapter>;
   readonly completionProviders?: CompletionProviderCollection;

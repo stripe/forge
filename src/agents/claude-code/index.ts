@@ -1,4 +1,3 @@
-import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import { randomUUID } from 'node:crypto';
 import type {
   AgentAdapter,
@@ -11,6 +10,7 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.ts';
+import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import {
@@ -238,9 +238,16 @@ export function createClaudeCodeAdapter(
                   'stream-json',
                   '--verbose',
                   '--dangerously-skip-permissions',
-                  ...(disallowedTools.length === 0 && !hasWebSearch(context.plan)
+                  ...(disallowedTools.length === 0 &&
+                  !hasWebSearch(context.plan)
                     ? []
-                    : ['--disallowedTools', [...disallowedTools, ...(hasWebSearch(context.plan) ? ['WebSearch'] : [])].join(',')]),
+                    : [
+                        '--disallowedTools',
+                        [
+                          ...disallowedTools,
+                          ...(hasWebSearch(context.plan) ? ['WebSearch'] : []),
+                        ].join(','),
+                      ]),
                   '--model',
                   context.selection.model,
                 ],

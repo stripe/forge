@@ -7,7 +7,7 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const SEARCH_TIMEOUT_MS = 120_000;
 
 export interface SearchResult {
-  readonly sources: readonly {url: string; title?: string}[];
+  readonly sources: readonly { url: string; title?: string }[];
   readonly searchCount: number;
   readonly usage: SearchTokenUsage;
 }
@@ -22,23 +22,33 @@ export interface SearchTokenUsage {
 
 export function parseSearchUsage(value: unknown): SearchTokenUsage {
   const number = (entry: unknown): number | null =>
-    typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0 ? entry : null;
+    typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0
+      ? entry
+      : null;
   const usage = isRecord(value) ? value : {};
   const input = number(usage.input_tokens);
   const output = number(usage.output_tokens);
   const total = number(usage.total_tokens);
-  const valid = input !== null && output !== null && total !== null &&
-    Number.isSafeInteger(input + output) && input + output === total;
+  const valid =
+    input !== null &&
+    output !== null &&
+    total !== null &&
+    Number.isSafeInteger(input + output) &&
+    input + output === total;
   const cached = isRecord(usage.input_tokens_details)
-    ? number(usage.input_tokens_details.cached_tokens) : null;
+    ? number(usage.input_tokens_details.cached_tokens)
+    : null;
   const reasoning = isRecord(usage.output_tokens_details)
-    ? number(usage.output_tokens_details.reasoning_tokens) : null;
+    ? number(usage.output_tokens_details.reasoning_tokens)
+    : null;
   return {
     input_tokens: valid ? input : null,
     output_tokens: valid ? output : null,
     total_tokens: valid ? total : null,
-    cached_input_tokens: valid && cached !== null && cached <= input! ? cached : null,
-    reasoning_tokens: valid && reasoning !== null && reasoning <= output! ? reasoning : null,
+    cached_input_tokens:
+      valid && cached !== null && cached <= input! ? cached : null,
+    reasoning_tokens:
+      valid && reasoning !== null && reasoning <= output! ? reasoning : null,
   };
 }
 
@@ -59,7 +69,7 @@ export function searchRequest(query: string): string {
   return JSON.stringify({
     model: WEB_SEARCH_MODEL,
     input: query,
-    tools: [{type: 'web_search', external_web_access: false}],
+    tools: [{ type: 'web_search', external_web_access: false }],
     include: ['web_search_call.action.sources'],
   });
 }
@@ -69,7 +79,7 @@ export function parseSearchResponse(raw: string): SearchResult {
   const payload: unknown = JSON.parse(raw);
   if (!isRecord(payload) || payload.error || !Array.isArray(payload.output))
     throw new Error('Search backend returned an invalid response.');
-  const sources: {url: string; title?: string}[] = [];
+  const sources: { url: string; title?: string }[] = [];
   const seen = new Set<string>();
   let searchCount = 0;
   for (const item of payload.output) {
@@ -86,7 +96,7 @@ export function parseSearchResponse(raw: string): SearchResult {
       }
     }
   }
-  return {sources, searchCount, usage: parseSearchUsage(payload.usage)};
+  return { sources, searchCount, usage: parseSearchUsage(payload.usage) };
 }
 
 /** Host-only transport with a fixed upstream request and bounded response. */
@@ -171,7 +181,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function toSource(value: unknown): {url: string; title?: string} | undefined {
+function toSource(value: unknown): { url: string; title?: string } | undefined {
   if (!isRecord(value) || typeof value.url !== 'string') return undefined;
   let url: URL;
   try {
@@ -188,7 +198,7 @@ function toSource(value: unknown): {url: string; title?: string} | undefined {
   return {
     url: value.url,
     ...(typeof value.title === 'string' && value.title
-      ? {title: value.title}
+      ? { title: value.title }
       : {}),
   };
 }

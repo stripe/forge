@@ -1,4 +1,3 @@
-import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import type {
   AgentAdapter,
   AgentRuntimeRequirements,
@@ -16,6 +15,7 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
+import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import { createAgentModelProbe } from '../../validation/agentProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { codexRejection, createCodexInvocationCapture } from './diagnostics.ts';
@@ -229,7 +229,9 @@ export function createCodexAdapter(
                   executable,
                   'exec',
                   ...configuration,
-                  ...(hasWebSearch(context.plan) ? ['-c', 'web_search="disabled"'] : []),
+                  ...(hasWebSearch(context.plan)
+                    ? ['-c', 'web_search="disabled"']
+                    : []),
                   '--json',
                   '--skip-git-repo-check',
                   '--dangerously-bypass-approvals-and-sandbox',

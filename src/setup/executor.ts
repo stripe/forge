@@ -91,7 +91,9 @@ export function createSetupExecutorWithHandlers(
             stepIndex: index,
             selection,
             runtime,
-            ...(context.agentStateDirectories === undefined ? {} : { agentStateDirectories: context.agentStateDirectories }),
+            ...(context.agentStateDirectories === undefined
+              ? {}
+              : { agentStateDirectories: context.agentStateDirectories }),
             ...(context.pluginInstaller === undefined
               ? {}
               : { pluginInstaller: context.pluginInstaller }),

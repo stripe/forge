@@ -16,8 +16,8 @@ import type {
   AgentSessionContext,
 } from '../../contracts/agent.ts';
 import type { CommandOptions, CommandResult } from '../../contracts/command.ts';
-import { createRedactedTail } from '../../security/diagnosticRedaction.ts';
 import { selectAgentEvidence } from '../../evidence/selection.ts';
+import { createRedactedTail } from '../../security/diagnosticRedaction.ts';
 import {
   createMemoryRunInputProvider,
   createMemoryWorkspace,
@@ -655,9 +655,18 @@ describe('OpenCode adapter', () => {
 
 it('writes the same Forge-owned OpenCode configuration when Forge search owns availability', async () => {
   const test = await fixture();
-  const plan = createTestResolvedRunPlan({ agent: selection, treatmentSetup: [{ uses: 'forge/web-search', with: {} }] });
+  const plan = createTestResolvedRunPlan({
+    agent: selection,
+    treatmentSetup: [{ uses: 'forge/web-search', with: {} }],
+  });
   const session = await test.adapter.openSession({ ...test.context, plan });
   await session.send('Do it', { signal: test.context.signal });
-  const config = Buffer.from(await test.state.mutable.readFile('config.json')).toString();
-  assert.equal(config, test.adapter.requirements(selection).environment.variables!.OPENCODE_CONFIG_CONTENT);
+  const config = Buffer.from(
+    await test.state.mutable.readFile('config.json'),
+  ).toString();
+  assert.equal(
+    config,
+    test.adapter.requirements(selection).environment.variables!
+      .OPENCODE_CONFIG_CONTENT,
+  );
 });

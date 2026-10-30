@@ -1,9 +1,13 @@
-import type { WebSearchUsageV1 } from '../results/types.ts';
-import {createHash, randomBytes, timingSafeEqual} from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as http from 'node:http';
-import type {Socket} from 'node:net';
-import {isRecord, parseSearchUsage, runWebSearch} from './webSearchBackend.ts';
-import {handleSearchMessage} from './webSearchProtocol.ts';
+import type { Socket } from 'node:net';
+import type { WebSearchUsageV1 } from '../results/types.ts';
+import {
+  isRecord,
+  parseSearchUsage,
+  runWebSearch,
+} from './webSearchBackend.ts';
+import { handleSearchMessage } from './webSearchProtocol.ts';
 
 export interface WebSearchConnection {
   readonly url: string;
@@ -45,16 +49,28 @@ export async function startWebSearchService(options: {
   const calls = new Set<AbortController>();
   const tasks = new Set<Promise<void>>();
   let active = 0;
-  const usage: { -readonly [K in keyof WebSearchUsageV1]: WebSearchUsageV1[K] } = {
-    tool_calls: 0, search_count: 0, input_tokens: 0, output_tokens: 0,
-    total_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0,
+  const usage: {
+    -readonly [K in keyof WebSearchUsageV1]: WebSearchUsageV1[K];
+  } = {
+    tool_calls: 0,
+    search_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+    cached_input_tokens: 0,
+    reasoning_tokens: 0,
   };
   const add = (key: keyof WebSearchUsageV1, value: number | null) => {
     const previous = usage[key];
-    usage[key] = previous === null || value === null || !Number.isSafeInteger(previous + value) ? null : previous + value;
+    usage[key] =
+      previous === null ||
+      value === null ||
+      !Number.isSafeInteger(previous + value)
+        ? null
+        : previous + value;
   };
   const server = http.createServer(
-    {maxHeaderSize: 16 * 1024},
+    { maxHeaderSize: 16 * 1024 },
     (request, response) => {
       const task = serve(request, response).catch(() => {
         if (!response.headersSent && !response.destroyed)
@@ -69,7 +85,7 @@ export async function startWebSearchService(options: {
     request: http.IncomingMessage,
     response: http.ServerResponse,
   ) {
-    const {authorization} = request.headers;
+    const { authorization } = request.headers;
     if (
       signal.aborted ||
       request.url !== route ||
@@ -83,7 +99,7 @@ export async function startWebSearchService(options: {
     }
     if (request.method !== 'POST') {
       request.resume();
-      response.writeHead(405, {allow: 'POST'});
+      response.writeHead(405, { allow: 'POST' });
       response.end();
       return;
     }
@@ -122,16 +138,29 @@ export async function startWebSearchService(options: {
         return;
       }
       // Accept one bounded MCP request; batches are invalid requests.
-      if (isRecord(message) && message.jsonrpc === '2.0' && message.method === 'tools/call' && message.id != null && isRecord(message.params) && message.params.name === 'call_web_search') add('tool_calls', 1);
+      if (
+        isRecord(message) &&
+        message.jsonrpc === '2.0' &&
+        message.method === 'tools/call' &&
+        message.id != null &&
+        isRecord(message.params) &&
+        message.params.name === 'call_web_search'
+      )
+        add('tool_calls', 1);
       const result = await handleSearchMessage(message, async (query) => {
         try {
-          const result = await runWebSearch(query, {...options, signal: callSignal});
+          const result = await runWebSearch(query, {
+            ...options,
+            signal: callSignal,
+          });
           add('search_count', result.searchCount);
-          for (const [key, value] of Object.entries(result.usage)) add(key as keyof WebSearchUsageV1, value);
+          for (const [key, value] of Object.entries(result.usage))
+            add(key as keyof WebSearchUsageV1, value);
           return result;
         } catch (error) {
           add('search_count', null);
-          for (const key of Object.keys(parseSearchUsage(undefined))) add(key as keyof WebSearchUsageV1, null);
+          for (const key of Object.keys(parseSearchUsage(undefined)))
+            add(key as keyof WebSearchUsageV1, null);
           throw error;
         }
       });

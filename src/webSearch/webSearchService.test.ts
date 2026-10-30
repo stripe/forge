@@ -1,36 +1,54 @@
-import {describe, it, expect} from 'vitest';
 import * as http from 'node:http';
-import {startWebSearchService} from './webSearchService.ts';
-import {parseSearchResponse, searchRequest} from './webSearchBackend.ts';
+import { describe, expect, it } from 'vitest';
+import { parseSearchResponse, searchRequest } from './webSearchBackend.ts';
+import { startWebSearchService } from './webSearchService.ts';
 
 const providerResult = {
-  usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14, input_tokens_details: { cached_tokens: 2 }, output_tokens_details: { reasoning_tokens: 1 } },
+  usage: {
+    input_tokens: 10,
+    output_tokens: 4,
+    total_tokens: 14,
+    input_tokens_details: { cached_tokens: 2 },
+    output_tokens_details: { reasoning_tokens: 1 },
+  },
   output: [
     {
       type: 'web_search_call',
       action: {
         sources: [
-          {url: 'https://docs.stripe.com/rate-limits'},
-          {url: 'https://docs.stripe.com/rate-limits'},
-          {url: 'file:///etc/passwd'},
+          { url: 'https://docs.stripe.com/rate-limits' },
+          { url: 'https://docs.stripe.com/rate-limits' },
+          { url: 'file:///etc/passwd' },
         ],
       },
     },
-    {type: 'message', content: [{text: 'withheld synthesized answer'}]},
+    { type: 'message', content: [{ text: 'withheld synthesized answer' }] },
   ],
 };
 
 describe('runner-owned search', () => {
   it('keeps consulted sources and zero-hit searches distinct from synthesized answers', () => {
     expect(parseSearchResponse(JSON.stringify(providerResult))).toEqual({
-      sources: [{url: 'https://docs.stripe.com/rate-limits'}],
+      sources: [{ url: 'https://docs.stripe.com/rate-limits' }],
       searchCount: 1,
-      usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 2, reasoning_tokens: 1 },
+      usage: {
+        input_tokens: 10,
+        output_tokens: 4,
+        total_tokens: 14,
+        cached_input_tokens: 2,
+        reasoning_tokens: 1,
+      },
     });
     expect(parseSearchResponse('{"output":[]}')).toEqual({
       sources: [],
       searchCount: 0,
-      usage: { input_tokens: null, output_tokens: null, total_tokens: null, cached_input_tokens: null, reasoning_tokens: null },
+      usage: {
+        input_tokens: null,
+        output_tokens: null,
+        total_tokens: null,
+        cached_input_tokens: null,
+        reasoning_tokens: null,
+      },
     });
     expect(() =>
       parseSearchResponse('{"error":{"message":"secret"}}'),
@@ -38,7 +56,7 @@ describe('runner-owned search', () => {
   });
 
   it('authenticates MCP calls, fixes backend authority, and returns only discovery results', async () => {
-    const requests: {body: string; authorization: string | undefined}[] = [];
+    const requests: { body: string; authorization: string | undefined }[] = [];
     const upstream = http.createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -47,7 +65,7 @@ describe('runner-owned search', () => {
         authorization: request.headers.authorization,
       });
       expect(request.url).toBe('/v1/responses');
-      response.writeHead(200, {'content-type': 'application/json'});
+      response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify(providerResult));
     });
     await new Promise<void>((resolve) => {
@@ -67,7 +85,7 @@ describe('runner-owned search', () => {
       method: 'tools/call',
       params: {
         name: 'call_web_search',
-        arguments: {query: '  stripe rate limits  '},
+        arguments: { query: '  stripe rate limits  ' },
       },
     };
     try {
@@ -89,16 +107,24 @@ describe('runner-owned search', () => {
         JSON.stringify(message),
         service.credential,
       );
-      const {result} = JSON.parse(response.body);
+      const { result } = JSON.parse(response.body);
       expect(result.isError).toBeUndefined();
       expect(JSON.parse(result.content[0].text)).toMatchObject({
         query: 'stripe rate limits',
-        results: [{url: 'https://docs.stripe.com/rate-limits'}],
+        results: [{ url: 'https://docs.stripe.com/rate-limits' }],
         searchCount: 1,
       });
       expect(response.body).not.toContain('withheld');
       expect(response.body).not.toContain('input_tokens');
-      expect(service.usage()).toEqual({ tool_calls: 1, search_count: 1, input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 2, reasoning_tokens: 1 });
+      expect(service.usage()).toEqual({
+        tool_calls: 1,
+        search_count: 1,
+        input_tokens: 10,
+        output_tokens: 4,
+        total_tokens: 14,
+        cached_input_tokens: 2,
+        reasoning_tokens: 1,
+      });
       expect(requests).toEqual([
         {
           body: searchRequest('stripe rate limits'),
@@ -109,7 +135,7 @@ describe('runner-owned search', () => {
         ...message,
         params: {
           ...message.params,
-          arguments: {query: 'query', model: 'other'},
+          arguments: { query: 'query', model: 'other' },
         },
       };
       expect(
@@ -176,7 +202,7 @@ describe('runner-owned search', () => {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: {name: 'call_web_search', arguments: {query: 'query'}},
+      params: { name: 'call_web_search', arguments: { query: 'query' } },
     });
     try {
       const failed = await post(service.url, message, service.credential);
@@ -195,7 +221,7 @@ describe('runner-owned search', () => {
         (
           await post(
             other.url,
-            JSON.stringify({jsonrpc: '2.0', id: 2, method: 'ping'}),
+            JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' }),
             other.credential,
           )
         ).status,
@@ -215,7 +241,7 @@ function post(
   url: string,
   body: string,
   credential: string,
-): Promise<{status: number; body: string}> {
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const request = http.request(
       url,
@@ -247,17 +273,46 @@ it('records attempts and nulls unavailable backend usage without exposing provid
   const upstream = http.createServer((_request, response) => {
     count += 1;
     response.setHeader('content-type', 'application/json');
-    response.end(count === 1 ? JSON.stringify(providerResult) : count === 2 ? JSON.stringify({ ...providerResult, usage: { input_tokens: 'bad' } }) : '{"invalid":"private-provider-text"}');
+    response.end(
+      count === 1
+        ? JSON.stringify(providerResult)
+        : count === 2
+          ? JSON.stringify({
+              ...providerResult,
+              usage: { input_tokens: 'bad' },
+            })
+          : '{"invalid":"private-provider-text"}',
+    );
   });
-  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) =>
+    upstream.listen(0, '127.0.0.1', resolve),
+  );
   const address = upstream.address();
   if (!address || typeof address === 'string') throw new Error('No port');
-  const service = await startWebSearchService({ upstreamBaseUrl: `http://127.0.0.1:${address.port}`, upstreamCredential: 'host-only', agentHostname: '127.0.0.1', signal: new AbortController().signal });
-  const message = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'call_web_search', arguments: { query: 'query' } } });
+  const service = await startWebSearchService({
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}`,
+    upstreamCredential: 'host-only',
+    agentHostname: '127.0.0.1',
+    signal: new AbortController().signal,
+  });
+  const message = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'call_web_search', arguments: { query: 'query' } },
+  });
   try {
     await post(service.url, message, service.credential);
     await post(service.url, message, service.credential);
-    expect(service.usage()).toEqual({ tool_calls: 2, search_count: 2, input_tokens: null, output_tokens: null, total_tokens: null, cached_input_tokens: null, reasoning_tokens: null });
+    expect(service.usage()).toEqual({
+      tool_calls: 2,
+      search_count: 2,
+      input_tokens: null,
+      output_tokens: null,
+      total_tokens: null,
+      cached_input_tokens: null,
+      reasoning_tokens: null,
+    });
     const third = await post(service.url, message, service.credential);
     expect(JSON.parse(third.body).result.isError).toBe(true);
     expect(third.body).not.toContain('private-provider-text');
@@ -272,17 +327,37 @@ it('records attempts and nulls unavailable backend usage without exposing provid
 it('limits concurrent requests to four and cancels them on teardown', async () => {
   let started = 0;
   let ready!: () => void;
-  const allStarted = new Promise<void>((resolve) => { ready = resolve; });
-  const upstream = http.createServer(() => { if (++started === 4) ready(); });
-  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const allStarted = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  const upstream = http.createServer(() => {
+    if (++started === 4) ready();
+  });
+  await new Promise<void>((resolve) =>
+    upstream.listen(0, '127.0.0.1', resolve),
+  );
   const address = upstream.address();
   if (!address || typeof address === 'string') throw new Error('No port');
-  const service = await startWebSearchService({ upstreamBaseUrl: `http://127.0.0.1:${address.port}`, upstreamCredential: 'host-only', agentHostname: '127.0.0.1', signal: new AbortController().signal });
-  const message = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'call_web_search', arguments: { query: 'query' } } });
-  const pending = Array.from({ length: 4 }, () => post(service.url, message, service.credential).catch(() => undefined));
+  const service = await startWebSearchService({
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}`,
+    upstreamCredential: 'host-only',
+    agentHostname: '127.0.0.1',
+    signal: new AbortController().signal,
+  });
+  const message = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'call_web_search', arguments: { query: 'query' } },
+  });
+  const pending = Array.from({ length: 4 }, () =>
+    post(service.url, message, service.credential).catch(() => undefined),
+  );
   try {
     await allStarted;
-    expect((await post(service.url, message, service.credential)).status).toBe(429);
+    expect((await post(service.url, message, service.credential)).status).toBe(
+      429,
+    );
     expect(started).toBe(4);
     await service.close();
     await Promise.all(pending);

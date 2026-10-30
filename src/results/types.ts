@@ -22,7 +22,6 @@ import type {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
-  JudgeTranscriptProjectionV1,
   JudgeVisibleStepV1,
 } from '../evaluation/judgeTranscript.ts';
 import type {

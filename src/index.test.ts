@@ -62,8 +62,8 @@ import {
   type RuntimePreflight,
   resolveManifestCaseIdFromFile,
   resolveRunPlan,
-  WorkspaceEntryLimitError,
   selectJudgeEvidence,
+  WorkspaceEntryLimitError,
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {

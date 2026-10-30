@@ -102,7 +102,8 @@ export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
   with: PluginSetupWithV1;
 }
 
-export interface WebSearchSetupStepV1 extends SetupStepV1<Record<string, never>> {
+export interface WebSearchSetupStepV1
+  extends SetupStepV1<Record<string, never>> {
   uses: 'forge/web-search';
 }
 

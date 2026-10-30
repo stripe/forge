@@ -84,8 +84,8 @@ import {
   judgeCriteria,
 } from '../evaluation/index.ts';
 import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
-import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
+import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import {
   createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
@@ -140,9 +140,6 @@ import {
   redactSecrets,
 } from '../security/redaction.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
-import {
-  preflightWebSearch, prepareWebSearch, type PreparedWebSearch,
-} from '../webSearch/runtime.ts';
 import { createSetupExecutorForRegistry } from '../setup/executor.ts';
 import { assertWebSearchConfiguration } from '../setup/forgeWebSearch.ts';
 import type {
@@ -159,6 +156,11 @@ import {
   FORGE_BUILD_IDENTITY,
   FORGE_VERSION,
 } from '../version.ts';
+import {
+  type PreparedWebSearch,
+  preflightWebSearch,
+  prepareWebSearch,
+} from '../webSearch/runtime.ts';
 import {
   type CompletionBinding,
   completionBindingsForPlan,
@@ -311,17 +313,22 @@ export async function validateRuntimeWithSetupActions(
     for (const check of checks) {
       signal.throwIfAborted();
       try {
-        const webSearch = await prepareWebSearch(check.plan, check.composition, check.runId, signal);
+        const webSearch = await prepareWebSearch(
+          check.plan,
+          check.composition,
+          check.runId,
+          signal,
+        );
         if (webSearch) {
           readinessSearch.push(webSearch);
           readinessSecrets.push(...webSearch.secrets);
         }
         const environment = await createEnvironmentResolver({
           async resolve(reference, context) {
-            const value = await (webSearch?.credentialResolver ?? check.composition.credentialResolver).resolve(
-              reference,
-              context,
-            );
+            const value = await (
+              webSearch?.credentialResolver ??
+              check.composition.credentialResolver
+            ).resolve(reference, context);
             if (typeof value === 'string') readinessSecrets.push(value);
             return value;
           },
@@ -340,7 +347,14 @@ export async function validateRuntimeWithSetupActions(
       }
     }
     const results: RuntimeReadinessResult[] = [];
-    for (const { plan, composition, preflight, environment, runId, webSearch } of resolved) {
+    for (const {
+      plan,
+      composition,
+      preflight,
+      environment,
+      runId,
+      webSearch,
+    } of resolved) {
       const runSignal = AbortSignal.any([
         signal,
         AbortSignal.timeout(plan.limits.run_timeout_ms),
@@ -380,7 +394,11 @@ export async function validateRuntimeWithSetupActions(
         stage = 'finalize';
         await runtime.finalizeSetup();
         if (webSearch)
-          await assertWebSearchConfiguration(plan, runtime, webSearch.service.url);
+          await assertWebSearchConfiguration(
+            plan,
+            runtime,
+            webSearch.service.url,
+          );
         stage = 'mcp';
         let serverCount = 0;
         for (const step of applied.steps) {
@@ -448,7 +466,9 @@ export async function validateRuntimeWithSetupActions(
     }
     return Object.freeze(results);
   } finally {
-    await Promise.allSettled(readinessSearch.map(({ service }) => service.close()));
+    await Promise.allSettled(
+      readinessSearch.map(({ service }) => service.close()),
+    );
   }
 }
 
@@ -571,7 +591,12 @@ export async function executeEvalWithTestHooks(
 
     await executionTimeout.withoutRecordingTime(() => diagnostics.flush());
 
-    webSearch = await prepareWebSearch(input.plan, input.composition, input.runId, signal);
+    webSearch = await prepareWebSearch(
+      input.plan,
+      input.composition,
+      input.runId,
+      signal,
+    );
     const environment = await resolveEnvironment(
       input,
       preflight.environmentSpecification,
@@ -669,7 +694,11 @@ export async function executeEvalWithTestHooks(
       throwIfAborted(signal, phase);
       await prepared!.finalizeSetup();
       if (webSearch)
-        await assertWebSearchConfiguration(input.plan, prepared!, webSearch.service.url);
+        await assertWebSearchConfiguration(
+          input.plan,
+          prepared!,
+          webSearch.service.url,
+        );
       return artifact;
     });
 
@@ -1016,7 +1045,9 @@ export async function executeEvalWithTestHooks(
             runtime: sealed!,
             interaction,
             setupArtifact,
-            ...(webSearch ? { webSearch: searchResultObservation(webSearch) } : {}),
+            ...(webSearch
+              ? { webSearch: searchResultObservation(webSearch) }
+              : {}),
             completionCalls: completions.calls,
             completionCallTotals: completions.totals,
             evidence: evaluated.redacted.evidence,
@@ -1653,7 +1684,9 @@ function buildEvalPreflight(
     agent.evidenceIdentity(plan.agent),
   );
   preflightWebSearch(plan, composition);
-  const agentRequirements = normalizeAgentRequirements(agent.requirements(plan.agent));
+  const agentRequirements = normalizeAgentRequirements(
+    agent.requirements(plan.agent),
+  );
   const setup = setupExecutor.preflight(plan.setup, {
     agentStateDirectories: agentRequirements.stateDirectories,
     selection: plan.agent,
@@ -1780,9 +1813,7 @@ async function resolveEnvironment(
   resolver = input.composition.credentialResolver,
 ): Promise<ResolvedEnvironment> {
   try {
-    return await createEnvironmentResolver(
-      resolver,
-    ).resolve(specification, {
+    return await createEnvironmentResolver(resolver).resolve(specification, {
       runId: input.runId,
       purpose: 'forge-eval',
       signal,
@@ -2783,14 +2814,21 @@ function mapExecutionError(
 }
 
 /** Optional accounting must never change execution or evaluation outcomes. */
-function searchResultObservation(search: PreparedWebSearch): NonNullable<RunResultV1['web_search']> {
-  let usage;
+function searchResultObservation(
+  search: PreparedWebSearch,
+): NonNullable<RunResultV1['web_search']> {
+  let usage: NonNullable<RunResultV1['web_search']>['usage'];
   try {
     usage = search.service.usage();
   } catch {
     usage = {
-      tool_calls: null, search_count: null, input_tokens: null, output_tokens: null,
-      total_tokens: null, cached_input_tokens: null, reasoning_tokens: null,
+      tool_calls: null,
+      search_count: null,
+      input_tokens: null,
+      output_tokens: null,
+      total_tokens: null,
+      cached_input_tokens: null,
+      reasoning_tokens: null,
     };
   }
   return { provider: 'forge/web-search', native_search: 'disabled', usage };

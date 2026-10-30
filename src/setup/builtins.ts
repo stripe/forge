@@ -112,7 +112,10 @@ export const builtInSetupActions: readonly SetupActionDefinition[] =
     commandSetupAction,
     pluginSetupAction,
     credentialsSetupAction,
-    Object.freeze({ ...webSearchSetupHandler, parseWith: (input: unknown) => z.object({}).strict().parse(input) }),
+    Object.freeze({
+      ...webSearchSetupHandler,
+      parseWith: (input: unknown) => z.object({}).strict().parse(input),
+    }),
   ]);
 
 function isBoundedText(value: string): boolean {
