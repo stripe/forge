@@ -1383,8 +1383,9 @@ Supported Codex MCP text and image blocks may carry opaque `annotations` and
 accept a result-level `_meta` object or `null` (treated as absent); other types
 trigger `source_incomplete` fallback. This field remains snapshot-only. Exec
 stream results accept `_meta` of any JSON type and opaque `structured_content`
-within the full event's byte, node, and depth limits; these fields are omitted
-from the driver turn. The discarded metadata's type cannot fail a live turn.
+within the per-line byte and depth limits and the stream-wide byte and node
+budgets, which every line of one `codex exec` invocation shares. These fields
+are omitted from the driver turn. The discarded metadata's type cannot fail a live turn.
 Native evidence retains the verified rendered `structuredContent` or content
 mirror. Metadata in recorded rendered output is preserved after credential
 redaction; snapshot-only metadata is not added to judge evidence. Supported
