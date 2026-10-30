@@ -2704,7 +2704,7 @@ it('enables restricted diagnostic capture only through the explicit run option',
   }
 });
 
-it('binds web search host credentials explicitly with completion-key fallback', async () => {
+it('binds web search host credentials with completion-key fallback only at the default URL', async () => {
   for (const dedicated of [false, true]) {
     const composition = await createDefaultCliComposition({
       datasetRoot: '.',
@@ -2756,5 +2756,58 @@ it('binds web search host credentials explicitly with completion-key fallback', 
         false,
       );
     }
+  }
+});
+
+it('rejects unsafe search host settings before credential resolution without printing values', async () => {
+  for (const baseUrl of [
+    'https://search.example.com',
+    'https://api.openai.com/',
+    'http://127.0.0.1:1234',
+  ]) {
+    for (const key of [undefined, '', 'invalid\nkey']) {
+      await assert.rejects(
+        createDefaultCliComposition({
+          datasetRoot: '.',
+          resultsRoot: '/tmp/forge-web-search-test',
+          environment: {
+            OPENAI_API_KEY: 'completion-secret',
+            FORGE_WEB_SEARCH_BASE_URL: baseUrl,
+            FORGE_WEB_SEARCH_API_KEY: key,
+          },
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof TypeError);
+          assert.match(error.message, /FORGE_WEB_SEARCH_API_KEY/);
+          assert.equal(error.message.includes(baseUrl), false);
+          assert.equal(error.message.includes('completion-secret'), false);
+          if (key) assert.equal(error.message.includes(key), false);
+          return true;
+        },
+      );
+    }
+  }
+  for (const baseUrl of [
+    'http://search.example.com',
+    'ftp://search.example.com',
+    'https://user:private@example.com',
+    'invalid-private-url',
+  ]) {
+    await assert.rejects(
+      createDefaultCliComposition({
+        datasetRoot: '.',
+        resultsRoot: '/tmp/forge-web-search-test',
+        environment: {
+          FORGE_WEB_SEARCH_BASE_URL: baseUrl,
+          FORGE_WEB_SEARCH_API_KEY: 'search-secret',
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof TypeError);
+        assert.match(error.message, /FORGE_WEB_SEARCH_BASE_URL/);
+        assert.equal(error.message.includes(baseUrl), false);
+        return true;
+      },
+    );
   }
 });

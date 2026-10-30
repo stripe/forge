@@ -8,6 +8,7 @@ import {
   hasWebSearch,
   WEB_SEARCH_TOKEN_REFERENCE,
 } from '../setup/forgeWebSearch.ts';
+import { validateWebSearchBaseUrl } from './configuration.ts';
 import {
   startWebSearchService,
   type WebSearchService,
@@ -29,15 +30,7 @@ export function preflightWebSearch(
       'The host must configure webSearch for forge/web-search.',
     );
   credentialReference(config.credential);
-  const url = new URL(config.baseUrl);
-  if (
-    !['http:', 'https:'].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  )
-    throw new TypeError('Invalid web search upstream base URL.');
+  validateWebSearchBaseUrl(config.baseUrl);
 }
 
 export interface PreparedWebSearch {

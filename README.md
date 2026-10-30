@@ -475,10 +475,14 @@ It uses `gpt-4.1-mini` with `external_web_access: false` and makes potentially
 billable host-side requests.
 
 The CLI reads `FORGE_WEB_SEARCH_BASE_URL` (default `https://api.openai.com`),
-appending `/v1/responses`. Set `FORGE_WEB_SEARCH_API_KEY`, or use the existing
-OpenAI completion-key binding when it is absent. Override the credential with
-`--credential-env forge.web-search-api-key=MY_SEARCH_KEY`. Keep the same host
-routing when resuming; plans do not record the upstream endpoint.
+appending `/v1/responses`. At the default URL, an absent
+`FORGE_WEB_SEARCH_API_KEY` uses the existing OpenAI completion-key binding.
+Every non-default URL requires an explicit `FORGE_WEB_SEARCH_API_KEY` and never
+falls back to the completion key. URLs must use HTTPS; HTTP is allowed only for
+loopback tests. Invalid settings fail pure preflight without printing values.
+`--credential-env forge.web-search-api-key=MY_SEARCH_KEY` overrides the binding;
+custom URLs still require `FORGE_WEB_SEARCH_API_KEY`. Keep the same host routing
+when resuming; plans do not record the upstream endpoint.
 
 Docker requires explicit `runtime.network: host` (or the existing
 `FORGE_DOCKER_NETWORK=host` override). The per-eval listener binds host loopback

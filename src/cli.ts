@@ -60,6 +60,10 @@ import {
 import { serializeCanonicalJson } from './serialization.ts';
 import { selectedModelProbes } from './validation/models.ts';
 import { runModelProbe } from './validation/runProbe.ts';
+import {
+  DEFAULT_WEB_SEARCH_BASE_URL,
+  validateWebSearchBaseUrl,
+} from './webSearch/configuration.ts';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
@@ -205,6 +209,17 @@ export async function createDefaultCliComposition(
     );
   }
   const environment = options.environment ?? process.env;
+  const searchBaseUrl =
+    environment.FORGE_WEB_SEARCH_BASE_URL ?? DEFAULT_WEB_SEARCH_BASE_URL;
+  validateWebSearchBaseUrl(searchBaseUrl);
+  if (
+    searchBaseUrl !== DEFAULT_WEB_SEARCH_BASE_URL &&
+    (!environment.FORGE_WEB_SEARCH_API_KEY ||
+      /[\0\r\n]/.test(environment.FORGE_WEB_SEARCH_API_KEY))
+  )
+    throw new TypeError(
+      'Set FORGE_WEB_SEARCH_API_KEY explicitly when FORGE_WEB_SEARCH_BASE_URL differs from the default.',
+    );
   const baseUrl = environment[ANTHROPIC_BASE_URL_ENVIRONMENT];
   const gatewaySelected = baseUrl !== undefined;
   const credential = gatewaySelected
@@ -259,8 +274,7 @@ export async function createDefaultCliComposition(
 
   return Object.freeze({
     webSearch: {
-      baseUrl:
-        environment.FORGE_WEB_SEARCH_BASE_URL ?? 'https://api.openai.com',
+      baseUrl: searchBaseUrl,
       credential: credentialReference('forge.web-search-api-key'),
     },
     runtime: createDockerRuntimeAdapter(),

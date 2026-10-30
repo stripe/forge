@@ -47,6 +47,44 @@ function fixture() {
   return { agent, runtime, plan, store, composition, resolutions };
 }
 
+it('validates upstream transport in pure preflight before any credentials or runtime allocation', () => {
+  const test = fixture();
+  for (const baseUrl of [
+    'http://search.example.com',
+    'https://user:private@example.com',
+    'https://search.example.com?private=value',
+    'https://search.example.com#private',
+    'invalid-private-url',
+  ]) {
+    assert.throws(
+      () =>
+        preflightEval({
+          plan: test.plan,
+          composition: {
+            ...test.composition,
+            webSearch: { ...test.composition.webSearch!, baseUrl },
+          },
+        }),
+      { code: 'invalid_plan', phase: 'preflight' },
+    );
+  }
+  for (const baseUrl of [
+    'https://search.example.com',
+    'http://localhost:1234',
+    'http://127.0.0.2:1234',
+    'http://[::1]:1234',
+  ])
+    preflightEval({
+      plan: test.plan,
+      composition: {
+        ...test.composition,
+        webSearch: { ...test.composition.webSearch!, baseUrl },
+      },
+    });
+  assert.deepEqual(test.resolutions, []);
+  assert.equal(test.runtime.runs.length, 0);
+});
+
 it('keeps upstream authority out of runtime and workspace, and tears down after success', async () => {
   const test = fixture();
   let url = '';
