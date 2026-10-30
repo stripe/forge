@@ -360,7 +360,7 @@ it('commits native evidence with batching bookkeeping, queued task context, and 
   assert.equal(verified.result.evidence.provenance.source.kind, 'native_log');
   assert.deepEqual(
     verified.result.evidence.warnings.map(({ code }) => code),
-    ['unsupported_native_event', 'unsupported_native_event'],
+    ['unsupported_native_event'],
   );
   const trajectory = parseAtifTrajectory(
     await artifact(completed.location, 'trajectory.json'),
@@ -383,6 +383,38 @@ it('commits native evidence with batching bookkeeping, queued task context, and 
       'utf8',
     ),
     test.native(),
+  );
+});
+
+it('commits complete native evidence when only API retry metadata is ignored', async (t) => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'forge-claude-retries-'),
+  );
+  t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+  const plan = createTestResolvedRunPlan({
+    agent: selection,
+    prompt: 'Complete the answer.',
+  });
+  const test = await fixture(root, plan, false, [
+    {
+      type: 'system',
+      subtype: 'api_error',
+      source: 'request_retry',
+      error: { message: 'Synthetic retry response body' },
+    },
+  ]);
+  const completed = await executeEval({
+    runId: 'claude-native-retries',
+    plan,
+    composition: test.composition,
+  });
+  const verified = await verifyCompletedRun(completed.location);
+  assert.equal(verified.result.evidence.completeness, 'complete');
+  assert.equal(verified.result.evidence.provenance.source.kind, 'native_log');
+  assert.deepEqual(verified.result.evidence.warnings, []);
+  assert.doesNotMatch(
+    JSON.stringify(await artifact(completed.location, 'trajectory.json')),
+    /Synthetic retry response body/,
   );
 });
 

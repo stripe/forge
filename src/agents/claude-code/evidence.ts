@@ -73,7 +73,6 @@ const OMITTED_ATTACHMENT_TYPES = new Set([
 const BOOKKEEPING_OMISSION_MESSAGES = {
   batching_reminder_sent:
     'Claude batching reminder bookkeeping was omitted from ATIF',
-  api_error: 'Claude API retry metadata was omitted from ATIF',
 } as const;
 
 type BookkeepingRecordType = keyof typeof BOOKKEEPING_OMISSION_MESSAGES;
@@ -684,11 +683,6 @@ function handleNonConversationRecord(
     record.subtype === 'api_error' &&
     record.source === 'request_retry'
   ) {
-    recordBookkeepingOmission(
-      bookkeepingOmissions,
-      'api_error',
-      recordIndex + 1,
-    );
     return;
   }
   if (record.type === 'attachment') {
