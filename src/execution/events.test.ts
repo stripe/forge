@@ -40,18 +40,18 @@ describe('run events', () => {
       (error: unknown) => error === operationFailure,
     );
 
-    const common = { runId: 'run-1', timestamp: '2026-09-15T00:00:00.000Z' };
     assert.deepEqual(observed, [
-      { ...common, sequence: 0, type: 'phase_started', phase: 'preflight' },
-      { ...common, sequence: 1, type: 'phase_completed', phase: 'preflight' },
+      { type: 'phase_started', phase: 'preflight' },
+      { type: 'phase_completed', phase: 'preflight' },
       {
-        ...common,
+        runId: 'run-1',
         sequence: 2,
+        timestamp: '2026-09-15T00:00:00.000Z',
         type: 'warning',
         phase: 'runtime_dispose',
         message: 'Runtime cleanup failed.',
       },
-      { ...common, sequence: 3, type: 'phase_started', phase: 'setup' },
+      { type: 'phase_started', phase: 'setup' },
     ]);
   });
 });

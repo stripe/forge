@@ -1099,7 +1099,10 @@ describe('executeEval', () => {
       assert.equal(actual.score, 0);
     }
     assert.deepEqual(completed.result.warnings, [warning]);
-    const observedWarnings = observed.filter(({ type }) => type === 'warning');
+    const observedWarnings = observed.filter(
+      (event): event is Extract<RunEvent, { type: 'warning' }> =>
+        event.type === 'warning',
+    );
     assert.equal(observedWarnings.length, 1);
     {
       const actual = observedWarnings[0];

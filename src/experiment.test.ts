@@ -378,7 +378,7 @@ describe('public experiment run API', () => {
       assert.equal(report.runs[0]!.diagnostics_status, 'unavailable');
       assert.equal(events.length, 1);
       assert.equal(
-        events[0]!.message,
+        'message' in events[0]! ? events[0].message : undefined,
         'Attempt diagnostic history is unavailable; continuing resume.',
       );
       assert.doesNotMatch(JSON.stringify(events), /private|truncated/);

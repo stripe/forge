@@ -17,21 +17,11 @@ export function createRunEventEmitter(
   observers: readonly RunObserver[] = [],
   now: () => Date = () => new Date(),
 ): RunEventEmitter {
+  // Phase events no longer carry a sequence but still advance it, so the
+  // numbering of warning and usage events is unchanged.
   let sequence = 0;
 
-  const emit = async (
-    type: 'phase_started' | 'phase_completed' | 'warning',
-    phase: RunPhase,
-    message?: string,
-  ): Promise<void> => {
-    const event: RunEvent = {
-      runId,
-      sequence: sequence++,
-      timestamp: now().toISOString(),
-      type,
-      phase,
-      ...(message === undefined ? {} : { message }),
-    };
+  const deliver = async (event: RunEvent): Promise<void> => {
     await Promise.allSettled(
       observers.map(async (observer) => observer.observe(event)),
     );
@@ -48,16 +38,24 @@ export function createRunEventEmitter(
         turn,
         usage: Object.freeze({ ...usage }),
       });
-      await Promise.allSettled(
-        observers.map(async (observer) => observer.observe(event)),
-      );
+      await deliver(event);
     },
     async phase(phase, operation) {
-      await emit('phase_started', phase);
+      sequence++;
+      await deliver({ type: 'phase_started', phase });
       const value = await operation();
-      await emit('phase_completed', phase);
+      sequence++;
+      await deliver({ type: 'phase_completed', phase });
       return value;
     },
-    warning: (phase, message) => emit('warning', phase, message),
+    warning: (phase, message) =>
+      deliver({
+        runId,
+        sequence: sequence++,
+        timestamp: now().toISOString(),
+        type: 'warning',
+        phase,
+        message,
+      }),
   };
 }
