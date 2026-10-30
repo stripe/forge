@@ -1022,11 +1022,13 @@ queued user prompts, and missing or mismatched text trigger `source_incomplete`
 with an `attachment/queued_command` diagnostic and line.
 
 Batching-reminder bookkeeping with the known model/text shape and no rendered
-content, and `api_error` system records from `request_retry`, are omitted with
-partial-detail warnings. Each kind has one warning with its record count and
-first line, regardless of repetition. Error bodies are not copied into those
-warnings. Compaction boundaries and summary flags remain `source_incomplete`,
-with their location and the unresolved loss of earlier turns made explicit.
+content is omitted with a partial-detail warning that gives its record count
+and first line, regardless of repetition. Recognized `api_error` system records
+from `request_retry` are ignored like `turn_duration`: they add no step or
+warning and do not reduce normalization completeness. Retry error bodies stay
+in the restricted native source. Compaction boundaries and summary flags
+remain `source_incomplete`, with their location and the unresolved loss of
+earlier turns made explicit.
 
 Codex selects a single matching root UUID rollout under its isolated
 `CODEX_HOME/sessions`, validates session metadata, and records source format

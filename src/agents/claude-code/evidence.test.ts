@@ -717,18 +717,25 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, []);
   });
 
-  it('fails closed on an unsupported queued prompt even when its rendering matches', async () => {
-    const record = queuedCommandRecord('prompt');
-    const evidence = await conversationEvidence([record]);
-    assert.deepEqual(evidence, {
-      kind: 'unavailable',
-      reason: {
-        code: 'source_incomplete',
-        message:
-          'Claude session evidence could not be normalized safely (attachment/queued_command at line 2).',
-      },
+  for (const mode of ['prompt', 'future-mode']) {
+    it(`rejects queued ${mode} with an otherwise accepted task notification`, async () => {
+      const record = queuedCommandRecord();
+      const evidence = await conversationEvidence([
+        {
+          ...record,
+          attachment: { ...record.attachment, commandMode: mode },
+        },
+      ]);
+      assert.deepEqual(evidence, {
+        kind: 'unavailable',
+        reason: {
+          code: 'source_incomplete',
+          message:
+            'Claude session evidence could not be normalized safely (attachment/queued_command at line 2).',
+        },
+      });
     });
-  });
+  }
 
   it('retains a short notification only when its whole delimited payload matches', async () => {
     const evidence = await conversationEvidence([
@@ -746,7 +753,7 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, []);
   });
 
-  it('omits API retry metadata without copying error bodies into evidence', async () => {
+  it('silently ignores API retry metadata without copying error bodies into evidence', async () => {
     const evidence = await conversationEvidence([
       {
         type: 'system',
@@ -762,14 +769,7 @@ describe('Claude native evidence', () => {
     assert.equal(evidence.kind, 'available');
     if (evidence.kind !== 'available') return;
     assert.equal(parseAtifTrajectory(evidence.trajectory).steps.length, 2);
-    assert.deepEqual(evidence.warnings, [
-      {
-        code: 'unsupported_native_event',
-        message:
-          'Claude API retry metadata was omitted from ATIF (records: 1).',
-        path: 'line:2',
-      },
-    ]);
+    assert.deepEqual(evidence.warnings, []);
     assert.doesNotMatch(JSON.stringify(evidence), /Synthetic response body/);
   });
 
@@ -809,12 +809,6 @@ describe('Claude native evidence', () => {
         message:
           'Claude batching reminder bookkeeping was omitted from ATIF (records: 300).',
         path: 'line:2',
-      },
-      {
-        code: 'unsupported_native_event',
-        message:
-          'Claude API retry metadata was omitted from ATIF (records: 300).',
-        path: 'line:3',
       },
     ]);
     assert.equal(normalized.trajectory.steps.length, 2);
