@@ -68,7 +68,6 @@ trusted_hash = "sha256:${'a'.repeat(64)}"
       stripe: {
         url: 'https://mcp.stripe.com',
         bearer_token_env_var: 'STRIPE_API_KEY',
-        http_headers: { Accept: 'application/json' },
       },
     });
     await prepareCodexPluginConfiguration(state.mutable);
@@ -86,7 +85,6 @@ trusted_hash = "sha256:${'a'.repeat(64)}"
         stripe: {
           url: 'https://mcp.stripe.com',
           bearer_token_env_var: 'STRIPE_API_KEY',
-          http_headers: { Accept: 'application/json' },
         },
       },
     });
@@ -138,6 +136,11 @@ enabled=true
       '[mcp_servers.stripe]\nurl="https://user:synthetic-secret@mcp.stripe.com"\nbearer_token_env_var="KEY"',
       '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="synthetic-secret value"',
       '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nhttp_headers={Authorization="synthetic-secret"}',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nhttp_headers={"X-API-Key"="synthetic-secret"}',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nenv_http_headers={"X-Other"="synthetic-secret value"}',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com?api_key=synthetic-secret"\nbearer_token_env_var="KEY"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com#synthetic-secret"\nbearer_token_env_var="KEY"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nenabled_tools=["read"]',
     ]) {
       const state = createMemoryWorkspace({ 'config.toml': config });
       await assert.rejects(

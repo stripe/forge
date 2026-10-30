@@ -4,7 +4,7 @@ import { parse } from 'toml';
 
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import { isSha256Digest } from '../../model/hashes.ts';
-import { isSafeSimpleIdentifier } from '../../model/paths.ts';
+import { isSafeMcpEndpointUrl, isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type {
   CodexMcpServerConfig,
   CodexMcpServerDeclarations,
@@ -195,52 +195,20 @@ async function readSanitizedConfiguration(
   };
 }
 
-/** Remote HTTP with an environment-referenced bearer; inline secrets are rejected. */
+/**
+ * Exactly a remote HTTP URL and an environment-referenced bearer. Inline auth,
+ * static or environment headers, URL credentials, and other settings are
+ * rejected because Forge neither generates nor can vouch for them.
+ */
 function safeMcpServer(value: unknown): value is CodexMcpServerConfig {
-  if (!record(value)) return false;
-  if (
-    Object.keys(value).some(
-      (key) =>
-        ![
-          'url',
-          'bearer_token_env_var',
-          'http_headers',
-          'env_http_headers',
-        ].includes(key),
-    )
-  )
-    return false;
-  if (typeof value.url !== 'string' || !bounded(value.url)) return false;
-  try {
-    const url = new URL(value.url);
-    if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password
-    )
-      return false;
-  } catch {
-    return false;
-  }
-  if (
-    typeof value.bearer_token_env_var !== 'string' ||
-    !/^[A-Z_][A-Z0-9_]{0,127}$/.test(value.bearer_token_env_var)
-  )
-    return false;
-  for (const field of ['http_headers', 'env_http_headers'] as const) {
-    const headers = value[field];
-    if (headers === undefined) continue;
-    if (!record(headers)) return false;
-    for (const [key, header] of Object.entries(headers))
-      if (
-        !bounded(key) ||
-        key.toLowerCase() === 'authorization' ||
-        typeof header !== 'string' ||
-        !bounded(header)
-      )
-        return false;
-  }
-  return true;
+  return (
+    record(value) &&
+    Object.keys(value).length === 2 &&
+    typeof value.url === 'string' &&
+    isSafeMcpEndpointUrl(value.url) &&
+    typeof value.bearer_token_env_var === 'string' &&
+    /^[A-Za-z_][A-Za-z0-9_]{0,255}$/.test(value.bearer_token_env_var)
+  );
 }
 
 /** Bound dotted keys before the parser expands them into nested tables. */

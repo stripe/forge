@@ -1,33 +1,84 @@
-import type { MutableWorkspace } from '../contracts/runtime.ts';
+import type {
+  MutableWorkspace,
+  ReadonlyWorkspace,
+} from '../contracts/runtime.ts';
+import { isSafeMcpEndpointUrl } from '../model/paths.ts';
 import { PLUGIN_MCP_CREDENTIALS } from '../model/pluginCredentials.ts';
 import type { PluginMcpServerId } from '../model/types.ts';
 
-/** A Codex user-level MCP server; it holds an environment reference, never a secret. */
+/**
+ * A Codex user-level MCP server: a plain remote URL plus an environment
+ * reference for its bearer token. It never holds a secret or static headers.
+ */
 export type CodexMcpServerConfig = {
   readonly url: string;
   readonly bearer_token_env_var: string;
-  readonly http_headers?: Readonly<Record<string, string>>;
-  readonly env_http_headers?: Readonly<Record<string, string>>;
 };
 
 export type CodexMcpServerDeclarations = Readonly<
   Partial<Record<PluginMcpServerId, CodexMcpServerConfig>>
 >;
 
+/** Bundled settings the Codex relocation carries; anything else is rejected. */
+const RELOCATED_SERVER_KEYS = ['type', 'url', 'bearer_token_env_var'];
+
 /**
- * Authenticate the plugin's bundled connections without adding new servers.
- *
- * Claude Code reads the rewritten bundled file. Codex re-materializes its plugin
- * cache after startup, discarding edits to that file, so its connections are
- * removed from the bundle and returned for declaration in the run-owned user
- * configuration instead.
+ * Authenticate the plugin's bundled Claude Code connections without adding new
+ * servers. The rewritten bundled file carries references only.
  */
 export async function configurePluginMcp(
   state: MutableWorkspace,
   root: string,
-  adapter: 'claude-code' | 'codex',
   servers: readonly PluginMcpServerId[],
-): Promise<CodexMcpServerDeclarations> {
+): Promise<void> {
+  const { path, input } = await readPluginMcpBundle(state, root, 'claude-code');
+  await state.writeFile(
+    path,
+    Buffer.from(
+      `${JSON.stringify(configurePluginMcpDocument(input, servers), null, 2)}\n`,
+    ),
+  );
+}
+
+/** A validated Codex relocation, prepared without changing the workspace. */
+export type CodexPluginMcpRelocation = {
+  readonly path: string;
+  /** The bundle with the selected servers removed. */
+  readonly document: Record<string, unknown>;
+  readonly declarations: CodexMcpServerDeclarations;
+};
+
+/**
+ * Read and fully validate the move of the selected Codex connections out of the
+ * bundle. Codex re-materializes its plugin cache after startup, discarding edits
+ * to the bundled file, so these connections are declared in the run-owned user
+ * configuration instead. Nothing is written here.
+ */
+export async function prepareCodexPluginMcpRelocation(
+  state: ReadonlyWorkspace,
+  root: string,
+  servers: readonly PluginMcpServerId[],
+): Promise<CodexPluginMcpRelocation> {
+  const { path, input } = await readPluginMcpBundle(state, root, 'codex');
+  return { path, ...relocateCodexPluginMcp(input, servers) };
+}
+
+/** Remove the relocated servers from the bundle once they are declared. */
+export async function writeRelocatedPluginMcp(
+  state: MutableWorkspace,
+  relocation: CodexPluginMcpRelocation,
+): Promise<void> {
+  await state.writeFile(
+    relocation.path,
+    Buffer.from(`${JSON.stringify(relocation.document, null, 2)}\n`),
+  );
+}
+
+async function readPluginMcpBundle(
+  state: ReadonlyWorkspace,
+  root: string,
+  adapter: 'claude-code' | 'codex',
+): Promise<{ path: string; input: unknown }> {
   // Native manifests can redirect MCP loading. Only the conventional bundled
   // .mcp.json contract is supported until each alternate format is exercised.
   for (const manifest of [
@@ -66,18 +117,7 @@ export async function configurePluginMcp(
       'utf8',
     ),
   );
-  const { document, declarations } =
-    adapter === 'claude-code'
-      ? {
-          document: configurePluginMcpDocument(input, servers),
-          declarations: {},
-        }
-      : relocateCodexPluginMcp(input, servers);
-  await state.writeFile(
-    path,
-    Buffer.from(`${JSON.stringify(document, null, 2)}\n`),
-  );
-  return declarations;
+  return { path, input };
 }
 
 /** Pure Claude Code transformation; the document contains references only. */
@@ -103,7 +143,13 @@ export function configurePluginMcpDocument(
   return output;
 }
 
-/** Pure Codex transformation: move each selected connection to user configuration. */
+/**
+ * Pure Codex transformation. Each selected server must be exactly a transport
+ * type, an endpoint URL, and optionally a bearer reference that Forge replaces.
+ * Everything else (`enabled`, tool allow/deny lists, timeouts, static or
+ * environment headers, unknown fields) would be lost by the move, and Forge does
+ * not carry it, so it is rejected before either file is touched.
+ */
 export function relocateCodexPluginMcp(
   input: unknown,
   servers: readonly PluginMcpServerId[],
@@ -120,29 +166,21 @@ export function relocateCodexPluginMcp(
     {};
   for (const name of servers) {
     const server = connections[name]!;
-    const headers: Partial<
-      Record<'http_headers' | 'env_http_headers', Record<string, string>>
-    > = {};
-    for (const field of ['http_headers', 'env_http_headers'] as const) {
-      const value = server[field];
-      if (value === undefined) continue;
-      if (
-        !record(value) ||
-        Object.values(value).some((header) => typeof header !== 'string')
-      )
-        throw new Error(`Plugin MCP server ${name} has invalid headers.`);
-      const retained = Object.fromEntries(
-        Object.entries(value as Record<string, string>).filter(
-          ([key]) => key.toLowerCase() !== 'authorization',
-        ),
+    if (Object.keys(server).some((key) => !RELOCATED_SERVER_KEYS.includes(key)))
+      throw new Error(
+        `Plugin MCP server ${name} has settings that Codex user configuration relocation does not carry.`,
       );
-      if (Object.keys(retained).length) headers[field] = retained;
-    }
+    if (
+      server.bearer_token_env_var !== undefined &&
+      typeof server.bearer_token_env_var !== 'string'
+    )
+      throw new Error(`Plugin MCP server ${name} has invalid auth.`);
+    if (!isSafeMcpEndpointUrl(server.url as string))
+      throw new Error(`Plugin MCP server ${name} has an unsupported URL.`);
     declarations[name] = {
       url: server.url as string,
       bearer_token_env_var:
         PLUGIN_MCP_CREDENTIALS[name].credentialEnvironmentVariable,
-      ...headers,
     };
     delete connections[name];
   }

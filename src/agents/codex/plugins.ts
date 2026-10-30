@@ -14,7 +14,10 @@ import {
   isSafeWorkspaceRelativePath,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
-import { configurePluginMcp } from '../pluginMcp.ts';
+import {
+  prepareCodexPluginMcpRelocation,
+  writeRelocatedPluginMcp,
+} from '../pluginMcp.ts';
 import { inspectInstalledPluginTree } from '../pluginTree.ts';
 import {
   assertCodexRuntimeLayout,
@@ -260,11 +263,17 @@ export function createCodexPluginInstaller(options: {
             installed.version,
           );
           const mcpServers = context.mcpServers;
-          if (mcpServers)
-            await declareCodexMcpServers(
+          if (mcpServers) {
+            // Validate the whole move and the merged configuration before
+            // changing either file.
+            const relocation = await prepareCodexPluginMcpRelocation(
               home,
-              await configurePluginMcp(home, relative, 'codex', mcpServers),
+              relative,
+              mcpServers,
             );
+            await declareCodexMcpServers(home, relocation.declarations);
+            await writeRelocatedPluginMcp(home, relocation);
+          }
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,
