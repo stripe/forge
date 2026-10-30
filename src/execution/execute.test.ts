@@ -282,16 +282,6 @@ describe('executeEval', () => {
       assert.equal(actual.score, 0);
     }
     assert.deepEqual(completed.result.warnings, [warning]);
-    const observedWarnings = observed.filter(({ type }) => type === 'warning');
-    assert.equal(observedWarnings.length, 1);
-    {
-      const actual = observedWarnings[0];
-      assert.ok(actual);
-      assert.equal(actual.runId, 'run-cleanup-warning');
-      assert.equal(actual.type, 'warning');
-      assert.equal(actual.phase, 'runtime_dispose');
-      assert.deepEqual(actual.message, warning.message);
-    }
     assert.ok(!JSON.stringify(observed).includes(SECRET));
     assert.deepEqual(fixture.calls.slice(-2), [
       'runtime:dispose',

@@ -10,13 +10,11 @@ export type RunPhase =
   | 'runtime_dispose'
   | 'result_commit';
 
+export type RunEventType = 'phase_started' | 'phase_completed';
+
 export interface RunEvent {
-  readonly runId: string;
-  readonly sequence: number;
-  readonly timestamp: string;
-  readonly type: 'phase_started' | 'phase_completed' | 'warning';
+  readonly type: RunEventType;
   readonly phase: RunPhase;
-  readonly message?: string;
 }
 
 /** Observers receive redacted lifecycle events and have no runtime authority. */
