@@ -727,7 +727,11 @@ on matched cases and agent configurations. See
 [scoring semantics](docs/architecture.md#evaluation-and-scoring).
 
 `criterion_scores` reports Required and Recommended scores in each run's
-`evaluation`, the overall summary, and each case/configuration group:
+`evaluation`, the overall summary, and each case/configuration group. These
+views keep judge errors separate from failures through `judge_errors`. Strict
+is `null` for an empty set or any errored judgment in that set. Avg uses only
+valid pass/fail judgments and is `null` when none remain.
+For fully judged, nonempty sets:
 
 | Criteria set | `strict` | `avg` |
 | --- | --- | --- |
@@ -737,32 +741,31 @@ on matched cases and agent configurations. See
 For example, passing one MUST and failing one SHOULD gives Required Strict and
 Avg of `1`, Recommended Strict of `0`, and Recommended Avg of `0.5`. OPTIONAL
 and file checks do not affect these scores. An empty set has `null` scores.
-For summary and case groups, `strict` is the fraction of eligible evaluations
-where all relevant criteria passed. `avg` pools their passed/total counts, so
-each criterion result has equal weight across runs. The headline weights each
-evaluation equally, while `criterion_scores.recommended.avg` pools MUST and
-SHOULD results so each judged criterion has equal weight. Each set's `evaluations`
-counts completed evaluations with at least one relevant criterion; empty sets,
-pending runs, and execution errors do not enter either denominator.
+For summary and case groups, `strict` is the fraction of fully judged, nonempty
+evaluations where all relevant criteria passed. `avg` pools passed/valid counts,
+including valid judgments from partly judged evaluations, so each criterion
+result has equal weight across runs. The headline weights each evaluation
+equally, while `criterion_scores.recommended.avg` pools MUST and SHOULD results
+so each judged criterion has equal weight. Each set's `evaluations` counts completed
+evaluations containing that set, including those with judge errors; it is not
+the Strict or Avg denominator. Empty sets, pending runs, and execution errors
+contribute to neither score. Each score is `null` when its denominator is zero.
 
 `criterion_scores.blend.score` combines a hard MUST gate with the SHOULD average.
-Any failed MUST gives `0`; otherwise the score is passed SHOULD / total SHOULD.
-For example, passing all MUST and half the SHOULD gives `0.5`; failing one MUST
-gives `0` even if every SHOULD passes. Without MUST, Blend is the SHOULD average.
-Without SHOULD, it is `1` if all MUST pass, else `0`. With neither, it is `null`.
-OPTIONAL criteria and file checks do not affect Blend.
+Any judged MUST failure gives `0`, even alongside MUST errors. Otherwise, any
+MUST error leaves the gate unresolved and Blend is `null`. Once all MUST pass,
+the score is passed SHOULD / valid SHOULD. For example, passing all MUST and
+half the valid SHOULD gives `0.5`; failing one MUST gives `0` even if every
+SHOULD passes. SHOULD-only cases use their valid pass fraction; MUST-only
+cases get `1` when all MUST pass. After a passing MUST gate, a nonempty but
+all-error SHOULD set gives `null`. An empty view is `null`. OPTIONAL criteria
+and file checks do not affect Blend.
 
-Summary and case groups average the per-evaluation Blend scores with equal
-weight, including zeros from failed MUST gates. Their `blend.evaluations` counts
-completed evaluations with any MUST or SHOULD; empty, pending, and errored runs
-are excluded. Blend is a report view; saved evaluation `score`, `status`, and
-`pass_rate` retain the rules above.
-
-Judge errors never count as failures. A set containing an errored criterion has
-`null` Strict for that evaluation and casts no Strict vote in aggregates; Avg
-counts only judged criteria. A judged MUST failure still gives Blend `0`; MUST
-errors without one leave Blend `null`, and SHOULD errors drop out of its SHOULD
-fraction. Groups average Blend over evaluations whose Blend is not `null`.
+Summary and case groups average the non-null per-evaluation Blend scores with
+equal weight, including zeros from failed MUST gates. Their `blend.evaluations`
+counts those completed evaluations; unresolved scores, pending runs, and
+execution errors are excluded. Blend is a report view; saved
+evaluation `score`, `status`, and `pass_rate` retain the rules above.
 
 `criteria_by_requirement` breaks out MUST, SHOULD, and OPTIONAL in the summary,
 case groups, and run rows, retaining passed, total, and errored criterion counts.
@@ -843,8 +846,12 @@ or partial leaks.
 sizes and digests; programmatic consumers use `verifyCompletedRun(location)`
 before trusting them. Saved artifacts record their producing Forge version:
 official releases require an exact reader version, while development versions
-use current strict schemas on a best-effort basis. Reports are derived
-snapshots and can be stale after interruption.
+use current strict schemas on a best-effort basis. Report readers and writers
+must use matching shapes, including after a rollout or revert: readers that
+require `criterion_scores` reject reports missing it, and earlier readers
+reject the added fields. For compatible saved plans and results, `--resume`
+regenerates the report without rerunning verified completed evals. Reports are
+derived snapshots and can be stale after interruption.
 
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
