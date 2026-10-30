@@ -77,7 +77,12 @@ export function searchRequest(query: string): string {
 /** Keep source discovery separate from the provider's synthesized answer. */
 export function parseSearchResponse(raw: string): SearchResult {
   const payload: unknown = JSON.parse(raw);
-  if (!isRecord(payload) || payload.error || !Array.isArray(payload.output))
+  if (
+    !isRecord(payload) ||
+    payload.error ||
+    (typeof payload.status === 'string' && payload.status !== 'completed') ||
+    !Array.isArray(payload.output)
+  )
     throw new Error('Search backend returned an invalid response.');
   const sources: { url: string; title?: string }[] = [];
   const seen = new Set<string>();
