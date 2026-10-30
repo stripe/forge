@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
+import { ZodError } from 'zod';
 import { loadClaudeEvidence } from '../agents/claude-code/evidence.ts';
 import { parseAtifTrajectory, serializeAtifTrajectory } from '../atif/index.ts';
 import { credentialReference } from '../contracts/credentials.ts';
@@ -15,6 +16,7 @@ import {
 import { sha256Digest } from '../model/hashes.ts';
 import { parseResolvedRunPlan } from '../model/index.ts';
 import {
+  ArtifactStoreError,
   createArtifactStore,
   type JudgeEvidenceV1,
   verifyCompletedRun,
@@ -225,6 +227,7 @@ async function rebindJudge(
   location: string,
   change: (judge: {
     transcript: { steps: { message?: string }[]; omitted?: string };
+    workspace: JudgeEvidenceV1['workspace'];
   }) => void,
 ) {
   const judgePath = path.join(location, 'judge-evidence.json');
@@ -544,6 +547,91 @@ describe('executeEval judge evidence budget and local store round trips', () => 
       assert.equal(trajectoryBytes.split('[REDACTED]').length - 1, nativeFits ? 3 : 2);
     });
   }
+
+  it('rejects an omitted over-budget trajectory with native provenance', async (t) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-budget-native-omission-'),
+    );
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const { completed, trajectoryBytes } = await runBudgetEval(root, {
+      assistant: 'y'.repeat(1_100_000),
+    });
+    assert.ok(Buffer.byteLength(
+      createJudgeTranscriptProjection(JSON.parse(trajectoryBytes)).transcriptJson,
+      'utf8',
+    ) > MAX_CRITERION_JUDGE_PROMPT_BYTES);
+    const resultPath = path.join(completed.location, 'result.json');
+    const result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
+    result.evidence.provenance.source = {
+      kind: 'native_log',
+      format: 'test-native',
+      session_id: SESSION,
+    };
+    result.evidence.completeness = 'complete';
+    result.evidence.warnings = [];
+    await fs.writeFile(resultPath, serializeCanonicalJson(result));
+    await assert.rejects(
+      verifyCompletedRun(completed.location),
+      (error: unknown) => error instanceof ArtifactStoreError &&
+        /omission is not justified/.test(error.message),
+    );
+  });
+
+  it('rejects omitted over-budget driver evidence without fallback completeness', async (t) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-budget-completeness-'),
+    );
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const { completed, trajectoryBytes } = await runBudgetEval(root, {
+      assistant: 'y'.repeat(1_100_000),
+    });
+    assert.ok(Buffer.byteLength(
+      createJudgeTranscriptProjection(JSON.parse(trajectoryBytes)).transcriptJson,
+      'utf8',
+    ) > MAX_CRITERION_JUDGE_PROMPT_BYTES);
+    const resultPath = path.join(completed.location, 'result.json');
+    const result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
+    result.evidence.completeness = 'complete';
+    result.evidence.warnings = [];
+    await fs.writeFile(resultPath, serializeCanonicalJson(result));
+    // The public verifier parses result.json first. Its schema already requires
+    // driver provenance and fallback completeness together, before omission checks.
+    await assert.rejects(
+      verifyCompletedRun(completed.location),
+      (error: unknown) => error instanceof ZodError && error.issues.some(
+        ({ path, message }) => path.join('.') === 'evidence.completeness' &&
+          /fallback provenance and fallback completeness/.test(message),
+      ),
+    );
+  });
+
+  it('reports an invalid recorded prompt budget as an ArtifactStoreError', async (t) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-budget-invalid-workspace-'),
+    );
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const { completed } = await runBudgetEval(root, {
+      assistant: 'y'.repeat(1_100_000),
+    });
+    await rebindJudge(completed.location, (judge) => {
+      judge.workspace = {
+        entries: Array.from({ length: 60 }, (_, index) => ({
+          path: `file-${index}.ts`,
+          content: 'x'.repeat(20_000),
+          truncated: false,
+        })),
+        complete: true,
+        warnings: [],
+      };
+    });
+    await assert.rejects(
+      verifyCompletedRun(completed.location),
+      (error: unknown) => error instanceof ArtifactStoreError &&
+        /prompt budget could not be verified/.test(error.message) &&
+        error.cause instanceof TypeError &&
+        /Mandatory criterion judge prompt exceeds/.test(error.cause.message),
+    );
+  });
 
   it('rejects forged omission for under-budget driver evidence with rebound hashes', async (t) => {
     const root = await fs.mkdtemp(
