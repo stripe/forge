@@ -22,6 +22,11 @@ export {
   parseCriterionJudgment,
 } from './criterionJudge.ts';
 export {
+  type JudgeEvidenceBudgetInput,
+  type JudgeEvidenceBudgetSelection,
+  selectJudgeEvidence,
+} from './judgeEvidenceBudget.ts';
+export {
   createJudgeTranscriptProjection,
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -37,7 +42,6 @@ export {
   type JudgeVisibleStepV1,
   type JudgeVisibleToolCallV1,
   type JudgeVisibleUserStepV1,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
 export {

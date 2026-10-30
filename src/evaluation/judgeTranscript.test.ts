@@ -13,7 +13,6 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeTranscriptProjectionV1,
   type JudgeVisibleStepV1,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
 
@@ -349,31 +348,15 @@ describe('parseJudgeTranscriptProjection', () => {
     );
   });
 
-  it('bounds transcript bytes and decoded JSON complexity before schema parsing', () => {
+  it('retains large projections and bounds decoded JSON complexity', () => {
     const valid = createJudgeTranscriptProjection(richTrajectory());
-    assert.throws(
-      () =>
-        createJudgeTranscriptProjection({
-          schema_version: 'ATIF-v1.8',
-          agent: { name: 'test-agent', version: '1' },
-          steps: [
-            {
-              step_id: 1,
-              source: 'user',
-              message: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES),
-            },
-          ],
-        }),
-      new RegExp(`${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit`),
-    );
-    assert.throws(
-      () =>
-        parseJudgeTranscriptProjection({
-          ...valid,
-          transcriptJson: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES + 1),
-        }),
-      new RegExp(`${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit`),
-    );
+    const large = createJudgeTranscriptProjection({
+      schema_version: 'ATIF-v1.8',
+      agent: { name: 'test-agent', version: '1' },
+      steps: [{ step_id: 1, source: 'user', message: 'x'.repeat(1024 * 1024) }],
+    });
+    assert.ok(Buffer.byteLength(large.transcriptJson) > 1024 * 1024);
+    assert.deepEqual(parseJudgeTranscriptProjection(large), large);
 
     const deeplyNested = `${'{"nested":'.repeat(65)}null${'}'.repeat(65)}`;
     assert.throws(
@@ -399,7 +382,6 @@ describe('parseJudgeTranscriptProjection', () => {
         ],
       },
     ]);
-    assert.ok(Buffer.byteLength(tooManyNodes) <= MAX_JUDGE_TRANSCRIPT_BYTES);
     assert.throws(
       () =>
         parseJudgeTranscriptProjection({

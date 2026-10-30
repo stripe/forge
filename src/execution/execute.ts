@@ -56,6 +56,7 @@ import {
   resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
+import { criterionJudgePromptOverheadBytes } from '../evaluation/criterionJudge.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
@@ -64,9 +65,14 @@ import {
   judgeCriteria,
   renderJudgeWorkspaceEvidence,
 } from '../evaluation/index.ts';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { selectJudgeEvidence } from '../evaluation/judgeEvidenceBudget.ts';
+import {
+  createJudgeTranscriptProjection,
+  parseJudgeTranscriptProjection,
+} from '../evaluation/judgeTranscript.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import {
+  createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
   selectAgentEvidence,
 } from '../evidence/selection.ts';
@@ -487,12 +493,9 @@ export async function executeEvalWithTestHooks(
       );
       return { evidence, nativeArtifact };
     });
-    const redacted = redactNormalizedTrajectory(
+    let redacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
-    );
-    const trajectoryJson = serializeAtifTrajectory(
-      redacted.evidence.trajectory,
     );
 
     const evaluated = await events.phase('evaluation', async () => {
@@ -513,9 +516,65 @@ export async function executeEvalWithTestHooks(
           secrets,
         );
         const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
-        const judgeTranscript = createJudgeTranscriptProjection(
+        const selectedTranscript = createJudgeTranscriptProjection(
           redacted.evidence.trajectory,
         );
+        const nativeSelected =
+          redacted.evidence.provenance.source.kind === 'native_log' ||
+          redacted.evidence.provenance.source.kind === 'atif';
+        const promptOverheadBytes = criterionJudgePromptOverheadBytes({
+          criteria,
+          exampleAnswer: input.plan.evaluation.example_answer,
+          workspaceText: safeWorkspaceText,
+        });
+        const selectedTranscriptBytes = Buffer.byteLength(
+          selectedTranscript.transcriptJson,
+          'utf8',
+        );
+        let budget = selectJudgeEvidence({
+          promptOverheadBytes,
+          ...(nativeSelected
+            ? { nativeTranscriptBytes: selectedTranscriptBytes }
+            : { driverTranscriptBytes: selectedTranscriptBytes }),
+        });
+        let judgeTranscript = selectedTranscript;
+        if (nativeSelected && budget.evidence !== 'native') {
+          // Build driver evidence only after the native candidate exceeds the
+          // shared budget. Under-budget native runs retain their original path.
+          redacted = redactNormalizedTrajectory(
+            createDriverFallbackEvidence(
+              {
+                agent: preflight.agent,
+                identity: preflight.agentEvidenceIdentity,
+                model: input.plan.agent.model,
+                sessionId: interaction.sessionId!,
+                completedTurns: interaction.turns,
+              },
+              {
+                code: 'value_omitted',
+                message:
+                  'Native evidence exceeded the judge budget; selected driver fallback evidence.',
+              },
+            ),
+            secrets,
+          );
+          judgeTranscript = createJudgeTranscriptProjection(
+            redacted.evidence.trajectory,
+          );
+          budget = selectJudgeEvidence({
+            promptOverheadBytes,
+            driverTranscriptBytes: Buffer.byteLength(
+              judgeTranscript.transcriptJson,
+              'utf8',
+            ),
+          });
+        }
+        if (budget.evidence === 'omitted') {
+          judgeTranscript = parseJudgeTranscriptProjection({
+            ...judgeTranscript,
+            transcriptJson: '[]\n',
+          });
+        }
         criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
@@ -558,6 +617,9 @@ export async function executeEvalWithTestHooks(
               copied_context: judgeTranscript.copiedContext,
               included_fields: [...judgeTranscript.includedFields],
               steps: JSON.parse(judgeTranscript.transcriptJson),
+              ...(budget.evidence === 'omitted'
+                ? { omitted: 'judge_budget_exceeded' }
+                : {}),
             },
             workspace: {
               entries: safeWorkspace.entries.map((entry) => ({
@@ -592,7 +654,7 @@ export async function executeEvalWithTestHooks(
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
       setupArtifact,
-      trajectoryJson,
+      serializeAtifTrajectory(redacted.evidence.trajectory),
       interactionArtifact,
       evaluated.workspaceEvidence,
       evaluated.judgeEvidence,

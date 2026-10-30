@@ -8,7 +8,10 @@ import type {
   RunArtifactTransaction,
 } from '../contracts/artifacts.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import { criterionJudgePromptOverheadBytes } from '../evaluation/criterionJudge.ts';
+import { selectJudgeEvidence } from '../evaluation/judgeEvidenceBudget.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { renderRecordedJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
 import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
@@ -640,6 +643,29 @@ function verifyJudgeEvidence(
   const judgeEvidence = parseJsonArtifact(path, body, (value) =>
     parseJudgeEvidence(value, { forgeVersion: result.forge.version }),
   );
+  if (judgeEvidence.transcript.omitted !== undefined) {
+    const budget = selectJudgeEvidence({
+      promptOverheadBytes: criterionJudgePromptOverheadBytes({
+        criteria: plan.evaluation.judging_criteria,
+        exampleAnswer: plan.evaluation.example_answer,
+        workspaceText: renderRecordedJudgeWorkspaceEvidence(judgeEvidence.workspace),
+      }),
+      driverTranscriptBytes: Buffer.byteLength(
+        createJudgeTranscriptProjection(trajectory).transcriptJson,
+        'utf8',
+      ),
+    });
+    if (
+      result.evidence.provenance.source.kind !== 'driver_fallback' ||
+      result.evidence.completeness !== 'fallback' ||
+      budget.evidence !== 'omitted'
+    ) {
+      throw new ArtifactStoreError(
+        'judge-evidence.json transcript omission is not justified by over-budget driver evidence.',
+      );
+    }
+    return;
+  }
   if (
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
     createJudgeTranscriptProjection(trajectory).transcriptJson

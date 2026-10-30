@@ -195,6 +195,8 @@ export interface JudgeEvidenceV1 {
     readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
     /** Canonical serialization of these steps is the judge's transcript input. */
     readonly steps: readonly JudgeVisibleStepV1[];
+    /** Present only when driver evidence exceeds the whole-prompt budget. */
+    readonly omitted?: 'judge_budget_exceeded';
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];

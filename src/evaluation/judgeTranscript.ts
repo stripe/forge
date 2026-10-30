@@ -14,8 +14,6 @@ import { serializeCanonicalJson } from '../serialization.ts';
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
-/** Portable upper bound before workspace, criterion, and prompt text are added. */
-export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
 export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze([
   'user',
@@ -134,7 +132,6 @@ export function parseJudgeTranscriptProjection(
 ): JudgeTranscriptProjectionV1 {
   assertBoundedProjectionJson(input, 'metadata');
   const projection = ProjectionSchema.parse(input);
-  assertTranscriptByteLimit(projection.transcriptJson);
   let decoded: unknown;
   try {
     decoded = JSON.parse(projection.transcriptJson);
@@ -225,7 +222,6 @@ function projectObservationResult(
 }
 
 function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
-  assertTranscriptByteLimit(transcriptJson);
   return Object.freeze({
     source: JUDGE_TRANSCRIPT_SOURCE,
     projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
@@ -235,15 +231,6 @@ function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
     includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
     transcriptJson,
   });
-}
-
-function assertTranscriptByteLimit(transcriptJson: string): void {
-  const bytes = Buffer.byteLength(transcriptJson, 'utf8');
-  if (bytes > MAX_JUDGE_TRANSCRIPT_BYTES) {
-    throw new TypeError(
-      `Judge transcript projection exceeds the ${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit.`,
-    );
-  }
 }
 
 function assertBoundedProjectionJson(
