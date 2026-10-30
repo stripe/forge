@@ -1107,8 +1107,10 @@ recomputes the budget from the plan and recorded workspace text to establish
 that the stored driver's projection exceeds it. Verification checks consistency
 with recorded workspace text; it does not reconstruct the workspace. The
 omission field identifies code-only grading even when native evidence was
-already unavailable. Empty steps without this record still require the ordinary
-projection equality check.
+already unavailable. `result.json` also records completeness `fallback` and a
+`value_omitted` evidence warning that grading used workspace evidence only.
+Empty steps without the omission record still require the ordinary projection
+equality check.
 
 Budget selection never trims transcript contents or reduces workspace text to
 make room. Existing workspace collection and canonical ATIF bounds still apply.

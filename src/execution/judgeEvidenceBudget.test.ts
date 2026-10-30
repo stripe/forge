@@ -374,6 +374,24 @@ describe('executeEval judge evidence budget and local store round trips', () => 
         completed.result.evidence.provenance.source.kind,
         'driver_fallback',
       );
+      const persistedResult = JSON.parse(
+        await fs.readFile(path.join(completed.location, 'result.json'), 'utf8'),
+      );
+      assert.equal(persistedResult.evidence.completeness, 'fallback');
+      assert.ok(
+        persistedResult.evidence.warnings.some(
+          ({ code, message }: { code: string; message: string }) =>
+            code === 'value_omitted' &&
+            message ===
+              'Transcript exceeded the judge budget; graded on workspace evidence only.',
+        ),
+      );
+      assert.ok(
+        !persistedResult.evidence.warnings.some(
+          ({ message }: { message: string }) =>
+            message.includes('selected driver fallback evidence'),
+        ),
+      );
       assert.deepEqual(judge.transcript.steps, []);
       assert.equal(judge.transcript.omitted, 'judge_budget_exceeded');
       assert.equal(

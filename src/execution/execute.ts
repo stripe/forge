@@ -553,7 +553,7 @@ export async function executeEvalWithTestHooks(
               {
                 code: 'value_omitted',
                 message:
-                  'Native evidence exceeded the judge budget; selected driver fallback evidence.',
+                  'Native evidence exceeded the judge budget; driver fallback is selected if it fits.',
               },
             ),
             secrets,
@@ -570,6 +570,20 @@ export async function executeEvalWithTestHooks(
           });
         }
         if (budget.evidence === 'omitted') {
+          redacted = {
+            ...redacted,
+            evidence: createNormalizedTrajectory({
+              ...redacted.evidence,
+              warnings: [
+                ...redacted.evidence.warnings,
+                {
+                  code: 'value_omitted',
+                  message:
+                    'Transcript exceeded the judge budget; graded on workspace evidence only.',
+                },
+              ],
+            }),
+          };
           judgeTranscript = parseJudgeTranscriptProjection({
             ...judgeTranscript,
             transcriptJson: '[]\n',
