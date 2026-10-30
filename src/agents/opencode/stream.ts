@@ -24,12 +24,15 @@ export function parseOpenCodeStream(
     if (lines.length > 100_000) throw new Error();
     let id: string | undefined;
     let activeMessage: string | undefined;
+    let finishedMessage: string | undefined;
     let stepHasTools = false;
+    let messageHasTools = false;
     let completed = false;
     let cost = 0;
     const parts = new Map<string, NativeRecord>();
     const calls = new Map<string, AgentToolCall>();
-    const texts: string[] = [];
+    const messages = new Set<string>();
+    const texts = new Map<string, string[]>();
     for (const line of lines) {
       if (!line.trim()) continue;
       const event = record(parseJson(line, 1024 * 1024));
@@ -59,9 +62,22 @@ export function parseOpenCodeStream(
       ) {
         // Pinned auto-compaction injects a synthetic USER continuation between
         // assistant steps. `run --format json` emits it without a role field.
-        if (activeMessage !== undefined) throw new Error();
+        if (
+          activeMessage !== undefined ||
+          !completed ||
+          messageHasTools ||
+          finishedMessage === undefined ||
+          messages.has(message)
+        )
+          throw new Error();
         string(part.text);
         nonnegative(record(part.time).end);
+        // v1.19.0 marks the summary on the stored message, but JSON stdout
+        // contains only parts. The immediately finished, tool-free assistant
+        // message is the summary preceding this synthetic continuation.
+        texts.delete(finishedMessage);
+        messages.add(message);
+        finishedMessage = undefined;
         completed = false;
         continue;
       }
@@ -70,6 +86,12 @@ export function parseOpenCodeStream(
         // with a new start part and no finish for the failed attempt.
         if (activeMessage !== undefined && activeMessage !== message)
           throw new Error();
+        if (activeMessage === undefined) {
+          if (messages.has(message)) throw new Error();
+          messages.add(message);
+          texts.set(message, []);
+          messageHasTools = false;
+        }
         activeMessage = message;
         // `stop` finishes one model step. Tools and automatic compaction can
         // lead to another step in the same successful CLI invocation.
@@ -81,13 +103,15 @@ export function parseOpenCodeStream(
           completed = terminal(part.reason) && !stepHasTools;
           cost += nonnegative(part.cost);
           activeMessage = undefined;
+          finishedMessage = message;
         } else if (event.type === 'text' && part.type === 'text') {
-          texts.push(string(part.text));
+          texts.get(message)!.push(string(part.text));
         } else if (event.type === 'reasoning' && part.type === 'reasoning') {
           string(part.text);
         } else if (event.type === 'tool_use' && part.type === 'tool') {
           const call = tool(part);
           stepHasTools = true;
+          messageHasTools = true;
           if (calls.has(call.id) || calls.size >= 2_000) throw new Error();
           calls.set(call.id, call);
         } else throw new Error();
@@ -96,7 +120,7 @@ export function parseOpenCodeStream(
     if (!completed || id === undefined || !Number.isFinite(cost))
       throw new Error();
     return {
-      text: texts.join('\n\n'),
+      text: [...texts.values()].flat().join('\n\n'),
       sessionId: id,
       toolCalls: [...calls.values()],
       costUsd: cost,

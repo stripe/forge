@@ -3,16 +3,22 @@ import { describe, it } from 'vitest';
 import {
   OPEN_CODE_MODEL,
   OPEN_CODE_SESSION,
+  openCodeEvents,
   openCodeExport,
 } from '../../../test/support/opencode.ts';
 import { parseAtifTrajectory } from '../../atif/index.ts';
 import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
-import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
+import {
+  selectAgentEvidence,
+  trajectoryCoversCompletedTurns,
+} from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/index.ts';
 import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
+import { createOpenCodeAdapter } from './index.ts';
+import { parseOpenCodeStream } from './stream.ts';
 
 const turns = [
   { prompt: 'First', response: 'Done.' },
@@ -33,6 +39,75 @@ function fixture(value: unknown = openCodeExport(turns)) {
   };
 }
 describe('OpenCode native evidence', () => {
+  it('uses the summary-free driver reply for compacted exports before native reconciliation', async () => {
+    const summaryTurn = { prompt: 'First', response: 'Compaction summary' };
+    const resumeTurn = { prompt: 'Continue', response: 'Done.' };
+    const value = openCodeExport([summaryTurn, resumeTurn]);
+    Object.assign(value.messages[1]!.parts[1]!, {
+      type: 'text',
+      text: 'Before.',
+    });
+    Object.assign(value.messages[3]!.parts[0]!, {
+      synthetic: true,
+      metadata: { compaction_continue: true },
+      time: { start: 1790000000000, end: 1790000000001 },
+    });
+    const events = openCodeEvents(summaryTurn);
+    events[1]!.type = 'text';
+    events[1]!.part = value.messages[1]!.parts[1]!;
+    const reply = parseOpenCodeStream(
+      [
+        ...events,
+        {
+          type: 'text',
+          sessionID: OPEN_CODE_SESSION,
+          part: value.messages[3]!.parts[0],
+        },
+        ...openCodeEvents(resumeTurn, 1),
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n'),
+    );
+    assert.equal(reply.text, 'Before.\n\nDone.');
+    // Both the summary marker and the synthetic user part independently make
+    // the export unavailable; compacted text never reaches reconciliation.
+    for (const summary of [true, false]) {
+      Object.assign(value.messages[2]!.info, { summary });
+      const { input, body } = fixture(value);
+      const collected = await loadOpenCodeEvidence(input);
+      assert.equal(collected.kind, 'unavailable');
+      const selected = selectAgentEvidence({
+        agent: createOpenCodeAdapter(),
+        identity: { name: 'opencode', version: '1.19.0' },
+        model: OPEN_CODE_MODEL,
+        sessionId: OPEN_CODE_SESSION,
+        completedTurns: [
+          {
+            user: summaryTurn.prompt,
+            assistant: reply.text,
+            toolCalls: reply.toolCalls,
+          },
+        ],
+        collected,
+      });
+      assert.equal(selected.provenance.source.kind, 'driver_fallback');
+      assert.deepEqual(
+        selected.warnings.map(({ code }) => code),
+        ['source_incomplete', 'fallback_used'],
+      );
+      assert.equal(selected.trajectory.steps[1]!.message, reply.text);
+      assert.equal(
+        JSON.stringify(
+          createJudgeTranscriptProjection(selected.trajectory),
+        ).includes('Compaction summary'),
+        false,
+      );
+      assert.equal(
+        Buffer.from((await loadOpenCodeNativeArtifact(input))!.body).toString(),
+        body,
+      );
+    }
+  });
   it('keeps valid continued stop steps and correlates parallel tools by ID', async () => {
     const value = openCodeExport([turns[0]!]);
     Object.assign(value.messages[1]!.info, { finish: 'stop' });

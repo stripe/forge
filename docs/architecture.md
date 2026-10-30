@@ -1135,7 +1135,11 @@ validates session/version/model identity and retains user text, assistant text,
 reasoning, correlated tool results and errors, and available usage. Compaction,
 attachments, unsupported conversation parts, or incomplete tools trigger
 explicit fallback. Exact parseable session exports remain restricted artifacts
-even when their content cannot be normalized.
+even when their content cannot be normalized. Native auto-compaction remains
+enabled; turn replies retain assistant text before and after compaction but
+exclude the summary message immediately preceding a synthetic continuation,
+rejecting ambiguous sequences. Compacted exports fall back before native text
+reconciliation, so the driver trajectory uses that summary-free reply.
 
 Before persistence or scoring, Forge redacts every resolved run and completion
 secret from the normalized trajectory. Provenance in `result.json` records:
