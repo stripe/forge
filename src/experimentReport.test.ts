@@ -533,7 +533,9 @@ describe('experiment run scorecards', () => {
         required: {
           ...required,
           evaluations: Number(
-            criteria.some((criterion) => criterion.requirement_level === 'MUST'),
+            criteria.some(
+              (criterion) => criterion.requirement_level === 'MUST',
+            ),
           ),
         },
         recommended: {
