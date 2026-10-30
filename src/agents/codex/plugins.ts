@@ -23,6 +23,7 @@ import {
   resolveCodexLayout,
 } from './layout.ts';
 import {
+  declareCodexMcpServers,
   prepareCodexPluginConfiguration,
   qualifiedPluginId,
   record,
@@ -260,7 +261,10 @@ export function createCodexPluginInstaller(options: {
           );
           const mcpServers = context.mcpServers;
           if (mcpServers)
-            await configurePluginMcp(home, relative, 'codex', mcpServers);
+            await declareCodexMcpServers(
+              home,
+              await configurePluginMcp(home, relative, 'codex', mcpServers),
+            );
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,

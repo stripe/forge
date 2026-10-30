@@ -200,7 +200,12 @@ secret values. See the README for other
 [credential grants](../README.md#requirements--credentials).
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
-Authorization header template; Codex uses `bearer_token_env_var`. Both reference
+Authorization header template in the plugin's MCP configuration. Codex
+re-materializes its plugin cache after startup, which discards edits to the
+bundled `.mcp.json` and leaves the server on Codex's OAuth path. Forge therefore
+moves each selected server out of the bundle into the run-owned Codex
+`config.toml` as `[mcp_servers.<name>]` with `bearer_token_env_var`; the
+plugin's skills and other content still load from the plugin. Both reference
 `STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
 use the same key. Tokens reach only agent commands, never setup commands.
 Forge fingerprints the configured installation. Runtime credential names and
