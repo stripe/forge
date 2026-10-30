@@ -1296,7 +1296,8 @@ explicitly. Missing driver results cannot be recovered by fallback. Resolved
 secrets are redacted before these
 prefixes are clipped. Assistant, argument, result, and call-count truncation
 has a visible marker and adds a `value_omitted` warning. Scoring consumes this
-exact bounded trajectory, and judging receives its declared root-behavior projection. If Ava
+exact bounded trajectory; judging receives its declared root-behavior projection
+subject to the [whole-prompt budget](#judge-visible-projection). If Ava
 fails before any agent turn, the system-only fallback instead identifies
 `role_player_error` and has no agent session ID.
 
@@ -1441,7 +1442,7 @@ secret from the normalized trajectory. Provenance in `result.json` records:
 - exact session ID when applicable;
 - adapter ID and version;
 - normalization completeness and warnings; and
-- replacement count.
+- replacement count for the saved normalized evidence.
 
 ### Judge-visible projection
 
@@ -1468,36 +1469,44 @@ reasoning.
 
 The projection policy is declared in
 [`src/evaluation/judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts).
-`judge-evidence.json` stores both that policy and the exact projected steps; its
-producing Forge release governs their interpretation and verification. The
-verifier recreates the projection from `trajectory.json` and requires bytewise
-canonical equivalence. Embedded steps are required; a policy-only artifact is
-invalid. Consumers can reproduce these exact bytes with
-`createJudgeTranscriptProjection` from `@stripe/forge`: canonical serialization
-of `transcript.steps` reproduces the transcript JSON supplied to each request.
-`judgeCriteria` accepts a validated projection rather than an arbitrary
-transcript string.
+`judge-evidence.json` stores that policy and the exact steps supplied to every
+criterion; its producing Forge release governs interpretation and verification.
+Consumers can reproduce the transcript JSON with canonical serialization of
+`transcript.steps`. Normally, the verifier requires bytewise canonical equality
+with `createJudgeTranscriptProjection(trajectory)` from `@stripe/forge`.
+`judgeCriteria` accepts a validated projection rather than an arbitrary string;
+bounded-JSON graph preflight still applies before recursive validation.
 
-Projected transcript JSON is capped at 786,432 UTF-8 bytes (768 KiB), including
-markers and the final LF. Oversized projections retain equally sized start/end
-excerpts of the canonical step JSON, with cuts at Unicode code-point boundaries.
-The largest equal code-unit prefix/suffix pair that fits after JSON escaping is
-kept. The transcript then contains a single `source: "omission"` record with
-`message`, `prefix`, and `suffix`, rather than complete conversation steps.
-The marker names the missing middle; no content is invented to fill it.
-`JudgeTranscriptProjectionV1.warnings` and `judge-evidence.json.transcript.warnings`
-record `transcript_truncated`. These optional fields are absent for untruncated
-projections; readers accept older artifacts without them. A marked excerpt
-requires its exact warning. Judge-only loss is absent from `result.evidence`,
-which describes the canonical trajectory. The full saved trajectory remains
-unchanged. Completed-run verification recomputes the projection: its limit,
-marker text, and cut rule are part of the artifact contract. Changing them can
-invalidate saved truncated runs; inspect those runs with the producing build.
-Untrusted projections still reject excess bytes and invalid shapes, with
-bounded-JSON graph preflight before recursive validation. The complete rendered
-criterion prompt is capped at 1,048,576 UTF-8 bytes before a provider is invoked. Each
-authored criterion is limited to 65,536 characters, matching the persisted
-evaluation bound.
+Execution budgets transcript bytes against the complete criterion prompt's
+1,048,576-byte UTF-8 limit. Instructions, the largest rendered criterion with
+the optional example-answer section, and all collected workspace text take
+priority. The transcript receives the remaining bytes, and every criterion
+uses the same selection. `selectJudgeEvidence` exposes this pure choice for
+already-sized inputs; there is no fixed transcript byte cap. Each authored
+criterion remains limited to 65,536 characters.
+
+If the native projection exceeds that budget, Forge selects the existing
+completed-turn driver fallback, saves it as `trajectory.json`, and records a
+`value_omitted` warning explaining that native evidence exceeded the judge
+budget. Completeness becomes `fallback`; captured native bytes remain a
+restricted artifact. If the driver projection also exceeds the budget, judging
+uses workspace evidence with an empty transcript. In that case alone,
+`judge-evidence.json` records `transcript.omitted: "judge_budget_exceeded"` and
+`transcript.steps: []`. The verifier requires fallback driver provenance and
+recomputes the budget from the plan and recorded workspace text to establish
+that the stored driver's projection exceeds it. Verification checks consistency
+with recorded workspace text; it does not reconstruct the workspace. The
+omission field identifies code-only grading even when native evidence was
+already unavailable. `result.json` also records completeness `fallback` and a
+`value_omitted` evidence warning that grading used workspace evidence only.
+Empty steps without the omission record still require the ordinary projection
+equality check.
+
+Budget selection never trims transcript contents or reduces workspace text to
+make room. Existing workspace collection and canonical ATIF bounds still apply.
+Transcript overflow degrades evidence instead of failing evaluation; mandatory
+prompt text, including the empty transcript JSON, must still fit the unchanged
+whole-prompt and provider limits.
 
 ## Evaluation and scoring
 
@@ -2143,7 +2152,8 @@ hashes. It also requires:
   interaction;
 - zero-turn role-player failures to use the system-only fallback shape;
 - conditional canonical artifacts to exist exactly when required; and
-- judge evidence to match the projection of the stored trajectory.
+- judge evidence to match the stored trajectory projection, or carry the
+  verified driver-budget omission described in [judge-visible projection](#judge-visible-projection).
 
 `criterionResultMatchesDefinition` from `@stripe/forge` compares a recorded
 judgment's text, label, and requirement level

@@ -12,9 +12,10 @@ import {
   type CriterionJudgeInput,
   createJudgeTranscriptProjection,
   judgeCriteria,
-  renderJudgeWorkspaceEvidence,
   scoreEvaluation,
 } from '../evaluation/index.ts';
+import { EMPTY_JUDGE_TRANSCRIPT } from '../evaluation/judgeTranscript.ts';
+import { renderRecordedJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import {
   completionBindingFor,
   prepareCompletionRuntime,
@@ -79,11 +80,16 @@ export interface SavedJudgeInputs {
 export function judgeInputFromSavedRun(
   saved: SavedJudgeInputs,
 ): Omit<CriterionJudgeInput, 'signal'> {
-  const workspaceText = renderJudgeWorkspaceEvidence(
+  const workspaceText = renderRecordedJudgeWorkspaceEvidence(
     saved.judgeEvidence.workspace,
   );
   return {
-    transcript: createJudgeTranscriptProjection(saved.trajectory),
+    // Code-only grading recorded an explicit omission; every other run's
+    // judge transcript is the projection of its saved trajectory.
+    transcript:
+      saved.judgeEvidence.transcript.omitted === undefined
+        ? createJudgeTranscriptProjection(saved.trajectory)
+        : EMPTY_JUDGE_TRANSCRIPT,
     criteria: saved.plan.evaluation.judging_criteria,
     evidenceWarnings: criterionEvidenceWarnings({
       trajectory: saved.evidence ?? {

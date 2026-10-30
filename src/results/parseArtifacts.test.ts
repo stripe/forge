@@ -8,7 +8,6 @@ import {
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
 } from '../evaluation/judgeTranscript.ts';
 import { FORGE_VERSION } from '../version.ts';
 import {
@@ -864,20 +863,10 @@ describe('canonical interaction and judge evidence parsing', () => {
         CONTEXT,
       ),
     );
-    assert.throws(
-      () =>
-        parseJudgeEvidence(
-          judgeEvidenceWithSteps([
-            {
-              step_id: 1,
-              source: 'agent',
-              message: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES),
-            },
-          ]),
-          CONTEXT,
-        ),
-      /Judge transcript projection exceeds the .*byte limit/,
-    );
+    const large = judgeEvidenceWithSteps([
+      { step_id: 1, source: 'agent', message: 'x'.repeat(1024 * 1024) },
+    ]);
+    assert.deepEqual(parseJudgeEvidence(large, CONTEXT), large);
 
     const cycle: Record<string, unknown> = {};
     cycle.self = cycle;
@@ -891,6 +880,27 @@ describe('canonical interaction and judge evidence parsing', () => {
       () => parseJudgeEvidence(judgeEvidenceWithSteps([nested]), CONTEXT),
       AtifValidationError,
     );
+  });
+
+  it('accepts only an explicit budget omission with empty transcript steps', () => {
+    const evidence = judgeEvidenceWithSteps([]);
+    const omitted = {
+      ...evidence,
+      transcript: { ...evidence.transcript, omitted: 'judge_budget_exceeded' },
+    };
+    assert.deepEqual(parseJudgeEvidence(omitted, CONTEXT), omitted);
+    for (const transcript of [
+      { ...omitted.transcript, omitted: 'unknown_reason' },
+      { ...omitted.transcript, budget_bytes: 0 },
+      {
+        ...omitted.transcript,
+        steps: [{ step_id: 1, source: 'agent', message: 'Done' }],
+      },
+    ]) {
+      assert.throws(() =>
+        parseJudgeEvidence({ ...evidence, transcript }, CONTEXT),
+      );
+    }
   });
 });
 

@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { it } from 'vitest';
+import { criterionJudgment } from './fixtures/criterionJudgment.ts';
 import {
   createArtifactStore,
   credentialReference,
@@ -108,7 +109,7 @@ it.each([
   },
 );
 
-it('commits and verifies bounded fallback results and oversized judge evidence after redaction', async () => {
+it('commits and verifies bounded fallback results and judge evidence after redaction', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-transcript-'));
   const secret = 'synthetic-private-token';
   try {
@@ -142,15 +143,9 @@ it('commits and verifies bounded fallback results and oversized judge evidence a
         credentials: { token: { reference: credentialReference('test.key') } },
       },
       responses: [
-        JSON.stringify({
-          results: [
-            {
-              index: 0,
-              passed: true,
-              explanation: 'The retained result is visible.',
-            },
-          ],
-        }),
+        JSON.stringify(
+          criterionJudgment(true, 'The retained result is visible.'),
+        ),
       ],
     });
     const completed = await executeEval({
@@ -208,22 +203,16 @@ it('commits and verifies bounded fallback results and oversized judge evidence a
       ),
       { forgeVersion: plan.provenance.forge.version },
     );
-    assert.equal(
-      evidence.transcript.warnings?.[0]?.code,
-      'transcript_truncated',
+    // The bounded fallback fits the whole-prompt budget, so the judge sees the
+    // complete projection (verifyCompletedRun proved it equals trajectory.json).
+    assert.equal(evidence.transcript.omitted, undefined);
+    assert.ok(evidence.transcript.steps.length > 0);
+    const judgeRequests = JSON.stringify(
+      completion.calls.map(({ request }) => request),
     );
-    assert.equal(evidence.transcript.steps[0]?.source, 'omission');
-    assert.match(
-      JSON.stringify(completion.calls.map(({ request }) => request)),
-      /Forge truncated the judge transcript/,
-    );
-    const { warnings: _, ...withoutWarning } = evidence.transcript;
-    assert.throws(() =>
-      parseJudgeEvidence(
-        { ...evidence, transcript: withoutWarning },
-        { forgeVersion: plan.provenance.forge.version },
-      ),
-    );
+    assert.doesNotMatch(judgeRequests, /Forge truncated the judge transcript/);
+    assert.match(judgeRequests, /START/);
+    assert.match(judgeRequests, /END/);
     assert.ok(
       (completed.result.evidence as { redaction_count: number })
         .redaction_count >= 2,

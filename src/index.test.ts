@@ -43,7 +43,6 @@ import {
   type JudgeEvidenceV1,
   MAX_COMPLETION_CALL_SUMMARIES,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
   type ModelProbe,
   type ModelProbeOutcome,
   type ModelProbeReason,
@@ -64,6 +63,7 @@ import {
   resolveManifestCaseIdFromFile,
   resolveRunPlan,
   WorkspaceEntryLimitError,
+  selectJudgeEvidence,
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
@@ -144,6 +144,7 @@ describe('@stripe/forge package root', () => {
       'EVALUATION_SCHEMA_VERSION',
       'CRITERION_JUDGE_PROMPT_VERSION',
       'JUDGE_TRANSCRIPT_PROJECTION_VERSION',
+      'MAX_JUDGE_TRANSCRIPT_BYTES',
       'JUDGE_WORKSPACE_EVIDENCE_SCHEMA_VERSION',
     ]) {
       assert.equal(removed in rootExports, false);
@@ -221,7 +222,7 @@ describe('@stripe/forge package root', () => {
     assert.equal(JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE, 'root');
     assert.deepEqual(JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES, ['user', 'agent']);
     assert.equal(JUDGE_TRANSCRIPT_COPIED_CONTEXT, 'excluded');
-    assert.equal(MAX_JUDGE_TRANSCRIPT_BYTES, 768 * 1024);
+    assert.equal(typeof selectJudgeEvidence, 'function');
     assert.equal(MAX_CRITERION_JUDGE_PROMPT_BYTES, 1024 * 1024);
     assert.deepEqual(JUDGE_TRANSCRIPT_INCLUDED_FIELDS, [
       'step_id',

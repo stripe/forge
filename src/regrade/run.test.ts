@@ -12,7 +12,15 @@ import {
   runJudgedFixture,
   temporaryRoot,
 } from './__tests__/judgedFixture.ts';
-import { REGRADE_RESULT_FORMAT, regradeCompletedRun } from './run.ts';
+import { parseAtifTrajectory } from '../atif/index.ts';
+import { EMPTY_JUDGE_TRANSCRIPT } from '../evaluation/judgeTranscript.ts';
+import { parseResolvedRunPlan } from '../model/index.ts';
+import { parseJudgeEvidence } from '../results/parse.ts';
+import {
+  judgeInputFromSavedRun,
+  REGRADE_RESULT_FORMAT,
+  regradeCompletedRun,
+} from './run.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -32,6 +40,38 @@ async function fixture() {
 function judge(responses: string[]) {
   return createScriptedCompletionProvider({ id: 'anthropic', responses });
 }
+
+describe('judgeInputFromSavedRun', () => {
+  it('regrades code-only runs with the empty transcript their judges saw', async () => {
+    const source = await fixture();
+    const read = async (name: string) =>
+      JSON.parse(await fs.readFile(`${source.runLocation}/${name}`, 'utf8'));
+    const result = await read('result.json');
+    const plan = parseResolvedRunPlan(await read('plan.json'));
+    const trajectory = parseAtifTrajectory(await read('trajectory.json'));
+    const judgeEvidence = parseJudgeEvidence(await read('judge-evidence.json'), {
+      forgeVersion: result.forge.version,
+    });
+    const normal = judgeInputFromSavedRun({ plan, trajectory, judgeEvidence });
+    assert.notEqual(
+      normal.transcript.transcriptJson,
+      EMPTY_JUDGE_TRANSCRIPT.transcriptJson,
+    );
+    const omitted = judgeInputFromSavedRun({
+      plan,
+      trajectory,
+      judgeEvidence: {
+        ...judgeEvidence,
+        transcript: {
+          ...judgeEvidence.transcript,
+          steps: [],
+          omitted: 'judge_budget_exceeded',
+        },
+      },
+    });
+    assert.deepEqual(omitted.transcript, EMPTY_JUDGE_TRANSCRIPT);
+  });
+});
 
 describe('regradeCompletedRun', () => {
   it('records insufficient evidence with the same thresholds and saved warnings as execution', async () => {

@@ -14,14 +14,6 @@ import { serializeCanonicalJson } from '../serialization.ts';
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
-/** Portable upper bound before workspace, criterion, and prompt text are added. */
-export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
-const TRANSCRIPT_OMISSION_MESSAGE =
-  '[Forge truncated the judge transcript to 768 KiB. The prefix and suffix are excerpts of canonical step JSON; intervening evidence is omitted.]';
-const TRANSCRIPT_WARNING = Object.freeze({
-  code: 'transcript_truncated' as const,
-  message: TRANSCRIPT_OMISSION_MESSAGE,
-});
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
 export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze([
   'user',
@@ -76,16 +68,10 @@ export interface JudgeVisibleAgentStepV1 {
   readonly observation?: JudgeVisibleObservationV1;
 }
 
-/** Root behavior, or a marked start/end excerpt when the full projection exceeds its budget. */
+/** One explicitly allowlisted, root-trajectory step visible to a judge. */
 export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
-  | JudgeVisibleAgentStepV1
-  | {
-      readonly source: 'omission';
-      readonly message: string;
-      readonly prefix: string;
-      readonly suffix: string;
-    };
+  | JudgeVisibleAgentStepV1;
 
 /** Exact transcript projection and declared policy supplied to a criterion judge. */
 export interface JudgeTranscriptProjectionV1 {
@@ -97,21 +83,27 @@ export interface JudgeTranscriptProjectionV1 {
   readonly includedFields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
   /** Exact canonical JSON supplied to the judge, including its final LF. */
   readonly transcriptJson: string;
-  /** Present when the transcript contains a marked start/end excerpt. */
-  readonly warnings?: readonly {
-    readonly code: 'transcript_truncated';
-    readonly message: string;
-  }[];
 }
+
+/** Canonical empty transcript with the same declared projection policy. */
+export const EMPTY_JUDGE_TRANSCRIPT: JudgeTranscriptProjectionV1 =
+  Object.freeze({
+    source: JUDGE_TRANSCRIPT_SOURCE,
+    projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
+    trajectoryScope: JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+    includedStepSources: JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
+    copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
+    includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
+    transcriptJson: serializeCanonicalJson([]),
+  });
 
 /**
  * Project canonical ATIF into the root-step evidence visible to a judge.
  *
  * The input is validated first and projected by positive allowlist. System and
  * copied-context steps are excluded. Opaque tool arguments and result content
- * are observable agent behavior; all other ATIF metadata, reasoning, extras,
- * and subagent references are excluded. Oversized projections retain marked
- * start/end excerpts within the byte budget.
+ * remain intact because they are observable agent behavior; all other ATIF
+ * metadata, reasoning, extras, and subagent references are excluded.
  */
 export function createJudgeTranscriptProjection(
   trajectory: AtifTrajectoryV1_8,
@@ -137,37 +129,7 @@ export function createJudgeTranscriptProjection(
     }
   }
 
-  const transcriptJson = serializeCanonicalJson(projectedSteps);
-  if (Buffer.byteLength(transcriptJson, 'utf8') <= MAX_JUDGE_TRANSCRIPT_BYTES) {
-    return makeProjection(transcriptJson);
-  }
-  return makeProjection(truncateTranscript(transcriptJson), true);
-}
-
-function truncateTranscript(text: string): string {
-  const render = (length: number): string => {
-    let prefixEnd = length;
-    let suffixStart = text.length - length;
-    if (/[\uD800-\uDBFF]/.test(text[prefixEnd - 1] ?? '')) prefixEnd -= 1;
-    if (/[\uDC00-\uDFFF]/.test(text[suffixStart] ?? '')) suffixStart += 1;
-    return serializeCanonicalJson([
-      {
-        source: 'omission',
-        message: TRANSCRIPT_OMISSION_MESSAGE,
-        prefix: text.slice(0, prefixEnd),
-        suffix: text.slice(suffixStart),
-      },
-    ]);
-  };
-  let low = 0;
-  let high = Math.min(Math.floor(text.length / 2), MAX_JUDGE_TRANSCRIPT_BYTES);
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(render(middle), 'utf8') <= MAX_JUDGE_TRANSCRIPT_BYTES)
-      low = middle;
-    else high = middle - 1;
-  }
-  return render(low);
+  return makeProjection(serializeCanonicalJson(projectedSteps));
 }
 
 /**
@@ -182,7 +144,6 @@ export function parseJudgeTranscriptProjection(
 ): JudgeTranscriptProjectionV1 {
   assertBoundedProjectionJson(input, 'metadata');
   const projection = ProjectionSchema.parse(input);
-  assertTranscriptByteLimit(projection.transcriptJson);
   let decoded: unknown;
   try {
     decoded = JSON.parse(projection.transcriptJson);
@@ -199,16 +160,7 @@ export function parseJudgeTranscriptProjection(
     );
   }
 
-  const truncated = steps[0]?.source === 'omission';
-  if (
-    serializeCanonicalJson(projection.warnings ?? []) !==
-    serializeCanonicalJson(truncated ? [TRANSCRIPT_WARNING] : [])
-  ) {
-    throw new TypeError(
-      'Judge transcript truncation requires its exact evidence warning.',
-    );
-  }
-  return makeProjection(canonicalTranscript, truncated);
+  return makeProjection(canonicalTranscript);
 }
 
 function projectAgentStep(step: AtifAgentStep): JudgeVisibleAgentStepV1 {
@@ -281,11 +233,7 @@ function projectObservationResult(
   return Object.keys(projected).length > 0 ? projected : undefined;
 }
 
-function makeProjection(
-  transcriptJson: string,
-  truncated = false,
-): JudgeTranscriptProjectionV1 {
-  assertTranscriptByteLimit(transcriptJson);
+function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
   return Object.freeze({
     source: JUDGE_TRANSCRIPT_SOURCE,
     projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
@@ -294,17 +242,7 @@ function makeProjection(
     copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
     includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
     transcriptJson,
-    ...(truncated ? { warnings: Object.freeze([TRANSCRIPT_WARNING]) } : {}),
   });
-}
-
-function assertTranscriptByteLimit(transcriptJson: string): void {
-  const bytes = Buffer.byteLength(transcriptJson, 'utf8');
-  if (bytes > MAX_JUDGE_TRANSCRIPT_BYTES) {
-    throw new TypeError(
-      `Judge transcript projection exceeds the ${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit.`,
-    );
-  }
 }
 
 function assertBoundedProjectionJson(
@@ -437,7 +375,7 @@ const AgentStepSchema = z
       }
     }
   });
-const CompleteStepsSchema = z
+const JudgeVisibleStepsSchema = z
   .array(z.union([UserStepSchema, AgentStepSchema]))
   .superRefine((steps, context) => {
     for (let index = 1; index < steps.length; index += 1) {
@@ -450,19 +388,6 @@ const CompleteStepsSchema = z
       }
     }
   });
-const JudgeVisibleStepsSchema = z.union([
-  CompleteStepsSchema,
-  z.tuple([
-    z
-      .object({
-        source: z.literal('omission'),
-        message: z.literal(TRANSCRIPT_OMISSION_MESSAGE),
-        prefix: z.string().min(1),
-        suffix: z.string().min(1),
-      })
-      .strict(),
-  ]),
-]);
 const ProjectionSchema = z
   .object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
@@ -485,16 +410,5 @@ const ProjectionSchema = z
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[8]),
     ]),
     transcriptJson: z.string(),
-    warnings: z
-      .array(
-        z
-          .object({
-            code: z.literal(TRANSCRIPT_WARNING.code),
-            message: z.literal(TRANSCRIPT_WARNING.message),
-          })
-          .strict(),
-      )
-      .length(1)
-      .optional(),
   })
   .strict();

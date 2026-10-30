@@ -13,123 +13,10 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeTranscriptProjectionV1,
   type JudgeVisibleStepV1,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
 
 describe('createJudgeTranscriptProjection', () => {
-  it.each([
-    [0, 1],
-    [1, 0],
-    [2, 2],
-  ])(
-    'cuts emoji at complete code points and fills the equal-excerpt budget (%i, %i)',
-    (prefixPadding, suffixPadding) => {
-      const steps: AtifTrajectoryV1_8['steps'] = [
-        {
-          step_id: 1,
-          source: 'agent',
-          message:
-            'x'.repeat(prefixPadding) +
-            '😀'.repeat(400_000) +
-            'y'.repeat(suffixPadding),
-        },
-      ];
-      const text = serializeCanonicalJson(steps);
-      const projection = createJudgeTranscriptProjection({
-        schema_version: 'ATIF-v1.8',
-        agent: { name: 'test', version: '1' },
-        steps,
-      });
-      const [excerpt] = JSON.parse(projection.transcriptJson);
-      assert.equal(/[\uD800-\uDBFF]$/.test(excerpt.prefix), false);
-      assert.equal(/^[\uDC00-\uDFFF]/.test(excerpt.suffix), false);
-      assert.ok(text.startsWith(excerpt.prefix));
-      assert.ok(text.endsWith(excerpt.suffix));
-      // These fixtures force each cut to sit immediately outside an emoji.
-      assert.equal(
-        text.slice(excerpt.prefix.length, excerpt.prefix.length + 2),
-        '😀',
-      );
-      assert.equal(
-        text.slice(
-          text.length - excerpt.suffix.length - 2,
-          text.length - excerpt.suffix.length,
-        ),
-        '😀',
-      );
-      if (prefixPadding === 0)
-        assert.equal(excerpt.suffix.length, excerpt.prefix.length + 1);
-      if (suffixPadding === 0)
-        assert.equal(excerpt.prefix.length, excerpt.suffix.length + 1);
-      assert.ok(
-        Buffer.byteLength(projection.transcriptJson) <=
-          MAX_JUDGE_TRANSCRIPT_BYTES,
-      );
-      for (const extended of [
-        { ...excerpt, prefix: text.slice(0, excerpt.prefix.length + 2) },
-        {
-          ...excerpt,
-          suffix: text.slice(text.length - excerpt.suffix.length - 2),
-        },
-      ]) {
-        assert.ok(
-          Buffer.byteLength(serializeCanonicalJson([extended])) >
-            MAX_JUDGE_TRANSCRIPT_BYTES,
-        );
-      }
-      if (prefixPadding === 2) {
-        assert.equal(
-          Buffer.byteLength(projection.transcriptJson),
-          MAX_JUDGE_TRANSCRIPT_BYTES,
-        );
-      }
-    },
-  );
-  it('keeps deterministic start/end excerpts within the byte budget, including escaped Unicode', () => {
-    for (const body of ['x', '😀\\"\n']) {
-      const trajectory: AtifTrajectoryV1_8 = {
-        schema_version: 'ATIF-v1.8',
-        agent: { name: 'test', version: '1' },
-        steps: [
-          { step_id: 1, source: 'user', message: 'START' },
-          {
-            step_id: 2,
-            source: 'agent',
-            message: body.repeat(MAX_JUDGE_TRANSCRIPT_BYTES),
-          },
-          { step_id: 3, source: 'agent', message: 'END' },
-        ],
-      };
-      const projected = createJudgeTranscriptProjection(trajectory);
-      assert.ok(
-        Buffer.byteLength(projected.transcriptJson) <=
-          MAX_JUDGE_TRANSCRIPT_BYTES,
-      );
-      const [excerpt] = JSON.parse(projected.transcriptJson);
-      assert.equal(excerpt.source, 'omission');
-      assert.match(excerpt.message, /Forge truncated/);
-      assert.match(excerpt.prefix, /START/);
-      assert.match(excerpt.suffix, /END/);
-      assert.equal(projected.warnings?.[0]?.code, 'transcript_truncated');
-      assert.equal(
-        createJudgeTranscriptProjection(trajectory).transcriptJson,
-        projected.transcriptJson,
-      );
-      assert.deepEqual(parseJudgeTranscriptProjection(projected), projected);
-      const { warnings: _, ...withoutWarning } = projected;
-      assert.throws(
-        () => parseJudgeTranscriptProjection(withoutWarning),
-        /exact evidence warning/,
-      );
-      assert.throws(() =>
-        parseJudgeTranscriptProjection({
-          ...projected,
-          warnings: [{ code: 'transcript_truncated', message: 'changed' }],
-        }),
-      );
-    }
-  });
   it('constructs only judge-visible root steps and fields', () => {
     const trajectory = richTrajectory();
     const before = structuredClone(trajectory);
@@ -461,16 +348,15 @@ describe('parseJudgeTranscriptProjection', () => {
     );
   });
 
-  it('bounds transcript bytes and decoded JSON complexity before schema parsing', () => {
+  it('retains large projections and bounds decoded JSON complexity', () => {
     const valid = createJudgeTranscriptProjection(richTrajectory());
-    assert.throws(
-      () =>
-        parseJudgeTranscriptProjection({
-          ...valid,
-          transcriptJson: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES + 1),
-        }),
-      new RegExp(`${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit`),
-    );
+    const large = createJudgeTranscriptProjection({
+      schema_version: 'ATIF-v1.8',
+      agent: { name: 'test-agent', version: '1' },
+      steps: [{ step_id: 1, source: 'user', message: 'x'.repeat(1024 * 1024) }],
+    });
+    assert.ok(Buffer.byteLength(large.transcriptJson) > 1024 * 1024);
+    assert.deepEqual(parseJudgeTranscriptProjection(large), large);
 
     const deeplyNested = `${'{"nested":'.repeat(65)}null${'}'.repeat(65)}`;
     assert.throws(
@@ -496,7 +382,6 @@ describe('parseJudgeTranscriptProjection', () => {
         ],
       },
     ]);
-    assert.ok(Buffer.byteLength(tooManyNodes) <= MAX_JUDGE_TRANSCRIPT_BYTES);
     assert.throws(
       () =>
         parseJudgeTranscriptProjection({

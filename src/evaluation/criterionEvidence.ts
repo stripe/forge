@@ -105,6 +105,20 @@ export function renderTrajectoryCaptureStatus(
   return 'Trajectory capture status: partial or fallback evidence with capture warnings. Missing steps may not be inferred.';
 }
 
+/**
+ * Warnings that render the longest capture-status line. Whole-prompt sizing
+ * reserves this once so one overhead holds for native, driver, and code-only
+ * evidence, whose real status lines are never longer.
+ */
+export const LONGEST_CAPTURE_STATUS_WARNINGS: readonly CriterionEvidenceWarningV1[] =
+  Object.freeze([
+    Object.freeze({
+      source: 'trajectory' as const,
+      code: 'source_unavailable',
+      message: 'Native evidence is unavailable.',
+    }),
+  ]);
+
 export const UNKNOWN_EVIDENCE_WARNINGS: readonly CriterionEvidenceWarningV1[] =
   Object.freeze([
     Object.freeze({

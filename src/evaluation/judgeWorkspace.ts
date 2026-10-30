@@ -482,24 +482,24 @@ export function boundJudgeWorkspaceEvidence(
   });
 }
 
-/** Warning fields the renderer reads; the code selects "omitted" or "truncated". */
-type RenderedJudgeWorkspaceWarning = {
-  readonly code: string;
-  readonly message: string;
-  readonly path?: string;
-};
+/** Render the exact bounded evidence fragment supplied to the judge. */
+export function renderJudgeWorkspaceEvidence(
+  evidence: JudgeWorkspaceEvidenceV1,
+): string {
+  return renderRecordedJudgeWorkspaceEvidence(evidence);
+}
 
-/**
- * Render the exact bounded evidence fragment supplied to the judge. Only entry
- * paths and contents and warnings are read, so the saved judge-evidence.json
- * workspace section reproduces the rendered text.
- */
-export function renderJudgeWorkspaceEvidence(evidence: {
+/** Internal renderer shared with verification of the persisted workspace subset. */
+export function renderRecordedJudgeWorkspaceEvidence(evidence: {
   readonly entries: readonly Pick<
     JudgeWorkspaceEvidenceEntryV1,
     'path' | 'content'
   >[];
-  readonly warnings: readonly RenderedJudgeWorkspaceWarning[];
+  readonly warnings: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly path?: string;
+  }[];
 }): string {
   if (evidence.entries.length === 0 && evidence.warnings.length === 0)
     return '';
@@ -520,7 +520,11 @@ function renderEntry(
   return `### ${entry.path}\n${fence}\n${entry.content}\n${fence}\n`;
 }
 
-function renderWarning(warning: RenderedJudgeWorkspaceWarning): string {
+function renderWarning(warning: {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}): string {
   const disposition =
     warning.code === 'workspace_binary_omitted' ? 'omitted' : 'truncated';
   return `(${disposition} — ${
@@ -535,7 +539,7 @@ function renderedEvidenceLength(evidence: {
     JudgeWorkspaceEvidenceEntryV1,
     'path' | 'content'
   >[];
-  readonly warnings: readonly RenderedJudgeWorkspaceWarning[];
+  readonly warnings: readonly JudgeWorkspaceEvidenceV1['warnings'][number][];
 }): number {
   const fragments = [
     ...evidence.entries.map(renderEntry),

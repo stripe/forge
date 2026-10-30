@@ -82,11 +82,12 @@ import {
   evaluateRunEvidence,
   type JudgeWorkspaceEvidenceV1,
   judgeCriteria,
-  renderJudgeWorkspaceEvidence,
 } from '../evaluation/index.ts';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
+import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import {
+  createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
   selectAgentEvidence,
 } from '../evidence/selection.ts';
@@ -778,16 +779,15 @@ export async function executeEvalWithTestHooks(
           evidence.completeness === 'fallback'
             ? fallbackTurns.replacements + interaction.toolResultRedactions
             : 0,
+        fallbackTurns: fallbackTurns.value,
+        fallbackTurnRedactions: fallbackTurns.replacements,
       };
     });
-    const redacted = redactNormalizedTrajectory(
+    const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
     );
-    redacted.replacements += selectedEvidence.fallbackRedactions ?? 0;
-    const trajectoryJson = serializeAtifTrajectory(
-      redacted.evidence.trajectory,
-    );
+    selectedRedacted.replacements += selectedEvidence.fallbackRedactions ?? 0;
 
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
@@ -803,22 +803,80 @@ export async function executeEvalWithTestHooks(
       let evidenceWarnings:
         | ReturnType<typeof criterionEvidenceWarnings>
         | undefined;
-      if (criteria.length > 0) {
-        const collected = await collectJudgeWorkspaceEvidence(
-          sealed!.workspace,
-          { signal },
-        );
-        const safeWorkspace = redactJudgeWorkspaceEvidence(
-          collected.evidence,
-          secrets,
-        );
-        const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
-        const judgeTranscript = createJudgeTranscriptProjection(
-          redacted.evidence.trajectory,
-        );
+      const safeWorkspace =
+        criteria.length === 0
+          ? undefined
+          : redactJudgeWorkspaceEvidence(
+              (
+                await collectJudgeWorkspaceEvidence(sealed!.workspace, {
+                  signal,
+                })
+              ).evidence,
+              secrets,
+            );
+      const workspace =
+        safeWorkspace === undefined
+          ? undefined
+          : {
+              entries: safeWorkspace.entries.map((entry) => ({
+                path: entry.path,
+                content: entry.content,
+                truncated: entry.truncated,
+              })),
+              complete: safeWorkspace.complete,
+              truncated: safeWorkspace.truncated,
+              warnings: safeWorkspace.warnings.map((warning) => ({
+                ...warning,
+              })),
+            };
+      const prompt =
+        workspace === undefined
+          ? undefined
+          : sizeJudgePrompt(input.plan, workspace);
+      const resolved =
+        prompt === undefined
+          ? undefined
+          : resolveJudgeTranscript({
+              promptOverheadBytes: prompt.promptOverheadBytes,
+              selected: selectedRedacted,
+              buildDriver: (reason) => {
+                if (interaction.sessionId === null) {
+                  throw new TypeError(
+                    'Driver evidence requires a completed agent session.',
+                  );
+                }
+                const evidence = createDriverFallbackEvidence(
+                  {
+                    agent: preflight.agent,
+                    identity: preflight.agentEvidenceIdentity,
+                    model: input.plan.agent.model,
+                    sessionId: interaction.sessionId,
+                    completedTurns: interaction.turns,
+                    ...(selectedEvidence.fallbackTurns === undefined
+                      ? {}
+                      : { fallbackTurns: selectedEvidence.fallbackTurns }),
+                  },
+                  reason,
+                );
+                assertEvidenceMatchesRun(
+                  evidence,
+                  preflight.agent,
+                  interaction.sessionId,
+                );
+                const driver = redactNormalizedTrajectory(evidence, secrets);
+                driver.replacements +=
+                  (selectedEvidence.fallbackTurnRedactions ?? 0) +
+                  interaction.toolResultRedactions;
+                return driver;
+              },
+            });
+      const redacted = resolved?.redacted ?? selectedRedacted;
+      if (resolved !== undefined && prompt !== undefined) {
+        const judgeTranscript = resolved.transcript;
+        const safeWorkspaceText = prompt.workspaceText;
         evidenceWarnings = criterionEvidenceWarnings({
           trajectory: redacted.evidence,
-          workspace: safeWorkspace,
+          workspace: safeWorkspace!,
         });
         criterionResults = await judgeCriteria(
           {
@@ -868,22 +926,11 @@ export async function executeEvalWithTestHooks(
               copied_context: judgeTranscript.copiedContext,
               included_fields: [...judgeTranscript.includedFields],
               steps: JSON.parse(judgeTranscript.transcriptJson),
-              ...(judgeTranscript.warnings === undefined
-                ? {}
-                : { warnings: judgeTranscript.warnings }),
+              ...(resolved.reason === 'judge_budget_exceeded'
+                ? { omitted: 'judge_budget_exceeded' }
+                : {}),
             },
-            workspace: {
-              entries: safeWorkspace.entries.map((entry) => ({
-                path: entry.path,
-                content: entry.content,
-                truncated: entry.truncated,
-              })),
-              complete: safeWorkspace.complete,
-              truncated: safeWorkspace.truncated,
-              warnings: safeWorkspace.warnings.map((warning) => ({
-                ...warning,
-              })),
-            },
+            workspace,
           },
           { forgeVersion: FORGE_VERSION },
         );
@@ -899,7 +946,7 @@ export async function executeEvalWithTestHooks(
         }),
         signal,
       );
-      return { ...result, judgeEvidence };
+      return { ...result, judgeEvidence, redacted };
     });
     throwIfAborted(signal, phase);
 
@@ -911,7 +958,7 @@ export async function executeEvalWithTestHooks(
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
       setupArtifact,
-      trajectoryJson,
+      serializeAtifTrajectory(evaluated.redacted.evidence.trajectory),
       interactionArtifact,
       evaluated.workspaceEvidence,
       evaluated.judgeEvidence,
@@ -944,8 +991,8 @@ export async function executeEvalWithTestHooks(
             setupArtifact,
             completionCalls: completions.calls,
             completionCallTotals: completions.totals,
-            evidence: redacted.evidence,
-            redactionCount: redacted.replacements,
+            evidence: evaluated.redacted.evidence,
+            redactionCount: evaluated.redacted.replacements,
             evaluation: evaluated.evaluation,
             coreDescriptors,
             supplementalDescriptors: nativeDescriptors,
@@ -1016,8 +1063,8 @@ export async function executeEvalWithTestHooks(
       setupArtifact,
       completionCalls: completions.calls,
       completionCallTotals: completions.totals,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
+      evidence: evaluated.redacted.evidence,
+      redactionCount: evaluated.redacted.replacements,
       evaluation: evaluated.evaluation,
       coreDescriptors,
       supplementalDescriptors,

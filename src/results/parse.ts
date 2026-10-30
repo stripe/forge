@@ -487,9 +487,14 @@ const judgeEvidenceSchema = z
         ]),
         // The shared projection parser below validates the complete step schema.
         steps: z.array(z.unknown()),
-        warnings: z.array(z.unknown()).optional(),
+        omitted: z.literal('judge_budget_exceeded').optional(),
       })
-      .strict(),
+      .strict()
+      .refine(
+        (transcript) =>
+          transcript.omitted === undefined || transcript.steps.length === 0,
+        { message: 'An omitted judge transcript must have empty steps.' },
+      ),
     workspace: z
       .object({
         entries: z
@@ -963,9 +968,6 @@ export function parseJudgeEvidence(
     copiedContext: transcript.copied_context,
     includedFields: transcript.included_fields,
     transcriptJson: serializeCanonicalJson(transcript.steps),
-    ...(transcript.warnings === undefined
-      ? {}
-      : { warnings: transcript.warnings }),
   });
   return {
     ...evidence,
