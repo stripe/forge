@@ -49,9 +49,12 @@ describe('judgeInputFromSavedRun', () => {
     const result = await read('result.json');
     const plan = parseResolvedRunPlan(await read('plan.json'));
     const trajectory = parseAtifTrajectory(await read('trajectory.json'));
-    const judgeEvidence = parseJudgeEvidence(await read('judge-evidence.json'), {
-      forgeVersion: result.forge.version,
-    });
+    const judgeEvidence = parseJudgeEvidence(
+      await read('judge-evidence.json'),
+      {
+        forgeVersion: result.forge.version,
+      },
+    );
     const normal = judgeInputFromSavedRun({ plan, trajectory, judgeEvidence });
     assert.notEqual(
       normal.transcript.transcriptJson,

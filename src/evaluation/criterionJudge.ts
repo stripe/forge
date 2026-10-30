@@ -110,7 +110,10 @@ export function buildCriterionJudgePrompt(
 }
 
 function renderCriterionJudgePrompt(
-  input: Pick<CriterionJudgeInput, 'exampleAnswer' | 'workspaceText' | 'evidenceWarnings'> & {
+  input: Pick<
+    CriterionJudgeInput,
+    'exampleAnswer' | 'workspaceText' | 'evidenceWarnings'
+  > & {
     readonly transcript: Pick<JudgeTranscriptProjectionV1, 'transcriptJson'>;
   },
   criterion: string,
