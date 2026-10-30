@@ -449,3 +449,46 @@ it('closes the per-run listener when the caller cancels interaction', async () =
   assert.ok(url);
   await assert.rejects(fetch(url));
 });
+
+it('closes the listener and disposes the runtime when quiesce throws', async () => {
+  const test = fixture();
+  let url = '';
+  const agent = {
+    ...test.agent,
+    async openSession(context: Parameters<typeof test.agent.openSession>[0]) {
+      url = JSON.parse(
+        Buffer.from(
+          await context.runtime.workspace.readFile('.mcp.json'),
+        ).toString(),
+      ).mcpServers.web_search.url;
+      return test.agent.openSession(context);
+    },
+  };
+  await assert.rejects(
+    executeEval({
+      runId: 'quiesce-failure-search',
+      plan: test.plan,
+      composition: {
+        ...test.composition,
+        agents: new Map([[agent.id, agent]]),
+        runtime: {
+          ...test.runtime.adapter,
+          async prepare(input) {
+            const runtime = await test.runtime.adapter.prepare(input);
+            return {
+              ...runtime,
+              async quiesce() {
+                throw new Error('Intentional quiesce failure');
+              },
+            };
+          },
+        },
+      },
+    }),
+    { phase: 'quiesce' },
+  );
+  assert.ok(url);
+  await assert.rejects(fetch(url));
+  assert.ok(test.runtime.runs[0]!.events.includes('dispose'));
+  assert.equal(test.store.runs.size, 0);
+});

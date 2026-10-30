@@ -1,5 +1,5 @@
 import * as http from 'node:http';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseSearchResponse, searchRequest } from './webSearchBackend.ts';
 import { startWebSearchService } from './webSearchService.ts';
 
@@ -102,6 +102,13 @@ describe('runner-owned search', () => {
         ).status,
       ).toBe(403);
       expect(requests).toHaveLength(0);
+      for (const method of ['GET', 'PUT', 'DELETE']) {
+        const rejected = await post(service.url, '', service.credential, method);
+        expect(rejected.status).toBe(405);
+        expect(rejected.allow).toBe('POST');
+      }
+      expect(service.usage().tool_calls).toBe(0);
+      expect(requests).toHaveLength(0);
       const response = await post(
         service.url,
         JSON.stringify(message),
@@ -199,6 +206,8 @@ describe('runner-owned search', () => {
     };
     const service = await startWebSearchService(options);
     const other = await startWebSearchService(options);
+    expect(new URL(service.url).pathname).not.toBe(new URL(other.url).pathname);
+    expect(service.credential).not.toBe(other.credential);
     const message = JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
@@ -212,6 +221,15 @@ describe('runner-owned search', () => {
       expect((await post(other.url, message, service.credential)).status).toBe(
         403,
       );
+      expect(
+        (
+          await post(
+            new URL(new URL(service.url).pathname, other.url).href,
+            message,
+            other.credential,
+          )
+        ).status,
+      ).toBe(403);
       const pending = post(service.url, message, service.credential).catch(
         () => undefined,
       );
@@ -242,12 +260,13 @@ function post(
   url: string,
   body: string,
   credential: string,
-): Promise<{ status: number; body: string }> {
+  method = 'POST',
+): Promise<{ status: number; body: string; allow: string | undefined }> {
   return new Promise((resolve, reject) => {
     const request = http.request(
       url,
       {
-        method: 'POST',
+        method,
         headers: {
           authorization: `Bearer ${credential}`,
           'content-type': 'application/json',
@@ -260,6 +279,7 @@ function post(
           resolve({
             status: response.statusCode ?? 0,
             body: Buffer.concat(chunks).toString(),
+            allow: response.headers.allow,
           }),
         );
       },
@@ -268,6 +288,26 @@ function post(
     request.end(body);
   });
 }
+
+it('closes a bound listener if its address is unexpected', async () => {
+  const address = vi.spyOn(http.Server.prototype, 'address').mockReturnValue(null);
+  const close = vi.spyOn(http.Server.prototype, 'close');
+  try {
+    await expect(
+      startWebSearchService({
+        upstreamBaseUrl: 'http://127.0.0.1:1',
+        upstreamCredential: 'host-only',
+        agentHostname: '127.0.0.1',
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('Search listener did not bind.');
+    expect(close).toHaveBeenCalledOnce();
+    expect((close.mock.contexts[0] as http.Server).listening).toBe(false);
+  } finally {
+    address.mockRestore();
+    close.mockRestore();
+  }
+});
 
 it('retains confirmed usage across malformed metadata and failed requests', async () => {
   let count = 0;

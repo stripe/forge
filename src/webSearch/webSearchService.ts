@@ -197,10 +197,12 @@ export async function startWebSearchService(options: {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
   });
-  const address = server.address();
-  if (!address || typeof address === 'string')
-    throw new Error('Search listener did not bind.');
   let closing: Promise<void> | undefined;
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    await close();
+    throw new Error('Search listener did not bind.');
+  }
   function close(): Promise<void> {
     closing ??= closeListener();
     return closing;
