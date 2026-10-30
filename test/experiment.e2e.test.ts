@@ -93,7 +93,7 @@ describe('resumable CLI experiment runs', () => {
           .replace(
             'execution_mode: one_shot',
             'execution_mode: multi_turn\nmax_turns: 3\ntask: Complete both parts.\ncontext: Ask for both parts.',
-          )
+          ),
       );
       let calls = 0;
       const runtime = createFakeRuntimeAdapter({

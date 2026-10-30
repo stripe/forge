@@ -438,7 +438,9 @@ describe('OpenCode adapter', () => {
           return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
         if (failExport) throw new Error('capture failed');
         return result(
-          JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
+          JSON.stringify(
+            openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+          ),
         );
       });
       const observations: string[] = [];
@@ -484,9 +486,15 @@ describe('OpenCode adapter', () => {
           : result(native.padEnd(MAX_NATIVE_BYTES + 1));
       });
       const session = await test.adapter.openSession(test.context);
-      const first = await session.send('Do it', { signal: test.context.signal });
-      assert.ok((await test.state.readonly.readFile('session.json')).length > 0);
-      const second = await session.send('Again', { signal: test.context.signal });
+      const first = await session.send('Do it', {
+        signal: test.context.signal,
+      });
+      assert.ok(
+        (await test.state.readonly.readFile('session.json')).length > 0,
+      );
+      const second = await session.send('Again', {
+        signal: test.context.signal,
+      });
       assert.equal(second.text, 'Done');
       assert.equal(session.sessionId(), OPEN_CODE_SESSION);
       assert.equal(
@@ -500,9 +508,7 @@ describe('OpenCode adapter', () => {
           runtimeId: test.context.runtime.runtimeId,
           paths: test.context.runtime.paths,
           workspace: test.workspace.readonly,
-          stateDirectories: new Map([
-            [OPENCODE_STATE_ID, test.state.readonly],
-          ]),
+          stateDirectories: new Map([[OPENCODE_STATE_ID, test.state.readonly]]),
           metadata: {},
         },
       };
@@ -613,8 +619,8 @@ describe('OpenCode adapter', () => {
             ? [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }]
             : [],
       });
-      const variables = test.adapter.requirements(selection).environment
-        .variables!;
+      const variables =
+        test.adapter.requirements(selection).environment.variables!;
       assert.equal(variables.OPENCODE_DISABLE_PROJECT_CONFIG, 'true');
       assert.equal(
         variables.OPENCODE_CONFIG,

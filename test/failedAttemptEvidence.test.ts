@@ -208,14 +208,14 @@ async function fixture(
         assert.equal(command.argv[6], exported.info.id);
         if (options.failExport === 'identity_conflict')
           exported.info.id = 'ses_another-session';
-        await runtime.runs[0]!.stateDirectories
-          .get(OPENCODE_STATE_ID)!
-          .mutable.writeFile(
-            EXPORT_PATH,
-            options.failExport === 'oversized'
-              ? Buffer.alloc(MAX_NATIVE_BYTES + 1)
-              : Buffer.from(JSON.stringify(exported)),
-          );
+        await runtime.runs[0]!.stateDirectories.get(
+          OPENCODE_STATE_ID,
+        )!.mutable.writeFile(
+          EXPORT_PATH,
+          options.failExport === 'oversized'
+            ? Buffer.alloc(MAX_NATIVE_BYTES + 1)
+            : Buffer.from(JSON.stringify(exported)),
+        );
         return {
           stdout: '',
           stderr: '',
