@@ -1221,17 +1221,23 @@ Reports preserve per-run passed, total, and errored counts for all three
 classifications and verify that MUST plus SHOULD match the scored counts and
 ratio, while OPTIONAL errors match the excluded error count. Each run's
 `criterion_scores` reports Required (MUST) and Recommended (MUST + SHOULD), each
-with Strict and Avg scores. These views exclude errored judgments from their
-counts. Blend gates each evaluation on all valid MUST passing, then uses only
-its valid SHOULD pass fraction. MUST-only evaluations receive `1` or `0`;
-SHOULD-only evaluations use their pass fraction. Views with no valid judgments
-are unscored. Blend aggregates average eligible evaluation scores after applying
-each gate. These report views ignore checks and do not change saved evaluation
-scores, status, pass rates, or judge-error reporting. Parsing verifies each view
+with Strict and Avg scores. Strict is unresolved (`null`) for an empty set or
+any errored judgment in that set; its aggregate uses only fully judged,
+nonempty sets. Avg pools valid judgments, including those from partly judged
+evaluations. Each set's `evaluations` counts completed evaluations containing
+that set, including all-error sets, rather than either score's denominator.
+Blend gives `0` for any judged MUST failure, even alongside MUST errors.
+Otherwise, a MUST error leaves its gate unresolved (`null`). Once all MUST
+pass, Blend uses the valid SHOULD pass fraction; with no SHOULD criteria it
+is `1`, while all-error SHOULD leaves it `null`. SHOULD-only evaluations use
+their valid pass fraction; empty views are unscored. Blend aggregates average
+non-null evaluation scores after applying each gate. These report views ignore
+checks and do not change saved evaluation scores, status, pass rates, or
+judge-error reporting. Parsing verifies each view
 against the per-classification counts, then verifies summary and
 case/configuration scores against the run rows. Aggregates use only the latest
 completed effective outcome per selection. Disjoint `criteria_by_requirement`
-groups preserve required failures, recommended failures, and OPTIONAL telemetry.
+groups preserve MUST failures, SHOULD failures, and OPTIONAL telemetry.
 The README defines the
 [score formulas and aggregate denominators](../README.md#understand-scores).
 

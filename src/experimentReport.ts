@@ -431,29 +431,42 @@ function statistics(
   };
 }
 
-/** Required uses valid MUST judgments; recommended also includes valid SHOULD. */
+type CriteriaByRequirement = z.infer<typeof criteriaByRequirementSchema>;
+type CriterionCounts = z.infer<typeof criterionCountsSchema>;
+
+/** Required uses MUST; recommended includes both MUST and SHOULD. */
 function relevantCriterionCounts(
-  groups: z.infer<typeof criteriaByRequirementSchema>,
+  groups: CriteriaByRequirement,
   set: 'required' | 'recommended',
-): { passed: number; total: number } {
+): CriterionCounts {
   const { MUST, SHOULD } = groups;
-  const required = { passed: MUST.passed, total: MUST.total - MUST.errored };
   return set === 'required'
-    ? required
+    ? MUST
     : {
-        passed: required.passed + SHOULD.passed,
-        total: required.total + SHOULD.total - SHOULD.errored,
+        passed: MUST.passed + SHOULD.passed,
+        total: MUST.total + SHOULD.total,
+        errored: MUST.errored + SHOULD.errored,
       };
 }
 
+/** A judged criterion that did not pass; errored criteria are not failures. */
+function judgedFailures({ passed, total, errored }: CriterionCounts): number {
+  return total - errored - passed;
+}
+
+/**
+ * Strict is decided only when every criterion was judged, matching
+ * `strict_pass_rate`; Avg counts judged criteria only, matching `score`.
+ */
 function criterionScores(
-  groups: z.infer<typeof criteriaByRequirementSchema>,
+  groups: CriteriaByRequirement,
 ): z.infer<typeof criterionScoresSchema> {
   function score(set: 'required' | 'recommended') {
-    const { passed, total } = relevantCriterionCounts(groups, set);
+    const { passed, total, errored } = relevantCriterionCounts(groups, set);
+    const judged = total - errored;
     return {
-      strict: total === 0 ? null : passed === total ? 1 : 0,
-      avg: total === 0 ? null : passed / total,
+      strict: total === 0 || errored > 0 ? null : passed === total ? 1 : 0,
+      avg: judged === 0 ? null : passed / judged,
     };
   }
   return {
@@ -463,16 +476,20 @@ function criterionScores(
   };
 }
 
-/** Fail on any unmet MUST, otherwise report the SHOULD pass fraction. */
+/**
+ * Fail on any judged MUST failure, otherwise report the judged SHOULD pass
+ * fraction. MUST errors without a judged failure leave the gate undecided.
+ */
 function blendedCriterionScore({
   MUST,
   SHOULD,
-}: z.infer<typeof criteriaByRequirementSchema>): number | null {
-  const mustJudged = MUST.total - MUST.errored;
-  const shouldJudged = SHOULD.total - SHOULD.errored;
-  if (mustJudged + shouldJudged === 0) return null;
-  if (MUST.passed !== mustJudged) return 0;
-  return shouldJudged === 0 ? 1 : SHOULD.passed / shouldJudged;
+}: CriteriaByRequirement): number | null {
+  if (MUST.total + SHOULD.total === 0) return null;
+  if (judgedFailures(MUST) > 0) return 0;
+  if (MUST.errored > 0) return null;
+  if (SHOULD.total === 0) return 1;
+  const judgedShould = SHOULD.total - SHOULD.errored;
+  return judgedShould === 0 ? null : SHOULD.passed / judgedShould;
 }
 
 /** Gate each evaluation before averaging, so another run cannot hide a failed MUST. */
@@ -493,14 +510,18 @@ function blendedCriterionScoreStatistics(
   return { score: evaluations === 0 ? null : sum / evaluations, evaluations };
 }
 
-/** Pool criterion results for Avg; give each eligible evaluation one Strict vote. */
+/**
+ * Pool judged criterion results for Avg; give each fully judged evaluation one
+ * Strict vote. `evaluations` counts completed evaluations containing the set.
+ */
 function criterionScoreStatistics(
   runs: readonly ExperimentRunReportRunV1[],
   set: 'required' | 'recommended',
 ): z.infer<typeof criterionScoreStatisticsSchema> {
   let passed = 0;
-  let total = 0;
+  let judged = 0;
   let evaluations = 0;
+  let fullyJudgedEvaluations = 0;
   let strictPasses = 0;
   for (const run of runs) {
     if (run.state !== 'completed') continue;
@@ -510,13 +531,19 @@ function criterionScoreStatistics(
     );
     if (group.total === 0) continue;
     passed += group.passed;
-    total += group.total;
+    judged += group.total - group.errored;
     evaluations += 1;
-    if (group.passed === group.total) strictPasses += 1;
+    if (group.errored === 0) {
+      fullyJudgedEvaluations += 1;
+      if (group.passed === group.total) strictPasses += 1;
+    }
   }
   return {
-    strict: evaluations === 0 ? null : strictPasses / evaluations,
-    avg: total === 0 ? null : passed / total,
+    strict:
+      fullyJudgedEvaluations === 0
+        ? null
+        : strictPasses / fullyJudgedEvaluations,
+    avg: judged === 0 ? null : passed / judged,
     evaluations,
   };
 }
