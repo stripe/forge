@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { getMatrixGroups } from './matrix.ts';
+import { agentSelectionKey, getMatrixGroups } from './matrix.ts';
 import type { ExperimentMatrixGroupV1, ExperimentMatrixV1 } from './types.ts';
 
 describe('matrix group views', () => {
@@ -50,5 +50,41 @@ describe('matrix group views', () => {
     );
     assert.deepEqual(matrix, before);
     assert.equal(Object.hasOwn(matrix, 'cases'), false);
+  });
+});
+
+describe('agent selection identity', () => {
+  it('preserves the existing key bytes for current model profiles', () => {
+    for (const [context, output] of [
+      [32000, 4000],
+      [128000, 16000],
+    ] as const) {
+      for (const reasoning of [false, true]) {
+        for (const temperature of [false, true]) {
+          for (const attachment of [false, true]) {
+            // Deliberately reverse authored property order at both depths.
+            const model_profile = {
+              attachment,
+              temperature,
+              reasoning,
+              limit: { output, context },
+            };
+            assert.equal(
+              agentSelectionKey({
+                adapter: 'opencode',
+                provider: 'openai-compatible',
+                model: 'gateway-code',
+                model_profile,
+              }),
+              `["opencode","openai-compatible","gateway-code",null,[${context},${output},${reasoning},${temperature},${attachment}]]`,
+            );
+          }
+        }
+      }
+    }
+    assert.equal(
+      agentSelectionKey({ adapter: 'codex', provider: 'openai', model: 'gpt' }),
+      '["codex","openai","gpt","native",null]',
+    );
   });
 });

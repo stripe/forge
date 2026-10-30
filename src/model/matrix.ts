@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { ModelProfileSchema } from './parse.ts';
 import type {
   AgentSelectionV1,
   ExperimentMatrixGroupV1,
@@ -33,12 +35,21 @@ export function agentSelectionKey(agent: {
     agent.hook_trust ?? (agent.adapter === 'codex' ? 'native' : null),
     agent.model_profile === undefined
       ? null
-      : [
-          agent.model_profile.limit.context,
-          agent.model_profile.limit.output,
-          agent.model_profile.reasoning,
-          agent.model_profile.temperature,
-          agent.model_profile.attachment,
-        ],
+      : schemaIdentityValues(
+          ModelProfileSchema,
+          ModelProfileSchema.parse(agent.model_profile),
+        ),
   ]);
+}
+
+// Preserve the existing flat key format, visiting fields in schema order rather
+// than authored object order. New schema fields automatically enter identity.
+function schemaIdentityValues(schema: z.ZodType, value: unknown): unknown[] {
+  if (schema instanceof z.ZodObject) {
+    const object = value as Record<string, unknown>;
+    return Object.entries(schema.shape).flatMap(([key, field]) =>
+      schemaIdentityValues(field, object[key]),
+    );
+  }
+  return [value];
 }

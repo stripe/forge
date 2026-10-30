@@ -16,6 +16,7 @@ import type {
   AgentSessionContext,
 } from '../../contracts/agent.ts';
 import type { CommandOptions, CommandResult } from '../../contracts/command.ts';
+import { selectAgentEvidence } from '../../evidence/selection.ts';
 import {
   createMemoryRunInputProvider,
   createMemoryWorkspace,
@@ -23,6 +24,7 @@ import {
 } from '../../testing/index.ts';
 import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
+import { MAX_NATIVE_BYTES } from './native.ts';
 import {
   PLUGIN_CONFIG_PATH,
   stripeOpenCodeConfiguration,
@@ -102,7 +104,7 @@ async function fixture(
       },
     },
   };
-  return { adapter, state, context, prepare, calls };
+  return { adapter, state, workspace, context, prepare, calls };
 }
 
 describe('OpenCode adapter', () => {
@@ -225,6 +227,14 @@ describe('OpenCode adapter', () => {
       prompt,
     );
     assert.equal(test.calls[0]!.argv.includes(prompt), false);
+    assert.deepEqual(test.calls[0]!.argv.slice(0, 6), [
+      'node',
+      '-e',
+      OPENCODE_LAUNCHER,
+      '/home/forge/.opencode-forge/prompt.txt',
+      'opencode',
+      'run',
+    ]);
     assert.equal(test.calls[0]!.argv.includes('--session'), false);
     assert.deepEqual(test.calls[1]!.argv, [
       'opencode',
@@ -232,6 +242,10 @@ describe('OpenCode adapter', () => {
       OPEN_CODE_SESSION,
     ]);
     await session.send('-', { signal: test.context.signal });
+    assert.deepEqual(
+      test.calls[2]!.argv.slice(0, 6),
+      test.calls[0]!.argv.slice(0, 6),
+    );
     assert.deepEqual(test.calls[2]!.argv.slice(-2), [
       '--session',
       OPEN_CODE_SESSION,
@@ -356,6 +370,75 @@ describe('OpenCode adapter', () => {
       0,
     );
   });
+  for (const failure of ['non-zero exit', 'oversized export']) {
+    it(`uses explicit driver fallback after an export with ${failure}`, async () => {
+      let exports = 0;
+      const native = JSON.stringify(
+        openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+      );
+      const test = await fixture(async (argv) => {
+        if (argv[1] !== 'export')
+          return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
+        exports++;
+        if (exports === 1) return result(native);
+        // Valid JSON in both cases: only the status/byte limit rejects it.
+        return failure === 'non-zero exit'
+          ? result(native, 1)
+          : result(native.padEnd(MAX_NATIVE_BYTES + 1));
+      });
+      const session = await test.adapter.openSession(test.context);
+      const first = await session.send('Do it', { signal: test.context.signal });
+      assert.ok((await test.state.readonly.readFile('session.json')).length > 0);
+      const second = await session.send('Again', { signal: test.context.signal });
+      assert.equal(second.text, 'Done');
+      assert.equal(session.sessionId(), OPEN_CODE_SESSION);
+      assert.equal(
+        (await test.state.readonly.readFile('session.json')).length,
+        0,
+      );
+      const evidenceContext = {
+        ...test.context,
+        sessionId: OPEN_CODE_SESSION,
+        runtime: {
+          runtimeId: test.context.runtime.runtimeId,
+          paths: test.context.runtime.paths,
+          workspace: test.workspace.readonly,
+          stateDirectories: new Map([
+            [OPENCODE_STATE_ID, test.state.readonly],
+          ]),
+          metadata: {},
+        },
+      };
+      const collected = await test.adapter.collectEvidence(evidenceContext);
+      assert.equal(collected.kind, 'unavailable');
+      const evidence = selectAgentEvidence({
+        agent: test.adapter,
+        identity: test.adapter.evidenceIdentity(selection),
+        model: selection.model,
+        sessionId: OPEN_CODE_SESSION,
+        completedTurns: [first, second].map((turn, index) => ({
+          user: index === 0 ? 'Do it' : 'Again',
+          assistant: turn.text,
+          toolCalls: turn.toolCalls,
+        })),
+        collected,
+      });
+      assert.equal(evidence.completeness, 'fallback');
+      assert.equal(evidence.provenance.source.kind, 'driver_fallback');
+      assert.deepEqual(
+        evidence.warnings.map(({ code }) => code),
+        ['source_unavailable', 'fallback_used'],
+      );
+      assert.deepEqual(
+        evidence.trajectory.steps.map(({ message }) => message),
+        ['Do it', 'Done', 'Again', 'Done'],
+      );
+      assert.equal(
+        await test.adapter.collectNativeArtifact!(evidenceContext),
+        undefined,
+      );
+    });
+  }
   it('propagates cancellation during execution or export', async () => {
     for (const phase of ['run', 'export']) {
       const controller = new AbortController();
@@ -428,6 +511,13 @@ describe('OpenCode adapter', () => {
             ? [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }]
             : [],
       });
+      const variables = test.adapter.requirements(selection).environment
+        .variables!;
+      assert.equal(variables.OPENCODE_DISABLE_PROJECT_CONFIG, 'true');
+      assert.equal(
+        variables.OPENCODE_CONFIG,
+        '/home/forge/.opencode-forge/config.json',
+      );
       const session = await test.adapter.openSession({ ...test.context, plan });
       await session.send('Do it', { signal: test.context.signal });
       const config = JSON.parse(

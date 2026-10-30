@@ -376,8 +376,13 @@ with `env: [STRIPE_API_KEY]` in case setup and pass
 
 OpenCode loads skills and MCP from the same Claude-format Stripe plugin used
 by Claude Code and Codex. It does not load Claude-specific hooks, commands, or
-agents. See the [plugin contract](docs/plugin-action.md)
-for installation provenance and the catalog's rolling revision semantics.
+agents. As with Codex, the Stripe marketplace is the trust root: Forge fetches
+its catalog at unpinned HEAD and trusts its source SHA and the bundle's MCP URL.
+The agent sends the `STRIPE_API_KEY` bearer to that URL; Forge does not restrict
+its host or require HTTPS. The receipt records the catalog commit and installed
+contents, but does not pin future installs. See the
+[plugin contract](docs/plugin-action.md) for installation provenance and source
+selection.
 
 The CLI credential reference is `opencode.api-key`; use
 `--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment
