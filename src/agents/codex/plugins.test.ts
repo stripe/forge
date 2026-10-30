@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { parse as parseToml } from 'toml';
 import { describe, it } from 'vitest';
 import { reportPluginInstallations } from '../../../test/fixtures/pluginReport.ts';
 import type { CommandRunner } from '../../contracts/command.ts';
@@ -187,7 +188,7 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
-  it('sets the native bearer environment reference in the installed plugin', async () => {
+  it('declares plugin MCP auth in user configuration, which plugin sync preserves', async () => {
     const mcpServers = ['stripe'] as const;
     const test = fixture({ mcpServers });
     await test.state.mutable.writeFile(
@@ -202,15 +203,21 @@ describe('Codex native plugin installer', () => {
     );
     const receipt = await test.install();
     assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
-    const configured = JSON.parse(
+    const bundled = JSON.parse(
       Buffer.from(
         await test.state.mutable.readFile(`${cache}/.mcp.json`),
       ).toString(),
     );
-    assert.equal(
-      configured.mcpServers.stripe.bearer_token_env_var,
-      'STRIPE_API_KEY',
-    );
+    assert.deepEqual(bundled, { mcpServers: {} });
+    const config = parseToml(
+      Buffer.from(await test.state.mutable.readFile('config.toml')).toString(),
+    ) as Record<string, unknown>;
+    assert.deepEqual(JSON.parse(JSON.stringify(config.mcp_servers)), {
+      stripe: {
+        url: 'https://mcp.stripe.com',
+        bearer_token_env_var: 'STRIPE_API_KEY',
+      },
+    });
     assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
   });
 

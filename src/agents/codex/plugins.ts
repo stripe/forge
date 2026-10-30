@@ -24,6 +24,7 @@ import {
 } from './layout.ts';
 import { CODEX_MCP_PROBE_EXIT, CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
 import {
+  declareCodexMcpServers,
   prepareCodexPluginConfiguration,
   qualifiedPluginId,
   record,
@@ -48,7 +49,6 @@ export function createCodexPluginInstaller(options: {
   return Object.freeze({
     supportsMcpBearerAuth: true as const,
     async checkMcp({
-      receipt,
       servers,
       stateDirectories,
       commands,
@@ -63,7 +63,6 @@ export function createCodexPluginInstaller(options: {
           '-e',
           CODEX_MCP_PROBE_SCRIPT,
           options.executable,
-          receipt.native_plugin_id,
           JSON.stringify(servers),
         ],
         { signal, timeoutMs: 90_000, maxOutputBytes: 1024 * 1024 },
@@ -299,7 +298,10 @@ export function createCodexPluginInstaller(options: {
           );
           const mcpServers = context.mcpServers;
           if (mcpServers)
-            await configurePluginMcp(home, relative, 'codex', mcpServers);
+            await declareCodexMcpServers(
+              home,
+              await configurePluginMcp(home, relative, 'codex', mcpServers),
+            );
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,

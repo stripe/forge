@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { parseSetupStep } from '../model/parse.ts';
 import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
-import { configurePluginMcp, configurePluginMcpDocument } from './pluginMcp.ts';
+import {
+  configurePluginMcp,
+  configurePluginMcpDocument,
+  relocateCodexPluginMcp,
+} from './pluginMcp.ts';
 
 const servers = ['stripe'] as const;
 const step = {
@@ -23,7 +27,7 @@ describe('plugin MCP bearer authentication', () => {
       },
       extra: true,
     };
-    const claude = configurePluginMcpDocument(input, 'claude-code', servers);
+    const claude = configurePluginMcpDocument(input, servers);
     assert.deepEqual(claude, {
       ...input,
       mcpServers: {
@@ -38,20 +42,21 @@ describe('plugin MCP bearer authentication', () => {
       },
     });
     assert.equal(input.mcpServers.stripe.headers.authorization, 'old');
-    const codex = configurePluginMcpDocument(
+    const codex = relocateCodexPluginMcp(
       {
         mcpServers: {
           stripe: {
             url: 'https://mcp.stripe.com',
             http_headers: { Authorization: 'old', Accept: 'application/json' },
           },
+          other: { command: 'local' },
         },
       },
-      'codex',
       servers,
     );
     assert.deepEqual(codex, {
-      mcpServers: {
+      document: { mcpServers: { other: { command: 'local' } } },
+      declarations: {
         stripe: {
           url: 'https://mcp.stripe.com',
           http_headers: { Accept: 'application/json' },
@@ -72,17 +77,44 @@ describe('plugin MCP bearer authentication', () => {
         url: 'https://example.com',
         headersHelper: 'node auth.js',
       },
+      { url: 'https://example.com', http_headers: { 'X-Retries': 3 } },
     ]) {
       assert.throws(
         () =>
-          configurePluginMcpDocument(
+          relocateCodexPluginMcp(
             { mcpServers: stripe ? { stripe } : {} },
-            'codex',
             servers,
           ),
-        /absent|HTTP|auth/,
+        /absent|HTTP|auth|headers/,
       );
     }
+  });
+
+  it('moves Codex connections out of the bundle, which Codex re-materializes after startup', async () => {
+    const state = createMemoryWorkspace();
+    await state.mutable.writeFile(
+      'plugin/.mcp.json',
+      Buffer.from(
+        '{"mcpServers":{"stripe":{"type":"http","url":"https://mcp.stripe.com"}}}',
+      ),
+    );
+    assert.deepEqual(
+      await configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
+      {
+        stripe: {
+          url: 'https://mcp.stripe.com',
+          bearer_token_env_var: 'STRIPE_API_KEY',
+        },
+      },
+    );
+    assert.deepEqual(
+      JSON.parse(
+        Buffer.from(await state.mutable.readFile('plugin/.mcp.json')).toString(
+          'utf8',
+        ),
+      ),
+      { mcpServers: {} },
+    );
   });
 
   it('rejects manifest redirects instead of configuring an unused file', async () => {

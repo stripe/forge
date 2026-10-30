@@ -5,6 +5,10 @@ import { parse } from 'toml';
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import { isSha256Digest } from '../../model/hashes.ts';
 import { isSafeSimpleIdentifier } from '../../model/paths.ts';
+import type {
+  CodexMcpServerConfig,
+  CodexMcpServerDeclarations,
+} from '../pluginMcp.ts';
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const MAX_CONFIG_DEPTH = 64;
@@ -14,8 +18,56 @@ const MAX_ENTRIES = 10_000;
 export async function prepareCodexPluginConfiguration(
   home: MutableWorkspace,
 ): Promise<void> {
+  const config = await readSanitizedConfiguration(home);
+  if (config) await writeConfiguration(home, config);
+}
+
+/**
+ * Declare Forge-owned MCP connections in user configuration, which Codex's
+ * plugin startup sync leaves intact; values are environment references only.
+ */
+export async function declareCodexMcpServers(
+  home: MutableWorkspace,
+  servers: CodexMcpServerDeclarations,
+): Promise<void> {
+  const config = (await readSanitizedConfiguration(home)) ?? {
+    marketplaces: {},
+    plugins: {},
+  };
+  const mcpServers = { ...config.mcp_servers };
+  for (const [name, server] of Object.entries(servers)) {
+    if (!isSafeSimpleIdentifier(name) || !server || !safeMcpServer(server))
+      invalid();
+    mcpServers[name] = server;
+  }
+  await writeConfiguration(home, {
+    ...config,
+    ...(Object.keys(mcpServers).length ? { mcp_servers: mcpServers } : {}),
+  });
+}
+
+type SanitizedConfiguration = {
+  readonly marketplaces: Record<string, Record<string, string>>;
+  readonly plugins: Record<string, { enabled: boolean }>;
+  readonly projects?: Record<string, { trust_level: string }>;
+  readonly hooks?: { state: Record<string, Record<string, boolean | string>> };
+  readonly mcp_servers?: Record<string, CodexMcpServerConfig>;
+};
+
+async function writeConfiguration(
+  home: MutableWorkspace,
+  config: SanitizedConfiguration,
+): Promise<void> {
+  await home.writeFile('config.toml', Buffer.from(stringify(config)), {
+    mode: 0o600,
+  });
+}
+
+async function readSanitizedConfiguration(
+  home: MutableWorkspace,
+): Promise<SanitizedConfiguration | undefined> {
   const inspected = await home.inspect('config.toml');
-  if (inspected.kind === 'absent') return;
+  if (inspected.kind === 'absent') return undefined;
   if (inspected.kind !== 'file')
     throw new Error('Codex configuration must be a regular file.');
   let config: Record<string, unknown>;
@@ -127,20 +179,68 @@ export async function prepareCodexPluginConfiguration(
         .map((key) => [key, value[key] as boolean | string]),
     );
   }
-  await home.writeFile(
-    'config.toml',
-    Buffer.from(
-      stringify({
-        marketplaces,
-        plugins,
-        ...(Object.keys(projects).length ? { projects } : {}),
-        ...(Object.keys(hookStates).length
-          ? { hooks: { state: hookStates } }
-          : {}),
-      }),
-    ),
-    { mode: 0o600 },
-  );
+  const mcpServers: Record<string, CodexMcpServerConfig> = Object.create(
+    null,
+  ) as Record<string, CodexMcpServerConfig>;
+  for (const [name, value] of entries(config.mcp_servers)) {
+    if (!isSafeSimpleIdentifier(name) || !safeMcpServer(value)) invalid();
+    mcpServers[name] = value;
+  }
+  return {
+    marketplaces,
+    plugins,
+    ...(Object.keys(projects).length ? { projects } : {}),
+    ...(Object.keys(hookStates).length ? { hooks: { state: hookStates } } : {}),
+    ...(Object.keys(mcpServers).length ? { mcp_servers: mcpServers } : {}),
+  };
+}
+
+/** Remote HTTP with an environment-referenced bearer; inline secrets are rejected. */
+function safeMcpServer(value: unknown): value is CodexMcpServerConfig {
+  if (!record(value)) return false;
+  if (
+    Object.keys(value).some(
+      (key) =>
+        ![
+          'url',
+          'bearer_token_env_var',
+          'http_headers',
+          'env_http_headers',
+        ].includes(key),
+    )
+  )
+    return false;
+  if (typeof value.url !== 'string' || !bounded(value.url)) return false;
+  try {
+    const url = new URL(value.url);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password
+    )
+      return false;
+  } catch {
+    return false;
+  }
+  if (
+    typeof value.bearer_token_env_var !== 'string' ||
+    !/^[A-Z_][A-Z0-9_]{0,127}$/.test(value.bearer_token_env_var)
+  )
+    return false;
+  for (const field of ['http_headers', 'env_http_headers'] as const) {
+    const headers = value[field];
+    if (headers === undefined) continue;
+    if (!record(headers)) return false;
+    for (const [key, header] of Object.entries(headers))
+      if (
+        !bounded(key) ||
+        key.toLowerCase() === 'authorization' ||
+        typeof header !== 'string' ||
+        !bounded(header)
+      )
+        return false;
+  }
+  return true;
 }
 
 /** Bound dotted keys before the parser expands them into nested tables. */

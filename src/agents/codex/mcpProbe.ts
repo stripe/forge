@@ -10,7 +10,7 @@ export const CODEX_MCP_PROBE_EXIT = Object.freeze({
 export const CODEX_MCP_PROBE_SCRIPT = `
 const {spawn} = require('node:child_process');
 const {createInterface} = require('node:readline');
-const [executable, pluginId, encodedServers] = process.argv.slice(1);
+const [executable, encodedServers] = process.argv.slice(1);
 const servers = JSON.parse(encodedServers);
 const child = spawn(executable, ['app-server'], {stdio: ['pipe', 'pipe', 'ignore']});
 let finished = false;
@@ -57,7 +57,8 @@ createInterface({input: child.stdout}).on('line', line => {
         return;
       }
       for (const name of servers) {
-        const matches = rows.filter(row => row.pluginId === pluginId && row.name === name);
+        // Forge declares plugin connections in user configuration, so they carry no plugin identity.
+        const matches = rows.filter(row => row.pluginId === null && row.name === name);
         if (matches.length !== 1) {finish(${CODEX_MCP_PROBE_EXIT.serverUnavailable}); return;}
         const row = matches[0];
         if (row.authStatus !== 'bearerToken') {finish(${CODEX_MCP_PROBE_EXIT.authenticationUnavailable}); return;}

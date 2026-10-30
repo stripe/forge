@@ -258,7 +258,12 @@ credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
 
 Forge keeps the bundled URL and unrelated plugin content. Claude and OpenCode use
-Authorization header templates; Codex uses `bearer_token_env_var`. All reference
+Authorization header templates in the plugin's MCP configuration. Codex
+re-materializes its plugin cache after startup, which discards edits to the
+bundled `.mcp.json` and leaves the server on Codex's OAuth path. Forge therefore
+moves each selected server out of the bundle into the run-owned Codex
+`config.toml` as `[mcp_servers.<name>]` with `bearer_token_env_var`; the
+plugin's skills and other content still load from the plugin. All reference
 `STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
 use the same key. Tokens reach only agent commands, never setup commands.
 Forge fingerprints the configured installation. Runtime credential names and
@@ -268,8 +273,8 @@ in the plan.
 Use `forge validate --host --experiment …` to install setup and check native MCP
 initialization and tool discovery from a disposable runtime. It requires the
 Stripe key, makes no model or MCP tool calls, and reports model auth as
-untested. Codex requires the expected server, bearer auth, server information,
-and a nonempty tool map. This check does not prove that `codex exec` exposes those
+untested. Codex requires exactly one Forge-declared server of that name (no
+plugin identity), bearer auth, server information, and a nonempty tool map. This check does not prove that `codex exec` exposes those
 tools to its model. Eval runs do not perform a separate discovery probe; their
 saved results can report native dispatch refusals as described in the
 [artifact contract](architecture.md).

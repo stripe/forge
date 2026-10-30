@@ -8,7 +8,7 @@ import { CODEX_MCP_PROBE_EXIT, CODEX_MCP_PROBE_SCRIPT } from './mcpProbe.ts';
 import { createCodexPluginInstaller } from './plugins.ts';
 
 const connected = {
-  pluginId: 'fixture@test',
+  pluginId: null,
   name: 'stripe',
   serverInfo: { name: 'fixture', version: '1' },
   authStatus: 'bearerToken',
@@ -53,7 +53,7 @@ async function probe(pages: readonly unknown[]) {
         };
       },
       process: {
-        argv: ['node', 'codex', 'fixture@test', '["stripe"]'],
+        argv: ['node', 'codex', '["stripe"]'],
         set exitCode(value: number) {
           resolve(value);
         },
@@ -213,7 +213,7 @@ describe('Codex MCP native status probe', () => {
         ] as const,
     ),
     [
-      'wrong plugin namespace',
+      'plugin-owned server instead of the Forge declaration',
       [{ data: [{ ...connected, pluginId: 'other@test' }], nextCursor: null }],
       2,
     ],
