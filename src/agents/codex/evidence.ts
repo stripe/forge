@@ -1,3 +1,6 @@
+import { posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifAgentStep,
@@ -252,8 +255,10 @@ function normalizeRecords(
   const calls = new Map<string, AtifAgentStep>();
   const completedCalls = new Set<string>();
   const completedItems = new Set<string>();
+  const completedWebSearches = new Set<string>();
   const turns = new Set<string>();
   let activeTurn: string | undefined;
+  let turnCwd: string | undefined;
   let completeTurns = 0;
   let userInTurn = false;
   let assistantInTurn = false;
@@ -311,6 +316,7 @@ function normalizeRecords(
         payload.model !== input.model
       )
         throw new Error('Codex turn context differs from the selected turn.');
+      turnCwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
       continue;
     }
     if (record.type === 'event_msg') {
@@ -320,6 +326,7 @@ function normalizeRecords(
         activeTurn = nonempty(payload.turn_id);
         if (turns.has(activeTurn)) throw new IncompleteRolloutError();
         turns.add(activeTurn);
+        turnCwd = undefined;
         userInTurn = false;
         assistantInTurn = false;
         lastAssistantMessage = undefined;
@@ -364,7 +371,34 @@ function normalizeRecords(
         const itemId = nonempty(object(payload.item).id);
         if (completedItems.has(itemId)) throw new IncompleteRolloutError();
         completedItems.add(itemId);
-        validateCompletedItem(payload, activeTurn, itemResponses);
+        validateCompletedItem(payload, activeTurn, itemResponses, turnCwd);
+        const item = object(payload.item);
+        if (item.type === 'WebSearch') {
+          completedWebSearches.add(itemId);
+          if (calls.has(itemId)) throw new IncompleteRolloutError();
+          const step = add(
+            {
+              source: 'agent',
+              model_name: input.model,
+              message: '',
+              tool_calls: [
+                {
+                  tool_call_id: itemId,
+                  function_name: 'web_search',
+                  arguments: {
+                    query: string(item.query),
+                    action: item.action as JsonObject,
+                  },
+                },
+              ],
+            },
+            record,
+            index,
+          ) as AtifAgentStep;
+          calls.set(itemId, step);
+          completedCalls.add(itemId);
+          assistantInTurn = true;
+        }
       } else if (type === 'thread_settings_applied') {
         if (activeTurn !== undefined) throw new IncompleteRolloutError();
         validateThreadSettings(payload, input.model);
@@ -447,6 +481,7 @@ function normalizeRecords(
           : type === 'function_call'
             ? functionArguments(payload.arguments)
             : { input: string(payload.input) };
+      const mcp = itemResponses.mcpSnapshots.get(id)?.payload;
       const step = add(
         {
           source: 'agent',
@@ -455,7 +490,12 @@ function normalizeRecords(
           tool_calls: [
             {
               tool_call_id: id,
-              function_name: namespace ? `${namespace}.${name}` : name,
+              function_name:
+                mcp && !namespace && name === mcp.tool
+                  ? `mcp__${string(mcp.server)}.${name}`
+                  : namespace
+                    ? `${namespace}.${name}`
+                    : name,
               arguments: arguments_,
             },
           ],
@@ -512,6 +552,9 @@ function normalizeRecords(
           },
         ],
       };
+    } else if (type === 'web_search_call') {
+      if (activeTurn === undefined || !userInTurn)
+        throw new IncompleteRolloutError();
     } else if (type === 'reasoning') {
       if (activeTurn === undefined || !userInTurn)
         throw new IncompleteRolloutError();
@@ -546,7 +589,8 @@ function normalizeRecords(
   if (
     activeTurn !== undefined ||
     completeTurns === 0 ||
-    completedCalls.size !== calls.size
+    completedCalls.size !== calls.size ||
+    completedWebSearches.size !== itemResponses.webSearches.size
   )
     throw new IncompleteRolloutError();
   return {
@@ -617,6 +661,7 @@ interface ItemResponses {
   readonly toolFailures: ReadonlyMap<string, boolean>;
   readonly truncatedTools: ReadonlySet<string>;
   readonly mcpSnapshots: ReadonlyMap<string, ItemResponse>;
+  readonly webSearches: ReadonlyMap<string, ItemResponse>;
 }
 
 /** Native completed-item events mirror response items, sometimes before them. */
@@ -629,6 +674,7 @@ function indexItemResponses(records: readonly RolloutRecord[]): ItemResponses {
   const toolFailures = new Map<string, boolean>();
   const truncatedTools = new Set<string>();
   const mcpSnapshots = new Map<string, ItemResponse>();
+  const webSearches = new Map<string, ItemResponse>();
   let turn: string | undefined;
   for (const record of records) {
     const payload = record.payload;
@@ -667,18 +713,22 @@ function indexItemResponses(records: readonly RolloutRecord[]): ItemResponses {
         ? messages
         : payload.type === 'reasoning'
           ? reasoning
-          : payload.type === 'function_call' ||
-              payload.type === 'custom_tool_call' ||
-              payload.type === 'tool_search_call'
-            ? calls
-            : payload.type === 'function_call_output' ||
-                payload.type === 'custom_tool_call_output' ||
-                payload.type === 'tool_search_output'
-              ? outputs
-              : undefined;
+          : payload.type === 'web_search_call'
+            ? webSearches
+            : payload.type === 'function_call' ||
+                payload.type === 'custom_tool_call' ||
+                payload.type === 'tool_search_call'
+              ? calls
+              : payload.type === 'function_call_output' ||
+                  payload.type === 'custom_tool_call_output' ||
+                  payload.type === 'tool_search_output'
+                ? outputs
+                : undefined;
     if (map === undefined) continue;
     const id =
-      map === messages || map === reasoning ? payload.id : payload.call_id;
+      map === messages || map === reasoning || map === webSearches
+        ? payload.id
+        : payload.call_id;
     // Older native messages have no ID and are checked by their text mirror.
     if ((map === messages || map === reasoning) && id === undefined) continue;
     const key = nonempty(id);
@@ -722,6 +772,7 @@ function indexItemResponses(records: readonly RolloutRecord[]): ItemResponses {
     toolFailures,
     truncatedTools,
     mcpSnapshots,
+    webSearches,
   };
 }
 
@@ -731,22 +782,24 @@ function validateResponseItem(
   turn: string | undefined,
 ): void {
   const fields =
-    type === 'message'
-      ? ['role', 'content', 'phase']
-      : type === 'function_call'
-        ? ['call_id', 'name', 'namespace', 'arguments']
-        : type === 'custom_tool_call'
-          ? ['call_id', 'name', 'namespace', 'input', 'status']
-          : type === 'tool_search_call'
-            ? ['call_id', 'arguments', 'status', 'execution']
-            : type === 'tool_search_output'
-              ? ['call_id', 'tools', 'status', 'execution']
-              : type === 'function_call_output' ||
-                  type === 'custom_tool_call_output'
-                ? ['call_id', 'output', 'is_error']
-                : type === 'reasoning'
-                  ? ['summary', 'content', 'encrypted_content']
-                  : undefined;
+    type === 'web_search_call'
+      ? ['status', 'action']
+      : type === 'message'
+        ? ['role', 'content', 'phase']
+        : type === 'function_call'
+          ? ['call_id', 'name', 'namespace', 'arguments']
+          : type === 'custom_tool_call'
+            ? ['call_id', 'name', 'namespace', 'input', 'status']
+            : type === 'tool_search_call'
+              ? ['call_id', 'arguments', 'status', 'execution']
+              : type === 'tool_search_output'
+                ? ['call_id', 'tools', 'status', 'execution']
+                : type === 'function_call_output' ||
+                    type === 'custom_tool_call_output'
+                  ? ['call_id', 'output', 'is_error']
+                  : type === 'reasoning'
+                    ? ['summary', 'content', 'encrypted_content']
+                    : undefined;
   if (!fields) throw new IncompleteRolloutError();
   assertKeys(payload, [
     'type',
@@ -765,6 +818,11 @@ function validateResponseItem(
     )
       throw new IncompleteRolloutError();
   }
+  if (type === 'web_search_call') {
+    nonempty(payload.id);
+    if (payload.status !== 'completed') throw new IncompleteRolloutError();
+    validateWebSearchAction(payload.action);
+  }
   if (payload.is_error !== undefined) boolean(payload.is_error);
   if (
     type === 'custom_tool_call' &&
@@ -778,6 +836,7 @@ function validateCompletedItem(
   payload: RecordValue,
   turn: string,
   responses: ItemResponses,
+  cwd: string | undefined,
 ): void {
   assertKeys(payload, [
     'type',
@@ -825,6 +884,42 @@ function validateCompletedItem(
     const response = responses.reasoning.get(id);
     if (response?.turn !== turn || reasoningContent(response.payload) !== text)
       throw new IncompleteRolloutError();
+  } else if (item.type === 'WebSearch') {
+    assertKeys(item, ['type', 'id', 'query', 'action']);
+    string(item.query);
+    validateWebSearchAction(item.action);
+    const response = responses.webSearches.get(id);
+    if (
+      response?.turn !== turn ||
+      !isDeepStrictEqual(item.action, response.payload.action)
+    )
+      throw new IncompleteRolloutError();
+  } else if (item.type === 'ImageView') {
+    assertKeys(item, ['type', 'id', 'path']);
+    const recordedPath = nonempty(item.path);
+    const path = recordedPath.startsWith('file:')
+      ? fileURLToPath(recordedPath, { windows: false })
+      : recordedPath;
+    const call = responses.calls.get(id);
+    const output = responses.outputs.get(id);
+    if (
+      call?.turn !== turn ||
+      output === undefined ||
+      call.payload.type !== 'function_call' ||
+      call.payload.name !== 'view_image' ||
+      (call.payload.namespace !== undefined && call.payload.namespace !== '') ||
+      output.payload.type !== 'function_call_output'
+    )
+      throw new IncompleteRolloutError();
+    const argumentPath = nonempty(
+      functionArguments(call.payload.arguments).path,
+    );
+    const resolvedPath = posix.isAbsolute(argumentPath)
+      ? posix.normalize(argumentPath)
+      : cwd !== undefined && posix.isAbsolute(cwd)
+        ? posix.resolve(cwd, argumentPath)
+        : undefined;
+    if (resolvedPath !== path) throw new IncompleteRolloutError();
   } else if (item.type === 'McpToolCall') {
     const snapshot = responses.mcpSnapshots.get(id);
     if (snapshot?.turn !== turn || snapshot.payload !== item)
@@ -918,6 +1013,22 @@ function validateCompletedItem(
   } else {
     throw new IncompleteRolloutError();
   }
+}
+
+function validateWebSearchAction(value: unknown): void {
+  const action = object(value);
+  if (action.type === 'search') {
+    assertKeys(action, ['type', 'query', 'queries']);
+    if (action.query !== undefined) string(action.query);
+    if (action.queries !== undefined) array(action.queries).forEach(string);
+  } else if (action.type === 'open_page') {
+    assertKeys(action, ['type', 'url']);
+    if (action.url !== undefined) string(action.url);
+  } else if (action.type === 'find_in_page') {
+    assertKeys(action, ['type', 'url', 'pattern']);
+    if (action.url !== undefined) string(action.url);
+    if (action.pattern !== undefined) string(action.pattern);
+  } else throw new IncompleteRolloutError();
 }
 
 function reasoningContent(payload: RecordValue): string {
