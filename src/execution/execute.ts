@@ -64,8 +64,8 @@ import {
   judgeCriteria,
 } from '../evaluation/index.ts';
 import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
-import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
+import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import {
   createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
