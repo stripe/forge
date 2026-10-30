@@ -1,6 +1,7 @@
 import { isSha256Digest } from '../model/hashes.ts';
 import {
   isSafeGitHubRepository,
+  isSafeMcpEndpointUrl,
   isSafeSimpleIdentifier,
   isSafeVersion,
 } from '../model/paths.ts';
@@ -21,6 +22,10 @@ export function parseAgentPluginInstallationReceipt(
       'version',
       'source',
       'installed_tree',
+      ...(Object.hasOwn(input, 'mcp_configuration') ||
+      Object.hasOwn(input, 'mcp_connections')
+        ? ['mcp_configuration', 'mcp_connections']
+        : []),
     ]) ||
     typeof input.adapter !== 'string' ||
     !isSafeSimpleIdentifier(input.adapter) ||
@@ -37,6 +42,10 @@ export function parseAgentPluginInstallationReceipt(
   ) {
     throw new TypeError('Agent plugin installation receipt is invalid.');
   }
+  const relocated = Object.hasOwn(input, 'mcp_configuration');
+  if (relocated && input.mcp_configuration !== 'codex-user-config') {
+    throw new TypeError('Agent plugin installation receipt is invalid.');
+  }
   return Object.freeze({
     adapter: input.adapter,
     plugin: input.plugin,
@@ -46,7 +55,44 @@ export function parseAgentPluginInstallationReceipt(
     version: input.version,
     source: parsePluginSourceReceipt(input.source),
     installed_tree: parseInstalledPluginTree(input.installed_tree),
+    ...(relocated
+      ? {
+          mcp_configuration: 'codex-user-config' as const,
+          mcp_connections: parseMcpConnections(input.mcp_connections),
+        }
+      : {}),
   });
+}
+
+const MAX_MCP_CONNECTIONS = 16;
+
+function parseMcpConnections(
+  input: unknown,
+): NonNullable<AgentPluginInstallationReceipt['mcp_connections']> {
+  if (
+    !Array.isArray(input) ||
+    input.length === 0 ||
+    input.length > MAX_MCP_CONNECTIONS
+  ) {
+    throw new TypeError('Agent plugin MCP connections receipt is invalid.');
+  }
+  let previous: string | undefined;
+  const connections = input.map((entry: unknown) => {
+    if (
+      !isPlainRecord(entry) ||
+      !hasExactKeys(entry, ['name', 'url']) ||
+      typeof entry.name !== 'string' ||
+      !isSafeSimpleIdentifier(entry.name) ||
+      typeof entry.url !== 'string' ||
+      !isSafeMcpEndpointUrl(entry.url) ||
+      (previous !== undefined && entry.name <= previous)
+    ) {
+      throw new TypeError('Agent plugin MCP connections receipt is invalid.');
+    }
+    previous = entry.name;
+    return Object.freeze({ name: entry.name, url: entry.url });
+  });
+  return Object.freeze(connections) as typeof connections;
 }
 
 function parsePluginSourceReceipt(

@@ -262,6 +262,16 @@ export function createCodexPluginInstaller(options: {
             identity.name,
             installed.version,
           );
+          // Fingerprint before Forge edits anything: the move below removes the
+          // connection from the tree, so the tree alone would not identify it.
+          const installedTree = await inspectInstalledPluginTree(
+            home,
+            relative,
+            signal,
+          );
+          let connections:
+            | NonNullable<AgentPluginInstallationReceipt['mcp_connections']>
+            | undefined;
           const mcpServers = context.mcpServers;
           if (mcpServers) {
             // Validate the whole move and the merged configuration before
@@ -273,12 +283,12 @@ export function createCodexPluginInstaller(options: {
             );
             await declareCodexMcpServers(home, relocation.declarations);
             await writeRelocatedPluginMcp(home, relocation);
+            connections = Object.entries(relocation.declarations)
+              .sort(([left], [right]) => (left < right ? -1 : 1))
+              .map(([name, server]) =>
+                Object.freeze({ name, url: server!.url }),
+              );
           }
-          const installedTree = await inspectInstalledPluginTree(
-            home,
-            relative,
-            signal,
-          );
           return Object.freeze({
             adapter: options.adapterId,
             plugin: selected.plugin,
@@ -288,6 +298,14 @@ export function createCodexPluginInstaller(options: {
             version: installed.version,
             source: Object.freeze({ kind: source.kind }),
             installed_tree: installedTree,
+            ...(connections?.length
+              ? {
+                  mcp_configuration: 'codex-user-config' as const,
+                  mcp_connections: Object.freeze(
+                    connections,
+                  ) as typeof connections,
+                }
+              : {}),
           });
         },
       });

@@ -37,6 +37,61 @@ describe('plugin installation receipts', () => {
     assert.deepEqual(parsed, RECEIPT);
   });
 
+  it('round-trips the optional Codex MCP relocation record and requires its parts together', () => {
+    const relocated = {
+      ...RECEIPT,
+      adapter: 'codex',
+      mcp_configuration: 'codex-user-config',
+      mcp_connections: [
+        { name: 'stripe', url: 'https://mcp.stripe.com/v1' },
+        { name: 'zeta', url: 'http://localhost:8080' },
+      ],
+    };
+    const parsed = parseAgentPluginInstallationReceipt(
+      JSON.parse(JSON.stringify(relocated)),
+    );
+    assert.deepEqual(parsed, relocated);
+    assert.ok(Object.isFrozen(parsed.mcp_connections));
+    // Old receipts carry neither field and still read.
+    const old = parseAgentPluginInstallationReceipt(RECEIPT);
+    assert.equal(Object.hasOwn(old, 'mcp_configuration'), false);
+    assert.equal(Object.hasOwn(old, 'mcp_connections'), false);
+
+    const { mcp_connections, ...marker } = relocated;
+    const { mcp_configuration, ...connections } = relocated;
+    const stripe = { name: 'stripe', url: 'https://mcp.stripe.com' };
+    for (const bad of [
+      marker,
+      connections,
+      { ...relocated, mcp_configuration: 'codex-global' },
+      { ...relocated, mcp_configuration: undefined },
+      { ...relocated, mcp_connections: [] },
+      { ...relocated, mcp_connections: {} },
+      { ...relocated, mcp_connections: Array(17).fill(stripe) },
+      { ...relocated, mcp_connections: [stripe, stripe] },
+      {
+        ...relocated,
+        mcp_connections: [
+          { name: 'zeta', url: stripe.url },
+          { name: 'stripe', url: stripe.url },
+        ],
+      },
+      { ...relocated, mcp_connections: [{ ...stripe, extra: true }] },
+      { ...relocated, mcp_connections: [{ name: 'Bad Name', url: stripe.url }] },
+      ...[
+        'https://mcp.stripe.com?api_key=synthetic-secret',
+        'https://mcp.stripe.com#synthetic-secret',
+        'https://user:synthetic-secret@mcp.stripe.com',
+        'ftp://mcp.stripe.com',
+        'not a url',
+      ].map((url) => ({
+        ...relocated,
+        mcp_connections: [{ name: 'stripe', url }],
+      })),
+    ])
+      assert.throws(() => parseAgentPluginInstallationReceipt(bad));
+  });
+
   it('accepts each supported source kind when no source commit is reported', () => {
     for (const kind of [
       'marketplace-path',
