@@ -1,3 +1,5 @@
+import { assertWebSearchConfiguration } from '../setup/forgeWebSearch.ts';
+import { preflightWebSearch, prepareWebSearch, type PreparedWebSearch } from '../webSearch/runtime.ts';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -301,13 +303,17 @@ export async function validateRuntimeWithSetupActions(
   });
   const resolved = [];
   const readinessSecrets: string[] = [];
+  const readinessSearch: PreparedWebSearch[] = [];
+  try {
   // Resolve every selected check before the first runtime allocation.
   for (const check of checks) {
     signal.throwIfAborted();
     try {
+      const webSearch = await prepareWebSearch(check.plan, check.composition, check.runId, signal);
+      if (webSearch) { readinessSearch.push(webSearch); readinessSecrets.push(...webSearch.secrets); }
       const environment = await createEnvironmentResolver({
         async resolve(reference, context) {
-          const value = await check.composition.credentialResolver.resolve(
+          const value = await (webSearch?.credentialResolver ?? check.composition.credentialResolver).resolve(
             reference,
             context,
           );
@@ -319,7 +325,7 @@ export async function validateRuntimeWithSetupActions(
         purpose: 'readiness',
         signal,
       });
-      resolved.push({ ...check, environment });
+      resolved.push({ ...check, environment, webSearch });
     } catch (error) {
       throw new Error(
         `Runtime readiness failed at credentials: ${
@@ -329,7 +335,7 @@ export async function validateRuntimeWithSetupActions(
     }
   }
   const results: RuntimeReadinessResult[] = [];
-  for (const { plan, composition, preflight, environment, runId } of resolved) {
+  for (const { plan, composition, preflight, environment, runId, webSearch } of resolved) {
     const runSignal = AbortSignal.any([
       signal,
       AbortSignal.timeout(plan.limits.run_timeout_ms),
@@ -357,6 +363,7 @@ export async function validateRuntimeWithSetupActions(
       });
       stage = 'setup';
       const applied = await preflight.setup.apply({
+        ...(webSearch ? { webSearchUrl: webSearch.service.url } : {}),
         runId,
         paths: runtime.paths,
         workspace: runtime.workspace,
@@ -366,6 +373,7 @@ export async function validateRuntimeWithSetupActions(
         signal: runSignal,
       });
       stage = 'finalize';
+      if (webSearch) await assertWebSearchConfiguration(plan, runtime, webSearch.service.url);
       await runtime.finalizeSetup();
       stage = 'mcp';
       let serverCount = 0;
@@ -422,6 +430,7 @@ export async function validateRuntimeWithSetupActions(
       );
     } finally {
       try {
+        await webSearch?.service.close();
         await runtime?.dispose();
       } catch {
         failure = new Error(
@@ -432,6 +441,9 @@ export async function validateRuntimeWithSetupActions(
     if (failure) throw failure;
   }
   return Object.freeze(results);
+  } finally {
+    await Promise.allSettled(readinessSearch.map(({ service }) => service.close()));
+  }
 }
 
 function readinessErrorDetail(error: unknown): string {
@@ -516,6 +528,7 @@ export async function executeEvalWithTestHooks(
     ),
   );
   let phase: RunPhase = 'preflight';
+  let webSearch: PreparedWebSearch | undefined;
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
@@ -552,10 +565,12 @@ export async function executeEvalWithTestHooks(
 
     await executionTimeout.withoutRecordingTime(() => diagnostics.flush());
 
+    webSearch = await prepareWebSearch(input.plan, input.composition, input.runId, signal);
     const environment = await resolveEnvironment(
       input,
       preflight.environmentSpecification,
       signal,
+      webSearch?.credentialResolver,
     );
     let completions: PreparedCompletionRuntime;
     try {
@@ -578,6 +593,7 @@ export async function executeEvalWithTestHooks(
     const secrets = uniqueStrings([
       ...credentialValues(environment),
       ...completions.secrets,
+      ...(webSearch?.secrets ?? []),
     ]);
 
     diagnosticSecrets = secrets;
@@ -628,6 +644,7 @@ export async function executeEvalWithTestHooks(
       );
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
+        ...(webSearch ? { webSearchUrl: webSearch.service.url } : {}),
         runId: input.runId,
         paths: prepared!.paths,
         workspace: prepared!.workspace,
@@ -644,6 +661,7 @@ export async function executeEvalWithTestHooks(
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
       throwIfAborted(signal, phase);
+      if (webSearch) await assertWebSearchConfiguration(input.plan, prepared!, webSearch.service.url);
       await prepared!.finalizeSetup();
       return artifact;
     });
@@ -701,7 +719,9 @@ export async function executeEvalWithTestHooks(
       await executionTimeout.withoutRecordingTime(() =>
         diagnostics.phase('quiesce'),
       );
-      return prepared!.quiesce();
+      const runtime = await prepared!.quiesce();
+      await webSearch?.service.close();
+      return runtime;
     });
 
     const evaluationTimeoutMs = input.plan.limits.evaluation_timeout_ms;
@@ -1171,6 +1191,7 @@ export async function executeEvalWithTestHooks(
       );
     throw primary;
   } finally {
+    await webSearch?.service.close().catch(() => undefined);
     executionTimeout.dispose();
   }
 }
@@ -1622,16 +1643,16 @@ function buildEvalPreflight(
   const agentEvidenceIdentity = parseAgentEvidenceIdentity(
     agent.evidenceIdentity(plan.agent),
   );
+  preflightWebSearch(plan, composition);
+  const agentRequirements = normalizeAgentRequirements(agent.requirements(plan.agent));
   const setup = setupExecutor.preflight(plan.setup, {
+    agentStateDirectories: agentRequirements.stateDirectories,
     selection: plan.agent,
     runtime: plan.runtime,
     ...(agent.pluginInstaller === undefined
       ? {}
       : { pluginInstaller: agent.pluginInstaller }),
   });
-  const agentRequirements = normalizeAgentRequirements(
-    agent.requirements(plan.agent),
-  );
   const requirements = mergeRuntimeRequirements(
     {
       executables: agentRequirements.executables,
@@ -1747,10 +1768,11 @@ async function resolveEnvironment(
   input: ExecuteEvalInput,
   specification: ScopedEnvironmentSpecification,
   signal: AbortSignal,
+  resolver = input.composition.credentialResolver,
 ): Promise<ResolvedEnvironment> {
   try {
     return await createEnvironmentResolver(
-      input.composition.credentialResolver,
+      resolver,
     ).resolve(specification, {
       runId: input.runId,
       purpose: 'forge-eval',

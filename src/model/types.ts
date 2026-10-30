@@ -102,12 +102,17 @@ export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
   with: PluginSetupWithV1;
 }
 
+export interface WebSearchSetupStepV1 extends SetupStepV1 {
+  uses: 'forge/web-search';
+}
+
 /** Closed union for consumers which intentionally handle only package built-ins. */
 export type BuiltInSetupStepV1 =
   | WriteSetupStepV1
   | CommandSetupStepV1
   | CredentialsSetupStepV1
-  | PluginSetupStepV1;
+  | PluginSetupStepV1
+  | WebSearchSetupStepV1;
 
 export interface FilesystemCheckV1 {
   description?: string;

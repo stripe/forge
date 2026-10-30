@@ -7,7 +7,6 @@ import { isSha256Digest } from '../../model/hashes.ts';
 import { isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type {
   CodexMcpServerConfig,
-  CodexMcpServerDeclarations,
 } from '../pluginMcp.ts';
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
@@ -28,7 +27,7 @@ export async function prepareCodexPluginConfiguration(
  */
 export async function declareCodexMcpServers(
   home: MutableWorkspace,
-  servers: CodexMcpServerDeclarations,
+  servers: Readonly<Record<string, CodexMcpServerConfig>>,
 ): Promise<void> {
   const config = (await readSanitizedConfiguration(home)) ?? {
     marketplaces: {},

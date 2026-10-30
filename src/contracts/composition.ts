@@ -5,7 +5,7 @@ import type {
   CompletionProvider,
   CompletionProviderResolver,
 } from './completion.ts';
-import type { CredentialResolver } from './credentials.ts';
+import type { CredentialReference, CredentialResolver } from './credentials.ts';
 import type { RunInputProvider } from './inputs.ts';
 import type { RunObserver } from './observability.ts';
 import type { RuntimeAdapter } from './runtime.ts';
@@ -19,6 +19,11 @@ export type CompletionProviderCollection =
  * There is no service discovery or implicit import of private implementations.
  */
 export interface ForgeComposition {
+  /** Host-only search authority; used only when setup declares forge/web-search.
+   * baseUrl excludes /v1; the engine appends /v1/responses. The runtime must
+   * reach host loopback (Docker requires explicit network: host).
+   */
+  readonly webSearch?: Readonly<{ baseUrl: string; credential: CredentialReference }>;
   readonly runtime: RuntimeAdapter;
   readonly agents: ReadonlyMap<string, AgentAdapter>;
   readonly completionProviders?: CompletionProviderCollection;

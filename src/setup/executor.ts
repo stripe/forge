@@ -62,6 +62,7 @@ export function createSetupExecutorWithHandlers(
         selection: AgentSelectionV1;
         runtime: ResolvedRunPlanV1['runtime'];
         pluginInstaller?: AgentPluginInstaller;
+        agentStateDirectories?: readonly RuntimeStateDirectoryRequirement[];
       }>,
     ) {
       const selection = freezeClone(context.selection);
@@ -90,6 +91,7 @@ export function createSetupExecutorWithHandlers(
             stepIndex: index,
             selection,
             runtime,
+            ...(context.agentStateDirectories === undefined ? {} : { agentStateDirectories: context.agentStateDirectories }),
             ...(context.pluginInstaller === undefined
               ? {}
               : { pluginInstaller: context.pluginInstaller }),

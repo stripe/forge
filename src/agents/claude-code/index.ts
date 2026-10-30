@@ -1,3 +1,4 @@
+import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import { randomUUID } from 'node:crypto';
 import type {
   AgentAdapter,
@@ -237,9 +238,9 @@ export function createClaudeCodeAdapter(
                   'stream-json',
                   '--verbose',
                   '--dangerously-skip-permissions',
-                  ...(disallowedTools.length === 0
+                  ...(disallowedTools.length === 0 && !hasWebSearch(context.plan)
                     ? []
-                    : ['--disallowedTools', disallowedTools.join(',')]),
+                    : ['--disallowedTools', [...disallowedTools, ...(hasWebSearch(context.plan) ? ['WebSearch'] : [])].join(',')]),
                   '--model',
                   context.selection.model,
                 ],

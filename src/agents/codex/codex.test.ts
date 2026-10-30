@@ -1061,3 +1061,15 @@ it.each([
     }
   },
 );
+
+it('disables native search only for forge/web-search on initial and resumed turns', async () => {
+  for (const enabled of [false, true]) {
+    const test = fixture();
+    const plan = createTestResolvedRunPlan({ agent: selection, treatmentSetup: enabled ? [{ uses: 'forge/web-search', with: {} }] : [] });
+    const session = await test.adapter.openSession({ ...test.sessionContext, plan });
+    await session.send('First', { signal: test.sessionContext.signal });
+    await session.send('Again', { signal: test.sessionContext.signal });
+    for (const call of test.calls.filter((call) => call.scope === 'agent'))
+      assert.equal(configArguments(call.argv).includes('web_search="disabled"'), enabled);
+  }
+});

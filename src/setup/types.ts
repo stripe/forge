@@ -38,10 +38,13 @@ export interface SetupPreflightContext {
   readonly runtime: ResolvedRunPlanV1['runtime'];
   /** Selected adapter's narrow native plugin mechanism, when available. */
   readonly pluginInstaller?: AgentPluginInstaller;
+  readonly agentStateDirectories?: readonly RuntimeStateDirectoryRequirement[];
 }
 
 /** Runtime capabilities shared by all steps in one already-preflighted setup. */
 export interface SetupApplyContext {
+  /** Engine-owned per-run host endpoint; present only for forge/web-search. */
+  readonly webSearchUrl?: string;
   readonly runId: string;
   readonly paths: RuntimeLogicalPaths;
   readonly workspace: MutableWorkspace;

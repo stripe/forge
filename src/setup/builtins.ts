@@ -7,6 +7,7 @@ import type { JsonObject } from '../model/types.ts';
 import { commandSetupHandler } from './forgeCommand.ts';
 import { credentialsSetupHandler } from './forgeCredentials.ts';
 import { pluginSetupHandler } from './forgePlugin.ts';
+import { webSearchSetupHandler } from './forgeWebSearch.ts';
 import { writeSetupHandler } from './forgeWrite.ts';
 import type { SetupActionDefinition } from './registry.ts';
 
@@ -111,6 +112,7 @@ export const builtInSetupActions: readonly SetupActionDefinition[] =
     commandSetupAction,
     pluginSetupAction,
     credentialsSetupAction,
+    Object.freeze({ ...webSearchSetupHandler, parseWith: (input: unknown) => z.object({}).strict().parse(input) }),
   ]);
 
 function isBoundedText(value: string): boolean {

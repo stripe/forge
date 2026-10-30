@@ -1,3 +1,4 @@
+import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import type {
   AgentAdapter,
   AgentRuntimeRequirements,
@@ -228,6 +229,7 @@ export function createCodexAdapter(
                   executable,
                   'exec',
                   ...configuration,
+                  ...(hasWebSearch(context.plan) ? ['-c', 'web_search="disabled"'] : []),
                   '--json',
                   '--skip-git-repo-check',
                   '--dangerously-bypass-approvals-and-sandbox',

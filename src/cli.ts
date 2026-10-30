@@ -10,7 +10,7 @@ import { createOpenCodeAdapter } from './agents/opencode/index.ts';
 import { parseOpenCodeModelRoutes } from './agents/opencode/routes.ts';
 import { resolveCliRuntime } from './cliRuntime.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
-import { createEnvironmentCredentialResolver } from './contracts/credentials.ts';
+import { credentialReference, createEnvironmentCredentialResolver } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
@@ -239,6 +239,7 @@ export async function createDefaultCliComposition(
     [OPENAI_API_KEY_REFERENCE, CODEX_API_KEY_ENVIRONMENT],
     ['openai.completion-api-key', 'OPENAI_API_KEY'],
     ['opencode.api-key', 'OPENCODE_API_KEY'],
+    ['forge.web-search-api-key', environment.FORGE_WEB_SEARCH_API_KEY !== undefined ? 'FORGE_WEB_SEARCH_API_KEY' : (options.credentialBindings?.['openai.completion-api-key'] ?? 'OPENAI_API_KEY')],
     ...Object.entries(opencodeRouting.credentialBindings),
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
@@ -248,6 +249,7 @@ export async function createDefaultCliComposition(
   });
 
   return Object.freeze({
+    webSearch: { baseUrl: environment.FORGE_WEB_SEARCH_BASE_URL ?? 'https://api.openai.com', credential: credentialReference('forge.web-search-api-key') },
     runtime: createDockerRuntimeAdapter(),
     agents: new Map([
       [claude.id, claude],

@@ -2703,3 +2703,20 @@ it('enables restricted diagnostic capture only through the explicit run option',
     assert.equal(observed, enabled ? true : undefined);
   }
 });
+
+it('binds web search host credentials explicitly with completion-key fallback', async () => {
+  for (const dedicated of [false, true]) {
+    const composition = await createDefaultCliComposition({
+      datasetRoot: '.', resultsRoot: '/tmp/forge-web-search-test',
+      environment: { OPENAI_API_KEY: 'completion-secret', ...(dedicated ? { FORGE_WEB_SEARCH_API_KEY: 'search-secret', FORGE_WEB_SEARCH_BASE_URL: 'https://example.com' } : {}) },
+    });
+    assert.equal(composition.webSearch?.baseUrl, dedicated ? 'https://example.com' : 'https://api.openai.com');
+    assert.equal(await composition.credentialResolver.resolve(composition.webSearch!.credential, { runId: 'test', purpose: 'web_search', signal: new AbortController().signal }), dedicated ? 'search-secret' : 'completion-secret');
+    for (const [id, provider] of [['claude-code', 'anthropic'], ['codex', 'openai'], ['opencode', 'openai-compatible']]) {
+      if (id === 'opencode') continue; // OpenCode requires its separately configured endpoint.
+      const requirements = composition.agents.get(id!)!.requirements({ adapter: id!, provider: provider!, model: 'test' });
+      assert.equal(JSON.stringify(requirements.environment).includes('forge.web-search-api-key'), false);
+      assert.equal(JSON.stringify(requirements.environment).includes('FORGE_WEB_SEARCH_API_KEY'), false);
+    }
+  }
+});

@@ -1,3 +1,4 @@
+import { hasWebSearch } from '../../setup/forgeWebSearch.ts';
 import type {
   AgentAdapter,
   AgentNativeArtifactUnavailableReason,
@@ -222,6 +223,11 @@ export function createOpenCodeAdapter(
           ),
           layout.stateDirectory,
         );
+      }
+      if (hasWebSearch(context.plan)) {
+        const parsed = JSON.parse(config) as Record<string, unknown>;
+        const tools = typeof parsed.tools === 'object' && parsed.tools !== null ? parsed.tools : {};
+        config = JSON.stringify({ ...parsed, tools: { ...tools, websearch: false } });
       }
       context.signal.throwIfAborted();
       let currentSessionId: string | undefined;

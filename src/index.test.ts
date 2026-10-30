@@ -211,6 +211,7 @@ describe('@stripe/forge package root', () => {
       'forge/command',
       'forge/credentials',
       'forge/plugin',
+      'forge/web-search',
       'forge/write',
     ]);
     assert.equal(typeof credentialReference, 'function');

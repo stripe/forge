@@ -94,6 +94,7 @@ describe('ForgeEngine setup action bundles', () => {
       'forge/command',
       'forge/credentials',
       'forge/plugin',
+      'forge/web-search',
       'forge/write',
     ]);
     assert.throws(

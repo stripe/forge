@@ -504,3 +504,19 @@ describe('Claude Code adapter', () => {
     ]);
   });
 });
+
+it('disallows native WebSearch only for forge/web-search and preserves host disallowed tools', async () => {
+  for (const enabled of [false, true]) {
+    const adapter = createClaudeCodeAdapter({ disallowedTools: ['OtherTool'] });
+    const plan = createTestResolvedRunPlan({ agent: { adapter: adapter.id, provider: 'anthropic', model: 'test' }, treatmentSetup: enabled ? [{ uses: 'forge/web-search', with: {} }] : [] });
+    const signal = new AbortController().signal;
+    let argv: readonly string[] = [];
+    const session = await adapter.openSession({
+      runId: 'search-test', plan, selection: plan.agent, signal, inputs: createMemoryRunInputProvider(),
+      runtime: { runtimeId: 'test', paths: { workspace: '/workspace', home: '/home/forge' }, workspace: createMemoryWorkspace().mutable, stateDirectories: new Map(),
+        commands: { agent: { async run(args) { argv = args; return { stdout: '', stderr: '', exitCode: 1, durationMs: 0 }; } } } },
+    });
+    await assert.rejects(session.send('Do it', { signal }));
+    assert.equal(argv[argv.indexOf('--disallowedTools') + 1], enabled ? 'OtherTool,WebSearch' : 'OtherTool');
+  }
+});
