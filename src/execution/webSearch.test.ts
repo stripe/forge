@@ -214,14 +214,18 @@ for (const responseKind of [
   'valid',
   'malformed-usage',
   'malformed-response',
+  'partial',
 ] as const) {
   it(`records the search condition and nullable usage for ${responseKind} without affecting scoring`, async () => {
     const test = fixture();
+    let requests = 0;
     const upstream = http.createServer((_request, response) => {
+      requests += 1;
       response.setHeader('content-type', 'application/json');
       response.end(
         JSON.stringify(
-          responseKind === 'malformed-response'
+          responseKind === 'malformed-response' ||
+          (responseKind === 'partial' && requests === 1)
             ? { error: { message: 'private-upstream-text' } }
             : {
                 output: [
@@ -306,13 +310,24 @@ for (const responseKind of [
         provider: 'forge/web-search',
         native_search: 'disabled',
         usage: {
+          usage_complete: responseKind === 'valid',
           tool_calls: 2,
-          search_count: responseKind === 'malformed-response' ? null : 4,
-          input_tokens: responseKind === 'valid' ? 20 : null,
-          output_tokens: responseKind === 'valid' ? 8 : null,
-          total_tokens: responseKind === 'valid' ? 28 : null,
-          cached_input_tokens: responseKind === 'valid' ? 4 : null,
-          reasoning_tokens: responseKind === 'valid' ? 2 : null,
+          search_count:
+            responseKind === 'malformed-response'
+              ? null
+              : responseKind === 'partial'
+                ? 2
+                : 4,
+          input_tokens:
+            responseKind === 'valid' ? 20 : responseKind === 'partial' ? 10 : null,
+          output_tokens:
+            responseKind === 'valid' ? 8 : responseKind === 'partial' ? 4 : null,
+          total_tokens:
+            responseKind === 'valid' ? 28 : responseKind === 'partial' ? 14 : null,
+          cached_input_tokens:
+            responseKind === 'valid' ? 4 : responseKind === 'partial' ? 2 : null,
+          reasoning_tokens:
+            responseKind === 'valid' ? 2 : responseKind === 'partial' ? 1 : null,
         },
       });
     } finally {
@@ -376,6 +391,15 @@ it('verifies the saved condition against its plan and rejects forged result fiel
         web_search: {
           ...condition,
           usage: { ...condition.usage, input_tokens: -1 },
+        },
+      }),
+    );
+    assert.throws(() =>
+      parseRunResult({
+        ...completed.result,
+        web_search: {
+          ...condition,
+          usage: { ...condition.usage, usage_complete: 'true' },
         },
       }),
     );

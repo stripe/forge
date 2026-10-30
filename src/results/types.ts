@@ -328,10 +328,11 @@ export interface RunEvidenceV1 {
   readonly redaction_count: number;
 }
 
-/** Bounded host search totals; null means unavailable, not zero spend.
+/** Bounded confirmed host search totals; null means unavailable, not zero spend.
  * Future price estimation can consume these independently of scoring.
  */
 export interface WebSearchUsageV1 {
+  readonly usage_complete: boolean;
   readonly tool_calls: number | null;
   readonly search_count: number | null;
   readonly input_tokens: number | null;

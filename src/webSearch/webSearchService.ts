@@ -52,6 +52,7 @@ export async function startWebSearchService(options: {
   const usage: {
     -readonly [K in keyof WebSearchUsageV1]: WebSearchUsageV1[K];
   } = {
+    usage_complete: true,
     tool_calls: 0,
     search_count: 0,
     input_tokens: 0,
@@ -60,14 +61,24 @@ export async function startWebSearchService(options: {
     cached_input_tokens: 0,
     reasoning_tokens: 0,
   };
-  const add = (key: keyof WebSearchUsageV1, value: number | null) => {
+  type Counter = Exclude<keyof WebSearchUsageV1, 'usage_complete'>;
+  const counted = new Set<Counter>();
+  const overflowed = new Set<Counter>();
+  const add = (key: Counter, value: number | null) => {
+    if (value === null) {
+      usage.usage_complete = false;
+      if (!counted.has(key)) usage[key] = null;
+      return;
+    }
+    if (overflowed.has(key)) return;
     const previous = usage[key];
-    usage[key] =
-      previous === null ||
-      value === null ||
-      !Number.isSafeInteger(previous + value)
-        ? null
-        : previous + value;
+    const total = (previous ?? 0) + value;
+    counted.add(key);
+    if (!Number.isSafeInteger(total)) {
+      overflowed.add(key);
+      usage[key] = null;
+      usage.usage_complete = false;
+    } else usage[key] = total;
   };
   const server = http.createServer(
     { maxHeaderSize: 16 * 1024 },
@@ -155,12 +166,12 @@ export async function startWebSearchService(options: {
           });
           add('search_count', result.searchCount);
           for (const [key, value] of Object.entries(result.usage))
-            add(key as keyof WebSearchUsageV1, value);
+            add(key as Counter, value);
           return result;
         } catch (error) {
           add('search_count', null);
           for (const key of Object.keys(parseSearchUsage(undefined)))
-            add(key as keyof WebSearchUsageV1, null);
+            add(key as Counter, null);
           throw error;
         }
       });

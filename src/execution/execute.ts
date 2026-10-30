@@ -2822,6 +2822,7 @@ function searchResultObservation(
     usage = search.service.usage();
   } catch {
     usage = {
+      usage_complete: false,
       tool_calls: null,
       search_count: null,
       input_tokens: null,

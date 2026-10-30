@@ -702,6 +702,7 @@ const runResultFields = {
       native_search: z.literal('disabled'),
       usage: z
         .object({
+          usage_complete: z.boolean(),
           tool_calls: SearchCounterSchema,
           search_count: SearchCounterSchema,
           input_tokens: SearchCounterSchema,

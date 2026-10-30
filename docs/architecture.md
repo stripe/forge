@@ -1067,16 +1067,19 @@ external-access flag, and native-search policy. `result.json.web_search` records
 
 | Counter | Meaning |
 | --- | --- |
+| `usage_complete` | False when any backend request failed or supplied unavailable usage, or a total overflowed; numeric counters then retain confirmed partial totals. |
 | `tool_calls` | Authenticated, accepted MCP calls to `call_web_search`, including invalid queries. Transport/auth/rate-limit rejections are excluded. |
 | `search_count` | Sum of upstream `web_search_call` output items; one agent call may perform multiple searches. |
 | `input_tokens`, `output_tokens`, `total_tokens` | Sum of Responses `usage` totals. |
 | `cached_input_tokens`, `reasoning_tokens` | Optional input-cache and output-reasoning subsets from Responses usage details. |
 
-Counters are nonnegative safe integers or null. No calls means zero. Missing,
-malformed, inconsistent, or overflowing token metadata makes affected totals
-null. A failed backend request makes its search and token totals unavailable;
-null propagates across later calls rather than claiming partial spend as a full
-total. Accounting cannot fail an eval or alter scores. There is no pricing;
+Counters are nonnegative safe integers or null. No calls means zero with
+`usage_complete: true`. Failed requests and missing, malformed, or inconsistent
+metadata set `usage_complete: false` without discarding confirmed counts from
+other calls. Each counter stays null only if no attempted backend call supplied
+a count for it, or its confirmed sum overflowed. Known zero counts are retained;
+unknown spend is never inferred as zero. Accounting cannot fail an eval or alter
+scores. There is no pricing;
 these counters are the input for future cost estimation. They are stored per
 eval and are not yet aggregated into experiment reports. Completed-run
 verification binds the condition and setup receipt to the plan. Without the

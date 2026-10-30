@@ -117,6 +117,7 @@ describe('runner-owned search', () => {
       expect(response.body).not.toContain('withheld');
       expect(response.body).not.toContain('input_tokens');
       expect(service.usage()).toEqual({
+        usage_complete: true,
         tool_calls: 1,
         search_count: 1,
         input_tokens: 10,
@@ -268,13 +269,14 @@ function post(
   });
 }
 
-it('records attempts and nulls unavailable backend usage without exposing provider text', async () => {
+it('retains confirmed usage across malformed metadata and failed requests', async () => {
   let count = 0;
   const upstream = http.createServer((_request, response) => {
     count += 1;
+    if (count === 4) response.statusCode = 500;
     response.setHeader('content-type', 'application/json');
     response.end(
-      count === 1
+      count === 1 || count === 5
         ? JSON.stringify(providerResult)
         : count === 2
           ? JSON.stringify({
@@ -305,19 +307,32 @@ it('records attempts and nulls unavailable backend usage without exposing provid
     await post(service.url, message, service.credential);
     await post(service.url, message, service.credential);
     expect(service.usage()).toEqual({
+      usage_complete: false,
       tool_calls: 2,
       search_count: 2,
-      input_tokens: null,
-      output_tokens: null,
-      total_tokens: null,
-      cached_input_tokens: null,
-      reasoning_tokens: null,
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+      cached_input_tokens: 2,
+      reasoning_tokens: 1,
     });
     const third = await post(service.url, message, service.credential);
     expect(JSON.parse(third.body).result.isError).toBe(true);
     expect(third.body).not.toContain('private-provider-text');
     expect(service.usage().tool_calls).toBe(3);
-    expect(service.usage().search_count).toBeNull();
+    expect(service.usage().search_count).toBe(2);
+    await post(service.url, message, service.credential);
+    await post(service.url, message, service.credential);
+    expect(service.usage()).toEqual({
+      usage_complete: false,
+      tool_calls: 5,
+      search_count: 3,
+      input_tokens: 20,
+      output_tokens: 8,
+      total_tokens: 28,
+      cached_input_tokens: 4,
+      reasoning_tokens: 2,
+    });
   } finally {
     await Promise.all([service.close(), service.close()]);
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
