@@ -42,7 +42,7 @@ realizing that plan. Runtime code does not infer omitted settings from ambient
 state.
 
 **Portable mechanisms.** Runtime, coding-agent, credential, completion,
-storage, input, and observation behavior enters through public contracts in
+storage, input, search authority, and observation behavior enters through public contracts in
 [`src/contracts`](https://github.com/stripe/forge/tree/main/src/contracts). The core does not discover private
 implementations or branch on a host environment.
 
@@ -713,8 +713,8 @@ choice not already fixed by the plan that could explain different realized
 behavior, such as the installed plugin version and source revision. Digest
 fields serve an expected-content check, artifact verification, or a documented
 content-identity workflow such as comparing installed plugin snapshots.
-Resolutions do not include credentials or private host paths. Static built-ins
-return no dynamic resolution.
+Resolutions do not include credentials or private host paths. `forge/write`, `forge/command`, and `forge/credentials`
+return no resolution.
 Once all actions succeed, Forge calls `finalizeSetup()` once. This closes setup
 command authority and asks the runtime to seal any state directory declared
 immutable for interaction.
@@ -977,9 +977,11 @@ The built-ins are:
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials;
 - `forge/credentials`: declare agent-scoped credentials without issuing setup
-  commands or mutating state; and
+  commands or mutating state;
 - `forge/plugin`: resolve a registered plugin name for the selected agent
-  adapter, install it, and retain a verified installation receipt.
+  adapter, install it, and retain a verified installation receipt; and
+- `forge/web-search`: configure one per-eval host MCP tool and disable native
+  search on Claude Code, Codex, and OpenCode.
 
 Action IDs are namespaced but have no individual version suffix. Breaking
 changes to their payload or behavior require updating affected benchmark
@@ -1002,6 +1004,90 @@ These identify the catalog snapshot and observed contents; plugin state remains
 writable during interaction. See
 [Marketplace plugin treatments](plugin-action.md) for registered names and
 installation semantics.
+
+### Host web search
+
+`forge/web-search` has an empty, strict `with` object. It occurs once in a
+run's ordered setup. Put it in every compared treatment to make search a shared
+condition; the action does not propagate itself to other treatments. The
+[README](../README.md#host-web-search) owns CLI configuration and authoring.
+
+An embedding host explicitly supplies `ForgeComposition.webSearch` with a
+`baseUrl` and opaque `credential` reference. The base URL excludes the API
+version; Forge appends `/v1/responses`. Pure preflight validates this authority
+and the selected harness before any credential lookup or allocation. Docker
+requires the existing explicit `runtime.network: host`; external runtimes must
+also make host loopback reachable. The Docker daemon and Forge process must
+share host loopback; remote daemons are unsupported by this mechanism. The
+engine resolves the credential with
+purpose `web_search`, starts one loopback HTTP listener on a random port per
+eval, and grants its random bearer as agent-scoped `FORGE_WEB_SEARCH_TOKEN`
+(reference `forge.web-search-token`). The upstream key never enters runtime
+credentials, commands, or workspace files. `SetupApplyContext.webSearchUrl`
+carries only the engine-owned endpoint during setup;
+`SetupPreflightContext.agentStateDirectories` supplies the selected adapter's
+layout declarations so Codex configuration uses the run-owned home.
+
+Setup preserves other MCP entries and writes `web_search` into Claude's
+workspace `.mcp.json`, Codex's run-owned `config.toml`, or OpenCode's workspace
+`opencode.json`. Authorization uses each client's environment-reference syntax.
+Forge checks the connection after ordered setup. Claude gets `WebSearch` in
+`--disallowedTools`; every Codex invocation gets `-c web_search="disabled"`;
+OpenCode's action requirements explicitly set `OPENCODE_EXPERIMENTAL`,
+`OPENCODE_ENABLE_EXA`, `OPENCODE_EXPERIMENTAL_EXA`, `OPENCODE_ENABLE_PARALLEL`,
+and `OPENCODE_EXPERIMENTAL_PARALLEL` to `false`. In pinned OpenCode 1.19.0,
+[these flags](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/effect/runtime-flags.ts)
+control [native search availability](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/tool/registry.ts)
+for the adapter's fixed `forge` provider, across all agents, before permission
+rules. Authored wildcard/legacy permissions cannot enable the unavailable tool.
+This also turns off features enabled by the broad experimental flag; that is
+part of this action's condition. Conflicting credential-backed declarations for
+these variables fail pure preflight under the existing environment rules.
+These controls
+apply only to plans containing the action. Ordinary network access and page
+fetch tools remain available.
+
+The stateless MCP listener exposes `call_web_search` with a single nonblank
+`query` of at most 4,000 trimmed characters. It authenticates a random route and
+bearer, accepts POST only, caps request bodies at 32 KiB and headers at 16 KiB,
+and admits four concurrent requests with at most eight connections. Header and
+request timeouts are 10 and 15 seconds. Each host request has a 120-second
+absolute deadline and a 4 MiB response cap. The fixed request selects
+`gpt-4.1-mini`, `tools: [{type: "web_search", external_web_access: false}]`, and
+`include: ["web_search_call.action.sources"]`. The result contains the trimmed
+query, elapsed seconds, backend search count, and up to 200 deduplicated HTTP(S)
+URLs with optional titles. URLs containing credentials are excluded. Provider
+answer text and usage are withheld from the agent. Failures return a bounded,
+content-free MCP tool error. The engine closes and drains the listener at
+quiescence, before evidence selection, and in failure cleanup.
+
+`setup.json` records the tool, backend model, URL-only behavior, endpoint kind,
+external-access flag, and native-search policy. `result.json.web_search` records
+`provider: "forge/web-search"`, `native_search: "disabled"`, and `usage`:
+
+| Counter | Meaning |
+| --- | --- |
+| `tool_calls` | Authenticated, accepted MCP calls to `call_web_search`, including invalid queries. Transport/auth/rate-limit rejections are excluded. |
+| `search_count` | Sum of upstream `web_search_call` output items; one agent call may perform multiple searches. |
+| `input_tokens`, `output_tokens`, `total_tokens` | Sum of Responses `usage` totals. |
+| `cached_input_tokens`, `reasoning_tokens` | Optional input-cache and output-reasoning subsets from Responses usage details. |
+
+Counters are nonnegative safe integers or null. No calls means zero. Missing,
+malformed, inconsistent, or overflowing token metadata makes affected totals
+null. A failed backend request makes its search and token totals unavailable;
+null propagates across later calls rather than claiming partial spend as a full
+total. Accounting cannot fail an eval or alter scores. There is no pricing;
+these counters are the input for future cost estimation. They are stored per
+eval and are not yet aggregated into experiment reports. Completed-run
+verification binds the condition and setup receipt to the plan. Without the
+action, the result field is absent and no search credential is resolved.
+
+The upstream URL, provider revision, search index, and returned page contents
+are not pinned or saved by this feature. Source links are discovery evidence;
+Forge does not claim they were opened or that reruns will return identical
+results. Host networking exposes reachable host services; it provides no network
+isolation. `validate --host` installs this configuration and tears down the listener, but
+does not probe this search connection through the native clients.
 
 ## Interaction architecture
 

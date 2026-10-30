@@ -537,6 +537,11 @@ SetupActionDefinition
 The executor binds `PreparedSetupStep.apply` during preflight. It does not look
 the action up again at execution time.
 
+`src/webSearch/` owns the bounded host search backend, stateless MCP protocol,
+per-eval listener, and host credential binding used by `setup/forgeWebSearch.ts`.
+`execution/execute.ts` owns listener lifetime and result recording. See the
+[host search contract](architecture.md#host-web-search).
+
 ## `src/execution`: the orchestration hub
 
 | File | Main symbols | Role and relationships |

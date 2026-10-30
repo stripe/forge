@@ -113,8 +113,9 @@ must use HTTPS and be reachable from the container; host-side completions
 must also reach their endpoint. A host loopback address points at the
 container when used by the agent, including names ending in `.localhost`.
 A successful host-side request does not prove coding-agent connectivity.
-The public CLI creates no host bridge; supply an endpoint reachable from
-the container. The development live suite has separate
+For coding-agent model endpoints, the CLI creates no host bridge; supply an
+endpoint reachable from the container. The optional Forge search tool uses
+its own [host listener](#host-web-search). The development live suite has separate
 [gateway bridge support](docs/codebase-guide.md#opt-in-live-tests).
 
 For the [Stripe plugin treatment](docs/plugin-action.md), use
@@ -447,6 +448,50 @@ The CLI credential reference is `opencode.api-key`; use
 variable. Ava and judging keep their independent `models` configuration.
 See the [adapter contract and limitations](docs/architecture.md#coding-agent-adapters)
 for configuration isolation and native evidence behavior.
+
+### Host web search
+
+Add `forge/web-search` to each compared treatment to give Claude Code, Codex,
+and OpenCode the same host-run MCP tool. Use a named control treatment: the
+reserved `baseline` requires empty setup.
+
+```yaml
+runtime:
+  network: host
+treatments:
+  control:
+    setup:
+      - uses: forge/web-search
+        with: {}
+```
+
+The action accepts no options. Put it after any setup that writes MCP or
+OpenCode configuration, and include it in every treatment being compared.
+Forge disables each harness's native search for these runs. OpenCode also keeps
+its broad experimental flag off as part of this condition. Without the action,
+existing search behavior is unchanged. `call_web_search` accepts `{query}` and
+returns URLs and optional titles; open the returned URLs separately for content.
+It uses `gpt-4.1-mini` with `external_web_access: false` and makes potentially
+billable host-side requests.
+
+The CLI reads `FORGE_WEB_SEARCH_BASE_URL` (default `https://api.openai.com`),
+appending `/v1/responses`. Set `FORGE_WEB_SEARCH_API_KEY`, or use the existing
+OpenAI completion-key binding when it is absent. Override the credential with
+`--credential-env forge.web-search-api-key=MY_SEARCH_KEY`. Keep the same host
+routing when resuming; plans do not record the upstream endpoint.
+
+Docker requires explicit `runtime.network: host` (or the existing
+`FORGE_DOCKER_NETWORK=host` override). The per-eval listener binds host loopback
+on a random port, reachable from the agent through host networking. Docker
+Desktop must support and enable host networking. The Docker daemon must share
+loopback with the Forge host; a remote daemon is unsupported for this action.
+The upstream key stays in the host process. Only a random per-eval bearer enters the agent environment; MCP
+files contain its environment reference. Forge closes the listener before
+evidence selection and on failure.
+
+Results record the condition and nullable usage under `web_search`, separately
+from agent and Ava/judge usage. See the [search contract](docs/architecture.md#host-web-search)
+for limits, accounting semantics, and provenance gaps.
 
 ### Concurrency and resume
 
