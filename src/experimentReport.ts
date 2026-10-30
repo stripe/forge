@@ -34,6 +34,22 @@ const criteriaByRequirementSchema = z
     OPTIONAL: criterionCountsSchema,
   })
   .strict();
+const criterionScoreSchema = z
+  .object({ strict: ratio.nullable(), avg: ratio.nullable() })
+  .strict();
+const blendedCriterionScoreSchema = z
+  .object({ score: ratio.nullable() })
+  .strict();
+const criterionScoresSchema = z
+  .object({
+    required: criterionScoreSchema,
+    recommended: criterionScoreSchema,
+    blend: blendedCriterionScoreSchema,
+  })
+  .strict();
+const criterionScoreStatisticsSchema = criterionScoreSchema.extend({
+  evaluations: count,
+});
 const criterionStatisticsSchema = z
   .object({
     passed: count,
@@ -53,6 +69,7 @@ const evaluationSchema = z
     judging_criteria_passed: count,
     judging_criteria_total: count,
     criteria_by_requirement: criteriaByRequirementSchema,
+    criterion_scores: criterionScoresSchema,
     judging_criteria_errored: count,
     judging_criteria_excluded_errored: count,
     checks_passed: count,
@@ -112,7 +129,13 @@ const evaluationSchema = z
         message: 'Evaluation score and status disagree with counts.',
       });
     }
-  });
+  })
+  .refine(
+    (value) =>
+      serializeCanonicalJson(value.criterion_scores) ===
+      serializeCanonicalJson(criterionScores(value.criteria_by_requirement)),
+    'Criterion scores must match their requirement counts.',
+  );
 const runSchema = z
   .object({
     selection_index: count,
@@ -158,6 +181,13 @@ const statisticsSchema = z
     retry_attempts: count,
     coverage: ratio.nullable(),
     pass_rate: ratio.nullable(),
+    criterion_scores: z
+      .object({
+        required: criterionScoreStatisticsSchema,
+        recommended: criterionScoreStatisticsSchema,
+        blend: blendedCriterionScoreSchema.extend({ evaluations: count }),
+      })
+      .strict(),
     criteria_by_requirement: z
       .object({
         MUST: criterionStatisticsSchema,
@@ -226,6 +256,7 @@ export function summarizeReportEvaluation(
     judging_criteria_errored: evaluation.judging_criteria_errored,
     judging_criteria_excluded_errored: criteriaByRequirement.OPTIONAL.errored,
     criteria_by_requirement: criteriaByRequirement,
+    criterion_scores: criterionScores(criteriaByRequirement),
     checks_passed: evaluation.checks.filter((check) => check.passed).length,
     checks_total: evaluation.checks.length,
   };
@@ -382,6 +413,11 @@ function statistics(
       completed === incompleteScoringEvaluations
         ? null
         : passed / (completed - incompleteScoringEvaluations),
+    criterion_scores: {
+      required: criterionScoreStatistics(runs, 'required'),
+      recommended: criterionScoreStatistics(runs, 'recommended'),
+      blend: blendedCriterionScoreStatistics(runs),
+    },
     criteria_by_requirement: {
       MUST: criterionStatistics(runs, 'MUST'),
       SHOULD: criterionStatistics(runs, 'SHOULD'),
@@ -392,6 +428,123 @@ function statistics(
         criterionEvaluations === 0 ? null : criterionSum / criterionEvaluations,
       evaluations: criterionEvaluations,
     },
+  };
+}
+
+type CriteriaByRequirement = z.infer<typeof criteriaByRequirementSchema>;
+type CriterionCounts = z.infer<typeof criterionCountsSchema>;
+
+/** Required uses MUST; recommended includes both MUST and SHOULD. */
+function relevantCriterionCounts(
+  groups: CriteriaByRequirement,
+  set: 'required' | 'recommended',
+): CriterionCounts {
+  const { MUST, SHOULD } = groups;
+  return set === 'required'
+    ? MUST
+    : {
+        passed: MUST.passed + SHOULD.passed,
+        total: MUST.total + SHOULD.total,
+        errored: MUST.errored + SHOULD.errored,
+      };
+}
+
+/** A judged criterion that did not pass; errored criteria are not failures. */
+function judgedFailures({ passed, total, errored }: CriterionCounts): number {
+  return total - errored - passed;
+}
+
+/**
+ * Strict is decided only when every criterion was judged, matching
+ * `strict_pass_rate`; Avg counts judged criteria only, matching `score`.
+ */
+function criterionScores(
+  groups: CriteriaByRequirement,
+): z.infer<typeof criterionScoresSchema> {
+  function score(set: 'required' | 'recommended') {
+    const { passed, total, errored } = relevantCriterionCounts(groups, set);
+    const judged = total - errored;
+    return {
+      strict: total === 0 || errored > 0 ? null : passed === total ? 1 : 0,
+      avg: judged === 0 ? null : passed / judged,
+    };
+  }
+  return {
+    required: score('required'),
+    recommended: score('recommended'),
+    blend: { score: blendedCriterionScore(groups) },
+  };
+}
+
+/**
+ * Fail on any judged MUST failure, otherwise report the judged SHOULD pass
+ * fraction. MUST errors without a judged failure leave the gate undecided.
+ */
+function blendedCriterionScore({
+  MUST,
+  SHOULD,
+}: CriteriaByRequirement): number | null {
+  if (MUST.total + SHOULD.total === 0) return null;
+  if (judgedFailures(MUST) > 0) return 0;
+  if (MUST.errored > 0) return null;
+  if (SHOULD.total === 0) return 1;
+  const judgedShould = SHOULD.total - SHOULD.errored;
+  return judgedShould === 0 ? null : SHOULD.passed / judgedShould;
+}
+
+/** Gate each evaluation before averaging, so another run cannot hide a failed MUST. */
+function blendedCriterionScoreStatistics(
+  runs: readonly ExperimentRunReportRunV1[],
+): { score: number | null; evaluations: number } {
+  let sum = 0;
+  let evaluations = 0;
+  for (const run of runs) {
+    if (run.state !== 'completed') continue;
+    const score = blendedCriterionScore(
+      run.evaluation!.criteria_by_requirement,
+    );
+    if (score === null) continue;
+    sum += score;
+    evaluations += 1;
+  }
+  return { score: evaluations === 0 ? null : sum / evaluations, evaluations };
+}
+
+/**
+ * Pool judged criterion results for Avg; give each fully judged evaluation one
+ * Strict vote. `evaluations` counts completed evaluations containing the set.
+ */
+function criterionScoreStatistics(
+  runs: readonly ExperimentRunReportRunV1[],
+  set: 'required' | 'recommended',
+): z.infer<typeof criterionScoreStatisticsSchema> {
+  let passed = 0;
+  let judged = 0;
+  let evaluations = 0;
+  let fullyJudgedEvaluations = 0;
+  let strictPasses = 0;
+  for (const run of runs) {
+    if (run.state !== 'completed') continue;
+    const group = relevantCriterionCounts(
+      run.evaluation!.criteria_by_requirement,
+      set,
+    );
+    if (group.total === 0) continue;
+    passed += group.passed;
+    judged += group.total - group.errored;
+    evaluations += 1;
+    if (group.errored === 0) {
+      fullyJudgedEvaluations += 1;
+      if (group.passed === group.total) strictPasses += 1;
+    }
+  }
+  return {
+    strict:
+      fullyJudgedEvaluations === 0
+        ? null
+        : strictPasses / fullyJudgedEvaluations,
+    avg: judged === 0 ? null : passed / judged,
+    evaluations,
   };
 }
 

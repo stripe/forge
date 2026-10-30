@@ -226,11 +226,28 @@ describe('experiment public entry points', () => {
       runs: readonly ExperimentRunReportRunV1[];
       summary: ExperimentRunReportStatisticsV1;
       evaluation: ExperimentRunReportEvaluationV1 | null;
+      requiredStrict: number | null;
+      requiredAvg: number | null;
+      recommendedStrict: number | null;
+      recommendedAvg: number | null;
+      blendScore: number | null;
+      blendEvaluations: number;
+      eligibleEvaluations: number;
+      runScores: ExperimentRunReportEvaluationV1['criterion_scores'] | null;
     } => ({
       cases: report.cases,
       runs: report.runs,
       summary: report.summary,
       evaluation: report.runs[0]?.evaluation ?? null,
+      requiredStrict: report.summary.criterion_scores.required.strict,
+      requiredAvg: report.summary.criterion_scores.required.avg,
+      recommendedStrict: report.summary.criterion_scores.recommended.strict,
+      recommendedAvg: report.summary.criterion_scores.recommended.avg,
+      blendScore: report.summary.criterion_scores.blend.score,
+      blendEvaluations: report.summary.criterion_scores.blend.evaluations,
+      eligibleEvaluations:
+        report.summary.criterion_scores.recommended.evaluations,
+      runScores: report.runs[0]?.evaluation?.criterion_scores ?? null,
     });
     const acceptsReferences = (
       summary: ExperimentRunSummary,
