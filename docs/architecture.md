@@ -1052,7 +1052,7 @@ secret from the normalized trajectory. Provenance in `result.json` records:
 - exact session ID when applicable;
 - adapter ID and version;
 - normalization completeness and warnings; and
-- replacement count.
+- replacement count for the saved normalized evidence.
 
 ### Judge-visible projection
 

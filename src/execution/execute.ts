@@ -56,20 +56,15 @@ import {
   resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
-import { criterionJudgePromptOverheadBytes } from '../evaluation/criterionJudge.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
   evaluateRunEvidence,
   type JudgeWorkspaceEvidenceV1,
   judgeCriteria,
-  renderJudgeWorkspaceEvidence,
 } from '../evaluation/index.ts';
-import { selectJudgeEvidence } from '../evaluation/judgeEvidenceBudget.ts';
-import {
-  createJudgeTranscriptProjection,
-  parseJudgeTranscriptProjection,
-} from '../evaluation/judgeTranscript.ts';
+import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
+import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import {
   createDriverFallbackEvidence,
@@ -493,7 +488,7 @@ export async function executeEvalWithTestHooks(
       );
       return { evidence, nativeArtifact };
     });
-    let redacted = redactNormalizedTrajectory(
+    const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
     );
@@ -506,89 +501,62 @@ export async function executeEvalWithTestHooks(
         | Awaited<ReturnType<typeof judgeCriteria>>
         | undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
-      if (criteria.length > 0) {
-        const collected = await collectJudgeWorkspaceEvidence(
-          sealed!.workspace,
-          { signal },
-        );
-        const safeWorkspace = redactJudgeWorkspaceEvidence(
-          collected.evidence,
-          secrets,
-        );
-        const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
-        const selectedTranscript = createJudgeTranscriptProjection(
-          redacted.evidence.trajectory,
-        );
-        const nativeSelected =
-          redacted.evidence.provenance.source.kind === 'native_log' ||
-          redacted.evidence.provenance.source.kind === 'atif';
-        const promptOverheadBytes = criterionJudgePromptOverheadBytes({
-          criteria,
-          exampleAnswer: input.plan.evaluation.example_answer,
-          workspaceText: safeWorkspaceText,
-        });
-        const selectedTranscriptBytes = Buffer.byteLength(
-          selectedTranscript.transcriptJson,
-          'utf8',
-        );
-        let budget = selectJudgeEvidence({
-          promptOverheadBytes,
-          ...(nativeSelected
-            ? { nativeTranscriptBytes: selectedTranscriptBytes }
-            : { driverTranscriptBytes: selectedTranscriptBytes }),
-        });
-        let judgeTranscript = selectedTranscript;
-        if (nativeSelected && budget.evidence !== 'native') {
-          // Build driver evidence only after the native candidate exceeds the
-          // shared budget. Under-budget native runs retain their original path.
-          redacted = redactNormalizedTrajectory(
-            createDriverFallbackEvidence(
-              {
-                agent: preflight.agent,
-                identity: preflight.agentEvidenceIdentity,
-                model: input.plan.agent.model,
-                sessionId: interaction.sessionId!,
-                completedTurns: interaction.turns,
+      const safeWorkspace =
+        criteria.length === 0
+          ? undefined
+          : redactJudgeWorkspaceEvidence(
+              (await collectJudgeWorkspaceEvidence(sealed!.workspace, { signal }))
+                .evidence,
+              secrets,
+            );
+      const workspace =
+        safeWorkspace === undefined
+          ? undefined
+          : {
+              entries: safeWorkspace.entries.map((entry) => ({
+                path: entry.path,
+                content: entry.content,
+                truncated: entry.truncated,
+              })),
+              complete: safeWorkspace.complete,
+              warnings: safeWorkspace.warnings.map((warning) => ({ ...warning })),
+            };
+      const prompt =
+        workspace === undefined ? undefined : sizeJudgePrompt(input.plan, workspace);
+      const resolved =
+        prompt === undefined
+          ? undefined
+          : resolveJudgeTranscript({
+              promptOverheadBytes: prompt.promptOverheadBytes,
+              selected: selectedRedacted,
+              buildDriver: (reason) => {
+                if (interaction.sessionId === null) {
+                  throw new TypeError(
+                    'Driver evidence requires a completed agent session.',
+                  );
+                }
+                const evidence = createDriverFallbackEvidence(
+                  {
+                    agent: preflight.agent,
+                    identity: preflight.agentEvidenceIdentity,
+                    model: input.plan.agent.model,
+                    sessionId: interaction.sessionId,
+                    completedTurns: interaction.turns,
+                  },
+                  reason,
+                );
+                assertEvidenceMatchesRun(
+                  evidence,
+                  preflight.agent,
+                  interaction.sessionId,
+                );
+                return redactNormalizedTrajectory(evidence, secrets);
               },
-              {
-                code: 'value_omitted',
-                message:
-                  'Native evidence exceeded the judge budget; driver fallback is selected if it fits.',
-              },
-            ),
-            secrets,
-          );
-          judgeTranscript = createJudgeTranscriptProjection(
-            redacted.evidence.trajectory,
-          );
-          budget = selectJudgeEvidence({
-            promptOverheadBytes,
-            driverTranscriptBytes: Buffer.byteLength(
-              judgeTranscript.transcriptJson,
-              'utf8',
-            ),
-          });
-        }
-        if (budget.evidence === 'omitted') {
-          redacted = {
-            ...redacted,
-            evidence: createNormalizedTrajectory({
-              ...redacted.evidence,
-              warnings: [
-                ...redacted.evidence.warnings,
-                {
-                  code: 'value_omitted',
-                  message:
-                    'Transcript exceeded the judge budget; graded on workspace evidence only.',
-                },
-              ],
-            }),
-          };
-          judgeTranscript = parseJudgeTranscriptProjection({
-            ...judgeTranscript,
-            transcriptJson: '[]\n',
-          });
-        }
+            });
+      const redacted = resolved?.redacted ?? selectedRedacted;
+      if (resolved !== undefined && prompt !== undefined) {
+        const judgeTranscript = resolved.transcript;
+        const safeWorkspaceText = prompt.workspaceText;
         criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
@@ -631,21 +599,11 @@ export async function executeEvalWithTestHooks(
               copied_context: judgeTranscript.copiedContext,
               included_fields: [...judgeTranscript.includedFields],
               steps: JSON.parse(judgeTranscript.transcriptJson),
-              ...(budget.evidence === 'omitted'
+              ...(resolved.reason === 'judge_budget_exceeded'
                 ? { omitted: 'judge_budget_exceeded' }
                 : {}),
             },
-            workspace: {
-              entries: safeWorkspace.entries.map((entry) => ({
-                path: entry.path,
-                content: entry.content,
-                truncated: entry.truncated,
-              })),
-              complete: safeWorkspace.complete,
-              warnings: safeWorkspace.warnings.map((warning) => ({
-                ...warning,
-              })),
-            },
+            workspace,
           },
           { forgeVersion: FORGE_VERSION },
         );
@@ -657,7 +615,7 @@ export async function executeEvalWithTestHooks(
         ...(criterionResults === undefined ? {} : { criterionResults }),
         signal,
       });
-      return { ...result, judgeEvidence };
+      return { ...result, judgeEvidence, redacted };
     });
 
     const interactionArtifact = redactInteractionArtifact(
@@ -668,7 +626,7 @@ export async function executeEvalWithTestHooks(
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
       setupArtifact,
-      serializeAtifTrajectory(redacted.evidence.trajectory),
+      serializeAtifTrajectory(evaluated.redacted.evidence.trajectory),
       interactionArtifact,
       evaluated.workspaceEvidence,
       evaluated.judgeEvidence,
@@ -691,8 +649,8 @@ export async function executeEvalWithTestHooks(
         runtime: sealed,
         interaction,
         completionCalls: completions.calls,
-        evidence: redacted.evidence,
-        redactionCount: redacted.replacements,
+        evidence: evaluated.redacted.evidence,
+        redactionCount: evaluated.redacted.replacements,
         evaluation: evaluated.evaluation,
         coreDescriptors,
         supplementalDescriptors: nativeDescriptors,
@@ -746,8 +704,8 @@ export async function executeEvalWithTestHooks(
       runtime: sealed,
       interaction,
       completionCalls: completions.calls,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
+      evidence: evaluated.redacted.evidence,
+      redactionCount: evaluated.redacted.replacements,
       evaluation: evaluated.evaluation,
       coreDescriptors,
       supplementalDescriptors,

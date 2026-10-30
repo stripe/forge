@@ -8,10 +8,11 @@ import type {
   RunArtifactTransaction,
 } from '../contracts/artifacts.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
-import { criterionJudgePromptOverheadBytes } from '../evaluation/criterionJudge.ts';
-import { selectJudgeEvidence } from '../evaluation/judgeEvidenceBudget.ts';
+import {
+  selectJudgeEvidence,
+  sizeJudgePrompt,
+} from '../evaluation/judgeEvidenceBudget.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
-import { renderRecordedJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
 import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
@@ -645,13 +646,8 @@ function verifyJudgeEvidence(
   );
   if (judgeEvidence.transcript.omitted !== undefined) {
     const budget = selectJudgeEvidence({
-      promptOverheadBytes: criterionJudgePromptOverheadBytes({
-        criteria: plan.evaluation.judging_criteria,
-        exampleAnswer: plan.evaluation.example_answer,
-        workspaceText: renderRecordedJudgeWorkspaceEvidence(
-          judgeEvidence.workspace,
-        ),
-      }),
+      promptOverheadBytes: sizeJudgePrompt(plan, judgeEvidence.workspace)
+        .promptOverheadBytes,
       driverTranscriptBytes: Buffer.byteLength(
         createJudgeTranscriptProjection(trajectory).transcriptJson,
         'utf8',

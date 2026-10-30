@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { describe, it } from 'vitest';
 import { loadClaudeEvidence } from '../agents/claude-code/evidence.ts';
 import { parseAtifTrajectory, serializeAtifTrajectory } from '../atif/index.ts';
+import { credentialReference } from '../contracts/credentials.ts';
 import { criterionJudgePromptOverheadBytes } from '../evaluation/criterionJudge.ts';
 import {
   buildCriterionJudgePrompt,
@@ -100,6 +101,7 @@ async function runBudgetEval(
     assistant?: string;
     exampleAnswer?: string;
     files?: Record<string, string>;
+    secrets?: readonly string[];
   },
 ) {
   const runtime = createFakeRuntimeAdapter({
@@ -147,6 +149,14 @@ async function runBudgetEval(
   };
   const provider = createScriptedCompletionProvider({
     responses: CRITERIA.map(() => SUCCESS),
+    requirements: {
+      credentials: Object.fromEntries(
+        (options.secrets ?? []).map((_, index) => [
+          `key${index}`,
+          { reference: credentialReference(`test-key-${index}`) },
+        ]),
+      ),
+    },
   });
   const basePlan = createTestResolvedRunPlan({
     prompt: TASK,
@@ -171,7 +181,14 @@ async function runBudgetEval(
       runtime: runtime.adapter,
       agents: new Map([[adapter.id, adapter]]),
       completionProviders: new Map([[provider.provider.id, provider.provider]]),
-      credentialResolver: createStaticCredentialResolver(),
+      credentialResolver: createStaticCredentialResolver(
+        Object.fromEntries(
+          (options.secrets ?? []).map((secret, index) => [
+            `test-key-${index}`,
+            secret,
+          ]),
+        ),
+      ),
       inputProvider: createMemoryRunInputProvider(),
       artifactStore: createArtifactStore({ root }),
     },
@@ -477,6 +494,56 @@ describe('executeEval judge evidence budget and local store round trips', () => 
       ),
     );
   });
+
+  it('verifies code-only evidence with workspace warnings and a multibyte example answer', async (t) => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-budget-multibyte-'),
+    );
+    t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const exampleAnswer = '界🙂'.repeat(140_000);
+    const { judge, provider } = await runBudgetEval(root, {
+      assistant: 'y'.repeat(1_100_000),
+      files: { 'answer.ts': 'x'.repeat(20_001) },
+      exampleAnswer,
+    });
+    assert.equal(judge.transcript.omitted, 'judge_budget_exceeded');
+    assert.ok(
+      judge.workspace.warnings.some(
+        ({ code }) => code === 'workspace_file_truncated',
+      ),
+    );
+    assert.ok(provider.calls.every(({ request }) =>
+      request.systemPrompt?.includes(exampleAnswer),
+    ));
+  });
+
+  for (const resultCharacters of [100, 100_000]) {
+    it(`counts redactions in saved evidence after selection (native result size=${resultCharacters})`, async (t) => {
+      const root = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'forge-budget-redaction-'),
+      );
+      t.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+      const nativeSecret = 'synthetic-native-secret';
+      const driverSecret = 'synthetic-driver-secret';
+      const raw = nativeSession(resultCharacters).replace(
+        'x'.repeat(100), nativeSecret.repeat(3),
+      );
+      const { completed, trajectoryBytes } = await runBudgetEval(root, {
+        raw,
+        assistant: driverSecret.repeat(2),
+        secrets: [nativeSecret, driverSecret],
+      });
+      const nativeFits = resultCharacters === 100;
+      assert.equal(
+        completed.result.evidence.provenance.source.kind,
+        nativeFits ? 'native_log' : 'driver_fallback',
+      );
+      assert.equal(completed.result.evidence.redaction_count, nativeFits ? 3 : 2);
+      assert.ok(!trajectoryBytes.includes(nativeSecret));
+      assert.ok(!trajectoryBytes.includes(driverSecret));
+      assert.equal(trajectoryBytes.split('[REDACTED]').length - 1, nativeFits ? 3 : 2);
+    });
+  }
 
   it('rejects forged omission for under-budget driver evidence with rebound hashes', async (t) => {
     const root = await fs.mkdtemp(
