@@ -103,7 +103,12 @@ describe('runner-owned search', () => {
       ).toBe(403);
       expect(requests).toHaveLength(0);
       for (const method of ['GET', 'PUT', 'DELETE']) {
-        const rejected = await post(service.url, '', service.credential, method);
+        const rejected = await post(
+          service.url,
+          '',
+          service.credential,
+          method,
+        );
         expect(rejected.status).toBe(405);
         expect(rejected.allow).toBe('POST');
       }
@@ -290,7 +295,9 @@ function post(
 }
 
 it('closes a bound listener if its address is unexpected', async () => {
-  const address = vi.spyOn(http.Server.prototype, 'address').mockReturnValue(null);
+  const address = vi
+    .spyOn(http.Server.prototype, 'address')
+    .mockReturnValue(null);
   const close = vi.spyOn(http.Server.prototype, 'close');
   try {
     await expect(

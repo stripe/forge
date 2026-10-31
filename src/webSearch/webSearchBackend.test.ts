@@ -58,7 +58,9 @@ it.each([0, 1])(
       output: [],
       padding: 'x'.repeat(4 * 1024 * 1024 - Buffer.byteLength(empty) + excess),
     });
-    const upstream = http.createServer((_request, response) => response.end(body));
+    const upstream = http.createServer((_request, response) =>
+      response.end(body),
+    );
     const options = await backendOptions(upstream);
     try {
       const result = runWebSearch('query', options);
@@ -113,7 +115,9 @@ it('enforces the 120 s absolute deadline even while the upstream trickles bytes'
 });
 
 async function backendOptions(upstream: http.Server) {
-  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) =>
+    upstream.listen(0, '127.0.0.1', resolve),
+  );
   const address = upstream.address();
   if (!address || typeof address === 'string') throw new Error('No port');
   return {
@@ -166,7 +170,9 @@ it.each([511, 512, 513, 4096])(
           {
             type: 'web_search_call',
             action: {
-              sources: [{ url: 'https://example.com', title: 'x'.repeat(length) }],
+              sources: [
+                { url: 'https://example.com', title: 'x'.repeat(length) },
+              ],
             },
           },
         ],

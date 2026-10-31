@@ -60,9 +60,7 @@ import {
 import { serializeCanonicalJson } from './serialization.ts';
 import { selectedModelProbes } from './validation/models.ts';
 import { runModelProbe } from './validation/runProbe.ts';
-import {
-  DEFAULT_WEB_SEARCH_BASE_URL,
-} from './webSearch/configuration.ts';
+import { DEFAULT_WEB_SEARCH_BASE_URL } from './webSearch/configuration.ts';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';

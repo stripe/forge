@@ -2760,7 +2760,10 @@ it('binds web search host credentials with completion-key fallback only at the d
 });
 
 it('never falls back to the completion key for a custom search URL', async () => {
-  for (const baseUrl of ['https://search.example.com', 'https://api.openai.com/']) {
+  for (const baseUrl of [
+    'https://search.example.com',
+    'https://api.openai.com/',
+  ]) {
     const composition = await createDefaultCliComposition({
       datasetRoot: '.',
       resultsRoot: '/tmp/forge-web-search-test',
@@ -2770,11 +2773,14 @@ it('never falls back to the completion key for a custom search URL', async () =>
       },
     });
     await assert.rejects(
-      composition.credentialResolver.resolve(composition.webSearch!.credential, {
-        runId: 'test',
-        purpose: 'web_search',
-        signal: new AbortController().signal,
-      }),
+      composition.credentialResolver.resolve(
+        composition.webSearch!.credential,
+        {
+          runId: 'test',
+          purpose: 'web_search',
+          signal: new AbortController().signal,
+        },
+      ),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.equal(error.message.includes('completion-secret'), false);

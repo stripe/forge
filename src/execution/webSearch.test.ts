@@ -225,7 +225,7 @@ for (const responseKind of [
       response.end(
         JSON.stringify(
           responseKind === 'malformed-response' ||
-          (responseKind === 'partial' && requests === 1)
+            (responseKind === 'partial' && requests === 1)
             ? { error: { message: 'private-upstream-text' } }
             : {
                 output: [
@@ -319,15 +319,35 @@ for (const responseKind of [
                 ? 2
                 : 4,
           input_tokens:
-            responseKind === 'valid' ? 20 : responseKind === 'partial' ? 10 : null,
+            responseKind === 'valid'
+              ? 20
+              : responseKind === 'partial'
+                ? 10
+                : null,
           output_tokens:
-            responseKind === 'valid' ? 8 : responseKind === 'partial' ? 4 : null,
+            responseKind === 'valid'
+              ? 8
+              : responseKind === 'partial'
+                ? 4
+                : null,
           total_tokens:
-            responseKind === 'valid' ? 28 : responseKind === 'partial' ? 14 : null,
+            responseKind === 'valid'
+              ? 28
+              : responseKind === 'partial'
+                ? 14
+                : null,
           cached_input_tokens:
-            responseKind === 'valid' ? 4 : responseKind === 'partial' ? 2 : null,
+            responseKind === 'valid'
+              ? 4
+              : responseKind === 'partial'
+                ? 2
+                : null,
           reasoning_tokens:
-            responseKind === 'valid' ? 2 : responseKind === 'partial' ? 1 : null,
+            responseKind === 'valid'
+              ? 2
+              : responseKind === 'partial'
+                ? 1
+                : null,
         },
       });
     } finally {
