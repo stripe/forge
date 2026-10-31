@@ -317,14 +317,14 @@ export function createCodexPluginInstaller(options: {
               home,
               relative,
               mcpServers,
+              installContext.pluginMcpConnections,
             );
             await declareCodexMcpServers(home, relocation.declarations);
             await writeRelocatedPluginMcp(home, relocation);
-            connections = Object.entries(relocation.declarations)
+            // Receipts record the upstream endpoint, never the run's relay.
+            connections = Object.entries(relocation.upstream)
               .sort(([left], [right]) => (left < right ? -1 : 1))
-              .map(([name, server]) =>
-                Object.freeze({ name, url: server!.url }),
-              );
+              .map(([name, url]) => Object.freeze({ name, url: url! }));
           }
           return Object.freeze({
             adapter: options.adapterId,

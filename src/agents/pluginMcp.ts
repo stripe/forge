@@ -1,5 +1,6 @@
 import type {
   MutableWorkspace,
+  PluginMcpConnections,
   ReadonlyWorkspace,
 } from '../contracts/runtime.ts';
 import { isSafeMcpEndpointUrl } from '../model/paths.ts';
@@ -9,6 +10,7 @@ import type { PluginMcpServerId } from '../model/types.ts';
 /**
  * A Codex user-level MCP server: a plain remote URL plus an environment
  * reference for its bearer token. It never holds a secret or static headers.
+ * Forge points it at the run's host relay and names the relay-token variable.
  */
 export type CodexMcpServerConfig = {
   readonly url: string;
@@ -23,19 +25,20 @@ export type CodexMcpServerDeclarations = Readonly<
 const RELOCATED_SERVER_KEYS = ['type', 'url', 'bearer_token_env_var'];
 
 /**
- * Authenticate the plugin's bundled Claude Code connections without adding new
- * servers. The rewritten bundled file carries references only.
+ * Point the plugin's bundled Claude Code connections at the run's host relay
+ * without adding new servers. Upstream keys never enter the bundle.
  */
 export async function configurePluginMcp(
   state: MutableWorkspace,
   root: string,
   servers: readonly PluginMcpServerId[],
+  connections: PluginMcpConnections = {},
 ): Promise<void> {
   const { path, input } = await readPluginMcpBundle(state, root, 'claude-code');
   await state.writeFile(
     path,
     Buffer.from(
-      `${JSON.stringify(configurePluginMcpDocument(input, servers), null, 2)}\n`,
+      `${JSON.stringify(configurePluginMcpDocument(input, servers, connections), null, 2)}\n`,
     ),
   );
 }
@@ -45,7 +48,10 @@ export type CodexPluginMcpRelocation = {
   readonly path: string;
   /** The bundle with the selected servers removed. */
   readonly document: Record<string, unknown>;
+  /** Relay declarations written to Codex user configuration. */
   readonly declarations: CodexMcpServerDeclarations;
+  /** Upstream endpoints for the receipt; never the run's relay address. */
+  readonly upstream: Readonly<Partial<Record<PluginMcpServerId, string>>>;
 };
 
 /**
@@ -58,9 +64,10 @@ export async function prepareCodexPluginMcpRelocation(
   state: ReadonlyWorkspace,
   root: string,
   servers: readonly PluginMcpServerId[],
+  relays: PluginMcpConnections = {},
 ): Promise<CodexPluginMcpRelocation> {
   const { path, input } = await readPluginMcpBundle(state, root, 'codex');
-  return { path, ...relocateCodexPluginMcp(input, servers) };
+  return { path, ...relocateCodexPluginMcp(input, servers, relays) };
 }
 
 /** Remove the relocated servers from the bundle once they are declared. */
@@ -120,10 +127,11 @@ async function readPluginMcpBundle(
   return { path, input };
 }
 
-/** Pure Claude Code transformation; the document contains references only. */
+/** Pure Claude Code transformation; the document holds relay capabilities only. */
 export function configurePluginMcpDocument(
   input: unknown,
   servers: readonly PluginMcpServerId[],
+  relays: PluginMcpConnections = {},
 ): Record<string, unknown> {
   const output = validatedPluginMcpDocument(input, 'claude-code', servers);
   const connections = output.mcpServers as Record<
@@ -132,13 +140,15 @@ export function configurePluginMcpDocument(
   >;
   for (const name of servers) {
     const server = connections[name]!;
+    const relay = requiredRelay(relays, name);
     if (server.headers !== undefined && !record(server.headers))
       throw new Error(`Plugin MCP server ${name} has invalid headers.`);
-    const headers = { ...(server.headers as Record<string, unknown>) };
-    for (const key of Object.keys(headers))
-      if (key.toLowerCase() === 'authorization') delete headers[key];
-    headers.Authorization = `Bearer \${${PLUGIN_MCP_CREDENTIALS[name].credentialEnvironmentVariable}}`;
-    server.headers = headers;
+    // Replace the whole entry: no original header, URL or option survives.
+    connections[name] = {
+      type: 'http',
+      url: relay.url,
+      headers: { Authorization: `Bearer ${relay.token}` },
+    };
   }
   return output;
 }
@@ -149,13 +159,18 @@ export function configurePluginMcpDocument(
  * Everything else (`enabled`, tool allow/deny lists, timeouts, static or
  * environment headers, unknown fields) would be lost by the move, and Forge does
  * not carry it, so it is rejected before either file is touched.
+ *
+ * The bundled endpoint is validated and recorded as the upstream; the
+ * declaration itself points at the run's relay.
  */
 export function relocateCodexPluginMcp(
   input: unknown,
   servers: readonly PluginMcpServerId[],
+  relays: PluginMcpConnections = {},
 ): {
   document: Record<string, unknown>;
   declarations: CodexMcpServerDeclarations;
+  upstream: Readonly<Partial<Record<PluginMcpServerId, string>>>;
 } {
   const document = validatedPluginMcpDocument(input, 'codex', servers);
   const connections = document.mcpServers as Record<
@@ -164,8 +179,10 @@ export function relocateCodexPluginMcp(
   >;
   const declarations: Partial<Record<PluginMcpServerId, CodexMcpServerConfig>> =
     {};
+  const upstream: Partial<Record<PluginMcpServerId, string>> = {};
   for (const name of servers) {
     const server = connections[name]!;
+    const relay = requiredRelay(relays, name);
     if (Object.keys(server).some((key) => !RELOCATED_SERVER_KEYS.includes(key)))
       throw new Error(
         `Plugin MCP server ${name} has settings that Codex user configuration relocation does not carry.`,
@@ -177,14 +194,16 @@ export function relocateCodexPluginMcp(
       throw new Error(`Plugin MCP server ${name} has invalid auth.`);
     if (!isSafeMcpEndpointUrl(server.url as string))
       throw new Error(`Plugin MCP server ${name} has an unsupported URL.`);
+    upstream[name] = server.url as string;
     declarations[name] = {
-      url: server.url as string,
+      url: relay.url,
+      // The variable holds the per-run relay token, never the upstream key.
       bearer_token_env_var:
-        PLUGIN_MCP_CREDENTIALS[name].credentialEnvironmentVariable,
+        PLUGIN_MCP_CREDENTIALS[name].relayTokenEnvironmentVariable,
     };
     delete connections[name];
   }
-  return { document, declarations };
+  return { document, declarations, upstream };
 }
 
 /** Clone the bundle after checking each selected connection is plain remote HTTP. */
@@ -211,12 +230,7 @@ function validatedPluginMcpDocument(
       throw new Error(`Plugin MCP server ${name} requires HTTP transport.`);
     if (typeof server.url !== 'string' || server.command !== undefined)
       throw new Error(`Plugin MCP server ${name} requires HTTP transport.`);
-    const url = new URL(server.url);
-    if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password
-    )
+    if (new URL(server.url).href !== PLUGIN_MCP_CREDENTIALS[name].url)
       throw new Error(`Plugin MCP server ${name} has an unsupported URL.`);
     if (
       server.oauth !== undefined ||
@@ -228,6 +242,15 @@ function validatedPluginMcpDocument(
       );
   }
   return output;
+}
+
+function requiredRelay(relays: PluginMcpConnections, name: PluginMcpServerId) {
+  const relay = relays[name];
+  if (!relay)
+    throw new Error(
+      `Plugin MCP server ${name} requires a host credential relay.`,
+    );
+  return relay;
 }
 
 function record(value: unknown): value is Record<string, unknown> {

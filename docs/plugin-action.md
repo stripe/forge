@@ -123,8 +123,8 @@ behavioral declarations, missing skills, and unsafe filesystem entries fail
 setup. Claude-specific hooks, commands, and agents are not ported.
 
 The generated native config adds an absolute skill path and a remote MCP server
-with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
-the bundled URL. The adapter combines this fragment with the model definition
+with OAuth disabled. Its URL and bearer token select the run-owned host relay.
+The adapter combines this fragment with the model definition
 from the experiment's agent `model_profile` and restores it before every turn,
 including resume. A workspace `opencode.json` is ignored; model declarations
 belong to the agent selection, and skills/MCP come from `forge/plugin`. See the
@@ -133,7 +133,7 @@ belong to the agent selection, and skills/MCP come from `forge/plugin`. See the
 OpenCode receipts use `installation: opencode-bundle` instead of
 `native_plugin_id`. They retain the selected catalog identity and commit, record
 `source: {kind: git-subdir, commit, path}` for the actual standard bundle, and
-fingerprint the copied bundle plus generated config. `dropped_parts` lists
+fingerprint the copied bundle before adding the generated config. `dropped_parts` lists
 `hooks`, `commands`, and `agents`: these behavior kinds are excluded by the
 OpenCode distribution policy. This is a policy record, not a count of removed
 files; unsupported declarations still fail setup. Native Claude/Codex receipts
@@ -178,7 +178,8 @@ and hook execution behavior.
 ## Execution and receipt
 
 During pure preflight, Forge resolves the registered plugin, binds the adapter's
-installer, and declares executable, state, and agent credential requirements.
+installer, and declares executable and state requirements. The engine declares
+the host relay credential separately from command credentials.
 During setup, the prepared operation:
 
 1. registers the marketplace;
@@ -186,10 +187,9 @@ During setup, the prepared operation:
 3. installs through the agent's native CLI, or materializes OpenCode's standard bundle;
 4. validates the plugin identity, version, path, source provenance, and native
    load status where applicable;
-5. configures the bundled MCP connection and fingerprints the installed tree
-   (Codex fingerprints first, before Forge moves the connection out of the
-   bundle); and
-6. records a receipt in `setup.json`.
+5. fingerprints the installed tree before Forge changes the bundled MCP
+   connection; and
+6. points that connection at the run's host relay and records a receipt in `setup.json`.
 
 The receipt includes:
 
@@ -206,7 +206,8 @@ The receipt includes:
   `mcp_configuration: codex-user-config` and `mcp_connections`. Together they
   mean Forge moved the bundled declarations into the run-owned user
   configuration, so `installed_tree` fingerprints the plugin before that move.
-  `mcp_connections` lists the declared servers as `{name, url}`, sorted by name;
+  `mcp_connections` lists the servers as `{name, url}`, sorted by name, with
+  the upstream endpoint rather than the run's relay address;
   a URL never carries userinfo, a query string, or a fragment, and no key or
   header value is recorded. Both fields appear together or not at all. Receipts
   without them keep their previous meaning and still read; older strict readers
@@ -214,8 +215,8 @@ The receipt includes:
 
 Forge bounds and validates the installed tree, rejecting symbolic links and
 special entries. The tree fingerprint covers relative paths, directories, and
-the exact regular-file bytes read at the fingerprint point in stable path order,
-independent of the adapter's listing order. It lets runs compare installed
+the exact regular-file bytes read after installation, before relay configuration, in stable path
+order, independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
 Git commits identify the catalog snapshot and the available source revision. Claude must report any source commit pinned by its
@@ -274,27 +275,113 @@ Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Missing values fail before runtime allocation. Ordinary
 validation and planning need no values.
 
-Forge keeps the bundled URL and unrelated plugin content. Claude and OpenCode use
-Authorization header templates in the plugin's MCP configuration. Codex
-re-materializes its plugin cache after startup, which discards edits to the
-bundled `.mcp.json` and leaves the server on Codex's OAuth path. Forge therefore
-moves each selected server out of the bundle into the run-owned Codex
-`config.toml` as `[mcp_servers.<name>]` with `bearer_token_env_var`; the
-plugin's skills and other content still load from the plugin.
+Forge checks that the bundled server names the fixed Stripe MCP endpoint, then
+replaces that connection with a run-owned relay URL and a random bearer token.
+The relay runs in the Forge host process, outside the container. It forwards
+only to `https://mcp.stripe.com/`, replaces client authorization with the host
+key, and rejects redirects, other paths, and methods other than GET, POST, or
+DELETE. The key never enters the command environment or generated config.
+Declaring the same key name or credential reference for command environments
+in a plugin run fails pure preflight, as does declaring the reserved relay-token
+variable `FORGE_STRIPE_MCP_RELAY_TOKEN`.
 
-The move carries only a transport `type`, the `url`, and an existing bearer
-variable, which Forge replaces. Setup fails, before changing either file, when a
-selected bundled server has anything else: `enabled`, `enabled_tools`,
+The relay starts before setup and survives setup-container replacement. Abort,
+quiescence, and disposal close it and cancel in-flight requests. Its token has
+no authority after shutdown. Forge redacts relay tokens from ordinary artifacts;
+restricted native logs can still contain them. Installation hashes cover native
+plugin content before relay configuration. OpenCode hashes the copied bundle
+before adding its generated config. Relay URLs and tokens do not affect these
+hashes; changes to bundle content still do.
+
+Claude Code and OpenCode carry the relay URL and token in their native MCP
+configuration. Codex re-materializes its plugin cache after startup, which
+discards edits to the bundled `.mcp.json` and leaves the server on Codex's OAuth
+path. Forge therefore moves each selected server out of the bundle into the
+run-owned Codex `config.toml` as `[mcp_servers.<name>]`, with the relay URL and
+`bearer_token_env_var = "FORGE_STRIPE_MCP_RELAY_TOKEN"`. The runtime exposes the
+per-run relay token under that name to commands inside the container; the file
+holds no token and no upstream key. The plugin's skills and other content still
+load from the plugin.
+
+The Codex move carries only a transport `type`, the `url`, and an existing
+bearer variable, which Forge replaces. Setup fails, before changing either file,
+when a selected bundled server has anything else: `enabled`, `enabled_tools`,
 `disabled_tools`, timeouts, static or environment headers, unknown fields, or a
 URL with userinfo, a query string, or a fragment. Setup also fails when the
 merged configuration would exceed the configuration size or entry limits, or
 when `config.toml` already declares a different server of the same name; an
 identical repeated declaration is accepted. A rejected move leaves the prior
-`config.toml` and the bundle unchanged. Both reference
-`STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
-use the same key. Tokens reach only agent commands, never setup commands.
-Runtime credential names and references are part of the Forge version; the host
-variable name is not recorded in the plan.
+`config.toml` and the bundle unchanged. The declared URL is the run's loopback
+or bridge relay address, which passes the same endpoint rule as any other
+declaration. The receipt's `mcp_connections` records the bundled upstream
+endpoint, not that address, so receipts do not vary with the relay's random port.
+
+Docker's default network uses `host.docker.internal`. Native Linux inspects the
+default bridge's IPv4 gateway, binds the relay to that address, and adds an
+explicit `--add-host` mapping to the same address. A missing or ambiguous gateway
+fails preparation; there is no wildcard listener fallback. This alias also
+names other host services bound to the bridge gateway. Forge does not isolate
+those services from the container. Docker Desktop supplies its host DNS and
+the relay binds loopback. With `runtime.network: host`, both the listener and
+client URL use loopback.
+Forge appends the relay host to `NO_PROXY` and `no_proxy`, preserving existing
+entries. The relay does not restrict general network egress: the selected Docker
+network and other proxy settings stay unchanged. Agents can still browse docs
+and use unauthenticated CLIs and tools; only the plugin key moves to the host.
+A local Docker daemon
+and a container-reachable host are required; remote daemons are unsupported for
+this treatment. Host networking retains Docker's platform requirements.
+
+Relay bounds are defined by `McpCredentialRelayLimits` and
+`DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS`, exported from `@stripe/forge/runtime/docker`.
+Embedding hosts can override them through `DockerRuntimeAdapterOptions.mcpRelayLimits`.
+Defaults allow eight active requests, 32 authenticated sockets, 1 MiB request
+bodies, and 16 MiB streamed responses. Four pending unauthenticated sockets have
+a separate one-second authentication window; newer connections evict the oldest
+pending socket. Unauthenticated requests do not enter saved counts.
+
+The default idle limit is 60 seconds. Request-body bytes, upstream response
+headers, and response-body bytes reset it. A stream may outlive that limit while
+bytes arrive; run abort remains the outer bound. A stalled request or stream
+closes when idle time expires, including when the upstream ignores cancellation.
+Native client reconnection after idle closure needs live validation.
+Only MCP transport headers are forwarded. Runs that commit a result record
+authenticated request and error counts as `runtime.metadata.pluginMcpRequests`
+and `pluginMcpErrors`, plus the resolved limits as canonical JSON in
+`pluginMcpLimits`. Counts include discovery and authenticated rejections.
+`pluginMcpToolCalls` holds canonical JSON with `tools` (tool name to call count),
+`other`, `unparsed`, and `overflow`. The relay reads only `method` and
+`params.name` from the already-bounded request body. Each `tools/call` in a batch
+counts separately, before forwarding; failed upstream calls still count.
+Other RPC methods do not add tool counts. Body-less GET/DELETE requests do not
+add tool observations. Requests rejected before body collection add no tool counts.
+
+Tool names must be 1–128 characters from `[A-Za-z0-9_.-]`; unsafe or missing
+names count under `other`, as do names containing the host key or relay token.
+At most 64 distinct names are retained per run;
+calls to further names count under `overflow`, while known names keep counting.
+Safe names such as `other` remain distinct from the bucket. Malformed JSON or
+UTF-8, empty batches, and malformed message entries count under `unparsed`.
+Counting never rejects a request. No arguments, results, or bodies are retained.
+These observation bounds are fixed by the Forge version, separately from
+transport limits.
+
+Failed attempts without a committed result retain no counts on this lifecycle.
+Older results may omit these keys. Writes are not blocked while tool use is
+being observed. Analysis can classify reads and writes from names; Forge has
+no hard-coded write list. A later tool policy may block writes.
+
+Custom runtimes must opt into `supportsMcpCredentialRelay`, honor
+`RuntimeRequirements.mcpRelays`, and keep `RuntimePreparation.mcpRelayCredentials`
+host-only. They return `pluginMcpConnections` for setup and own relay shutdown.
+Direct installer callers supply these connections through
+`AgentPluginInstallContext`. Unsupported runtimes fail before credential lookup.
+The `forge/plugin` setup handler declares executable and state requirements;
+it does not declare an agent credential. Hosts that discover credentials from
+setup requirements must instead honor the engine's `RuntimeRequirements.mcpRelays`
+and resolve the separate host-only credential inputs. The Docker adapter's
+`hostPlatform` option controls host routing and defaults to the process platform;
+it is separate from the container's target architecture.
 
 Use `forge validate --host --experiment …` to install setup and check native MCP
 initialization and tool discovery from a disposable runtime. It requires the

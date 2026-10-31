@@ -133,11 +133,11 @@ its own [host listener](#host-web-search). The development live suite has separa
 For the [Stripe plugin treatment](docs/plugin-action.md), use
 `with: {plugin: stripe}` and export `STRIPE_API_KEY` with an Agent API key.
 To use a different host variable, pass
-`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`; the agent still receives
-`STRIPE_API_KEY`.
-Forge selects the distribution for the run's agent and configures its bundled
-MCP connection. The token reaches only agent commands; prepare the account or
-merchant outside Forge.
+`--credential-env env:STRIPE_API_KEY=STRIPE_TEST_KEY`. Forge keeps this key on
+the host and routes the bundled MCP connection through a run-owned credential
+relay. The container receives a temporary relay token. Plugin runs need a local
+Docker daemon with host reachability; see the [relay contract](docs/plugin-action.md#credentials-and-limitations).
+Prepare the account or merchant outside Forge.
 
 OpenCode requires `OPENCODE_BASE_URL`, a Chat Completions API root such as
 `https://gateway.example.com/v1`, and `OPENCODE_API_KEY`. This supports the
@@ -202,7 +202,8 @@ Embedding hosts resolve `env:API_TOKEN` through their credential resolver.
 
 This action adds requirements without adding automatic host bindings. Existing
 bindings still apply: selecting `forge/plugin` with `plugin: stripe` already
-declares and binds `STRIPE_API_KEY`, so there is no need to repeat it here.
+binds `STRIPE_API_KEY` for its host relay. Declaring that key for command
+environments in the same run is rejected.
 
 ## Installation
 
@@ -424,16 +425,17 @@ npx --no-install forge run --experiment ./my-eval/experiment.yaml --agent openco
 For a plugin comparison, select `baseline` and `stripe-plugin` in the matrix.
 Keep `baseline.setup: []`; add `uses: forge/plugin` with
 `with: {plugin: stripe}` only to `stripe-plugin`. Both use the model profile
-above. If both arms need Stripe account access, declare `forge/credentials`
-with `env: [STRIPE_API_KEY]` in case setup and pass
-`--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`.
+above. The plugin arm reaches Stripe through the host relay, so neither arm has
+the key in its environment. Declaring `STRIPE_API_KEY` through
+`forge/credentials` for direct API access would expose it to tool shells and is
+rejected in a plugin run.
 
 OpenCode loads skills and MCP from the same Claude-format Stripe plugin used
 by Claude Code and Codex. It does not load Claude-specific hooks, commands, or
 agents. As with Codex, the Stripe marketplace is the trust root: Forge fetches
-its catalog at unpinned HEAD and trusts its source SHA and the bundle's MCP URL.
-The agent sends the `STRIPE_API_KEY` bearer to that URL; Forge does not restrict
-its host or require HTTPS. The receipt records the catalog commit and installed
+its catalog at unpinned HEAD and trusts its source SHA. The bundle's MCP URL
+must be the fixed Stripe endpoint, which the host relay forwards to with the
+key. The receipt records the catalog commit and installed
 contents, but does not pin future installs. See the
 [plugin contract](docs/plugin-action.md) for installation provenance and source
 selection.

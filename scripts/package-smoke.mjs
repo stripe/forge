@@ -240,6 +240,9 @@ try {
         for (const name of names) assert.equal(name in surface, false);
       }
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
+      assert.equal(Object.isFrozen(docker.DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS), true);
+      assert.equal(docker.DEFAULT_MCP_CREDENTIAL_RELAY_LIMITS.idleTimeoutMs, 60_000);
+      assert.equal(docker.createDockerRuntimeAdapter({mcpRelayLimits: {idleTimeoutMs: 120_000}}).supportsMcpCredentialRelay, true);
       assert.equal(typeof setup.createSetupExecutor, 'function');
       assert.equal(setup.credentialsSetupHandler, forge.credentialsSetupHandler);
       assert.deepEqual(forge.parseSetupStep({

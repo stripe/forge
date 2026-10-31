@@ -201,18 +201,19 @@ export function createClaudePluginInstaller(
             installedLocation.absolute,
             entry.source,
           );
+          const installedTree = await inspectInstalledPluginTree(
+            state,
+            installedLocation.relative,
+            installContext.signal,
+          );
           const mcpServers = context.mcpServers;
           if (mcpServers)
             await configurePluginMcp(
               state,
               installedLocation.relative,
               mcpServers,
+              installContext.pluginMcpConnections,
             );
-          const installedTree = await inspectInstalledPluginTree(
-            state,
-            installedLocation.relative,
-            installContext.signal,
-          );
           return deepFreeze({
             adapter: adapterId,
             plugin: selected.plugin,

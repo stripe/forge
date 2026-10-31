@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import type { PluginMcpConnection } from '../../contracts/runtime.ts';
 import { isSafeVersion } from '../../model/paths.ts';
 import { PLUGIN_MCP_CREDENTIALS } from '../../model/pluginCredentials.ts';
 import { parseJson, record } from './native.ts';
@@ -50,6 +51,7 @@ export function stripeBundleVersion(manifest: unknown): string {
 export function stripeOpenCodeConfiguration(
   document: unknown,
   stateDirectory: string,
+  connection?: PluginMcpConnection,
 ): StripeOpenCodeConfiguration {
   const value = record(document);
   const servers = record(value.mcpServers);
@@ -75,16 +77,20 @@ export function stripeOpenCodeConfiguration(
     /[\s{}\u0000-\u001f\u007f]/.test(stripe.url)
   )
     throw new Error('Invalid Stripe bundle MCP URL.');
+  if (url.href !== PLUGIN_MCP_CREDENTIALS.stripe.url)
+    throw new Error('Unsupported Stripe bundle MCP URL.');
+  if (!connection)
+    throw new Error('Stripe MCP requires a host credential relay.');
   return {
     skills: { paths: [`${stateDirectory}/${PLUGIN_ROOT}/bundle/skills`] },
     mcp: {
       stripe: {
         type: 'remote',
-        url: stripe.url,
+        url: connection.url,
         enabled: true,
         oauth: false,
         headers: {
-          Authorization: `Bearer {env:${PLUGIN_MCP_CREDENTIALS.stripe.credentialEnvironmentVariable}}`,
+          Authorization: `Bearer ${connection.token}`,
         },
       },
     },
@@ -100,12 +106,35 @@ export function mergeStripeOpenCodeConfiguration(
   const config = record(parseJson(generated, 1024 * 1024));
   const fragment = record(parseJson(installed, 1024 * 1024));
   const server = record(record(fragment.mcp).stripe);
+  const token = record(server.headers).Authorization;
+  if (
+    typeof server.url !== 'string' ||
+    typeof token !== 'string' ||
+    !/^Bearer [a-f0-9]{64}$/.test(token)
+  )
+    throw new Error('Invalid installed OpenCode relay configuration.');
+  const relayUrl = new URL(server.url);
+  if (
+    relayUrl.protocol !== 'http:' ||
+    relayUrl.pathname !== '/mcp' ||
+    relayUrl.username ||
+    relayUrl.password ||
+    relayUrl.search ||
+    relayUrl.hash
+  )
+    throw new Error('Invalid installed OpenCode relay URL.');
   const expected = stripeOpenCodeConfiguration(
     {
       $schema: `${SCHEMA_ROOT}mcp.schema.json`,
-      mcpServers: { stripe: { type: 'streamable-http', url: server.url } },
+      mcpServers: {
+        stripe: {
+          type: 'streamable-http',
+          url: PLUGIN_MCP_CREDENTIALS.stripe.url,
+        },
+      },
     },
     stateDirectory,
+    { url: server.url, token: token.slice('Bearer '.length) },
   );
   // Exact structure also rejects accidental model/auth overrides in installed state.
   if (!isDeepStrictEqual(fragment, expected))

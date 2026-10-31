@@ -188,6 +188,12 @@ export async function runOpenCodeIntegrationSuite(options) {
     const dockerRuntime = forge.createDockerRuntimeAdapter({
       dockerExecutable,
       temporaryRoot: runtimeRoot,
+      mcpRelayFetch: (url, init) => {
+        assert.equal(url, 'https://mcp.stripe.com/');
+        const target = new URL(mcp.url);
+        target.hostname = '127.0.0.1';
+        return fetch(target, init);
+      },
     });
     const runtime = fixtureOpenCodeRuntime(dockerRuntime, forge, mcp);
     const agent = forge.createOpenCodeAdapter({
@@ -252,7 +258,7 @@ export async function runOpenCodeIntegrationSuite(options) {
             treatment === 'stripe-plugin'
               ? [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }]
               : [],
-          caseSetup: openCodePluginFixtureSetup(mcp.url),
+          caseSetup: openCodePluginFixtureSetup(),
           checks: {
             files_created: ['answer.txt'],
             file_checks: [

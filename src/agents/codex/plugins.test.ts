@@ -12,6 +12,8 @@ import { createTestResolvedRunPlan } from '../../testing/plans.ts';
 import { CODEX_HOME_STATE_ID } from './layout.ts';
 import { createCodexPluginInstaller } from './plugins.ts';
 
+const relay = { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) };
+
 const commit = 'a'.repeat(40);
 const catalogRelative = '.tmp/marketplaces/test';
 const configRoot = '/home/forge/.codex';
@@ -21,6 +23,7 @@ const distribution = { plugin: 'fixture@test', marketplace: 'example/plugins' };
 
 function fixture(
   options: {
+    connection?: import('../../contracts/runtime.ts').PluginMcpConnection;
     source?: unknown;
     mcpServers?: readonly import('../../model/types.ts').PluginMcpServerId[];
     catalogPath?: string;
@@ -182,6 +185,7 @@ function fixture(
   const install = (signal = new AbortController().signal) =>
     prepared.install({
       runId: 'test',
+      pluginMcpConnections: { stripe: options.connection ?? relay },
       paths: { workspace: '/workspace', home: '/home/forge' },
       commands,
       stateDirectories: new Map([[CODEX_HOME_STATE_ID, state.mutable]]),
@@ -191,37 +195,49 @@ function fixture(
 }
 
 describe('Codex native plugin installer', () => {
-  it('declares plugin MCP auth in user configuration, which plugin sync preserves', async () => {
-    const mcpServers = ['stripe'] as const;
-    const test = fixture({ mcpServers });
-    await test.state.mutable.writeFile(
-      `${cache}/.mcp.json`,
-      Buffer.from(
-        JSON.stringify({
-          mcpServers: {
-            stripe: { type: 'http', url: 'https://mcp.stripe.com' },
-          },
-        }),
-      ),
-    );
-    const receipt = await test.install();
-    assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
-    const bundled = JSON.parse(
-      Buffer.from(
-        await test.state.mutable.readFile(`${cache}/.mcp.json`),
-      ).toString(),
-    );
-    assert.deepEqual(bundled, { mcpServers: {} });
-    const config = parseToml(
-      Buffer.from(await test.state.mutable.readFile('config.toml')).toString(),
-    ) as Record<string, unknown>;
-    assert.deepEqual(JSON.parse(JSON.stringify(config.mcp_servers)), {
-      stripe: {
-        url: 'https://mcp.stripe.com',
-        bearer_token_env_var: 'STRIPE_API_KEY',
-      },
-    });
-    assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
+  it('declares the relay in user configuration and keeps the bundle fingerprint stable across relay connections', async () => {
+    let previousTree: unknown;
+    for (const connection of [
+      relay,
+      { url: 'http://127.0.0.1:23456/mcp', token: 'b'.repeat(64) },
+    ]) {
+      const test = fixture({ mcpServers: ['stripe'], connection });
+      await test.state.mutable.writeFile(
+        `${cache}/.mcp.json`,
+        Buffer.from(
+          JSON.stringify({
+            mcpServers: {
+              stripe: { type: 'http', url: 'https://mcp.stripe.com' },
+            },
+          }),
+        ),
+      );
+      const receipt = await test.install();
+      if (previousTree) assert.deepEqual(receipt.installed_tree, previousTree);
+      previousTree = receipt.installed_tree;
+      assert.equal(Object.hasOwn(receipt, 'mcp_servers'), false);
+      const bundled = JSON.parse(
+        Buffer.from(
+          await test.state.mutable.readFile(`${cache}/.mcp.json`),
+        ).toString(),
+      );
+      assert.deepEqual(bundled, { mcpServers: {} });
+      const source = Buffer.from(
+        await test.state.mutable.readFile('config.toml'),
+      ).toString();
+      const config = parseToml(source) as Record<string, unknown>;
+      // Declared in user configuration, which plugin sync preserves; the
+      // token is referenced through the environment, not written.
+      assert.deepEqual(JSON.parse(JSON.stringify(config.mcp_servers)), {
+        stripe: {
+          url: connection.url,
+          bearer_token_env_var: 'FORGE_STRIPE_MCP_RELAY_TOKEN',
+        },
+      });
+      assert.ok(!source.includes('STRIPE_API_KEY'));
+      assert.ok(!source.includes(connection.token));
+      assert.ok(!JSON.stringify(test.calls).includes('STRIPE_API_KEY'));
+    }
   });
 
   for (const [exitCode, reason] of [
@@ -265,24 +281,29 @@ describe('Codex native plugin installer', () => {
       );
     });
 
-  it('fingerprints the original tree and records the moved connection in the receipt', async () => {
+  it('fingerprints the original tree and records the upstream connection, not the relay, in the receipt', async () => {
     const mcpServers = ['stripe'] as const;
+    const url = 'https://mcp.stripe.com';
     const receipts = [];
-    for (const url of [
-      'https://first.example.test',
-      'https://second.example.test',
-    ]) {
+    for (const [note, connection] of [
+      ['first', relay],
+      ['second', { url: 'http://127.0.0.1:23456/mcp', token: 'b'.repeat(64) }],
+    ] as const) {
       const bundle = JSON.stringify({
         mcpServers: { stripe: { type: 'http', url } },
+        note,
       });
-      const test = fixture({ mcpServers });
+      const test = fixture({ mcpServers, connection });
       await test.state.mutable.writeFile(
         `${cache}/.mcp.json`,
         Buffer.from(bundle),
       );
       const receipt = await test.install();
       assert.equal(receipt.mcp_configuration, 'codex-user-config');
+      // Stable across runs: the random local relay address is never recorded.
       assert.deepEqual(receipt.mcp_connections, [{ name: 'stripe', url }]);
+      assert.ok(!JSON.stringify(receipt).includes(connection.url));
+      assert.ok(!JSON.stringify(receipt).includes(connection.token));
       assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
       // The fingerprint covers the bundle as installed, before Forge's edit.
       const bare = fixture();

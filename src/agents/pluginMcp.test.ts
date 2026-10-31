@@ -11,36 +11,36 @@ import {
 } from './pluginMcp.ts';
 
 const servers = ['stripe'] as const;
+const relays = {
+  stripe: { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) },
+};
 const step = {
   uses: 'forge/plugin',
   with: { plugin: 'stripe' },
 };
 
 describe('plugin MCP bearer authentication', () => {
-  it('retains native endpoints, other servers and non-auth headers without mutating input', () => {
+  it('replaces upstream auth and endpoints with relay capabilities without mutating input', () => {
     const input = {
       mcpServers: {
         stripe: {
           type: 'http',
           url: 'https://mcp.stripe.com',
-          headers: { authorization: 'old', Accept: 'application/json' },
+          headers: { authorization: 'old' },
+          bearer_token_env_var: 'STRIPE_API_KEY',
         },
         other: { command: 'local' },
       },
-      extra: true,
     };
-    const claude = configurePluginMcpDocument(input, servers);
+    const claude = configurePluginMcpDocument(input, servers, relays);
     assert.deepEqual(claude, {
-      ...input,
       mcpServers: {
-        ...input.mcpServers,
         stripe: {
-          ...input.mcpServers.stripe,
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer \${STRIPE_API_KEY}`,
-          },
+          type: 'http',
+          url: relays.stripe.url,
+          headers: { Authorization: `Bearer ${relays.stripe.token}` },
         },
+        other: input.mcpServers.other,
       },
     });
     assert.equal(input.mcpServers.stripe.headers.authorization, 'old');
@@ -56,19 +56,44 @@ describe('plugin MCP bearer authentication', () => {
         extra: true,
       },
       servers,
+      relays,
     );
     assert.deepEqual(codex, {
       document: {
         mcpServers: { other: { command: 'local', enabled_tools: ['read'] } },
         extra: true,
       },
+      upstream: { stripe: 'https://mcp.stripe.com' },
       declarations: {
         stripe: {
-          url: 'https://mcp.stripe.com',
-          bearer_token_env_var: 'STRIPE_API_KEY',
+          url: relays.stripe.url,
+          bearer_token_env_var: 'FORGE_STRIPE_MCP_RELAY_TOKEN',
         },
       },
     });
+    for (const configured of [claude, codex])
+      assert.ok(!JSON.stringify(configured).includes('STRIPE_API_KEY'));
+    assert.ok(!JSON.stringify(codex).includes(relays.stripe.token));
+    assert.throws(
+      () => configurePluginMcpDocument(input, servers),
+      /host credential relay/,
+    );
+    assert.throws(
+      () => relocateCodexPluginMcp(input, servers),
+      /host credential relay/,
+    );
+    for (const document of [
+      { mcpServers: { stripe: { type: 'http', url: 'https://example.com' } } },
+    ]) {
+      assert.throws(
+        () => configurePluginMcpDocument(document, servers, relays),
+        /unsupported URL/,
+      );
+      assert.throws(
+        () => relocateCodexPluginMcp(document, servers, relays),
+        /unsupported URL/,
+      );
+    }
   });
 
   it('fails on absent servers, unsupported transport and competing auth sources', () => {
@@ -88,8 +113,9 @@ describe('plugin MCP bearer authentication', () => {
           relocateCodexPluginMcp(
             { mcpServers: stripe ? { stripe } : {} },
             servers,
+            relays,
           ),
-        /absent|HTTP|auth/,
+        /absent|HTTP|auth|URL/,
       );
     }
   });
@@ -120,6 +146,7 @@ describe('plugin MCP bearer authentication', () => {
           relocateCodexPluginMcp(
             { mcpServers: { stripe: { ...base, ...extra } } },
             servers,
+            relays,
           ),
         /not carry|auth|URL/,
         JSON.stringify(extra),
@@ -139,13 +166,15 @@ describe('plugin MCP bearer authentication', () => {
       state.mutable,
       'plugin',
       servers,
+      relays,
     );
     assert.deepEqual(relocation.declarations, {
       stripe: {
-        url: 'https://mcp.stripe.com',
-        bearer_token_env_var: 'STRIPE_API_KEY',
+        url: relays.stripe.url,
+        bearer_token_env_var: 'FORGE_STRIPE_MCP_RELAY_TOKEN',
       },
     });
+    assert.deepEqual(relocation.upstream, { stripe: 'https://mcp.stripe.com' });
     // Preparing the move changes nothing until it is written.
     assert.deepEqual(
       JSON.parse(

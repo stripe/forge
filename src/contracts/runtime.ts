@@ -1,4 +1,4 @@
-import type { ResolvedRunPlanV1 } from '../model/types.ts';
+import type { PluginMcpServerId, ResolvedRunPlanV1 } from '../model/types.ts';
 import type { CommandRunner } from './command.ts';
 import type {
   ResolvedEnvironment,
@@ -79,6 +79,24 @@ export interface RuntimeRequirements {
   /** Executables the prepared runtime must make available to the agent adapter. */
   readonly executables: readonly string[];
   readonly stateDirectories: readonly RuntimeStateDirectoryRequirement[];
+  /** Host credential relays required by registered plugins. */
+  readonly mcpRelays?: readonly PluginMcpServerId[];
+}
+
+/** Agent-visible authority restricted to one run's MCP endpoint. */
+export interface PluginMcpConnection {
+  readonly url: string;
+  readonly token: string;
+}
+
+export type PluginMcpConnections = Readonly<
+  Partial<Record<PluginMcpServerId, PluginMcpConnection>>
+>;
+
+/** Host-only credential input; never project it into commands or files. */
+export interface PluginMcpRelayCredential {
+  readonly server: PluginMcpServerId;
+  readonly value: string;
 }
 
 /** A host-authorized, bounded import into a declared run-owned state directory. */
@@ -123,6 +141,7 @@ export interface RuntimePreparation {
   readonly plan: ResolvedRunPlanV1;
   readonly environment: ResolvedEnvironment;
   readonly requirements: RuntimeRequirements;
+  readonly mcpRelayCredentials?: readonly PluginMcpRelayCredential[];
   readonly signal: AbortSignal;
 }
 
@@ -148,6 +167,13 @@ export interface PreparedRuntime {
   readonly workspace: MutableWorkspace;
   readonly paths: RuntimeLogicalPaths;
   readonly stateDirectories: ReadonlyMap<string, MutableWorkspace>;
+  /**
+   * Contains relay capabilities only, never upstream credentials. The runtime
+   * also exposes each token to agent commands as the server's
+   * `relayTokenEnvironmentVariable` in `PLUGIN_MCP_CREDENTIALS`, for adapters
+   * that authenticate from the environment.
+   */
+  readonly pluginMcpConnections?: PluginMcpConnections;
   /**
    * Optional host-only capability. It is not projected to setup actions or
    * agents. An adapter that implements it must copy without buffering the
@@ -180,6 +206,8 @@ export interface PreparedRuntime {
 /** Forge owns lifecycle ordering; adapters own only runtime mechanics. */
 export interface RuntimeAdapter {
   readonly id: string;
+  /** Relays stay outside agent authority and stop on abort, quiesce, or disposal. */
+  readonly supportsMcpCredentialRelay?: true;
   /**
    * Pure, synchronous validation of the exact configuration and combined
    * agent/setup requirements. Never normalize defaults, resolve credentials,

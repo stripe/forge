@@ -4,6 +4,7 @@ import type { RunInputProvider } from '../contracts/inputs.ts';
 import type { AgentPluginInstaller } from '../contracts/plugin.ts';
 import type {
   MutableWorkspace,
+  PluginMcpConnections,
   RuntimeLogicalPaths,
   RuntimeStateDirectoryRequirement,
 } from '../contracts/runtime.ts';
@@ -46,6 +47,7 @@ export interface SetupApplyContext {
   /** Engine-owned per-run host endpoint; present only for forge/web-search. */
   readonly webSearchUrl?: string;
   readonly runId: string;
+  readonly pluginMcpConnections?: PluginMcpConnections;
   readonly paths: RuntimeLogicalPaths;
   readonly workspace: MutableWorkspace;
   /** All state directories aggregated during pure setup preflight. */

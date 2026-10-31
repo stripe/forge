@@ -126,6 +126,7 @@ describe('OpenCode adapter', () => {
         },
       },
       '/home/forge/.opencode-forge',
+      { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) },
     );
     await test.state.mutable.writeFile(
       PLUGIN_CONFIG_PATH,
@@ -636,6 +637,7 @@ describe('OpenCode adapter', () => {
                   },
                 },
                 '/home/forge/.opencode-forge',
+                { url: 'http://127.0.0.1:12345/mcp', token: 'a'.repeat(64) },
               ),
             ),
           ),

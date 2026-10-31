@@ -49,6 +49,36 @@ const verifiers = createRunVerifiers({
 });
 
 describe('unified live end-to-end suite', () => {
+  it('keeps readiness mock authentication on the host across success and failure scenarios', async () => {
+    const { startReadinessMcpFixture, readinessFixtureSetup } =
+      await liveModule('readiness');
+    for (const scenario of ['connected', 'unauthorized', 'discovery-failed']) {
+      const mock = await startReadinessMcpFixture(scenario);
+      try {
+        const response = await fetch(mock.url, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer forge-synthetic-mcp-token' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+        });
+        assert.equal(
+          response.status,
+          scenario === 'connected'
+            ? 200
+            : scenario === 'unauthorized'
+              ? 401
+              : 500,
+        );
+        assert.deepEqual(mock.observed, [{ method: 'tools/list', auth: true }]);
+        assert.ok(
+          !JSON.stringify(readinessFixtureSetup(scenario)).includes(
+            'forge-synthetic-mcp-token',
+          ),
+        );
+      } finally {
+        await mock.close();
+      }
+    }
+  });
   it('runs OpenAI host completion coverage through verified Ava and judge artifacts', async () => {
     const { runOpenAICompletionSuite } = await liveModule('completions');
     const root = await fs.mkdtemp(

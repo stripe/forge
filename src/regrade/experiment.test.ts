@@ -205,7 +205,8 @@ describe('regradeExperimentRun', () => {
     roots.push(root);
     const source = path.join(root, 'source');
     const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
-    const receipts = ['a', 'b'].map((hex) =>
+    // Digests must differ from the fake runtime's relay token ('a' x 64).
+    const receipts = ['e', 'f'].map((hex) =>
       parseAgentPluginInstallationReceipt({
         adapter: 'claude-code',
         plugin: 'stripe@claude-plugins-official',

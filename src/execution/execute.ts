@@ -109,8 +109,12 @@ import {
 } from '../model/index.ts';
 import { judgeMethodOf } from '../model/judgeMethod.ts';
 import { parseResolvedRunPlanWithSetupActions } from '../model/parse.ts';
+import {
+  PLUGIN_MCP_CREDENTIALS,
+  pluginMcpCredentials,
+} from '../model/pluginCredentials.ts';
 import { pluginDefinitionForAgent } from '../model/plugins.ts';
-import type { PluginSetupStepV1 } from '../model/types.ts';
+import type { PluginMcpServerId, PluginSetupStepV1 } from '../model/types.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import {
   agentPrices,
@@ -329,7 +333,7 @@ export async function validateRuntimeWithSetupActions(
           readinessSearch.push(webSearch);
           readinessSecrets.push(...webSearch.secrets);
         }
-        const environment = await createEnvironmentResolver({
+        const resolver = createEnvironmentResolver({
           async resolve(reference, context) {
             const value = await (
               webSearch?.credentialResolver ??
@@ -338,12 +342,21 @@ export async function validateRuntimeWithSetupActions(
             if (typeof value === 'string') readinessSecrets.push(value);
             return value;
           },
-        }).resolve(check.environmentSpecification, {
+        });
+        const context = {
           runId: check.runId,
           purpose: 'readiness',
           signal,
-        });
-        resolved.push({ ...check, environment, webSearch });
+        };
+        const environment = await resolver.resolve(
+          check.environmentSpecification,
+          context,
+        );
+        const relayEnvironment = await resolver.resolve(
+          mcpRelayEnvironment(check.preflight.requirements),
+          context,
+        );
+        resolved.push({ ...check, environment, relayEnvironment, webSearch });
       } catch (error) {
         throw new Error(
           `Runtime readiness failed at credentials: ${
@@ -358,6 +371,7 @@ export async function validateRuntimeWithSetupActions(
       composition,
       preflight,
       environment,
+      relayEnvironment,
       runId,
       webSearch,
     } of resolved) {
@@ -375,6 +389,10 @@ export async function validateRuntimeWithSetupActions(
           plan,
           requirements: preflight.requirements,
           environment,
+          mcpRelayCredentials: mcpRelayCredentials(
+            preflight.requirements,
+            relayEnvironment,
+          ),
           signal: runSignal,
         });
         stage = 'agent';
@@ -394,6 +412,9 @@ export async function validateRuntimeWithSetupActions(
           workspace: runtime.workspace,
           stateDirectories: runtime.stateDirectories,
           commands: runtime.commands,
+          ...(runtime.pluginMcpConnections === undefined
+            ? {}
+            : { pluginMcpConnections: runtime.pluginMcpConnections }),
           inputs: composition.inputProvider,
           signal: runSignal,
         });
@@ -456,7 +477,7 @@ export async function validateRuntimeWithSetupActions(
         );
       } catch (error) {
         failure = new Error(
-          `Runtime readiness failed at ${stage} for ${plan.selection.case_id} (${plan.agent.adapter}/${plan.selection.treatment}): ${redactSecrets(readinessErrorDetail(error), credentialValues(environment)).value}`,
+          `Runtime readiness failed at ${stage} for ${plan.selection.case_id} (${plan.agent.adapter}/${plan.selection.treatment}): ${redactSecrets(readinessErrorDetail(error), [...credentialValues(environment), ...credentialValues(relayEnvironment), ...Object.values(runtime?.pluginMcpConnections ?? {}).map(({ token }) => token)]).value}`,
         );
       } finally {
         try {
@@ -609,6 +630,12 @@ export async function executeEvalWithTestHooks(
       signal,
       webSearch?.credentialResolver,
     );
+    const relayEnvironment = await resolveEnvironment(
+      input,
+      mcpRelayEnvironment(preflight.requirements),
+      signal,
+      webSearch?.credentialResolver,
+    );
     let completions: PreparedCompletionRuntime;
     try {
       completions = await prepareCompletionRuntime({
@@ -616,7 +643,10 @@ export async function executeEvalWithTestHooks(
         bindings: preflight.completionBindings,
         credentialResolver: input.composition.credentialResolver,
         onObservation: diagnostics.completions,
-        redactionSecrets: credentialValues(environment),
+        redactionSecrets: [
+          ...credentialValues(environment),
+          ...credentialValues(relayEnvironment),
+        ],
         signal,
       });
     } catch (error) {
@@ -629,6 +659,7 @@ export async function executeEvalWithTestHooks(
     }
     const secrets = uniqueStrings([
       ...credentialValues(environment),
+      ...credentialValues(relayEnvironment),
       ...completions.secrets,
       ...(webSearch?.secrets ?? []),
     ]);
@@ -657,13 +688,19 @@ export async function executeEvalWithTestHooks(
         runId: input.runId,
         plan: input.plan,
         environment,
-        requirements: {
-          executables: preflight.requirements.executables,
-          stateDirectories: preflight.requirements.stateDirectories,
-        },
+        requirements: preflight.requirements,
+        mcpRelayCredentials: mcpRelayCredentials(
+          preflight.requirements,
+          relayEnvironment,
+        ),
         signal,
       });
     });
+    secrets.push(
+      ...Object.values(prepared.pluginMcpConnections ?? {}).map(
+        ({ token }) => token,
+      ),
+    );
 
     await preflight.agent.prepare({
       runId: input.runId,
@@ -686,6 +723,9 @@ export async function executeEvalWithTestHooks(
         paths: prepared!.paths,
         workspace: prepared!.workspace,
         stateDirectories: prepared!.stateDirectories,
+        ...(prepared!.pluginMcpConnections === undefined
+          ? {}
+          : { pluginMcpConnections: prepared!.pluginMcpConnections }),
         commands: Object.freeze({
           uncredentialed: prepared!.commands.uncredentialed,
           setup: (credentialEnvironmentNames: readonly string[]) =>
@@ -1705,7 +1745,7 @@ function buildEvalPreflight(
       ? {}
       : { pluginInstaller: agent.pluginInstaller }),
   });
-  const requirements = mergeRuntimeRequirements(
+  const baseRequirements = mergeRuntimeRequirements(
     {
       executables: agentRequirements.executables,
       stateDirectories: agentRequirements.stateDirectories,
@@ -1738,6 +1778,49 @@ function buildEvalPreflight(
     },
   ]);
   const completionBindings = completionBindingsForPlan(plan, composition);
+  const mcpRelays = [
+    ...new Set(
+      plan.setup.flatMap((step) =>
+        step.uses === 'forge/plugin'
+          ? (pluginDefinitionForAgent(
+              (step as PluginSetupStepV1).with.plugin,
+              plan.agent.adapter,
+            )?.mcpServers ?? [])
+          : [],
+      ),
+    ),
+  ];
+  if (mcpRelays.length > 0 && !composition.runtime.supportsMcpCredentialRelay)
+    throw new TypeError(
+      'The selected runtime does not support host MCP credential relays.',
+    );
+  for (const server of mcpRelays) {
+    const name = PLUGIN_MCP_CREDENTIALS[server].credentialEnvironmentVariable;
+    const relayToken =
+      PLUGIN_MCP_CREDENTIALS[server].relayTokenEnvironmentVariable;
+    if (
+      Object.hasOwn(environmentSpecification.variables ?? {}, relayToken) ||
+      Object.hasOwn(environmentSpecification.credentials ?? {}, relayToken)
+    )
+      throw new TypeError(
+        'The plugin MCP relay token variable is reserved for the runtime.',
+      );
+    if (
+      Object.hasOwn(environmentSpecification.variables ?? {}, name) ||
+      Object.hasOwn(environmentSpecification.credentials ?? {}, name) ||
+      Object.values(environmentSpecification.credentials ?? {}).some(
+        ({ reference }) =>
+          reference === PLUGIN_MCP_CREDENTIALS[server].credentialReference,
+      )
+    )
+      throw new TypeError(
+        'A plugin MCP credential cannot also enter the command environment.',
+      );
+  }
+  const requirements = Object.freeze({
+    ...baseRequirements,
+    ...(mcpRelays.length === 0 ? {} : { mcpRelays: Object.freeze(mcpRelays) }),
+  });
   preflightRuntime(plan, composition, requirements, environmentSpecification);
   return Object.freeze({
     agent,
@@ -1748,6 +1831,32 @@ function buildEvalPreflight(
     environmentSpecification,
     completionBindings,
   });
+}
+
+function mcpRelayEnvironment(
+  requirements: RuntimeRequirements,
+): ScopedEnvironmentSpecification {
+  return mergeEnvironmentSpecifications([
+    {
+      scope: 'agent',
+      specification: {
+        credentials: pluginMcpCredentials(requirements.mcpRelays ?? []),
+      },
+    },
+  ]);
+}
+
+function mcpRelayCredentials(
+  requirements: RuntimeRequirements,
+  environment: ResolvedEnvironment,
+) {
+  return (requirements.mcpRelays ?? []).map((server: PluginMcpServerId) => ({
+    server,
+    value:
+      environment.credentials[
+        PLUGIN_MCP_CREDENTIALS[server].credentialEnvironmentVariable
+      ]!.value,
+  }));
 }
 
 function assertExecutablePlan(plan: ResolvedRunPlanV1): void {

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
+import { createServer } from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { stringify } from 'yaml';
@@ -21,6 +23,7 @@ export async function runReadinessIntegrationSuite({
   const runtimeRoot = path.join(root, 'runtime');
   await fs.mkdir(runtimeRoot);
   const reports = [];
+  const mocks = [];
   const distribution = {
     plugin: 'stripe@claude-plugins-official',
     marketplace: 'anthropics/claude-plugins-official',
@@ -105,7 +108,9 @@ export async function runReadinessIntegrationSuite({
       let output = '';
       let errors = '';
       const runIds = [];
-      let observed;
+      const mock = await startReadinessMcpFixture(scenario);
+      mocks.push(mock);
+      const observed = mock.observed;
       const code = await runCli(
         [
           'validate',
@@ -142,6 +147,10 @@ export async function runReadinessIntegrationSuite({
             const docker = createDockerRuntimeAdapter({
               dockerExecutable,
               temporaryRoot: runtimeRoot,
+              mcpRelayFetch: (url, init) => {
+                assert.equal(url, 'https://mcp.stripe.com/');
+                return fetch(mock.url, init);
+              },
             });
             return {
               ...composition,
@@ -182,20 +191,6 @@ export async function runReadinessIntegrationSuite({
                         },
                       },
                     },
-                    async dispose() {
-                      if (scenario !== 'absent') {
-                        try {
-                          observed = JSON.parse(
-                            Buffer.from(
-                              await runtime.workspace.readFile(
-                                'mcp-observed.json',
-                              ),
-                            ).toString(),
-                          );
-                        } catch {}
-                      }
-                      await runtime.dispose();
-                    },
                   };
                 },
               },
@@ -232,6 +227,7 @@ export async function runReadinessIntegrationSuite({
     }
     return { verified: true, model_calls: 0, agent: liveAgent, cases: reports };
   } finally {
+    await Promise.all(mocks.map((mock) => mock.close()));
     await fs.rm(root, { recursive: true, force: true });
   }
 }
@@ -258,17 +254,17 @@ export function readinessFixtureSetup(scenario) {
       'catalog/plugin/.claude-plugin/plugin.json',
       JSON.stringify({ name: 'stripe', version: '1.0.0' }),
     ),
-    write('mock-mcp.cjs', mockMcpScript(scenario)),
-    command([
-      'node',
-      '-e',
-      `require('node:child_process').spawn(process.execPath, ['mock-mcp.cjs'], {detached: true, stdio: 'ignore'}).unref()`,
-    ]),
-    command([
-      'node',
-      '-e',
-      `const fs=require('node:fs'); (async()=>{for(let i=0;i<100;i++){if(fs.existsSync('mcp-ready'))return;await new Promise(r=>setTimeout(r,50));}throw new Error('mock MCP did not start');})().catch(()=>process.exit(1));`,
-    ]),
+    write(
+      'catalog/plugin/.mcp.json',
+      JSON.stringify({
+        mcpServers: {
+          [scenario === 'absent' ? 'other' : 'stripe']: {
+            type: 'http',
+            url: 'https://mcp.stripe.com/',
+          },
+        },
+      }),
+    ),
     command(['git', 'init', '-b', 'main', '/workspace/catalog']),
     command(['git', '-C', '/workspace/catalog', 'add', '.']),
     command([
@@ -286,17 +282,70 @@ export function readinessFixtureSetup(scenario) {
   ];
 }
 
-function mockMcpScript(scenario) {
-  return `const fs=require('node:fs'); const http=require('node:http'); const observations=[];
-const server=http.createServer(async(req,res)=>{
-  if(req.method!=='POST'){res.writeHead(405).end();return;}
-  let body='';for await(const chunk of req)body+=chunk;const message=JSON.parse(body);
-  const auth=req.headers.authorization==='Bearer ${fixtureToken}';
-  observations.push({method:message.method,auth});fs.writeFileSync('mcp-observed.json',JSON.stringify(observations));
-  if(!auth || ${JSON.stringify(scenario)}==='unauthorized'){res.writeHead(401).end();return;}
-  if(message.id===undefined){res.writeHead(202).end();return;}
-  if(message.method==='tools/list' && ${JSON.stringify(scenario)}==='discovery-failed'){res.writeHead(500).end();return;}
-  const result=message.method==='initialize'?{protocolVersion:message.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:message.method==='tools/list'?{tools:[{name:'ping',description:'Fixture tool; never invoked.',inputSchema:{type:'object'}}]}:message.method==='resources/list'?{resources:[]}:{resourceTemplates:[]};
-  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({jsonrpc:'2.0',id:message.id,result}));
-});server.listen(0,'127.0.0.1',()=>{fs.writeFileSync('catalog/plugin/.mcp.json',JSON.stringify({mcpServers:{[${JSON.stringify(scenario)}==='absent'?'other':'stripe']:{type:'http',url:'http://127.0.0.1:'+server.address().port+'/mcp'}}}));fs.writeFileSync('mcp-ready','ready');});`;
+/** Host mock sees the upstream key; native clients see only the run relay token. */
+export async function startReadinessMcpFixture(scenario) {
+  const observed = [];
+  const server = createServer(async (request, response) => {
+    if (request.method !== 'POST') {
+      response.writeHead(405).end();
+      return;
+    }
+    let body = '';
+    for await (const chunk of request) {
+      body += chunk;
+      if (Buffer.byteLength(body) > 1024 * 1024) {
+        response.writeHead(413).end();
+        return;
+      }
+    }
+    const message = JSON.parse(body);
+    const auth = request.headers.authorization === `Bearer ${fixtureToken}`;
+    observed.push({ method: message.method, auth });
+    if (!auth || scenario === 'unauthorized') {
+      response.writeHead(401).end();
+      return;
+    }
+    if (message.id === undefined) {
+      response.writeHead(202).end();
+      return;
+    }
+    if (message.method === 'tools/list' && scenario === 'discovery-failed') {
+      response.writeHead(500).end();
+      return;
+    }
+    const result =
+      message.method === 'initialize'
+        ? {
+            protocolVersion: message.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: 'fixture', version: '1' },
+          }
+        : message.method === 'tools/list'
+          ? {
+              tools: [
+                {
+                  name: 'ping',
+                  description: 'Fixture tool; never invoked.',
+                  inputSchema: { type: 'object' },
+                },
+              ],
+            }
+          : message.method === 'resources/list'
+            ? { resources: [] }
+            : { resourceTemplates: [] };
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  return {
+    observed,
+    url: `http://127.0.0.1:${server.address().port}/mcp`,
+    async close() {
+      const closed = once(server, 'close');
+      server.close();
+      server.closeAllConnections();
+      await closed;
+    },
+  };
 }
