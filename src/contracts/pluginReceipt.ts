@@ -72,7 +72,8 @@ function parseMcpConnections(
   if (
     !Array.isArray(input) ||
     input.length === 0 ||
-    input.length > MAX_MCP_CONNECTIONS
+    input.length > MAX_MCP_CONNECTIONS ||
+    !isDenseArray(input)
   ) {
     throw new TypeError('Agent plugin MCP connections receipt is invalid.');
   }
@@ -93,6 +94,20 @@ function parseMcpConnections(
     return Object.freeze({ name: entry.name, url: entry.url });
   });
   return Object.freeze(connections) as typeof connections;
+}
+
+/** Own keys are exactly the indices and `length`: no holes, no extra properties. */
+function isDenseArray(input: readonly unknown[]): boolean {
+  const keys = Reflect.ownKeys(input);
+  return (
+    keys.length === input.length + 1 &&
+    keys.every(
+      (key) =>
+        key === 'length' ||
+        (typeof key === 'string' && /^(0|[1-9][0-9]*)$/.test(key)),
+    ) &&
+    input.every((_, index) => Object.hasOwn(input, index))
+  );
 }
 
 function parsePluginSourceReceipt(

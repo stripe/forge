@@ -78,6 +78,15 @@ describe('plugin installation receipts', () => {
       },
       { ...relocated, mcp_connections: [{ ...stripe, extra: true }] },
       { ...relocated, mcp_connections: [{ name: 'Bad Name', url: stripe.url }] },
+      { ...relocated, mcp_connections: new Array(1) },
+      {
+        ...relocated,
+        mcp_connections: Object.assign([stripe], { extra: true }),
+      },
+      {
+        ...relocated,
+        mcp_connections: Object.assign([stripe], { [Symbol('extra')]: true }),
+      },
       ...[
         'https://mcp.stripe.com?api_key=synthetic-secret',
         'https://mcp.stripe.com#synthetic-secret',
