@@ -496,7 +496,7 @@ describe('model probes', () => {
     }
   });
 
-  it('uses each agent protocol and its own credential, including exact OpenCode routes', async () => {
+  it('uses each agent protocol and its own credential, including named OpenCode endpoints', async () => {
     const agents = [
       {
         adapter: createClaudeCodeAdapter({
@@ -521,11 +521,8 @@ describe('model probes', () => {
         adapter: createOpenCodeAdapter({
           baseUrl: 'https://unused.example/v1',
           credential: 'unused.key',
-          modelRoutes: {
-            'vendor/example': {
-              baseUrl: 'https://routed.example/v1',
-              credential,
-            },
+          endpoints: {
+            routed: { baseUrl: 'https://routed.example/v1', credential },
           },
         }),
         provider: 'openai-compatible',
@@ -556,7 +553,7 @@ describe('model probes', () => {
         provider,
         model: 'vendor/example',
         ...(provider === 'openai-compatible'
-          ? { model_profile: OPEN_CODE_MODEL_PROFILE }
+          ? { model_profile: OPEN_CODE_MODEL_PROFILE, endpoint: 'routed' }
           : {}),
       });
       assert.equal(calls, 0);

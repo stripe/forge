@@ -183,6 +183,10 @@ export interface AgentSelectionV1 extends ModelRefV1 {
   hook_trust?: 'native' | 'automation';
   /** Claude gateway compatibility; omit to retain the native beta behavior. */
   disable_experimental_betas?: true;
+  /** Named host endpoint serving the model; OpenCode only. The host maps the name to a URL and key. */
+  endpoint?: string;
+  /** OpenRouter upstream provider slugs in preference order; OpenCode only. Fallbacks are disabled. */
+  upstream_providers?: string[];
   /** Explicit model limits and capabilities; required by OpenCode. */
   model_profile?: {
     limit: { context: number; output: number };

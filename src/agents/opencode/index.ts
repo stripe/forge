@@ -19,6 +19,10 @@ import {
 import { reportNativeArtifactUnavailable } from '../nativeArtifactError.ts';
 import { summarizeNativeStreamLine } from '../streamDiagnostics.ts';
 import {
+  type OpenCodeEndpoint,
+  OpenCodeEndpointConfigurationError,
+} from './endpoints.ts';
+import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
@@ -48,19 +52,10 @@ export interface OpenCodeAdapterOptions {
   /** Explicit Chat Completions API root, including /v1 when needed. Required when selected. */
   readonly baseUrl?: string;
   /**
-   * Host-side endpoint overrides keyed by exact selected model name. A routed
-   * model uses its route's API root and credential; others use `baseUrl` and
-   * `credential`. Routes are host configuration and are not recorded in plans.
+   * Host-owned API roots and credential references by endpoint name. A
+   * selection's `endpoint` picks one; selections without it use `baseUrl`.
    */
-  readonly modelRoutes?: Readonly<
-    Record<
-      string,
-      {
-        readonly baseUrl: string;
-        readonly credential: string | CredentialReference;
-      }
-    >
-  >;
+  readonly endpoints?: Readonly<Record<string, OpenCodeEndpoint>>;
 }
 
 /** API-key OpenCode execution inside a runtime providing Docker-equivalent isolation. */
@@ -89,13 +84,13 @@ export function createOpenCodeAdapter(
   const credential = credentialReference(
     options.credential ?? 'opencode.api-key',
   );
-  const modelRoutes = new Map(
-    Object.entries(options.modelRoutes ?? {}).map(([model, route]) => [
-      model,
-      {
-        baseUrl: validateBaseUrl(route.baseUrl),
-        credential: credentialReference(route.credential),
-      },
+  const endpoints = new Map(
+    Object.entries(options.endpoints ?? {}).map(([name, endpoint]) => [
+      name,
+      Object.freeze({
+        baseUrl: validateBaseUrl(endpoint.baseUrl),
+        credential: credentialReference(endpoint.credential),
+      }),
     ]),
   );
   const requirements = (
@@ -105,18 +100,23 @@ export function createOpenCodeAdapter(
       throw new TypeError(
         'OpenCode requires the selected adapter and openai-compatible provider.',
       );
+    const endpoint =
+      selection.endpoint === undefined
+        ? undefined
+        : endpoints.get(selection.endpoint);
+    if (selection.endpoint !== undefined && endpoint === undefined)
+      throw new OpenCodeEndpointConfigurationError(selection.endpoint);
+    const endpointBaseUrl = endpoint?.baseUrl ?? baseUrl;
+    if (endpointBaseUrl === undefined)
+      throw new TypeError(
+        'OpenCode requires an explicit baseUrl (OPENCODE_BASE_URL in the CLI).',
+      );
     if (!selection.model || /[\u0000-\u001f\u007f]/.test(selection.model))
       throw new TypeError('OpenCode requires an explicit model.');
-    const route = modelRoutes.get(selection.model);
-    const endpoint = route?.baseUrl ?? baseUrl;
-    const endpointCredential = route?.credential ?? credential;
-    if (endpoint === undefined)
-      throw new TypeError(
-        'OpenCode requires an explicit baseUrl (OPENCODE_BASE_URL in the CLI) or a model route.',
-      );
     if (selection.model_profile === undefined)
       throw new TypeError('OpenCode requires an explicit model_profile.');
     const model = `forge/${selection.model}`;
+    const pin = selection.upstream_providers;
     return {
       executables: [executable, 'node'],
       environment: {
@@ -148,18 +148,40 @@ export function createOpenCodeAdapter(
                   [selection.model]: {
                     ...selection.model_profile,
                     tool_call: true,
+                    // Pin the upstream provider. By source reading of OpenCode
+                    // v1.19.0 and @ai-sdk/openai-compatible 2.0.41: (1)
+                    // provider/provider.ts merges config model `options`;
+                    // (2) session/llm/request.ts merges them into the call
+                    // options; (3) session/llm.ts passes them through
+                    // ProviderTransform.providerOptions; (4) transform.ts keys
+                    // them by the provider ID `forge`; (5) the SDK's getArgs
+                    // spreads providerOptions.forge keys outside its own
+                    // schema, such as `provider`, into the request body.
+                    // Delivery is not proven end to end.
+                    ...(pin === undefined
+                      ? {}
+                      : {
+                          options: {
+                            provider: {
+                              order: [...pin],
+                              allow_fallbacks: false,
+                            },
+                          },
+                        }),
                   },
                 },
                 env: ['OPENCODE_API_KEY'],
                 options: {
-                  baseURL: endpoint,
+                  baseURL: endpointBaseUrl,
                   apiKey: '{env:OPENCODE_API_KEY}',
                 },
               },
             },
           }),
         },
-        credentials: { OPENCODE_API_KEY: { reference: endpointCredential } },
+        credentials: {
+          OPENCODE_API_KEY: { reference: endpoint?.credential ?? credential },
+        },
       },
       stateDirectories: [
         { id: OPENCODE_STATE_ID, containerPath: layout.stateDirectory },
@@ -176,9 +198,13 @@ export function createOpenCodeAdapter(
     requirements,
     probeModel(selection) {
       requirements(selection);
+      const endpoint =
+        selection.endpoint === undefined
+          ? undefined
+          : endpoints.get(selection.endpoint);
       return createAgentModelProbe({
-        endpoint: `${(modelRoutes.get(selection.model)?.baseUrl ?? baseUrl)!.replace(/\/+$/, '')}/chat/completions`,
-        credential: modelRoutes.get(selection.model)?.credential ?? credential,
+        endpoint: `${(endpoint?.baseUrl ?? baseUrl)!.replace(/\/+$/, '')}/chat/completions`,
+        credential: endpoint?.credential ?? credential,
         model: selection.model,
         protocol: 'chat',
       });

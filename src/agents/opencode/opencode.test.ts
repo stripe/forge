@@ -156,19 +156,23 @@ describe('OpenCode adapter', () => {
     assert.ok(test.calls.some(({ argv }) => argv.includes('--session')));
   });
 
-  it('routes listed models to their endpoint and credential, others to the default', () => {
+  it('sends a selection to its named endpoint and credential, others to the default', () => {
+    const endpoints = {
+      openrouter: {
+        baseUrl: 'https://openrouter.example/api/v1',
+        credential: 'opencode.endpoint.openrouter.api-key',
+      },
+    };
     const adapter = createOpenCodeAdapter({
       baseUrl: 'https://gateway.example/v1',
       credential: 'opencode.api-key',
-      modelRoutes: {
-        'qwen/qwen4-coder': {
-          baseUrl: 'https://openrouter.example/api/v1',
-          credential: 'opencode.endpoint.openrouter.api-key',
-        },
-      },
+      endpoints,
     });
-    const endpointOf = (model: string) => {
-      const requirements = adapter.requirements({ ...selection, model });
+    const endpointOf = (endpoint?: string) => {
+      const requirements = adapter.requirements({
+        ...selection,
+        ...(endpoint === undefined ? {} : { endpoint }),
+      });
       return {
         baseURL: JSON.parse(
           requirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
@@ -177,31 +181,57 @@ describe('OpenCode adapter', () => {
           requirements.environment.credentials!.OPENCODE_API_KEY!.reference,
       };
     };
-    assert.deepEqual(endpointOf('qwen/qwen4-coder'), {
+    assert.deepEqual(endpointOf('openrouter'), {
       baseURL: 'https://openrouter.example/api/v1',
       credential: 'opencode.endpoint.openrouter.api-key',
     });
-    assert.deepEqual(endpointOf(OPEN_CODE_MODEL), {
+    assert.deepEqual(endpointOf(), {
       baseURL: 'https://gateway.example/v1',
       credential: 'opencode.api-key',
     });
-    // A routed model works without a default endpoint; an unrouted one does not.
-    const routedOnly = createOpenCodeAdapter({
-      modelRoutes: {
-        m: { baseUrl: 'https://openrouter.example/api/v1', credential: 'k' },
-      },
-    });
+    // A named endpoint works without a default; an unnamed selection does not.
+    const namedOnly = createOpenCodeAdapter({ endpoints });
     assert.doesNotThrow(() =>
-      routedOnly.requirements({ ...selection, model: 'm' }),
+      namedOnly.requirements({ ...selection, endpoint: 'openrouter' }),
     );
-    assert.throws(() => routedOnly.requirements(selection), /baseUrl/);
+    assert.throws(() => namedOnly.requirements(selection), /baseUrl/);
+    assert.throws(
+      () => adapter.requirements({ ...selection, endpoint: 'missing' }),
+      /endpoint "missing" is not configured/,
+    );
     assert.throws(
       () =>
         createOpenCodeAdapter({
-          modelRoutes: { m: { baseUrl: 'ftp://bad', credential: 'k' } },
+          endpoints: { m: { baseUrl: 'ftp://bad', credential: 'k' } },
         }),
       /OpenCode baseUrl/,
     );
+  });
+
+  it('pins the upstream provider only for selections that author it', () => {
+    const adapter = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+    });
+    const modelEntry = (extra: object = {}) =>
+      JSON.parse(
+        adapter.requirements({ ...selection, ...extra }).environment.variables!
+          .OPENCODE_CONFIG_CONTENT!,
+      ).provider.forge.models[OPEN_CODE_MODEL];
+    assert.deepEqual(
+      modelEntry({ upstream_providers: ['anthropic', 'google-vertex'] })
+        .options,
+      {
+        provider: {
+          order: ['anthropic', 'google-vertex'],
+          allow_fallbacks: false,
+        },
+      },
+    );
+    // Unpinned: exactly the profile plus tool_call, as before.
+    assert.deepEqual(modelEntry(), {
+      ...selection.model_profile,
+      tool_call: true,
+    });
   });
 
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {

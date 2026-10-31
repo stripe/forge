@@ -288,8 +288,9 @@ an experiment run controller is responsible for retrying that selection.
 A `RunSelection` chooses exactly one case, treatment, complete agent selection,
 and zero-based repetition. Codex selections include `hook_trust`; new plans
 materialize its `native` default, while saved plans may omit it. OpenCode selections
-include their explicit `model_profile` in selection identity, plans, results,
-checkpoints, and report grouping. The CLI requires
+include their explicit `model_profile`, and optional `endpoint` and
+`upstream_providers`, in selection identity, plans, results, checkpoints, and
+report grouping. The CLI requires
 filters to resolve to one entry for `plan`. `run` resolves and purely preflights
 every matching plan before executing them with bounded concurrency. The CLI loads the dataset from
 the experiment config and permits selectors such as `--case` to restrict execution.
@@ -1163,6 +1164,37 @@ the profile plus `tool_call: true` into its generated
 `provider.forge.models[selection.model]` entry and supplies the provider package,
 endpoint, and scoped credential. The main and small model use that same alias.
 
+An OpenCode selection may also name an `endpoint` (lowercase letters, digits, and
+underscores; rejected for Claude Code and Codex). The name is experiment config:
+it is part of selection identity, so arms that differ only by endpoint are
+distinct selections, and it is recorded in `plan.json` and in the selection copy
+in `result.json` and report coordinates. It is not a score or headline field.
+Routing is host-only: the CLI maps the name to an API root and key from
+`OPENCODE_ENDPOINT_<NAME>_BASE_URL` and `OPENCODE_ENDPOINT_<NAME>_API_KEY`
+(credential reference `opencode.endpoint.<name>.api-key`). Forge does not write
+URLs, hosts, or keys into the plan, results, or reports. Redaction covers
+resolved credential values, not URLs, so text the agent echoes (for example its
+base URL) can appear in normalized transcripts, and the restricted native
+artifact retains raw bytes. An unconfigured name fails pure preflight. Because the plan
+records only the name, the same name can resolve to different hosts on different
+machines; Forge does not capture that mapping.
+
+An OpenCode selection may also set `upstream_providers`, 1 to 16 unique
+provider slugs in preference order (rejected for Claude Code and Codex). It is
+experiment config like `endpoint`: part of selection identity, so arms that
+differ in providers or order are distinct selections and report groups, and it
+is recorded in `plan.json` and the selection copy in `result.json`. For a pinned
+selection the adapter writes `options.provider = {order, allow_fallbacks: false}`
+into the generated `provider.forge.models[alias]` entry; unpinned selections
+generate the same config as before. By reading OpenCode v1.19.0 and
+`@ai-sdk/openai-compatible` 2.0.41, config model `options` are merged into the
+call options (`provider/provider.ts`, `session/llm/request.ts`), passed through
+`ProviderTransform.providerOptions` under the provider ID `forge`
+(`session/llm.ts`, `provider/transform.ts`), and the SDK's `getArgs` spreads
+keys outside its own schema, such as `provider`, into the request body.
+End-to-end delivery has not been captured from a live or fake-upstream run, and
+Forge does not record which upstream provider actually served a call.
+
 A workspace `opencode.json` is ignored. Automatic project configuration,
 external skill, and AGENTS.md/CLAUDE.md discovery are disabled or unsupported.
 Before each turn, the launcher rejects implicit global config files, discovered
@@ -1176,7 +1208,7 @@ bundle's skills and MCP connection through generated native configuration.
 The adapter merges that fragment with its generated model config and restores
 the combined snapshot on every turn. See the [plugin contract](plugin-action.md)
 for source selection, authentication, supported bundle behavior, and installation
-receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`,
+receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `endpoints`, `credential`, `id`,
 `executable`, `expectedVersion`, and logical `layout`
 options; the CLI supplies its endpoint and credential binding as documented
 in the [README](../README.md#opencode-setup).

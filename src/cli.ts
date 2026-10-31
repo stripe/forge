@@ -6,8 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import {
+  openCodeEndpointCredentialEnvironment,
+  parseOpenCodeEndpoints,
+} from './agents/opencode/endpoints.ts';
 import { createOpenCodeAdapter } from './agents/opencode/index.ts';
-import { parseOpenCodeModelRoutes } from './agents/opencode/routes.ts';
 import { resolveCliRuntime } from './cliRuntime.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
@@ -236,10 +239,10 @@ export async function createDefaultCliComposition(
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
   const opencodeBaseUrl = environment.OPENCODE_BASE_URL;
-  const opencodeRouting = parseOpenCodeModelRoutes(environment);
+  const opencodeEndpoints = parseOpenCodeEndpoints(environment);
   const opencode = createOpenCodeAdapter({
     ...(opencodeBaseUrl === undefined ? {} : { baseUrl: opencodeBaseUrl }),
-    modelRoutes: opencodeRouting.routes,
+    endpoints: opencodeEndpoints,
   });
   const bindings = new Map<string, string>([
     [credential, credentialEnvironmentName],
@@ -256,7 +259,11 @@ export async function createDefaultCliComposition(
         : (options.credentialBindings?.['openai.completion-api-key'] ??
           'OPENAI_API_KEY'),
     ],
-    ...Object.entries(opencodeRouting.credentialBindings),
+    // Each named endpoint's key comes from its own host variable.
+    ...Object.values(opencodeEndpoints).flatMap(({ credential }) => {
+      const variable = openCodeEndpointCredentialEnvironment(credential);
+      return variable === undefined ? [] : [[credential, variable] as const];
+    }),
     ...Object.entries(options.credentialBindings ?? {}),
   ]);
   const credentialResolver = createEnvironmentCredentialResolver({

@@ -1079,6 +1079,27 @@ describe('experiment run scorecards', () => {
     );
   });
 
+  it('keeps arms that differ only by endpoint name in separate score groups', () => {
+    const runs = [row(0), row(1)];
+    runs[0]!.selection.agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+      endpoint: 'openrouter',
+    };
+    runs[1]!.selection.agent = {
+      ...runs[0]!.selection.agent,
+      endpoint: 'gateway',
+    };
+    const report = build(runs);
+    assert.deepEqual(
+      report.cases.map(({ agent }) => agent.endpoint),
+      ['openrouter', 'gateway'],
+    );
+    assert.deepEqual(parseExperimentRunReport(report), report);
+  });
+
   it('retains model profiles in checkpoints and report rows and separates their score groups', () => {
     const runs = [row(0), row(1)];
     runs[0]!.selection.agent = {

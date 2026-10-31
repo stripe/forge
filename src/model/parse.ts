@@ -315,6 +315,22 @@ const ModelRefSchema = z
   })
   .strict();
 
+const EndpointNameSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,62}$/, 'must be a lowercase endpoint name');
+
+const UpstreamProvidersSchema = z
+  .array(
+    z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'must be a provider slug'),
+  )
+  .min(1)
+  .max(16)
+  .refine((slugs) => new Set(slugs).size === slugs.length, {
+    message: 'provider slugs must be unique',
+  });
+
 // The unrefined object defines profile identity: refinements wrap objects in
 // ZodEffects under Zod 3, which would hide their fields from the key walk.
 export const ModelProfileShapeSchema = z
@@ -338,9 +354,20 @@ const AgentSelectionSchema = ModelRefSchema.extend({
   hook_trust: z.enum(['native', 'automation']).optional(),
   disable_experimental_betas: z.literal(true).optional(),
   model_profile: ModelProfileSchema.optional(),
+  endpoint: EndpointNameSchema.optional(),
+  upstream_providers: UpstreamProvidersSchema.optional(),
 })
   .strict()
   .superRefine((agent, context) => {
+    for (const field of ['endpoint', 'upstream_providers'] as const) {
+      if (agent.adapter !== 'opencode' && agent[field] !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: `${field} is not supported by ${agent.adapter}`,
+        });
+      }
+    }
     if (
       agent.disable_experimental_betas !== undefined &&
       agent.adapter !== 'claude-code'

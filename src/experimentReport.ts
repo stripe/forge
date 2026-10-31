@@ -370,6 +370,11 @@ const coordinates = z
         hook_trust: z.enum(['native', 'automation']).optional(),
         disable_experimental_betas: z.literal(true).optional(),
         model_profile: ModelProfileSchema.optional(),
+        endpoint: z.string().min(1).max(4096).optional(),
+        upstream_providers: z
+          .array(z.string().min(1).max(4096))
+          .max(16)
+          .optional(),
       })
       .strict(),
   })

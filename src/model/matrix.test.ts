@@ -82,6 +82,28 @@ describe('agent selection identity', () => {
         }
       }
     }
+    // Routing fields enter identity only when authored.
+    const opencode = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'm',
+    };
+    assert.equal(
+      agentSelectionKey(opencode),
+      '["opencode","openai-compatible","m",null,null]',
+    );
+    assert.equal(
+      agentSelectionKey({ ...opencode, endpoint: 'openrouter' }),
+      '["opencode","openai-compatible","m",null,null,"openrouter"]',
+    );
+    assert.equal(
+      agentSelectionKey({ ...opencode, upstream_providers: ['a', 'b'] }),
+      '["opencode","openai-compatible","m",null,null,null,["a","b"]]',
+    );
+    assert.notEqual(
+      agentSelectionKey({ ...opencode, upstream_providers: ['a', 'b'] }),
+      agentSelectionKey({ ...opencode, upstream_providers: ['b', 'a'] }),
+    );
     assert.equal(
       agentSelectionKey({ adapter: 'codex', provider: 'openai', model: 'gpt' }),
       '["codex","openai","gpt","native",null]',

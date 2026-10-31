@@ -201,6 +201,125 @@ describe('public benchmark parsing', () => {
       /unique/,
     );
   });
+  it('treats the OpenCode endpoint name as agent identity and rejects it elsewhere', () => {
+    const config = parseExperimentConfig(
+      parseExperimentConfigYaml(experimentConfigYaml()),
+    );
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    const parse = (...agents: unknown[]) =>
+      parseExperimentConfig({
+        ...config,
+        matrix: { ...config.matrix, agents },
+      });
+    // Arms that differ only by endpoint are distinct selections.
+    const groups = getMatrixGroups(
+      parse(
+        agent,
+        { ...agent, endpoint: 'openrouter' },
+        { ...agent, endpoint: 'gateway' },
+      ).matrix,
+    )[0]!;
+    assert.deepEqual(
+      groups.agents.map(({ endpoint }) => endpoint),
+      [undefined, 'openrouter', 'gateway'],
+    );
+    assert.throws(
+      () =>
+        parse(
+          { ...agent, endpoint: 'openrouter' },
+          {
+            ...agent,
+            endpoint: 'openrouter',
+          },
+        ),
+      /unique/,
+    );
+    for (const endpoint of ['', 'Open', 'a-b', 'https://x.example', '1a'])
+      assert.throws(() => parse({ ...agent, endpoint }), BenchmarkModelError);
+    for (const adapter of ['claude-code', 'codex'])
+      assert.throws(
+        () =>
+          parse({
+            adapter,
+            provider: 'anthropic',
+            model: 'm',
+            endpoint: 'openrouter',
+          }),
+        /endpoint is not supported/,
+      );
+  });
+
+  it('validates OpenCode upstream providers, treats them as identity, and rejects them elsewhere', () => {
+    const config = parseExperimentConfig(
+      parseExperimentConfigYaml(experimentConfigYaml()),
+    );
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    const parse = (...agents: unknown[]) =>
+      parseExperimentConfig({
+        ...config,
+        matrix: { ...config.matrix, agents },
+      });
+    const pinned = { ...agent, upstream_providers: ['google-vertex'] };
+    assert.deepEqual(
+      getMatrixGroups(parse(pinned).matrix)[0]!.agents[0],
+      pinned,
+    );
+    // Provider choice and order separate arms; an exact repeat is a duplicate.
+    assert.equal(
+      getMatrixGroups(
+        parse(
+          agent,
+          pinned,
+          { ...agent, upstream_providers: ['anthropic'] },
+          { ...agent, upstream_providers: ['a', 'b'] },
+          { ...agent, upstream_providers: ['b', 'a'] },
+        ).matrix,
+      )[0]!.agents.length,
+      5,
+    );
+    assert.throws(() => parse(pinned, { ...pinned }), /unique/);
+    const sixteen = Array.from({ length: 16 }, (_, i) => `p${i}`);
+    assert.doesNotThrow(() => parse({ ...agent, upstream_providers: sixteen }));
+    for (const upstream_providers of [
+      [],
+      [...sixteen, 'p16'],
+      ['a', 'a'],
+      [''],
+      ['-a'],
+      ['bad slug'],
+      ['a'.repeat(129)],
+      [1],
+      'google-vertex',
+      { order: ['a'] },
+    ])
+      assert.throws(
+        () => parse({ ...agent, upstream_providers }),
+        BenchmarkModelError,
+        JSON.stringify(upstream_providers),
+      );
+    for (const adapter of ['claude-code', 'codex'])
+      assert.throws(
+        () =>
+          parse({
+            adapter,
+            provider: 'anthropic',
+            model: 'm',
+            upstream_providers: ['google-vertex'],
+          }),
+        /upstream_providers is not supported/,
+      );
+  });
+
   it('strictly validates model profiles and rejects them for Claude Code and Codex', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     const agent = {

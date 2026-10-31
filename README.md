@@ -426,22 +426,50 @@ contents, but does not pin future installs. See the
 [plugin contract](docs/plugin-action.md) for installation provenance and source
 selection.
 
-To send some OpenCode models to a different endpoint than the rest, set a
-host-side routing table. `OPENCODE_MODEL_ROUTES` maps exact experiment model
-names to endpoint names; each endpoint reads its API root from
-`OPENCODE_ENDPOINT_<NAME>_BASE_URL` and its key from
-`OPENCODE_ENDPOINT_<NAME>_API_KEY` (credential reference
-`opencode.endpoint.<name>.api-key`). Unlisted models keep `OPENCODE_BASE_URL`
-and `OPENCODE_API_KEY`:
+To compare inference providers for a model, name an `endpoint` on the agent
+selection. The name is experiment config: arms that differ only by endpoint are
+different selections, and the name is recorded in `plan.json` and the selection
+copy in `result.json`. Routing stays on the host, which maps each name to an API
+root and key. Forge does not write the URL or key into the plan, results, or
+reports:
+
+```yaml
+matrix:
+  agents:
+    - { adapter: opencode, provider: openai-compatible, model: gateway-code,
+        endpoint: openrouter, model_profile: { ... } }
+```
 
 ```sh
-export OPENCODE_MODEL_ROUTES='qwen/qwen4-coder=openrouter,kimi-k3=openrouter'
 export OPENCODE_ENDPOINT_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 export OPENCODE_ENDPOINT_OPENROUTER_API_KEY=your-openrouter-key
 ```
 
-Routing is host configuration: experiment files and saved plans do not record
-which endpoint served a model, so keep the same routing when resuming.
+OpenRouter chooses the upstream provider for each request unless the request
+pins one. To pin it, add one optional line, `upstream_providers`, a list of
+provider slugs in preference order (1 to 16 unique slugs):
+
+```yaml
+- { adapter: opencode, provider: openai-compatible, model: openrouter-gemini-4-argon,
+    endpoint: openrouter, upstream_providers: [google-vertex], model_profile: { ... } }
+```
+
+Requests then carry `provider: {order: [...], allow_fallbacks: false}`. Without
+the field the request is unchanged. Claude Code and Codex reject it. Like
+`endpoint`, it is experiment config: it is part of selection identity, so arms
+that differ in providers or their order are separate selections and separate
+report groups, and it is recorded in `plan.json` and the selection copy in
+`result.json`. URLs and keys stay host-only.
+
+Names use lowercase letters, digits, and underscores; the credential reference
+is `opencode.endpoint.<name>.api-key`. Selections without `endpoint` keep
+`OPENCODE_BASE_URL` and `OPENCODE_API_KEY`. An endpoint name with no
+`OPENCODE_ENDPOINT_<NAME>_BASE_URL` fails before any credential lookup. The
+name does not capture where the host sends it, so use the same host mapping when
+resuming. Two exceptions remain: if the agent echoes the URL in its own output,
+that text is kept in the normalized transcript (`trajectory.json`,
+`interaction.json`), and the restricted native artifact keeps raw agent output
+unredacted.
 
 The CLI credential reference is `opencode.api-key`; use
 `--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment
