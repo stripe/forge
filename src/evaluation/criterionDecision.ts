@@ -4,6 +4,7 @@ import {
   choiceDistributionIsValid,
   DECISION_PROBABILITY_TOLERANCE,
   MAX_ASSESSMENT_ARGUMENT_CHARACTERS,
+  MAX_VERBALIZED_SAMPLING_CANDIDATES,
 } from './decision.ts';
 
 export const CRITERION_DECISION_OPTIONS = [
@@ -27,13 +28,17 @@ export interface CriterionDecisionThresholdsV1 {
 }
 export type CriterionDecisionV1 = Omit<
   ChoiceAnswer<CriterionDecisionOption>,
-  'explanation' | 'assessments'
+  'explanation' | 'assessments' | 'candidates'
 > & {
   readonly thresholded_outcome: CriterionDecisionOption;
   readonly thresholds: CriterionDecisionThresholdsV1;
   /** Present only for verbalized judges; see `ChoiceAnswer.assessments`. */
   readonly assessments?:
     | ChoiceAnswer<CriterionDecisionOption>['assessments']
+    | undefined;
+  /** Present only for verbalized-sampling judges; see `ChoiceAnswer.candidates`. */
+  readonly candidates?:
+    | ChoiceAnswer<CriterionDecisionOption>['candidates']
     | undefined;
 };
 
@@ -104,12 +109,30 @@ export const criterionDecisionSchema = z
       )
       .strict()
       .optional(),
+    candidates: z
+      .array(
+        z
+          .object({
+            reading: z.string().min(1).max(MAX_ASSESSMENT_ARGUMENT_CHARACTERS),
+            rationale: z
+              .string()
+              .min(1)
+              .max(MAX_ASSESSMENT_ARGUMENT_CHARACTERS),
+            label: z.enum(CRITERION_DECISION_OPTIONS),
+            probability: z.number().finite().min(0).max(1),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(MAX_VERBALIZED_SAMPLING_CANDIDATES)
+      .optional(),
   })
   .strict()
   .superRefine((decision, context) => {
     if (
       !choiceDistributionIsValid(decision) ||
       !assessmentsMatchDistribution(decision) ||
+      !candidatesMatchDistribution(decision) ||
       decision.thresholded_outcome !==
         criterionDecisionOutcome(decision, decision.thresholds)
     ) {
@@ -142,6 +165,36 @@ function assessmentsMatchDistribution(decision: {
       (option) =>
         Math.abs(
           assessments[option].probability / sum -
+            decision.probabilities[option],
+        ) <= DECISION_PROBABILITY_TOLERANCE,
+    )
+  );
+}
+
+/** Saved candidates must sum, per option and normalized, to the saved distribution. */
+function candidatesMatchDistribution(decision: {
+  readonly probabilities: Readonly<Record<CriterionDecisionOption, number>>;
+  readonly assessments?: unknown;
+  readonly candidates?:
+    | readonly {
+        readonly label: CriterionDecisionOption;
+        readonly probability: number;
+      }[]
+    | undefined;
+}): boolean {
+  if (decision.candidates === undefined) return true;
+  if (decision.assessments !== undefined) return false;
+  const candidates = decision.candidates;
+  const sum = candidates.reduce((total, c) => total + c.probability, 0);
+  return (
+    sum > 0 &&
+    CRITERION_DECISION_OPTIONS.every(
+      (option) =>
+        Math.abs(
+          candidates
+            .filter((c) => c.label === option)
+            .reduce((total, c) => total + c.probability, 0) /
+            sum -
             decision.probabilities[option],
         ) <= DECISION_PROBABILITY_TOLERANCE,
     )

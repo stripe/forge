@@ -418,7 +418,7 @@ function resultFromAnswer(
   criterion: JudgingCriterionV1,
   answer: ChoiceAnswer,
 ): CriterionResultV1 {
-  const { explanation, ...fields } = answer;
+  const { explanation, candidates, ...fields } = answer;
   const choice = fields.choice as CriterionDecisionOption;
   const probabilities = {
     ...fields.probabilities,
@@ -427,12 +427,23 @@ function resultFromAnswer(
     { choice, probabilities },
     CRITERION_DECISION_THRESHOLDS,
   );
+  // Decision models (SystemOne) and direct judges return no explanation;
+  // verbalized sampling is summarized by its most probable candidate.
+  const leading = candidates?.reduce((best, candidate) =>
+    candidate.probability > best.probability ? candidate : best,
+  );
   return criterionResult(criterion, {
     passed: choice === 'met',
-    // Decision models (SystemOne) return no explanation.
-    explanation: explanation ?? '',
+    explanation: explanation ?? leading?.rationale ?? '',
     decision: {
       ...fields,
+      ...(candidates === undefined
+        ? {}
+        : {
+            candidates: candidates as NonNullable<
+              CriterionDecisionV1['candidates']
+            >,
+          }),
       choice,
       probabilities,
       thresholded_outcome: outcome,

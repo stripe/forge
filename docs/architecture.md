@@ -1850,15 +1850,27 @@ is rejected with `probability_range`. Saved decisions use the same choice
 tolerance; their distributions must sum to 1 within 0.000001, and their
 confidence must lie in [0, 1].
 
-A completion-backed decision model can run in `verbalized` mode (regrade's
-`--judge-mode verbalized`). Its strict schema lists `assessments` before
-`choice`: one `{for, against, probability}` entry per option, so the model
-argues each option before committing. Per-option probabilities are stated
-independently and need not sum to 1; the answer's `probabilities` is their
-normalization, and the choice must be its maximum. Saved decisions keep the
-assessments, and parsing rejects saved assessments that do not normalize to
-the saved distribution. Decision models such as Jev omit them. Run-time
-judging stays `standard`. Invalid answers use the
+A completion-backed decision model takes a judge method (regrade's
+`--judge-mode`; `explained` by default):
+
+- `direct`: the strict schema has `choice` and `probabilities` only.
+- `explained`: adds one `explanation`.
+- `option-critique`: lists `assessments` before `choice`, one
+  `{for, against, probability}` entry per option, so the model argues each
+  option before committing. The answer's `probabilities` is their
+  normalization, and the choice must be its maximum.
+- `verbalized-sampling`: lists exactly k `candidates` (2–10, default 5), each
+  `{reading, rationale, label, probability}`, and no choice. Each option's
+  probability is the normalized sum over candidates with that label. The choice
+  is derived as the maximum; an exact tie goes to the label of the single most
+  probable candidate, and a tie there too is rejected (`choice_not_argmax`)
+  rather than broken by option order.
+
+Saved decisions keep assessments or candidates (never both), and parsing
+rejects saved ones that do not normalize to the saved distribution. Decision
+models such as Jev omit both. Verbalized sampling also composes with decision
+models in two stages: an LLM proposes candidate judgments, and a decision model
+weighs them through a Choice question whose criteria are the candidates. Invalid answers use the
 malformed-output retry budget and record a fixed rejection `reason`, without
 caller IDs, field paths, or received values.
 

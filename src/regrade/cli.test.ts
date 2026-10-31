@@ -123,9 +123,24 @@ describe('forge regrade', () => {
       '/tmp/x',
     ]);
     assert.equal(mode.code, 2);
+    const candidates = await invoke([
+      'regrade',
+      '--experiment-run',
+      '/nonexistent',
+      '--judge-provider',
+      'anthropic',
+      '--judge-model',
+      'claude-opus-4-6',
+      '--judge-candidates',
+      '5',
+      '--output',
+      '/tmp/x',
+    ]);
+    assert.equal(candidates.code, 2);
+    assert.match(candidates.stderr, /apply only to verbalized-sampling/);
     assert.match(
       mode.stderr,
-      /--judge-mode must be one of: standard, verbalized/,
+      /--judge-mode must be one of: direct, explained, option-critique, verbalized-sampling/,
     );
     const extra = await invoke([
       'regrade',

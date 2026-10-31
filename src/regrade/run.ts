@@ -7,7 +7,11 @@ import type { CredentialResolver } from '../contracts/credentials.ts';
 import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
 import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
 import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
-import type { DecisionJudgeMode } from '../evaluation/decision.ts';
+import {
+  DEFAULT_DECISION_JUDGE_MODE,
+  type DecisionJudgeMethod,
+  type DecisionJudgeMode,
+} from '../evaluation/decision.ts';
 import {
   type CriterionJudgeExecutionOptions,
   type CriterionJudgeInput,
@@ -43,8 +47,10 @@ export interface RegradeResultV1 {
   readonly run_id: string;
   /** The judge used for this regrade. */
   readonly judge: ModelRefV1;
-  /** How the judge answered; absent in older regrades, which were `standard`. */
+  /** How the judge answered; absent in older regrades, which were `explained`. */
   readonly judge_mode?: DecisionJudgeMode;
+  /** Candidate count, recorded only for `verbalized-sampling`. */
+  readonly judge_candidates?: number;
   /** Digests of the exact saved inputs, so a regrade is tied to one committed run. */
   readonly source: {
     readonly result_sha256: string;
@@ -123,8 +129,8 @@ export async function regradeCompletedRun(
   input: {
     readonly location: string;
     readonly judge: ModelRefV1;
-    /** Default `standard`; `verbalized` records per-option assessments. */
-    readonly judgeMode?: DecisionJudgeMode;
+    /** Default `explained`; see `DecisionJudgeMode`. */
+    readonly judgeMethod?: DecisionJudgeMethod;
     readonly signal?: AbortSignal;
     readonly now?: () => Date;
     /** Test seam for the judge's fixed retry waits, as in execution. */
@@ -187,7 +193,7 @@ export async function regradeVerifiedRun(
     { ...judgeInput, signal },
     createCompletionDecisionModel({
       model: input.judge,
-      mode: input.judgeMode ?? 'standard',
+      ...(input.judgeMethod === undefined ? {} : { method: input.judgeMethod }),
       invoke: (request) => completions.invoke('judge', request, request.signal),
     }),
     {
@@ -209,7 +215,7 @@ export async function regradeVerifiedRun(
     format: REGRADE_RESULT_FORMAT,
     run_id: result.run_id,
     judge: Object.freeze({ ...input.judge }),
-    judge_mode: input.judgeMode ?? 'standard',
+    ...judgeMethodRecord(input.judgeMethod),
     source: Object.freeze({
       result_sha256: sha256Digest(
         await fs.readFile(path.join(completed.location, 'result.json')),
@@ -244,4 +250,17 @@ async function readClaimed(
   if (sha256Digest(body) !== descriptor.sha256)
     throw new Error(`${artifactPath} changed after verification.`);
   return body.toString('utf8');
+}
+
+/** The saved form of a judge method: its mode, and a candidate count if sampled. */
+export function judgeMethodRecord(method?: DecisionJudgeMethod): {
+  judge_mode: DecisionJudgeMode;
+  judge_candidates?: number;
+} {
+  return {
+    judge_mode: method?.mode ?? DEFAULT_DECISION_JUDGE_MODE,
+    ...(method?.candidates === undefined
+      ? {}
+      : { judge_candidates: method.candidates }),
+  };
 }

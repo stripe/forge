@@ -5,7 +5,11 @@ import { z } from 'zod';
 import { defaultForgeEngine } from '../engine.ts';
 import {
   DECISION_JUDGE_MODES,
+  type DecisionJudgeMethod,
   type DecisionJudgeMode,
+  LEGACY_DECISION_JUDGE_MODES,
+  MAX_VERBALIZED_SAMPLING_CANDIDATES,
+  MIN_VERBALIZED_SAMPLING_CANDIDATES,
 } from '../evaluation/decision.ts';
 import { inspectExperimentRun } from '../experiment.ts';
 import { experimentRunIdSchema } from '../experimentModel.ts';
@@ -23,6 +27,7 @@ import type { RunResultV1 } from '../results/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
 import { RegradeReadError, readRegradeArtifact } from './read.ts';
 import {
+  judgeMethodRecord,
   REGRADE_RESULT_FORMAT,
   type RegradeDependencies,
   type RegradeResultV1,
@@ -53,6 +58,7 @@ export interface RegradeExperimentSummaryV1 {
   readonly output_location: string;
   readonly judge: ModelRefV1;
   readonly judge_mode: DecisionJudgeMode;
+  readonly judge_candidates?: number;
   readonly regraded: number;
   /** Regrades already present for the same judge and committed result. */
   readonly reused: number;
@@ -93,7 +99,7 @@ export async function regradeExperimentRun(
   input: {
     readonly experimentRun: string;
     readonly judge: ModelRefV1;
-    readonly judgeMode?: DecisionJudgeMode;
+    readonly judgeMethod?: DecisionJudgeMethod;
     readonly output: string;
     readonly jobs?: number;
     readonly signal?: AbortSignal;
@@ -174,8 +180,7 @@ export async function regradeExperimentRun(
           existing.run_id !== runId ||
           existing.judge.provider !== input.judge.provider ||
           existing.judge.model !== input.judge.model ||
-          (existing.judge_mode ?? 'standard') !==
-            (input.judgeMode ?? 'standard') ||
+          !sameJudgeMethod(existing, input.judgeMethod) ||
           existing.source.result_sha256 !== resultSha256
         )
           throw new Error(
@@ -188,9 +193,9 @@ export async function regradeExperimentRun(
         {
           location,
           judge: input.judge,
-          ...(input.judgeMode === undefined
+          ...(input.judgeMethod === undefined
             ? {}
-            : { judgeMode: input.judgeMode }),
+            : { judgeMethod: input.judgeMethod }),
           signal,
           now,
           ...(input.waitBeforeJudgeRetry === undefined
@@ -315,7 +320,7 @@ export async function regradeExperimentRun(
     source_location: source,
     output_location: output,
     judge: Object.freeze({ ...input.judge }),
-    judge_mode: input.judgeMode ?? 'standard',
+    ...judgeMethodRecord(input.judgeMethod),
     regraded: count('regraded'),
     reused: count('reused'),
     not_judged: count('not_judged'),
@@ -387,7 +392,19 @@ export function parseSavedRegrade(body: Buffer): RegradeResultV1 {
     throw new RegradeReadError('invalid_judge');
   if (
     'judge_mode' in value &&
-    !(DECISION_JUDGE_MODES as readonly unknown[]).includes(value.judge_mode)
+    !(DECISION_JUDGE_MODES as readonly unknown[]).includes(value.judge_mode) &&
+    !(
+      typeof value.judge_mode === 'string' &&
+      Object.hasOwn(LEGACY_DECISION_JUDGE_MODES, value.judge_mode)
+    )
+  )
+    throw new RegradeReadError('invalid_judge');
+  if (
+    'judge_candidates' in value &&
+    (typeof value.judge_candidates !== 'number' ||
+      !Number.isSafeInteger(value.judge_candidates) ||
+      value.judge_candidates < MIN_VERBALIZED_SAMPLING_CANDIDATES ||
+      value.judge_candidates > MAX_VERBALIZED_SAMPLING_CANDIDATES)
   )
     throw new RegradeReadError('invalid_judge');
   if (
@@ -413,4 +430,24 @@ async function writeAtomic(file: string, body: string): Promise<void> {
   } finally {
     await fs.rm(temporary, { force: true });
   }
+}
+
+/** A saved regrade's method, mapping older mode names, equals the requested one. */
+function sameJudgeMethod(
+  saved: Pick<RegradeResultV1, 'judge_mode' | 'judge_candidates'>,
+  requested?: DecisionJudgeMethod,
+): boolean {
+  const savedRecord = {
+    judge_mode:
+      (saved.judge_mode !== undefined &&
+        LEGACY_DECISION_JUDGE_MODES[saved.judge_mode]) ||
+      saved.judge_mode ||
+      judgeMethodRecord().judge_mode,
+    judge_candidates: saved.judge_candidates,
+  };
+  const requestedRecord = judgeMethodRecord(requested);
+  return (
+    savedRecord.judge_mode === requestedRecord.judge_mode &&
+    savedRecord.judge_candidates === requestedRecord.judge_candidates
+  );
 }

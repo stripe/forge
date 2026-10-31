@@ -1000,15 +1000,25 @@ reuses regrades for the same judge and committed result, so an interrupted
 regrade can be continued. An output that already holds regrades from another
 judge reports those runs as failed instead of mixing judges.
 
-`--judge-mode verbalized` asks the judge to argue every option before
-deciding: for each of `met`, `not_met`, and `insufficient_evidence` it gives the
-strongest evidence for and against, then a probability. The saved decision
-keeps these `assessments`, and its `probabilities` are their normalized
-distribution; the choice and score rules are unchanged. The default is
-`standard`. Each regrade and `regrade.json` record `judge_mode`, and a mode
-counts as part of the judge, so modes are not mixed in one output. The
-verbalized wrapper is 108 bytes longer than the standard one; a saved run
-whose evidence sits within that margin of the prompt limit fails fast.
+`--judge-mode` selects how the judge answers each criterion:
+
+| Mode | The judge writes |
+| --- | --- |
+| `direct` | One distribution over `met`, `not_met`, and `insufficient_evidence`; no explanation (the SystemOne decision-model shape). |
+| `explained` (default) | One distribution and one explanation. |
+| `option-critique` | For each option, the strongest evidence for and against it and a probability; the distribution is their normalization. |
+| `verbalized-sampling` | `--judge-candidates` (2–10, default 5) complete candidate judgments, each with a reading of the criterion and evidence, a rationale, a label, and a probability. Each label's probability is the sum over its candidates, and the choice is the most probable label. |
+
+The pass rule is unchanged: a criterion passes when the choice is `met`.
+Saved decisions keep option-critique `assessments` or verbalized-sampling
+`candidates`; a verbalized-sampling result's explanation is its most probable
+candidate's rationale. Each regrade and `regrade.json` record `judge_mode` (and
+`judge_candidates` for verbalized sampling). The method counts as part of the
+judge, so methods are not mixed in one output; regrades recorded as `standard`
+or `verbalized` before the rename read as `explained` and `option-critique`.
+The longer instructions of the argued modes add about 100 bytes to the prompt;
+a saved run whose evidence sits within that margin of the prompt limit fails
+fast.
 
 Deterministic file checks are not re-run, because the workspace is gone after
 a run; each regrade keeps the run's original check results. The judge sees

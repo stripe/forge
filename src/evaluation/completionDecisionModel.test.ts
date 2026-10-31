@@ -4,6 +4,7 @@ import {
   createCompletionDecisionModel,
   type DecisionCompletionRequest,
 } from './completionDecisionModel.ts';
+import { decisionJudgeMethod } from './decision.ts';
 
 describe('completion decision adapter', () => {
   it.each([
@@ -33,7 +34,7 @@ describe('completion decision adapter', () => {
       assert.equal(calls, 0);
     },
   );
-  it('asks verbalized judges to argue every option before choosing and normalizes their probabilities', async () => {
+  it('asks option-critique judges to argue every option before choosing and normalizes their probabilities', async () => {
     const calls: DecisionCompletionRequest[] = [];
     const assess = (forText: string, probability: number) => ({
       for: forText,
@@ -62,7 +63,7 @@ describe('completion decision adapter', () => {
     };
     const decide = (body: string) =>
       createCompletionDecisionModel({
-        mode: 'verbalized',
+        method: { mode: 'option-critique' },
         invoke: async (request) => {
           calls.push(request);
           return body;
@@ -125,7 +126,7 @@ describe('completion decision adapter', () => {
       ),
       /assessments/,
     );
-    // The standard mode keeps its prompt, budget, and schema.
+    // The explained mode keeps its prompt, budget, and schema.
     calls.length = 0;
     await createCompletionDecisionModel({
       invoke: async (request) => {
@@ -148,6 +149,144 @@ describe('completion decision adapter', () => {
     });
     assert.equal(calls[0]!.maxTokens, 1024);
     assert.doesNotMatch(calls[0]!.systemPrompt, /Assess every option/);
+  });
+
+  it('runs verbalized sampling: k candidates, per-option sums, and a derived choice', async () => {
+    const calls: DecisionCompletionRequest[] = [];
+    const question = {
+      type: 'choice' as const,
+      instructions: 'Is it done?',
+      criteria: { yes: 'Done.', no: 'Not done.' },
+    };
+    const candidate = (label: string, probability: number) => ({
+      reading: `A ${label} reading.`,
+      rationale: `Why ${label}.`,
+      label,
+      probability,
+    });
+    const decide = (candidates: unknown[]) =>
+      createCompletionDecisionModel({
+        method: { mode: 'verbalized-sampling', candidates: 3 },
+        invoke: async (request) => {
+          calls.push(request);
+          return JSON.stringify({
+            answers: { check: { type: 'choice', candidates } },
+          });
+        },
+      }).decide({
+        state: 'State.',
+        questions: { check: question },
+        signal: new AbortController().signal,
+      });
+    const answer = (
+      await decide([
+        candidate('yes', 0.4),
+        candidate('no', 0.35),
+        candidate('yes', 0.25),
+      ])
+    ).answers.check!;
+    assert.equal(answer.choice, 'yes');
+    assert.ok(Math.abs(answer.probabilities.yes! - 0.65) < 1e-9);
+    assert.ok(Math.abs(answer.probabilities.no! - 0.35) < 1e-9);
+    assert.equal(answer.candidates?.length, 3);
+    assert.equal(answer.explanation, undefined);
+    const request = calls[0]!;
+    assert.match(request.systemPrompt, /Generate 3 candidate answers/);
+    assert.equal(request.maxTokens, 4096);
+    const answerSchema = (
+      request.responseSchema.schema as {
+        properties: {
+          answers: {
+            properties: Record<
+              string,
+              {
+                properties: Record<
+                  string,
+                  { minItems?: number; maxItems?: number }
+                >;
+                required: string[];
+              }
+            >;
+          };
+        };
+      }
+    ).properties.answers.properties.check!;
+    assert.deepEqual(answerSchema.required, ['type', 'candidates']);
+    assert.equal(answerSchema.properties.candidates!.minItems, 3);
+    assert.equal(answerSchema.properties.candidates!.maxItems, 3);
+    // Aggregate tie: the single most probable candidate decides.
+    assert.equal(
+      (
+        await decide([
+          candidate('no', 0.5),
+          candidate('yes', 0.3),
+          candidate('yes', 0.2),
+        ])
+      ).answers.check!.choice,
+      'no',
+    );
+    // A tie at both levels is rejected rather than broken by option order.
+    await assert.rejects(
+      decide([candidate('yes', 0.5), candidate('no', 0.5), candidate('no', 0)]),
+      /choice_not_argmax/,
+    );
+    await assert.rejects(decide([candidate('maybe', 1)]), /unknown_choice/);
+    await assert.rejects(
+      decide([{ ...candidate('yes', 1), rationale: ' ' }]),
+      /candidates/,
+    );
+  });
+
+  it('runs direct mode without an explanation and validates judge methods', async () => {
+    const calls: DecisionCompletionRequest[] = [];
+    const result = await createCompletionDecisionModel({
+      method: { mode: 'direct' },
+      invoke: async (request) => {
+        calls.push(request);
+        return JSON.stringify({
+          answers: {
+            check: {
+              type: 'choice',
+              choice: 'yes',
+              probabilities: { yes: 0.7, no: 0.3 },
+            },
+          },
+        });
+      },
+    }).decide({
+      state: 'State.',
+      questions: {
+        check: {
+          type: 'choice',
+          instructions: 'Done?',
+          criteria: { yes: 'Yes.', no: 'No.' },
+        },
+      },
+      signal: new AbortController().signal,
+    });
+    assert.equal(result.answers.check!.explanation, undefined);
+    assert.equal(calls[0]!.maxTokens, 512);
+    const required = (
+      calls[0]!.responseSchema.schema as {
+        properties: {
+          answers: { properties: Record<string, { required: string[] }> };
+        };
+      }
+    ).properties.answers.properties.check!.required;
+    assert.deepEqual(required, ['type', 'choice', 'probabilities']);
+    assert.deepEqual(decisionJudgeMethod(), { mode: 'explained' });
+    assert.deepEqual(decisionJudgeMethod('verbalized-sampling'), {
+      mode: 'verbalized-sampling',
+      candidates: 5,
+    });
+    for (const [mode, candidates] of [
+      ['sampled', undefined],
+      ['explained', 3],
+      ['verbalized-sampling', 1],
+      ['verbalized-sampling', 11],
+      ['verbalized-sampling', 2.5],
+    ] as const)
+      assert.throws(() => decisionJudgeMethod(mode, candidates));
   });
 
   it('preserves caller IDs and options that match object prototype names', async () => {

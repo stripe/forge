@@ -21,6 +21,17 @@ export interface ChoiceAssessment {
 }
 
 /**
+ * One verbalized-sampling candidate: a complete answer (how it reads the
+ * question and state, why, and the option it selects) with its probability.
+ */
+export interface ChoiceCandidate<Option extends string = string> {
+  readonly reading: string;
+  readonly rationale: string;
+  readonly label: Option;
+  readonly probability: number;
+}
+
+/**
  * One Choice answer in the SystemOne shape (`type`, `choice`, `probabilities`,
  * `confidence`), so decision-model and LLM-backed implementations are
  * interchangeable. Decision models return no explanation.
@@ -42,6 +53,11 @@ export interface ChoiceAnswer<Option extends string = string> {
    * Decision models omit them.
    */
   readonly assessments?: Readonly<Record<Option, ChoiceAssessment>>;
+  /**
+   * Verbalized-sampling candidates. `probabilities` sums them per option and
+   * the choice is its maximum. Decision models omit them.
+   */
+  readonly candidates?: readonly ChoiceCandidate<Option>[];
 }
 
 export type DecisionAnswer = ChoiceAnswer;

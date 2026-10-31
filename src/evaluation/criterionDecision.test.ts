@@ -338,7 +338,7 @@ describe('criterion decisions', () => {
     assert.equal(blank!.error?.reason, 'explanation');
   });
 
-  it('persists verbalized assessments and rejects saved ones that disagree with the distribution', async () => {
+  it('persists option-critique assessments and rejects saved ones that disagree with the distribution', async () => {
     const assess = (probability: number) => ({
       for: 'Evidence for.',
       against: 'Evidence against.',
@@ -347,7 +347,7 @@ describe('criterion decisions', () => {
     const [result] = await judgeCriteria(
       { transcript, criteria: ['Answers.'] },
       createCompletionDecisionModel({
-        mode: 'verbalized',
+        method: { mode: 'option-critique' },
         invoke: async () =>
           JSON.stringify({
             answers: {
@@ -377,6 +377,54 @@ describe('criterion decisions', () => {
         met: { probability: number };
       }
     ).met.probability = 0.1;
+    assert.throws(() => parseEvaluationResult(tampered));
+  });
+
+  it('persists verbalized-sampling candidates with the leading rationale as the explanation', async () => {
+    const candidate = (
+      label: string,
+      probability: number,
+      rationale: string,
+    ) => ({
+      reading: `Reads it as ${label}.`,
+      rationale,
+      label,
+      probability,
+    });
+    const [result] = await judgeCriteria(
+      { transcript, criteria: ['Answers.'] },
+      createCompletionDecisionModel({
+        method: { mode: 'verbalized-sampling', candidates: 3 },
+        invoke: async () =>
+          JSON.stringify({
+            answers: {
+              criterion: {
+                type: 'choice',
+                candidates: [
+                  candidate('not_met', 0.45, 'The strict reading fails.'),
+                  candidate('met', 0.3, 'The lenient reading passes.'),
+                  candidate('met', 0.25, 'The final code passes.'),
+                ],
+              },
+            },
+          }),
+      }),
+      { waitBeforeRetry: async () => {} },
+    );
+    assert.equal(result!.passed, true);
+    assert.equal(result!.decision?.choice, 'met');
+    assert.ok(Math.abs(result!.decision!.probabilities.met - 0.55) < 1e-9);
+    assert.equal(result!.decision?.candidates?.length, 3);
+    // The most probable single candidate summarizes, even when its label lost.
+    assert.equal(result!.explanation, 'The strict reading fails.');
+    const evaluation = scoreEvaluation([result!], [], []);
+    assert.doesNotThrow(() => parseEvaluationResult(evaluation));
+    const tampered = structuredClone(evaluation);
+    (
+      tampered.judging_criteria[0]!.decision!.candidates as unknown as {
+        label: string;
+      }[]
+    )[0]!.label = 'met';
     assert.throws(() => parseEvaluationResult(tampered));
   });
 

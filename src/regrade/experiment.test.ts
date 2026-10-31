@@ -383,7 +383,7 @@ describe('regradeExperimentRun', () => {
     assert.equal(report.runs[0]!.state, 'pending');
   });
 
-  it('records the judge mode and refuses to mix modes in one output', async () => {
+  it('records the judge method, reads older mode names, and refuses to mix methods', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
     roots.push(root);
     const source = await runJudgedFixture(root);
@@ -393,25 +393,40 @@ describe('regradeExperimentRun', () => {
       { experimentRun: source.experimentLocation, judge, output },
       dependencies([ORIGINAL_JUDGMENT]).dependencies,
     );
-    assert.equal(first.judge_mode, 'standard');
-    const saved = (await fs.readdir(path.join(output, 'runs')))[0]!;
-    assert.equal(
-      JSON.parse(await fs.readFile(path.join(output, 'runs', saved), 'utf8'))
-        .judge_mode,
-      'standard',
+    assert.equal(first.judge_mode, 'explained');
+    assert.equal(Object.hasOwn(first, 'judge_candidates'), false);
+    const file = path.join(
+      output,
+      'runs',
+      (await fs.readdir(path.join(output, 'runs')))[0]!,
     );
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(saved.judge_mode, 'explained');
+    // A regrade written before the rename recorded `standard`; it still counts as explained.
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...saved, judge_mode: 'standard' }),
+    );
+    const legacy = dependencies([ORIGINAL_JUDGMENT]);
+    const reused = await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      legacy.dependencies,
+    );
+    assert.equal(legacy.scripted.calls.length, 0);
+    assert.equal(reused.reused, 1);
     const other = dependencies([ORIGINAL_JUDGMENT]);
     const summary = await regradeExperimentRun(
       {
         experimentRun: source.experimentLocation,
         judge,
-        judgeMode: 'verbalized',
+        judgeMethod: { mode: 'verbalized-sampling', candidates: 5 },
         output,
       },
       other.dependencies,
     );
     assert.equal(other.scripted.calls.length, 0);
-    assert.equal(summary.judge_mode, 'verbalized');
+    assert.equal(summary.judge_mode, 'verbalized-sampling');
+    assert.equal(summary.judge_candidates, 5);
     assert.match(summary.failed[0]!.message, /different judge/);
   });
 

@@ -3,11 +3,15 @@ import type { StrictCompletionResponseSchema } from '../contracts/completion.ts'
 import type {
   ChoiceAnswer,
   ChoiceAssessment,
+  ChoiceCandidate,
   DecisionRequest,
 } from '../contracts/decision.ts';
 
 export const MAX_DECISION_EXPLANATION_CHARACTERS = 64 * 1024;
 export const MAX_ASSESSMENT_ARGUMENT_CHARACTERS = 4 * 1024;
+export const MIN_VERBALIZED_SAMPLING_CANDIDATES = 2;
+export const MAX_VERBALIZED_SAMPLING_CANDIDATES = 10;
+export const DEFAULT_VERBALIZED_SAMPLING_CANDIDATES = 5;
 /** Canonical saved distributions and near-tie comparisons. */
 export const DECISION_PROBABILITY_TOLERANCE = 0.000001;
 /** Rounded wire distributions are normalized within this band around 1. */
@@ -25,6 +29,7 @@ export const DECISION_REJECTION_REASONS = [
   'unknown_choice',
   'explanation',
   'assessments',
+  'candidates',
 ] as const;
 export type DecisionRejectionReason =
   (typeof DECISION_REJECTION_REASONS)[number];
@@ -84,10 +89,12 @@ function parseChoiceAnswer(
   options: readonly string[],
 ): ChoiceAnswer {
   // SystemOne answers carry `confidence` and no explanation; LLM answers the
-  // reverse. Verbalized answers state per-option probabilities in `assessments`.
+  // reverse. Option-critique answers state per-option probabilities in
+  // `assessments`; verbalized-sampling answers list `candidates` and leave the
+  // choice to the aggregated distribution.
   requireDecisionKeys(
     value,
-    ['type', 'choice'],
+    ['type'],
     [
       'type',
       'choice',
@@ -95,32 +102,48 @@ function parseChoiceAnswer(
       'confidence',
       'explanation',
       'assessments',
+      'candidates',
     ],
   );
   if (value.type !== 'choice') throw new InvalidDecisionResponseError();
-  if (typeof value.choice !== 'string' || !options.includes(value.choice))
-    throw new InvalidDecisionResponseError('unknown_choice');
   const assessments =
     value.assessments === undefined
       ? undefined
       : parseAssessments(value.assessments, options);
+  const candidates =
+    value.candidates === undefined
+      ? undefined
+      : parseCandidates(value.candidates, options);
+  const derived = assessments?.probabilities ?? candidates?.probabilities;
+  if (assessments !== undefined && candidates !== undefined)
+    throw new InvalidDecisionResponseError('invalid_schema');
   let probabilities: Record<string, number>;
   if (value.probabilities !== undefined)
     probabilities = parseProbabilities(value.probabilities, options);
-  else if (assessments !== undefined) probabilities = assessments.probabilities;
+  else if (derived !== undefined) probabilities = derived;
   else throw new InvalidDecisionResponseError('invalid_schema');
   if (
-    assessments !== undefined &&
+    derived !== undefined &&
     options.some(
       (option) =>
-        Math.abs(probabilities[option]! - assessments.probabilities[option]!) >
+        Math.abs(probabilities[option]! - derived[option]!) >
         DECISION_PROBABILITY_TOLERANCE,
     )
   )
-    throw new InvalidDecisionResponseError('assessments');
+    throw new InvalidDecisionResponseError(
+      assessments === undefined ? 'candidates' : 'assessments',
+    );
   const maximum = Math.max(...Object.values(probabilities));
-  if (maximum - probabilities[value.choice]! > DECISION_PROBABILITY_TOLERANCE)
-    throw new InvalidDecisionResponseError('choice_not_argmax');
+  let choice: string;
+  if (value.choice !== undefined) {
+    if (typeof value.choice !== 'string' || !options.includes(value.choice))
+      throw new InvalidDecisionResponseError('unknown_choice');
+    if (maximum - probabilities[value.choice]! > DECISION_PROBABILITY_TOLERANCE)
+      throw new InvalidDecisionResponseError('choice_not_argmax');
+    choice = value.choice;
+  } else if (candidates !== undefined) {
+    choice = sampledChoice(probabilities, maximum, candidates.candidates);
+  } else throw new InvalidDecisionResponseError('invalid_schema');
   let confidence = maximum;
   if (value.confidence !== undefined) {
     if (
@@ -145,13 +168,102 @@ function parseChoiceAnswer(
   }
   return {
     type: 'choice',
-    choice: value.choice,
+    choice,
     probabilities,
     confidence,
     ...(explanation === undefined ? {} : { explanation }),
     ...(assessments === undefined
       ? {}
       : { assessments: assessments.assessments }),
+    ...(candidates === undefined ? {} : { candidates: candidates.candidates }),
+  };
+}
+
+/**
+ * The aggregated maximum. An exact tie goes to the single most probable
+ * candidate's label; a tie there too is rejected rather than broken by option
+ * order, so no option is favored.
+ */
+function sampledChoice(
+  probabilities: Record<string, number>,
+  maximum: number,
+  candidates: readonly ChoiceCandidate[],
+): string {
+  const tied = Object.keys(probabilities).filter(
+    (option) =>
+      maximum - probabilities[option]! <= DECISION_PROBABILITY_TOLERANCE,
+  );
+  if (tied.length === 1) return tied[0]!;
+  const best = Math.max(
+    ...candidates.map((candidate) => candidate.probability),
+  );
+  const leaders = new Set(
+    candidates
+      .filter(
+        (candidate) =>
+          best - candidate.probability <= DECISION_PROBABILITY_TOLERANCE &&
+          tied.includes(candidate.label),
+      )
+      .map((candidate) => candidate.label),
+  );
+  if (leaders.size !== 1)
+    throw new InvalidDecisionResponseError('choice_not_argmax');
+  return [...leaders][0]!;
+}
+
+/**
+ * Verbalized sampling: complete candidate answers with stated probabilities.
+ * Each option's probability is the normalized sum over candidates selecting it.
+ */
+function parseCandidates(
+  value: unknown,
+  options: readonly string[],
+): {
+  candidates: ChoiceCandidate[];
+  probabilities: Record<string, number>;
+} {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > MAX_VERBALIZED_SAMPLING_CANDIDATES
+  )
+    throw new InvalidDecisionResponseError('candidates');
+  const text = z.string().trim().min(1).max(MAX_ASSESSMENT_ARGUMENT_CHARACTERS);
+  const candidates = value.map((entry): ChoiceCandidate => {
+    requireDecisionKeys(entry, [
+      'reading',
+      'rationale',
+      'label',
+      'probability',
+    ]);
+    if (typeof entry.label !== 'string' || !options.includes(entry.label))
+      throw new InvalidDecisionResponseError('unknown_choice');
+    const p = entry.probability;
+    if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1)
+      throw new InvalidDecisionResponseError('probability_range');
+    const reading = text.safeParse(entry.reading);
+    const rationale = text.safeParse(entry.rationale);
+    if (!reading.success || !rationale.success)
+      throw new InvalidDecisionResponseError('candidates');
+    return {
+      reading: reading.data,
+      rationale: rationale.data,
+      label: entry.label,
+      probability: p,
+    };
+  });
+  const sum = candidates.reduce((total, c) => total + c.probability, 0);
+  if (sum <= 0) throw new InvalidDecisionResponseError('probabilities_sum');
+  return {
+    candidates,
+    probabilities: Object.fromEntries(
+      options.map((option) => [
+        option,
+        candidates
+          .filter((candidate) => candidate.label === option)
+          .reduce((total, candidate) => total + candidate.probability, 0) / sum,
+      ]),
+    ),
   };
 }
 
@@ -227,19 +339,70 @@ function parseAssessments(
 }
 
 /**
- * How an LLM judge answers: `standard` states one distribution and an
- * explanation; `verbalized` first argues every option and states a probability
- * for each, and the distribution is their normalization.
+ * How an LLM judge answers each Choice question:
+ * - `direct`: one distribution, no explanation (the SystemOne answer shape).
+ * - `explained`: one distribution and one explanation (the default).
+ * - `option-critique`: evidence for and against every option, with a
+ *   probability per option; the distribution is their normalization.
+ * - `verbalized-sampling`: `candidates` complete candidate answers with
+ *   probabilities in one response; each option's probability is the sum over
+ *   the candidates selecting it, and the choice is derived from that.
  */
-export type DecisionJudgeMode = 'standard' | 'verbalized';
+export type DecisionJudgeMode =
+  | 'direct'
+  | 'explained'
+  | 'option-critique'
+  | 'verbalized-sampling';
 export const DECISION_JUDGE_MODES: readonly DecisionJudgeMode[] = [
-  'standard',
-  'verbalized',
+  'direct',
+  'explained',
+  'option-critique',
+  'verbalized-sampling',
 ];
+export const DEFAULT_DECISION_JUDGE_MODE: DecisionJudgeMode = 'explained';
+/** Names recorded by earlier regrades. */
+export const LEGACY_DECISION_JUDGE_MODES: Readonly<
+  Record<string, DecisionJudgeMode>
+> = Object.freeze({ standard: 'explained', verbalized: 'option-critique' });
+
+/** A judge mode with its candidate count; only verbalized sampling has one. */
+export interface DecisionJudgeMethod {
+  readonly mode: DecisionJudgeMode;
+  readonly candidates?: number;
+}
+
+/** Validate and default a mode and optional candidate count from config or flags. */
+export function decisionJudgeMethod(
+  mode: unknown = DEFAULT_DECISION_JUDGE_MODE,
+  candidates?: unknown,
+): DecisionJudgeMethod {
+  if (!(DECISION_JUDGE_MODES as readonly unknown[]).includes(mode))
+    throw new TypeError(
+      `Judge mode must be one of: ${DECISION_JUDGE_MODES.join(', ')}.`,
+    );
+  if (mode !== 'verbalized-sampling') {
+    if (candidates !== undefined)
+      throw new TypeError(
+        'Judge candidates apply only to verbalized-sampling.',
+      );
+    return { mode: mode as DecisionJudgeMode };
+  }
+  const count = candidates ?? DEFAULT_VERBALIZED_SAMPLING_CANDIDATES;
+  if (
+    typeof count !== 'number' ||
+    !Number.isSafeInteger(count) ||
+    count < MIN_VERBALIZED_SAMPLING_CANDIDATES ||
+    count > MAX_VERBALIZED_SAMPLING_CANDIDATES
+  )
+    throw new TypeError(
+      `Judge candidates must be an integer from ${MIN_VERBALIZED_SAMPLING_CANDIDATES} to ${MAX_VERBALIZED_SAMPLING_CANDIDATES}.`,
+    );
+  return { mode: 'verbalized-sampling', candidates: count };
+}
 
 export function decisionResponseSchema(
   questions: DecisionRequest['questions'],
-  mode: DecisionJudgeMode = 'standard',
+  method: DecisionJudgeMethod = { mode: DEFAULT_DECISION_JUDGE_MODE },
 ): StrictCompletionResponseSchema {
   return {
     name: 'choice_decision',
@@ -253,12 +416,7 @@ export function decisionResponseSchema(
           properties: Object.fromEntries(
             Object.entries(questions).map(([id, question]) => {
               const options = Object.keys(question.criteria);
-              return [
-                id,
-                mode === 'verbalized'
-                  ? verbalizedAnswerSchema(options)
-                  : standardAnswerSchema(options),
-              ];
+              return [id, answerSchema(options, method)];
             }),
           ),
           required: Object.keys(questions),
@@ -299,7 +457,26 @@ const explanationSchema = {
   maxLength: MAX_DECISION_EXPLANATION_CHARACTERS,
 } as const;
 
-function standardAnswerSchema(options: readonly string[]) {
+function answerSchema(options: readonly string[], method: DecisionJudgeMethod) {
+  switch (method.mode) {
+    case 'direct':
+      return distributionAnswerSchema(options, false);
+    case 'explained':
+      return distributionAnswerSchema(options, true);
+    case 'option-critique':
+      return optionCritiqueAnswerSchema(options);
+    case 'verbalized-sampling':
+      return verbalizedSamplingAnswerSchema(
+        options,
+        method.candidates ?? DEFAULT_VERBALIZED_SAMPLING_CANDIDATES,
+      );
+  }
+}
+
+function distributionAnswerSchema(
+  options: readonly string[],
+  explained: boolean,
+) {
   return {
     type: 'object',
     properties: {
@@ -316,15 +493,56 @@ function standardAnswerSchema(options: readonly string[]) {
         required: options,
         additionalProperties: false,
       },
-      explanation: explanationSchema,
+      ...(explained ? { explanation: explanationSchema } : {}),
     },
-    required: ['type', 'choice', 'probabilities', 'explanation'],
+    required: [
+      'type',
+      'choice',
+      'probabilities',
+      ...(explained ? ['explanation'] : []),
+    ],
+    additionalProperties: false,
+  };
+}
+
+/** Candidates only: the choice is derived, so the model never restates it. */
+function verbalizedSamplingAnswerSchema(
+  options: readonly string[],
+  count: number,
+) {
+  const text = {
+    type: 'string',
+    minLength: 1,
+    maxLength: MAX_ASSESSMENT_ARGUMENT_CHARACTERS,
+  };
+  return {
+    type: 'object',
+    properties: {
+      type: { type: 'string', const: 'choice' },
+      candidates: {
+        type: 'array',
+        minItems: count,
+        maxItems: count,
+        items: {
+          type: 'object',
+          properties: {
+            reading: text,
+            rationale: text,
+            label: { type: 'string', enum: options },
+            probability: { type: 'number', minimum: 0, maximum: 1 },
+          },
+          required: ['reading', 'rationale', 'label', 'probability'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['type', 'candidates'],
     additionalProperties: false,
   };
 }
 
 /** Assessments precede the choice, so each option is argued before deciding. */
-function verbalizedAnswerSchema(options: readonly string[]) {
+function optionCritiqueAnswerSchema(options: readonly string[]) {
   const argument = {
     type: 'string',
     minLength: 1,
