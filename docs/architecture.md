@@ -1840,9 +1840,15 @@ errors are rejected. After normalization, the reported choice must be a maximum
 or within 0.000001 of one. Forge keeps that choice, including exact and near
 ties, and never substitutes another option or favors `met`. A clearly
 non-maximal choice is rejected with `choice_not_argmax`. Typed decision-model
-answers use the same rule, and their confidence is recomputed. Saved decisions
-use the same choice tolerance; their distributions must sum to 1 within
-0.000001 and agree with stored confidence. Invalid answers use the
+answers use the same rule. Answers follow the SystemOne Choice shape
+(`type`, `choice`, `probabilities`, `confidence`), so a decision model such as
+Jev can be supplied directly: `explanation` is optional (stored as an empty
+string when absent), and a reported `confidence` in [0, 1] is kept as a
+separate certainty measure rather than recomputed. Answers without one, such
+as the LLM judge's, derive it as the largest probability; an out-of-range value
+is rejected with `probability_range`. Saved decisions use the same choice
+tolerance; their distributions must sum to 1 within 0.000001, and their
+confidence must lie in [0, 1]. Invalid answers use the
 malformed-output retry budget and record a fixed rejection `reason`, without
 caller IDs, field paths, or received values.
 

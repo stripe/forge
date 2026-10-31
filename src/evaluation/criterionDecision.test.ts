@@ -287,6 +287,71 @@ describe('criterion decisions', () => {
     );
   });
 
+  it('accepts SystemOne-shaped answers: independent confidence and no explanation', async () => {
+    const systemOne = (confidence: unknown, extra = {}): DecisionModel => ({
+      async decide() {
+        return {
+          answers: {
+            criterion: {
+              type: 'choice',
+              choice: 'met',
+              probabilities: {
+                met: 0.8,
+                not_met: 0.15,
+                insufficient_evidence: 0.05,
+              },
+              confidence,
+              ...extra,
+            },
+          },
+        } as never;
+      },
+    });
+    const [result] = await judgeCriteria(
+      { transcript, criteria: ['Answers.'] },
+      systemOne(0.7),
+      { waitBeforeRetry: async () => {} },
+    );
+    assert.equal(result!.passed, true);
+    assert.equal(result!.explanation, '');
+    assert.equal(result!.decision?.confidence, 0.7);
+    assert.equal(result!.decision?.probabilities.met, 0.8);
+    // The stored result round-trips through the strict result parser.
+    assert.doesNotThrow(() =>
+      parseEvaluationResult(scoreEvaluation([result!], [], [])),
+    );
+    for (const confidence of [1.5, -0.1, Number.NaN, '0.7']) {
+      const [rejected] = await judgeCriteria(
+        { transcript, criteria: ['Answers.'] },
+        systemOne(confidence),
+        { waitBeforeRetry: async () => {} },
+      );
+      assert.equal(rejected!.passed, null);
+      assert.equal(rejected!.error?.reason, 'probability_range');
+    }
+    const [blank] = await judgeCriteria(
+      { transcript, criteria: ['Answers.'] },
+      systemOne(0.7, { explanation: '  ' }),
+      { waitBeforeRetry: async () => {} },
+    );
+    assert.equal(blank!.error?.reason, 'explanation');
+  });
+
+  it('derives confidence as the maximum when an LLM answer omits it', () => {
+    const result = parseCriterionJudgment(
+      JSON.stringify(
+        judgment('not_met', {
+          met: 0.1,
+          not_met: 0.85,
+          insufficient_evidence: 0.05,
+        }),
+      ),
+      'Checks.',
+    );
+    assert.equal(result.decision?.confidence, 0.85);
+    assert.equal(result.explanation, 'Judged from the supplied evidence.');
+  });
+
   it('uses an answer-only decision envelope and stores warning references instead of copies', async () => {
     let calls = 0;
     const model: DecisionModel = {
@@ -318,9 +383,10 @@ describe('criterion decisions', () => {
       { waitBeforeRetry: async () => {} },
     );
     assert.equal(calls, 3);
+    // A model-reported confidence is kept; it need not equal the maximum probability.
     assert.ok(
       results.every(
-        (result) => result.passed === true && result.decision?.confidence === 1,
+        (result) => result.passed === true && result.decision?.confidence === 0,
       ),
     );
     assert.ok(

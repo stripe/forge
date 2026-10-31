@@ -49,7 +49,10 @@ export function choiceDistributionIsValid(
     Object.hasOwn(answer.probabilities, answer.choice) &&
     maximum - answer.probabilities[answer.choice]! <=
       DECISION_PROBABILITY_TOLERANCE &&
-    Math.abs(answer.confidence - maximum) <= DECISION_PROBABILITY_TOLERANCE
+    // Confidence is a separate SystemOne measure; it need not equal the maximum.
+    Number.isFinite(answer.confidence) &&
+    answer.confidence >= 0 &&
+    answer.confidence <= 1
   );
 }
 
@@ -73,13 +76,12 @@ function requireDecisionKeys(
 function parseChoiceAnswer(
   value: unknown,
   options: readonly string[],
-  allowDerivedConfidence: boolean,
 ): ChoiceAnswer {
-  const keys = ['type', 'choice', 'probabilities', 'explanation'];
+  // SystemOne answers carry `confidence` and no explanation; LLM answers the reverse.
   requireDecisionKeys(
     value,
-    keys,
-    allowDerivedConfidence ? [...keys, 'confidence'] : keys,
+    ['type', 'choice', 'probabilities'],
+    ['type', 'choice', 'probabilities', 'confidence', 'explanation'],
   );
   if (value.type !== 'choice') throw new InvalidDecisionResponseError();
   if (typeof value.choice !== 'string' || !options.includes(value.choice))
@@ -103,20 +105,34 @@ function parseChoiceAnswer(
   const maximum = Math.max(...Object.values(probabilities));
   if (maximum - probabilities[value.choice]! > DECISION_PROBABILITY_TOLERANCE)
     throw new InvalidDecisionResponseError('choice_not_argmax');
-  const explanation = z
-    .string()
-    .trim()
-    .min(1)
-    .max(MAX_DECISION_EXPLANATION_CHARACTERS)
-    .safeParse(value.explanation);
-  if (!explanation.success)
-    throw new InvalidDecisionResponseError('explanation');
+  let confidence = maximum;
+  if (value.confidence !== undefined) {
+    if (
+      typeof value.confidence !== 'number' ||
+      !Number.isFinite(value.confidence) ||
+      value.confidence < 0 ||
+      value.confidence > 1
+    )
+      throw new InvalidDecisionResponseError('probability_range');
+    confidence = value.confidence;
+  }
+  let explanation: string | undefined;
+  if (value.explanation !== undefined) {
+    const parsed = z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_DECISION_EXPLANATION_CHARACTERS)
+      .safeParse(value.explanation);
+    if (!parsed.success) throw new InvalidDecisionResponseError('explanation');
+    explanation = parsed.data;
+  }
   return {
     type: 'choice',
     choice: value.choice,
     probabilities,
-    confidence: maximum,
-    explanation: explanation.data,
+    confidence,
+    ...(explanation === undefined ? {} : { explanation }),
   };
 }
 
@@ -178,7 +194,6 @@ export function decisionResponseSchema(
 export function parseDecisionAnswers(
   value: unknown,
   questions: DecisionRequest['questions'],
-  options: { readonly allowDerivedConfidence?: boolean } = {},
 ): Record<string, ChoiceAnswer> {
   requireDecisionKeys(value, ['answers']);
   requireDecisionKeys(
@@ -193,14 +208,7 @@ export function parseDecisionAnswers(
       const choices = Object.keys(question.criteria);
       if (choices.length === 0)
         throw new TypeError('Choice questions require options.');
-      return [
-        id,
-        parseChoiceAnswer(
-          answers[id],
-          choices,
-          options.allowDerivedConfidence === true,
-        ),
-      ];
+      return [id, parseChoiceAnswer(answers[id], choices)];
     }),
   );
 }

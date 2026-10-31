@@ -319,7 +319,6 @@ async function judgeOneCriterion(
       const answer = parseDecisionAnswers(
         { answers: response?.answers },
         CRITERION_DECISION_QUESTIONS,
-        { allowDerivedConfidence: true },
       ).criterion!;
       return resultFromAnswer(criterion, answer);
     } catch (error) {
@@ -428,7 +427,8 @@ function resultFromAnswer(
   );
   return criterionResult(criterion, {
     passed: choice === 'met',
-    explanation,
+    // Decision models (SystemOne) return no explanation.
+    explanation: explanation ?? '',
     decision: {
       ...fields,
       choice,
