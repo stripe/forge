@@ -47,7 +47,7 @@ describe('sample dataset release', () => {
     ]);
     assert.deepEqual(dataset.manifest.dataset, {
       id: 'stripe-integration-public-evals',
-      version: '0.4.0',
+      version: '0.5.0',
     });
     assert.equal(dataset.manifest.cases.length, 69);
     assert.deepEqual(
