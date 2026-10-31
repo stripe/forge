@@ -69,7 +69,9 @@ describe('CLI OpenCode endpoints', () => {
     const { tmpdir } = await import('node:os');
     const path = await import('node:path');
     const { createDefaultCliComposition } = await import('../../cli.ts');
-    const root = await mkdtemp(path.join(tmpdir(), 'forge-opencode-endpoints-'));
+    const root = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-endpoints-'),
+    );
     try {
       const composition = await createDefaultCliComposition({
         datasetRoot: root,

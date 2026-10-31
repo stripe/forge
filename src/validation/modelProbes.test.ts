@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { afterEach, describe, it, vi } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 import { createClaudeCodeAdapter } from '../agents/claude-code/index.ts';
 import { createCodexAdapter } from '../agents/codex/index.ts';
 import { createOpenCodeAdapter } from '../agents/opencode/index.ts';
@@ -10,7 +11,6 @@ import type { ModelProbeOutcome } from '../contracts/modelProbe.ts';
 import { createAnthropicCompletionProvider } from '../providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from '../providers/openai/index.ts';
 import { createStaticCredentialResolver } from '../testing/index.ts';
-import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 import { classifyProbeHttpFailure, createHttpModelProbe } from './httpProbe.ts';
 import { runModelProbe } from './runProbe.ts';
 
