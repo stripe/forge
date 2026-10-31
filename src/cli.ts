@@ -51,6 +51,7 @@ import {
 } from './planning/index.ts';
 import { validateExperimentDataset } from './planning/planner.ts';
 import { createAnthropicCompletionProvider } from './providers/anthropic/index.ts';
+import { normalizeOpenAIBaseUrl } from './providers/openai/baseUrl.ts';
 import { createOpenAICompletionProvider } from './providers/openai/index.ts';
 import type { RegradeDiff } from './regrade/diff.ts';
 import { regradeExperimentRun } from './regrade/experiment.ts';
@@ -209,9 +210,16 @@ export async function createDefaultCliComposition(
     );
   }
   const environment = options.environment ?? process.env;
-  // URL validity is checked in pure preflight, only for plans that use the action.
+  const codexBaseUrl = environment[OPENAI_BASE_URL_ENVIRONMENT];
+  // An explicit URL is validated in pure preflight, only for plans that use the
+  // action. Otherwise search shares the OpenAI completion upstream, validated by
+  // the provider's own rule; the search root excludes /v1.
+  const explicitSearchBaseUrl = environment.FORGE_WEB_SEARCH_BASE_URL;
   const searchBaseUrl =
-    environment.FORGE_WEB_SEARCH_BASE_URL ?? DEFAULT_WEB_SEARCH_BASE_URL;
+    explicitSearchBaseUrl ??
+    (codexBaseUrl === undefined
+      ? DEFAULT_WEB_SEARCH_BASE_URL
+      : normalizeOpenAIBaseUrl(codexBaseUrl).replace(/\/v1$/, ''));
   const baseUrl = environment[ANTHROPIC_BASE_URL_ENVIRONMENT];
   const gatewaySelected = baseUrl !== undefined;
   const credential = gatewaySelected
@@ -230,7 +238,6 @@ export async function createDefaultCliComposition(
     auth: gatewaySelected ? 'bearer' : 'api-key',
     ...(baseUrl === undefined ? {} : { baseUrl }),
   });
-  const codexBaseUrl = environment[OPENAI_BASE_URL_ENVIRONMENT];
   const openaiCompletionProvider = createOpenAICompletionProvider({
     ...(codexBaseUrl === undefined ? {} : { baseUrl: codexBaseUrl }),
   });
@@ -251,10 +258,10 @@ export async function createDefaultCliComposition(
     ['opencode.api-key', 'OPENCODE_API_KEY'],
     [
       'forge.web-search-api-key',
-      // A custom URL never falls back to the completion key; an unset
+      // An explicit URL never falls back to the completion key; an unset
       // dedicated key then fails at credential lookup for web-search runs only.
       environment.FORGE_WEB_SEARCH_API_KEY !== undefined ||
-      searchBaseUrl !== DEFAULT_WEB_SEARCH_BASE_URL
+      explicitSearchBaseUrl !== undefined
         ? 'FORGE_WEB_SEARCH_API_KEY'
         : (options.credentialBindings?.['openai.completion-api-key'] ??
           'OPENAI_API_KEY'),

@@ -502,13 +502,18 @@ returns URLs and optional titles; open the returned URLs separately for content.
 It uses `gpt-4.1-mini` with `external_web_access: false` and makes potentially
 billable host-side requests.
 
-The CLI reads `FORGE_WEB_SEARCH_BASE_URL` (default `https://api.openai.com`),
-appending `/v1/responses`. At the default URL, an absent
-`FORGE_WEB_SEARCH_API_KEY` uses the existing OpenAI completion-key binding.
-Every non-default URL binds `FORGE_WEB_SEARCH_API_KEY` and never falls back to
-the completion key; an unset key fails credential lookup, only for runs that use
-the action. URLs must use HTTPS; HTTP is allowed only for
-loopback tests. Invalid settings fail pure preflight without printing values.
+Without `FORGE_WEB_SEARCH_BASE_URL`, search uses the same upstream and key as
+Ava and the judge: the OpenAI completion provider's `OPENAI_BASE_URL` (a
+trailing `/v1` is dropped, since Forge appends `/v1/responses`) and its
+completion-key binding, or `https://api.openai.com` when `OPENAI_BASE_URL` is
+unset. That URL gets the provider's transport rule: HTTPS, or HTTP only for a
+loopback host such as `localhost` or `*.localhost`. When
+`FORGE_WEB_SEARCH_BASE_URL` is set, it must use HTTPS (HTTP only for loopback
+hosts, by the same rule), and the CLI binds `FORGE_WEB_SEARCH_API_KEY` with no
+fallback to the completion key; an unset key fails credential lookup, only for
+runs that use the action. An absent-URL run with `FORGE_WEB_SEARCH_API_KEY` set
+uses that key instead of the completion key. Invalid settings fail pure
+preflight without printing values.
 `--credential-env forge.web-search-api-key=MY_SEARCH_KEY` is an explicit
 override of that binding and is sent to whichever URL is configured. Keep the same host routing
 when resuming; plans do not record the upstream endpoint.

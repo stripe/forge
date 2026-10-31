@@ -1060,7 +1060,11 @@ condition; the action does not propagate itself to other treatments. The
 An embedding host explicitly supplies `ForgeComposition.webSearch` with a
 `baseUrl` and opaque `credential` reference. The base URL excludes the API
 version; Forge appends `/v1/responses`. It must use HTTPS, except HTTP for
-loopback tests, and contain no credentials, query, or fragment. Pure preflight
+loopback hosts (one definition shared with the OpenAI completion provider,
+including `*.localhost`), and contain no credentials, query, or fragment. The
+default CLI composition inherits the OpenAI completion provider's resolved base
+URL (minus a trailing `/v1`) and key binding when no search URL is set, and
+uses a dedicated key only for an explicit search URL. Pure preflight
 validates this authority and the selected harness before any credential lookup
 or allocation. Docker
 requires the existing explicit `runtime.network: host`; external runtimes must

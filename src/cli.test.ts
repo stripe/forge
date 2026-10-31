@@ -24,6 +24,7 @@ import {
   createScriptedAgentAdapter,
   createStaticCredentialResolver,
 } from './testing/index.ts';
+import { validateWebSearchBaseUrl } from './webSearch/configuration.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -2757,6 +2758,83 @@ it('binds web search host credentials with completion-key fallback only at the d
       );
     }
   }
+});
+
+async function resolveSearchKey(
+  composition: Awaited<ReturnType<typeof createDefaultCliComposition>>,
+): Promise<string> {
+  return composition.credentialResolver.resolve(
+    composition.webSearch!.credential,
+    {
+      runId: 'test',
+      purpose: 'web_search',
+      signal: new AbortController().signal,
+    },
+  );
+}
+
+it('inherits the OpenAI completion upstream and key when no search URL is set', async () => {
+  for (const [openaiBaseUrl, expected] of [
+    ['http://kos.localhost:8080/v1', 'http://kos.localhost:8080'],
+    ['http://kos.localhost:8080/v1/', 'http://kos.localhost:8080'],
+    ['https://gateway.example/openai/v1', 'https://gateway.example/openai'],
+  ] as const) {
+    const composition = await createDefaultCliComposition({
+      datasetRoot: '.',
+      resultsRoot: '/tmp/forge-web-search-test',
+      environment: {
+        OPENAI_API_KEY: 'completion-secret',
+        OPENAI_BASE_URL: openaiBaseUrl,
+      },
+    });
+    // The bridge appends /v1/responses, so the root must not keep its own /v1.
+    assert.equal(composition.webSearch?.baseUrl, expected);
+    assert.equal(
+      `${composition.webSearch?.baseUrl}/v1/responses`.includes('/v1/v1'),
+      false,
+    );
+    assert.equal(await resolveSearchKey(composition), 'completion-secret');
+    assert.doesNotThrow(() =>
+      validateWebSearchBaseUrl(composition.webSearch!.baseUrl),
+    );
+  }
+});
+
+it('rejects a non-loopback http OPENAI_BASE_URL exactly as the completion provider does', async () => {
+  await assert.rejects(
+    createDefaultCliComposition({
+      datasetRoot: '.',
+      resultsRoot: '/tmp/forge-web-search-test',
+      environment: { OPENAI_BASE_URL: 'http://gateway.example/v1' },
+    }),
+    /plaintext HTTP only for a loopback host/,
+  );
+});
+
+it('keeps an explicit search URL on its dedicated key despite OPENAI_BASE_URL', async () => {
+  const composition = await createDefaultCliComposition({
+    datasetRoot: '.',
+    resultsRoot: '/tmp/forge-web-search-test',
+    environment: {
+      OPENAI_API_KEY: 'completion-secret',
+      OPENAI_BASE_URL: 'http://kos.localhost:8080/v1',
+      FORGE_WEB_SEARCH_BASE_URL: 'https://search.example.com',
+      FORGE_WEB_SEARCH_API_KEY: 'search-secret',
+    },
+  });
+  assert.equal(composition.webSearch?.baseUrl, 'https://search.example.com');
+  assert.equal(await resolveSearchKey(composition), 'search-secret');
+  const withoutKey = await createDefaultCliComposition({
+    datasetRoot: '.',
+    resultsRoot: '/tmp/forge-web-search-test',
+    environment: {
+      OPENAI_API_KEY: 'completion-secret',
+      OPENAI_BASE_URL: 'http://kos.localhost:8080/v1',
+      FORGE_WEB_SEARCH_BASE_URL: 'https://search.example.com',
+    },
+  });
+  await assert.rejects(resolveSearchKey(withoutKey));
+  assert.throws(() => validateWebSearchBaseUrl('http://search.example.com'));
 });
 
 it('never falls back to the completion key for a custom search URL', async () => {

@@ -71,6 +71,7 @@ it('validates upstream transport in pure preflight before any credentials or run
   for (const baseUrl of [
     'https://search.example.com',
     'http://localhost:1234',
+    'http://kos.localhost:1234',
     'http://127.0.0.2:1234',
     'http://[::1]:1234',
   ])

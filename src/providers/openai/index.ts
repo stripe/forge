@@ -22,6 +22,7 @@ import {
 } from '../../validation/httpProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { observeCompletionFailure } from '../transportObservation.ts';
+import { normalizeOpenAIBaseUrl } from './baseUrl.ts';
 
 export const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1' as const;
 export const OPENAI_MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -30,7 +31,6 @@ const MAX_MESSAGE_BYTES = 1024 * 1024;
 const MAX_TOKENS = 128_000;
 const DEFAULT_MAX_TOKENS = 16_000;
 const MAX_REQUEST_DURATION_MS = 5 * 60 * 1_000;
-const MAX_BASE_URL_BYTES = 4_096;
 const MAX_SCHEMA_DEPTH = 100;
 const MAX_SCHEMA_NODES = 100_000;
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
@@ -78,7 +78,7 @@ export function createOpenAICompletionProvider(
       'OpenAI completion provider id must be a safe identifier.',
     );
   }
-  const endpoint = `${normalizeBaseUrl(options.baseUrl ?? OPENAI_DEFAULT_BASE_URL)}/responses`;
+  const endpoint = `${normalizeOpenAIBaseUrl(options.baseUrl ?? OPENAI_DEFAULT_BASE_URL)}/responses`;
   const credential = normalizeCredentialReference(
     options.credential,
     'openai.completion-api-key',
@@ -195,48 +195,6 @@ function normalizeCredentialReference(
   return typeof configured === 'string'
     ? credentialReference(configured)
     : configured;
-}
-
-function normalizeBaseUrl(value: string): string {
-  if (
-    typeof value !== 'string' ||
-    value.length === 0 ||
-    Buffer.byteLength(value, 'utf8') > MAX_BASE_URL_BYTES ||
-    /[\u0000-\u0020\u007f]/.test(value)
-  ) {
-    throw new TypeError('OpenAI baseUrl must be a bounded HTTP(S) URL.');
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new TypeError('OpenAI baseUrl must be a valid HTTP(S) URL.');
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new TypeError('OpenAI baseUrl must use HTTP or HTTPS.');
-  }
-  if (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname)) {
-    throw new TypeError(
-      'OpenAI baseUrl may use plaintext HTTP only for a loopback host.',
-    );
-  }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new TypeError(
-      'OpenAI baseUrl must not contain credentials, a query, or a fragment.',
-    );
-  }
-  return value.replace(/\/+$/, '');
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return (
-    normalized === 'localhost' ||
-    normalized.endsWith('.localhost') ||
-    normalized === '[::1]' ||
-    normalized === '::1' ||
-    /^127(?:\.[0-9]{1,3}){3}$/.test(normalized)
-  );
 }
 
 function boundedTimeout(value: number | undefined): number {
