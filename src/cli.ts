@@ -147,7 +147,7 @@ Validation options:
   --probe-models        Send small paid model tests with no case content; no CLI or container
   --host                Apply setup and check native MCP connections without model calls
   --credential-env <environment-name>
-                        With --host, authorize the host variables used by native MCP checks
+                        With --host or --probe-models, authorize the host variables they use
 
 Regrade options:
   --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
@@ -468,6 +468,7 @@ export async function runCli(
           readinessRequests.push({ plan, composition });
         }
       }
+      let credentialUses: readonly EvalCredentialUse[] = [];
       if (credentials !== undefined) {
         if (
           grants.environmentNames.length > 0 &&
@@ -477,11 +478,10 @@ export async function runCli(
             'Same-name credential grants require an engine with inspectEvalCredentials. Use explicit reference=HOST_VAR bindings with this engine.',
           );
         }
-        credentials.finalize(
-          readinessRequests.flatMap(
-            (request) => engine.inspectEvalCredentials?.(request) ?? [],
-          ),
+        credentialUses = readinessRequests.flatMap(
+          (request) => engine.inspectEvalCredentials?.(request) ?? [],
         );
+        credentials.finalize(credentialUses);
       }
       const probes = parsed.values['probe-models']
         ? selectedModelProbes(readinessRequests)
@@ -516,7 +516,11 @@ export async function runCli(
         } of probes) {
           const result = await runModelProbe(
             probe,
-            composition.credentialResolver,
+            probeCredentialResolver(
+              composition.credentialResolver,
+              credentialUses,
+              purpose,
+            ),
             options.signal ?? new AbortController().signal,
           );
           probeResults.push({
@@ -1095,6 +1099,36 @@ function createCliCredentialResolver(
           { cause: error },
         );
       }
+    },
+  };
+}
+
+/**
+ * A probe resolves a credential under the purpose execution uses for it, so an
+ * explicit grant authorizes the same consumer for the probe and for the run.
+ */
+function probeCredentialResolver(
+  resolver: CredentialResolver,
+  uses: readonly EvalCredentialUse[],
+  role: 'agent' | 'role_player' | 'judge',
+): CredentialResolver {
+  const completion = `forge-eval:completion:${role}:`;
+  return {
+    ...(resolver.sourceIdentity === undefined
+      ? {}
+      : { sourceIdentity: (...args) => resolver.sourceIdentity!(...args) }),
+    resolve(reference, context) {
+      const use = uses.find(
+        (candidate) =>
+          candidate.reference === reference &&
+          (role === 'agent'
+            ? !candidate.purpose.startsWith('forge-eval:completion:')
+            : candidate.purpose.startsWith(completion)),
+      );
+      return resolver.resolve(
+        reference,
+        use === undefined ? context : { ...context, purpose: use.purpose },
+      );
     },
   };
 }

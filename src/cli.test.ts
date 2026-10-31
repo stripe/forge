@@ -596,7 +596,7 @@ judging_criteria: [The task is complete.]
     }
   });
 
-  it('uses the default composition credential binding for a model-only check', async () => {
+  it('uses an explicit credential grant for a model-only check', async () => {
     const fixture = await createBenchmarkFixture();
     let calls = 0;
     vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
@@ -613,7 +613,14 @@ judging_criteria: [The task is complete.]
     let stdout = '';
     assert.equal(
       await runCli(
-        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        [
+          'validate',
+          '--probe-models',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'ANTHROPIC_API_KEY',
+        ],
         {
           environment: { ANTHROPIC_API_KEY: 'synthetic-key' },
           stdout: (text) => {
@@ -625,6 +632,29 @@ judging_criteria: [The task is complete.]
     );
     assert.equal(calls, 1);
     assert.equal(JSON.parse(stdout).model_probes[0].outcome, 'ok');
+    assert.doesNotMatch(stdout, /synthetic-key/);
+  });
+
+  it('does not read an exported key for a model-only check without a grant', async () => {
+    const fixture = await createBenchmarkFixture();
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('probe must not send a request without a credential');
+    });
+    let stdout = '';
+    assert.equal(
+      await runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: { ANTHROPIC_API_KEY: 'synthetic-key' },
+          stdout: (text) => {
+            stdout += text;
+          },
+        },
+      ),
+      1,
+    );
+    const probes = JSON.parse(stdout).model_probes;
+    assert.equal(probes[0].outcome, 'auth');
     assert.doesNotMatch(stdout, /synthetic-key/);
   });
 
