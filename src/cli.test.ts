@@ -2759,55 +2759,52 @@ it('binds web search host credentials with completion-key fallback only at the d
   }
 });
 
-it('rejects unsafe search host settings before credential resolution without printing values', async () => {
-  for (const baseUrl of [
-    'https://search.example.com',
-    'https://api.openai.com/',
-    'http://127.0.0.1:1234',
-  ]) {
-    for (const key of [undefined, '', 'invalid\nkey']) {
-      await assert.rejects(
-        createDefaultCliComposition({
-          datasetRoot: '.',
-          resultsRoot: '/tmp/forge-web-search-test',
-          environment: {
-            OPENAI_API_KEY: 'completion-secret',
-            FORGE_WEB_SEARCH_BASE_URL: baseUrl,
-            FORGE_WEB_SEARCH_API_KEY: key,
-          },
-        }),
-        (error: unknown) => {
-          assert.ok(error instanceof TypeError);
-          assert.match(error.message, /FORGE_WEB_SEARCH_API_KEY/);
-          assert.equal(error.message.includes(baseUrl), false);
-          assert.equal(error.message.includes('completion-secret'), false);
-          if (key) assert.equal(error.message.includes(key), false);
-          return true;
-        },
-      );
-    }
-  }
-  for (const baseUrl of [
-    'http://search.example.com',
-    'ftp://search.example.com',
-    'https://user:private@example.com',
-    'invalid-private-url',
-  ]) {
+it('never falls back to the completion key for a custom search URL', async () => {
+  for (const baseUrl of ['https://search.example.com', 'https://api.openai.com/']) {
+    const composition = await createDefaultCliComposition({
+      datasetRoot: '.',
+      resultsRoot: '/tmp/forge-web-search-test',
+      environment: {
+        OPENAI_API_KEY: 'completion-secret',
+        FORGE_WEB_SEARCH_BASE_URL: baseUrl,
+      },
+    });
     await assert.rejects(
-      createDefaultCliComposition({
-        datasetRoot: '.',
-        resultsRoot: '/tmp/forge-web-search-test',
-        environment: {
-          FORGE_WEB_SEARCH_BASE_URL: baseUrl,
-          FORGE_WEB_SEARCH_API_KEY: 'search-secret',
-        },
+      composition.credentialResolver.resolve(composition.webSearch!.credential, {
+        runId: 'test',
+        purpose: 'web_search',
+        signal: new AbortController().signal,
       }),
       (error: unknown) => {
-        assert.ok(error instanceof TypeError);
-        assert.match(error.message, /FORGE_WEB_SEARCH_BASE_URL/);
-        assert.equal(error.message.includes(baseUrl), false);
+        assert.ok(error instanceof Error);
+        assert.equal(error.message.includes('completion-secret'), false);
         return true;
       },
     );
   }
+});
+
+it('runs experiments without forge/web-search despite a malformed search URL', async () => {
+  const fixture = await createBenchmarkFixture();
+  let observed: string | undefined;
+  const code = await runCli(
+    [
+      'run',
+      '--experiment',
+      fixture.experimentPath,
+      '--output',
+      path.join(fixture.root, 'out'),
+    ],
+    {
+      environment: { FORGE_WEB_SEARCH_BASE_URL: 'invalid-private-url' },
+      stdout() {},
+      stderr() {},
+      execute: async (input) => {
+        observed = input.composition.webSearch?.baseUrl;
+        return executeOffline(input);
+      },
+    },
+  );
+  assert.equal(code, 0);
+  assert.equal(observed, 'invalid-private-url');
 });

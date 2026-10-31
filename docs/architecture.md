@@ -1080,7 +1080,7 @@ external-access flag, and native-search policy. `result.json.web_search` records
 | `tool_calls` | Authenticated, parsed MCP `tools/call` requests for `call_web_search` with an ID, including invalid queries. Auth, method, oversized-body, malformed-JSON, invalid-envelope, and rate-limit rejections are excluded. |
 | `search_count` | Sum of upstream `web_search_call` output items; one agent call may perform multiple searches. |
 | `input_tokens`, `output_tokens`, `total_tokens` | Sum of Responses `usage` totals. |
-| `cached_input_tokens`, `reasoning_tokens` | Optional input-cache and output-reasoning subsets from Responses usage details. |
+| `cached_input_tokens`, `reasoning_tokens` | Optional input-cache and output-reasoning subsets from Responses usage details; a response that omits the details marks `usage_complete: false`. |
 
 Counters are nonnegative safe integers or null. No calls means zero with
 `usage_complete: true`. Failed requests and missing, malformed, or inconsistent
