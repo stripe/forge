@@ -118,7 +118,8 @@ function sendThroughTunnel(
       headers[name] = value;
     });
     // The tunnel is already TLS-wrapped above, so speak plain HTTP over it.
-    // https.request would try to negotiate TLS again over the TLS socket and hang.
+    // No `agent: false`: with it, Node ignores createConnection and dials the
+    // upstream directly, which hangs on hosts without direct egress.
     const upstream: ClientRequest = httpRequest(
       {
         protocol: 'http:',
@@ -127,7 +128,6 @@ function sendThroughTunnel(
         path: `${target.pathname}${target.search}`,
         method: init.method ?? 'GET',
         headers,
-        agent: false,
         createConnection: () => connection as never,
         ...(signal ? { signal } : {}),
       },
