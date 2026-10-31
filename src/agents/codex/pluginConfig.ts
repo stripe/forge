@@ -8,10 +8,7 @@ import {
   isSafeMcpEndpointUrl,
   isSafeSimpleIdentifier,
 } from '../../model/paths.ts';
-import type {
-  CodexMcpServerConfig,
-  CodexMcpServerDeclarations,
-} from '../pluginMcp.ts';
+import type { CodexMcpServerConfig } from '../pluginMcp.ts';
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const MAX_CONFIG_DEPTH = 64;
