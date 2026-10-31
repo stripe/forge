@@ -486,6 +486,16 @@ export function createDockerRuntimeAdapter(
             connectHost: relayNetwork!.connectHost,
             limits: mcpRelayLimits,
             signal: input.signal,
+            ...(runtime.proxy?.https === undefined
+              ? {}
+              : {
+                  upstreamProxy: {
+                    https: runtime.proxy.https,
+                    ...(runtime.proxy.no_proxy === undefined
+                      ? {}
+                      : { noProxy: runtime.proxy.no_proxy }),
+                  },
+                }),
             ...(options.mcpRelayFetch === undefined
               ? {}
               : { fetch: options.mcpRelayFetch }),

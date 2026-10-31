@@ -84,6 +84,101 @@ async function fixture(
   return { relay, calls, controller, headers };
 }
 
+async function connectProxy(refuse = false) {
+  const connects: string[] = [];
+  const proxy = createServer();
+  proxy.on('connect', (request, client: Socket, head) => {
+    connects.push(request.url ?? '');
+    if (refuse) {
+      client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+      return;
+    }
+    const [host, port] = (request.url ?? '').split(':');
+    const upstream = createConnection(Number(port), host, () => {
+      client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      upstream.write(head);
+      upstream.pipe(client);
+      client.pipe(upstream);
+    });
+    upstream.on('error', () => client.destroy());
+    client.on('error', () => upstream.destroy());
+  });
+  await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+  cleanup.push(
+    () =>
+      new Promise<void>((resolve) => {
+        proxy.closeAllConnections();
+        proxy.close(() => resolve());
+      }),
+  );
+  const address = proxy.address();
+  assert.ok(address && typeof address !== 'string');
+  return { connects, url: `http://127.0.0.1:${address.port}` };
+}
+
+describe('host MCP credential relay upstream proxy', () => {
+  it('tunnels the upstream request through the configured proxy', async () => {
+    const proxy = await connectProxy();
+    const test = await fixture(
+      (_request, response) => response.end('via proxy'),
+      { upstreamProxy: { https: proxy.url } },
+    );
+    const response = await fetch(test.relay.connection.url, {
+      method: 'POST',
+      headers: test.headers,
+      body: '{}',
+    });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'via proxy');
+    assert.equal(proxy.connects.length, 1);
+    assert.match(proxy.connects[0]!, /^127\.0\.0\.1:\d+$/);
+    assert.equal(test.calls[0]!.body, '{}');
+    assert.equal(
+      test.calls[0]!.headers.authorization,
+      'Bearer synthetic-host-key',
+    );
+  });
+
+  it('connects directly when the upstream host matches no_proxy', async () => {
+    const proxy = await connectProxy();
+    const test = await fixture(undefined, {
+      upstreamProxy: { https: proxy.url, noProxy: 'example.com,127.0.0.1' },
+    });
+    const response = await fetch(test.relay.connection.url, {
+      headers: test.headers,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(test.calls.length, 1);
+    assert.deepEqual(proxy.connects, []);
+  });
+
+  it('connects directly without a proxy', async () => {
+    const test = await fixture();
+    const response = await fetch(test.relay.connection.url, {
+      headers: test.headers,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(test.calls.length, 1);
+  });
+
+  for (const mode of ['unreachable', 'refused'] as const)
+    it(`returns 502 and counts an error when the proxy is ${mode}`, async () => {
+      const proxy = mode === 'refused' ? await connectProxy(true) : undefined;
+      const test = await fixture(undefined, {
+        upstreamProxy: {
+          https: proxy?.url ?? 'http://127.0.0.1:1/secret-proxy-path',
+        },
+      });
+      const response = await fetch(test.relay.connection.url, {
+        headers: test.headers,
+      });
+      assert.equal(response.status, 502);
+      assert.equal(await response.text(), '');
+      assert.equal(test.calls.length, 0);
+      assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    });
+});
+
 describe('host MCP credential relay', () => {
   it('observes tool calls and malformed bodies without blocking or changing them', async () => {
     const test = await fixture((_request, response) =>

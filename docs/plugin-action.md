@@ -325,7 +325,9 @@ those services from the container. Docker Desktop supplies its host DNS and
 the relay binds loopback. With `runtime.network: host`, both the listener and
 client URL use loopback.
 Forge appends the relay host to `NO_PROXY` and `no_proxy`, preserving existing
-entries. The relay does not restrict general network egress: the selected Docker
+entries. The relay's own upstream connection tunnels through the runtime's
+`https` proxy (`FORGE_HTTPS_PROXY`) unless the upstream host matches `no_proxy`
+(`FORGE_NO_PROXY`), and connects directly without one. The relay does not restrict general network egress: the selected Docker
 network and other proxy settings stay unchanged. Agents can still browse docs
 and use unauthenticated CLIs and tools; only the plugin key moves to the host.
 A local Docker daemon

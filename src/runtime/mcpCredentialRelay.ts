@@ -8,6 +8,10 @@ import {
   type McpToolCallCounts,
   mcpToolCallNames,
 } from './mcpToolCallCounts.ts';
+import {
+  createProxiedFetch,
+  type McpRelayUpstreamProxy,
+} from './mcpUpstreamProxy.ts';
 
 export interface McpCredentialRelayLimits {
   readonly requestBytes: number;
@@ -91,6 +95,8 @@ export async function startMcpCredentialRelay(input: {
     expire: () => void,
     milliseconds: number,
   ) => () => void;
+  /** Tunnels the upstream connection through this proxy unless `noProxy` matches. */
+  readonly upstreamProxy?: McpRelayUpstreamProxy;
   readonly fetch?: typeof globalThis.fetch;
 }): Promise<McpCredentialRelay> {
   input.signal.throwIfAborted();
@@ -104,6 +110,11 @@ export async function startMcpCredentialRelay(input: {
       timer.unref();
       return () => clearTimeout(timer);
     });
+  const upstreamFetch =
+    input.fetch ??
+    (input.upstreamProxy
+      ? createProxiedFetch(input.upstreamProxy)
+      : globalThis.fetch);
   const token = randomBytes(32).toString('hex');
   const expectedAuthorization = Buffer.from(`Bearer ${token}`);
   const shutdown = new AbortController();
@@ -212,7 +223,7 @@ export async function startMcpCredentialRelay(input: {
           }
           headers.set('Authorization', `Bearer ${input.credential}`);
           const upstream = await awaitRelayOperation(
-            (input.fetch ?? globalThis.fetch)(input.upstreamUrl, {
+            upstreamFetch(input.upstreamUrl, {
               method: request.method!,
               headers,
               ...(bytes > 0 ? { body } : {}),
