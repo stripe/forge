@@ -322,6 +322,7 @@ export function createCodexAdapter(
                       ? {
                           input_tokens: 0,
                           cached_input_tokens: 0,
+                          cache_write_input_tokens: 0,
                           output_tokens: 0,
                           reasoning_tokens: 0,
                         }
@@ -369,13 +370,14 @@ function invocationUsage(
   const delta = (key: keyof AgentTokenUsage): number | null => {
     const total = current[key];
     const baseline = previous?.[key];
-    return total === null || baseline == null || total < baseline
+    return total == null || baseline == null || total < baseline
       ? null
       : total - baseline;
   };
   return {
     input_tokens: delta('input_tokens'),
     cached_input_tokens: delta('cached_input_tokens'),
+    cache_write_input_tokens: delta('cache_write_input_tokens'),
     output_tokens: delta('output_tokens'),
     reasoning_tokens: delta('reasoning_tokens'),
   };

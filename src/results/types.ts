@@ -366,7 +366,10 @@ interface RunResultCommon {
     provider: string;
     model: string;
     session_id: string | null;
+    /** Harness-reported cost, independent of Forge's list-price estimate. */
     cost_usd: number | null;
+    estimated_cost_usd?: number | null;
+    pricing_version?: string;
     usage?: AgentTokenUsage;
   };
   /** Built-in plugin receipts in setup order; absence means not recorded. */

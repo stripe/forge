@@ -736,6 +736,14 @@ export async function runExperiment(
                     plugin_installations:
                       inspected.artifact.plugin_installations,
                   }),
+              ...(effective.state === 'completed' &&
+              inspected.agentCost !== undefined
+                ? {
+                    agent_estimated_cost_usd:
+                      inspected.agentCost.estimated_cost_usd,
+                    agent_pricing_version: inspected.agentCost.pricing_version,
+                  }
+                : {}),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -776,6 +784,7 @@ interface AttemptInspection {
   evaluation: ExperimentRunReportEvaluationV1 | null;
   usage?: AgentTokenUsage;
   rateLimitWaitMs?: number;
+  agentCost?: { estimated_cost_usd: number | null; pricing_version: string };
 }
 interface CachedInspection {
   identity: string;
@@ -836,6 +845,15 @@ async function inspectAttempt(
             rateLimitWaitMs:
               completed.result.completion_call_totals.rate_limit_wait_ms,
           }),
+      ...(completed.result.agent.estimated_cost_usd !== undefined &&
+      completed.result.agent.pricing_version !== undefined
+        ? {
+            agentCost: {
+              estimated_cost_usd: completed.result.agent.estimated_cost_usd,
+              pricing_version: completed.result.agent.pricing_version,
+            },
+          }
+        : {}),
       artifact: {
         ...(warnings.length ? { warnings } : {}),
         location,

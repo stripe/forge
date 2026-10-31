@@ -2539,3 +2539,35 @@ it('reads old results without usage and round-trips strict nullable agent token 
       parseRunResult({ ...result, agent: { ...result.agent, usage: invalid } }),
     );
 });
+
+it('reads old results without an estimate and requires paired bounded cost/version fields', () => {
+  const DIGEST = `sha256:${'a'.repeat(64)}`;
+  const old = resultFor([]);
+  assert.equal(parseRunResult(old).agent.estimated_cost_usd, undefined);
+  assert.equal(parseRunResult(old).agent.pricing_version, undefined);
+  const agent = {
+    ...old.agent,
+    estimated_cost_usd: 1.25,
+    pricing_version: DIGEST,
+  };
+  const parsed = parseRunResult(
+    JSON.parse(serializeCanonicalJson({ ...old, agent })),
+  );
+  assert.equal(parsed.agent.estimated_cost_usd, 1.25);
+  assert.equal(parsed.agent.pricing_version, DIGEST);
+  assert.equal(parsed.agent.cost_usd, old.agent.cost_usd);
+  assert.equal(
+    parseRunResult({ ...old, agent: { ...agent, estimated_cost_usd: null } })
+      .agent.estimated_cost_usd,
+    null,
+  );
+  for (const invalid of [
+    { ...old.agent, estimated_cost_usd: 1 },
+    { ...old.agent, pricing_version: DIGEST },
+    { ...agent, estimated_cost_usd: -1 },
+    { ...agent, estimated_cost_usd: Infinity },
+    { ...agent, pricing_version: 'unknown' },
+    { ...agent, unknown_cost: 1 },
+  ])
+    assert.throws(() => parseRunResult({ ...old, agent: invalid }));
+});

@@ -6,6 +6,9 @@ export const agentTokenUsageSchema = z
   .object({
     input_tokens: tokens,
     cached_input_tokens: tokens,
+    cache_write_input_tokens: tokens.optional(),
+    cache_write_5m_input_tokens: tokens.optional(),
+    cache_write_1h_input_tokens: tokens.optional(),
     output_tokens: tokens,
     reasoning_tokens: tokens,
   })
@@ -41,17 +44,24 @@ export function sumAgentTokenUsage(
   usages: readonly (AgentTokenUsage | undefined)[],
 ): AgentTokenUsage | undefined {
   if (!usages.some((usage) => usage !== undefined)) return undefined;
-  const total: Record<keyof AgentTokenUsage, number | null> = {
+  const total: Partial<Record<keyof AgentTokenUsage, number | null>> = {
     input_tokens: 0,
     cached_input_tokens: 0,
     output_tokens: 0,
     reasoning_tokens: 0,
   };
+  for (const key of [
+    'cache_write_input_tokens',
+    'cache_write_5m_input_tokens',
+    'cache_write_1h_input_tokens',
+  ] as const) {
+    if (usages.some((usage) => usage?.[key] !== undefined)) total[key] = 0;
+  }
   for (const usage of usages) {
     for (const key of Object.keys(total) as (keyof AgentTokenUsage)[]) {
       const value = usage?.[key];
       const previous = total[key];
-      const sum = value == null || previous === null ? null : previous + value;
+      const sum = value == null || previous == null ? null : previous + value;
       total[key] = sum !== null && Number.isSafeInteger(sum) ? sum : null;
     }
   }

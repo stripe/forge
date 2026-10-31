@@ -776,13 +776,27 @@ jq '.cases[] | {headline, mean_confidence, expected_score, case_id, treatment, a
 ```
 
 When an adapter reports tokens, `result.json` includes `agent.usage`. Its
-input, cached input, output, and reasoning counters are nullable; an unknown
-counter is not zero. Experiment reports retain each completed row's
+input, cached input, cache-write, output, and reasoning counters are nullable;
+input includes cache reads and writes, and output includes reasoning. Claude Code
+also retains native cache-write TTL counts when available. An unknown counter
+is not zero. Experiment reports retain each completed row's
 `agent_usage` and sum it in `agent_usage_by_model`, grouped by adapter, provider,
 and model across cases and treatments. These groups count evals with usage.
 A counter stays unknown if any contributing eval lacks it. Old results and
 reports without these fields still parse. Host role-player and judge tokens
 remain separate in `completion_calls`.
+
+New evals record `agent.estimated_cost_usd` and `agent.pricing_version` alongside
+usage. This is an agent-only estimate at the bundled public list prices;
+`agent.cost_usd` keeps the independent harness-reported cost. Unsupported models
+or incomplete required counters give a null estimate. Reports preserve the saved
+estimate and version in `runs[].agent_estimated_cost_usd` and
+`agent_pricing_version`, and sum estimates in `agent_cost_by_model` and
+`agent_cost_by_arm` (treatment plus complete agent configuration). Each sum has
+`priced_evaluations` out of `evaluations`; read a partial sum as “priced N of M
+evals,” not the full cost. A zero-cost eval counts as priced; no priced evals
+gives a null sum. Old runs are not backfilled. Resume and regrade preserve the
+saved estimates. See the [pricing policy and limitations](docs/architecture.md#agent-cost-estimates).
 
 `coverage` is completed selections divided by all saved selections.
 `pass_rate` is passed evaluations divided by completed evaluations without

@@ -792,8 +792,24 @@ const runResultFields = {
       session_id: z.string().max(4096).nullable(),
       cost_usd: z.number().finite().nonnegative().nullable(),
       usage: agentTokenUsageSchema.optional(),
+      estimated_cost_usd: z
+        .number()
+        .finite()
+        .nonnegative()
+        .nullable()
+        .optional(),
+      pricing_version: z
+        .string()
+        .regex(/^sha256:[0-9a-f]{64}$/)
+        .optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (agent) =>
+        (agent.estimated_cost_usd === undefined) ===
+        (agent.pricing_version === undefined),
+      'Agent cost estimates require their pricing version.',
+    ),
   completion_call_totals: z
     .object({
       calls: z.number().int().nonnegative().safe(),

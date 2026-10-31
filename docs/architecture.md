@@ -737,7 +737,12 @@ optional object; old turns may omit it.
 
 `AgentTurn.usage` optionally supplies `AgentTokenUsage`: strict nonnegative safe
 integer or null counters named `input_tokens`, `cached_input_tokens`,
-`output_tokens`, and `reasoning_tokens`. Input includes cache reads and writes;
+`output_tokens`, and `reasoning_tokens`, plus optional nullable
+`cache_write_input_tokens`. Claude Code also preserves optional nullable
+`cache_write_5m_input_tokens` and `cache_write_1h_input_tokens` from native
+`usage.cache_creation`. Absent TTL breakdowns remain absent; a missing counter
+in a contributing turn makes an aggregated breakdown unknown. Older results
+may omit all cache-write fields. Input includes cache reads and writes;
 reasoning is a subset of output. Codex's stream parser returns cumulative thread
 snapshots. Its agent session subtracts the prior snapshot to report each invocation;
 a new thread starts from zero. An unknown counter or baseline, or a counter reset,
@@ -771,6 +776,45 @@ by adapter, provider, and model, with eval counts and counts with usage; missing
 counters propagate null. Only latest completed effective outcomes contribute.
 Regrade reports keep source agent usage. Results and reports without usage
 remain valid. Host completion usage stays in `completion_calls`.
+
+#### Agent cost estimates
+
+Every new result records nullable `agent.estimated_cost_usd` and
+`agent.pricing_version`, the SHA-256 of the canonical bundled
+[price table](https://github.com/stripe/forge/blob/main/src/pricing/prices.json), including its source and policy metadata.
+`agent.cost_usd` remains the independent harness-reported cost. Estimates use the
+selected model's exact table key and public standard list rates per million tokens:
+subtract cache reads and writes from inclusive input, then price uncached input,
+reads, writes, and inclusive output separately. Reasoning is not charged again.
+Unknown models, missing required counters, inconsistent TTL counts, negative
+uncached input, or non-finite costs give null without affecting evaluation.
+When the source lists no separate write rate, writes use input price and their
+count is unnecessary for pricing. For models charging separately for writes,
+an unknown write count leaves cost unknown.
+
+Claude's native `cache_creation.ephemeral_5m_input_tokens` and
+`ephemeral_1h_input_tokens` receive their separate rates when available. Otherwise
+writes use the shortest TTL rate. A supplied but incomplete or inconsistent
+breakdown is unpriced. Codex reports aggregate writes, so GPT-6.1 Sol uses the
+30-minute rate and can undercount 12-hour writes. OpenCode reports aggregate
+`tokens.cache.read` and `write` without TTL detail. The table records exact model
+mappings and source URLs; the Argon alias uses the underlying Google model's list
+prices. Estimates exclude tiered and long-context rates, batch discounts, cache
+storage duration, fees, tools, subagents outside the reported usage, Ava, and
+judging. Prices are static snapshots, never fetched during execution; date-limited
+rates remain in use until the table is updated.
+
+Reports retain the saved estimate and version on completed run rows as
+`agent_estimated_cost_usd` and `agent_pricing_version`. `agent_cost_by_model`
+groups by adapter/provider/model; `agent_cost_by_arm` groups by treatment and
+complete agent configuration across cases. Both sum known estimates and expose
+`priced_evaluations` out of completed `evaluations`, including old and unpriced
+runs in the denominator. Zero is a known estimate; no priced evals or overflow
+gives a null sum. Pending and errored selections do not contribute. Parsing
+recomputes and validates the aggregates from rows. Only latest completed effective
+outcomes contribute; failed attempts are not a total-spend ledger. Resume and
+regrade retain original estimates and versions without repricing. Old results
+and reports may omit all cost fields; no historical backfill is performed.
 
 One-shot and multi-turn interaction are described separately below.
 

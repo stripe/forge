@@ -112,6 +112,11 @@ import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import type { PluginSetupStepV1 } from '../model/types.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import {
+  agentPrices,
+  agentPricingVersion,
+  estimateAgentCost,
+} from '../pricing/index.ts';
+import {
   type ArtifactDescriptorV1,
   type AtifEvidenceProvenanceV1,
   type AvaDecisionV1,
@@ -2629,6 +2634,13 @@ function buildResult(input: {
       model: input.input.plan.agent.model,
       session_id: input.interaction.sessionId,
       cost_usd: input.interaction.totalCostUsd,
+      estimated_cost_usd: estimateAgentCost(
+        input.interaction.usage,
+        Object.hasOwn(agentPrices, input.input.plan.agent.model)
+          ? agentPrices[input.input.plan.agent.model]
+          : undefined,
+      ),
+      pricing_version: agentPricingVersion,
       ...(input.interaction.usage === undefined
         ? {}
         : { usage: input.interaction.usage }),

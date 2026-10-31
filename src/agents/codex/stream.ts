@@ -529,6 +529,8 @@ function validateUsage(value: unknown): AgentTokenUsage {
     return {
       input_tokens: usage.input_tokens as number,
       cached_input_tokens: usage.cached_input_tokens as number,
+      cache_write_input_tokens:
+        (usage.cache_write_input_tokens as number | undefined) ?? null,
       output_tokens: usage.output_tokens as number,
       reasoning_tokens:
         (usage.reasoning_output_tokens as number | undefined) ?? null,

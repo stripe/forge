@@ -132,7 +132,27 @@ export function parseClaudeStream(stdout: string): AgentTurn {
 }
 
 function claudeUsage(native: Record<string, unknown>): AgentTokenUsage {
+  const creation = native.cache_creation;
+  const split =
+    creation !== null &&
+    typeof creation === 'object' &&
+    !Array.isArray(creation)
+      ? (creation as Record<string, unknown>)
+      : {};
   return {
+    ...(creation === undefined
+      ? {}
+      : {
+          cache_write_5m_input_tokens: sumObservedTokens(
+            split.ephemeral_5m_input_tokens,
+          ),
+          cache_write_1h_input_tokens: sumObservedTokens(
+            split.ephemeral_1h_input_tokens,
+          ),
+        }),
+    cache_write_input_tokens: sumObservedTokens(
+      native.cache_creation_input_tokens,
+    ),
     input_tokens: sumObservedTokens(
       native.input_tokens,
       native.cache_read_input_tokens,

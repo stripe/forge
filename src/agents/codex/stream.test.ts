@@ -223,7 +223,11 @@ describe('Codex exec stream', () => {
       {
         text: 'Repo contains docs and examples.',
         sessionId: SESSION_ID,
-        usage: { ...completed.usage, reasoning_tokens: 0 },
+        usage: {
+          ...completed.usage,
+          cache_write_input_tokens: null,
+          reasoning_tokens: 0,
+        },
         toolCalls: [
           {
             id: 'item_1',
@@ -273,7 +277,11 @@ describe('Codex exec stream', () => {
       {
         text: 'I will inspect the project.\n\nFinished.',
         sessionId: SESSION_ID,
-        usage: { ...completed.usage, reasoning_tokens: null },
+        usage: {
+          ...completed.usage,
+          cache_write_input_tokens: null,
+          reasoning_tokens: null,
+        },
         toolCalls: [
           {
             id: 'item_1',
@@ -326,6 +334,7 @@ describe('Codex exec stream', () => {
       usage: {
         input_tokens: 10,
         cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
         output_tokens: 5,
         reasoning_tokens: 0,
       },
@@ -337,6 +346,7 @@ describe('Codex exec stream', () => {
       usage: {
         input_tokens: 20,
         cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
         output_tokens: 10,
         reasoning_tokens: 0,
       },
@@ -419,6 +429,7 @@ describe('Codex exec stream', () => {
         usage: {
           input_tokens: 50,
           cached_input_tokens: 0,
+          cache_write_input_tokens: 0,
           output_tokens: 25,
           reasoning_tokens: 0,
         },
@@ -475,6 +486,7 @@ describe('Codex exec stream', () => {
       usage: {
         input_tokens: 24763,
         cached_input_tokens: 24448,
+        cache_write_input_tokens: null,
         output_tokens: 122,
         reasoning_tokens: null,
       },
@@ -509,6 +521,7 @@ describe('Codex exec stream', () => {
         usage: {
           input_tokens: 24763,
           cached_input_tokens: 24448,
+          cache_write_input_tokens: null,
           output_tokens: 122,
           reasoning_tokens: null,
         },
