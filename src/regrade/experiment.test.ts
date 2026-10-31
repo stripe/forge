@@ -383,6 +383,38 @@ describe('regradeExperimentRun', () => {
     assert.equal(report.runs[0]!.state, 'pending');
   });
 
+  it('records the judge mode and refuses to mix modes in one output', async () => {
+    const root = await temporaryRoot('forge-regrade-exp-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade');
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    const first = await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      dependencies([ORIGINAL_JUDGMENT]).dependencies,
+    );
+    assert.equal(first.judge_mode, 'standard');
+    const saved = (await fs.readdir(path.join(output, 'runs')))[0]!;
+    assert.equal(
+      JSON.parse(await fs.readFile(path.join(output, 'runs', saved), 'utf8'))
+        .judge_mode,
+      'standard',
+    );
+    const other = dependencies([ORIGINAL_JUDGMENT]);
+    const summary = await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge,
+        judgeMode: 'verbalized',
+        output,
+      },
+      other.dependencies,
+    );
+    assert.equal(other.scripted.calls.length, 0);
+    assert.equal(summary.judge_mode, 'verbalized');
+    assert.match(summary.failed[0]!.message, /different judge/);
+  });
+
   it('rejects an output inside the source experiment run before any work', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
     roots.push(root);

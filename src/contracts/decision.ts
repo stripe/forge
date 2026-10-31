@@ -11,6 +11,16 @@ export interface ChoiceQuestion<Option extends string = string> {
 export type DecisionQuestion = ChoiceQuestion;
 
 /**
+ * One option's verbalized assessment: the strongest evidence for and against
+ * it, then the probability stated for it before any option is chosen.
+ */
+export interface ChoiceAssessment {
+  readonly for: string;
+  readonly against: string;
+  readonly probability: number;
+}
+
+/**
  * One Choice answer in the SystemOne shape (`type`, `choice`, `probabilities`,
  * `confidence`), so decision-model and LLM-backed implementations are
  * interchangeable. Decision models return no explanation.
@@ -26,6 +36,12 @@ export interface ChoiceAnswer<Option extends string = string> {
    */
   readonly confidence: number;
   readonly explanation?: string;
+  /**
+   * Verbalized assessments, one per option, from judges asked to argue each
+   * option before deciding. `probabilities` is their normalized distribution.
+   * Decision models omit them.
+   */
+  readonly assessments?: Readonly<Record<Option, ChoiceAssessment>>;
 }
 
 export type DecisionAnswer = ChoiceAnswer;

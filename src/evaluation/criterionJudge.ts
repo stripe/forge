@@ -162,6 +162,8 @@ export function criterionJudgePromptOverheadBytes(input: {
     evidenceWarnings: LONGEST_CAPTURE_STATUS_WARNINGS,
   };
   // The decision wrapper adds fixed question text after the rendered state.
+  // Run-time judging is standard; a verbalized regrade reuses this selected
+  // evidence, and its slightly longer wrapper fails fast at the prompt limit.
   const decisionBytes = Buffer.byteLength(
     buildDecisionPrompt('', CRITERION_DECISION_QUESTIONS),
     'utf8',

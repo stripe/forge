@@ -1000,6 +1000,16 @@ reuses regrades for the same judge and committed result, so an interrupted
 regrade can be continued. An output that already holds regrades from another
 judge reports those runs as failed instead of mixing judges.
 
+`--judge-mode verbalized` asks the judge to argue every option before
+deciding: for each of `met`, `not_met`, and `insufficient_evidence` it gives the
+strongest evidence for and against, then a probability. The saved decision
+keeps these `assessments`, and its `probabilities` are their normalized
+distribution; the choice and score rules are unchanged. The default is
+`standard`. Each regrade and `regrade.json` record `judge_mode`, and a mode
+counts as part of the judge, so modes are not mixed in one output. The
+verbalized wrapper is 108 bytes longer than the standard one; a saved run
+whose evidence sits within that margin of the prompt limit fails fast.
+
 Deterministic file checks are not re-run, because the workspace is gone after
 a run; each regrade keeps the run's original check results. The judge sees
 only the bounded workspace excerpts captured at run time. Runs without judging

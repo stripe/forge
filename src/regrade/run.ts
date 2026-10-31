@@ -7,6 +7,7 @@ import type { CredentialResolver } from '../contracts/credentials.ts';
 import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
 import { createCompletionDecisionModel } from '../evaluation/completionDecisionModel.ts';
 import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
+import type { DecisionJudgeMode } from '../evaluation/decision.ts';
 import {
   type CriterionJudgeExecutionOptions,
   type CriterionJudgeInput,
@@ -42,6 +43,8 @@ export interface RegradeResultV1 {
   readonly run_id: string;
   /** The judge used for this regrade. */
   readonly judge: ModelRefV1;
+  /** How the judge answered; absent in older regrades, which were `standard`. */
+  readonly judge_mode?: DecisionJudgeMode;
   /** Digests of the exact saved inputs, so a regrade is tied to one committed run. */
   readonly source: {
     readonly result_sha256: string;
@@ -120,6 +123,8 @@ export async function regradeCompletedRun(
   input: {
     readonly location: string;
     readonly judge: ModelRefV1;
+    /** Default `standard`; `verbalized` records per-option assessments. */
+    readonly judgeMode?: DecisionJudgeMode;
     readonly signal?: AbortSignal;
     readonly now?: () => Date;
     /** Test seam for the judge's fixed retry waits, as in execution. */
@@ -182,6 +187,7 @@ export async function regradeVerifiedRun(
     { ...judgeInput, signal },
     createCompletionDecisionModel({
       model: input.judge,
+      mode: input.judgeMode ?? 'standard',
       invoke: (request) => completions.invoke('judge', request, request.signal),
     }),
     {
@@ -203,6 +209,7 @@ export async function regradeVerifiedRun(
     format: REGRADE_RESULT_FORMAT,
     run_id: result.run_id,
     judge: Object.freeze({ ...input.judge }),
+    judge_mode: input.judgeMode ?? 'standard',
     source: Object.freeze({
       result_sha256: sha256Digest(
         await fs.readFile(path.join(completed.location, 'result.json')),

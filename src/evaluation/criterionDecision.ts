@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { ChoiceAnswer, ChoiceQuestion } from '../contracts/decision.ts';
-import { choiceDistributionIsValid } from './decision.ts';
+import {
+  choiceDistributionIsValid,
+  DECISION_PROBABILITY_TOLERANCE,
+  MAX_ASSESSMENT_ARGUMENT_CHARACTERS,
+} from './decision.ts';
 
 export const CRITERION_DECISION_OPTIONS = [
   'met',
@@ -23,10 +27,14 @@ export interface CriterionDecisionThresholdsV1 {
 }
 export type CriterionDecisionV1 = Omit<
   ChoiceAnswer<CriterionDecisionOption>,
-  'explanation'
+  'explanation' | 'assessments'
 > & {
   readonly thresholded_outcome: CriterionDecisionOption;
   readonly thresholds: CriterionDecisionThresholdsV1;
+  /** Present only for verbalized judges; see `ChoiceAnswer.assessments`. */
+  readonly assessments?:
+    | ChoiceAnswer<CriterionDecisionOption>['assessments']
+    | undefined;
 };
 
 export function criterionDecisionOutcome(
@@ -69,11 +77,39 @@ export const criterionDecisionSchema = z
     thresholds: z
       .object({ minimum_probability: z.number().finite().min(0).max(1) })
       .strict(),
+    assessments: z
+      .object(
+        Object.fromEntries(
+          CRITERION_DECISION_OPTIONS.map((option) => [
+            option,
+            z
+              .object({
+                for: z.string().min(1).max(MAX_ASSESSMENT_ARGUMENT_CHARACTERS),
+                against: z
+                  .string()
+                  .min(1)
+                  .max(MAX_ASSESSMENT_ARGUMENT_CHARACTERS),
+                probability: z.number().finite().min(0).max(1),
+              })
+              .strict(),
+          ]),
+        ) as Record<
+          CriterionDecisionOption,
+          z.ZodObject<{
+            for: z.ZodString;
+            against: z.ZodString;
+            probability: z.ZodNumber;
+          }>
+        >,
+      )
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((decision, context) => {
     if (
       !choiceDistributionIsValid(decision) ||
+      !assessmentsMatchDistribution(decision) ||
       decision.thresholded_outcome !==
         criterionDecisionOutcome(decision, decision.thresholds)
     ) {
@@ -84,3 +120,30 @@ export const criterionDecisionSchema = z
       });
     }
   });
+
+/** Saved assessments must normalize to the saved distribution. */
+function assessmentsMatchDistribution(decision: {
+  readonly probabilities: Readonly<Record<CriterionDecisionOption, number>>;
+  readonly assessments?:
+    | Readonly<
+        Record<CriterionDecisionOption, { readonly probability: number }>
+      >
+    | undefined;
+}): boolean {
+  if (decision.assessments === undefined) return true;
+  const assessments = decision.assessments;
+  const sum = CRITERION_DECISION_OPTIONS.reduce(
+    (total, option) => total + assessments[option].probability,
+    0,
+  );
+  return (
+    sum > 0 &&
+    CRITERION_DECISION_OPTIONS.every(
+      (option) =>
+        Math.abs(
+          assessments[option].probability / sum -
+            decision.probabilities[option],
+        ) <= DECISION_PROBABILITY_TOLERANCE,
+    )
+  );
+}

@@ -4,6 +4,7 @@ import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import type { DecisionModel } from '../contracts/decision.ts';
 import { parseEvaluationResult } from '../results/parse.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
+import { createCompletionDecisionModel } from './completionDecisionModel.ts';
 import { criterionDecisionOutcome } from './criterionDecision.ts';
 import { boundCriterionEvidenceWarnings } from './criterionEvidence.ts';
 import {
@@ -335,6 +336,48 @@ describe('criterion decisions', () => {
       { waitBeforeRetry: async () => {} },
     );
     assert.equal(blank!.error?.reason, 'explanation');
+  });
+
+  it('persists verbalized assessments and rejects saved ones that disagree with the distribution', async () => {
+    const assess = (probability: number) => ({
+      for: 'Evidence for.',
+      against: 'Evidence against.',
+      probability,
+    });
+    const [result] = await judgeCriteria(
+      { transcript, criteria: ['Answers.'] },
+      createCompletionDecisionModel({
+        mode: 'verbalized',
+        invoke: async () =>
+          JSON.stringify({
+            answers: {
+              criterion: {
+                type: 'choice',
+                assessments: {
+                  met: assess(0.7),
+                  not_met: assess(0.2),
+                  insufficient_evidence: assess(0.1),
+                },
+                choice: 'met',
+                explanation: 'Mostly met.',
+              },
+            },
+          }),
+      }),
+      { waitBeforeRetry: async () => {} },
+    );
+    assert.equal(result!.passed, true);
+    assert.equal(result!.decision?.assessments?.met.probability, 0.7);
+    assert.ok(Math.abs(result!.decision!.probabilities.met - 0.7) < 1e-9);
+    const evaluation = scoreEvaluation([result!], [], []);
+    assert.doesNotThrow(() => parseEvaluationResult(evaluation));
+    const tampered = structuredClone(evaluation);
+    (
+      tampered.judging_criteria[0]!.decision!.assessments as {
+        met: { probability: number };
+      }
+    ).met.probability = 0.1;
+    assert.throws(() => parseEvaluationResult(tampered));
   });
 
   it('derives confidence as the maximum when an LLM answer omits it', () => {

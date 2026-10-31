@@ -1848,7 +1848,17 @@ separate certainty measure rather than recomputed. Answers without one, such
 as the LLM judge's, derive it as the largest probability; an out-of-range value
 is rejected with `probability_range`. Saved decisions use the same choice
 tolerance; their distributions must sum to 1 within 0.000001, and their
-confidence must lie in [0, 1]. Invalid answers use the
+confidence must lie in [0, 1].
+
+A completion-backed decision model can run in `verbalized` mode (regrade's
+`--judge-mode verbalized`). Its strict schema lists `assessments` before
+`choice`: one `{for, against, probability}` entry per option, so the model
+argues each option before committing. Per-option probabilities are stated
+independently and need not sum to 1; the answer's `probabilities` is their
+normalization, and the choice must be its maximum. Saved decisions keep the
+assessments, and parsing rejects saved assessments that do not normalize to
+the saved distribution. Decision models such as Jev omit them. Run-time
+judging stays `standard`. Invalid answers use the
 malformed-output retry budget and record a fixed rejection `reason`, without
 caller IDs, field paths, or received values.
 

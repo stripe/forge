@@ -20,6 +20,10 @@ import {
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
+import {
+  DECISION_JUDGE_MODES,
+  type DecisionJudgeMode,
+} from './evaluation/decision.ts';
 import { type executeEval, FORGE_VERSION } from './execution/index.ts';
 import {
   createExperimentCliOptions,
@@ -91,6 +95,7 @@ const HOST_CLI_OPTIONS = {
   'experiment-run': { type: 'string' },
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
+  'judge-mode': { type: 'string' },
   regrade: { type: 'string' },
   json: { type: 'boolean' },
   host: { type: 'boolean' },
@@ -120,7 +125,7 @@ const USAGE = `Usage:
   forge run --experiment <file> --resume <experiment-run-id> [run options]
   forge regrade diff --experiment-run <directory> --regrade <directory> [--json]
   forge status --experiment-run <directory> [--json]
-  forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--jobs <count>]
+  forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--judge-mode <mode>] [--jobs <count>]
 
 Selection options:
   --case <id>          Select an eval case
@@ -154,6 +159,8 @@ Regrade options:
   --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
   --judge-provider <id>         Completion provider for the new judge, such as anthropic
   --judge-model <id>            Judge model
+  --judge-mode <mode>           standard (default) or verbalized: argue each option
+                                for and against, with a probability for each
   --output <directory>          New directory for regrades and report.json, outside the source
   --jobs <count>                Maximum simultaneous run regrades (default: 1)
   --credential-env <reference>=<environment-name>
@@ -381,6 +388,7 @@ export async function runCli(
         'experiment-run',
         'judge-provider',
         'judge-model',
+        'judge-mode',
         'output',
         'jobs',
         'credential-env',
@@ -944,6 +952,15 @@ async function runRegradeCommand(
     provider: required('judge-provider'),
     model: required('judge-model'),
   };
+  const judgeModeValue = values['judge-mode'];
+  if (
+    judgeModeValue !== undefined &&
+    !(DECISION_JUDGE_MODES as readonly unknown[]).includes(judgeModeValue)
+  )
+    throw new CliUsageError(
+      `--judge-mode must be one of: ${DECISION_JUDGE_MODES.join(', ')}.`,
+    );
+  const judgeMode = (judgeModeValue ?? 'standard') as DecisionJudgeMode;
   const jobsValue = values.jobs;
   const jobs = jobsValue === undefined ? 1 : Number(jobsValue);
   if (!Number.isSafeInteger(jobs) || jobs < 1)
@@ -967,6 +984,7 @@ async function runRegradeCommand(
     {
       experimentRun,
       judge,
+      judgeMode,
       output,
       jobs,
       ...(options.signal === undefined ? {} : { signal: options.signal }),

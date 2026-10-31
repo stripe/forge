@@ -3,6 +3,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import { defaultForgeEngine } from '../engine.ts';
+import {
+  DECISION_JUDGE_MODES,
+  type DecisionJudgeMode,
+} from '../evaluation/decision.ts';
 import { inspectExperimentRun } from '../experiment.ts';
 import { experimentRunIdSchema } from '../experimentModel.ts';
 import {
@@ -48,6 +52,7 @@ export interface RegradeExperimentSummaryV1 {
   readonly source_location: string;
   readonly output_location: string;
   readonly judge: ModelRefV1;
+  readonly judge_mode: DecisionJudgeMode;
   readonly regraded: number;
   /** Regrades already present for the same judge and committed result. */
   readonly reused: number;
@@ -88,6 +93,7 @@ export async function regradeExperimentRun(
   input: {
     readonly experimentRun: string;
     readonly judge: ModelRefV1;
+    readonly judgeMode?: DecisionJudgeMode;
     readonly output: string;
     readonly jobs?: number;
     readonly signal?: AbortSignal;
@@ -168,6 +174,8 @@ export async function regradeExperimentRun(
           existing.run_id !== runId ||
           existing.judge.provider !== input.judge.provider ||
           existing.judge.model !== input.judge.model ||
+          (existing.judge_mode ?? 'standard') !==
+            (input.judgeMode ?? 'standard') ||
           existing.source.result_sha256 !== resultSha256
         )
           throw new Error(
@@ -180,6 +188,9 @@ export async function regradeExperimentRun(
         {
           location,
           judge: input.judge,
+          ...(input.judgeMode === undefined
+            ? {}
+            : { judgeMode: input.judgeMode }),
           signal,
           now,
           ...(input.waitBeforeJudgeRetry === undefined
@@ -304,6 +315,7 @@ export async function regradeExperimentRun(
     source_location: source,
     output_location: output,
     judge: Object.freeze({ ...input.judge }),
+    judge_mode: input.judgeMode ?? 'standard',
     regraded: count('regraded'),
     reused: count('reused'),
     not_judged: count('not_judged'),
@@ -371,6 +383,11 @@ export function parseSavedRegrade(body: Buffer): RegradeResultV1 {
     !savedRegradeJudgeSchema.safeParse(
       'judge' in value ? value.judge : undefined,
     ).success
+  )
+    throw new RegradeReadError('invalid_judge');
+  if (
+    'judge_mode' in value &&
+    !(DECISION_JUDGE_MODES as readonly unknown[]).includes(value.judge_mode)
   )
     throw new RegradeReadError('invalid_judge');
   if (

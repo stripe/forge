@@ -109,6 +109,24 @@ describe('forge regrade', () => {
     ]);
     assert.equal(missing.code, 2);
     assert.match(missing.stderr, /regrade requires --judge-model/);
+    const mode = await invoke([
+      'regrade',
+      '--experiment-run',
+      '/nonexistent',
+      '--judge-provider',
+      'anthropic',
+      '--judge-model',
+      'claude-opus-4-6',
+      '--judge-mode',
+      'sampled',
+      '--output',
+      '/tmp/x',
+    ]);
+    assert.equal(mode.code, 2);
+    assert.match(
+      mode.stderr,
+      /--judge-mode must be one of: standard, verbalized/,
+    );
     const extra = await invoke([
       'regrade',
       '--experiment',
