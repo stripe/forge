@@ -77,7 +77,10 @@ describe('plugin installation receipts', () => {
         ],
       },
       { ...relocated, mcp_connections: [{ ...stripe, extra: true }] },
-      { ...relocated, mcp_connections: [{ name: 'Bad Name', url: stripe.url }] },
+      {
+        ...relocated,
+        mcp_connections: [{ name: 'Bad Name', url: stripe.url }],
+      },
       { ...relocated, mcp_connections: new Array(1) },
       {
         ...relocated,

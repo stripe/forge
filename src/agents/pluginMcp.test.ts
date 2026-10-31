@@ -153,7 +153,9 @@ describe('plugin MCP bearer authentication', () => {
           'utf8',
         ),
       ),
-      { mcpServers: { stripe: { type: 'http', url: 'https://mcp.stripe.com' } } },
+      {
+        mcpServers: { stripe: { type: 'http', url: 'https://mcp.stripe.com' } },
+      },
     );
     await writeRelocatedPluginMcp(state.mutable, relocation);
     assert.deepEqual(

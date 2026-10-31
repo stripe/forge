@@ -4,7 +4,10 @@ import { parse } from 'toml';
 
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import { isSha256Digest } from '../../model/hashes.ts';
-import { isSafeMcpEndpointUrl, isSafeSimpleIdentifier } from '../../model/paths.ts';
+import {
+  isSafeMcpEndpointUrl,
+  isSafeSimpleIdentifier,
+} from '../../model/paths.ts';
 import type {
   CodexMcpServerConfig,
   CodexMcpServerDeclarations,

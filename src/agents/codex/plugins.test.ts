@@ -224,19 +224,28 @@ describe('Codex native plugin installer', () => {
   it('fingerprints the original tree and records the moved connection in the receipt', async () => {
     const mcpServers = ['stripe'] as const;
     const receipts = [];
-    for (const url of ['https://first.example.test', 'https://second.example.test']) {
+    for (const url of [
+      'https://first.example.test',
+      'https://second.example.test',
+    ]) {
       const bundle = JSON.stringify({
         mcpServers: { stripe: { type: 'http', url } },
       });
       const test = fixture({ mcpServers });
-      await test.state.mutable.writeFile(`${cache}/.mcp.json`, Buffer.from(bundle));
+      await test.state.mutable.writeFile(
+        `${cache}/.mcp.json`,
+        Buffer.from(bundle),
+      );
       const receipt = await test.install();
       assert.equal(receipt.mcp_configuration, 'codex-user-config');
       assert.deepEqual(receipt.mcp_connections, [{ name: 'stripe', url }]);
       assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
       // The fingerprint covers the bundle as installed, before Forge's edit.
       const bare = fixture();
-      await bare.state.mutable.writeFile(`${cache}/.mcp.json`, Buffer.from(bundle));
+      await bare.state.mutable.writeFile(
+        `${cache}/.mcp.json`,
+        Buffer.from(bundle),
+      );
       assert.deepEqual(
         receipt.installed_tree,
         (await bare.install()).installed_tree,
@@ -248,7 +257,7 @@ describe('Codex native plugin installer', () => {
       receipts[1]!.installed_tree.sha256,
     );
     assert.equal(
-      Object.hasOwn((await fixture().install()), 'mcp_configuration'),
+      Object.hasOwn(await fixture().install(), 'mcp_configuration'),
       false,
     );
   });
@@ -257,17 +266,41 @@ describe('Codex native plugin installer', () => {
     const mcpServers = ['stripe'] as const;
     const bigUrl = `https://mcp.example.test/${'a'.repeat(4_000)}`;
     for (const [server, existing] of [
-      [{ type: 'http', url: 'https://mcp.stripe.com', enabled_tools: ['read'] }],
-      [{ type: 'http', url: 'https://mcp.stripe.com', disabled_tools: ['write'] }],
+      [
+        {
+          type: 'http',
+          url: 'https://mcp.stripe.com',
+          enabled_tools: ['read'],
+        },
+      ],
+      [
+        {
+          type: 'http',
+          url: 'https://mcp.stripe.com',
+          disabled_tools: ['write'],
+        },
+      ],
       [{ type: 'http', url: 'https://mcp.stripe.com', enabled: false }],
       [{ type: 'http', url: 'https://mcp.stripe.com', tool_timeout_sec: 5 }],
-      [{ type: 'http', url: 'https://mcp.stripe.com', http_headers: { 'X-API-Key': 'synthetic-secret' } }],
-      [{ type: 'http', url: 'https://mcp.stripe.com?api_key=synthetic-secret' }],
+      [
+        {
+          type: 'http',
+          url: 'https://mcp.stripe.com',
+          http_headers: { 'X-API-Key': 'synthetic-secret' },
+        },
+      ],
+      [
+        {
+          type: 'http',
+          url: 'https://mcp.stripe.com?api_key=synthetic-secret',
+        },
+      ],
       [
         { type: 'http', url: bigUrl },
         Array.from(
           { length: 256 },
-          (_, i) => `[mcp_servers.s${i}]\nurl = "${bigUrl}"\nbearer_token_env_var = "KEY"\n`,
+          (_, i) =>
+            `[mcp_servers.s${i}]\nurl = "${bigUrl}"\nbearer_token_env_var = "KEY"\n`,
         ).join(''),
       ],
       [
@@ -279,7 +312,9 @@ describe('Codex native plugin installer', () => {
         mcpServers,
         ...(existing === undefined ? {} : { extraConfig: existing }),
       });
-      const bundle = Buffer.from(JSON.stringify({ mcpServers: { stripe: server } }));
+      const bundle = Buffer.from(
+        JSON.stringify({ mcpServers: { stripe: server } }),
+      );
       await test.state.mutable.writeFile(`${cache}/.mcp.json`, bundle);
       await assert.rejects(test.install());
       assert.deepEqual(
@@ -290,7 +325,9 @@ describe('Codex native plugin installer', () => {
         await test.state.mutable.readFile('config.toml'),
       ).toString();
       assert.ok(
-        existing === undefined ? !config.includes('mcp_servers') : config.includes(existing.slice(0, 40)),
+        existing === undefined
+          ? !config.includes('mcp_servers')
+          : config.includes(existing.slice(0, 40)),
       );
     }
   });
