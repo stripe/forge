@@ -1041,7 +1041,9 @@ policy fixed by the Forge version. Setup installs the current marketplace entry,
 configures its existing MCP connection, and fingerprints the installation.
 The `setup.json` receipt records resolved native IDs, catalog commit, installed
 version, distribution path, available source commit, inspected policy exclusions,
-and the installed-tree fingerprint. Uninspected policy exclusions remain absent.
+and the installed-tree fingerprint; Codex receipts also mark when the MCP
+connection moved to run-owned user configuration and list its non-sensitive
+endpoint. Uninspected policy exclusions remain absent.
 Results and verified `ExperimentRunArtifact` metadata copy built-in plugin
 receipts in setup order under optional `plugin_installations`; absence means not
 recorded. Both experiment and regrade reports retain these verified observations.

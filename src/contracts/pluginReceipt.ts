@@ -1,6 +1,7 @@
 import { isSha256Digest } from '../model/hashes.ts';
 import {
   isSafeGitHubRepository,
+  isSafeMcpEndpointUrl,
   isSafeSimpleIdentifier,
   isSafeVersion,
   isSafeWorkspaceRelativePath,
@@ -35,6 +36,10 @@ export function parseAgentPluginInstallationReceipt(
       'source',
       'installed_tree',
       ...(Object.hasOwn(input, 'dropped_parts') ? ['dropped_parts'] : []),
+      ...(Object.hasOwn(input, 'mcp_configuration') ||
+      Object.hasOwn(input, 'mcp_connections')
+        ? ['mcp_configuration', 'mcp_connections']
+        : []),
     ]) ||
     typeof input.adapter !== 'string' ||
     !isSafeSimpleIdentifier(input.adapter) ||
@@ -52,6 +57,10 @@ export function parseAgentPluginInstallationReceipt(
   ) {
     throw new TypeError('Agent plugin installation receipt is invalid.');
   }
+  const relocated = Object.hasOwn(input, 'mcp_configuration');
+  if (relocated && input.mcp_configuration !== 'codex-user-config') {
+    throw new TypeError('Agent plugin installation receipt is invalid.');
+  }
   const common = {
     adapter: input.adapter,
     plugin: input.plugin,
@@ -61,6 +70,12 @@ export function parseAgentPluginInstallationReceipt(
     installed_tree: parseInstalledPluginTree(input.installed_tree),
     ...(Object.hasOwn(input, 'dropped_parts')
       ? { dropped_parts: parseDroppedParts(input.dropped_parts) }
+      : {}),
+    ...(relocated
+      ? {
+          mcp_configuration: 'codex-user-config' as const,
+          mcp_connections: parseMcpConnections(input.mcp_connections),
+        }
       : {}),
   };
   if (input.installation === 'opencode-bundle') {
@@ -89,6 +104,52 @@ export function parseAgentPluginInstallationReceipt(
     native_plugin_id: input.native_plugin_id as string,
     source: parsePluginSourceReceipt(input.source),
   });
+}
+
+const MAX_MCP_CONNECTIONS = 16;
+
+function parseMcpConnections(
+  input: unknown,
+): NonNullable<AgentPluginInstallationReceipt['mcp_connections']> {
+  if (
+    !Array.isArray(input) ||
+    input.length === 0 ||
+    input.length > MAX_MCP_CONNECTIONS ||
+    !isDenseArray(input)
+  ) {
+    throw new TypeError('Agent plugin MCP connections receipt is invalid.');
+  }
+  let previous: string | undefined;
+  const connections = input.map((entry: unknown) => {
+    if (
+      !isPlainRecord(entry) ||
+      !hasExactKeys(entry, ['name', 'url']) ||
+      typeof entry.name !== 'string' ||
+      !isSafeSimpleIdentifier(entry.name) ||
+      typeof entry.url !== 'string' ||
+      !isSafeMcpEndpointUrl(entry.url) ||
+      (previous !== undefined && entry.name <= previous)
+    ) {
+      throw new TypeError('Agent plugin MCP connections receipt is invalid.');
+    }
+    previous = entry.name;
+    return Object.freeze({ name: entry.name, url: entry.url });
+  });
+  return Object.freeze(connections) as typeof connections;
+}
+
+/** Own keys are exactly the indices and `length`: no holes, no extra properties. */
+function isDenseArray(input: readonly unknown[]): boolean {
+  const keys = Reflect.ownKeys(input);
+  return (
+    keys.length === input.length + 1 &&
+    keys.every(
+      (key) =>
+        key === 'length' ||
+        (typeof key === 'string' && /^(0|[1-9][0-9]*)$/.test(key)),
+    ) &&
+    input.every((_, index) => Object.hasOwn(input, index))
+  );
 }
 
 function parsePluginSourceReceipt(

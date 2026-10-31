@@ -206,7 +206,6 @@ export function createClaudePluginInstaller(
             await configurePluginMcp(
               state,
               installedLocation.relative,
-              'claude-code',
               mcpServers,
             );
           const installedTree = await inspectInstalledPluginTree(
