@@ -117,10 +117,11 @@ function sendThroughTunnel(
     new Headers(init.headers).forEach((value, name) => {
       headers[name] = value;
     });
-    const send = secure ? httpsRequest : httpRequest;
-    const upstream: ClientRequest = send(
+    // The tunnel is already TLS-wrapped above, so speak plain HTTP over it.
+    // https.request would try to negotiate TLS again over the TLS socket and hang.
+    const upstream: ClientRequest = httpRequest(
       {
-        protocol: target.protocol,
+        protocol: 'http:',
         hostname: target.hostname.replace(/^\[|\]$/g, ''),
         port: target.port || undefined,
         path: `${target.pathname}${target.search}`,
