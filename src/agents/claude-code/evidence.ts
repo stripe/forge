@@ -65,6 +65,17 @@ const OMITTED_ATTACHMENT_TYPES = new Set([
   'skill_listing',
   'task_reminder',
 ]);
+const BOOKKEEPING_OMISSION_MESSAGES = {
+  batching_reminder_sent:
+    'Claude batching reminder bookkeeping was omitted from ATIF',
+} as const;
+
+type BookkeepingRecordType = keyof typeof BOOKKEEPING_OMISSION_MESSAGES;
+interface BookkeepingOmission {
+  count: number;
+  firstLine: number;
+}
+type BookkeepingOmissions = Map<BookkeepingRecordType, BookkeepingOmission>;
 
 interface SessionBlock {
   type?: string;
@@ -81,6 +92,7 @@ interface SessionBlock {
 interface SessionRecord {
   type?: string;
   subtype?: string;
+  source?: string;
   timestamp?: string;
   sessionId?: string;
   session_id?: string;
@@ -213,6 +225,7 @@ function recordsToAtif(
 ): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
   const steps: AtifStep[] = [];
   const warnings: AgentNativeEvidenceWarning[] = [];
+  const bookkeepingOmissions: BookkeepingOmissions = new Map();
   let reportedSessionId: string | undefined;
   let lastAgentStep: AtifAgentStep | undefined;
   const toolStepsByCallId = new Map<string, AtifAgentStep>();
@@ -240,8 +253,10 @@ function recordsToAtif(
       record.isCompactSummary === true ||
       record.subtype === 'compact_boundary'
     ) {
-      throw new ClaudeSessionIncompleteError(
-        'Compacted Claude sessions are not supported by Forge normalization.',
+      throw incompleteRecord(
+        record,
+        recordIndex,
+        'Claude compaction may replace earlier turns; complete conversation coverage cannot be established.',
       );
     }
     if (record.isSidechain === true) {
@@ -371,6 +386,7 @@ function recordsToAtif(
         record,
         records[position + 1]?.record,
         warnings,
+        bookkeepingOmissions,
         recordIndex,
         addStep,
       );
@@ -404,7 +420,17 @@ function recordsToAtif(
       },
       steps,
     },
-    warnings,
+    warnings: [
+      ...warnings,
+      ...Array.from(
+        bookkeepingOmissions,
+        ([kind, { count, firstLine }]): AgentNativeEvidenceWarning => ({
+          code: 'unsupported_native_event',
+          message: `${BOOKKEEPING_OMISSION_MESSAGES[kind]} (records: ${count}).`,
+          path: `line:${firstLine}`,
+        }),
+      ),
+    ],
   };
 }
 
@@ -598,6 +624,7 @@ function handleNonConversationRecord(
   record: SessionRecord,
   nextRecord: SessionRecord | undefined,
   warnings: AgentNativeEvidenceWarning[],
+  bookkeepingOmissions: BookkeepingOmissions,
   recordIndex: number,
   addStep: (step: Omit<AtifStep, 'step_id'>) => void,
 ): void {
@@ -626,6 +653,13 @@ function handleNonConversationRecord(
   ) {
     return;
   }
+  if (
+    record.type === 'system' &&
+    record.subtype === 'api_error' &&
+    record.source === 'request_retry'
+  ) {
+    return;
+  }
   if (record.type === 'attachment') {
     const attachment = plainRecord(record.attachment);
     if (attachment === undefined) {
@@ -647,11 +681,29 @@ function handleNonConversationRecord(
       );
     }
     if (attachmentType === 'queued_command') {
-      throw incompleteRecord(
-        record,
-        recordIndex,
-        'A Claude queued-command attachment may contain an unrepresented user turn.',
+      addQueuedCommand(record, attachment, warnings, recordIndex, addStep);
+      return;
+    }
+    if (attachmentType === 'batching_reminder_sent') {
+      if (
+        !hasExactKeys(attachment, ['type', 'model', 'text']) ||
+        typeof attachment.model !== 'string' ||
+        typeof attachment.text !== 'string' ||
+        (record.rendered !== undefined &&
+          (!Array.isArray(record.rendered) || record.rendered.length !== 0))
+      ) {
+        throw incompleteRecord(
+          record,
+          recordIndex,
+          'A Claude batching reminder had unrepresented content.',
+        );
+      }
+      recordBookkeepingOmission(
+        bookkeepingOmissions,
+        'batching_reminder_sent',
+        recordIndex + 1,
       );
+      return;
     }
     if (attachmentType === 'hook_success') {
       if (hasPairedHookContext(record, nextRecord)) return;
@@ -734,6 +786,87 @@ function handleNonConversationRecord(
     record,
     recordIndex,
     'A Claude session contained an unsupported conversation record.',
+  );
+}
+
+function recordBookkeepingOmission(
+  omissions: BookkeepingOmissions,
+  kind: BookkeepingRecordType,
+  line: number,
+): void {
+  const previous = omissions.get(kind);
+  omissions.set(kind, {
+    count: (previous?.count ?? 0) + 1,
+    firstLine: previous?.firstLine ?? line,
+  });
+}
+
+function addQueuedCommand(
+  record: SessionRecord,
+  attachment: Readonly<Record<string, unknown>>,
+  warnings: AgentNativeEvidenceWarning[],
+  recordIndex: number,
+  addStep: (step: Omit<AtifStep, 'step_id'>) => void,
+): void {
+  let rendered: string[];
+  try {
+    rendered = renderedAttachmentContent(record.rendered);
+  } catch {
+    throw incompleteRecord(
+      record,
+      recordIndex,
+      'A Claude queued command had unsupported rendered content.',
+    );
+  }
+  if (
+    !hasExactKeys(attachment, ['type', 'commandMode', 'prompt', 'timestamp']) ||
+    typeof attachment.prompt !== 'string' ||
+    attachment.prompt.length === 0 ||
+    typeof attachment.timestamp !== 'string' ||
+    rendered.length !== 1
+  ) {
+    throw incompleteRecord(
+      record,
+      recordIndex,
+      'A Claude queued command had an unsupported shape.',
+    );
+  }
+  const extra = {
+    native_record_type: 'attachment',
+    attachment_type: 'queued_command',
+  };
+  const timestamp = timestampField(record.timestamp, warnings, recordIndex);
+  if (
+    attachment.commandMode === 'task-notification' &&
+    rendered[0] !== undefined &&
+    isRenderedTaskNotification(attachment.prompt, rendered[0])
+  ) {
+    addStep({ source: 'system', message: rendered[0], extra, ...timestamp });
+    return;
+  }
+  throw incompleteRecord(
+    record,
+    recordIndex,
+    'A Claude queued command could not be represented faithfully.',
+  );
+}
+
+function isRenderedTaskNotification(prompt: string, rendered: string): boolean {
+  const reminderStart = '<system-reminder>\n';
+  const reminderEnd = '\n</system-reminder>';
+  const notificationStart = '<task-notification>';
+  const notificationEnd = '</task-notification>';
+  const start = rendered.indexOf(notificationStart);
+  const end = rendered.indexOf(notificationEnd, start);
+  return (
+    rendered.startsWith(reminderStart) &&
+    start >= reminderStart.length &&
+    rendered[start - 1] === '\n' &&
+    rendered.indexOf(notificationStart, start + notificationStart.length) ===
+      -1 &&
+    end >= start &&
+    rendered.slice(start, end + notificationEnd.length) === prompt &&
+    rendered.slice(end + notificationEnd.length) === reminderEnd
   );
 }
 
@@ -852,6 +985,8 @@ function incompleteRecord(
 
 /** Diagnostic labels are literals, never untrusted native field values. */
 function safeRecordKind(record: SessionRecord): string {
+  if (record.isCompactSummary === true) return 'compact summary';
+  if (record.subtype === 'compact_boundary') return 'system/compact_boundary';
   if (record.type === 'attachment') {
     const attachmentType = plainRecord(record.attachment)?.type;
     switch (attachmentType) {
@@ -859,6 +994,7 @@ function safeRecordKind(record: SessionRecord): string {
       case 'queued_command':
       case 'session_context':
       case 'prompt_snapshot':
+      case 'batching_reminder_sent':
         return `attachment/${attachmentType}`;
       default:
         return 'attachment';
@@ -937,6 +1073,12 @@ function safeSessionFailure(error: unknown): string {
     return 'Claude session evidence exceeded a safety limit.';
   }
   if (error instanceof ClaudeSessionIncompleteError && error.location) {
+    if (
+      error.location.kind === 'compact summary' ||
+      error.location.kind === 'system/compact_boundary'
+    ) {
+      return `Claude compaction may replace earlier turns; complete conversation coverage cannot be established (${error.location.kind} at line ${error.location.line}).`;
+    }
     return `Claude session evidence could not be normalized safely (${error.location.kind} at line ${error.location.line}).`;
   }
   return 'Claude session evidence could not be normalized safely.';
