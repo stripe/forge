@@ -1,5 +1,9 @@
 import { sha256Digest } from '../model/hashes.ts';
 import {
+  DEFAULT_DECISION_JUDGE_MODE,
+  judgeMethodOf,
+} from '../model/judgeMethod.ts';
+import {
   ancestorDirectories,
   assertDatasetSetupInputs,
   indexLoadedDatasetCases,
@@ -14,6 +18,7 @@ import {
   type ExperimentConfigV1,
   type ExperimentMatrixGroupV1,
   type ForgeDockerRuntimeV1,
+  type JudgeModelRefV1,
   type LoadedDatasetV1,
   type LoadedExperimentConfigV1,
   type ModelRefV1,
@@ -252,7 +257,7 @@ export function resolveRunPlanWithSetupActions(
         : { example_answer: definition.example_answer }),
       ...(definition.judging_criteria.length === 0
         ? {}
-        : { judge: cloneJson(config.models.judge ?? DEFAULT_HOST_MODEL) }),
+        : { judge: planJudge(config.models.judge ?? DEFAULT_HOST_MODEL) }),
     },
     ...(definition.execution_mode !== 'multi_turn'
       ? {}
@@ -452,4 +457,22 @@ function deepFreeze<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+/**
+ * The planned judge. The default method is omitted so plans that do not set
+ * one keep their identity; verbalized sampling records its candidate count.
+ */
+function planJudge(judge: JudgeModelRefV1): JudgeModelRefV1 {
+  const method = judgeMethodOf(judge);
+  return {
+    provider: judge.provider,
+    model: judge.model,
+    ...(method.mode === DEFAULT_DECISION_JUDGE_MODE
+      ? {}
+      : { mode: method.mode }),
+    ...(method.candidates === undefined
+      ? {}
+      : { candidates: method.candidates }),
+  };
 }

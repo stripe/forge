@@ -105,7 +105,9 @@ export function completionBindingsForPlan(
     requested.push({ purpose: 'role_player', model: plan.role_player });
   }
   if (plan.evaluation.judge !== undefined) {
-    requested.push({ purpose: 'judge', model: plan.evaluation.judge });
+    // Providers bind the model; the judge method only shapes the request.
+    const { provider, model } = plan.evaluation.judge;
+    requested.push({ purpose: 'judge', model: { provider, model } });
   }
   if (requested.length === 0) return Object.freeze([]);
 

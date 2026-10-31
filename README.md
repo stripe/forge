@@ -84,6 +84,18 @@ models:
   judge: { provider: anthropic, model: claude-sonnet-4-6 }
 ```
 
+`models.judge` also takes an optional `mode`, how the judge answers each
+criterion: `direct`, `explained` (the default), `option-critique`, or
+`verbalized-sampling` with an optional `candidates` count (2–10, default 5).
+See [Regrade saved runs](#regrade-saved-runs) for what each mode writes. The method is part of the
+plan: `explained` is omitted from it so plans that do not set a mode keep their
+identity, and verbalized sampling records its candidate count.
+
+```yaml
+models:
+  judge: { provider: openai, model: gpt-6.1-sol, mode: verbalized-sampling, candidates: 5 }
+```
+
 OpenAI host completions use the Responses API with strict JSON Schema,
 `store: false`, and `OPENAI_API_KEY` (credential reference
 `openai.completion-api-key`). `OPENAI_BASE_URL` optionally sets the complete

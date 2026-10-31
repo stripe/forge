@@ -107,6 +107,7 @@ import {
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.ts';
+import { judgeMethodOf } from '../model/judgeMethod.ts';
 import { parseResolvedRunPlanWithSetupActions } from '../model/parse.ts';
 import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import type { PluginSetupStepV1 } from '../model/types.ts';
@@ -953,7 +954,11 @@ export async function executeEvalWithTestHooks(
             signal,
           },
           createCompletionDecisionModel({
-            model: input.plan.evaluation.judge!,
+            model: {
+              provider: input.plan.evaluation.judge!.provider,
+              model: input.plan.evaluation.judge!.model,
+            },
+            method: judgeMethodOf(input.plan.evaluation.judge!),
             invoke: (request) =>
               abortable(
                 completions.invoke('judge', request, request.signal),

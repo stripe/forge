@@ -221,7 +221,13 @@ export async function regradeVerifiedRun(
         await fs.readFile(path.join(completed.location, 'result.json')),
       ),
       judge_evidence_sha256: sha256Digest(judgeEvidenceBody),
-      original_judge: plan.evaluation.judge ?? null,
+      original_judge:
+        plan.evaluation.judge === undefined
+          ? null
+          : {
+              provider: plan.evaluation.judge.provider,
+              model: plan.evaluation.judge.model,
+            },
       original_evaluation: Object.freeze({
         status: result.evaluation.status,
         score: result.evaluation.score,

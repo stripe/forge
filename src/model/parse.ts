@@ -13,6 +13,12 @@ import { JudgingCriterionSchema } from './criteria.ts';
 import { DockerProxySchema } from './dockerNetwork.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
 import { isSha256Digest } from './hashes.ts';
+import {
+  DECISION_JUDGE_MODES,
+  type DecisionJudgeMode,
+  MAX_VERBALIZED_SAMPLING_CANDIDATES,
+  MIN_VERBALIZED_SAMPLING_CANDIDATES,
+} from './judgeMethod.ts';
 import { agentSelectionKey } from './matrix.ts';
 import {
   isAuthoredCaseId,
@@ -315,6 +321,28 @@ const ModelRefSchema = z
   })
   .strict();
 
+/** A judge reference; `candidates` only accompanies verbalized sampling. */
+const JudgeModelRefSchema = ModelRefSchema.extend({
+  mode: z
+    .enum(DECISION_JUDGE_MODES as [DecisionJudgeMode, ...DecisionJudgeMode[]])
+    .optional(),
+  candidates: z
+    .number()
+    .int()
+    .min(MIN_VERBALIZED_SAMPLING_CANDIDATES)
+    .max(MAX_VERBALIZED_SAMPLING_CANDIDATES)
+    .optional(),
+})
+  .strict()
+  .refine(
+    (judge) =>
+      judge.candidates === undefined || judge.mode === 'verbalized-sampling',
+    {
+      message: 'Judge candidates apply only to verbalized-sampling.',
+      path: ['candidates'],
+    },
+  );
+
 const EndpointNameSchema = z
   .string()
   .regex(/^[a-z][a-z0-9_]{0,62}$/, 'must be a lowercase endpoint name');
@@ -575,7 +603,7 @@ const ExperimentConfigSchema = z
     models: z
       .object({
         role_player: ModelRefSchema.optional(),
-        judge: ModelRefSchema.optional(),
+        judge: JudgeModelRefSchema.optional(),
       })
       .strict()
       .default({}),
@@ -767,7 +795,7 @@ const ResolvedRunPlanSchema = z
         judging_criteria: JudgingCriteriaSchema,
         checks: ChecksSchema.optional(),
         example_answer: z.string().refine(isBoundedText).optional(),
-        judge: ModelRefSchema.optional(),
+        judge: JudgeModelRefSchema.optional(),
       })
       .strict(),
     role_player: ModelRefSchema.optional(),
