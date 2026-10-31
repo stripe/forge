@@ -526,12 +526,13 @@ export function createDockerRuntimeAdapter(
         ...dockerProxyEnvironment(runtime.proxy),
         ...input.environment.variables,
       };
+      // Codex reads its relay capability from the environment; the upstream
+      // key is never an environment value.
       for (const [server, connection] of Object.entries(pluginMcpConnections))
-        // Codex reads its relay capability from the environment; the upstream
-        // key is never an environment value.
         commandVariables[
-          PLUGIN_MCP_CREDENTIALS[server as PluginMcpServerId]
-            .relayTokenEnvironmentVariable
+          PLUGIN_MCP_CREDENTIALS[
+            server as PluginMcpServerId
+          ].relayTokenEnvironmentVariable
         ] = connection.token;
       if (relays.length > 0) {
         const relayHost =
