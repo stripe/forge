@@ -95,30 +95,30 @@
     "notes": "USD per million tokens, OpenRouter's listed price for the pinned xai/zdr endpoint on 2026-10-31 (public endpoints API). No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
   },
   "moonshotai/kimi-k3": {
-    "input": 0.276,
-    "cache_read": 0.13,
-    "cache_write": 0.276,
-    "output": 9.6,
+    "input": 3.0,
+    "cache_read": 0.3,
+    "cache_write": 3.0,
+    "output": 15.0,
     "source_url": "https://openrouter.ai/api/v1/models/moonshotai/kimi-k3/endpoints",
-    "effective_date": "2026-10-31",
+    "effective_date": "2026-11-01",
     "cache_write_policy": "input_rate",
     "priced_model": "kimi-k3",
     "routing_model": "moonshotai/kimi-k3",
     "routing_source_url": "https://openrouter.ai/moonshotai/kimi-k3",
-    "notes": "USD per million tokens, OpenRouter's listed price for the pinned wafer/us endpoint on 2026-10-31 (public endpoints API). No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
+    "notes": "USD per million tokens. Unpinned: OpenRouter routes among the account's allowed providers, so the serving provider is not recorded. Priced at the allowed Fireworks endpoint's list rate on 2026-11-01 (OpenRouter endpoints API); other allowed endpoints (fireworks/spot, Amazon Bedrock) list within about -30%/+20%. No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
   },
   "z-ai/glm-5.3": {
-    "input": 0.0699,
-    "cache_read": 0.0689,
-    "cache_write": 0.0699,
-    "output": 1.4,
+    "input": 1.4,
+    "cache_read": 0.26,
+    "cache_write": 1.4,
+    "output": 4.4,
     "source_url": "https://openrouter.ai/api/v1/models/z-ai/glm-5.3/endpoints",
-    "effective_date": "2026-10-31",
+    "effective_date": "2026-11-01",
     "cache_write_policy": "input_rate",
     "priced_model": "glm-5.3",
     "routing_model": "z-ai/glm-5.3",
     "routing_source_url": "https://openrouter.ai/z-ai/glm-5.3",
-    "notes": "USD per million tokens, OpenRouter's listed price for the pinned wafer/us endpoint on 2026-10-31 (public endpoints API). No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
+    "notes": "USD per million tokens. Unpinned: OpenRouter routes among the account's allowed providers, so the serving provider is not recorded. Priced at the allowed Fireworks endpoint's list rate on 2026-11-01 (OpenRouter endpoints API); other allowed endpoints (fireworks/spot, Amazon Bedrock) list within about -30%/+20%. No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
   },
   "minimax/minimax-m3.1-flash": {
     "input": 0.15,
@@ -126,12 +126,12 @@
     "cache_write": 0.15,
     "output": 0.6,
     "source_url": "https://openrouter.ai/api/v1/models/minimax/minimax-m3.1-flash/endpoints",
-    "effective_date": "2026-10-31",
+    "effective_date": "2026-11-01",
     "cache_write_policy": "input_rate",
     "priced_model": "minimax-m3.1-flash",
     "routing_model": "minimax/minimax-m3.1-flash",
     "routing_source_url": "https://openrouter.ai/minimax/minimax-m3.1-flash",
-    "notes": "USD per million tokens, OpenRouter's listed price for the pinned digitalocean endpoint on 2026-10-31 (public endpoints API). No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
+    "notes": "USD per million tokens. Unpinned: OpenRouter routes among the account's allowed providers, so the serving provider is not recorded. Priced at the allowed Fireworks endpoint's list rate on 2026-11-01 (OpenRouter endpoints API); other allowed endpoints (fireworks/spot, Amazon Bedrock) list within about -30%/+20%. No separate cache-write rate is listed, so writes use the input rate. Excludes per-request web search charges."
   },
   "@preset/opus-5-5-anthropic-v1": {
     "input": 4.0,
