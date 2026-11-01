@@ -682,3 +682,78 @@ function requestAndErrorCounts(relay: {
   const { requests, errors } = relay.counts();
   return { requests, errors };
 }
+
+describe('host MCP credential relay error accounting', () => {
+  it('does not count a 405 to GET (no server stream offered) as an error', async () => {
+    const test = await fixture((request, response) => {
+      if (request.method === 'GET') {
+        response.writeHead(405).end();
+        return;
+      }
+      response.end('ok');
+    });
+    const get = await fetch(test.relay.connection.url, {
+      headers: test.headers,
+    });
+    assert.equal(get.status, 405);
+    await get.arrayBuffer();
+    const post = await fetch(test.relay.connection.url, {
+      method: 'POST',
+      headers: test.headers,
+      body: '{}',
+    });
+    assert.equal(post.status, 200);
+    await post.arrayBuffer();
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 2,
+      errors: 0,
+    });
+    assert.deepEqual(test.relay.counts().responses, {
+      'GET 405': 1,
+      'POST 200': 1,
+    });
+  });
+
+  it('still counts a 405 to POST as an error', async () => {
+    const test = await fixture((_request, response) =>
+      response.writeHead(405).end(),
+    );
+    const post = await fetch(test.relay.connection.url, {
+      method: 'POST',
+      headers: test.headers,
+      body: '{}',
+    });
+    assert.equal(post.status, 405);
+    await post.arrayBuffer();
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
+  });
+
+  it('records a request the client abandons without counting an error', async () => {
+    let release: () => void = () => {};
+    const test = await fixture((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write('data: start\n\n');
+      release = () => response.end();
+    });
+    const client = new AbortController();
+    const response = await fetch(test.relay.connection.url, {
+      method: 'DELETE',
+      headers: test.headers,
+      signal: client.signal,
+    });
+    assert.equal(response.status, 200);
+    client.abort();
+    await response.arrayBuffer().catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 0,
+    });
+    assert.equal(test.relay.counts().responses['DELETE client-closed'], 1);
+  });
+});

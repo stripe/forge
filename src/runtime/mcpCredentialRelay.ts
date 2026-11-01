@@ -255,7 +255,13 @@ export async function startMcpCredentialRelay(input: {
             return;
           }
           recordResponse(request.method, String(upstream.status));
-          if (upstream.status >= 400) markError();
+          // A 405 to GET only says the server offers no server-to-client
+          // stream; MCP clients fall back to POST. Not an error.
+          if (
+            upstream.status >= 400 &&
+            !(request.method === 'GET' && upstream.status === 405)
+          )
+            markError();
           for (const name of RESPONSE_HEADERS) {
             const value = upstream.headers.get(name);
             if (value !== null) response.setHeader(name, value);
@@ -280,6 +286,17 @@ export async function startMcpCredentialRelay(input: {
           }
           response.end();
         } catch {
+          // The client hung up first (for example, a DELETE sent while it
+          // exits): recorded, but not a relay or upstream failure.
+          if (
+            disconnected.signal.aborted &&
+            !shutdown.signal.aborted &&
+            !idle.signal.aborted
+          ) {
+            recordResponse(request.method, 'client-closed');
+            if (!response.destroyed) response.destroy();
+            return;
+          }
           markError();
           if (!response.headersSent && !response.destroyed) {
             recordResponse(request.method, '502 relay');

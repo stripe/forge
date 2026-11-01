@@ -357,6 +357,10 @@ and `pluginMcpErrors`, plus the resolved limits as canonical JSON in
 `GET 502 relay`, `GET stream-error relay`), so an error count can be traced to
 Stripe's answer or to the relay. At most 32 distinct keys are kept; the rest count
 under `overflow`. It records no bodies, headers or tool names.
+`pluginMcpErrors` leaves out two normal cases that still appear in
+`pluginMcpResponses`: `GET 405`, which means the server offers no server-to-client
+stream (clients continue over POST), and `client-closed`, a request the client
+abandoned, such as a `DELETE` sent while it exits.
 `pluginMcpToolCalls` holds canonical JSON with `tools` (tool name to call count),
 `other`, `unparsed`, and `overflow`. The relay reads only `method` and
 `params.name` from the already-bounded request body. Each `tools/call` in a batch
