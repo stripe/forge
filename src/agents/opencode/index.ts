@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import type {
   AgentAdapter,
   AgentNativeArtifactUnavailableReason,
@@ -8,6 +9,7 @@ import {
   type CredentialReference,
   credentialReference,
 } from '../../contracts/credentials.ts';
+import { ModelProfileShapeSchema } from '../../model/parse.ts';
 import type { AgentSelectionV1 } from '../../model/types.ts';
 import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.ts';
 import { createAgentModelProbe } from '../../validation/agentProbe.ts';
@@ -42,6 +44,11 @@ import {
 } from './pluginConfig.ts';
 import { createOpenCodePluginInstaller } from './plugins.ts';
 import { parseOpenCodeStream } from './stream.ts';
+import {
+  WEB_SEARCH_PLUGIN,
+  WEB_SEARCH_PLUGIN_PATH,
+  WEB_SEARCH_TRANSFORM_REQUIRED,
+} from './webSearchPlugin.ts';
 
 export interface OpenCodeAdapterOptions {
   readonly id?: string;
@@ -115,6 +122,10 @@ export function createOpenCodeAdapter(
       throw new TypeError('OpenCode requires an explicit model.');
     if (selection.model_profile === undefined)
       throw new TypeError('OpenCode requires an explicit model_profile.');
+    // Validate only the search field and keep the authored profile bytes.
+    const { web_search: rawWebSearch, ...modelProfile } =
+      selection.model_profile;
+    const webSearch = ModelProfileShapeSchema.shape.web_search.parse(rawWebSearch);
     const model = `forge/${selection.model}`;
     const pin = selection.upstream_providers;
     return {
@@ -140,13 +151,27 @@ export function createOpenCodeAdapter(
             autoupdate: false,
             enabled_providers: ['forge'],
             permission: 'allow',
+            // Forge's pinned request plugin; present only when search is selected.
+            ...(webSearch === undefined
+              ? {}
+              : {
+                  plugin: [
+                    [
+                      pathToFileURL(
+                        `${layout.stateDirectory}/${WEB_SEARCH_PLUGIN_PATH}`,
+                        { windows: false },
+                      ).href,
+                      webSearch,
+                    ],
+                  ],
+                }),
             provider: {
               forge: {
                 npm: '@ai-sdk/openai-compatible',
                 name: 'Forge',
                 models: {
                   [selection.model]: {
-                    ...selection.model_profile,
+                    ...modelProfile,
                     tool_call: true,
                     // Pin the upstream provider. By source reading of OpenCode
                     // v1.19.0 and @ai-sdk/openai-compatible 2.0.41: (1)
@@ -174,6 +199,11 @@ export function createOpenCodeAdapter(
                 options: {
                   baseURL: endpointBaseUrl,
                   apiKey: '{env:OPENCODE_API_KEY}',
+                  // The plugin replaces this guard in memory. If it fails to
+                  // load, the non-callable value stops the request.
+                  ...(webSearch === undefined
+                    ? {}
+                    : { transformRequestBody: WEB_SEARCH_TRANSFORM_REQUIRED }),
                 },
               },
             },
@@ -274,6 +304,12 @@ export function createOpenCodeAdapter(
             await state.writeFile('config.json', Buffer.from(config), {
               mode: 0o600,
             });
+            if (context.selection.model_profile?.web_search !== undefined)
+              await state.writeFile(
+                WEB_SEARCH_PLUGIN_PATH,
+                Buffer.from(WEB_SEARCH_PLUGIN),
+                { mode: 0o600 },
+              );
             await state.writeFile('prompt.txt', Buffer.from(message), {
               mode: 0o600,
             });

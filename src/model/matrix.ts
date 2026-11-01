@@ -55,6 +55,12 @@ export function agentSelectionKey(agent: {
 // Preserve the existing flat key format, visiting fields in schema order rather
 // than authored object order. New schema fields automatically enter identity.
 function schemaIdentityValues(schema: z.ZodType, value: unknown): unknown[] {
+  // An absent optional field adds nothing, so keys authored before it existed
+  // keep their bytes.
+  if (schema instanceof z.ZodOptional)
+    return value === undefined
+      ? []
+      : schemaIdentityValues(schema.unwrap() as z.ZodType, value);
   if (schema instanceof z.ZodObject) {
     const object = value as Record<string, unknown>;
     return Object.entries(schema.shape as Record<string, z.ZodType>).flatMap(

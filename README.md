@@ -475,6 +475,30 @@ that differ in providers or their order are separate selections and separate
 report groups, and it is recorded in `plan.json` and the selection copy in
 `result.json`. URLs and keys stay host-only.
 
+To give an OpenRouter-served model OpenRouter's server-side web search, add
+`web_search` to its `model_profile`:
+
+```yaml
+- { adapter: opencode, provider: openai-compatible, model: openrouter-gemini-4-argon,
+    endpoint: openrouter,
+    model_profile: { ..., web_search: { engine: native } } }
+```
+
+`engine` is `native` (the upstream provider's own search where it has one,
+such as Gemini on Vertex or Grok on xAI) or `exa`; `auto`, other values, and
+extra fields are rejected, as are Claude Code and Codex. The selection must
+use an OpenRouter endpoint: Forge does not check this, and other gateways may
+reject or ignore the tool. Forge installs a shipped request plugin that appends
+one `openrouter:web_search` tool to each Chat Completions request. It composes
+with `upstream_providers`; the request then carries both the `provider` pin and
+the search tool. If the plugin fails to load, the request is not sent. The
+engine is part of selection identity and is recorded in `plan.json` and the
+selection copy in `result.json`. Inline citations in the assistant's text reach
+the reply, trajectory, and judge. The pinned SDK drops structured
+`url_citation` annotations, so annotation-only results are unavailable, and
+Forge records no search tool call. Selecting search does not prove a search
+executed. Selections without `web_search` are unchanged.
+
 Names use lowercase letters, digits, and underscores; the credential reference
 is `opencode.endpoint.<name>.api-key`. Selections without `endpoint` keep
 `OPENCODE_BASE_URL` and `OPENCODE_API_KEY`. An endpoint name with no

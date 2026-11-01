@@ -1,0 +1,18 @@
+{
+  "message": {
+    "role": "assistant",
+    "content": "Here is the result: [example.com](https://www.example.com/web-search-result).",
+    "annotations": [
+      {
+        "type": "url_citation",
+        "url_citation": {
+          "url": "https://www.example.com/web-search-result",
+          "title": "Title of the web search result",
+          "content": "Content of the web search result",
+          "start_index": 20,
+          "end_index": 76
+        }
+      }
+    ]
+  }
+}

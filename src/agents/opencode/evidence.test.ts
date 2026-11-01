@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { describe, it } from 'vitest';
 import {
   OPEN_CODE_MODEL,
@@ -39,6 +40,59 @@ function fixture(value: unknown = openCodeExport(turns)) {
   };
 }
 describe('OpenCode native evidence', () => {
+  it('keeps cited URLs in ATIF and judge evidence with no fabricated search call', async () => {
+    const value = JSON.parse(
+      await readFile(
+        new URL(
+          '../../../test/fixtures/opencode-openrouter/export.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    const stream = await readFile(
+      new URL(
+        '../../../test/fixtures/opencode-openrouter/stream.jsonl',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const turn = parseOpenCodeStream(stream);
+    const result = await loadOpenCodeEvidence(fixture(value).input);
+    assert.equal(result.kind, 'available');
+    if (result.kind !== 'available') return;
+    const trajectory = parseAtifTrajectory(result.trajectory);
+    assert.equal(trajectory.steps[1]!.message, turn.text);
+    assert.equal(trajectory.steps[1]!.tool_calls, undefined);
+    assert.equal(
+      trajectoryCoversCompletedTurns(
+        trajectory,
+        [
+          {
+            user: value.messages[0].parts[0].text,
+            assistant: turn.text,
+            toolCalls: [],
+          },
+        ],
+        result.source,
+      ),
+      true,
+    );
+    assert.ok(
+      JSON.stringify(createJudgeTranscriptProjection(trajectory)).includes(
+        'https://www.example.com/web-search-result',
+      ),
+    );
+    value.messages[1].parts.push({
+      ...value.messages[1].parts[1],
+      id: 'prt_unknown_citation',
+      type: 'url_citation',
+    });
+    assert.equal(
+      (await loadOpenCodeEvidence(fixture(value).input)).kind,
+      'unavailable',
+    );
+  });
   it('uses the summary-free driver reply for compacted exports before native reconciliation', async () => {
     const summaryTurn = { prompt: 'First', response: 'Compaction summary' };
     const resumeTurn = { prompt: 'Continue', response: 'Done.' };

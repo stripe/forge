@@ -369,6 +369,10 @@ export const ModelProfileShapeSchema = z
     reasoning: z.boolean(),
     temperature: z.boolean(),
     attachment: z.boolean(),
+    web_search: z
+      .object({ engine: z.enum(['native', 'exa']) })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -396,6 +400,15 @@ const AgentSelectionSchema = ModelRefSchema.extend({
         });
       }
     }
+    if (
+      agent.model_profile?.web_search !== undefined &&
+      agent.adapter !== 'opencode'
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['model_profile', 'web_search'],
+        message: 'web_search requires the opencode adapter',
+      });
     if (
       agent.disable_experimental_betas !== undefined &&
       agent.adapter !== 'claude-code'

@@ -212,6 +212,9 @@ try {
       assert.equal(docker.FORGE_OPENCODE_VERSION, '1.19.0');
       const openCodeRequirements = opencode.createOpenCodeAdapter({baseUrl: 'https://gateway.example/v1'}).requirements({adapter: 'opencode', provider: 'openai-compatible', model: 'gateway/model', model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false}});
       assert.equal(openCodeRequirements.environment.credentials.OPENCODE_API_KEY.reference, 'opencode.api-key');
+      const searchConfig = JSON.parse(opencode.createOpenCodeAdapter({baseUrl: 'https://openrouter.ai/api/v1'}).requirements({adapter: 'opencode', provider: 'openai-compatible', model: 'vendor/model', model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false, web_search: {engine: 'exa'}}}).environment.variables.OPENCODE_CONFIG_CONTENT);
+      assert.deepEqual(searchConfig.plugin, [['file:///home/forge/.opencode-forge/forge-web-search.mjs', {engine: 'exa'}]]);
+      assert.equal(searchConfig.provider.forge.npm, '@ai-sdk/openai-compatible');
       assert.equal(JSON.parse(openCodeRequirements.environment.variables.OPENCODE_CONFIG_CONTENT).model, 'forge/gateway/model');
       assert.equal(typeof codex.createCodexAdapter, 'function');
       assert.throws(() => codex.parseCodexStream('{malformed'), (error) =>

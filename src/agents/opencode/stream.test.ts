@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { describe, it } from 'vitest';
 import {
   OPEN_CODE_SESSION,
@@ -28,6 +29,34 @@ const continuation = (index = 0) => ({
   },
 });
 describe('OpenCode live stream', () => {
+  it('preserves citation text without inventing a server tool execution', async () => {
+    const stream = await readFile(
+      new URL(
+        '../../../test/fixtures/opencode-openrouter/stream.jsonl',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const response = JSON.parse(
+      await readFile(
+        new URL(
+          '../../../test/fixtures/opencode-openrouter/response.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    const turn = parseOpenCodeStream(stream);
+    assert.equal(turn.text, response.message.content);
+    assert.deepEqual(turn.toolCalls, []);
+    assert.throws(
+      () =>
+        parseOpenCodeStream(
+          stream.replace('"type":"text"', '"type":"url_citation"'),
+        ),
+      OpenCodeStreamError,
+    );
+  });
   it.each(['pending', 'running'])(
     'rejects a nonterminal %s tool snapshot without inventing an outcome',
     (status) => {

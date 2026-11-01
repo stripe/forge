@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -27,6 +28,10 @@ import { OPENCODE_EXPORT_LAUNCHER } from './export.ts';
 import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
 import { MAX_NATIVE_BYTES } from './native.ts';
+import {
+  WEB_SEARCH_PLUGIN,
+  WEB_SEARCH_PLUGIN_SHA256,
+} from './webSearchPlugin.ts';
 import {
   PLUGIN_CONFIG_PATH,
   stripeOpenCodeConfiguration,
@@ -235,6 +240,51 @@ describe('OpenCode adapter', () => {
     });
   });
 
+  it('keeps the generated config byte-identical unless web search is selected', () => {
+    const adapter = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+    });
+    const generate = (extra: object = {}) =>
+      adapter.requirements({ ...selection, ...extra }).environment.variables!
+        .OPENCODE_CONFIG_CONTENT!;
+    // Captured from the generator before web_search existed.
+    assert.equal(
+      generate(),
+      '{"model":"forge/' +
+        OPEN_CODE_MODEL +
+        '","small_model":"forge/' +
+        OPEN_CODE_MODEL +
+        '","default_agent":"build","agent":{"build":{"model":"forge/' +
+        OPEN_CODE_MODEL +
+        '"}},"share":"disabled","autoupdate":false,"enabled_providers":["forge"],"permission":"allow","provider":{"forge":{"npm":"@ai-sdk/openai-compatible","name":"Forge","models":{"' +
+        OPEN_CODE_MODEL +
+        '":{"limit":{"context":32000,"output":4000},"reasoning":false,"temperature":true,"attachment":false,"tool_call":true}},"env":["OPENCODE_API_KEY"],"options":{"baseURL":"https://gateway.example/v1","apiKey":"{env:OPENCODE_API_KEY}"}}}}',
+    );
+    const searching = JSON.parse(
+      generate({
+        model_profile: { ...OPEN_CODE_MODEL_PROFILE, web_search: { engine: 'exa' } },
+      }),
+    );
+    assert.deepEqual(searching.provider.forge.models[OPEN_CODE_MODEL], {
+      ...OPEN_CODE_MODEL_PROFILE,
+      tool_call: true,
+    });
+    assert.deepEqual(searching.plugin, [
+      ['file:///home/forge/.opencode-forge/forge-web-search.mjs', { engine: 'exa' }],
+    ]);
+    assert.equal(
+      searching.provider.forge.options.transformRequestBody,
+      'forge-web-search-required',
+    );
+    assert.throws(
+      () =>
+        generate({
+          model_profile: { ...OPEN_CODE_MODEL_PROFILE, web_search: { engine: 'auto' } },
+        }),
+      /engine/,
+    );
+  });
+
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {
     const adapter = createOpenCodeAdapter({
       baseUrl: 'https://gateway.example/v1',
@@ -303,6 +353,47 @@ describe('OpenCode adapter', () => {
     ]) {
       const invalid = await fixture(async () => output);
       await assert.rejects(invalid.adapter.prepare(invalid.prepare), /version/);
+    }
+  });
+  it('restores the search plugin into run-owned state only when selected', async () => {
+    const searching = {
+      ...selection,
+      upstream_providers: ['google-vertex'],
+      model_profile: { ...OPEN_CODE_MODEL_PROFILE, web_search: { engine: 'native' as const } },
+    };
+    for (const [chosen, expected] of [
+      [selection, false],
+      [searching, true],
+    ] as const) {
+      const test = await fixture();
+      const session = await test.adapter.openSession({
+        ...test.context,
+        selection: chosen,
+      });
+      await session.send('Search', { signal: test.context.signal });
+      const files = await Promise.all(
+        ['forge-web-search.mjs', 'config.json'].map((name) =>
+          test.state.readonly.readFile(name).then(
+            (bytes) => Buffer.from(bytes).toString(),
+            () => undefined,
+          ),
+        ),
+      );
+      assert.equal(files[0] === WEB_SEARCH_PLUGIN, expected);
+      assert.equal(files[0] === undefined, !expected);
+      const config = JSON.parse(files[1]!);
+      assert.equal(config.plugin !== undefined, expected);
+      if (expected) {
+        // Pin and search tool travel in the same generated config.
+        assert.deepEqual(
+          config.provider.forge.models[OPEN_CODE_MODEL].options.provider,
+          { order: ['google-vertex'], allow_fallbacks: false },
+        );
+        assert.equal(
+          createHash('sha256').update(files[0]!).digest('hex'),
+          WEB_SEARCH_PLUGIN_SHA256,
+        );
+      }
     }
   });
   it('preserves prompt bytes and resumes only the observed session', async () => {

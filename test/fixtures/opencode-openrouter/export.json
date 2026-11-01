@@ -1,0 +1,99 @@
+{
+  "info": {
+    "id": "ses_0123456789abcdefghij",
+    "version": "1.19.0",
+    "time": {
+      "created": 1790000000000,
+      "updated": 1790000000001
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "id": "msg_user0",
+        "sessionID": "ses_0123456789abcdefghij",
+        "role": "user",
+        "time": {
+          "created": 1790000000000
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "forge",
+          "modelID": "gateway/kimi-test"
+        }
+      },
+      "parts": [
+        {
+          "id": "prt_user0",
+          "messageID": "msg_user0",
+          "sessionID": "ses_0123456789abcdefghij",
+          "type": "text",
+          "text": "Search the web and cite your source."
+        }
+      ]
+    },
+    {
+      "info": {
+        "id": "msg_final0",
+        "sessionID": "ses_0123456789abcdefghij",
+        "role": "assistant",
+        "parentID": "msg_user0",
+        "modelID": "gateway/kimi-test",
+        "providerID": "forge",
+        "agent": "build",
+        "mode": "build",
+        "time": {
+          "created": 1790000000000,
+          "completed": 1790000000001
+        },
+        "cost": 0.01,
+        "tokens": {
+          "input": 5,
+          "output": 2,
+          "reasoning": 1,
+          "cache": {
+            "read": 3,
+            "write": 0
+          }
+        },
+        "finish": "stop"
+      },
+      "parts": [
+        {
+          "id": "prt_finalstart0",
+          "messageID": "msg_final0",
+          "sessionID": "ses_0123456789abcdefghij",
+          "type": "step-start"
+        },
+        {
+          "id": "prt_text0",
+          "messageID": "msg_final0",
+          "sessionID": "ses_0123456789abcdefghij",
+          "type": "text",
+          "text": "Here is the result: [example.com](https://www.example.com/web-search-result).",
+          "time": {
+            "start": 1790000000000,
+            "end": 1790000000001
+          }
+        },
+        {
+          "id": "prt_finalfinish0",
+          "messageID": "msg_final0",
+          "sessionID": "ses_0123456789abcdefghij",
+          "type": "step-finish",
+          "reason": "stop",
+          "cost": 0.01,
+          "tokens": {
+            "input": 5,
+            "output": 2,
+            "reasoning": 1,
+            "cache": {
+              "read": 3,
+              "write": 0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

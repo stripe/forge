@@ -104,6 +104,53 @@ describe('agent selection identity', () => {
       agentSelectionKey({ ...opencode, upstream_providers: ['a', 'b'] }),
       agentSelectionKey({ ...opencode, upstream_providers: ['b', 'a'] }),
     );
+    // An unset or absent web_search leaves the key bytes unchanged; an
+    // authored engine is appended to the profile values.
+    const profile = {
+      limit: { context: 32000, output: 4000 },
+      reasoning: false,
+      temperature: true,
+      attachment: false,
+    };
+    const baseKey =
+      '["opencode","openai-compatible","m",null,[32000,4000,false,true,false]]';
+    assert.equal(
+      agentSelectionKey({ ...opencode, model_profile: profile }),
+      baseKey,
+    );
+    assert.equal(
+      agentSelectionKey({
+        ...opencode,
+        model_profile: { ...profile, web_search: undefined },
+      }),
+      baseKey,
+    );
+    assert.equal(
+      agentSelectionKey({
+        ...opencode,
+        model_profile: { ...profile, web_search: { engine: 'exa' } },
+      }),
+      '["opencode","openai-compatible","m",null,[32000,4000,false,true,false,"exa"]]',
+    );
+    assert.equal(
+      agentSelectionKey({
+        ...opencode,
+        endpoint: 'openrouter',
+        upstream_providers: ['google-vertex'],
+        model_profile: profile,
+      }),
+      '["opencode","openai-compatible","m",null,[32000,4000,false,true,false],"openrouter",["google-vertex"]]',
+    );
+    assert.notEqual(
+      agentSelectionKey({
+        ...opencode,
+        model_profile: { ...profile, web_search: { engine: 'exa' } },
+      }),
+      agentSelectionKey({
+        ...opencode,
+        model_profile: { ...profile, web_search: { engine: 'native' } },
+      }),
+    );
     assert.equal(
       agentSelectionKey({ adapter: 'codex', provider: 'openai', model: 'gpt' }),
       '["codex","openai","gpt","native",null]',

@@ -254,6 +254,66 @@ describe('public benchmark parsing', () => {
       );
   });
 
+  it('allows only explicit web search engines on OpenCode and keys them independently', () => {
+    const config = parseExperimentConfig(
+      parseExperimentConfigYaml(experimentConfigYaml()),
+    );
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    const search = (engine: unknown) => ({
+      ...agent,
+      model_profile: { ...agent.model_profile, web_search: { engine } },
+    });
+    const parse = (agents: unknown[]) =>
+      parseExperimentConfig({
+        ...config,
+        matrix: { ...config.matrix, agents },
+      });
+    assert.equal(
+      getMatrixGroups(
+        parse([agent, search('native'), search('exa')]).matrix,
+      )[0]!.agents.length,
+      3,
+    );
+    assert.deepEqual(
+      getMatrixGroups(parse([search('exa')]).matrix)[0]!.agents[0]!
+        .model_profile!.web_search,
+      { engine: 'exa' },
+    );
+    for (const engine of ['auto', '', 'other', null, true, undefined])
+      assert.throws(() => parse([search(engine)]), BenchmarkModelError);
+    for (const web_search of [{}, null, { engine: 'exa', max_results: 3 }])
+      assert.throws(
+        () =>
+          parse([
+            { ...agent, model_profile: { ...agent.model_profile, web_search } },
+          ]),
+        BenchmarkModelError,
+      );
+    for (const adapter of ['claude-code', 'codex'])
+      assert.throws(
+        () =>
+          parse([
+            {
+              adapter,
+              provider: 'openai',
+              model: 'gpt',
+              model_profile: search('exa').model_profile,
+            },
+          ]),
+        BenchmarkModelError,
+      );
+    assert.throws(
+      () => parse([{ ...search('exa'), adapter: 'custom' }]),
+      /web_search requires the opencode adapter/,
+    );
+    assert.throws(() => parse([search('exa'), search('exa')]), /unique/);
+  });
+
   it('validates OpenCode upstream providers, treats them as identity, and rejects them elsewhere', () => {
     const config = parseExperimentConfig(
       parseExperimentConfigYaml(experimentConfigYaml()),

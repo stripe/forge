@@ -202,6 +202,8 @@ export interface AgentSelectionV1 extends ModelRefV1 {
     reasoning: boolean;
     temperature: boolean;
     attachment: boolean;
+    /** OpenRouter server-side search; OpenCode only, and the endpoint must be OpenRouter. */
+    web_search?: { engine: 'native' | 'exa' } | undefined;
   };
 }
 

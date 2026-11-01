@@ -1261,6 +1261,33 @@ keys outside its own schema, such as `provider`, into the request body.
 End-to-end delivery has not been captured from a live or fake-upstream run, and
 Forge does not record which upstream provider actually served a call.
 
+Optional `model_profile.web_search: {engine: native | exa}` enables OpenRouter's
+server-side search for an OpenCode selection (rejected for Claude Code, Codex,
+and custom adapters; unknown fields and `auto` are rejected). The selection must
+use an OpenRouter endpoint, which Forge does not verify. The engine is part of
+selection identity and is recorded in `plan.json` and the `result.json`
+selection copy; selections without it keep their identity and generated config
+byte for byte. The adapter keeps the profile's limits and capabilities as the
+model entry and, when search is selected, restores its shipped, dependency-free
+plugin at the fixed `forge-web-search.mjs` path in declared agent state before
+each turn. The generated config names only that file URL and the engine, and
+sets a non-callable `transformRequestBody` guard on the `forge` provider. The
+launcher verifies the plugin's SHA-256 and rejects any other configured plugin.
+OpenCode's in-memory `config` hook replaces the guard with a transform that,
+after SDK request preparation, appends exactly one `openrouter:web_search`
+tool with `parameters.engine`, preserving every other body field (including a
+`provider` object from `upstream_providers`) and rejecting unexpected body or
+tool shapes. If the plugin fails to load or initialize, the SDK rejects the
+guard before any model request. The server tool is absent from OpenCode's local
+tool registry. Forge records no search tool call, and selecting search does not
+prove a search executed.
+
+For OpenRouter search, the pinned compatible SDK drops structured `annotations`
+(`url_citation`) before OpenCode emits stream parts or exports. Inline cited
+URLs remain assistant text in the driver reply, ATIF, and judge projection;
+annotation-only results are unavailable. Forge fabricates neither citations nor
+local search tool calls and still rejects unknown parts.
+
 A workspace `opencode.json` is ignored. Automatic project configuration,
 external skill, and AGENTS.md/CLAUDE.md discovery are disabled or unsupported.
 Before each turn, the launcher rejects implicit global config files, discovered
