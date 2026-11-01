@@ -125,7 +125,8 @@ export function createOpenCodeAdapter(
     // Validate only the search field and keep the authored profile bytes.
     const { web_search: rawWebSearch, ...modelProfile } =
       selection.model_profile;
-    const webSearch = ModelProfileShapeSchema.shape.web_search.parse(rawWebSearch);
+    const webSearch =
+      ModelProfileShapeSchema.shape.web_search.parse(rawWebSearch);
     const model = `forge/${selection.model}`;
     const pin = selection.upstream_providers;
     return {

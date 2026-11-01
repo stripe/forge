@@ -53,7 +53,10 @@ describe('OpenCode OpenRouter request plugin', () => {
     assert.deepEqual(pin, {
       provider: { order: ['google-vertex'], allow_fallbacks: false },
     });
-    assert.equal(config.provider.forge.options.baseURL, 'https://openrouter.ai/api/v1');
+    assert.equal(
+      config.provider.forge.options.baseURL,
+      'https://openrouter.ai/api/v1',
+    );
     const apply = await transform('native', config);
     // Stand-in for the SDK's prepared body: model options spread alongside messages.
     const body = apply({

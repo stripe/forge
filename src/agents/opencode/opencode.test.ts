@@ -29,13 +29,13 @@ import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
 import { MAX_NATIVE_BYTES } from './native.ts';
 import {
-  WEB_SEARCH_PLUGIN,
-  WEB_SEARCH_PLUGIN_SHA256,
-} from './webSearchPlugin.ts';
-import {
   PLUGIN_CONFIG_PATH,
   stripeOpenCodeConfiguration,
 } from './pluginConfig.ts';
+import {
+  WEB_SEARCH_PLUGIN,
+  WEB_SEARCH_PLUGIN_SHA256,
+} from './webSearchPlugin.ts';
 
 const selection = {
   adapter: 'opencode',
@@ -262,7 +262,10 @@ describe('OpenCode adapter', () => {
     );
     const searching = JSON.parse(
       generate({
-        model_profile: { ...OPEN_CODE_MODEL_PROFILE, web_search: { engine: 'exa' } },
+        model_profile: {
+          ...OPEN_CODE_MODEL_PROFILE,
+          web_search: { engine: 'exa' },
+        },
       }),
     );
     assert.deepEqual(searching.provider.forge.models[OPEN_CODE_MODEL], {
@@ -270,7 +273,10 @@ describe('OpenCode adapter', () => {
       tool_call: true,
     });
     assert.deepEqual(searching.plugin, [
-      ['file:///home/forge/.opencode-forge/forge-web-search.mjs', { engine: 'exa' }],
+      [
+        'file:///home/forge/.opencode-forge/forge-web-search.mjs',
+        { engine: 'exa' },
+      ],
     ]);
     assert.equal(
       searching.provider.forge.options.transformRequestBody,
@@ -279,7 +285,10 @@ describe('OpenCode adapter', () => {
     assert.throws(
       () =>
         generate({
-          model_profile: { ...OPEN_CODE_MODEL_PROFILE, web_search: { engine: 'auto' } },
+          model_profile: {
+            ...OPEN_CODE_MODEL_PROFILE,
+            web_search: { engine: 'auto' },
+          },
         }),
       /engine/,
     );
@@ -359,7 +368,10 @@ describe('OpenCode adapter', () => {
     const searching = {
       ...selection,
       upstream_providers: ['google-vertex'],
-      model_profile: { ...OPEN_CODE_MODEL_PROFILE, web_search: { engine: 'native' as const } },
+      model_profile: {
+        ...OPEN_CODE_MODEL_PROFILE,
+        web_search: { engine: 'native' as const },
+      },
     };
     for (const [chosen, expected] of [
       [selection, false],
