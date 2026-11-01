@@ -380,6 +380,50 @@ describe('public benchmark parsing', () => {
       );
   });
 
+  it('accepts a Claude Code context window as identity and rejects it elsewhere', () => {
+    const config = parseExperimentConfig(
+      parseExperimentConfigYaml(experimentConfigYaml()),
+    );
+    const agent = {
+      adapter: 'claude-code',
+      provider: 'anthropic',
+      model: '@preset/sonnet',
+    };
+    const parse = (...agents: unknown[]) =>
+      parseExperimentConfig({
+        ...config,
+        matrix: { ...config.matrix, agents },
+      });
+    const declared = { ...agent, context_window_tokens: 1_000_000 };
+    assert.deepEqual(
+      getMatrixGroups(parse(declared).matrix)[0]!.agents[0],
+      declared,
+    );
+    assert.equal(
+      getMatrixGroups(
+        parse(agent, declared, { ...agent, context_window_tokens: 400_000 })
+          .matrix,
+      )[0]!.agents.length,
+      3,
+    );
+    for (const context_window_tokens of [99_999, 10_000_001, 1.5, '1000000'])
+      assert.throws(
+        () => parse({ ...agent, context_window_tokens }),
+        BenchmarkModelError,
+        JSON.stringify(context_window_tokens),
+      );
+    assert.throws(
+      () =>
+        parse({
+          adapter: 'codex',
+          provider: 'openai',
+          model: 'm',
+          context_window_tokens: 1_000_000,
+        }),
+      /context_window_tokens is supported only by Claude Code/,
+    );
+  });
+
   it('strictly validates model profiles and rejects them for Claude Code and Codex', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     const agent = {

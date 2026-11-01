@@ -152,6 +152,13 @@ in resume checks, and passes the setting to Claude. `0` clears the override.
 The gateway must still support the agent and host judge APIs; validate this
 with a complete eval in that environment.
 
+Claude Code assumes a 200K context window for a model ID it doesn't recognize,
+such as an OpenRouter `@preset/...` name, and auto-compacts there. Declare the
+model's real window on that agent with `context_window_tokens: 1000000`; Forge
+passes it to Claude as `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and records it in the
+agent's selection identity. It applies only to IDs that don't start with
+`claude-`; Claude Code already knows the window of the models it recognizes.
+
 The runtime installs pinned Claude Code, Codex, and OpenCode CLI releases from npm.
 Their use remains subject to their providers' terms.
 

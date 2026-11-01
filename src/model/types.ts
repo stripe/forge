@@ -192,6 +192,8 @@ export interface AgentSelectionV1 extends ModelRefV1 {
   hook_trust?: 'native' | 'automation';
   /** Claude gateway compatibility; omit to retain the native beta behavior. */
   disable_experimental_betas?: true;
+  /** Context window Claude Code assumes for an unrecognized model ID, such as an OpenRouter preset. Claude Code only. */
+  context_window_tokens?: number;
   /** Named host endpoint serving the model; OpenCode only. The host maps the name to a URL and key. */
   endpoint?: string;
   /** OpenRouter upstream provider slugs in preference order; OpenCode only. Fallbacks are disabled. */

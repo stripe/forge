@@ -650,6 +650,10 @@ native compatibility environment setting. The CLI can resolve it from
 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` (`0` clears it). It participates in
 selection identity, saved plans, report grouping, and resume checks. Codex
 rejects this coordinate. MCP readiness does not verify model gateway behavior.
+The optional Claude coordinate `context_window_tokens` (100,000 to 10,000,000)
+becomes `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, the window Claude Code assumes for an
+unrecognized model ID. It is appended to selection identity only when set, so
+existing keys are unchanged; other adapters reject it.
 
 ### 2. Resolve credentials and completion transports
 

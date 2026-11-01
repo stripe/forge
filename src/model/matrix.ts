@@ -27,6 +27,7 @@ export function agentSelectionKey(agent: {
   model: string;
   hook_trust?: 'native' | 'automation' | undefined;
   disable_experimental_betas?: true | undefined;
+  context_window_tokens?: number | undefined;
   model_profile?: AgentSelectionV1['model_profile'] | undefined;
   endpoint?: string | undefined;
   upstream_providers?: readonly string[] | undefined;
@@ -49,6 +50,9 @@ export function agentSelectionKey(agent: {
     key.push(agent.endpoint ?? null);
   if (agent.upstream_providers !== undefined)
     key.push(agent.upstream_providers);
+  // Claude Code only, so it never shares a position with the OpenCode fields.
+  if (agent.context_window_tokens !== undefined)
+    key.push(agent.context_window_tokens);
   return JSON.stringify(key);
 }
 

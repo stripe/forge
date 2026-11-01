@@ -10,7 +10,11 @@ import {
 } from './experimentModel.ts';
 import { mcpToolRefusalWarningSchema } from './mcpToolRefusals.ts';
 import { sha256Digest } from './model/hashes.ts';
-import { ModelProfileSchema, parseRunSelection } from './model/parse.ts';
+import {
+  ContextWindowTokensSchema,
+  ModelProfileSchema,
+  parseRunSelection,
+} from './model/parse.ts';
 import type { JsonValue, RequirementLevelV1 } from './model/types.ts';
 import { criterionEvidenceWarningsSchema } from './results/parse.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
@@ -380,6 +384,7 @@ const coordinates = z
         model: z.string().min(1).max(4096),
         hook_trust: z.enum(['native', 'automation']).optional(),
         disable_experimental_betas: z.literal(true).optional(),
+        context_window_tokens: ContextWindowTokensSchema.optional(),
         model_profile: ModelProfileSchema.optional(),
         endpoint: z.string().min(1).max(4096).optional(),
         upstream_providers: z

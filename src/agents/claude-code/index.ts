@@ -104,6 +104,7 @@ export function createClaudeCodeAdapter(
     provider: string;
     hook_trust?: string;
     disable_experimental_betas?: true;
+    context_window_tokens?: number;
     model_profile?: unknown;
   }): AgentRuntimeRequirements => {
     if (selection.model_profile !== undefined) {
@@ -121,7 +122,8 @@ export function createClaudeCodeAdapter(
       executables: [executable],
       environment: {
         ...(Object.keys(variables).length === 0 &&
-        !selection.disable_experimental_betas
+        !selection.disable_experimental_betas &&
+        selection.context_window_tokens === undefined
           ? {}
           : {
               variables: {
@@ -129,6 +131,13 @@ export function createClaudeCodeAdapter(
                 ...(selection.disable_experimental_betas
                   ? { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' }
                   : {}),
+                ...(selection.context_window_tokens === undefined
+                  ? {}
+                  : {
+                      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(
+                        selection.context_window_tokens,
+                      ),
+                    }),
               },
             }),
         credentials: {

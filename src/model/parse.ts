@@ -381,10 +381,18 @@ export const ModelProfileSchema = ModelProfileShapeSchema.refine(
   { path: ['limit', 'output'], message: 'output must not exceed context' },
 );
 
+/** Claude Code's assumed context window for a model ID it does not recognize. */
+export const ContextWindowTokensSchema = z
+  .number()
+  .int()
+  .min(100_000)
+  .max(10_000_000);
+
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
   disable_experimental_betas: z.literal(true).optional(),
+  context_window_tokens: ContextWindowTokensSchema.optional(),
   model_profile: ModelProfileSchema.optional(),
   endpoint: EndpointNameSchema.optional(),
   upstream_providers: UpstreamProvidersSchema.optional(),
@@ -417,6 +425,15 @@ const AgentSelectionSchema = ModelRefSchema.extend({
         code: z.ZodIssueCode.custom,
         path: ['disable_experimental_betas'],
         message: 'disable_experimental_betas is supported only by Claude Code',
+      });
+    if (
+      agent.context_window_tokens !== undefined &&
+      agent.adapter !== 'claude-code'
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['context_window_tokens'],
+        message: 'context_window_tokens is supported only by Claude Code',
       });
     if (
       ['claude-code', 'codex'].includes(agent.adapter) &&

@@ -28,6 +28,25 @@ it('passes the explicit compatibility setting through the agent requirements', (
   );
 });
 
+it('passes the declared context window through the agent requirements', () => {
+  const adapter = createClaudeCodeAdapter();
+  const selection = {
+    adapter: 'claude-code',
+    provider: 'anthropic',
+    model: '@preset/test',
+  };
+  assert.equal(
+    adapter.requirements({ ...selection, context_window_tokens: 1_000_000 })
+      .environment.variables?.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    '1000000',
+  );
+  assert.equal(
+    adapter.requirements(selection).environment.variables
+      ?.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    undefined,
+  );
+});
+
 describe('Claude Code adapter', () => {
   it('retains a failed exit status without copying raw command output', async () => {
     const adapter = createClaudeCodeAdapter({
