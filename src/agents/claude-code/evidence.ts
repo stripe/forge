@@ -845,8 +845,15 @@ function addQueuedCommand(
       'A Claude queued command had unsupported rendered content.',
     );
   }
+  // Claude Code 2.1.280 adds `source_uuid`, a link to the originating record.
+  const sourceUuid = attachment.source_uuid;
+  const keys = ['type', 'commandMode', 'prompt', 'timestamp'];
   if (
-    !hasExactKeys(attachment, ['type', 'commandMode', 'prompt', 'timestamp']) ||
+    !hasExactKeys(
+      attachment,
+      sourceUuid === undefined ? keys : [...keys, 'source_uuid'],
+    ) ||
+    (sourceUuid !== undefined && typeof sourceUuid !== 'string') ||
     typeof attachment.prompt !== 'string' ||
     attachment.prompt.length === 0 ||
     typeof attachment.timestamp !== 'string' ||

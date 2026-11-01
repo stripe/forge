@@ -718,6 +718,31 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, []);
   });
 
+  it('accepts the 2.1.280 task-notification shape with source_uuid and renderedInHumanTurn', async () => {
+    const base = queuedCommandRecord();
+    const record = {
+      ...base,
+      attachment: { ...base.attachment, source_uuid: 'source-record-uuid' },
+      renderedInHumanTurn: [
+        { content: 'Human-turn rendering of the same notice.' },
+      ],
+    };
+    const evidence = await conversationEvidence([record]);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    assert.equal(trajectory.steps[1]?.message, base.rendered[0]!.content);
+    assert.deepEqual(evidence.warnings, []);
+  });
+
+  it('rejects a non-string source_uuid on a queued command', async () => {
+    const base = queuedCommandRecord();
+    const evidence = await conversationEvidence([
+      { ...base, attachment: { ...base.attachment, source_uuid: 7 } },
+    ]);
+    assert.equal(evidence.kind, 'unavailable');
+  });
+
   for (const mode of ['prompt', 'future-mode']) {
     it(`rejects queued ${mode} with an otherwise accepted task notification`, async () => {
       const record = queuedCommandRecord();
