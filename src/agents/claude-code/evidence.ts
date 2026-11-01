@@ -47,6 +47,8 @@ const HOOK_ATTACHMENT_RECORD_KEYS = new Set([
 const IGNORED_RECORD_TYPES = new Set([
   'agent-name',
   'ai-title',
+  // Session cost and usage totals (Claude Code 2.1.280+); not conversation.
+  'cost-state',
   'custom-title',
   'file-history-snapshot',
   'last-prompt',

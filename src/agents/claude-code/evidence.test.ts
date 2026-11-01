@@ -336,6 +336,7 @@ describe('Claude native evidence', () => {
       'pr-link',
       'queue-operation',
       'summary',
+      'cost-state',
     ];
 
     const evidence = await nativeEvidence(
