@@ -140,8 +140,8 @@ for (const row of cases)
     );
   });
 
-it('pins five official price entries and hashes all table content', () => {
-  assert.equal(Object.keys(prices).length, 5);
+it('pins the price entries and hashes all table content', () => {
+  assert.equal(Object.keys(prices).length, 14);
   assert.match(agentPricingVersion, /^sha256:[0-9a-f]{64}$/);
   for (const price of Object.values(prices)) {
     assert.equal(new URL(price.source_url).protocol, 'https:');
@@ -160,4 +160,12 @@ it('pins five official price entries and hashes all table content', () => {
   );
   assert.equal(prices['gpt-6.1-sol'].cache_write, 2.5);
   assert.equal(prices['claude-opus-4-6'].cache_write_1h, 10);
+  // OpenRouter-pinned entries are keyed by the exact selected model name.
+  assert.equal(prices['x-ai/grok-4.7'].cache_write_policy, 'input_rate');
+  assert.equal(prices['x-ai/grok-4.7'].cache_write, 2);
+  assert.equal(
+    prices['@preset/sonnet-5-5-anthropic-v1'].routing_model,
+    'anthropic/claude-sonnet-5.5',
+  );
+  assert.equal(prices['@preset/sonnet-5-5-anthropic-v1'].input, 2);
 });
