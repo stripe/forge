@@ -656,6 +656,11 @@ export function createDockerRuntimeAdapter(
                       0,
                     ),
                   ),
+                  pluginMcpResponses: serializeCanonicalJson(
+                    mergeMcpRelayResponses(
+                      relays.map((relay) => relay.counts().responses),
+                    ),
+                  ),
                 }),
           }),
         });
@@ -1406,4 +1411,15 @@ function positive(value: number, name: string): number {
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Sum per-relay `<METHOD> <status>` counts; content-free, bounded by each relay. */
+function mergeMcpRelayResponses(
+  all: readonly Readonly<Record<string, number>>[],
+): Record<string, number> {
+  const merged: Record<string, number> = {};
+  for (const responses of all)
+    for (const [key, count] of Object.entries(responses))
+      merged[key] = (merged[key] ?? 0) + count;
+  return merged;
 }

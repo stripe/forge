@@ -351,6 +351,12 @@ Only MCP transport headers are forwarded. Runs that commit a result record
 authenticated request and error counts as `runtime.metadata.pluginMcpRequests`
 and `pluginMcpErrors`, plus the resolved limits as canonical JSON in
 `pluginMcpLimits`. Counts include discovery and authenticated rejections.
+`pluginMcpResponses` holds canonical JSON counting each authenticated request as
+`<METHOD> <status>` (GET, POST, DELETE, otherwise OTHER), for example `POST 200` or
+`GET 405`. Statuses the relay produced itself end in ` relay` (`POST 413 relay`,
+`GET 502 relay`, `GET stream-error relay`), so an error count can be traced to
+Stripe's answer or to the relay. At most 32 distinct keys are kept; the rest count
+under `overflow`. It records no bodies, headers or tool names.
 `pluginMcpToolCalls` holds canonical JSON with `tools` (tool name to call count),
 `other`, `unparsed`, and `overflow`. The relay reads only `method` and
 `params.name` from the already-bounded request body. Each `tools/call` in a batch

@@ -175,7 +175,10 @@ describe('host MCP credential relay upstream proxy', () => {
       assert.equal(response.status, 502);
       assert.equal(await response.text(), '');
       assert.equal(test.calls.length, 0);
-      assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+      assert.deepEqual(requestAndErrorCounts(test.relay), {
+        requests: 1,
+        errors: 1,
+      });
     });
 });
 
@@ -223,7 +226,11 @@ describe('host MCP credential relay', () => {
       unparsed: 1,
       overflow: 0,
     });
-    assert.deepEqual(test.relay.counts(), { requests: 2, errors: 0 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 2,
+      errors: 0,
+    });
+    assert.deepEqual(test.relay.counts().responses, { 'POST 200': 2 });
     assert.ok(
       !JSON.stringify(test.relay.toolCalls()).includes('synthetic-input'),
     );
@@ -279,7 +286,10 @@ describe('host MCP credential relay', () => {
       test.calls[0]?.body,
       '{"jsonrpc":"2.0","method":"tools/list","id":1}',
     );
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 0 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 0,
+    });
     assert.ok(!JSON.stringify(test.relay).includes('synthetic-host-key'));
   });
 
@@ -297,7 +307,10 @@ describe('host MCP credential relay', () => {
       assert.equal(response.status, 401);
     }
     assert.equal(first.calls.length, 0);
-    assert.deepEqual(first.relay.counts(), { requests: 0, errors: 0 });
+    assert.deepEqual(requestAndErrorCounts(first.relay), {
+      requests: 0,
+      errors: 0,
+    });
   });
 
   it('rejects other paths, queries and methods without forwarding', async () => {
@@ -327,7 +340,10 @@ describe('host MCP credential relay', () => {
     assert.equal(response.status, 502);
     assert.equal(response.headers.get('location'), null);
     assert.equal(test.calls.length, 1);
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
   });
 
   it('bounds request bodies and concurrent upstream requests', async () => {
@@ -359,7 +375,15 @@ describe('host MCP credential relay', () => {
     finish();
     assert.equal(await (await pending).text(), 'ok');
     assert.equal(test.calls.length, 1);
-    assert.deepEqual(test.relay.counts(), { requests: 3, errors: 2 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 3,
+      errors: 2,
+    });
+    assert.deepEqual(test.relay.counts().responses, {
+      'GET 200': 1,
+      'GET 503 relay': 1,
+      'POST 413 relay': 1,
+    });
   });
 
   it('bounds streamed response bytes', async () => {
@@ -374,7 +398,10 @@ describe('host MCP credential relay', () => {
       await response.text();
     });
     await test.relay.close();
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
   });
 
   it('bounds chunked request bodies without relying on content length', async () => {
@@ -392,7 +419,10 @@ describe('host MCP credential relay', () => {
     } as RequestInit);
     assert.equal(response.status, 413);
     assert.equal(test.calls.length, 0);
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
   });
 
   it('reports upstream transport failure without exposing its message', async () => {
@@ -406,7 +436,10 @@ describe('host MCP credential relay', () => {
     });
     assert.equal(response.status, 502);
     assert.equal(await response.text(), '');
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
   });
 
   for (const stall of ['transport', 'body'] as const)
@@ -439,7 +472,10 @@ describe('host MCP credential relay', () => {
       clock.advance(60_000);
       await assert.rejects(completion);
       await test.relay.close();
-      assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+      assert.deepEqual(requestAndErrorCounts(test.relay), {
+        requests: 1,
+        errors: 1,
+      });
     });
 
   it('keeps streams alive beyond the idle limit while bytes arrive, then closes an idle stream', async () => {
@@ -472,7 +508,10 @@ describe('host MCP credential relay', () => {
     clock.advance(60_000);
     await assert.rejects(stalled);
     await test.relay.close();
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
   });
 
   it('keeps unauthenticated sockets outside the agent budget and audit counts', async () => {
@@ -499,7 +538,10 @@ describe('host MCP credential relay', () => {
       headers: test.headers,
     });
     assert.equal(await response.text(), 'ok');
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 0 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 0,
+    });
     const last = sockets.at(-1)!;
     const closed = last.closed ? Promise.resolve() : once(last, 'close');
     clock.advance(1_000);
@@ -530,7 +572,10 @@ describe('host MCP credential relay', () => {
     }
     await oldestClosed;
     assert.equal(sockets[0]!.destroyed, true);
-    assert.deepEqual(test.relay.counts(), { requests: 0, errors: 0 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 0,
+      errors: 0,
+    });
     for (const socket of sockets.slice(1)) {
       socket.write(
         `GET /mcp HTTP/1.1\r\nHost: localhost\r\nAuthorization: ${test.headers.Authorization}\r\nConnection: close\r\n\r\n`,
@@ -540,7 +585,10 @@ describe('host MCP credential relay', () => {
       assert.match(response, /^HTTP\/1\.1 200 /);
     }
     assert.equal(test.calls.length, 4);
-    assert.deepEqual(test.relay.counts(), { requests: 4, errors: 0 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 4,
+      errors: 0,
+    });
   });
 
   it('caps authenticated connections separately from request concurrency', async () => {
@@ -558,7 +606,10 @@ describe('host MCP credential relay', () => {
     assert.equal(response.status, 503);
     await test.relay.close();
     await stopped;
-    assert.deepEqual(test.relay.counts(), { requests: 2, errors: 2 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 2,
+      errors: 2,
+    });
   });
 
   it('rejects a wildcard listener and invalid bounds before listening', async () => {
@@ -590,7 +641,10 @@ describe('host MCP credential relay', () => {
     assert.equal(response.status, 502);
     assert.equal(await response.text(), '');
     await test.relay.close();
-    assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+    assert.deepEqual(requestAndErrorCounts(test.relay), {
+      requests: 1,
+      errors: 1,
+    });
   });
 
   for (const reason of ['idle timeout', 'abort'] as const)
@@ -615,6 +669,16 @@ describe('host MCP credential relay', () => {
       await assert.rejects(
         fetch(test.relay.connection.url, { headers: test.headers }),
       );
-      assert.deepEqual(test.relay.counts(), { requests: 1, errors: 1 });
+      assert.deepEqual(requestAndErrorCounts(test.relay), {
+        requests: 1,
+        errors: 1,
+      });
     });
 });
+
+function requestAndErrorCounts(relay: {
+  counts(): { requests: number; errors: number };
+}) {
+  const { requests, errors } = relay.counts();
+  return { requests, errors };
+}

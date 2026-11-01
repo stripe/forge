@@ -63,6 +63,8 @@ export function resolveMcpCredentialRelayLimits(
       throw new TypeError('Invalid MCP relay timeout.');
   return Object.freeze(limits);
 }
+const RECORDED_METHODS = new Set(['GET', 'POST', 'DELETE']);
+const MAX_RECORDED_RESPONSES = 32;
 const REQUEST_HEADERS = [
   'accept',
   'content-type',
@@ -78,7 +80,12 @@ const RESPONSE_HEADERS = [
 
 export interface McpCredentialRelay {
   readonly connection: PluginMcpConnection;
-  counts(): Readonly<{ requests: number; errors: number }>;
+  counts(): Readonly<{
+    requests: number;
+    errors: number;
+    /** `<METHOD> <status>` per authenticated request; ` relay` marks relay-generated statuses. */
+    responses: Readonly<Record<string, number>>;
+  }>;
   toolCalls(): McpToolCallCounts;
   close(): Promise<void>;
 }
@@ -121,6 +128,14 @@ export async function startMcpCredentialRelay(input: {
   let active = 0;
   let requests = 0;
   let errors = 0;
+  const responses = new Map<string, number>();
+  const recordResponse = (method: string | undefined, outcome: string) => {
+    const verb = RECORDED_METHODS.has(method ?? '') ? method! : 'OTHER';
+    let key = `${verb} ${outcome}`;
+    if (!responses.has(key) && responses.size >= MAX_RECORDED_RESPONSES)
+      key = 'overflow';
+    responses.set(key, (responses.get(key) ?? 0) + 1);
+  };
   let toolCalls = EMPTY_MCP_TOOL_CALL_COUNTS;
   let closing: Promise<void> | undefined;
   const tasks = new Set<Promise<void>>();
@@ -136,6 +151,7 @@ export async function startMcpCredentialRelay(input: {
       };
       const fail = (status: number) => {
         markError();
+        recordResponse(request.method, `${status} relay`);
         response.writeHead(status, { Connection: 'close' });
         response.end();
         request.resume();
@@ -238,6 +254,7 @@ export async function startMcpCredentialRelay(input: {
             fail(502);
             return;
           }
+          recordResponse(request.method, String(upstream.status));
           if (upstream.status >= 400) markError();
           for (const name of RESPONSE_HEADERS) {
             const value = upstream.headers.get(name);
@@ -264,9 +281,13 @@ export async function startMcpCredentialRelay(input: {
           response.end();
         } catch {
           markError();
-          if (!response.headersSent && !response.destroyed)
+          if (!response.headersSent && !response.destroyed) {
+            recordResponse(request.method, '502 relay');
             response.writeHead(502).end();
-          else response.destroy();
+          } else {
+            recordResponse(request.method, 'stream-error relay');
+            response.destroy();
+          }
         } finally {
           cancelIdle();
           signal.removeEventListener('abort', abort);
@@ -329,7 +350,12 @@ export async function startMcpCredentialRelay(input: {
         url: `http://${input.connectHost}:${address.port}/mcp`,
         token,
       }),
-      counts: () => Object.freeze({ requests, errors }),
+      counts: () =>
+        Object.freeze({
+          requests,
+          errors,
+          responses: Object.freeze(Object.fromEntries([...responses].sort())),
+        }),
       toolCalls: () => toolCalls,
       close,
     });
