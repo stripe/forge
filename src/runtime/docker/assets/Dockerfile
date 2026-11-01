@@ -10,7 +10,7 @@ RUN apt-get update \
     && chown -R forge:forge /workspace /home/forge
 
 RUN npm install --global --omit=dev --no-audit --no-fund \
-      @anthropic-ai/claude-code@2.1.273 \
+      @anthropic-ai/claude-code@2.1.280 \
       @openai/codex@0.149.0 \
       opencode-ai@1.19.0 \
     && test -x /usr/local/bin/claude \

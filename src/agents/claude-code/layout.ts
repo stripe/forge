@@ -77,7 +77,7 @@ export function claudeProjectDirectory(layout: ClaudeCodeLayout): string {
   return `${layout.configDirectory}/projects/${encodeClaudeProjectPath(layout.workspace)}`;
 }
 
-/** Claude Code 2.1.273's Linux project-directory encoding. */
+/** Claude Code's Linux project-directory encoding (verified on 2.1.273; pinned 2.1.280). */
 function encodeClaudeProjectPath(workspace: string): string {
   const encoded = workspace.replace(/[^a-zA-Z0-9]/g, '-');
   if (encoded.length <= 200) return encoded;

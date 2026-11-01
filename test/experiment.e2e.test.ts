@@ -105,7 +105,7 @@ describe('resumable CLI experiment runs', () => {
                   ? 'codex-cli 0.149.0'
                   : kind === 'opencode'
                     ? '1.19.0'
-                    : '2.1.273 (Claude Code)',
+                    : '2.1.280 (Claude Code)',
               stderr: '',
               exitCode: 0,
               durationMs: 1,

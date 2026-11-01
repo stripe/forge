@@ -202,7 +202,7 @@ describe('Claude Code adapter', () => {
               calls.push([...argv]);
               return {
                 exitCode: 0,
-                stdout: '2.1.273 (Claude Code)',
+                stdout: '2.1.280 (Claude Code)',
                 stderr: '',
                 durationMs: 1,
               };
@@ -282,7 +282,7 @@ describe('Claude Code adapter', () => {
     const commands = {
       async run() {
         calls += 1;
-        return { exitCode: 0, stdout: '2.1.273', stderr: '', durationMs: 1 };
+        return { exitCode: 0, stdout: '2.1.280', stderr: '', durationMs: 1 };
       },
     };
     for (const paths of [
