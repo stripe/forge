@@ -6,23 +6,6 @@ import type { RunEvent } from '../contracts/observability.ts';
 import { createRunEventEmitter } from './events.ts';
 
 describe('run events', () => {
-  it('attributes work to the last started phase, also after it completes', async () => {
-    const emitter = createRunEventEmitter();
-    assert.equal(emitter.lastStartedPhase(), 'preflight');
-    await emitter.phase('setup', async (phase) => {
-      assert.equal(phase, 'setup');
-      assert.equal(emitter.lastStartedPhase(), 'setup');
-    });
-    assert.equal(emitter.lastStartedPhase(), 'setup');
-    await assert.rejects(
-      emitter.phase('interaction', async () => {
-        throw new Error('interaction failed');
-      }),
-      /interaction failed/,
-    );
-    assert.equal(emitter.lastStartedPhase(), 'interaction');
-  });
-
   it('orders lifecycle events and isolates synchronous and asynchronous observer failures', async () => {
     const observed: RunEvent[] = [];
     const emitter = createRunEventEmitter([

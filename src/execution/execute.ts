@@ -143,7 +143,7 @@ import {
   type ForgeExecutionErrorCode,
   throwIfAborted,
 } from './errors.ts';
-import { createRunEventEmitter } from './events.ts';
+import { createRunEventEmitter, type RunEventEmitter } from './events.ts';
 
 const MAX_NATIVE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_NATIVE_FORMAT = /^[a-z0-9][a-z0-9._+-]{0,127}$/i;
@@ -288,6 +288,79 @@ export async function executeEvalWithSetupActions(
   return executeEvalWithTestHooks(request, {}, setupActions);
 }
 
+const executionErrorCodeByPhase: Readonly<
+  Record<RunPhase, ForgeExecutionErrorCode>
+> = {
+  preflight: 'invalid_plan',
+  runtime_prepare: 'runtime_failed',
+  setup: 'setup_failed',
+  interaction: 'agent_failed',
+  quiesce: 'runtime_failed',
+  evidence: 'evidence_failed',
+  evaluation: 'evaluation_failed',
+  artifact_stage: 'artifact_failed',
+  runtime_dispose: 'runtime_failed',
+  result_commit: 'artifact_failed',
+};
+
+const attributeToPhase = (
+  error: unknown,
+  phase: RunPhase,
+  signal: AbortSignal,
+): ForgeExecutionError => {
+  if (signal.aborted) {
+    return new ForgeExecutionError(
+      'aborted',
+      phase,
+      'The Forge run was aborted.',
+      { cause: signal.reason },
+    );
+  }
+  if (error instanceof ForgeExecutionError) return error;
+  return executionError(
+    executionErrorCodeByPhase[phase],
+    phase,
+    `Forge failed during ${phase}.`,
+    error,
+  );
+};
+
+type PhaseRunner = <T>(phase: RunPhase, step: () => Promise<T>) => Promise<T>;
+
+const createPhaseRunner =
+  (events: RunEventEmitter, signal: AbortSignal): PhaseRunner =>
+  async (phase, step) => {
+    try {
+      return await events.phase(phase, async () => {
+        throwIfAborted(signal, phase);
+        return step();
+      });
+    } catch (error) {
+      throw attributeToPhase(error, phase, signal);
+    }
+  };
+
+interface PreflightPhaseResult {
+  readonly preflight: EvalPreflight;
+  readonly environment: ResolvedEnvironment;
+  readonly completions: PreparedCompletionRuntime;
+  readonly secrets: string[];
+}
+
+interface EvidencePhaseResult {
+  readonly nativeArtifact: RunArtifact | undefined;
+  readonly redacted: ReturnType<typeof redactNormalizedTrajectory>;
+  readonly trajectoryJson: string;
+}
+
+interface EvaluationPhaseResult {
+  readonly evaluated: Awaited<ReturnType<typeof evaluateRunEvidence>>;
+  readonly coreArtifacts: RunArtifact[];
+  readonly coreDescriptors: ArtifactDescriptorV1[];
+  readonly supplementalArtifacts: RunArtifact[];
+  readonly supplementalDescriptors: ArtifactDescriptorV1[];
+}
+
 /** @internal Unexported package test seam; production always uses fixed waits. */
 export async function executeEvalWithTestHooks(
   request: ExecuteEvalInput,
@@ -316,54 +389,53 @@ export async function executeEvalWithTestHooks(
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
   );
+  const runPhase = createPhaseRunner(events, signal);
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
 
   try {
-    const preflight = await events.phase('preflight', async (phase) => {
-      throwIfAborted(signal, phase);
-      assertRunId(input.runId);
-      return buildEvalPreflight(
-        input.plan,
-        input.composition,
-        hooks.setupExecutor ??
-          createSetupExecutorForRegistry(setupActions, true),
-      );
-    });
-
-    const environment = await resolveEnvironment(
-      input,
-      preflight.environmentSpecification,
-      preflight.credentialDeclarations,
-      signal,
+    const { preflight, environment, completions, secrets } = await runPhase(
+      'preflight',
+      async (): Promise<PreflightPhaseResult> => {
+        assertRunId(input.runId);
+        const preflight = buildEvalPreflight(
+          input.plan,
+          input.composition,
+          hooks.setupExecutor ??
+            createSetupExecutorForRegistry(setupActions, true),
+        );
+        const environment = await resolveEnvironment(
+          input,
+          preflight.environmentSpecification,
+          preflight.credentialDeclarations,
+          signal,
+        );
+        const completions = await prepareCompletionRuntime({
+          runId: input.runId,
+          bindings: preflight.completionBindings,
+          credentialResolver: input.composition.credentialResolver,
+          redactionSecrets: credentialValues(environment),
+          signal,
+        }).catch((error: unknown) => {
+          throw executionError(
+            'credential_failed',
+            'preflight',
+            'Forge could not prepare the completion providers required by this run.',
+            error,
+          );
+        });
+        const secrets = uniqueStrings([
+          ...credentialValues(environment),
+          ...completions.secrets,
+        ]);
+        return { preflight, environment, completions, secrets };
+      },
     );
-    let completions: PreparedCompletionRuntime;
-    try {
-      completions = await prepareCompletionRuntime({
-        runId: input.runId,
-        bindings: preflight.completionBindings,
-        credentialResolver: input.composition.credentialResolver,
-        redactionSecrets: credentialValues(environment),
-        signal,
-      });
-    } catch (error) {
-      throw executionError(
-        'credential_failed',
-        'preflight',
-        'Forge could not prepare the completion providers required by this run.',
-        error,
-      );
-    }
-    const secrets = uniqueStrings([
-      ...credentialValues(environment),
-      ...completions.secrets,
-    ]);
 
-    prepared = await events.phase('runtime_prepare', async (phase) => {
-      throwIfAborted(signal, phase);
-      return input.composition.runtime.prepare({
+    await runPhase('runtime_prepare', async () => {
+      prepared = await input.composition.runtime.prepare({
         runId: input.runId,
         plan: input.plan,
         environment,
@@ -373,19 +445,17 @@ export async function executeEvalWithTestHooks(
         },
         signal,
       });
+      await preflight.agent.prepare({
+        runId: input.runId,
+        plan: input.plan,
+        selection: input.plan.agent,
+        runtime: projectAgentPrepareRuntime(prepared),
+        inputs: input.composition.inputProvider,
+        signal,
+      });
     });
 
-    await preflight.agent.prepare({
-      runId: input.runId,
-      plan: input.plan,
-      selection: input.plan.agent,
-      runtime: projectAgentPrepareRuntime(prepared),
-      inputs: input.composition.inputProvider,
-      signal,
-    });
-
-    const setupArtifact = await events.phase('setup', async (phase) => {
-      throwIfAborted(signal, phase);
+    const setupArtifact = await runPhase('setup', async () => {
       const applied = await preflight.setup.apply({
         runId: input.runId,
         paths: prepared!.paths,
@@ -402,13 +472,12 @@ export async function executeEvalWithTestHooks(
       const artifact = buildSetupArtifact(input.plan, applied);
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'setup');
       await prepared!.finalizeSetup();
       return artifact;
     });
 
-    const interaction = await events.phase('interaction', async (phase) => {
-      throwIfAborted(signal, phase);
+    const interaction = await runPhase('interaction', async () => {
       const session = await preflight.agent.openSession({
         runId: input.runId,
         plan: input.plan,
@@ -426,69 +495,84 @@ export async function executeEvalWithTestHooks(
       );
     });
 
-    sealed = await events.phase('quiesce', async () => {
+    sealed = await runPhase('quiesce', async () => {
       return prepared!.quiesce();
     });
 
-    const selectedEvidence = await events.phase('evidence', async (phase) => {
-      throwIfAborted(signal, phase);
-      if (interaction.turns.length === 0) {
-        return {
-          evidence: rolePlayerErrorEvidence(
-            input.plan,
+    const { nativeArtifact, redacted, trajectoryJson } = await runPhase(
+      'evidence',
+      async (): Promise<EvidencePhaseResult> => {
+        const selectedEvidence = await (async () => {
+          if (interaction.turns.length === 0) {
+            return {
+              evidence: rolePlayerErrorEvidence(
+                input.plan,
+                preflight.agent,
+                preflight.agentEvidenceIdentity,
+              ),
+              nativeArtifact: undefined,
+            };
+          }
+          if (interaction.sessionId === null) {
+            throw new TypeError(
+              'A completed agent turn requires a session identity.',
+            );
+          }
+          const evidenceContext = {
+            runId: input.runId,
+            plan: input.plan,
+            selection: input.plan.agent,
+            runtime: projectAgentEvidenceRuntime(sealed!),
+            sessionId: interaction.sessionId,
+            signal,
+          };
+          const captured =
+            await preflight.agent.collectNativeArtifact?.(evidenceContext);
+          const collected =
+            await preflight.agent.collectEvidence(evidenceContext);
+          const nativeArtifact = buildNativeArtifact(
+            captured,
+            collected,
             preflight.agent,
-            preflight.agentEvidenceIdentity,
-          ),
-          nativeArtifact: undefined,
-        };
-      }
-      if (interaction.sessionId === null) {
-        throw new TypeError(
-          'A completed agent turn requires a session identity.',
+            interaction.sessionId,
+          );
+          const evidence = selectAgentEvidence({
+            agent: preflight.agent,
+            identity: preflight.agentEvidenceIdentity,
+            model: input.plan.agent.model,
+            sessionId: interaction.sessionId,
+            completedTurns: interaction.turns,
+            collected,
+          });
+          assertEvidenceMatchesRun(
+            evidence,
+            preflight.agent,
+            interaction.sessionId,
+          );
+          return { evidence, nativeArtifact };
+        })();
+        const redacted = redactNormalizedTrajectory(
+          selectedEvidence.evidence,
+          secrets,
         );
-      }
-      const evidenceContext = {
-        runId: input.runId,
-        plan: input.plan,
-        selection: input.plan.agent,
-        runtime: projectAgentEvidenceRuntime(sealed!),
-        sessionId: interaction.sessionId,
-        signal,
-      };
-      const captured =
-        await preflight.agent.collectNativeArtifact?.(evidenceContext);
-      const collected = await preflight.agent.collectEvidence(evidenceContext);
-      const nativeArtifact = buildNativeArtifact(
-        captured,
-        collected,
-        preflight.agent,
-        interaction.sessionId,
-      );
-      const evidence = selectAgentEvidence({
-        agent: preflight.agent,
-        identity: preflight.agentEvidenceIdentity,
-        model: input.plan.agent.model,
-        sessionId: interaction.sessionId,
-        completedTurns: interaction.turns,
-        collected,
-      });
-      assertEvidenceMatchesRun(
-        evidence,
-        preflight.agent,
-        interaction.sessionId,
-      );
-      return { evidence, nativeArtifact };
-    });
-    const redacted = redactNormalizedTrajectory(
-      selectedEvidence.evidence,
-      secrets,
-    );
-    const trajectoryJson = serializeAtifTrajectory(
-      redacted.evidence.trajectory,
+        const trajectoryJson = serializeAtifTrajectory(
+          redacted.evidence.trajectory,
+        );
+        return {
+          nativeArtifact: selectedEvidence.nativeArtifact,
+          redacted,
+          trajectoryJson,
+        };
+      },
     );
 
-    const evaluated = await events.phase('evaluation', async (phase) => {
-      throwIfAborted(signal, phase);
+    const {
+      evaluated,
+      coreArtifacts,
+      coreDescriptors,
+      supplementalArtifacts,
+      supplementalDescriptors,
+    } = await runPhase<EvaluationPhaseResult>('evaluation', async () => {
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
         | Awaited<ReturnType<typeof judgeCriteria>>
@@ -572,71 +656,79 @@ export async function executeEvalWithTestHooks(
         ...(criterionResults === undefined ? {} : { criterionResults }),
         signal,
       });
-      return { ...result, judgeEvidence };
+      const evaluated = { ...result, judgeEvidence };
+
+      const interactionArtifact = redactInteractionArtifact(
+        buildInteractionArtifact(input.plan, interaction),
+        secrets,
+      );
+
+      const coreArtifacts = buildCoreArtifacts(
+        input.plan,
+        setupArtifact,
+        trajectoryJson,
+        interactionArtifact,
+        evaluated.workspaceEvidence,
+        evaluated.judgeEvidence,
+      );
+      for (const artifact of coreArtifacts) {
+        assertNoSecrets(artifact.body, secrets, artifact.path);
+      }
+      const coreDescriptors = coreArtifacts.map(describeArtifact);
+      const nativeArtifacts =
+        nativeArtifact === undefined ? [] : [nativeArtifact];
+      const nativeDescriptors = nativeArtifacts.map(describeArtifact);
+      const contributedArtifacts = await (async (): Promise<RunArtifact[]> => {
+        if ((input.composition.contributors?.length ?? 0) === 0) return [];
+        const contributorResult = buildResult({
+          input,
+          agent: preflight.agent,
+          agentMetadata: preflight.agentMetadata,
+          runtime: sealed!,
+          interaction,
+          completionCalls: completions.calls,
+          evidence: redacted.evidence,
+          redactionCount: redacted.replacements,
+          evaluation: evaluated.evaluation,
+          coreDescriptors,
+          supplementalDescriptors: nativeDescriptors,
+          warnings: rolePlayerWarnings(interaction.failure),
+          startedAt,
+          completedAt: now(),
+        });
+        return buildSupplementalArtifacts(
+          input,
+          contributorResult,
+          secrets,
+          signal,
+        );
+      })();
+      const supplementalArtifacts = [
+        ...nativeArtifacts,
+        ...contributedArtifacts,
+      ];
+      const supplementalDescriptors = [
+        ...nativeDescriptors,
+        ...contributedArtifacts.map(describeArtifact),
+      ];
+      return {
+        evaluated,
+        coreArtifacts,
+        coreDescriptors,
+        supplementalArtifacts,
+        supplementalDescriptors,
+      };
     });
 
-    const interactionArtifact = redactInteractionArtifact(
-      buildInteractionArtifact(input.plan, interaction),
-      secrets,
-    );
-
-    const coreArtifacts = buildCoreArtifacts(
-      input.plan,
-      setupArtifact,
-      trajectoryJson,
-      interactionArtifact,
-      evaluated.workspaceEvidence,
-      evaluated.judgeEvidence,
-    );
-    for (const artifact of coreArtifacts) {
-      assertNoSecrets(artifact.body, secrets, artifact.path);
-    }
-    const coreDescriptors = coreArtifacts.map(describeArtifact);
-    const nativeArtifacts =
-      selectedEvidence.nativeArtifact === undefined
-        ? []
-        : [selectedEvidence.nativeArtifact];
-    const nativeDescriptors = nativeArtifacts.map(describeArtifact);
-    let contributedArtifacts: RunArtifact[] = [];
-    if ((input.composition.contributors?.length ?? 0) > 0) {
-      const contributorResult = buildResult({
-        input,
-        agent: preflight.agent,
-        agentMetadata: preflight.agentMetadata,
-        runtime: sealed,
-        interaction,
-        completionCalls: completions.calls,
-        evidence: redacted.evidence,
-        redactionCount: redacted.replacements,
-        evaluation: evaluated.evaluation,
-        coreDescriptors,
-        supplementalDescriptors: nativeDescriptors,
-        warnings: rolePlayerWarnings(interaction.failure),
-        startedAt,
-        completedAt: now(),
-      });
-      contributedArtifacts = await buildSupplementalArtifacts(
-        input,
-        contributorResult,
-        secrets,
-        signal,
-      );
-    }
-    const supplementalArtifacts = [...nativeArtifacts, ...contributedArtifacts];
-    const supplementalDescriptors = [
-      ...nativeDescriptors,
-      ...contributedArtifacts.map(describeArtifact),
-    ];
-
-    await events.phase('artifact_stage', async () => {
+    const warnings = await runPhase('artifact_stage', async () => {
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
       }
+      return rolePlayerWarnings(interaction.failure);
     });
 
-    const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
-    await events.phase('runtime_dispose', async () => {
+    const result = await runPhase('runtime_dispose', async () => {
       try {
         await prepared!.dispose();
       } catch {
@@ -649,55 +741,45 @@ export async function executeEvalWithTestHooks(
       } finally {
         runtimeDisposed = true;
       }
+
+      const result = buildResult({
+        input,
+        agent: preflight.agent,
+        agentMetadata: preflight.agentMetadata,
+        runtime: sealed!,
+        interaction,
+        completionCalls: completions.calls,
+        evidence: redacted.evidence,
+        redactionCount: redacted.replacements,
+        evaluation: evaluated.evaluation,
+        coreDescriptors,
+        supplementalDescriptors,
+        warnings,
+        startedAt,
+        completedAt: now(),
+      });
+      assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
+      return result;
     });
 
-    const result = buildResult({
-      input,
-      agent: preflight.agent,
-      agentMetadata: preflight.agentMetadata,
-      runtime: sealed,
-      interaction,
-      completionCalls: completions.calls,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
-      evaluation: evaluated.evaluation,
-      coreDescriptors,
-      supplementalDescriptors,
-      warnings,
-      startedAt,
-      completedAt: now(),
-    });
-    assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
-
-    const committed = await events.phase('result_commit', async () => {
-      return transaction!.commit(
+    return await runPhase('result_commit', async () => {
+      const committed = await transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
+      transaction = undefined;
+      const committedResult = parseRunResult(committed.result);
+      return {
+        runId: committed.runId,
+        location: committed.location,
+        result: committedResult,
+      };
     });
-    transaction = undefined;
-    const committedResult = parseRunResult(committed.result);
-    return {
-      runId: committed.runId,
-      location: committed.location,
-      result: committedResult,
-    };
   } catch (error) {
-    const phase = events.lastStartedPhase();
     await transaction?.rollback().catch(() => undefined);
     if (prepared && !runtimeDisposed) {
       await prepared.dispose().catch(() => undefined);
     }
-    if (signal.aborted) {
-      throw new ForgeExecutionError(
-        'aborted',
-        phase,
-        'The Forge run was aborted.',
-        {
-          cause: signal.reason,
-        },
-      );
-    }
-    throw mapExecutionError(error, phase);
+    throw error;
   }
 }
 
@@ -2024,29 +2106,3 @@ function assertRunId(runId: string): void {
     );
   }
 }
-
-const executionErrorCodeByPhase: Readonly<
-  Record<RunPhase, ForgeExecutionErrorCode>
-> = {
-  preflight: 'invalid_plan',
-  runtime_prepare: 'runtime_failed',
-  setup: 'setup_failed',
-  interaction: 'agent_failed',
-  quiesce: 'runtime_failed',
-  evidence: 'evidence_failed',
-  evaluation: 'evaluation_failed',
-  artifact_stage: 'artifact_failed',
-  runtime_dispose: 'runtime_failed',
-  result_commit: 'artifact_failed',
-};
-
-const mapExecutionError = (
-  error: unknown,
-  phase: RunPhase,
-): ForgeExecutionError =>
-  executionError(
-    executionErrorCodeByPhase[phase],
-    phase,
-    `Forge failed during ${phase}.`,
-    error,
-  );
