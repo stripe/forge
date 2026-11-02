@@ -1150,6 +1150,14 @@ is missing. Failed reads retain any inspected file existence, with an issue;
 unavailable content cannot pass a content check. Cancellation propagates
 through evidence collection.
 
+### Interview questions
+
+`interview_questions` is an optional list of nonblank questions for the agent
+to answer after its run. Forge validates the list and carries it in the parsed
+case and resolved plan, but never asks the questions, scores them, or changes
+the run because of them. A host that wants the answers asks them itself and
+sets its own limits.
+
 ### Criterion judging
 
 `judging_criteria` accepts strings or strict objects with nonblank `value`,

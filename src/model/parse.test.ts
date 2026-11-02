@@ -223,6 +223,31 @@ context: Existing integration
     );
   });
 
+  it('accepts trimmed interview questions and rejects blank ones', () => {
+    const definition = {
+      id: 'suite/task',
+      version: '0.1.0',
+      task: 'Complete the task.',
+    };
+    assert.deepEqual(
+      parseEvalCase({
+        ...definition,
+        interview_questions: ['  What was hardest?  ', 'What was missing?'],
+      }).interview_questions,
+      ['What was hardest?', 'What was missing?'],
+    );
+    assert.deepEqual(
+      parseEvalCase({ ...definition, interview_questions: [] })
+        .interview_questions,
+      [],
+    );
+    assert.equal(parseEvalCase(definition).interview_questions, undefined);
+    assert.throws(
+      () => parseEvalCase({ ...definition, interview_questions: ['   '] }),
+      BenchmarkModelError,
+    );
+  });
+
   it('accepts exactly one effective prompt in one-shot mode', () => {
     const oneShot = parseEvalCaseYaml(`
 id: smoke/write-file

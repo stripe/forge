@@ -226,6 +226,7 @@ const CompatibleEvalCaseSchema = z
     max_turns: PositiveIntegerSchema.max(100).optional(),
     setup: z.array(SetupStepEnvelopeSchema).max(MAX_SETUP_STEPS).default([]),
     judging_criteria: JudgingCriteriaSchema.default([]),
+    interview_questions: z.array(TrimmedTextSchema).optional(),
     checks: ChecksSchema.optional(),
     example_answer: z.string().refine(isBoundedText).optional(),
   })

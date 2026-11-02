@@ -161,6 +161,7 @@ export interface EvalCaseV1 {
   max_turns?: number;
   setup: SetupStepV1[];
   judging_criteria: JudgingCriterionV1[];
+  interview_questions?: string[];
   checks?: ChecksV1;
   example_answer?: string;
 }
