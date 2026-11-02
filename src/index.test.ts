@@ -14,6 +14,7 @@ import {
   criterionResultMatchesDefinition,
   defineSetupActionBundle,
   evaluateRunEvidence,
+  evaluateSealedRun,
   executeEval,
   FORGE_BUILD_IDENTITY,
   FORGE_VERSION,
@@ -91,6 +92,7 @@ describe('@stripe/forge package root', () => {
     assert.equal(typeof parseSetupArtifact, 'function');
     assert.equal(typeof parseAgentPluginInstallationReceipt, 'function');
     assert.equal(typeof evaluateRunEvidence, 'function');
+    assert.equal(typeof evaluateSealedRun, 'function');
     assert.equal(typeof resolveRunPlan, 'function');
     assert.equal(typeof parseResolvedRunPlan, 'function');
     assert.equal(typeof resolveManifestCaseIdFromFile, 'function');

@@ -56,16 +56,7 @@ import {
   resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
-import {
-  type CriterionCompletionRequest,
-  collectJudgeWorkspaceEvidence,
-  evaluateRunEvidence,
-  type JudgeWorkspaceEvidenceV1,
-  judgeCriteria,
-  renderJudgeWorkspaceEvidence,
-} from '../evaluation/index.ts';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
-import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
+import { evaluateSealedRun } from '../evaluation/index.ts';
 import {
   parseAgentEvidenceIdentity,
   selectAgentEvidence,
@@ -97,7 +88,6 @@ import {
   type JudgeEvidenceV1,
   MAX_SETUP_ARTIFACT_BYTES,
   parseInteractionArtifact,
-  parseJudgeEvidence,
   parseRunResult,
   parseSetupArtifact,
   type RolePlayerErrorV1,
@@ -497,90 +487,25 @@ export async function executeEvalWithTestHooks(
     const evaluated = await events.phase('evaluation', async () => {
       phase = 'evaluation';
       throwIfAborted(signal, phase);
-      const criteria = input.plan.evaluation.judging_criteria;
-      let criterionResults:
-        | Awaited<ReturnType<typeof judgeCriteria>>
-        | undefined;
-      let judgeEvidence: JudgeEvidenceV1 | undefined;
-      if (criteria.length > 0) {
-        const collected = await collectJudgeWorkspaceEvidence(
-          sealed!.workspace,
-          { signal },
-        );
-        const safeWorkspace = redactJudgeWorkspaceEvidence(
-          collected.evidence,
-          secrets,
-        );
-        const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
-        const judgeTranscript = createJudgeTranscriptProjection(
-          redacted.evidence.trajectory,
-        );
-        criterionResults = await judgeCriteria(
-          {
-            transcript: judgeTranscript,
-            criteria,
-            ...(input.plan.evaluation.example_answer === undefined
-              ? {}
-              : { exampleAnswer: input.plan.evaluation.example_answer }),
-            ...(safeWorkspaceText.length === 0
-              ? {}
-              : { workspaceText: safeWorkspaceText }),
-            signal,
-          },
-          async (request) => {
-            return (await completions.invoke('judge', request, request.signal))
-              .content;
-          },
-          {
-            redactionSecrets: secrets,
-            validateRequest: (request) =>
-              assertJudgePromptWillRemainUnchanged(request, secrets),
-            ...(hooks.waitBeforeCompletionRetry === undefined
-              ? {}
-              : {
-                  waitBeforeRetry: (attempt, retrySignal) =>
-                    hooks.waitBeforeCompletionRetry!(
-                      'judge',
-                      attempt,
-                      retrySignal ?? signal,
-                    ),
-                }),
-          },
-        );
-        judgeEvidence = parseJudgeEvidence(
-          {
-            transcript: {
-              source: judgeTranscript.source,
-              projection_id: judgeTranscript.projectionId,
-              trajectory_scope: judgeTranscript.trajectoryScope,
-              included_step_sources: [...judgeTranscript.includedStepSources],
-              copied_context: judgeTranscript.copiedContext,
-              included_fields: [...judgeTranscript.includedFields],
-              steps: JSON.parse(judgeTranscript.transcriptJson),
-            },
-            workspace: {
-              entries: safeWorkspace.entries.map((entry) => ({
-                path: entry.path,
-                content: entry.content,
-                truncated: entry.truncated,
-              })),
-              complete: safeWorkspace.complete,
-              warnings: safeWorkspace.warnings.map((warning) => ({
-                ...warning,
-              })),
-            },
-          },
-          { forgeVersion: FORGE_VERSION },
-        );
-      }
-      const result = await evaluateRunEvidence({
+      return evaluateSealedRun({
         plan: input.plan,
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
-        ...(criterionResults === undefined ? {} : { criterionResults }),
+        invokeJudge: async (request) =>
+          (await completions.invoke('judge', request, request.signal)).content,
+        secrets,
         signal,
+        ...(hooks.waitBeforeCompletionRetry === undefined
+          ? {}
+          : {
+              waitBeforeRetry: (attempt, retrySignal) =>
+                hooks.waitBeforeCompletionRetry!(
+                  'judge',
+                  attempt,
+                  retrySignal ?? signal,
+                ),
+            }),
       });
-      return { ...result, judgeEvidence };
     });
 
     const interactionArtifact = redactInteractionArtifact(
@@ -1591,13 +1516,6 @@ function rolePlayerErrorEvidence(
   });
 }
 
-function redactJudgeWorkspaceEvidence(
-  evidence: JudgeWorkspaceEvidenceV1,
-  secrets: readonly string[],
-): JudgeWorkspaceEvidenceV1 {
-  return boundJudgeWorkspaceEvidence(redactSecrets(evidence, secrets).value);
-}
-
 function buildInteractionArtifact(
   plan: ResolvedRunPlanV1,
   interaction: ExecutedInteraction,
@@ -1992,29 +1910,6 @@ function describeArtifact(artifact: RunArtifact): ArtifactDescriptorV1 {
       ? {}
       : { sensitivity: artifact.sensitivity }),
   };
-}
-
-/**
- * The projected transcript and recorded workspace evidence are exact
- * substrings of the final judge prompt. CompletionRuntime still performs
- * defensive redaction, so fail closed if that final pass would rewrite any
- * prompt bytes after those evidence values were constructed. This also
- * catches secret-shaped strings formed only at JSON or prompt-template
- * boundaries.
- */
-function assertJudgePromptWillRemainUnchanged(
-  request: Pick<CriterionCompletionRequest, 'systemPrompt' | 'messages'>,
-  secrets: readonly string[],
-): void {
-  const projected = redactSecrets(
-    { systemPrompt: request.systemPrompt, messages: request.messages },
-    secrets,
-  );
-  if (projected.replacements !== 0) {
-    throw new TypeError(
-      'Judge prompt cannot be sent without changing its audited evidence.',
-    );
-  }
 }
 
 function credentialValues(environment: ResolvedEnvironment): string[] {

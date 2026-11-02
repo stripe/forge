@@ -57,3 +57,8 @@ export {
   renderJudgeWorkspaceEvidence,
 } from './judgeWorkspace.ts';
 export { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
+export {
+  type EvaluatedSealedRun,
+  type EvaluateSealedRunInput,
+  evaluateSealedRun,
+} from './sealedRun.ts';

@@ -334,7 +334,7 @@ executeEvalWithTestHooks
 ├── agent.collectNativeArtifact / collectEvidence
 ├── selectAgentEvidence
 ├── redactNormalizedTrajectory
-├── evaluation
+├── evaluateSealedRun
 │   ├── collectJudgeWorkspaceEvidence
 │   ├── createJudgeTranscriptProjection
 │   ├── judgeCriteria
@@ -698,10 +698,11 @@ one originally selected.
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
 | [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
-| [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
+| [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by `evaluateSealedRun`. |
 | [`judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
 | [`criterionJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionJudge.ts) | `judgeCriteria`, prompt/response helpers | Renders one prompt per criterion, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |
 | [`score.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/score.ts) | `scoreEvaluation` | Purely combines criterion and check results into score/status. |
+| [`sealedRun.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/sealedRun.ts) | `evaluateSealedRun` | Evaluates one sealed run: judges its criteria against redacted workspace evidence and the judge transcript projection, records judge evidence, then calls `evaluateRunEvidence`. Called by execution. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/index.ts) | Public evaluation barrel | Re-exported at package root |
 
 There are two workspace evidence paths with different purposes:
@@ -938,7 +939,7 @@ README/architecture inventory. Keep host-owned files below
 | `interaction` | `execution/execute.ts:executeInteraction` | selected agent `index.ts`, stream parser, Ava/conversation, completion runtime |
 | `quiesce` | selected runtime `quiesce` | active command controller and sealed workspace/state |
 | `evidence` | adapter `collectEvidence`, then `evidence/selection.ts` | adapter evidence parser, ATIF parser/normalization |
-| `evaluation` | `evaluation/checks.ts` and `criterionJudge.ts` | judge transcript/workspace projection, completion runtime |
+| `evaluation` | `evaluation/sealedRun.ts:evaluateSealedRun` | judge transcript/workspace projection, completion runtime |
 | `artifact_stage` | artifact store transaction and `buildSupplementalArtifacts` | result descriptors, contributors, secret scans |
 | `runtime_dispose` | selected runtime `dispose` | container/process cleanup; late failures become warnings |
 | `result_commit` | `results/localStore.ts:commit` | result parser, descriptor equality, directory rename |

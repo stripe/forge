@@ -649,6 +649,7 @@ Deterministic file checks read the sealed workspace. If judging criteria exist,
 Forge builds a positive projection of the redacted ATIF trajectory with an explicit policy,
 collects bounded workspace text, invokes the judge provider, and records the
 exact evidence made available to it.
+The exported `evaluateSealedRun` performs this step, so hosts that drive their own lifecycle can evaluate a sealed run the same way.
 
 ### 9. Stage, dispose, and commit
 
@@ -1246,7 +1247,7 @@ and category, never raw responses, unknown keys, or received values.
 `parseCriterionJudgment` reports malformed input as a one-attempt parse error.
 
 Cancellation, oversized prompts, and dispatch invariant failures remain fatal.
-The execution controller supplies `validateRequest` to the judge's execution
+`evaluateSealedRun` supplies `validateRequest` to the judge's execution
 options to ensure final defensive redaction cannot change the already-audited
 evidence. This validation runs outside the retryable provider call; failure
 cancels peer judgments and prevents commit.
