@@ -140,6 +140,7 @@ import {
 import {
   executionError,
   ForgeExecutionError,
+  type ForgeExecutionErrorCode,
   throwIfAborted,
 } from './errors.ts';
 import { createRunEventEmitter } from './events.ts';
@@ -2034,26 +2035,30 @@ function assertRunId(runId: string): void {
   }
 }
 
+const EXECUTION_ERROR_CODE_BY_PHASE: Readonly<
+  Record<RunPhase, ForgeExecutionErrorCode>
+> = {
+  preflight: 'invalid_plan',
+  runtime_prepare: 'runtime_failed',
+  setup: 'setup_failed',
+  interaction: 'agent_failed',
+  quiesce: 'runtime_failed',
+  evidence: 'evidence_failed',
+  evaluation: 'evaluation_failed',
+  artifact_stage: 'artifact_failed',
+  runtime_dispose: 'runtime_failed',
+  result_commit: 'artifact_failed',
+};
+
 function mapExecutionError(
   error: unknown,
   phase: RunPhase,
 ): ForgeExecutionError {
   if (error instanceof ForgeExecutionError) return error;
-  const code =
-    phase === 'preflight'
-      ? 'invalid_plan'
-      : phase === 'runtime_prepare' ||
-          phase === 'quiesce' ||
-          phase === 'runtime_dispose'
-        ? 'runtime_failed'
-        : phase === 'setup'
-          ? 'setup_failed'
-          : phase === 'interaction'
-            ? 'agent_failed'
-            : phase === 'evidence'
-              ? 'evidence_failed'
-              : phase === 'evaluation'
-                ? 'evaluation_failed'
-                : 'artifact_failed';
-  return executionError(code, phase, `Forge failed during ${phase}.`, error);
+  return executionError(
+    EXECUTION_ERROR_CODE_BY_PHASE[phase],
+    phase,
+    `Forge failed during ${phase}.`,
+    error,
+  );
 }
