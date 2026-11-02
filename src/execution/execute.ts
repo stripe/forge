@@ -331,10 +331,7 @@ const createPhaseRunner =
   (events: RunEventEmitter, signal: AbortSignal): PhaseRunner =>
   async (phase, step) => {
     try {
-      return await events.phase(phase, async () => {
-        throwIfAborted(signal, phase);
-        return step();
-      });
+      return await events.phase(phase, step);
     } catch (error) {
       throw attributeToPhase(error, phase, signal);
     }
@@ -399,6 +396,7 @@ export async function executeEvalWithTestHooks(
     const { preflight, environment, completions, secrets } = await runPhase(
       'preflight',
       async (): Promise<PreflightPhaseResult> => {
+        throwIfAborted(signal, 'preflight');
         assertRunId(input.runId);
         const preflight = buildEvalPreflight(
           input.plan,
@@ -435,6 +433,7 @@ export async function executeEvalWithTestHooks(
     );
 
     await runPhase('runtime_prepare', async () => {
+      throwIfAborted(signal, 'runtime_prepare');
       prepared = await input.composition.runtime.prepare({
         runId: input.runId,
         plan: input.plan,
@@ -456,6 +455,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const setupArtifact = await runPhase('setup', async () => {
+      throwIfAborted(signal, 'setup');
       const applied = await preflight.setup.apply({
         runId: input.runId,
         paths: prepared!.paths,
@@ -478,6 +478,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const interaction = await runPhase('interaction', async () => {
+      throwIfAborted(signal, 'interaction');
       const session = await preflight.agent.openSession({
         runId: input.runId,
         plan: input.plan,
@@ -502,6 +503,7 @@ export async function executeEvalWithTestHooks(
     const { nativeArtifact, redacted, trajectoryJson } = await runPhase(
       'evidence',
       async (): Promise<EvidencePhaseResult> => {
+        throwIfAborted(signal, 'evidence');
         const selectedEvidence = await (async () => {
           if (interaction.turns.length === 0) {
             return {
@@ -573,6 +575,7 @@ export async function executeEvalWithTestHooks(
       supplementalArtifacts,
       supplementalDescriptors,
     } = await runPhase<EvaluationPhaseResult>('evaluation', async () => {
+      throwIfAborted(signal, 'evaluation');
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
         | Awaited<ReturnType<typeof judgeCriteria>>
