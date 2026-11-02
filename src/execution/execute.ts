@@ -140,6 +140,7 @@ import {
 import {
   executionError,
   ForgeExecutionError,
+  type ForgeExecutionErrorCode,
   throwIfAborted,
 } from './errors.ts';
 import { createRunEventEmitter } from './events.ts';
@@ -315,15 +316,13 @@ export async function executeEvalWithTestHooks(
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
   );
-  let phase: RunPhase = 'preflight';
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
 
   try {
-    const preflight = await events.phase('preflight', async () => {
-      phase = 'preflight';
+    const preflight = await events.phase('preflight', async (phase) => {
       throwIfAborted(signal, phase);
       assertRunId(input.runId);
       return buildEvalPreflight(
@@ -362,8 +361,7 @@ export async function executeEvalWithTestHooks(
       ...completions.secrets,
     ]);
 
-    prepared = await events.phase('runtime_prepare', async () => {
-      phase = 'runtime_prepare';
+    prepared = await events.phase('runtime_prepare', async (phase) => {
       throwIfAborted(signal, phase);
       return input.composition.runtime.prepare({
         runId: input.runId,
@@ -386,8 +384,7 @@ export async function executeEvalWithTestHooks(
       signal,
     });
 
-    const setupArtifact = await events.phase('setup', async () => {
-      phase = 'setup';
+    const setupArtifact = await events.phase('setup', async (phase) => {
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
         runId: input.runId,
@@ -410,8 +407,7 @@ export async function executeEvalWithTestHooks(
       return artifact;
     });
 
-    const interaction = await events.phase('interaction', async () => {
-      phase = 'interaction';
+    const interaction = await events.phase('interaction', async (phase) => {
       throwIfAborted(signal, phase);
       const session = await preflight.agent.openSession({
         runId: input.runId,
@@ -431,12 +427,10 @@ export async function executeEvalWithTestHooks(
     });
 
     sealed = await events.phase('quiesce', async () => {
-      phase = 'quiesce';
       return prepared!.quiesce();
     });
 
-    const selectedEvidence = await events.phase('evidence', async () => {
-      phase = 'evidence';
+    const selectedEvidence = await events.phase('evidence', async (phase) => {
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
         return {
@@ -493,8 +487,7 @@ export async function executeEvalWithTestHooks(
       redacted.evidence.trajectory,
     );
 
-    const evaluated = await events.phase('evaluation', async () => {
-      phase = 'evaluation';
+    const evaluated = await events.phase('evaluation', async (phase) => {
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
@@ -636,7 +629,6 @@ export async function executeEvalWithTestHooks(
     ];
 
     await events.phase('artifact_stage', async () => {
-      phase = 'artifact_stage';
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
@@ -645,7 +637,6 @@ export async function executeEvalWithTestHooks(
 
     const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
     await events.phase('runtime_dispose', async () => {
-      phase = 'runtime_dispose';
       try {
         await prepared!.dispose();
       } catch {
@@ -679,7 +670,6 @@ export async function executeEvalWithTestHooks(
     assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
     const committed = await events.phase('result_commit', async () => {
-      phase = 'result_commit';
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
@@ -692,6 +682,7 @@ export async function executeEvalWithTestHooks(
       result: committedResult,
     };
   } catch (error) {
+    const phase = events.lastStartedPhase();
     await transaction?.rollback().catch(() => undefined);
     if (prepared && !runtimeDisposed) {
       await prepared.dispose().catch(() => undefined);
@@ -2034,26 +2025,28 @@ function assertRunId(runId: string): void {
   }
 }
 
-function mapExecutionError(
+const executionErrorCodeByPhase: Readonly<
+  Record<RunPhase, ForgeExecutionErrorCode>
+> = {
+  preflight: 'invalid_plan',
+  runtime_prepare: 'runtime_failed',
+  setup: 'setup_failed',
+  interaction: 'agent_failed',
+  quiesce: 'runtime_failed',
+  evidence: 'evidence_failed',
+  evaluation: 'evaluation_failed',
+  artifact_stage: 'artifact_failed',
+  runtime_dispose: 'runtime_failed',
+  result_commit: 'artifact_failed',
+};
+
+const mapExecutionError = (
   error: unknown,
   phase: RunPhase,
-): ForgeExecutionError {
-  if (error instanceof ForgeExecutionError) return error;
-  const code =
-    phase === 'preflight'
-      ? 'invalid_plan'
-      : phase === 'runtime_prepare' ||
-          phase === 'quiesce' ||
-          phase === 'runtime_dispose'
-        ? 'runtime_failed'
-        : phase === 'setup'
-          ? 'setup_failed'
-          : phase === 'interaction'
-            ? 'agent_failed'
-            : phase === 'evidence'
-              ? 'evidence_failed'
-              : phase === 'evaluation'
-                ? 'evaluation_failed'
-                : 'artifact_failed';
-  return executionError(code, phase, `Forge failed during ${phase}.`, error);
-}
+): ForgeExecutionError =>
+  executionError(
+    executionErrorCodeByPhase[phase],
+    phase,
+    `Forge failed during ${phase}.`,
+    error,
+  );

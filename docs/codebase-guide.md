@@ -523,7 +523,7 @@ the action up again at execution time.
 | --- | --- | --- |
 | [`execute.ts`](https://github.com/stripe/forge/blob/main/src/execution/execute.ts) | `preflightEval`, `executeEval`, lifecycle helpers | Owns the full lifecycle and imports every score-affecting subsystem. This is the main integration file. |
 | [`completionRuntime.ts`](https://github.com/stripe/forge/blob/main/src/execution/completionRuntime.ts) | `completionBindingsForPlan`, `prepareCompletionRuntime`, `PreparedCompletionRuntime` | Resolves purpose-specific providers and credentials, performs provider preflight, invokes/redacts/validates completions, and records safe call summaries. Used by Ava and criterion judging through `execute.ts`. |
-| [`events.ts`](https://github.com/stripe/forge/blob/main/src/execution/events.ts) | `createRunEventEmitter` | Wraps lifecycle phases in start/completion events and uses `Promise.allSettled` so observers cannot control execution. |
+| [`events.ts`](https://github.com/stripe/forge/blob/main/src/execution/events.ts) | `createRunEventEmitter` | Wraps lifecycle phases in start/completion events and uses `Promise.allSettled` so observers cannot control execution. Records the last-started phase, which the engine uses to attribute failures. |
 | [`errors.ts`](https://github.com/stripe/forge/blob/main/src/execution/errors.ts) | `ForgeExecutionError`, `executionError`, `throwIfAborted` | Stable secret-safe phase/error surface used by the controller. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/execution/index.ts) | Public execution barrel | Re-exports execution entry points and stable errors |
 
