@@ -1877,7 +1877,10 @@ describe('Codex exact rollout evidence', () => {
         ' suffix';
       for (const options of [
         {
-          result: { content: [{ type: 'text', text: longText }], isError: false },
+          result: {
+            content: [{ type: 'text', text: longText }],
+            isError: false,
+          },
         },
         {
           result: {
@@ -1908,7 +1911,9 @@ describe('Codex exact rollout evidence', () => {
         });
         const projection = createJudgeTranscriptProjection(trajectory);
         assert.ok(
-          projection.transcriptJson.includes(JSON.stringify(output).slice(1, -1)),
+          projection.transcriptJson.includes(
+            JSON.stringify(output).slice(1, -1),
+          ),
         );
         assert.ok(
           !projection.transcriptJson.includes(
@@ -1988,7 +1993,10 @@ describe('Codex exact rollout evidence', () => {
         { type: 'input_text', text: MCP_HEADER },
         { type: 'input_text', text: 'small' },
         { type: 'input_text', text: clip(longText, 25) },
-        { type: 'input_image', image_url: `data:image/png;base64,${IMAGE_DATA}` },
+        {
+          type: 'input_image',
+          image_url: `data:image/png;base64,${IMAGE_DATA}`,
+        },
         { type: 'input_text', text: '[omitted 2 text items ...]' },
       ];
       const evidence = await loadToolSequence(
@@ -2006,7 +2014,9 @@ describe('Codex exact rollout evidence', () => {
       const projection = createJudgeTranscriptProjection(
         parseAtifTrajectory(evidence.trajectory),
       );
-      assert.ok(projection.transcriptJson.includes('[omitted 2 text items ...]'));
+      assert.ok(
+        projection.transcriptJson.includes('[omitted 2 text items ...]'),
+      );
       assert.ok(!projection.transcriptJson.includes('not shown'));
       assert.ok(!projection.transcriptJson.includes(IMAGE_DATA));
       for (const corrupt of [
@@ -2014,7 +2024,9 @@ describe('Codex exact rollout evidence', () => {
           index === 2 ? { ...block, text: `${block.text}!` } : block,
         ),
         output.map((block, index) =>
-          index === 4 ? { ...block, text: '[omitted 1 text items ...]' } : block,
+          index === 4
+            ? { ...block, text: '[omitted 1 text items ...]' }
+            : block,
         ),
         output.filter((_, index) => index !== 3),
         [...output, { type: 'input_text', text: 'not shown' }],
@@ -2147,7 +2159,8 @@ describe('Codex exact rollout evidence', () => {
         clip(original, 2), // The elapsed-time header itself is unavailable.
       ])
         assert.equal(
-          (await loadToolSequence(capturedMcp({ result, output: corrupt }))).kind,
+          (await loadToolSequence(capturedMcp({ result, output: corrupt })))
+            .kind,
           'unavailable',
         );
       for (const changed of [

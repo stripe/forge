@@ -102,10 +102,7 @@ describe('pinned Codex middle-out truncation', () => {
     // 9 bytes => 4 for the head and 5 for the tail. Head rounds down before
     // 漢; tail rounds up past 字. Each retained é is one scalar, two bytes.
     const original = 'é漢🦀middle🦀字é';
-    assert.equal(
-      codexTruncationBudget(original, 'é…10 chars truncated…é'),
-      4,
-    ); // Multiple byte budgets can produce the same rounded transform.
+    assert.equal(codexTruncationBudget(original, 'é…10 chars truncated…é'), 4); // Multiple byte budgets can produce the same rounded transform.
     assert.equal(
       codexTruncationBudget('🦀éhidden漢🦀', '🦀…8 chars truncated…🦀'),
       8,

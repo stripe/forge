@@ -74,7 +74,9 @@ function codexCharsTruncationBudget(
     const sourceSuffix = source.length - suffixLength;
     if (prefixLength >= sourceSuffix) continue;
     if (
-      !source.subarray(0, prefixLength).equals(result.subarray(0, prefixLength)) ||
+      !source
+        .subarray(0, prefixLength)
+        .equals(result.subarray(0, prefixLength)) ||
       !source.subarray(sourceSuffix).equals(result.subarray(suffixStart))
     )
       continue;
