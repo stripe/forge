@@ -478,6 +478,21 @@ export function boundJudgeWorkspaceEvidence(
 export function renderJudgeWorkspaceEvidence(
   evidence: JudgeWorkspaceEvidenceV1,
 ): string {
+  return renderRecordedJudgeWorkspaceEvidence(evidence);
+}
+
+/** Internal renderer shared with verification of the persisted workspace subset. */
+export function renderRecordedJudgeWorkspaceEvidence(evidence: {
+  readonly entries: readonly Pick<
+    JudgeWorkspaceEvidenceEntryV1,
+    'path' | 'content'
+  >[];
+  readonly warnings: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly path?: string;
+  }[];
+}): string {
   if (evidence.entries.length === 0 && evidence.warnings.length === 0)
     return '';
   return `${WORKSPACE_SECTION_PREFIX}${[
@@ -486,7 +501,9 @@ export function renderJudgeWorkspaceEvidence(
   ].join('\n')}`;
 }
 
-function renderEntry(entry: JudgeWorkspaceEvidenceEntryV1): string {
+function renderEntry(
+  entry: Pick<JudgeWorkspaceEvidenceEntryV1, 'path' | 'content'>,
+): string {
   const longestRun = Math.max(
     0,
     ...[...entry.content.matchAll(/`+/g)].map(([run]) => run.length),
@@ -495,7 +512,11 @@ function renderEntry(entry: JudgeWorkspaceEvidenceEntryV1): string {
   return `### ${entry.path}\n${fence}\n${entry.content}\n${fence}\n`;
 }
 
-function renderWarning(warning: JudgeWorkspaceWarningV1): string {
+function renderWarning(warning: {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}): string {
   const disposition =
     warning.code === 'workspace_binary_omitted' ? 'omitted' : 'truncated';
   return `(${disposition} — ${

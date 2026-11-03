@@ -390,8 +390,14 @@ const judgeEvidenceSchema = z
         ]),
         // The shared projection parser below validates the complete step schema.
         steps: z.array(z.unknown()),
+        omitted: z.literal('judge_budget_exceeded').optional(),
       })
-      .strict(),
+      .strict()
+      .refine(
+        (transcript) =>
+          transcript.omitted === undefined || transcript.steps.length === 0,
+        { message: 'An omitted judge transcript must have empty steps.' },
+      ),
     workspace: z
       .object({
         entries: z

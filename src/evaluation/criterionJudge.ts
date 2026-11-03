@@ -131,11 +131,11 @@ export function buildCriterionJudgePrompt(
 }
 
 function renderCriterionJudgePrompt(
-  input: Pick<
-    CriterionJudgeInput,
-    'transcript' | 'exampleAnswer' | 'workspaceText'
-  >,
+  input: Pick<CriterionJudgeInput, 'exampleAnswer' | 'workspaceText'> & {
+    readonly transcript: Pick<JudgeTranscriptProjectionV1, 'transcriptJson'>;
+  },
   criterion: string,
+  enforceLimit = true,
 ): string {
   const evidence = input.workspaceText
     ? `${input.transcript.transcriptJson}\n${input.workspaceText}`
@@ -154,12 +154,42 @@ ${criterion}
 
 Give a concise, one- or two-sentence explanation for your decision.`;
   const promptBytes = Buffer.byteLength(prompt, 'utf8');
-  if (promptBytes > MAX_CRITERION_JUDGE_PROMPT_BYTES) {
+  if (enforceLimit && promptBytes > MAX_CRITERION_JUDGE_PROMPT_BYTES) {
     throw new TypeError(
       `Criterion judge prompt exceeds the ${MAX_CRITERION_JUDGE_PROMPT_BYTES}-byte limit.`,
     );
   }
   return prompt;
+}
+
+/** Internal sizing seam: use the exact prompt template, without transcript bytes. */
+export function criterionJudgePromptOverheadBytes(input: {
+  readonly criteria: CriterionJudgeInput['criteria'];
+  readonly exampleAnswer?: string | undefined;
+  readonly workspaceText?: string | undefined;
+}): number {
+  const evidence = {
+    ...(input.exampleAnswer === undefined
+      ? {}
+      : { exampleAnswer: input.exampleAnswer }),
+    ...(input.workspaceText === undefined
+      ? {}
+      : { workspaceText: input.workspaceText }),
+    transcript: { transcriptJson: '' },
+  };
+  return Math.max(
+    0,
+    ...input.criteria.map((criterion) =>
+      Buffer.byteLength(
+        renderCriterionJudgePrompt(
+          evidence,
+          JudgingCriterionSchema.parse(criterion).value,
+          false,
+        ),
+        'utf8',
+      ),
+    ),
+  );
 }
 
 /** Parse only the strict one-criterion contract; prose and code fences are invalid. */

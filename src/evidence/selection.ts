@@ -83,7 +83,7 @@ export function selectAgentEvidence(
     throw new TypeError('Agent returned an invalid native evidence result.');
   }
   if (input.collected.kind === 'unavailable') {
-    return driverFallback(
+    return createDriverFallbackEvidence(
       input,
       parseUnavailableReason(input.collected.reason),
     );
@@ -133,7 +133,7 @@ export function selectAgentEvidence(
       source,
     )
   ) {
-    return driverFallback(input, {
+    return createDriverFallbackEvidence(input, {
       code: 'source_incomplete',
       message: 'Native evidence did not cover every completed agent turn.',
     });
@@ -292,8 +292,9 @@ function hasVisibleAgentEvidence(step: AtifAgentStep): boolean {
   return (step.tool_calls?.length ?? 0) > 0;
 }
 
-function driverFallback(
-  input: SelectAgentEvidenceInput,
+/** Internal reuse of the same bounded driver trajectory for judge-budget fallback. */
+export function createDriverFallbackEvidence(
+  input: Omit<SelectAgentEvidenceInput, 'collected'>,
   reason: AtifNormalizationWarning,
 ): NormalizedTrajectory {
   const steps: AtifTrajectoryV1_8['steps'] = [];

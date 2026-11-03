@@ -8,6 +8,11 @@ import type {
   RunArtifactTransaction,
 } from '../contracts/artifacts.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import {
+  type JudgeEvidenceBudgetSelection,
+  selectJudgeEvidence,
+  sizeJudgePrompt,
+} from '../evaluation/judgeEvidenceBudget.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
 import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
 import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
@@ -640,6 +645,34 @@ function verifyJudgeEvidence(
   const judgeEvidence = parseJsonArtifact(path, body, (value) =>
     parseJudgeEvidence(value, { forgeVersion: result.forge.version }),
   );
+  if (judgeEvidence.transcript.omitted !== undefined) {
+    let budget: JudgeEvidenceBudgetSelection;
+    try {
+      budget = selectJudgeEvidence({
+        promptOverheadBytes: sizeJudgePrompt(plan, judgeEvidence.workspace)
+          .promptOverheadBytes,
+        driverTranscriptBytes: Buffer.byteLength(
+          createJudgeTranscriptProjection(trajectory).transcriptJson,
+          'utf8',
+        ),
+      });
+    } catch (error) {
+      throw new ArtifactStoreError(
+        'judge-evidence.json prompt budget could not be verified.',
+        { cause: error },
+      );
+    }
+    if (
+      result.evidence.provenance.source.kind !== 'driver_fallback' ||
+      result.evidence.completeness !== 'fallback' ||
+      budget.evidence !== 'omitted'
+    ) {
+      throw new ArtifactStoreError(
+        'judge-evidence.json transcript omission is not justified by over-budget driver evidence.',
+      );
+    }
+    return;
+  }
   if (
     serializeCanonicalJson(judgeEvidence.transcript.steps) !==
     createJudgeTranscriptProjection(trajectory).transcriptJson

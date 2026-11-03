@@ -62,11 +62,12 @@ import {
   evaluateRunEvidence,
   type JudgeWorkspaceEvidenceV1,
   judgeCriteria,
-  renderJudgeWorkspaceEvidence,
 } from '../evaluation/index.ts';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
+import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
 import {
+  createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
   selectAgentEvidence,
 } from '../evidence/selection.ts';
@@ -486,12 +487,9 @@ export async function executeEvalWithTestHooks(
       );
       return { evidence, nativeArtifact };
     });
-    const redacted = redactNormalizedTrajectory(
+    const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
-    );
-    const trajectoryJson = serializeAtifTrajectory(
-      redacted.evidence.trajectory,
     );
 
     const evaluated = await events.phase('evaluation', async () => {
@@ -502,19 +500,69 @@ export async function executeEvalWithTestHooks(
         | Awaited<ReturnType<typeof judgeCriteria>>
         | undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
-      if (criteria.length > 0) {
-        const collected = await collectJudgeWorkspaceEvidence(
-          sealed!.workspace,
-          { signal },
-        );
-        const safeWorkspace = redactJudgeWorkspaceEvidence(
-          collected.evidence,
-          secrets,
-        );
-        const safeWorkspaceText = renderJudgeWorkspaceEvidence(safeWorkspace);
-        const judgeTranscript = createJudgeTranscriptProjection(
-          redacted.evidence.trajectory,
-        );
+      const safeWorkspace =
+        criteria.length === 0
+          ? undefined
+          : redactJudgeWorkspaceEvidence(
+              (
+                await collectJudgeWorkspaceEvidence(sealed!.workspace, {
+                  signal,
+                })
+              ).evidence,
+              secrets,
+            );
+      const workspace =
+        safeWorkspace === undefined
+          ? undefined
+          : {
+              entries: safeWorkspace.entries.map((entry) => ({
+                path: entry.path,
+                content: entry.content,
+                truncated: entry.truncated,
+              })),
+              complete: safeWorkspace.complete,
+              warnings: safeWorkspace.warnings.map((warning) => ({
+                ...warning,
+              })),
+            };
+      const prompt =
+        workspace === undefined
+          ? undefined
+          : sizeJudgePrompt(input.plan, workspace);
+      const resolved =
+        prompt === undefined
+          ? undefined
+          : resolveJudgeTranscript({
+              promptOverheadBytes: prompt.promptOverheadBytes,
+              selected: selectedRedacted,
+              buildDriver: (reason) => {
+                if (interaction.sessionId === null) {
+                  throw new TypeError(
+                    'Driver evidence requires a completed agent session.',
+                  );
+                }
+                const evidence = createDriverFallbackEvidence(
+                  {
+                    agent: preflight.agent,
+                    identity: preflight.agentEvidenceIdentity,
+                    model: input.plan.agent.model,
+                    sessionId: interaction.sessionId,
+                    completedTurns: interaction.turns,
+                  },
+                  reason,
+                );
+                assertEvidenceMatchesRun(
+                  evidence,
+                  preflight.agent,
+                  interaction.sessionId,
+                );
+                return redactNormalizedTrajectory(evidence, secrets);
+              },
+            });
+      const redacted = resolved?.redacted ?? selectedRedacted;
+      if (resolved !== undefined && prompt !== undefined) {
+        const judgeTranscript = resolved.transcript;
+        const safeWorkspaceText = prompt.workspaceText;
         criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
@@ -557,18 +605,11 @@ export async function executeEvalWithTestHooks(
               copied_context: judgeTranscript.copiedContext,
               included_fields: [...judgeTranscript.includedFields],
               steps: JSON.parse(judgeTranscript.transcriptJson),
+              ...(resolved.reason === 'judge_budget_exceeded'
+                ? { omitted: 'judge_budget_exceeded' }
+                : {}),
             },
-            workspace: {
-              entries: safeWorkspace.entries.map((entry) => ({
-                path: entry.path,
-                content: entry.content,
-                truncated: entry.truncated,
-              })),
-              complete: safeWorkspace.complete,
-              warnings: safeWorkspace.warnings.map((warning) => ({
-                ...warning,
-              })),
-            },
+            workspace,
           },
           { forgeVersion: FORGE_VERSION },
         );
@@ -580,7 +621,7 @@ export async function executeEvalWithTestHooks(
         ...(criterionResults === undefined ? {} : { criterionResults }),
         signal,
       });
-      return { ...result, judgeEvidence };
+      return { ...result, judgeEvidence, redacted };
     });
 
     const interactionArtifact = redactInteractionArtifact(
@@ -591,7 +632,7 @@ export async function executeEvalWithTestHooks(
     const coreArtifacts = buildCoreArtifacts(
       input.plan,
       setupArtifact,
-      trajectoryJson,
+      serializeAtifTrajectory(evaluated.redacted.evidence.trajectory),
       interactionArtifact,
       evaluated.workspaceEvidence,
       evaluated.judgeEvidence,
@@ -614,8 +655,8 @@ export async function executeEvalWithTestHooks(
         runtime: sealed,
         interaction,
         completionCalls: completions.calls,
-        evidence: redacted.evidence,
-        redactionCount: redacted.replacements,
+        evidence: evaluated.redacted.evidence,
+        redactionCount: evaluated.redacted.replacements,
         evaluation: evaluated.evaluation,
         coreDescriptors,
         supplementalDescriptors: nativeDescriptors,
@@ -668,8 +709,8 @@ export async function executeEvalWithTestHooks(
       runtime: sealed,
       interaction,
       completionCalls: completions.calls,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
+      evidence: evaluated.redacted.evidence,
+      redactionCount: evaluated.redacted.replacements,
       evaluation: evaluated.evaluation,
       coreDescriptors,
       supplementalDescriptors,
