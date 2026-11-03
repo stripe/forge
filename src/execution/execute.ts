@@ -316,20 +316,16 @@ export async function executeEvalWithTestHooks(
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
   );
-  let phase: RunPhase = 'preflight';
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
   const step = <T>(name: RunPhase, operation: () => Promise<T>): Promise<T> =>
-    events.phase(name, async () => {
-      phase = name;
-      return operation();
-    });
+    inPhase(name, () => events.phase(name, operation));
 
   try {
     const preflight = await step('preflight', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'preflight');
       assertRunId(input.runId);
       return buildEvalPreflight(
         input.plan,
@@ -339,36 +335,42 @@ export async function executeEvalWithTestHooks(
       );
     });
 
-    const environment = await resolveEnvironment(
-      input,
-      preflight.environmentSpecification,
-      preflight.credentialDeclarations,
-      signal,
+    const { environment, completions, secrets } = await inPhase(
+      'preflight',
+      async () => {
+        const environment = await resolveEnvironment(
+          input,
+          preflight.environmentSpecification,
+          preflight.credentialDeclarations,
+          signal,
+        );
+        let completions: PreparedCompletionRuntime;
+        try {
+          completions = await prepareCompletionRuntime({
+            runId: input.runId,
+            bindings: preflight.completionBindings,
+            credentialResolver: input.composition.credentialResolver,
+            redactionSecrets: credentialValues(environment),
+            signal,
+          });
+        } catch (error) {
+          throw executionError(
+            'credential_failed',
+            'preflight',
+            'Forge could not prepare the completion providers required by this run.',
+            error,
+          );
+        }
+        const secrets = uniqueStrings([
+          ...credentialValues(environment),
+          ...completions.secrets,
+        ]);
+        return { environment, completions, secrets };
+      },
     );
-    let completions: PreparedCompletionRuntime;
-    try {
-      completions = await prepareCompletionRuntime({
-        runId: input.runId,
-        bindings: preflight.completionBindings,
-        credentialResolver: input.composition.credentialResolver,
-        redactionSecrets: credentialValues(environment),
-        signal,
-      });
-    } catch (error) {
-      throw executionError(
-        'credential_failed',
-        'preflight',
-        'Forge could not prepare the completion providers required by this run.',
-        error,
-      );
-    }
-    const secrets = uniqueStrings([
-      ...credentialValues(environment),
-      ...completions.secrets,
-    ]);
 
     prepared = await step('runtime_prepare', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'runtime_prepare');
       return input.composition.runtime.prepare({
         runId: input.runId,
         plan: input.plan,
@@ -381,17 +383,19 @@ export async function executeEvalWithTestHooks(
       });
     });
 
-    await preflight.agent.prepare({
-      runId: input.runId,
-      plan: input.plan,
-      selection: input.plan.agent,
-      runtime: projectAgentPrepareRuntime(prepared),
-      inputs: input.composition.inputProvider,
-      signal,
-    });
+    await inPhase('runtime_prepare', () =>
+      preflight.agent.prepare({
+        runId: input.runId,
+        plan: input.plan,
+        selection: input.plan.agent,
+        runtime: projectAgentPrepareRuntime(prepared!),
+        inputs: input.composition.inputProvider,
+        signal,
+      }),
+    );
 
     const setupArtifact = await step('setup', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'setup');
       const applied = await preflight.setup.apply({
         runId: input.runId,
         paths: prepared!.paths,
@@ -408,13 +412,13 @@ export async function executeEvalWithTestHooks(
       const artifact = buildSetupArtifact(input.plan, applied);
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'setup');
       await prepared!.finalizeSetup();
       return artifact;
     });
 
     const interaction = await step('interaction', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'interaction');
       const session = await preflight.agent.openSession({
         runId: input.runId,
         plan: input.plan,
@@ -437,7 +441,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const selectedEvidence = await step('evidence', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'evidence');
       if (interaction.turns.length === 0) {
         return {
           evidence: rolePlayerErrorEvidence(
@@ -485,16 +489,19 @@ export async function executeEvalWithTestHooks(
       );
       return { evidence, nativeArtifact };
     });
-    const redacted = redactNormalizedTrajectory(
-      selectedEvidence.evidence,
-      secrets,
-    );
-    const trajectoryJson = serializeAtifTrajectory(
-      redacted.evidence.trajectory,
-    );
+    const { redacted, trajectoryJson } = await inPhase('evidence', () => {
+      const redacted = redactNormalizedTrajectory(
+        selectedEvidence.evidence,
+        secrets,
+      );
+      const trajectoryJson = serializeAtifTrajectory(
+        redacted.evidence.trajectory,
+      );
+      return { redacted, trajectoryJson };
+    });
 
     const evaluated = await step('evaluation', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, 'evaluation');
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
         | Awaited<ReturnType<typeof judgeCriteria>>
@@ -581,58 +588,74 @@ export async function executeEvalWithTestHooks(
       return { ...result, judgeEvidence };
     });
 
-    const interactionArtifact = redactInteractionArtifact(
-      buildInteractionArtifact(input.plan, interaction),
-      secrets,
-    );
-
-    const coreArtifacts = buildCoreArtifacts(
-      input.plan,
-      setupArtifact,
-      trajectoryJson,
-      interactionArtifact,
-      evaluated.workspaceEvidence,
-      evaluated.judgeEvidence,
-    );
-    for (const artifact of coreArtifacts) {
-      assertNoSecrets(artifact.body, secrets, artifact.path);
-    }
-    const coreDescriptors = coreArtifacts.map(describeArtifact);
-    const nativeArtifacts =
-      selectedEvidence.nativeArtifact === undefined
-        ? []
-        : [selectedEvidence.nativeArtifact];
-    const nativeDescriptors = nativeArtifacts.map(describeArtifact);
-    let contributedArtifacts: RunArtifact[] = [];
-    if ((input.composition.contributors?.length ?? 0) > 0) {
-      const contributorResult = buildResult({
-        input,
-        agent: preflight.agent,
-        agentMetadata: preflight.agentMetadata,
-        runtime: sealed,
-        interaction,
-        completionCalls: completions.calls,
-        evidence: redacted.evidence,
-        redactionCount: redacted.replacements,
-        evaluation: evaluated.evaluation,
-        coreDescriptors,
-        supplementalDescriptors: nativeDescriptors,
-        warnings: rolePlayerWarnings(interaction.failure),
-        startedAt,
-        completedAt: now(),
-      });
-      contributedArtifacts = await buildSupplementalArtifacts(
-        input,
-        contributorResult,
+    const {
+      coreArtifacts,
+      coreDescriptors,
+      supplementalArtifacts,
+      supplementalDescriptors,
+    } = await inPhase('evaluation', async () => {
+      const interactionArtifact = redactInteractionArtifact(
+        buildInteractionArtifact(input.plan, interaction),
         secrets,
-        signal,
       );
-    }
-    const supplementalArtifacts = [...nativeArtifacts, ...contributedArtifacts];
-    const supplementalDescriptors = [
-      ...nativeDescriptors,
-      ...contributedArtifacts.map(describeArtifact),
-    ];
+
+      const coreArtifacts = buildCoreArtifacts(
+        input.plan,
+        setupArtifact,
+        trajectoryJson,
+        interactionArtifact,
+        evaluated.workspaceEvidence,
+        evaluated.judgeEvidence,
+      );
+      for (const artifact of coreArtifacts) {
+        assertNoSecrets(artifact.body, secrets, artifact.path);
+      }
+      const coreDescriptors = coreArtifacts.map(describeArtifact);
+      const nativeArtifacts =
+        selectedEvidence.nativeArtifact === undefined
+          ? []
+          : [selectedEvidence.nativeArtifact];
+      const nativeDescriptors = nativeArtifacts.map(describeArtifact);
+      let contributedArtifacts: RunArtifact[] = [];
+      if ((input.composition.contributors?.length ?? 0) > 0) {
+        const contributorResult = buildResult({
+          input,
+          agent: preflight.agent,
+          agentMetadata: preflight.agentMetadata,
+          runtime: sealed!,
+          interaction,
+          completionCalls: completions.calls,
+          evidence: redacted.evidence,
+          redactionCount: redacted.replacements,
+          evaluation: evaluated.evaluation,
+          coreDescriptors,
+          supplementalDescriptors: nativeDescriptors,
+          warnings: rolePlayerWarnings(interaction.failure),
+          startedAt,
+          completedAt: now(),
+        });
+        contributedArtifacts = await buildSupplementalArtifacts(
+          input,
+          contributorResult,
+          secrets,
+          signal,
+        );
+      }
+      const supplementalArtifacts = [
+        ...nativeArtifacts,
+        ...contributedArtifacts,
+      ];
+      const supplementalDescriptors = [
+        ...nativeDescriptors,
+        ...contributedArtifacts.map(describeArtifact),
+      ];
+      return {
+        coreArtifacts,
+        coreDescriptors,
+        supplementalArtifacts,
+        supplementalDescriptors,
+      };
+    });
 
     await step('artifact_stage', async () => {
       transaction = await input.composition.artifactStore.begin(input.runId);
@@ -641,7 +664,9 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
+    const warnings: RunWarningV1[] = await inPhase('artifact_stage', () =>
+      rolePlayerWarnings(interaction.failure),
+    );
     await step('runtime_dispose', async () => {
       try {
         await prepared!.dispose();
@@ -657,23 +682,26 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    const result = buildResult({
-      input,
-      agent: preflight.agent,
-      agentMetadata: preflight.agentMetadata,
-      runtime: sealed,
-      interaction,
-      completionCalls: completions.calls,
-      evidence: redacted.evidence,
-      redactionCount: redacted.replacements,
-      evaluation: evaluated.evaluation,
-      coreDescriptors,
-      supplementalDescriptors,
-      warnings,
-      startedAt,
-      completedAt: now(),
+    const result = await inPhase('runtime_dispose', () => {
+      const result = buildResult({
+        input,
+        agent: preflight.agent,
+        agentMetadata: preflight.agentMetadata,
+        runtime: sealed!,
+        interaction,
+        completionCalls: completions.calls,
+        evidence: redacted.evidence,
+        redactionCount: redacted.replacements,
+        evaluation: evaluated.evaluation,
+        coreDescriptors,
+        supplementalDescriptors,
+        warnings,
+        startedAt,
+        completedAt: now(),
+      });
+      assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
+      return result;
     });
-    assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
     const committed = await step('result_commit', async () => {
       return transaction!.commit(
@@ -681,13 +709,16 @@ export async function executeEvalWithTestHooks(
       );
     });
     transaction = undefined;
-    const committedResult = parseRunResult(committed.result);
-    return {
+    return await inPhase('result_commit', () => ({
       runId: committed.runId,
       location: committed.location,
-      result: committedResult,
-    };
+      result: parseRunResult(committed.result),
+    }));
   } catch (error) {
+    const failure =
+      error instanceof PhaseFailure
+        ? error
+        : new PhaseFailure('preflight', error);
     await transaction?.rollback().catch(() => undefined);
     if (prepared && !runtimeDisposed) {
       await prepared.dispose().catch(() => undefined);
@@ -695,14 +726,14 @@ export async function executeEvalWithTestHooks(
     if (signal.aborted) {
       throw new ForgeExecutionError(
         'aborted',
-        phase,
+        failure.phase,
         'The Forge run was aborted.',
         {
           cause: signal.reason,
         },
       );
     }
-    throw mapExecutionError(error, phase);
+    throw mapExecutionError(failure.cause, failure.phase);
   }
 }
 
@@ -2056,4 +2087,27 @@ function mapExecutionError(
     `Forge failed during ${phase}.`,
     error,
   );
+}
+
+class PhaseFailure extends Error {
+  constructor(
+    readonly phase: RunPhase,
+    cause: unknown,
+  ) {
+    super(`Forge failed during ${phase}.`, { cause });
+    this.name = 'PhaseFailure';
+  }
+}
+
+async function inPhase<T>(
+  phase: RunPhase,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw error instanceof PhaseFailure
+      ? error
+      : new PhaseFailure(phase, error);
+  }
 }
