@@ -248,6 +248,9 @@ export function summarizeReportEvaluation(
     if (criterion.passed === true) group.passed += 1;
     if (criterion.passed === null) group.errored += 1;
   }
+  const scoredChecks = evaluation.checks.filter(
+    (check) => check.requirement_level !== 'OPTIONAL',
+  );
   return {
     status: evaluation.status,
     score: evaluation.score,
@@ -257,8 +260,9 @@ export function summarizeReportEvaluation(
     judging_criteria_excluded_errored: criteriaByRequirement.OPTIONAL.errored,
     criteria_by_requirement: criteriaByRequirement,
     criterion_scores: criterionScores(criteriaByRequirement),
-    checks_passed: evaluation.checks.filter((check) => check.passed).length,
-    checks_total: evaluation.checks.length,
+    // OPTIONAL checks are telemetry in result.json and do not gate status.
+    checks_passed: scoredChecks.filter((check) => check.passed).length,
+    checks_total: scoredChecks.length,
   };
 }
 

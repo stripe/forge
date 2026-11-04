@@ -35,10 +35,33 @@ export interface ForgeArtifactParseContext {
 
 export type EvalStatus = 'passed' | 'partial' | 'failed' | 'judge_error';
 
+/** Bound on matching calls listed in one check result. */
+export const MAX_MATCHED_TOOL_CALLS = 20;
+
+/** One tool call that satisfied a tool call check. Arguments are not copied. */
+export interface MatchedToolCallV1 {
+  readonly step_id: number;
+  readonly tool_call_id: string;
+  readonly function_name: string;
+}
+
+/** Calls that matched a tool call check's `tool` and `inputs`. */
+export interface ToolCallCheckEvidenceV1 {
+  /** Every matching call, including those beyond the bounded `calls` list. */
+  readonly matched_count: number;
+  /** The first matches in trajectory order, bounded. */
+  readonly calls: readonly MatchedToolCallV1[];
+}
+
 export interface CheckResultV1 {
   readonly name: string;
+  readonly label?: string;
+  /** Set by tool call checks; absent means SHOULD. */
+  readonly requirement_level?: RequirementLevelV1;
   readonly passed: boolean;
   readonly detail?: string;
+  /** Present on tool call checks; points into `trajectory.json`. */
+  readonly tool_calls?: ToolCallCheckEvidenceV1;
 }
 
 export type CriterionResultV1 = {

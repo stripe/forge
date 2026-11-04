@@ -33,7 +33,9 @@ export {
   type InteractionTurnV1,
   type JudgeEvidenceV1,
   type JudgeWorkspaceEntryV1,
+  MAX_MATCHED_TOOL_CALLS,
   MAX_SETUP_ARTIFACT_BYTES,
+  type MatchedToolCallV1,
   type RolePlayerErrorV1,
   type RunEvidenceV1,
   type RunResult,
@@ -42,6 +44,7 @@ export {
   type RunWarningV1,
   type SetupArtifactStepV1,
   type SetupArtifactV1,
+  type ToolCallCheckEvidenceV1,
   type WorkspaceEvidenceEntryV1,
   type WorkspaceEvidenceV1,
 } from './types.ts';

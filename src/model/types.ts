@@ -108,6 +108,16 @@ export type BuiltInSetupStepV1 =
   | CredentialsSetupStepV1
   | PluginSetupStepV1;
 
+/**
+ * Metadata for tool call checks. `label` is a repeatable category like a
+ * criterion label. An omitted level is SHOULD; OPTIONAL results are recorded
+ * but do not affect the score or status.
+ */
+export interface CheckMetadataV1 {
+  label?: string;
+  requirement_level?: RequirementLevelV1;
+}
+
 export interface FilesystemCheckV1 {
   description?: string;
   file: string;
@@ -129,8 +139,7 @@ export interface ToolCallCheckCountV1 {
  * Asserts on tool calls in the root ATIF trajectory. Subagent trajectories are
  * not searched. `tool` is a regular expression matched against the whole name.
  */
-export interface ToolCallCheckV1 {
-  description?: string;
+export interface ToolCallCheckV1 extends CheckMetadataV1 {
   tool: string;
   inputs?: ToolCallCheckInputsV1;
   count?: ToolCallCheckCountV1;
@@ -142,13 +151,14 @@ export interface ChecksV1 {
   tool_call_checks?: ToolCallCheckV1[];
 }
 
+export type RequirementLevelV1 = (typeof REQUIREMENT_LEVELS)[number];
+
 export const REQUIREMENT_LEVELS = Object.freeze([
   'MUST',
   'SHOULD',
   'OPTIONAL',
 ] as const);
 
-export type RequirementLevelV1 = (typeof REQUIREMENT_LEVELS)[number];
 export const DEFAULT_REQUIREMENT_LEVEL = 'SHOULD' as const;
 
 /** Authored shorthand and objects; parsing materializes the requirement level. */

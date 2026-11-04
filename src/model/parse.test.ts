@@ -911,6 +911,33 @@ treatments:
     );
   });
 
+  it('accepts label and requirement_level on tool call checks only', () => {
+    const parse = (checks: unknown) =>
+      parseEvalCase({
+        id: 'suite/task',
+        version: '0.1.0',
+        task: 'Complete the task.',
+        checks,
+      } as never).checks;
+    const parsed = parse({
+      file_checks: [{ file: 'a.txt', description: 'output' }],
+      tool_call_checks: [
+        { tool: 'x', label: 'api', requirement_level: 'MUST' },
+      ],
+    });
+    assert.equal(parsed?.file_checks?.[0]?.description, 'output');
+    assert.equal(parsed?.tool_call_checks?.[0]?.label, 'api');
+    for (const bad of [
+      { file_checks: [{ file: 'a.txt', label: 'output' }] },
+      { file_checks: [{ file: 'a.txt', requirement_level: 'MUST' }] },
+      { tool_call_checks: [{ tool: 'x', description: 'x' }] },
+      { tool_call_checks: [{ tool: 'x', label: 'Not Valid' }] },
+      { tool_call_checks: [{ tool: 'x', requirement_level: 'MAYBE' }] },
+    ]) {
+      assert.throws(() => parse(bad), BenchmarkModelError);
+    }
+  });
+
   it('validates tool call checks', () => {
     const parse = (tool_call_checks: unknown) =>
       parseEvalCase({

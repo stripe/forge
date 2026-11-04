@@ -35,6 +35,7 @@ import {
   type ExperimentConfigV1,
   type JsonObject,
   type JsonValue,
+  REQUIREMENT_LEVELS,
   type ResolvedRunPlanV1,
   type RunSelection,
   type SetupStepV1,
@@ -183,6 +184,14 @@ const ForgeProvenanceSchema = z
     }
   });
 
+const CheckMetadataFields = {
+  label: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
+  requirement_level: z.enum(REQUIREMENT_LEVELS).optional(),
+};
+
 const FilesystemCheckSchema = z
   .object({
     description: TrimmedTextSchema.optional(),
@@ -234,7 +243,7 @@ function toolCallInputsSchema(depth: number): z.ZodType<ToolCallCheckInputsV1> {
 
 const ToolCallCheckSchema = z
   .object({
-    description: TrimmedTextSchema.optional(),
+    ...CheckMetadataFields,
     tool: z
       .string()
       .min(1)

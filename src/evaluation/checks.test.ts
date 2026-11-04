@@ -7,7 +7,10 @@ import type {
   WorkspaceEntry,
 } from '../contracts/runtime.ts';
 import type { ChecksV1 } from '../model/types.ts';
-import type { CriterionResultV1 } from '../results/types.ts';
+import {
+  type CriterionResultV1,
+  MAX_MATCHED_TOOL_CALLS,
+} from '../results/types.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
 import {
   collectWorkspaceEvidence,
@@ -593,33 +596,100 @@ describe('runToolCallChecks', () => {
     );
   });
 
-  it('applies count bounds and labels', () => {
+  it('applies count bounds and records labels, levels, and matched calls', () => {
+    const call = (step: number, id: string, name: string) => ({
+      step_id: step,
+      tool_call_id: id,
+      function_name: name,
+    });
     assert.deepEqual(
       run([
         { tool: 'stripe__delete_customer', count: { max: 0 } },
         { tool: 'stripe__update_subscription', count: { max: 0 } },
         { tool: 'stripe__update_subscription', count: { min: 2 } },
         {
-          description: 'Exactly one',
+          label: 'billing',
+          requirement_level: 'MUST',
           tool: 'stripe__update_subscription',
           count: { min: 1, max: 1 },
         },
+        { requirement_level: 'OPTIONAL', tool: 'stripe__.*' },
       ]),
       [
-        { name: 'tool_not_called: stripe__delete_customer', passed: true },
+        {
+          name: 'tool_not_called: stripe__delete_customer',
+          requirement_level: 'SHOULD',
+          passed: true,
+          tool_calls: { matched_count: 0, calls: [] },
+        },
         {
           name: 'tool_not_called: stripe__update_subscription',
+          requirement_level: 'SHOULD',
           passed: false,
           detail: 'Found 1 matching tool call; expected exactly 0.',
+          tool_calls: {
+            matched_count: 1,
+            calls: [call(2, 'b', 'stripe__update_subscription')],
+          },
         },
         {
           name: 'tool_called: stripe__update_subscription',
+          requirement_level: 'SHOULD',
           passed: false,
           detail: 'Found 1 matching tool call; expected at least 2.',
+          tool_calls: {
+            matched_count: 1,
+            calls: [call(2, 'b', 'stripe__update_subscription')],
+          },
         },
-        { name: 'Exactly one', passed: true },
+        {
+          name: 'tool_called: stripe__update_subscription',
+          label: 'billing',
+          requirement_level: 'MUST',
+          passed: true,
+          tool_calls: {
+            matched_count: 1,
+            calls: [call(2, 'b', 'stripe__update_subscription')],
+          },
+        },
+        {
+          name: 'tool_called: stripe__.*',
+          requirement_level: 'OPTIONAL',
+          passed: true,
+          tool_calls: {
+            matched_count: 2,
+            calls: [
+              call(2, 'a', 'stripe__stripe_api_write'),
+              call(2, 'b', 'stripe__update_subscription'),
+            ],
+          },
+        },
       ],
     );
+  });
+
+  it('bounds the listed matches but not the matched count', () => {
+    const [result] = runToolCallChecks(
+      { tool_call_checks: [{ tool: 'Read' }] },
+      {
+        ...trajectory,
+        steps: Array.from({ length: 30 }, (_, index) => ({
+          step_id: index + 1,
+          source: 'agent' as const,
+          message: 'x',
+          tool_calls: [
+            {
+              tool_call_id: `c${index}`,
+              function_name: 'Read',
+              arguments: { secret: 'value' },
+            },
+          ],
+        })),
+      },
+    );
+    assert.equal(result?.tool_calls?.matched_count, 30);
+    assert.equal(result?.tool_calls?.calls.length, MAX_MATCHED_TOOL_CALLS);
+    assert.doesNotMatch(JSON.stringify(result), /value/);
   });
 
   it('handles null, missing, and prototype keys and non-object actuals', () => {

@@ -85,6 +85,68 @@ describe('canonical interaction and judge evidence parsing', () => {
     );
   });
 
+  it('parses check metadata and tool call evidence', () => {
+    const base = {
+      score: 0,
+      status: 'passed',
+      judging_criteria_passed: 0,
+      judging_criteria_total: 0,
+      judging_criteria_errored: 0,
+      judging_criteria: [],
+    };
+    const toolCalls = {
+      matched_count: 1,
+      calls: [
+        { step_id: 2, tool_call_id: 'a', function_name: 'stripe__create' },
+      ],
+    };
+    const parsed = parseEvaluationResult({
+      ...base,
+      checks: [
+        {
+          name: 'tool_called: stripe__create',
+          label: 'api',
+          requirement_level: 'MUST',
+          passed: true,
+          tool_calls: toolCalls,
+        },
+        { name: 'file_created: a.txt', passed: true },
+        {
+          name: 'tool_called: other',
+          requirement_level: 'OPTIONAL',
+          passed: false,
+          tool_calls: { matched_count: 0, calls: [] },
+        },
+      ],
+    });
+    assert.equal(parsed.checks[0]?.tool_calls?.calls[0]?.step_id, 2);
+    assert.equal(parsed.checks[1]?.requirement_level, undefined);
+    assert.throws(() =>
+      parseEvaluationResult({
+        ...base,
+        checks: [
+          {
+            name: 'tool_called: x',
+            passed: true,
+            tool_calls: { matched_count: 0, calls: toolCalls.calls },
+          },
+        ],
+      }),
+    );
+    assert.throws(() =>
+      parseEvaluationResult({
+        ...base,
+        checks: [
+          {
+            name: 'tool_called: x',
+            passed: true,
+            tool_calls: { ...toolCalls, arguments: { secret: 1 } },
+          },
+        ],
+      }),
+    );
+  });
+
   it('parses evaluation snapshots and rejects contradictory criterion totals', () => {
     const evaluation = {
       score: 0.5,
@@ -104,7 +166,13 @@ describe('canonical interaction and judge evidence parsing', () => {
           explanation: 'Missing.',
         },
       ],
-      checks: [{ name: 'file_exists: answer.txt', passed: true }],
+      checks: [
+        {
+          name: 'file_exists: answer.txt',
+          requirement_level: 'SHOULD',
+          passed: true,
+        },
+      ],
     };
     const parsed = parseEvaluationResult(evaluation);
     assert.deepEqual(parsed, {

@@ -1174,6 +1174,10 @@ is missing. Failed reads retain any inspected file existence, with an issue;
 unavailable content cannot pass a content check. Cancellation propagates
 through evidence collection.
 
+`file_checks` entries keep their optional `description`, and `files_created`
+entries are plain paths; neither has a label or requirement level, and both
+always gate a clean pass.
+
 `checks.tool_call_checks` assert on tool calls in the redacted ATIF trajectory
 selected for evaluation and need no companion artifact; redaction of secret
 arguments can therefore affect whether `inputs` match. Each check names a `tool`
@@ -1185,12 +1189,22 @@ compare by exact equality, objects may be nested so that the top level plus
 four more levels are allowed, extra keys in the actual call are ignored, and
 arrays and `__proto__` keys are rejected. `count` applies to calls matching both
 `tool` and `inputs`. Without `count`, one matching call is required; with only
-`max`, `min` is 0. A pattern that fails or times out fails the check. Results
-are labeled with `description`; otherwise `tool_not_called: <tool>` when
-`count.max` is 0, and `tool_called: <tool>` for every other check. Only root
-trajectory steps are searched; subagent trajectories are not. MCP tools appear
-under the server-prefixed name the agent recorded, such as
-`stripe__create_product`.
+`max`, `min` is 0. A pattern that fails or times out fails the check. Each check
+also accepts an optional `label` (a repeatable category matching
+`[a-z][a-z0-9_]*`, as on criteria) and an optional `requirement_level`,
+defaulting to SHOULD. MUST and SHOULD tool call checks gate a clean pass; an
+OPTIONAL one is recorded in `result.json` but affects neither the score nor the
+status, and experiment reports count only gating checks. Names are
+`tool_not_called: <tool>` when `count.max` is 0, and `tool_called: <tool>` for
+every other check. Only root trajectory steps are searched; subagent
+trajectories are not. MCP tools appear under the server-prefixed name the agent
+recorded, such as `stripe__create_product`.
+
+Each tool call check result in `result.json.evaluation.checks` carries
+`tool_calls`: `matched_count` (every matching call) and `calls`, the first 20
+matches in trajectory order as `{step_id, tool_call_id, function_name}`. These
+point into `trajectory.json`; arguments are not copied into the result.
+Tool call check results also record `requirement_level` and, when set, `label`.
 
 ### Interview questions
 

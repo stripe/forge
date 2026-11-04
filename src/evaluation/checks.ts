@@ -6,18 +6,22 @@ import type {
   JsonObject,
 } from '../atif/index.ts';
 import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
-import type {
-  ChecksV1,
-  ResolvedRunPlanV1,
-  ToolCallCheckInputsV1,
-  ToolCallCheckV1,
+import {
+  type CheckMetadataV1,
+  type ChecksV1,
+  DEFAULT_REQUIREMENT_LEVEL,
+  type RequirementLevelV1,
+  type ResolvedRunPlanV1,
+  type ToolCallCheckInputsV1,
+  type ToolCallCheckV1,
 } from '../model/types.ts';
-import type {
-  CheckResultV1,
-  CriterionResultV1,
-  EvaluationResultV1,
-  WorkspaceEvidenceEntryV1,
-  WorkspaceEvidenceV1,
+import {
+  type CheckResultV1,
+  type CriterionResultV1,
+  type EvaluationResultV1,
+  MAX_MATCHED_TOOL_CALLS,
+  type WorkspaceEvidenceEntryV1,
+  type WorkspaceEvidenceV1,
 } from '../results/index.ts';
 import { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
 
@@ -227,53 +231,66 @@ export function runToolCallChecks(
   const toolChecks = checks?.tool_call_checks ?? [];
   if (toolChecks.length === 0) return [];
   const calls = trajectory.steps.flatMap((step) =>
-    step.source === 'agent' ? (step.tool_calls ?? []) : [],
+    step.source === 'agent'
+      ? (step.tool_calls ?? []).map((call) => ({ step: step.step_id, call }))
+      : [],
   );
   return toolChecks.map((check) => evaluateToolCallCheck(check, calls));
 }
 
 function evaluateToolCallCheck(
   check: ToolCallCheckV1,
-  calls: readonly AtifToolCall[],
+  calls: ReadonlyArray<{ step: number; call: AtifToolCall }>,
 ): CheckResultV1 {
   const max = check.count?.max;
   const min = check.count?.min ?? (max === undefined ? 1 : 0);
-  const name =
-    check.description ??
-    `${max === 0 ? 'tool_not_called' : 'tool_called'}: ${check.tool}`;
+  const name = `${max === 0 ? 'tool_not_called' : 'tool_called'}: ${check.tool}`;
+  const metadata = checkMetadata(check);
   const nameMatches = toolNameMatcher(check.tool);
   if (nameMatches === undefined) {
     return {
       name,
+      ...metadata,
       passed: false,
       detail: 'Tool pattern is invalid or too large.',
     };
   }
-  let matched: number;
+  let matches: Array<{ step: number; call: AtifToolCall }>;
   try {
-    matched = calls.filter(
-      (call) =>
+    matches = calls.filter(
+      ({ call }) =>
         nameMatches(call.function_name) &&
         (check.inputs === undefined ||
           inputsMatch(check.inputs, call.arguments)),
-    ).length;
+    );
   } catch {
     // Fail closed: a timeout must not read as "never called".
     return {
       name,
+      ...metadata,
       passed: false,
       detail: 'Tool pattern evaluation failed or timed out.',
     };
   }
+  const matched = matches.length;
   const passed = matched >= min && (max === undefined || matched <= max);
   return {
     name,
+    ...metadata,
     passed,
     ...(passed
       ? {}
       : {
           detail: `Found ${matched} matching tool call${matched === 1 ? '' : 's'}; expected ${describeCount(min, max)}.`,
         }),
+    tool_calls: {
+      matched_count: matched,
+      calls: matches.slice(0, MAX_MATCHED_TOOL_CALLS).map(({ step, call }) => ({
+        step_id: step,
+        tool_call_id: call.tool_call_id,
+        function_name: call.function_name,
+      })),
+    },
   };
 }
 
@@ -330,6 +347,16 @@ function inputsMatch(
     }
     return got === want;
   });
+}
+
+function checkMetadata(check: CheckMetadataV1): {
+  label?: string;
+  requirement_level: RequirementLevelV1;
+} {
+  return {
+    ...(check.label === undefined ? {} : { label: check.label }),
+    requirement_level: check.requirement_level ?? DEFAULT_REQUIREMENT_LEVEL,
+  };
 }
 
 export class UnsupportedEvaluationCapabilityError extends Error {
