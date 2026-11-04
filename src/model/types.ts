@@ -115,9 +115,31 @@ export interface FilesystemCheckV1 {
   contains?: string;
 }
 
+/** Scalar or nested partial-match values for tool call arguments. */
+export interface ToolCallCheckInputsV1 {
+  [key: string]: JsonPrimitive | ToolCallCheckInputsV1;
+}
+
+export interface ToolCallCheckCountV1 {
+  min?: number;
+  max?: number;
+}
+
+/**
+ * Asserts on tool calls in the root ATIF trajectory. Subagent trajectories are
+ * not searched. `tool` is a regular expression matched against the whole name.
+ */
+export interface ToolCallCheckV1 {
+  description?: string;
+  tool: string;
+  inputs?: ToolCallCheckInputsV1;
+  count?: ToolCallCheckCountV1;
+}
+
 export interface ChecksV1 {
   files_created?: string[];
   file_checks?: FilesystemCheckV1[];
+  tool_call_checks?: ToolCallCheckV1[];
 }
 
 export const REQUIREMENT_LEVELS = Object.freeze([

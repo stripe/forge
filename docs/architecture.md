@@ -1163,7 +1163,7 @@ trajectory. Criterion judges receive a separately redacted workspace subset.
 ### Deterministic checks
 
 [`src/evaluation/checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) supports file-created,
-file-exists/absent, and bounded content-regex checks. It reads only requested
+file-exists/absent, bounded content-regex, and tool call checks. File checks read only requested
 workspace paths, does not follow symbolic links, records exact base64-encoded
 bytes in `workspace-evidence.json`, and executes regular expressions in a
 bounded VM context. The containing artifact checksum protects this evidence;
@@ -1173,6 +1173,24 @@ An absence check requires a successful inspection establishing that the path
 is missing. Failed reads retain any inspected file existence, with an issue;
 unavailable content cannot pass a content check. Cancellation propagates
 through evidence collection.
+
+`checks.tool_call_checks` assert on tool calls in the redacted ATIF trajectory
+selected for evaluation and need no companion artifact; redaction of secret
+arguments can therefore affect whether `inputs` match. Each check names a `tool`
+(a regular expression matched against the whole function name, with the same
+size and time bounds as `contains`), optional `inputs`, and an optional `count`
+of `min` and `max`. Only call names and arguments are read, never tool results.
+`inputs` is a recursive partial match: scalars (string, number, boolean, null)
+compare by exact equality, objects may be nested so that the top level plus
+four more levels are allowed, extra keys in the actual call are ignored, and
+arrays and `__proto__` keys are rejected. `count` applies to calls matching both
+`tool` and `inputs`. Without `count`, one matching call is required; with only
+`max`, `min` is 0. A pattern that fails or times out fails the check. Results
+are labeled with `description`; otherwise `tool_not_called: <tool>` when
+`count.max` is 0, and `tool_called: <tool>` for every other check. Only root
+trajectory steps are searched; subagent trajectories are not. MCP tools appear
+under the server-prefixed name the agent recorded, such as
+`stripe__create_product`.
 
 ### Interview questions
 
@@ -1614,7 +1632,7 @@ The public CLI and built-in composition currently have these limits:
   [completion-provider implementation](#host-side-completion-providers) and
   cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content
-  checks. Post-agent test commands and static-analysis checks are not built in.
+  checks, and root-trajectory tool call checks on names and arguments. Post-agent test commands and static-analysis checks are not built in.
 - The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
   network policies need a host-supplied [runtime adapter](#runtime-architecture).
 - Execution is local, with bounded concurrency and explicit resume. There is no

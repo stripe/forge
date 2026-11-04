@@ -763,6 +763,35 @@ describe('local artifact store', () => {
     );
   });
 
+  it('expects check results, but no workspace evidence, for tool call checks only', async () => {
+    const canonical = [
+      { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+      { path: 'trajectory.json', body: oneShotTrajectory },
+    ];
+    const plan = createTestResolvedRunPlan({
+      checks: { tool_call_checks: [{ tool: 'Read' }] },
+    });
+    const valid = await commitArtifacts(
+      canonical,
+      (result) => ({
+        ...result,
+        evaluation: {
+          ...result.evaluation,
+          checks: [{ name: 'tool_called: Read', passed: true }],
+        },
+      }),
+      { plan },
+    );
+    assert.ok(await verifyCompletedRun(valid));
+    const missingChecks = await commitArtifacts(canonical, (result) => result, {
+      plan,
+    });
+    await assert.rejects(
+      verifyCompletedRun(missingChecks),
+      /evaluation configuration does not match/,
+    );
+  });
+
   it('rejects result evidence without provenance', () => {
     const result = resultFor([]);
     const evidenceWithoutProvenance: Record<string, unknown> = {

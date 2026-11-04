@@ -911,6 +911,38 @@ treatments:
     );
   });
 
+  it('validates tool call checks', () => {
+    const parse = (tool_call_checks: unknown) =>
+      parseEvalCase({
+        id: 'suite/task',
+        version: '0.1.0',
+        task: 'Complete the task.',
+        checks: { tool_call_checks },
+      } as never);
+    const nested = (depth: number): Record<string, unknown> =>
+      depth === 1 ? { k: 'v' } : { k: nested(depth - 1) };
+    assert.deepEqual(
+      parse([{ tool: 'stripe__x', inputs: { a: { b: 1 } }, count: { min: 0 } }])
+        .checks?.tool_call_checks?.length,
+      1,
+    );
+    parse([{ tool: 'x', inputs: nested(5) }]);
+    for (const bad of [
+      [{ tool: 'x', inputs: nested(6) }],
+      [{ tool: 'x', inputs: { a: [1] } }],
+      [{ tool: 'x', count: { min: 2, max: 1 } }],
+      [{ tool: 'x', count: { min: -1 } }],
+      [{ tool: 'x', count: { max: 1.5 } }],
+      [{ tool: '(' }],
+      [{ tool: 'a\nb' }],
+      [{ tool: 'x'.repeat(1025) }],
+      [{ tool: 'x', extra: true }],
+      JSON.parse('[{"tool":"x","inputs":{"__proto__":"x"}}]'),
+      JSON.parse('[{"tool":"x","inputs":{"a":{"__proto__":1}}}]'),
+    ]) {
+      assert.throws(() => parse(bad), BenchmarkModelError);
+    }
+  });
   it('validates manifest case identities, paths, and uniqueness', () => {
     const entry = {
       id: 'smoke/write',

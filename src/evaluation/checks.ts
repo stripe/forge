@@ -1,8 +1,17 @@
 import { runInNewContext } from 'node:vm';
 
-import type { AtifTrajectoryV1_8 } from '../atif/index.ts';
+import type {
+  AtifToolCall,
+  AtifTrajectoryV1_8,
+  JsonObject,
+} from '../atif/index.ts';
 import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
-import type { ChecksV1, ResolvedRunPlanV1 } from '../model/types.ts';
+import type {
+  ChecksV1,
+  ResolvedRunPlanV1,
+  ToolCallCheckInputsV1,
+  ToolCallCheckV1,
+} from '../model/types.ts';
 import type {
   CheckResultV1,
   CriterionResultV1,
@@ -63,10 +72,10 @@ export async function evaluateRunEvidence(
     input.plan.evaluation.checks,
     input.signal,
   );
-  const checks = runWorkspaceChecks(
-    input.plan.evaluation.checks,
-    workspaceEvidence,
-  );
+  const checks = [
+    ...runWorkspaceChecks(input.plan.evaluation.checks, workspaceEvidence),
+    ...runToolCallChecks(input.plan.evaluation.checks, input.trajectory),
+  ];
   return {
     workspaceEvidence,
     evaluation: scoreEvaluation(criterionResults, checks),
@@ -203,6 +212,124 @@ export function runWorkspaceChecks(
     }
   }
   return results;
+}
+
+/**
+ * Evaluate tool call checks against the sealed root trajectory. Only the root
+ * `steps` are searched; subagent trajectories are not. Only call names and
+ * arguments are read, never observation results. `count` applies to calls
+ * whose name and `inputs` both match; without `count`, one such call is needed.
+ */
+export function runToolCallChecks(
+  checks: ChecksV1 | undefined,
+  trajectory: AtifTrajectoryV1_8,
+): CheckResultV1[] {
+  const toolChecks = checks?.tool_call_checks ?? [];
+  if (toolChecks.length === 0) return [];
+  const calls = trajectory.steps.flatMap((step) =>
+    step.source === 'agent' ? (step.tool_calls ?? []) : [],
+  );
+  return toolChecks.map((check) => evaluateToolCallCheck(check, calls));
+}
+
+function evaluateToolCallCheck(
+  check: ToolCallCheckV1,
+  calls: readonly AtifToolCall[],
+): CheckResultV1 {
+  const max = check.count?.max;
+  const min = check.count?.min ?? (max === undefined ? 1 : 0);
+  const name =
+    check.description ??
+    `${max === 0 ? 'tool_not_called' : 'tool_called'}: ${check.tool}`;
+  const nameMatches = toolNameMatcher(check.tool);
+  if (nameMatches === undefined) {
+    return {
+      name,
+      passed: false,
+      detail: 'Tool pattern is invalid or too large.',
+    };
+  }
+  let matched: number;
+  try {
+    matched = calls.filter(
+      (call) =>
+        nameMatches(call.function_name) &&
+        (check.inputs === undefined ||
+          inputsMatch(check.inputs, call.arguments)),
+    ).length;
+  } catch {
+    // Fail closed: a timeout must not read as "never called".
+    return {
+      name,
+      passed: false,
+      detail: 'Tool pattern evaluation failed or timed out.',
+    };
+  }
+  const passed = matched >= min && (max === undefined || matched <= max);
+  return {
+    name,
+    passed,
+    ...(passed
+      ? {}
+      : {
+          detail: `Found ${matched} matching tool call${matched === 1 ? '' : 's'}; expected ${describeCount(min, max)}.`,
+        }),
+  };
+}
+
+function describeCount(min: number, max: number | undefined): string {
+  if (max === undefined) return `at least ${min}`;
+  if (min === max) return `exactly ${min}`;
+  return `${min} to ${max}`;
+}
+
+/** Whole-name regex match in the bounded VM, memoized per distinct name. */
+function toolNameMatcher(
+  pattern: string,
+): ((name: string) => boolean) | undefined {
+  if (Buffer.byteLength(pattern, 'utf8') > MAX_REGEX_BYTES) return undefined;
+  const anchored = `^(?:${pattern})$`;
+  try {
+    RegExp(anchored);
+  } catch {
+    return undefined;
+  }
+  const cache = new Map<string, boolean>();
+  return (name) => {
+    const cached = cache.get(name);
+    if (cached !== undefined) return cached;
+    const result =
+      runInNewContext(
+        'new RegExp(pattern).test(name)',
+        { pattern: anchored, name },
+        {
+          timeout: MAX_REGEX_EXECUTION_MS,
+          contextCodeGeneration: { strings: false, wasm: false },
+        },
+      ) === true;
+    cache.set(name, result);
+    return result;
+  };
+}
+
+/** Recursive partial match: expected keys must equal; extra actual keys pass. */
+function inputsMatch(
+  expected: ToolCallCheckInputsV1,
+  actual: JsonObject,
+): boolean {
+  return Object.entries(expected).every(([key, want]) => {
+    if (!Object.hasOwn(actual, key)) return false;
+    const got = actual[key];
+    if (want !== null && typeof want === 'object') {
+      return (
+        got !== null &&
+        typeof got === 'object' &&
+        !Array.isArray(got) &&
+        inputsMatch(want, got)
+      );
+    }
+    return got === want;
+  });
 }
 
 export class UnsupportedEvaluationCapabilityError extends Error {

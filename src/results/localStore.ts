@@ -16,7 +16,10 @@ import {
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
 import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
 import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
-import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
+import {
+  hasDeterministicChecks,
+  hasDeterministicWorkspaceChecks,
+} from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
   type PluginSetupStepV1,
@@ -381,7 +384,7 @@ function verifyPlanArtifact(
       (entry, index) =>
         !criterionResultMatchesDefinition(entry, plannedCriteria[index]!),
     ) ||
-    hasDeterministicWorkspaceChecks(plan.evaluation.checks) !==
+    hasDeterministicChecks(plan.evaluation.checks) !==
       result.evaluation.checks.length > 0
   ) {
     throw new ArtifactStoreError(

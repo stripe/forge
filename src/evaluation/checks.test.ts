@@ -6,11 +6,13 @@ import type {
   ReadonlyWorkspace,
   WorkspaceEntry,
 } from '../contracts/runtime.ts';
+import type { ChecksV1 } from '../model/types.ts';
 import type { CriterionResultV1 } from '../results/types.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
 import {
   collectWorkspaceEvidence,
   evaluateRunEvidence,
+  runToolCallChecks,
   runWorkspaceChecks,
   UnsupportedEvaluationCapabilityError,
 } from './checks.ts';
@@ -323,6 +325,41 @@ describe('workspace checks', () => {
   });
 });
 
+describe('evaluateRunEvidence with tool call checks', () => {
+  it('appends tool call results after workspace results and scores them', async () => {
+    const evaluated = await evaluateRunEvidence({
+      plan: createTestResolvedRunPlan({
+        checks: {
+          files_created: ['a.txt'],
+          tool_call_checks: [{ tool: 'Read' }],
+        },
+      }),
+      trajectory: {
+        schema_version: 'ATIF-v1.8',
+        agent: { name: 'test-agent', version: '1' },
+        steps: [
+          {
+            step_id: 1,
+            source: 'agent',
+            message: 'x',
+            tool_calls: [
+              { tool_call_id: 'a', function_name: 'Read', arguments: {} },
+            ],
+          },
+        ],
+      },
+      workspace: workspace({ 'a.txt': 'a' }),
+    });
+    assert.deepEqual(
+      evaluated.evaluation.checks.map(({ name, passed }) => [name, passed]),
+      [
+        ['file_created: a.txt', true],
+        ['tool_called: Read', true],
+      ],
+    );
+  });
+});
+
 describe('evaluateRunEvidence', () => {
   const trajectory: AtifTrajectoryV1_8 = {
     schema_version: 'ATIF-v1.8',
@@ -483,5 +520,164 @@ describe('evaluateRunEvidence', () => {
         (error: unknown) => error === reason,
       );
     }
+  });
+});
+
+describe('runToolCallChecks', () => {
+  const trajectory: AtifTrajectoryV1_8 = {
+    schema_version: 'ATIF-v1.8',
+    agent: { name: 'test-agent', version: '1' },
+    steps: [
+      { step_id: 1, source: 'user', message: 'go' },
+      {
+        step_id: 2,
+        source: 'agent',
+        message: 'working',
+        tool_calls: [
+          {
+            tool_call_id: 'a',
+            function_name: 'stripe__stripe_api_write',
+            arguments: {
+              stripe_api_operation_id: 'PostProducts',
+              parameters: { name: 'Test Product', currency: 'usd' },
+              tags: ['x'],
+            },
+          },
+          {
+            tool_call_id: 'b',
+            function_name: 'stripe__update_subscription',
+            arguments: { status: 'active', amount: 1000 },
+          },
+        ],
+        observation: { results: [{ content: 'status: canceled' }] },
+      },
+    ],
+  };
+
+  function run(checks: NonNullable<ChecksV1['tool_call_checks']>) {
+    return runToolCallChecks({ tool_call_checks: checks }, trajectory);
+  }
+
+  it('matches names against the whole name, with regex support', () => {
+    assert.deepEqual(
+      run([
+        { tool: 'stripe__update_subscription' },
+        { tool: 'stripe__.*_subscription' },
+        { tool: 'stripe__stripe_api_(read|write)' },
+        { tool: 'update_subscription' },
+        { tool: 'stripe__stripe_api_read' },
+      ]).map(({ passed }) => passed),
+      [true, true, true, false, false],
+    );
+  });
+
+  it('matches inputs as a recursive partial match on scalars only', () => {
+    assert.deepEqual(
+      run([
+        {
+          tool: 'stripe__stripe_api_write',
+          inputs: {
+            stripe_api_operation_id: 'PostProducts',
+            parameters: { name: 'Test Product' },
+          },
+        },
+        {
+          tool: 'stripe__stripe_api_write',
+          inputs: { parameters: { name: 'Other' } },
+        },
+        { tool: 'stripe__update_subscription', inputs: { amount: '1000' } },
+        { tool: 'stripe__update_subscription', inputs: { missing: null } },
+        { tool: 'stripe__stripe_api_write', inputs: { tags: { 0: 'x' } } },
+      ]).map(({ passed }) => passed),
+      [true, false, false, false, false],
+    );
+  });
+
+  it('applies count bounds and labels', () => {
+    assert.deepEqual(
+      run([
+        { tool: 'stripe__delete_customer', count: { max: 0 } },
+        { tool: 'stripe__update_subscription', count: { max: 0 } },
+        { tool: 'stripe__update_subscription', count: { min: 2 } },
+        {
+          description: 'Exactly one',
+          tool: 'stripe__update_subscription',
+          count: { min: 1, max: 1 },
+        },
+      ]),
+      [
+        { name: 'tool_not_called: stripe__delete_customer', passed: true },
+        {
+          name: 'tool_not_called: stripe__update_subscription',
+          passed: false,
+          detail: 'Found 1 matching tool call; expected exactly 0.',
+        },
+        {
+          name: 'tool_called: stripe__update_subscription',
+          passed: false,
+          detail: 'Found 1 matching tool call; expected at least 2.',
+        },
+        { name: 'Exactly one', passed: true },
+      ],
+    );
+  });
+
+  it('handles null, missing, and prototype keys and non-object actuals', () => {
+    assert.deepEqual(
+      run([
+        { tool: 'stripe__update_subscription', inputs: { toString: 'x' } },
+        { tool: 'stripe__update_subscription', inputs: { status: null } },
+        { tool: 'stripe__stripe_api_write', inputs: { tags: { a: 1 } } },
+        { tool: 'stripe__stripe_api_write', count: { max: 2 } },
+        { tool: 'stripe__missing', count: { max: 2 } },
+        { tool: 'stripe__missing', count: {} },
+      ]).map(({ passed }) => passed),
+      [false, false, false, true, true, false],
+    );
+  });
+
+  it('ignores non-agent steps and steps without tool calls', () => {
+    const results = runToolCallChecks(
+      { tool_call_checks: [{ tool: 'x', count: { max: 0 } }] },
+      {
+        ...trajectory,
+        steps: [
+          { step_id: 1, source: 'user', message: 'x' },
+          { step_id: 2, source: 'agent', message: 'y', tool_calls: null },
+          { step_id: 3, source: 'agent', message: 'z' },
+        ],
+      },
+    );
+    assert.equal(results[0]?.passed, true);
+  });
+
+  it('fails closed when matching a tool name times out', () => {
+    const slow: AtifTrajectoryV1_8 = {
+      ...trajectory,
+      steps: [
+        {
+          step_id: 1,
+          source: 'agent',
+          message: 'x',
+          tool_calls: [
+            {
+              tool_call_id: 'a',
+              function_name: `${'a'.repeat(40)}!`,
+              arguments: {},
+            },
+          ],
+        },
+      ],
+    };
+    const [result] = runToolCallChecks(
+      { tool_call_checks: [{ tool: '(a+)+$', count: { max: 0 } }] },
+      slow,
+    );
+    assert.equal(result?.passed, false);
+    assert.match(result?.detail ?? '', /timed out/);
+  });
+
+  it('returns nothing without tool call checks', () => {
+    assert.deepEqual(runToolCallChecks(undefined, trajectory), []);
   });
 });
