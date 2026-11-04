@@ -617,7 +617,6 @@ describe('runToolCallChecks', () => {
           name: 'tool_called: stripe__delete_customer',
           requirement_level: 'SHOULD',
           passed: false,
-          detail: 'No matching tool call found.',
           tool_calls: { matched_count: 0, calls: [] },
         },
         {

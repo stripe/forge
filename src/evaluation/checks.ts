@@ -276,7 +276,6 @@ function evaluateToolCallCheck(
     name,
     ...metadata,
     passed,
-    ...(passed ? {} : { detail: 'No matching tool call found.' }),
     tool_calls: {
       matched_count: matched,
       calls: matches.slice(0, MAX_MATCHED_TOOL_CALLS).map(({ step, call }) => ({
