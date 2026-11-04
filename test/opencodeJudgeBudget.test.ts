@@ -133,9 +133,8 @@ describe('OpenCode whole-prompt judge budget integration', () => {
       events.find((event) => event.part.type === 'tool')!.part = toolPart;
       const stream = events.map((event) => JSON.stringify(event)).join('\n');
       if (scenario.capture === 'mismatch') {
-        exported.messages[2]!.parts.find(
-          (part) => part.type === 'text',
-        )!.text = 'A different native reply.';
+        exported.messages[2]!.parts.find((part) => part.type === 'text')!.text =
+          'A different native reply.';
       }
       const raw = JSON.stringify(exported);
       // 228 KB of workspace plus 840 KB of native tool output exceeds 1 MiB.
@@ -161,9 +160,10 @@ describe('OpenCode whole-prompt judge budget integration', () => {
                 ? raw
                 : stream;
           if (call.scope === 'agent' && call.argv[1] !== 'export') {
-            const state = runtime.runs[0]!.stateDirectories.get(
-              OPENCODE_STATE_ID,
-            )!.readonly;
+            const state =
+              runtime.runs[0]!.stateDirectories.get(
+                OPENCODE_STATE_ID,
+              )!.readonly;
             assert.equal(
               Buffer.from(await state.readFile('prompt.txt')).toString(),
               TASK,
@@ -303,16 +303,15 @@ describe('OpenCode whole-prompt judge budget integration', () => {
           /prompt exceeds/,
         );
       }
-      if (
-        scenario.selection === 'native' &&
-        scenario.toolOutput === 840_000
-      ) {
+      if (scenario.selection === 'native' && scenario.toolOutput === 840_000) {
         assert.ok(Buffer.byteLength(projection.transcriptJson) > 786_432);
       }
       assert.equal(provider.calls.length, CRITERIA.length);
       for (const { request } of provider.calls) {
         const prompt = request.systemPrompt!;
-        assert.ok(Buffer.byteLength(prompt) <= MAX_CRITERION_JUDGE_PROMPT_BYTES);
+        assert.ok(
+          Buffer.byteLength(prompt) <= MAX_CRITERION_JUDGE_PROMPT_BYTES,
+        );
         assert.ok(
           CRITERIA.some(
             (criterion) =>
