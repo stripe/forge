@@ -267,17 +267,6 @@ const ToolCallCheckSchema = z
         }
       }),
     inputs: toolCallInputsSchema(1).optional(),
-    count: z
-      .object({
-        min: NonnegativeIntegerSchema.optional(),
-        max: NonnegativeIntegerSchema.optional(),
-      })
-      .strict()
-      .refine(
-        ({ min, max }) => min === undefined || max === undefined || min <= max,
-        'count.min must not exceed count.max',
-      )
-      .optional(),
   })
   .strict();
 

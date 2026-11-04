@@ -22,6 +22,7 @@ import {
 } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
+  DEFAULT_REQUIREMENT_LEVEL,
   type PluginSetupStepV1,
   parseResolvedRunPlan,
   type ResolvedRunPlanV1,
@@ -385,13 +386,34 @@ function verifyPlanArtifact(
         !criterionResultMatchesDefinition(entry, plannedCriteria[index]!),
     ) ||
     hasDeterministicChecks(plan.evaluation.checks) !==
-      result.evaluation.checks.length > 0
+      result.evaluation.checks.length > 0 ||
+    !toolCallCheckResultsMatchPlan(plan, result)
   ) {
     throw new ArtifactStoreError(
       'plan.json evaluation configuration does not match the completed result.',
     );
   }
   return plan;
+}
+
+/** Tool call results come last, one per planned check, in plan order. */
+function toolCallCheckResultsMatchPlan(
+  plan: ResolvedRunPlanV1,
+  result: RunResult,
+): boolean {
+  const planned = plan.evaluation.checks?.tool_call_checks ?? [];
+  const recorded = result.evaluation.checks;
+  if (recorded.length < planned.length) return false;
+  const tail = recorded.slice(recorded.length - planned.length);
+  return planned.every((check, index) => {
+    const entry = tail[index]!;
+    return (
+      entry.name === `tool_called: ${check.tool}` &&
+      entry.label === check.label &&
+      entry.requirement_level ===
+        (check.requirement_level ?? DEFAULT_REQUIREMENT_LEVEL)
+    );
+  });
 }
 
 function verifyCanonicalArtifactInventory(

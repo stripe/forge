@@ -130,11 +130,6 @@ export interface ToolCallCheckInputsV1 {
   [key: string]: JsonPrimitive | ToolCallCheckInputsV1;
 }
 
-export interface ToolCallCheckCountV1 {
-  min?: number;
-  max?: number;
-}
-
 /**
  * Asserts on tool calls in the root ATIF trajectory. Subagent trajectories are
  * not searched. `tool` is a regular expression matched against the whole name.
@@ -142,7 +137,6 @@ export interface ToolCallCheckCountV1 {
 export interface ToolCallCheckV1 extends CheckMetadataV1 {
   tool: string;
   inputs?: ToolCallCheckInputsV1;
-  count?: ToolCallCheckCountV1;
 }
 
 export interface ChecksV1 {

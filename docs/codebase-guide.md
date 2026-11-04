@@ -697,7 +697,7 @@ one originally selected.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
+| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `runToolCallChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic file and tool call checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
 | [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
 | [`judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
 | [`criterionJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionJudge.ts) | `judgeCriteria`, prompt/response helpers | Renders one prompt per criterion, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |

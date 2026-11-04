@@ -121,6 +121,23 @@ describe('canonical interaction and judge evidence parsing', () => {
     });
     assert.equal(parsed.checks[0]?.tool_calls?.calls[0]?.step_id, 2);
     assert.equal(parsed.checks[1]?.requirement_level, undefined);
+    for (const [passed, matched_count] of [
+      [true, 0],
+      [false, 1],
+    ] as const) {
+      assert.throws(() =>
+        parseEvaluationResult({
+          ...base,
+          checks: [
+            {
+              name: 'tool_called: x',
+              passed,
+              tool_calls: { matched_count, calls: [] },
+            },
+          ],
+        }),
+      );
+    }
     assert.throws(() =>
       parseEvaluationResult({
         ...base,

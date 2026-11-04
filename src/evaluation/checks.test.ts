@@ -596,7 +596,7 @@ describe('runToolCallChecks', () => {
     );
   });
 
-  it('applies count bounds and records labels, levels, and matched calls', () => {
+  it('records labels, levels, and matched calls', () => {
     const call = (step: number, id: string, name: string) => ({
       step_id: step,
       tool_call_id: id,
@@ -604,43 +604,21 @@ describe('runToolCallChecks', () => {
     });
     assert.deepEqual(
       run([
-        { tool: 'stripe__delete_customer', count: { max: 0 } },
-        { tool: 'stripe__update_subscription', count: { max: 0 } },
-        { tool: 'stripe__update_subscription', count: { min: 2 } },
+        { tool: 'stripe__delete_customer' },
         {
           label: 'billing',
           requirement_level: 'MUST',
           tool: 'stripe__update_subscription',
-          count: { min: 1, max: 1 },
         },
         { requirement_level: 'OPTIONAL', tool: 'stripe__.*' },
       ]),
       [
         {
-          name: 'tool_not_called: stripe__delete_customer',
+          name: 'tool_called: stripe__delete_customer',
           requirement_level: 'SHOULD',
-          passed: true,
+          passed: false,
+          detail: 'No matching tool call found.',
           tool_calls: { matched_count: 0, calls: [] },
-        },
-        {
-          name: 'tool_not_called: stripe__update_subscription',
-          requirement_level: 'SHOULD',
-          passed: false,
-          detail: 'Found 1 matching tool call; expected exactly 0.',
-          tool_calls: {
-            matched_count: 1,
-            calls: [call(2, 'b', 'stripe__update_subscription')],
-          },
-        },
-        {
-          name: 'tool_called: stripe__update_subscription',
-          requirement_level: 'SHOULD',
-          passed: false,
-          detail: 'Found 1 matching tool call; expected at least 2.',
-          tool_calls: {
-            matched_count: 1,
-            calls: [call(2, 'b', 'stripe__update_subscription')],
-          },
         },
         {
           name: 'tool_called: stripe__update_subscription',
@@ -698,17 +676,15 @@ describe('runToolCallChecks', () => {
         { tool: 'stripe__update_subscription', inputs: { toString: 'x' } },
         { tool: 'stripe__update_subscription', inputs: { status: null } },
         { tool: 'stripe__stripe_api_write', inputs: { tags: { a: 1 } } },
-        { tool: 'stripe__stripe_api_write', count: { max: 2 } },
-        { tool: 'stripe__missing', count: { max: 2 } },
-        { tool: 'stripe__missing', count: {} },
+        { tool: 'stripe__missing' },
       ]).map(({ passed }) => passed),
-      [false, false, false, true, true, false],
+      [false, false, false, false],
     );
   });
 
   it('ignores non-agent steps and steps without tool calls', () => {
     const results = runToolCallChecks(
-      { tool_call_checks: [{ tool: 'x', count: { max: 0 } }] },
+      { tool_call_checks: [{ tool: 'x' }] },
       {
         ...trajectory,
         steps: [
@@ -718,7 +694,8 @@ describe('runToolCallChecks', () => {
         ],
       },
     );
-    assert.equal(results[0]?.passed, true);
+    assert.equal(results[0]?.passed, false);
+    assert.equal(results[0]?.tool_calls?.matched_count, 0);
   });
 
   it('fails closed when matching a tool name times out', () => {
@@ -740,7 +717,7 @@ describe('runToolCallChecks', () => {
       ],
     };
     const [result] = runToolCallChecks(
-      { tool_call_checks: [{ tool: '(a+)+$', count: { max: 0 } }] },
+      { tool_call_checks: [{ tool: '(a+)+$' }] },
       slow,
     );
     assert.equal(result?.passed, false);

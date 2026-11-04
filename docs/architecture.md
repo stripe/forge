@@ -1182,21 +1182,19 @@ always gate a clean pass.
 selected for evaluation and need no companion artifact; redaction of secret
 arguments can therefore affect whether `inputs` match. Each check names a `tool`
 (a regular expression matched against the whole function name, with the same
-size and time bounds as `contains`), optional `inputs`, and an optional `count`
-of `min` and `max`. Only call names and arguments are read, never tool results.
+size and time bounds as `contains`) and optional `inputs`. Only call names and
+arguments are read, never tool results.
 `inputs` is a recursive partial match: scalars (string, number, boolean, null)
 compare by exact equality, objects may be nested so that the top level plus
 four more levels are allowed, extra keys in the actual call are ignored, and
-arrays and `__proto__` keys are rejected. `count` applies to calls matching both
-`tool` and `inputs`. Without `count`, one matching call is required; with only
-`max`, `min` is 0. A pattern that fails or times out fails the check. Each check
+arrays and `__proto__` keys are rejected. A check passes when at least one call
+matches both `tool` and `inputs`; a pattern that fails or times out fails it. Each check
 also accepts an optional `label` (a repeatable category matching
 `[a-z][a-z0-9_]*`, as on criteria) and an optional `requirement_level`,
 defaulting to SHOULD. MUST and SHOULD tool call checks gate a clean pass; an
 OPTIONAL one is recorded in `result.json` but affects neither the score nor the
 status, and experiment reports count only gating checks. Names are
-`tool_not_called: <tool>` when `count.max` is 0, and `tool_called: <tool>` for
-every other check. Only root trajectory steps are searched; subagent
+`tool_called: <tool>`. Only root trajectory steps are searched; subagent
 trajectories are not. MCP tools appear under the server-prefixed name the agent
 recorded, such as `stripe__create_product`.
 

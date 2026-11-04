@@ -949,17 +949,15 @@ treatments:
     const nested = (depth: number): Record<string, unknown> =>
       depth === 1 ? { k: 'v' } : { k: nested(depth - 1) };
     assert.deepEqual(
-      parse([{ tool: 'stripe__x', inputs: { a: { b: 1 } }, count: { min: 0 } }])
-        .checks?.tool_call_checks?.length,
+      parse([{ tool: 'stripe__x', inputs: { a: { b: 1 } } }]).checks
+        ?.tool_call_checks?.length,
       1,
     );
     parse([{ tool: 'x', inputs: nested(5) }]);
     for (const bad of [
       [{ tool: 'x', inputs: nested(6) }],
       [{ tool: 'x', inputs: { a: [1] } }],
-      [{ tool: 'x', count: { min: 2, max: 1 } }],
-      [{ tool: 'x', count: { min: -1 } }],
-      [{ tool: 'x', count: { max: 1.5 } }],
+      [{ tool: 'x', count: { min: 1 } }],
       [{ tool: '(' }],
       [{ tool: 'a\nb' }],
       [{ tool: 'x'.repeat(1025) }],

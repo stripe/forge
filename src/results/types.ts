@@ -56,7 +56,7 @@ export interface ToolCallCheckEvidenceV1 {
 export interface CheckResultV1 {
   readonly name: string;
   readonly label?: string;
-  /** Set by tool call checks; absent means SHOULD. */
+  /** Set by tool call checks; absent on file checks, which always gate. */
   readonly requirement_level?: RequirementLevelV1;
   readonly passed: boolean;
   readonly detail?: string;

@@ -771,18 +771,42 @@ describe('local artifact store', () => {
     const plan = createTestResolvedRunPlan({
       checks: { tool_call_checks: [{ tool: 'Read' }] },
     });
+    const withChecks =
+      (
+        checks: Array<Record<string, unknown>>,
+      ): Parameters<typeof commitArtifacts>[1] =>
+      (result) =>
+        ({
+          ...result,
+          evaluation: { ...result.evaluation, checks },
+        }) as never;
     const valid = await commitArtifacts(
       canonical,
-      (result) => ({
-        ...result,
-        evaluation: {
-          ...result.evaluation,
-          checks: [{ name: 'tool_called: Read', passed: true }],
+      withChecks([
+        {
+          name: 'tool_called: Read',
+          requirement_level: 'SHOULD',
+          passed: true,
         },
-      }),
+      ]),
       { plan },
     );
     assert.ok(await verifyCompletedRun(valid));
+    for (const altered of [
+      { name: 'tool_called: Write', requirement_level: 'SHOULD' },
+      { name: 'tool_called: Read', requirement_level: 'OPTIONAL' },
+      { name: 'tool_called: Read', requirement_level: 'SHOULD', label: 'x' },
+    ]) {
+      const tampered = await commitArtifacts(
+        canonical,
+        withChecks([{ ...altered, passed: true }]),
+        { plan },
+      );
+      await assert.rejects(
+        verifyCompletedRun(tampered),
+        /evaluation configuration does not match/,
+      );
+    }
     const missingChecks = await commitArtifacts(canonical, (result) => result, {
       plan,
     });

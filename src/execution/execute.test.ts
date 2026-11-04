@@ -215,7 +215,7 @@ describe('executeEval', () => {
         label: 'telemetry',
         requirement_level: 'OPTIONAL',
         passed: false,
-        detail: 'Found 0 matching tool calls; expected at least 1.',
+        detail: 'No matching tool call found.',
         tool_calls: { matched_count: 0, calls: [] },
       },
     ]);

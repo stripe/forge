@@ -156,7 +156,12 @@ const checkResult = z
       .refine(({ matched_count, calls }) => calls.length <= matched_count)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    ({ passed, tool_calls }) =>
+      tool_calls === undefined || passed === tool_calls.matched_count > 0,
+    'A tool call check passes exactly when a call matched.',
+  );
 
 const artifactDescriptor = z
   .object({

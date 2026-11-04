@@ -221,8 +221,8 @@ export function runWorkspaceChecks(
 /**
  * Evaluate tool call checks against the sealed root trajectory. Only the root
  * `steps` are searched; subagent trajectories are not. Only call names and
- * arguments are read, never observation results. `count` applies to calls
- * whose name and `inputs` both match; without `count`, one such call is needed.
+ * arguments are read, never observation results. A check passes when at least
+ * one call matches both its name and `inputs`.
  */
 export function runToolCallChecks(
   checks: ChecksV1 | undefined,
@@ -242,9 +242,7 @@ function evaluateToolCallCheck(
   check: ToolCallCheckV1,
   calls: ReadonlyArray<{ step: number; call: AtifToolCall }>,
 ): CheckResultV1 {
-  const max = check.count?.max;
-  const min = check.count?.min ?? (max === undefined ? 1 : 0);
-  const name = `${max === 0 ? 'tool_not_called' : 'tool_called'}: ${check.tool}`;
+  const name = `tool_called: ${check.tool}`;
   const metadata = checkMetadata(check);
   const nameMatches = toolNameMatcher(check.tool);
   if (nameMatches === undefined) {
@@ -273,16 +271,12 @@ function evaluateToolCallCheck(
     };
   }
   const matched = matches.length;
-  const passed = matched >= min && (max === undefined || matched <= max);
+  const passed = matched > 0;
   return {
     name,
     ...metadata,
     passed,
-    ...(passed
-      ? {}
-      : {
-          detail: `Found ${matched} matching tool call${matched === 1 ? '' : 's'}; expected ${describeCount(min, max)}.`,
-        }),
+    ...(passed ? {} : { detail: 'No matching tool call found.' }),
     tool_calls: {
       matched_count: matched,
       calls: matches.slice(0, MAX_MATCHED_TOOL_CALLS).map(({ step, call }) => ({
@@ -292,12 +286,6 @@ function evaluateToolCallCheck(
       })),
     },
   };
-}
-
-function describeCount(min: number, max: number | undefined): string {
-  if (max === undefined) return `at least ${min}`;
-  if (min === max) return `exactly ${min}`;
-  return `${min} to ${max}`;
 }
 
 /** Whole-name regex match in the bounded VM, memoized per distinct name. */
