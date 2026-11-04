@@ -81,4 +81,88 @@ describe('pinned Codex middle-out truncation', () => {
     );
     assert.equal(codexTruncationBudget('short', 'short'), undefined);
   });
+
+  it('validates chars markers using byte budgets with an odd byte assigned to the tail', () => {
+    const original = '0123456789'.repeat(20);
+    const expected = '0123…191 chars truncated…56789';
+    assert.equal(codexTruncationBudget(original, expected), 9);
+    for (const observed of [
+      expected.replace('191', '190'),
+      expected.replace('191', '192'),
+      expected.replace('0123', '0124'),
+      expected.replace('56789', '56788'),
+      '01234…191 chars truncated…6789', // Odd byte belongs to the tail.
+      '012…191 chars truncated…456789', // Equal counts, impossible split.
+      'unrelated …191 chars truncated… text',
+    ])
+      assert.equal(codexTruncationBudget(original, observed), undefined);
+  });
+
+  it('counts omitted Unicode scalars after rounding both UTF-8 boundaries', () => {
+    // 9 bytes => 4 for the head and 5 for the tail. Head rounds down before
+    // 漢; tail rounds up past 字. Each retained é is one scalar, two bytes.
+    const original = 'é漢🦀middle🦀字é';
+    assert.equal(codexTruncationBudget(original, 'é…10 chars truncated…é'), 4); // Multiple byte budgets can produce the same rounded transform.
+    assert.equal(
+      codexTruncationBudget('🦀éhidden漢🦀', '🦀…8 chars truncated…🦀'),
+      8,
+    );
+    // A 9-byte budget cuts through the head emoji and the é before the tail
+    // emoji. The complete tail emoji survives, giving asymmetric byte lengths.
+    assert.equal(
+      codexTruncationBudget('é🦀hiddené🦀', 'é…8 chars truncated…🦀'),
+      7,
+    );
+    assert.equal(
+      codexTruncationBudget('é🦀hidden🦀é', 'é…8 chars truncated…é'),
+      4,
+    ); // Both four-byte emojis cross the byte targets and are omitted.
+    assert.equal(
+      codexTruncationBudget('🦀éhidden漢🦀', '🦀…10 chars truncated…🦀'),
+      undefined,
+    ); // UTF-16 code units are not the chars unit.
+    assert.equal(
+      codexTruncationBudget('🦀hidden🦀a', '…7 chars truncated…🦀a'),
+      undefined,
+    ); // Balanced-looking bytes cannot fit the head boundary.
+    assert.equal(codexTruncationBudget('🦀', '…1 chars truncated…'), 0);
+  });
+
+  it('verifies chars clipping when literal chars and tokens markers survive in the source', () => {
+    const prefix = '…1 tokens truncated…';
+    const suffix = '…1 chars truncated…!';
+    assert.equal(Buffer.byteLength(prefix), Buffer.byteLength(suffix));
+    const original = `${prefix}${'x'.repeat(100)}${suffix}`;
+    const expected = `${prefix}…100 chars truncated…${suffix}`;
+    assert.equal(
+      codexTruncationBudget(original, expected),
+      Buffer.byteLength(prefix) * 2,
+    );
+    assert.equal(codexTruncationBudget(original, original), undefined);
+    assert.equal(
+      codexTruncationBudget(original, `${expected}…1 chars truncated…`),
+      undefined,
+    );
+  });
+
+  it('rejects malformed chars counts and UTF-16 without replacing evidence', () => {
+    const original = '0123456789'.repeat(20);
+    for (const count of ['0', '-1', '01', '201', '99999999999999999999', '1.5'])
+      assert.equal(
+        codexTruncationBudget(original, `0123…${count} chars truncated…56789`),
+        undefined,
+      );
+    assert.equal(
+      codexTruncationBudget(original, '0123...191 chars truncated...56789'),
+      undefined,
+    );
+    assert.equal(
+      codexTruncationBudget('\ud800hidden�', '�…6 chars truncated…�'),
+      undefined,
+    );
+    assert.equal(
+      codexTruncationBudget('�hidden�', '\ud800…6 chars truncated…�'),
+      undefined,
+    );
+  });
 });
