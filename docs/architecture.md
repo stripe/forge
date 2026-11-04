@@ -1190,8 +1190,7 @@ are non-blank, trimmed strings up to 256 bytes; a case may have up to 32
 tags. When a case defines `tags`, Forge carries them through the parsed case,
 resolved plan (in `plan.case.tags`), and result (`case_tags` at the top level
 of `result.json`). Cases without `tags` produce no `tags` field in the parsed
-case, plan, or result. **Do not put sensitive data in tags; they are exported
-to analytics.**
+case, plan, or result. **Do not put sensitive data in tags.**
 
 ```yaml
 tags:
