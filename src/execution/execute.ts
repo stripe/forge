@@ -322,10 +322,14 @@ export async function executeEvalWithTestHooks(
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
+  const step = <T>(name: RunPhase, operation: () => Promise<T>): Promise<T> =>
+    events.phase(name, async () => {
+      phase = name;
+      return operation();
+    });
 
   try {
-    const preflight = await events.phase('preflight', async () => {
-      phase = 'preflight';
+    const preflight = await step('preflight', async () => {
       throwIfAborted(signal, phase);
       assertRunId(input.runId);
       return buildEvalPreflight(
@@ -364,8 +368,7 @@ export async function executeEvalWithTestHooks(
       ...completions.secrets,
     ]);
 
-    prepared = await events.phase('runtime_prepare', async () => {
-      phase = 'runtime_prepare';
+    prepared = await step('runtime_prepare', async () => {
       throwIfAborted(signal, phase);
       return input.composition.runtime.prepare({
         runId: input.runId,
@@ -388,8 +391,7 @@ export async function executeEvalWithTestHooks(
       signal,
     });
 
-    const setupArtifact = await events.phase('setup', async () => {
-      phase = 'setup';
+    const setupArtifact = await step('setup', async () => {
       throwIfAborted(signal, phase);
       const applied = await preflight.setup.apply({
         runId: input.runId,
@@ -412,8 +414,7 @@ export async function executeEvalWithTestHooks(
       return artifact;
     });
 
-    const interaction = await events.phase('interaction', async () => {
-      phase = 'interaction';
+    const interaction = await step('interaction', async () => {
       throwIfAborted(signal, phase);
       const session = await preflight.agent.openSession({
         runId: input.runId,
@@ -432,13 +433,11 @@ export async function executeEvalWithTestHooks(
       );
     });
 
-    sealed = await events.phase('quiesce', async () => {
-      phase = 'quiesce';
+    sealed = await step('quiesce', async () => {
       return prepared!.quiesce();
     });
 
-    const selectedEvidence = await events.phase('evidence', async () => {
-      phase = 'evidence';
+    const selectedEvidence = await step('evidence', async () => {
       throwIfAborted(signal, phase);
       if (interaction.turns.length === 0) {
         return {
@@ -492,8 +491,7 @@ export async function executeEvalWithTestHooks(
       secrets,
     );
 
-    const evaluated = await events.phase('evaluation', async () => {
-      phase = 'evaluation';
+    const evaluated = await step('evaluation', async () => {
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
@@ -677,8 +675,7 @@ export async function executeEvalWithTestHooks(
       ...contributedArtifacts.map(describeArtifact),
     ];
 
-    await events.phase('artifact_stage', async () => {
-      phase = 'artifact_stage';
+    await step('artifact_stage', async () => {
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
@@ -686,8 +683,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
-    await events.phase('runtime_dispose', async () => {
-      phase = 'runtime_dispose';
+    await step('runtime_dispose', async () => {
       try {
         await prepared!.dispose();
       } catch {
@@ -720,8 +716,7 @@ export async function executeEvalWithTestHooks(
     });
     assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
-    const committed = await events.phase('result_commit', async () => {
-      phase = 'result_commit';
+    const committed = await step('result_commit', async () => {
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
