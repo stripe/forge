@@ -270,6 +270,7 @@ export interface RunEvidenceV1 {
 interface RunResultCommon {
   readonly run_id: string;
   readonly selection: RunSelection;
+  readonly case_tags?: Readonly<Record<string, string>>;
   readonly forge: ForgeBuildIdentity & {
     readonly action_bundles?: readonly SetupActionBundleReferenceV1[];
   };

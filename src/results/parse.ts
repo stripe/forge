@@ -575,6 +575,14 @@ const evidenceV1 = z
     }
   });
 
+const caseTagsResultSchema = z.record(
+  z
+    .string()
+    .max(128)
+    .regex(/^[a-z][a-z0-9_]*$/),
+  z.string().min(1).max(256),
+);
+
 const runResultFields = {
   run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
   selection: z.unknown().transform((value, context) => {
@@ -588,6 +596,7 @@ const runResultFields = {
       return z.NEVER;
     }
   }),
+  case_tags: caseTagsResultSchema.optional(),
   forge: z
     .object({
       version: safeVersion,

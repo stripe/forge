@@ -1921,6 +1921,9 @@ function buildResult(input: {
   return {
     run_id: input.input.runId,
     selection: input.input.plan.selection,
+    ...(input.input.plan.case.tags !== undefined
+      ? { case_tags: { ...input.input.plan.case.tags } }
+      : {}),
     forge: {
       ...FORGE_BUILD_IDENTITY,
       ...(input.input.plan.provenance.forge.action_bundles === undefined

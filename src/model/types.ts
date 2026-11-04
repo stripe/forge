@@ -164,6 +164,7 @@ export interface EvalCaseV1 {
   interview_questions?: string[];
   checks?: ChecksV1;
   example_answer?: string;
+  tags?: Record<string, string>;
 }
 
 export interface ModelRefV1 {
