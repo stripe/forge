@@ -329,44 +329,10 @@ export async function executeEvalWithTestHooks(
     });
 
   try {
-    const preflight = await step('preflight', async () => {
-      throwIfAborted(signal, phase);
-      assertRunId(input.runId);
-      return buildEvalPreflight(
-        input.plan,
-        input.composition,
-        hooks.setupExecutor ??
-          createSetupExecutorForRegistry(setupActions, true),
-      );
-    });
-
-    const environment = await resolveEnvironment(
-      input,
-      preflight.environmentSpecification,
-      preflight.credentialDeclarations,
-      signal,
+    const { preflight, environment, completions, secrets } = await step(
+      'preflight',
+      () => runPreflight({ input, hooks, setupActions, signal }),
     );
-    let completions: PreparedCompletionRuntime;
-    try {
-      completions = await prepareCompletionRuntime({
-        runId: input.runId,
-        bindings: preflight.completionBindings,
-        credentialResolver: input.composition.credentialResolver,
-        redactionSecrets: credentialValues(environment),
-        signal,
-      });
-    } catch (error) {
-      throw executionError(
-        'credential_failed',
-        'preflight',
-        'Forge could not prepare the completion providers required by this run.',
-        error,
-      );
-    }
-    const secrets = uniqueStrings([
-      ...credentialValues(environment),
-      ...completions.secrets,
-    ]);
 
     prepared = await step('runtime_prepare', async () => {
       throwIfAborted(signal, phase);
@@ -745,6 +711,63 @@ export async function executeEvalWithTestHooks(
     }
     throw mapExecutionError(error, phase);
   }
+}
+
+interface PreflightInput {
+  readonly input: ExecuteEvalInput;
+  readonly hooks: ExecuteEvalTestHooks;
+  readonly setupActions: SetupActionRegistry;
+  readonly signal: AbortSignal;
+}
+
+interface PreflightState {
+  readonly preflight: EvalPreflight;
+  readonly environment: ResolvedEnvironment;
+  readonly completions: PreparedCompletionRuntime;
+  readonly secrets: readonly string[];
+}
+
+async function runPreflight({
+  input,
+  hooks,
+  setupActions,
+  signal,
+}: PreflightInput): Promise<PreflightState> {
+  throwIfAborted(signal, 'preflight');
+  assertRunId(input.runId);
+  const preflight = buildEvalPreflight(
+    input.plan,
+    input.composition,
+    hooks.setupExecutor ?? createSetupExecutorForRegistry(setupActions, true),
+  );
+  const environment = await resolveEnvironment(
+    input,
+    preflight.environmentSpecification,
+    preflight.credentialDeclarations,
+    signal,
+  );
+  let completions: PreparedCompletionRuntime;
+  try {
+    completions = await prepareCompletionRuntime({
+      runId: input.runId,
+      bindings: preflight.completionBindings,
+      credentialResolver: input.composition.credentialResolver,
+      redactionSecrets: credentialValues(environment),
+      signal,
+    });
+  } catch (error) {
+    throw executionError(
+      'credential_failed',
+      'preflight',
+      'Forge could not prepare the completion providers required by this run.',
+      error,
+    );
+  }
+  const secrets = uniqueStrings([
+    ...credentialValues(environment),
+    ...completions.secrets,
+  ]);
+  return { preflight, environment, completions, secrets };
 }
 
 interface ExecutedInteraction {
