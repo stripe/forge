@@ -527,6 +527,13 @@ the action up again at execution time.
 | [`errors.ts`](https://github.com/stripe/forge/blob/main/src/execution/errors.ts) | `ForgeExecutionError`, `executionError`, `throwIfAborted` | Stable secret-safe phase/error surface used by the controller. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/execution/index.ts) | Public execution barrel | Re-exports execution entry points and stable errors |
 
+`src/application/runEval/` holds the lifecycle as it moves out of `execute.ts`, one step at a time. It is internal and not a package subpath.
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`phase.ts`](https://github.com/stripe/forge/blob/main/src/application/runEval/phase.ts) | `createPhaseRunner` | Runs one public phase through the event emitter, optionally checks for abort first, and tracks the phase failures report. |
+| [`steps/`](https://github.com/stripe/forge/tree/main/src/application/runEval/steps) | `resolveEnvironment`, `prepareCompletions`, `collectSecrets` | The run's credential steps, which follow `preflight` and report failures as `credential_failed` during `preflight`. |
+
 ### How to read `execute.ts`
 
 The top third contains the public entry points and lifecycle. Start with

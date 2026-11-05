@@ -1,4 +1,8 @@
 import * as path from 'node:path';
+import { createPhaseRunner } from '../application/runEval/phase.ts';
+import { collectSecrets } from '../application/runEval/steps/collectSecrets.ts';
+import { prepareCompletions } from '../application/runEval/steps/prepareCompletions.ts';
+import { resolveEnvironment } from '../application/runEval/steps/resolveEnvironment.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -33,7 +37,6 @@ import {
   type EnvironmentSpecification,
   normalizeEnvironmentSpecification,
   normalizeScopedEnvironmentSpecification,
-  type ResolvedEnvironment,
   type ScopedEnvironmentSpecification,
 } from '../contracts/credentials.ts';
 import {
@@ -53,7 +56,6 @@ import type {
 } from '../contracts/runtime.ts';
 import {
   type RuntimeCredentialDeclaration,
-  resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
 import {
@@ -136,7 +138,6 @@ import {
   type CompletionBinding,
   completionBindingsForPlan,
   type PreparedCompletionRuntime,
-  prepareCompletionRuntime,
 } from './completionRuntime.ts';
 import {
   executionError,
@@ -317,59 +318,47 @@ export async function executeEvalWithTestHooks(
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
   );
-  let phase: RunPhase = 'preflight';
+  const phases = createPhaseRunner({ events, signal });
+  const step = phases.run;
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
-  const step = <T>(name: RunPhase, operation: () => Promise<T>): Promise<T> =>
-    events.phase(name, async () => {
-      phase = name;
-      return operation();
-    });
 
   try {
-    const preflight = await step('preflight', async () => {
-      throwIfAborted(signal, phase);
-      assertRunId(input.runId);
-      return buildEvalPreflight(
-        input.plan,
-        input.composition,
-        hooks.setupExecutor ??
-          createSetupExecutorForRegistry(setupActions, true),
-      );
-    });
-
-    const environment = await resolveEnvironment(
-      input,
-      preflight.environmentSpecification,
-      preflight.credentialDeclarations,
-      signal,
+    const preflight = await step(
+      'preflight',
+      async () => {
+        assertRunId(input.runId);
+        return buildEvalPreflight(
+          input.plan,
+          input.composition,
+          hooks.setupExecutor ??
+            createSetupExecutorForRegistry(setupActions, true),
+        );
+      },
+      { abortable: true },
     );
-    let completions: PreparedCompletionRuntime;
-    try {
-      completions = await prepareCompletionRuntime({
-        runId: input.runId,
-        bindings: preflight.completionBindings,
-        credentialResolver: input.composition.credentialResolver,
-        redactionSecrets: credentialValues(environment),
-        signal,
-      });
-    } catch (error) {
-      throw executionError(
-        'credential_failed',
-        'preflight',
-        'Forge could not prepare the completion providers required by this run.',
-        error,
-      );
-    }
-    const secrets = uniqueStrings([
-      ...credentialValues(environment),
-      ...completions.secrets,
-    ]);
+
+    const credentials = {
+      runId: input.runId,
+      credentialResolver: input.composition.credentialResolver,
+      signal,
+    };
+    const environment = await resolveEnvironment({
+      ...credentials,
+      specification: preflight.environmentSpecification,
+      declarations: preflight.credentialDeclarations,
+    });
+    const completions = await prepareCompletions({
+      ...credentials,
+      bindings: preflight.completionBindings,
+      environment,
+    });
+    const secrets = collectSecrets(environment, completions);
 
     prepared = await step('runtime_prepare', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       return input.composition.runtime.prepare({
         runId: input.runId,
         plan: input.plan,
@@ -392,7 +381,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const setupArtifact = await step('setup', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       const applied = await preflight.setup.apply({
         runId: input.runId,
         paths: prepared!.paths,
@@ -409,13 +398,13 @@ export async function executeEvalWithTestHooks(
       const artifact = buildSetupArtifact(input.plan, applied);
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       await prepared!.finalizeSetup();
       return artifact;
     });
 
     const interaction = await step('interaction', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       const session = await preflight.agent.openSession({
         runId: input.runId,
         plan: input.plan,
@@ -438,7 +427,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const selectedEvidence = await step('evidence', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       if (interaction.turns.length === 0) {
         return {
           evidence: rolePlayerErrorEvidence(
@@ -492,7 +481,7 @@ export async function executeEvalWithTestHooks(
     );
 
     const evaluated = await step('evaluation', async () => {
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
         | Awaited<ReturnType<typeof judgeCriteria>>
@@ -736,14 +725,14 @@ export async function executeEvalWithTestHooks(
     if (signal.aborted) {
       throw new ForgeExecutionError(
         'aborted',
-        phase,
+        phases.current(),
         'The Forge run was aborted.',
         {
           cause: signal.reason,
         },
       );
     }
-    throw mapExecutionError(error, phase);
+    throw mapExecutionError(error, phases.current());
   }
 }
 
@@ -1118,33 +1107,6 @@ function selectedAgent(
     );
   }
   return agent;
-}
-
-async function resolveEnvironment(
-  input: ExecuteEvalInput,
-  specification: ScopedEnvironmentSpecification,
-  declarations: readonly RuntimeCredentialDeclaration[],
-  signal: AbortSignal,
-): Promise<ResolvedEnvironment> {
-  try {
-    return await resolveCredentialDeclarations(
-      specification,
-      declarations,
-      input.composition.credentialResolver,
-      {
-        runId: input.runId,
-        purpose: 'forge-eval',
-        signal,
-      },
-    );
-  } catch (error) {
-    throw executionError(
-      'credential_failed',
-      'preflight',
-      'Forge could not resolve the credentials required by this run.',
-      error,
-    );
-  }
 }
 
 interface ScopedEnvironmentDeclaration {
@@ -2051,14 +2013,6 @@ function assertJudgePromptWillRemainUnchanged(
       'Judge prompt cannot be sent without changing its audited evidence.',
     );
   }
-}
-
-function credentialValues(environment: ResolvedEnvironment): string[] {
-  return Object.values(environment.credentials).map(({ value }) => value);
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values)];
 }
 
 function assertRunId(runId: string): void {
