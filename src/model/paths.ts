@@ -55,6 +55,33 @@ export function isSafeSimpleIdentifier(value: string): boolean {
   );
 }
 
+/**
+ * A remote MCP endpoint safe to record and to declare in configuration: HTTP(S)
+ * with no userinfo, query string, or fragment, which could carry credentials.
+ */
+export function isSafeMcpEndpointUrl(value: string): boolean {
+  if (
+    value.length === 0 ||
+    Buffer.byteLength(value) > 4_096 ||
+    CONTROL_CHARACTER.test(value)
+  )
+    return false;
+  try {
+    const url = new URL(value);
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      !value.includes('?') &&
+      !value.includes('#')
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isSafeVersion(value: string): boolean {
   return (
     value.length <= 128 &&

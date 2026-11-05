@@ -40,6 +40,19 @@ export interface AgentPluginInstallationReceipt extends JsonObject {
     readonly file_count: number;
     readonly size_bytes: number;
   };
+  /**
+   * Present only when Forge moved the bundled MCP declarations out of the
+   * plugin into the run-owned Codex user configuration. `installed_tree` then
+   * fingerprints the installation before that move, and `mcp_connections`
+   * records the non-sensitive connection state declared there. Absence means
+   * the installed tree is the configured installation.
+   */
+  readonly mcp_configuration?: 'codex-user-config';
+  /** Declared servers sorted by name; URLs carry no userinfo, query, or fragment. */
+  readonly mcp_connections?: (JsonObject & {
+    readonly name: string;
+    readonly url: string;
+  })[];
 }
 
 /** Ambient-free context for binding one portable plugin to an agent adapter. */

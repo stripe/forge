@@ -817,7 +817,9 @@ policy fixed by the Forge version. Setup installs the current marketplace entry,
 configures its existing MCP connection, and fingerprints the installation.
 The `setup.json` receipt records resolved native IDs, catalog commit, installed
 version, reported source commit when available, and the installed-tree
-fingerprint. These identify the catalog snapshot and observed contents; plugin
+fingerprint; Codex receipts also mark when the MCP connection moved to run-owned
+user configuration and list its non-sensitive endpoint. These identify the catalog
+snapshot and observed contents; plugin
 state remains writable during interaction. See
 [Marketplace plugin treatments](plugin-action.md) for registered names and
 installation semantics.
