@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { createPhaseRunner } from '../application/runEval/phase.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -317,20 +318,15 @@ export async function executeEvalWithTestHooks(
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
   );
-  let phase: RunPhase = 'preflight';
+  const phases = createPhaseRunner({ events });
   let prepared: PreparedRuntime | undefined;
   let sealed: SealedRuntime | undefined;
   let transaction: RunArtifactTransaction | undefined;
   let runtimeDisposed = false;
-  const step = <T>(name: RunPhase, operation: () => Promise<T>): Promise<T> =>
-    events.phase(name, async () => {
-      phase = name;
-      return operation();
-    });
 
   try {
-    const preflight = await step('preflight', async () => {
-      throwIfAborted(signal, phase);
+    const preflight = await phases.run('preflight', async () => {
+      throwIfAborted(signal, phases.current());
       assertRunId(input.runId);
       return buildEvalPreflight(
         input.plan,
@@ -368,8 +364,8 @@ export async function executeEvalWithTestHooks(
       ...completions.secrets,
     ]);
 
-    prepared = await step('runtime_prepare', async () => {
-      throwIfAborted(signal, phase);
+    prepared = await phases.run('runtime_prepare', async () => {
+      throwIfAborted(signal, phases.current());
       return input.composition.runtime.prepare({
         runId: input.runId,
         plan: input.plan,
@@ -391,8 +387,8 @@ export async function executeEvalWithTestHooks(
       signal,
     });
 
-    const setupArtifact = await step('setup', async () => {
-      throwIfAborted(signal, phase);
+    const setupArtifact = await phases.run('setup', async () => {
+      throwIfAborted(signal, phases.current());
       const applied = await preflight.setup.apply({
         runId: input.runId,
         paths: prepared!.paths,
@@ -409,13 +405,13 @@ export async function executeEvalWithTestHooks(
       const artifact = buildSetupArtifact(input.plan, applied);
       assertNoSecretsInJsonValue(artifact, secrets, 'setup.json');
       assertNoSecrets(serializeCanonicalJson(artifact), secrets, 'setup.json');
-      throwIfAborted(signal, phase);
+      throwIfAborted(signal, phases.current());
       await prepared!.finalizeSetup();
       return artifact;
     });
 
-    const interaction = await step('interaction', async () => {
-      throwIfAborted(signal, phase);
+    const interaction = await phases.run('interaction', async () => {
+      throwIfAborted(signal, phases.current());
       const session = await preflight.agent.openSession({
         runId: input.runId,
         plan: input.plan,
@@ -433,12 +429,12 @@ export async function executeEvalWithTestHooks(
       );
     });
 
-    sealed = await step('quiesce', async () => {
+    sealed = await phases.run('quiesce', async () => {
       return prepared!.quiesce();
     });
 
-    const selectedEvidence = await step('evidence', async () => {
-      throwIfAborted(signal, phase);
+    const selectedEvidence = await phases.run('evidence', async () => {
+      throwIfAborted(signal, phases.current());
       if (interaction.turns.length === 0) {
         return {
           evidence: rolePlayerErrorEvidence(
@@ -491,8 +487,8 @@ export async function executeEvalWithTestHooks(
       secrets,
     );
 
-    const evaluated = await step('evaluation', async () => {
-      throwIfAborted(signal, phase);
+    const evaluated = await phases.run('evaluation', async () => {
+      throwIfAborted(signal, phases.current());
       const criteria = input.plan.evaluation.judging_criteria;
       let criterionResults:
         | Awaited<ReturnType<typeof judgeCriteria>>
@@ -675,7 +671,7 @@ export async function executeEvalWithTestHooks(
       ...contributedArtifacts.map(describeArtifact),
     ];
 
-    await step('artifact_stage', async () => {
+    await phases.run('artifact_stage', async () => {
       transaction = await input.composition.artifactStore.begin(input.runId);
       for (const artifact of [...coreArtifacts, ...supplementalArtifacts]) {
         await transaction.write(artifact);
@@ -683,7 +679,7 @@ export async function executeEvalWithTestHooks(
     });
 
     const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
-    await step('runtime_dispose', async () => {
+    await phases.run('runtime_dispose', async () => {
       try {
         await prepared!.dispose();
       } catch {
@@ -716,7 +712,7 @@ export async function executeEvalWithTestHooks(
     });
     assertNoSecrets(serializeCanonicalJson(result), secrets, 'result.json');
 
-    const committed = await step('result_commit', async () => {
+    const committed = await phases.run('result_commit', async () => {
       return transaction!.commit(
         result as unknown as Readonly<Record<string, unknown>>,
       );
@@ -736,14 +732,14 @@ export async function executeEvalWithTestHooks(
     if (signal.aborted) {
       throw new ForgeExecutionError(
         'aborted',
-        phase,
+        phases.current(),
         'The Forge run was aborted.',
         {
           cause: signal.reason,
         },
       );
     }
-    throw mapExecutionError(error, phase);
+    throw mapExecutionError(error, phases.current());
   }
 }
 

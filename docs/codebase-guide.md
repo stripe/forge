@@ -535,8 +535,10 @@ The top third contains the public entry points and lifecycle. Start with
 requirement merging. The lower half contains capability projection, redaction,
 artifact construction, result construction, and error mapping helpers.
 
-The local `phase` variable is not just logging. It determines the stable error
-code returned when an implementation throws. The `prepared`, `sealed`,
+The current phase, tracked by the phase runner in
+[`src/application/runEval/phase.ts`](https://github.com/stripe/forge/blob/main/src/application/runEval/phase.ts),
+is not just logging. It determines the stable error code returned when an
+implementation throws. The `prepared`, `sealed`,
 `transaction`, and `runtimeDisposed` variables track cleanup ownership across
 the main `try/catch`.
 
