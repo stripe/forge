@@ -1,5 +1,13 @@
 /** Stable package-root surface for the portable Forge engine and contracts. */
 
+export type { PlanRunInput } from './application/planRun.ts';
+export type {
+  ComposeForRuntime,
+  ExperimentIdentity,
+  ExperimentValidation,
+  PlanValidationOperations,
+  ValidateExperimentInput,
+} from './application/validateExperiment.ts';
 export * from './contracts/index.ts';
 export {
   createForgeEngine,

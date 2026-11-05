@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
+import { validateExperiment } from './application/validateExperiment.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
   type CredentialResolver,
@@ -140,6 +141,11 @@ The run command executes every matching matrix entry with bounded concurrency.
 Each new invocation creates results/experiments/<experiment-run-id>/.
 The plan command requires exactly one matching matrix entry.
 `;
+
+interface DockerHostSelection {
+  readonly docker_platform: RuntimePlatform;
+  readonly runtime_platform: RuntimePlatform;
+}
 
 export interface DefaultCliCompositionOptions {
   readonly datasetRoot: string;
@@ -321,15 +327,9 @@ export async function runCli(
       experiment.config.runtime.platform === 'native';
 
     if (command === 'validate') {
-      const selections = expandExperiment(experiment, dataset);
       const compositionFactory =
         options.compositionFactory ?? createDefaultCliComposition;
-      let hostSelection:
-        | {
-            docker_platform: RuntimePlatform;
-            runtime_platform: RuntimePlatform;
-          }
-        | undefined;
+      let hostSelection: DockerHostSelection | undefined;
       if (parsed.values.host === true) {
         if (experiment.config.runtime.adapter !== 'docker') {
           throw new CliUsageError(
@@ -348,33 +348,23 @@ export async function runCli(
           runtime_platform: runtimePlatform,
         };
       }
-      const validationPlatforms: readonly (RuntimePlatform | undefined)[] =
-        nativeDocker
-          ? hostSelection === undefined
-            ? ['linux/amd64', 'linux/arm64']
-            : [hostSelection.runtime_platform]
-          : [undefined];
-      for (const runtimePlatform of validationPlatforms) {
-        const plans = selections.map((selection) =>
-          engine.resolveRunPlan({
-            dataset,
-            experiment,
-            selection,
-            ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
-          }),
-        );
-        const composition = await compositionFactory({
-          datasetRoot: dataset.root,
-          ...(plans[0] === undefined ? {} : { runtime: plans[0].runtime }),
-          resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
-          ...(options.environment === undefined
-            ? {}
-            : { environment: options.environment }),
-        });
-        for (const plan of plans) {
-          engine.preflightEval({ plan, composition });
-        }
-      }
+      const validation = await validateExperiment(
+        {
+          experiment,
+          dataset,
+          runtimePlatforms: platformsToValidate(nativeDocker, hostSelection),
+          compose: (runtime) =>
+            compositionFactory({
+              datasetRoot: dataset.root,
+              ...(runtime === undefined ? {} : { runtime }),
+              resultsRoot: path.resolve(cwd, DEFAULT_RESULTS_DIRECTORY),
+              ...(options.environment === undefined
+                ? {}
+                : { environment: options.environment }),
+            }),
+        },
+        engine,
+      );
       const host =
         hostSelection === undefined
           ? undefined
@@ -394,14 +384,8 @@ export async function runCli(
             })();
       stdout(
         serializeCanonicalJson({
-          dataset: dataset.manifest.dataset,
-          experiment: {
-            id: experiment.config.id,
-            version: experiment.config.version,
-          },
+          ...validation,
           ...(host === undefined ? {} : { host }),
-          run_count: selections.length,
-          valid: true,
         }),
       );
       return 0;
@@ -603,6 +587,17 @@ interface SelectionFilters {
   readonly provider: string | undefined;
   readonly model: string | undefined;
   readonly repetition: number | undefined;
+}
+
+/** Native Docker validates both Linux platforms, or only the host's with --host. */
+function platformsToValidate(
+  nativeDocker: boolean,
+  host: DockerHostSelection | undefined,
+): readonly RuntimePlatform[] {
+  if (!nativeDocker) return [];
+  return host === undefined
+    ? ['linux/amd64', 'linux/arm64']
+    : [host.runtime_platform];
 }
 
 function selectOne(

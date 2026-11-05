@@ -1,3 +1,9 @@
+import type { PlanRunInput } from './application/planRun.ts';
+import {
+  type ExperimentValidation,
+  type ValidateExperimentInput,
+  validateExperiment as validateExperimentWithOperations,
+} from './application/validateExperiment.ts';
 import type {
   EvalCredentialUse,
   ExecuteEvalInput,
@@ -23,11 +29,9 @@ import {
 import type {
   EvalCaseV1,
   ExperimentConfigV1,
-  ForgeDockerRuntimeV1,
   LoadedDatasetV1,
   LoadedExperimentConfigV1,
   ResolvedRunPlanV1,
-  RunSelection,
   SetupActionBundleReferenceV1,
   SetupStepV1,
 } from './model/types.ts';
@@ -58,13 +62,12 @@ export interface ForgeEngine {
   loadExperimentConfig(
     experimentPath: string,
   ): Promise<LoadedExperimentConfigV1>;
-  resolveRunPlan(input: {
-    readonly dataset: LoadedDatasetV1;
-    readonly experiment: LoadedExperimentConfigV1;
-    readonly selection: RunSelection;
-    readonly runtimePlatform?: ForgeDockerRuntimeV1['platform'];
-  }): ResolvedRunPlanV1;
+  resolveRunPlan(input: PlanRunInput): ResolvedRunPlanV1;
   preflightEval(request: PreflightEvalInput): void;
+  /** Plans and preflights every selection, per runtime platform, without executing. */
+  validateExperiment(
+    input: ValidateExperimentInput,
+  ): Promise<ExperimentValidation>;
   /** Pure selected-consumer inventory; defers only credential-source proof. */
   inspectEvalCredentials?(
     request: PreflightEvalInput,
@@ -118,6 +121,9 @@ export function createForgeEngine(
     },
     preflightEval(request) {
       preflightEvalWithSetupActions(request, setupActions);
+    },
+    validateExperiment(input) {
+      return validateExperimentWithOperations(input, engine);
     },
     inspectEvalCredentials(request) {
       return inspectEvalCredentialsWithSetupActions(request, setupActions);

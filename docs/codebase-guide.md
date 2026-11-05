@@ -250,8 +250,14 @@ loadDataset/config             →  model/loaders.ts
 resolveRunPlan                 →  planning/planner.ts, then reparses
 inspectEvalCredentials        →  execution/execute.ts
 preflightEval/executeEval      →  execution/execute.ts
+validateExperiment             →  application/validateExperiment.ts
 verifyCompletedRun             →  results/localStore.ts
 ```
+
+`validateExperiment` is a use case over the engine's own operations: it
+expands the matrix, resolves each selection per runtime platform, composes once
+per platform, and runs `preflightEval` on every plan. The CLI's `validate`
+command calls it with the engine it was given, then adds the Docker host check.
 
 That closure is why setup action semantics cannot change between parsing and
 execution. Package-level convenience functions use the same built-in-only
@@ -379,6 +385,17 @@ flowchart LR
 When an adapter supplies exact native source bytes, they are copied separately
 as a restricted supplemental artifact. That copy does not feed the scoring
 branch.
+
+## `src/application`: use cases
+
+One file per use case the engine offers, each taking its collaborators as
+parameters. Inbound hosts (the CLI, embedding hosts) call these through
+`ForgeEngine`.
+
+| File | Main symbols | Role and relationships |
+| --- | --- | --- |
+| [`validateExperiment.ts`](https://github.com/stripe/forge/blob/main/src/application/validateExperiment.ts) | `validateExperiment`, `ValidateExperimentInput`, `ExperimentValidation` | Plans and preflights every matrix selection per runtime platform without credentials, providers, or a runtime. Uses `planning/planner.ts:expandExperiment` and the engine's `resolveRunPlan`/`preflightEval`. |
+| [`planRun.ts`](https://github.com/stripe/forge/blob/main/src/application/planRun.ts) | `PlanRunInput` | The input of `ForgeEngine.resolveRunPlan`: one selection of a loaded experiment and dataset. |
 
 ## `src/model`: wire formats and trusted loading
 
