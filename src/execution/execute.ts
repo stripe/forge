@@ -1,5 +1,4 @@
 import * as path from 'node:path';
-import { createPhaseRunner } from '../application/runEval/phase.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -57,6 +56,7 @@ import {
   resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
+import { createPhaseRunner } from '../domain/service/runEval/phase.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,

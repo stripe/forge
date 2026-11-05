@@ -1,5 +1,5 @@
-import type { RunPhase } from '../../contracts/observability.ts';
-import type { RunEventEmitter } from '../../execution/events.ts';
+import type { RunPhase } from '../../../contracts/observability.ts';
+import type { RunEventEmitter } from '../../../execution/events.ts';
 
 export interface PhaseRunner {
   /** Run one public phase: emit its events and make it the phase failures report until the next one starts. */

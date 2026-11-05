@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import type { RunPhase } from '../../contracts/observability.ts';
-import type { RunEventEmitter } from '../../execution/events.ts';
+import type { RunPhase } from '../../../contracts/observability.ts';
+import type { RunEventEmitter } from '../../../execution/events.ts';
 
 import { createPhaseRunner } from './phase.ts';
 
