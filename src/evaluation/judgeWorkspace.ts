@@ -389,6 +389,7 @@ export function boundJudgeWorkspaceEvidence(
   );
   const normalizedEntries: JudgeWorkspaceEvidenceEntryV1[] = [];
   const normalizationWarnings: JudgeWorkspaceWarningV1[] = [];
+  let binaryWasOmitted = false;
   const alreadyTruncatedPaths = new Set(
     evidence.warnings.flatMap((warning) =>
       warning.code === 'workspace_file_truncated' && warning.path !== undefined
@@ -398,6 +399,20 @@ export function boundJudgeWorkspaceEvidence(
   );
   let contentWasTruncated = false;
   for (const entry of evidence.entries) {
+    // Evidence may arrive from callers other than the collector. Binary
+    // content, including NUL bytes, must never reach a prompt; record an
+    // omission instead of stripping bytes and presenting the rest as text.
+    if (hasNonTextCharacters(entry.content)) {
+      binaryWasOmitted = true;
+      normalizationWarnings.push(
+        Object.freeze({
+          code: 'workspace_binary_omitted' as const,
+          path: entry.path,
+          message: `Binary workspace file omitted (non-text characters; ${entry.size_bytes} bytes). Its contents were not judged.`,
+        }),
+      );
+      continue;
+    }
     if (entry.content.length <= MAX_JUDGE_WORKSPACE_FILE_CHARACTERS) {
       normalizedEntries.push(entry);
       continue;
@@ -425,7 +440,7 @@ export function boundJudgeWorkspaceEvidence(
     ...evidence,
     entries: normalizedEntries,
     warnings: normalizedWarnings,
-    complete: evidence.complete && !contentWasTruncated,
+    complete: evidence.complete && !contentWasTruncated && !binaryWasOmitted,
     truncated: evidence.truncated || contentWasTruncated,
   });
   if (renderedEvidenceLength(normalized) <= limit) return normalized;
@@ -568,6 +583,10 @@ function isEligibleFile(
   }
   const fileName = segments.at(-1)?.toLowerCase() ?? '';
   return !SKIP_FILE_NAMES.has(fileName) && extension(entry.path) !== '.lock';
+}
+
+function hasNonTextCharacters(text: string): boolean {
+  return /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text);
 }
 
 /** Reject binary bytes rather than replacing or stripping them in judge evidence. */

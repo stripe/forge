@@ -489,6 +489,40 @@ describe('collectJudgeWorkspaceEvidence', () => {
     );
   });
 
+  it('replaces NUL-containing entries with an omission warning', () => {
+    const bounded = boundJudgeWorkspaceEvidence({
+      entries: [
+        {
+          path: 'db/test.db',
+          size_bytes: 3,
+          bytes_read: 3,
+          content: 'a\u0000b',
+          truncated: false,
+        },
+        {
+          path: 'ok.txt',
+          size_bytes: 2,
+          bytes_read: 2,
+          content: 'ok',
+          truncated: false,
+        },
+      ],
+      complete: true,
+      truncated: false,
+      bytes_read: 5,
+      warnings: [],
+    });
+    const rendered = renderJudgeWorkspaceEvidence(bounded);
+
+    assert.equal(rendered.includes('\u0000'), false);
+    assert.deepEqual(
+      bounded.entries.map(({ path }) => path),
+      ['ok.txt'],
+    );
+    assert.equal(bounded.complete, false);
+    assert.ok(rendered.includes('db/test.db: Binary workspace file omitted'));
+  });
+
   it('uses completeness flags when a tightened limit cannot fit a warning', () => {
     const bounded = boundJudgeWorkspaceEvidence(
       {
