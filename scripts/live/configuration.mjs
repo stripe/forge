@@ -35,9 +35,15 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     });
   }
   const liveAgent = optionalEnvironment('FORGE_LIVE_AGENT') ?? 'claude-code';
-  if (liveAgent !== 'claude-code' && liveAgent !== 'codex') {
-    throw new Error('FORGE_LIVE_AGENT must be claude-code or codex.');
+  if (!['claude-code', 'codex', 'opencode'].includes(liveAgent)) {
+    throw new Error(
+      'FORGE_LIVE_AGENT must be claude-code, codex, or opencode.',
+    );
   }
+  if (liveAgent === 'opencode' && mode !== 'setup')
+    throw new Error(
+      'OpenCode live coverage currently requires FORGE_LIVE_MODE=setup.',
+    );
   const codexSelected = liveAgent === 'codex';
   const gatewayEnvironmentName = codexSelected
     ? 'OPENAI_BASE_URL'

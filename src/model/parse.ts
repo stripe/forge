@@ -400,12 +400,38 @@ const ModelRefSchema = z
   })
   .strict();
 
+export const ModelProfileSchema = z
+  .object({
+    limit: z
+      .object({ context: PositiveIntegerSchema, output: PositiveIntegerSchema })
+      .strict()
+      .refine((limit) => limit.output <= limit.context, {
+        path: ['output'],
+        message: 'output must not exceed context',
+      }),
+    reasoning: z.boolean(),
+    temperature: z.boolean(),
+    attachment: z.boolean(),
+  })
+  .strict();
+
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
+  model_profile: ModelProfileSchema.optional(),
 })
   .strict()
   .superRefine((agent, context) => {
+    if (
+      ['claude-code', 'codex'].includes(agent.adapter) &&
+      agent.model_profile !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['model_profile'],
+        message: `model_profile is not supported by ${agent.adapter}`,
+      });
+    }
     if (agent.adapter === 'claude-code' && agent.hook_trust !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

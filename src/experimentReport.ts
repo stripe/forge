@@ -5,7 +5,7 @@ import {
   experimentRunIdSchema,
 } from './experimentModel.ts';
 import { sha256Digest } from './model/hashes.ts';
-import { parseRunSelection } from './model/parse.ts';
+import { ModelProfileSchema, parseRunSelection } from './model/parse.ts';
 import type { RequirementLevelV1 } from './model/types.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
@@ -210,6 +210,7 @@ const coordinates = z
         provider: z.string().min(1).max(4096),
         model: z.string().min(1).max(4096),
         hook_trust: z.enum(['native', 'automation']).optional(),
+        model_profile: ModelProfileSchema.optional(),
       })
       .strict(),
   })

@@ -130,11 +130,14 @@ describe('unified live end-to-end suite', () => {
     const options = configuration({
       FORGE_LIVE: '1',
       FORGE_LIVE_MODE: 'completions',
+      FORGE_LIVE_AGENT: 'opencode',
       FORGE_LIVE_COMPLETION_MODEL: 'gpt-6.1-sol',
       OPENAI_API_KEY: 'host-key',
       OPENAI_BASE_URL: 'https://gateway.example/v1',
       ANTHROPIC_API_KEY: '\0',
       CODEX_API_KEY: '\0',
+      OPENCODE_API_KEY: '\0',
+      OPENCODE_BASE_URL: '\0',
     });
     assert.equal(options.mode, 'completions');
     assert.equal(options.completionModel, 'gpt-6.1-sol');
@@ -152,6 +155,86 @@ describe('unified live end-to-end suite', () => {
     );
   });
 
+  it('serves deterministic authenticated OpenCode Chat Completions without an upstream', async () => {
+    const { startOpenCodeFixtureEndpoint, OPENCODE_FIXTURE_MODEL } =
+      await liveModule('opencode');
+    const endpoint = await startOpenCodeFixtureEndpoint();
+    try {
+      const url = `${endpoint.baseUrl}/chat/completions`;
+      const payload = {
+        model: OPENCODE_FIXTURE_MODEL,
+        stream: true,
+        messages: [{ role: 'user', content: 'Create answer.txt' }],
+        tools: [{ type: 'function', function: { name: 'bash' } }],
+      };
+      const unauthorized = await fetch(url, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      assert.equal(unauthorized.status, 401);
+      const headers = {
+        authorization: `Bearer ${endpoint.credential}`,
+        'content-type': 'application/json',
+      };
+      const first = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+      assert.equal(first.status, 200);
+      const stream = await first.text();
+      assert.match(stream, /tool_calls/);
+      assert.match(stream, /answer.txt/);
+      assert.match(stream, /\[DONE\]/);
+      const second = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...payload,
+          stream: false,
+          messages: [
+            ...payload.messages,
+            { role: 'tool', content: 'complete' },
+          ],
+        }),
+      });
+      const completed = (await second.json()) as {
+        choices: { finish_reason: string }[];
+      };
+      assert.equal(completed.choices[0]!.finish_reason, 'stop');
+      assert.equal(
+        (
+          await fetch(`${endpoint.baseUrl}/responses`, {
+            method: 'POST',
+            headers,
+            body: '{}',
+          })
+        ).status,
+        404,
+      );
+      assert.equal(endpoint.requests.length, 2);
+      assert.deepEqual(endpoint.failures, []);
+      const config = readLiveConfiguration(
+        {
+          FORGE_LIVE: '1',
+          FORGE_LIVE_AGENT: 'opencode',
+          FORGE_LIVE_MODE: 'setup',
+        },
+        repositoryRoot,
+      );
+      assert.equal(config.upstreamCredential, undefined);
+      assert.throws(
+        () =>
+          readLiveConfiguration(
+            { FORGE_LIVE: '1', FORGE_LIVE_AGENT: 'opencode' },
+            repositoryRoot,
+          ),
+        /FORGE_LIVE_MODE=setup/,
+      );
+    } finally {
+      await endpoint.close();
+    }
+  });
   it('is the only live package command and has valid JavaScript syntax', async () => {
     const packageJson = JSON.parse(
       await fs.readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
@@ -292,7 +375,7 @@ describe('unified live end-to-end suite', () => {
           FORGE_LIVE: '1',
           FORGE_LIVE_AGENT: 'unsupported-agent',
         }),
-      /FORGE_LIVE_AGENT must be claude-code or codex/,
+      /FORGE_LIVE_AGENT must be claude-code, codex, or opencode/,
     );
   });
 
@@ -376,7 +459,11 @@ describe('unified live end-to-end suite', () => {
     );
   });
 
-  for (const protocol of ['responses', 'messages'] as const) {
+  for (const protocol of [
+    'responses',
+    'messages',
+    'chat-completions',
+  ] as const) {
     it(`forwards only authorized ${protocol} routes and isolates upstream credentials and headers`, {
       timeout: 10_000,
     }, async () => {
@@ -408,7 +495,7 @@ describe('unified live end-to-end suite', () => {
       try {
         bridge = await startLoopbackGatewayBridge({
           upstream: new URL(
-            `${upstream.url}/${protocol === 'responses' ? 'v1/' : 'anthropic'}`,
+            `${upstream.url}/${protocol === 'messages' ? 'anthropic' : 'v1/'}`,
           ),
           upstreamCredential: 'synthetic-host-only-key',
           protocol,
@@ -419,7 +506,9 @@ describe('unified live end-to-end suite', () => {
         const routes =
           protocol === 'responses'
             ? ['/responses']
-            : ['/v1/messages', '/v1/messages/count_tokens'];
+            : protocol === 'chat-completions'
+              ? ['/chat/completions']
+              : ['/v1/messages', '/v1/messages/count_tokens'];
         for (const route of routes) {
           const result = await bridgeRequest(
             bridge,
@@ -452,7 +541,7 @@ describe('unified live end-to-end suite', () => {
           const forwarded = calls.at(-1)!;
           assert.equal(
             forwarded.url,
-            `${protocol === 'responses' ? '/v1' : '/anthropic'}${route}?probe=1`,
+            `${protocol === 'messages' ? '/anthropic' : '/v1'}${route}?probe=1`,
           );
           assert.equal(forwarded.body, '{"message":"local fixture"}');
           assert.equal(forwarded.headers.host, new URL(upstream.url).host);
@@ -488,7 +577,7 @@ describe('unified live end-to-end suite', () => {
           ...[
             '/responses',
             `${prefix}/v1/responses`,
-            `${prefix}/chat/completions`,
+            `${prefix}${protocol === 'chat-completions' ? '/responses' : '/chat/completions'}`,
             `${prefix}/models`,
             `${prefix}${protocol === 'responses' ? '/v1/messages' : '/responses'}`,
           ].map((target) => ({

@@ -202,6 +202,13 @@ export interface AgentSelectionV1 extends ModelRefV1 {
   adapter: string;
   /** Codex hook review: native by default; automation permits all enabled hooks. */
   hook_trust?: 'native' | 'automation';
+  /** Explicit model limits and capabilities; required by OpenCode. */
+  model_profile?: {
+    limit: { context: number; output: number };
+    reasoning: boolean;
+    temperature: boolean;
+    attachment: boolean;
+  };
 }
 
 export interface TreatmentV1 {

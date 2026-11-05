@@ -2,8 +2,8 @@
 
 Forge runs and compares coding agents, models, and plugins on versioned tasks.
 Each evaluation runs in an isolated environment, checks the agent's output,
-and saves results and transcripts for inspection. Claude Code and Codex are
-built in.
+and saves results and transcripts for inspection. Claude Code, Codex, and an
+experimental OpenCode Chat Completions adapter are built in.
 
 Forge is in early development. See the
 [architecture and current limitations](docs/architecture.md#current-limitations)
@@ -64,6 +64,8 @@ For the built-in CLI, you need:
 | Claude Code with default Ava or judge models | `--credential-env ANTHROPIC_API_KEY --credential-env OPENAI_API_KEY` |
 | Codex, one-shot with checks only | `--credential-env OPENAI_API_KEY` |
 | Codex with default Ava or judge models | `--credential-env OPENAI_API_KEY` |
+| OpenCode, one-shot with checks only | `--credential-env OPENCODE_API_KEY` |
+| OpenCode with default Ava or judge models | `--credential-env OPENCODE_API_KEY --credential-env OPENAI_API_KEY` |
 | `validate` or `plan` | None |
 
 Export the required variables in your shell or credential manager and grant
@@ -128,7 +130,14 @@ Forge selects the distribution for the run's agent and configures its bundled
 MCP connection. The token reaches only agent commands; prepare the account or
 merchant outside Forge.
 
-The runtime installs pinned Claude Code and Codex CLI releases from npm.
+OpenCode requires `OPENCODE_BASE_URL`, a Chat Completions API root such as
+`https://gateway.example.com/v1`, and an explicit
+`--credential-env OPENCODE_API_KEY` grant. This supports the
+protocol used by LiteLLM and other compatible gateways; each selected model
+must support the configured tools and capabilities. Responses endpoints use
+the separate Codex route. See [OpenCode setup](#opencode-setup).
+
+The runtime installs pinned Claude Code, Codex, and OpenCode CLI releases from npm.
 Their use remains subject to their providers' terms.
 
 ### Advanced credential bindings
@@ -320,6 +329,69 @@ for named groups. Omit `--group` on resume; the saved group scope is restored.
 `--run-id` names an **eval run** and requires one matching selection. Omit it
 for an automatically generated ID. Experiment runs receive their own IDs.
 
+### OpenCode setup
+
+OpenCode support is experimental. Select `adapter: opencode`,
+`provider: openai-compatible`, and the exact gateway model alias in your
+experiment matrix. Embedded slashes in the model name are preserved.
+
+Declare the model's actual limits and capabilities once on the agent selection,
+so every treatment uses the same definition:
+
+```yaml
+matrix:
+  agents:
+    - adapter: opencode
+      provider: openai-compatible
+      model: gateway-code
+      model_profile:
+        limit: { context: 32000, output: 4000 }
+        reasoning: false
+        temperature: true
+        attachment: false
+```
+
+`model_profile` is required for OpenCode. Limits must be positive safe integers,
+with output no greater than context; all three capabilities are explicit
+booleans. Unknown fields are rejected. Claude Code and Codex reject this field.
+The adapter sets `tool_call: true`, so the model must support tools. A workspace
+`opencode.json` is ignored. API routing and credentials stay outside the
+experiment:
+
+```sh
+export OPENCODE_BASE_URL=https://gateway.example.com/v1
+export OPENCODE_API_KEY=your-restricted-key
+export OPENAI_API_KEY=your-openai-key
+npx --no-install forge run --experiment ./my-eval/experiment.yaml --agent opencode \
+  --credential-env OPENCODE_API_KEY \
+  --credential-env OPENAI_API_KEY
+```
+
+For a plugin comparison, select `baseline` and `stripe-plugin` in the matrix.
+Keep `baseline.setup: []`; add `uses: forge/plugin` with
+`with: {plugin: stripe}` only to `stripe-plugin`. Both use the model profile
+above. If both arms need Stripe account access, declare `forge/credentials`
+with `env: [STRIPE_API_KEY]` in case setup and pass
+`--credential-env env:STRIPE_API_KEY=STRIPE_API_KEY`.
+
+OpenCode loads skills and MCP from the same Claude-format Stripe plugin used
+by Claude Code and Codex. It does not load Claude-specific hooks, commands, or
+agents. As with Codex, the Stripe marketplace is the trust root: Forge fetches
+its catalog at unpinned HEAD and trusts its source SHA and the bundle's MCP URL.
+The agent sends the `STRIPE_API_KEY` bearer to that URL; Forge does not restrict
+its host or require HTTPS. The receipt records the catalog commit and installed
+contents, but does not pin future installs. See the
+[plugin contract](docs/plugin-action.md) for installation provenance and source
+selection.
+
+The CLI credential reference is `opencode.api-key`; use
+`--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment
+variable. Ava and judging keep their independent host-model configuration;
+the example grants OpenAI access for their defaults. One-shot cases with only
+deterministic checks need no host-model credential.
+See the [adapter contract and limitations](docs/architecture.md#coding-agent-adapters)
+for configuration isolation and native evidence behavior.
+
 ### Concurrency and resume
 
 Use `--jobs <count>` (or `-j`) to limit concurrent eval runs; the default is 1:
@@ -508,7 +580,8 @@ statistics are telemetry and do not enter either scored group.
 ### Inspect evidence
 
 Runs may also contain `workspace-evidence.json`, `judge-evidence.json`, and
-`native/<adapter>/session.jsonl`. The **native log is unredacted and restricted**;
+`native/<adapter>/session.*` (JSON for OpenCode, JSONL for Claude Code and Codex).
+The **native log is unredacted and restricted**;
 preserve its access controls when copying or publishing artifacts. Normalized
 transcripts redact exact resolved secret values, without detecting transformed
 or partial leaks.

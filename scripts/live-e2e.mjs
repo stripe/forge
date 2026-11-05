@@ -35,6 +35,13 @@ try {
       signal,
       progress,
     });
+  } else if (configuration.liveAgent === 'opencode') {
+    const { runOpenCodeIntegrationSuite } = await import('./live/opencode.mjs');
+    report = await runOpenCodeIntegrationSuite({
+      ...configuration,
+      signal,
+      progress,
+    });
   } else if (mode === 'setup') {
     const { runSetupIntegrationSuite } = await import('./live/setup.mjs');
     const setup = await runSetupIntegrationSuite({

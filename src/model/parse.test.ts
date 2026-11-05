@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 
 import { BenchmarkModelError } from './errors.ts';
 import { getMatrixGroups } from './matrix.ts';
@@ -164,6 +165,84 @@ describe('public benchmark parsing', () => {
     assert.throws(
       () => parseExperimentConfigYaml(JSON.stringify(duplicate)),
       /unique/,
+    );
+  });
+  it('strictly validates model profiles and rejects them for Claude Code and Codex', () => {
+    const config = parseExperimentConfigYaml(experimentConfigYaml());
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openai-compatible',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    const parse = (selection: unknown) =>
+      parseExperimentConfig({
+        ...config,
+        matrix: { ...config.matrix, agents: [selection] },
+      });
+    assert.deepEqual(getMatrixGroups(parse(agent).matrix)[0]!.agents[0], agent);
+    for (const adapter of ['claude-code', 'codex']) {
+      assert.throws(
+        () => parse({ ...agent, adapter }),
+        /model_profile is not supported/,
+      );
+    }
+    const profile = OPEN_CODE_MODEL_PROFILE;
+    for (const invalid of [
+      null,
+      {},
+      { ...profile, extra: true },
+      { ...profile, tool_call: true },
+      { ...profile, limit: { ...profile.limit, extra: 1 } },
+      ...[0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, '32000'].flatMap(
+        (value) => [
+          { ...profile, limit: { ...profile.limit, context: value } },
+          { ...profile, limit: { ...profile.limit, output: value } },
+        ],
+      ),
+      { ...profile, limit: { context: 1, output: 2 } },
+      ...['reasoning', 'temperature', 'attachment'].flatMap((key) => [
+        { ...profile, [key]: undefined },
+        { ...profile, [key]: 'false' },
+        { ...profile, [key]: 0 },
+      ]),
+    ]) {
+      assert.throws(
+        () => parse({ ...agent, model_profile: invalid }),
+        BenchmarkModelError,
+      );
+    }
+    const reordered = {
+      attachment: false,
+      temperature: true,
+      reasoning: false,
+      limit: { output: 4000, context: 32000 },
+    };
+    assert.throws(
+      () =>
+        parseExperimentConfig({
+          ...config,
+          matrix: {
+            ...config.matrix,
+            agents: [agent, { ...agent, model_profile: reordered }],
+          },
+        }),
+      /unique/,
+    );
+    assert.equal(
+      getMatrixGroups(
+        parseExperimentConfig({
+          ...config,
+          matrix: {
+            ...config.matrix,
+            agents: [
+              agent,
+              { ...agent, model_profile: { ...profile, reasoning: true } },
+            ],
+          },
+        }).matrix,
+      )[0]!.agents.length,
+      2,
     );
   });
   it('preserves multi-turn prompt semantics and materializes defaults', () => {

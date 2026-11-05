@@ -1301,7 +1301,7 @@ describe('Forge CLI', () => {
     assert.ok(stderr.includes('Selection does not match the benchmark matrix'));
   });
 
-  it('assembles the public Docker/Claude/Codex defaults with explicit credentials', async () => {
+  it('assembles the public Docker and agent defaults with explicit credentials', async () => {
     const fixture = await createBenchmarkFixture();
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
@@ -1311,9 +1311,13 @@ describe('Forge CLI', () => {
     });
 
     assert.equal(composition.runtime.id, 'forge/docker');
-    assert.deepEqual([...composition.agents.keys()], ['claude-code', 'codex']);
+    assert.deepEqual(
+      [...composition.agents.keys()],
+      ['claude-code', 'codex', 'opencode'],
+    );
     assert.equal(composition.agents.get('claude-code')?.version, FORGE_VERSION);
     assert.equal(composition.agents.get('codex')?.version, FORGE_VERSION);
+    assert.equal(composition.agents.get('opencode')?.version, FORGE_VERSION);
     assert.deepEqual(
       [
         ...(
@@ -2042,6 +2046,153 @@ describe('Forge CLI', () => {
     assert.equal(execution.runtime.runs.length, 1);
     assert.equal(JSON.parse(stdout).skipped, 1);
     assert.equal(JSON.parse(stdout).executed, 0);
+  });
+
+  it('binds the OpenCode endpoint and credentials explicitly, including reference overrides', async () => {
+    const fixture = await createBenchmarkFixture();
+    for (const hostVariable of [
+      undefined,
+      'OPENCODE_API_KEY',
+      'MY_GATEWAY_KEY',
+    ]) {
+      const composition = await createDefaultCliComposition({
+        datasetRoot: fixture.datasetRoot,
+        resultsRoot: path.join(fixture.root, 'results'),
+        environment: {
+          OPENCODE_BASE_URL: 'https://gateway.example/v1',
+          OPENCODE_API_KEY: 'opencode-key',
+          MY_GATEWAY_KEY: 'override-key',
+          OPENAI_API_KEY: 'must-not-infer',
+          CODEX_API_KEY: 'codex-key',
+        },
+        ...(hostVariable === undefined
+          ? {}
+          : { credentialBindings: { 'opencode.api-key': hostVariable } }),
+      });
+      const selected = composition.agents.get('opencode')!;
+      const requirements = selected.requirements({
+        adapter: 'opencode',
+        provider: 'openai-compatible',
+        model: 'gateway/model',
+        model_profile: {
+          limit: { context: 32000, output: 4000 },
+          reasoning: false,
+          temperature: true,
+          attachment: false,
+        },
+      });
+      const config = JSON.parse(
+        requirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
+      );
+      assert.equal(
+        config.provider.forge.options.baseURL,
+        'https://gateway.example/v1',
+      );
+      assert.equal(config.model, 'forge/gateway/model');
+      const resolve = () =>
+        composition.credentialResolver.resolve(
+          credentialReference('opencode.api-key'),
+          {
+            runId: 'opencode-cli',
+            purpose: 'agent',
+            signal: new AbortController().signal,
+          },
+        );
+      if (hostVariable === undefined) {
+        await assert.rejects(resolve(), /--credential-env OPENCODE_API_KEY/);
+      } else {
+        assert.equal(
+          await resolve(),
+          hostVariable === 'MY_GATEWAY_KEY' ? 'override-key' : 'opencode-key',
+        );
+      }
+    }
+    const composition = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      environment: { OPENAI_BASE_URL: 'https://not-inferred.example/v1' },
+    });
+    assert.throws(
+      () =>
+        composition.agents.get('opencode')!.requirements({
+          adapter: 'opencode',
+          provider: 'openai-compatible',
+          model: 'test',
+        }),
+      /OPENCODE_BASE_URL/,
+    );
+  });
+
+  it('requires an explicit OpenCode credential grant before reading secrets or allocating a runtime', async () => {
+    for (const grant of [
+      undefined,
+      'OPENCODE_API_KEY',
+      'opencode.api-key=MY_GATEWAY_KEY',
+    ]) {
+      const fixture = await createBenchmarkFixture({
+        agent: 'opencode',
+        ...(grant === 'OPENCODE_API_KEY'
+          ? {
+              caseSetup: [
+                {
+                  uses: 'forge/credentials' as const,
+                  with: { env: ['OPENCODE_API_KEY'] },
+                },
+              ],
+            }
+          : {}),
+      });
+      const execution = createCredentialExecution();
+      const reads: string[] = [];
+      let stderr = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          ...(grant === undefined ? [] : ['--credential-env', grant]),
+        ],
+        {
+          environment: {
+            OPENCODE_BASE_URL: 'https://gateway.example/v1',
+            get OPENCODE_API_KEY() {
+              reads.push('OPENCODE_API_KEY');
+              return 'opencode-key';
+            },
+            get MY_GATEWAY_KEY() {
+              reads.push('MY_GATEWAY_KEY');
+              return 'override-key';
+            },
+          },
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          execute: execution.execute,
+        },
+      );
+      assert.equal(exitCode, grant === undefined ? 1 : 0, stderr);
+      if (grant === undefined) {
+        assert.match(stderr, /--credential-env OPENCODE_API_KEY/);
+        assert.deepEqual(reads, []);
+        assert.equal(execution.runtime.runs.length, 0);
+      } else {
+        const overridden = grant.includes('=');
+        assert.deepEqual(
+          [...new Set(reads)],
+          [overridden ? 'MY_GATEWAY_KEY' : 'OPENCODE_API_KEY'],
+        );
+        assert.deepEqual(
+          execution.runtime.runs[0]!.input.environment.credentials,
+          {
+            OPENCODE_API_KEY: {
+              value: overridden ? 'override-key' : 'opencode-key',
+              scopes: ['agent'],
+            },
+          },
+        );
+      }
+    }
   });
 
   it('selects standard gateway authentication when ANTHROPIC_BASE_URL is set', async () => {
@@ -3408,7 +3559,7 @@ async function createGroupedBenchmarkFixture() {
 
 async function createBenchmarkFixture(
   options: {
-    agent?: 'claude-code' | 'codex';
+    agent?: 'claude-code' | 'codex' | 'opencode';
     repetitions?: number;
     includeUnselectedCase?: boolean;
     caseSetup?: readonly SetupStepV1[];
@@ -3507,9 +3658,9 @@ matrix:
   treatments: [baseline]
   agents:
     - adapter: ${options.agent ?? 'claude-code'}
-      provider: ${options.agent === 'codex' ? 'openai' : 'anthropic'}
-      model: ${options.agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet'}
-  repetitions: ${options.repetitions ?? 1}
+      provider: ${options.agent === 'opencode' ? 'openai-compatible' : options.agent === 'codex' ? 'openai' : 'anthropic'}
+      model: ${options.agent === 'opencode' ? 'gateway/test' : options.agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet'}
+${options.agent === 'opencode' ? '      model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false}\n' : ''}  repetitions: ${options.repetitions ?? 1}
   retries: 0
 limits:
   run_timeout_ms: 1800000

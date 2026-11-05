@@ -99,7 +99,11 @@ export function createCodexAdapter(
     adapter: string;
     provider: string;
     hook_trust?: string;
+    model_profile?: unknown;
   }): AgentRuntimeRequirements => {
+    if (selection.model_profile !== undefined) {
+      throw new TypeError('model_profile is not supported by Codex.');
+    }
     if (selection.adapter !== id || selection.provider !== provider) {
       throw new TypeError(
         'Codex adapter does not match the selected adapter/provider.',
