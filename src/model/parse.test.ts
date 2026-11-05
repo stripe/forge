@@ -911,6 +911,57 @@ treatments:
     );
   });
 
+  it('accepts valid tags, trims values, and rejects invalid keys or blank values', () => {
+    const definition = {
+      id: 'suite/task',
+      version: '0.1.0',
+      task: 'Complete the task.',
+    };
+    assert.deepEqual(
+      parseEvalCase({
+        ...definition,
+        tags: { env: 'staging', model_family: 'opus' },
+      }).tags,
+      { env: 'staging', model_family: 'opus' },
+    );
+    assert.deepEqual(
+      parseEvalCase({
+        ...definition,
+        tags: { env: '  staging  ' },
+      }).tags,
+      { env: 'staging' },
+    );
+    assert.equal(parseEvalCase(definition).tags, undefined);
+    assert.throws(
+      () => parseEvalCase({ ...definition, tags: { BadKey: 'value' } }),
+      BenchmarkModelError,
+    );
+    assert.throws(
+      () => parseEvalCase({ ...definition, tags: { '1key': 'value' } }),
+      BenchmarkModelError,
+    );
+    assert.throws(
+      () => parseEvalCase({ ...definition, tags: { env: '' } }),
+      BenchmarkModelError,
+    );
+    assert.throws(
+      () => parseEvalCase({ ...definition, tags: { env: '   ' } }),
+      BenchmarkModelError,
+    );
+  });
+
+  it('does not materialize tags to an empty object for cases without tags', () => {
+    const definition = {
+      id: 'suite/task',
+      version: '0.1.0',
+      task: 'Complete the task.',
+    };
+    const withoutTags = parseEvalCase(definition);
+    const withTags = parseEvalCase({ ...definition, tags: { env: 'prod' } });
+    assert.equal(Object.hasOwn(withoutTags, 'tags'), false);
+    assert.ok(Object.hasOwn(withTags, 'tags'));
+  });
+
   it('accepts label and requirement_level on tool call checks only', () => {
     const parse = (checks: unknown) =>
       parseEvalCase({

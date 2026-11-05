@@ -53,6 +53,9 @@ const MAX_SETUP_STEPS = 1_000;
 const MAX_RESOLVED_SETUP_STEPS = MAX_SETUP_STEPS * 2;
 const MAX_ACTION_BUNDLES = 100;
 const MAX_CHECK_REGEX_BYTES = 1_024;
+const MAX_CASE_TAG_COUNT = 32;
+const MAX_CASE_TAG_KEY_BYTES = 128;
+const MAX_CASE_TAG_VALUE_BYTES = 256;
 const MAX_TOOL_CALL_INPUT_DEPTH = 5;
 
 const FiniteNumberSchema = z.number().finite();
@@ -74,6 +77,25 @@ const JudgingCriteriaSchema = z
     }
   });
 const MetadataSchema = z.string().trim().min(1).refine(isSafeMetadata);
+const CaseTagKeySchema = z
+  .string()
+  .max(MAX_CASE_TAG_KEY_BYTES)
+  .regex(/^[a-z][a-z0-9_]*$/, 'tag key must match [a-z][a-z0-9_]*');
+const CaseTagValueSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_CASE_TAG_VALUE_BYTES);
+const CaseTagsSchema = z
+  .record(CaseTagKeySchema, CaseTagValueSchema)
+  .superRefine((tags, context) => {
+    if (Object.keys(tags).length > MAX_CASE_TAG_COUNT) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `tags must not exceed ${MAX_CASE_TAG_COUNT} entries`,
+      });
+    }
+  });
 const SimpleIdentifierSchema = z
   .string()
   .refine(isSafeSimpleIdentifier, 'must be a safe identifier');
@@ -293,6 +315,7 @@ const CompatibleEvalCaseSchema = z
     interview_questions: z.array(TrimmedTextSchema).optional(),
     checks: ChecksSchema.optional(),
     example_answer: z.string().refine(isBoundedText).optional(),
+    tags: CaseTagsSchema.optional(),
   })
   .strict()
   .superRefine((definition, context) => {

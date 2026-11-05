@@ -1214,6 +1214,22 @@ case and resolved plan, but never asks the questions, scores them, or changes
 the run because of them. A host that wants the answers asks them itself and
 sets its own limits.
 
+### Case tags
+
+`tags` is an optional flat map of string keys to string values for freeform
+case metadata. Keys must match `[a-z][a-z0-9_]*` (up to 128 bytes); values
+are non-blank, trimmed strings up to 256 bytes; a case may have up to 32
+tags. When a case defines `tags`, Forge carries them through the parsed case,
+resolved plan (in `plan.case.tags`), and result (`case_tags` at the top level
+of `result.json`). Cases without `tags` produce no `tags` field in the parsed
+case, plan, or result. **Do not put sensitive data in tags.**
+
+```yaml
+tags:
+  difficulty: hard
+  product_area: billing
+```
+
 ### Criterion judging
 
 `judging_criteria` accepts strings or strict objects with nonblank `value`,
