@@ -329,24 +329,15 @@ export async function executeEvalWithTestHooks(
     });
 
   try {
-    const { preflight, environment, completions, secrets } = await step(
-      'preflight',
-      () => runPreflight({ input, hooks, setupActions, signal }),
+    const preflight = await step('preflight', () =>
+      runPreflight({ input, hooks, setupActions, signal }),
     );
 
-    prepared = await step('runtime_prepare', async () => {
-      throwIfAborted(signal, phase);
-      return input.composition.runtime.prepare({
-        runId: input.runId,
-        plan: input.plan,
-        environment,
-        requirements: {
-          executables: preflight.requirements.executables,
-          stateDirectories: preflight.requirements.stateDirectories,
-        },
-        signal,
-      });
-    });
+    const ready = await step('runtime_prepare', () =>
+      prepareRuntime({ input, preflight, signal }),
+    );
+    prepared = ready.prepared;
+    const { completions, secrets } = ready;
 
     await preflight.agent.prepare({
       runId: input.runId,
@@ -720,35 +711,67 @@ interface PreflightInput {
   readonly signal: AbortSignal;
 }
 
-interface PreflightState {
-  readonly preflight: EvalPreflight;
-  readonly environment: ResolvedEnvironment;
-  readonly completions: PreparedCompletionRuntime;
-  readonly secrets: readonly string[];
-}
-
+/** Validates the run before touching any credential, provider or sandbox. */
 async function runPreflight({
   input,
   hooks,
   setupActions,
   signal,
-}: PreflightInput): Promise<PreflightState> {
+}: PreflightInput): Promise<EvalPreflight> {
   throwIfAborted(signal, 'preflight');
   assertRunId(input.runId);
-  const preflight = buildEvalPreflight(
+  return buildEvalPreflight(
     input.plan,
     input.composition,
     hooks.setupExecutor ?? createSetupExecutorForRegistry(setupActions, true),
   );
+}
+
+interface PrepareRuntimeInput {
+  readonly input: ExecuteEvalInput;
+  readonly preflight: EvalPreflight;
+  readonly signal: AbortSignal;
+}
+
+interface PreparedRun {
+  readonly completions: PreparedCompletionRuntime;
+  readonly secrets: readonly string[];
+  readonly prepared: PreparedRuntime;
+}
+
+async function prepareRuntime(run: PrepareRuntimeInput): Promise<PreparedRun> {
+  const { input, preflight, signal } = run;
+  throwIfAborted(signal, 'runtime_prepare');
   const environment = await resolveEnvironment(
     input,
     preflight.environmentSpecification,
     preflight.credentialDeclarations,
     signal,
   );
-  let completions: PreparedCompletionRuntime;
+  const completions = await prepareCompletions(run, environment);
+  const secrets = uniqueStrings([
+    ...credentialValues(environment),
+    ...completions.secrets,
+  ]);
+  const prepared = await input.composition.runtime.prepare({
+    runId: input.runId,
+    plan: input.plan,
+    environment,
+    requirements: {
+      executables: preflight.requirements.executables,
+      stateDirectories: preflight.requirements.stateDirectories,
+    },
+    signal,
+  });
+  return { completions, secrets, prepared };
+}
+
+async function prepareCompletions(
+  { input, preflight, signal }: PrepareRuntimeInput,
+  environment: ResolvedEnvironment,
+): Promise<PreparedCompletionRuntime> {
   try {
-    completions = await prepareCompletionRuntime({
+    return await prepareCompletionRuntime({
       runId: input.runId,
       bindings: preflight.completionBindings,
       credentialResolver: input.composition.credentialResolver,
@@ -758,16 +781,11 @@ async function runPreflight({
   } catch (error) {
     throw executionError(
       'credential_failed',
-      'preflight',
+      'runtime_prepare',
       'Forge could not prepare the completion providers required by this run.',
       error,
     );
   }
-  const secrets = uniqueStrings([
-    ...credentialValues(environment),
-    ...completions.secrets,
-  ]);
-  return { preflight, environment, completions, secrets };
 }
 
 interface ExecutedInteraction {
@@ -1163,7 +1181,7 @@ async function resolveEnvironment(
   } catch (error) {
     throw executionError(
       'credential_failed',
-      'preflight',
+      'runtime_prepare',
       'Forge could not resolve the credentials required by this run.',
       error,
     );

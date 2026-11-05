@@ -857,7 +857,7 @@ describe('executeEval', () => {
         }),
         {
           code: failure === 'unproven' ? 'invalid_plan' : 'credential_failed',
-          phase: 'preflight',
+          phase: failure === 'unproven' ? 'preflight' : 'runtime_prepare',
         },
       );
       assert.deepEqual(

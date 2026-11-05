@@ -932,8 +932,8 @@ README/architecture inventory. Keep host-owned files below
 
 | Phase | Start reading | Common collaborating files |
 | --- | --- | --- |
-| `preflight` | `execution/execute.ts:buildEvalPreflight` | model parser, setup executor, agent requirements, completion runtime, runtime preflight |
-| `runtime_prepare` | selected `RuntimeAdapter.prepare` | Docker runtime/controller, credentials, workspace helpers |
+| `preflight` | `execution/execute.ts:buildEvalPreflight` | model parser, setup executor, agent requirements, completion provider selection, runtime preflight |
+| `runtime_prepare` | `execution/execute.ts:prepareRuntime`, then selected `RuntimeAdapter.prepare` | credential resolver, completion runtime (credential-aware provider preflight), Docker runtime/controller, workspace helpers |
 | `setup` | `setup/executor.ts:PreparedSetup.apply` | selected handler, input provider, workspace, command projection |
 | `interaction` | `execution/execute.ts:executeInteraction` | selected agent `index.ts`, stream parser, Ava/conversation, completion runtime |
 | `quiesce` | selected runtime `quiesce` | active command controller and sealed workspace/state |
