@@ -1,3 +1,4 @@
+import { createPlanRun } from './application/planRun/createPlanRun.ts';
 import type {
   EvalCredentialUse,
   ExecuteEvalInput,
@@ -31,7 +32,6 @@ import type {
   SetupActionBundleReferenceV1,
   SetupStepV1,
 } from './model/types.ts';
-import { resolveRunPlanWithSetupActions } from './planning/planner.ts';
 import { verifyCompletedRunWithPlanParser } from './results/localStore.ts';
 import type { CompletedRun, CompletedRunV1 } from './results/types.ts';
 import {
@@ -83,6 +83,7 @@ export function createForgeEngine(
   const setupActions = createSetupActionRegistry(
     options.setupActionBundles ?? [],
   );
+  const planRun = createPlanRun({ setupActions });
   const engine: ForgeEngine = {
     setupActionBundles: setupActions.actionBundles,
     setupActionIds: setupActions.actionIds,
@@ -110,12 +111,7 @@ export function createForgeEngine(
     loadExperimentConfig(experimentPath) {
       return loadExperimentConfigWithSetupActions(experimentPath, setupActions);
     },
-    resolveRunPlan(input) {
-      return parseResolvedRunPlanWithSetupActions(
-        resolveRunPlanWithSetupActions(input, setupActions),
-        setupActions,
-      );
-    },
+    resolveRunPlan: (input) => planRun.plan(input),
     preflightEval(request) {
       preflightEvalWithSetupActions(request, setupActions);
     },
