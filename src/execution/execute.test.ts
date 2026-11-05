@@ -210,7 +210,15 @@ describe('executeEval', () => {
       { name: 'file_created: greeting.txt', passed: true },
       { name: 'file_exists: greeting.txt', passed: true },
       { name: 'file_contains: greeting.txt /hello/', passed: true },
+      {
+        name: 'tool_called: NeverCalled',
+        label: 'telemetry',
+        requirement_level: 'OPTIONAL',
+        passed: false,
+        tool_calls: { matched_count: 0, calls: [] },
+      },
     ]);
+    assert.equal(verified.result.evaluation.status, 'passed');
     const trajectory = await fs.readFile(
       path.join(completed.location, 'trajectory.json'),
       'utf8',
@@ -1459,6 +1467,13 @@ function resolvedPlan(): ResolvedRunPlanV1 {
   const checks = {
     files_created: ['greeting.txt'],
     file_checks: [{ file: 'greeting.txt', exists: true, contains: 'hello' }],
+    tool_call_checks: [
+      {
+        tool: 'NeverCalled',
+        label: 'telemetry',
+        requirement_level: 'OPTIONAL' as const,
+      },
+    ],
   };
   return {
     selection: {

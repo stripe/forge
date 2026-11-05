@@ -1,14 +1,27 @@
 import { runInNewContext } from 'node:vm';
 
-import type { AtifTrajectoryV1_8 } from '../atif/index.ts';
-import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
-import type { ChecksV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import type {
-  CheckResultV1,
-  CriterionResultV1,
-  EvaluationResultV1,
-  WorkspaceEvidenceEntryV1,
-  WorkspaceEvidenceV1,
+  AtifToolCall,
+  AtifTrajectoryV1_8,
+  JsonObject,
+} from '../atif/index.ts';
+import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
+import {
+  type CheckMetadataV1,
+  type ChecksV1,
+  DEFAULT_REQUIREMENT_LEVEL,
+  type RequirementLevelV1,
+  type ResolvedRunPlanV1,
+  type ToolCallCheckInputsV1,
+  type ToolCallCheckV1,
+} from '../model/types.ts';
+import {
+  type CheckResultV1,
+  type CriterionResultV1,
+  type EvaluationResultV1,
+  MAX_MATCHED_TOOL_CALLS,
+  type WorkspaceEvidenceEntryV1,
+  type WorkspaceEvidenceV1,
 } from '../results/index.ts';
 import { criterionResultMatchesDefinition, scoreEvaluation } from './score.ts';
 
@@ -63,10 +76,10 @@ export async function evaluateRunEvidence(
     input.plan.evaluation.checks,
     input.signal,
   );
-  const checks = runWorkspaceChecks(
-    input.plan.evaluation.checks,
-    workspaceEvidence,
-  );
+  const checks = [
+    ...runWorkspaceChecks(input.plan.evaluation.checks, workspaceEvidence),
+    ...runToolCallChecks(input.plan.evaluation.checks, input.trajectory),
+  ];
   return {
     workspaceEvidence,
     evaluation: scoreEvaluation(criterionResults, checks),
@@ -203,6 +216,134 @@ export function runWorkspaceChecks(
     }
   }
   return results;
+}
+
+/**
+ * Evaluate tool call checks against the sealed root trajectory. Only the root
+ * `steps` are searched; subagent trajectories are not. Only call names and
+ * arguments are read, never observation results. A check passes when at least
+ * one call matches both its name and `inputs`.
+ */
+export function runToolCallChecks(
+  checks: ChecksV1 | undefined,
+  trajectory: AtifTrajectoryV1_8,
+): CheckResultV1[] {
+  const toolChecks = checks?.tool_call_checks ?? [];
+  if (toolChecks.length === 0) return [];
+  const calls = trajectory.steps.flatMap((step) =>
+    step.source === 'agent'
+      ? (step.tool_calls ?? []).map((call) => ({ step: step.step_id, call }))
+      : [],
+  );
+  return toolChecks.map((check) => evaluateToolCallCheck(check, calls));
+}
+
+function evaluateToolCallCheck(
+  check: ToolCallCheckV1,
+  calls: ReadonlyArray<{ step: number; call: AtifToolCall }>,
+): CheckResultV1 {
+  const name = `tool_called: ${check.tool}`;
+  const metadata = checkMetadata(check);
+  const nameMatches = toolNameMatcher(check.tool);
+  if (nameMatches === undefined) {
+    return {
+      name,
+      ...metadata,
+      passed: false,
+      detail: 'Tool pattern is invalid or too large.',
+    };
+  }
+  let matches: Array<{ step: number; call: AtifToolCall }>;
+  try {
+    matches = calls.filter(
+      ({ call }) =>
+        nameMatches(call.function_name) &&
+        (check.inputs === undefined ||
+          inputsMatch(check.inputs, call.arguments)),
+    );
+  } catch {
+    // Fail closed: a timeout must not read as "never called".
+    return {
+      name,
+      ...metadata,
+      passed: false,
+      detail: 'Tool pattern evaluation failed or timed out.',
+    };
+  }
+  const matched = matches.length;
+  const passed = matched > 0;
+  return {
+    name,
+    ...metadata,
+    passed,
+    tool_calls: {
+      matched_count: matched,
+      calls: matches.slice(0, MAX_MATCHED_TOOL_CALLS).map(({ step, call }) => ({
+        step_id: step,
+        tool_call_id: call.tool_call_id,
+        function_name: call.function_name,
+      })),
+    },
+  };
+}
+
+/** Whole-name regex match in the bounded VM, memoized per distinct name. */
+function toolNameMatcher(
+  pattern: string,
+): ((name: string) => boolean) | undefined {
+  if (Buffer.byteLength(pattern, 'utf8') > MAX_REGEX_BYTES) return undefined;
+  const anchored = `^(?:${pattern})$`;
+  try {
+    RegExp(anchored);
+  } catch {
+    return undefined;
+  }
+  const cache = new Map<string, boolean>();
+  return (name) => {
+    const cached = cache.get(name);
+    if (cached !== undefined) return cached;
+    const result =
+      runInNewContext(
+        'new RegExp(pattern).test(name)',
+        { pattern: anchored, name },
+        {
+          timeout: MAX_REGEX_EXECUTION_MS,
+          contextCodeGeneration: { strings: false, wasm: false },
+        },
+      ) === true;
+    cache.set(name, result);
+    return result;
+  };
+}
+
+/** Recursive partial match: expected keys must equal; extra actual keys pass. */
+function inputsMatch(
+  expected: ToolCallCheckInputsV1,
+  actual: JsonObject,
+): boolean {
+  return Object.entries(expected).every(([key, want]) => {
+    if (!Object.hasOwn(actual, key)) return false;
+    const got = actual[key];
+    if (want !== null && typeof want === 'object') {
+      return (
+        got !== null &&
+        typeof got === 'object' &&
+        !Array.isArray(got) &&
+        inputsMatch(want, got)
+      );
+    }
+    return got === want;
+  });
+}
+
+function checkMetadata(check: CheckMetadataV1): {
+  label?: string;
+  requirement_level: RequirementLevelV1;
+} {
+  return {
+    ...(check.label === undefined ? {} : { label: check.label }),
+    requirement_level: check.requirement_level ?? DEFAULT_REQUIREMENT_LEVEL,
+  };
 }
 
 export class UnsupportedEvaluationCapabilityError extends Error {

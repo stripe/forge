@@ -9,7 +9,7 @@ import type {
   EvaluationResultV1,
 } from '../results/index.ts';
 
-/** Use a criterion-ratio score and gate a clean pass on invariant checks. */
+/** Use a criterion-ratio score and gate a clean pass on scored checks. */
 export function scoreEvaluation(
   criteria: readonly CriterionResultV1[],
   checks: readonly CheckResultV1[],
@@ -31,8 +31,11 @@ export function scoreEvaluation(
       : judgedTotal === 0
         ? null
         : criteriaPassed / judgedTotal;
-  const allChecksPass =
-    checks.length === 0 || checks.every((check) => check.passed);
+  // OPTIONAL checks are recorded as telemetry and never gate the status.
+  const scoredChecks = checks.filter(
+    (check) => check.requirement_level !== 'OPTIONAL',
+  );
+  const allChecksPass = scoredChecks.every((check) => check.passed);
 
   let status: EvaluationResultV1['status'];
   if (criteriaErrored > 0) {
@@ -41,7 +44,7 @@ export function scoreEvaluation(
     status = allChecksPass ? 'passed' : 'failed';
   } else if (score === 1 && allChecksPass) {
     status = 'passed';
-  } else if (criteriaPassed > 0 || (checks.length > 0 && allChecksPass)) {
+  } else if (criteriaPassed > 0 || (scoredChecks.length > 0 && allChecksPass)) {
     status = 'partial';
   } else {
     status = 'failed';
@@ -58,7 +61,17 @@ export function scoreEvaluation(
         ? { ...criterion, error: { ...criterion.error } }
         : { ...criterion },
     ),
-    checks: checks.map((check) => ({ ...check })),
+    checks: checks.map((check) => ({
+      ...check,
+      ...(check.tool_calls === undefined
+        ? {}
+        : {
+            tool_calls: {
+              ...check.tool_calls,
+              calls: check.tool_calls.calls.map((call) => ({ ...call })),
+            },
+          }),
+    })),
   };
 }
 

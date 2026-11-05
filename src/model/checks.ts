@@ -8,3 +8,12 @@ export function hasDeterministicWorkspaceChecks(
     (checks?.file_checks?.length ?? 0) > 0
   );
 }
+
+export function hasToolCallChecks(checks: ChecksV1 | undefined): boolean {
+  return (checks?.tool_call_checks?.length ?? 0) > 0;
+}
+
+/** True when evaluation emits any deterministic check result. */
+export function hasDeterministicChecks(checks: ChecksV1 | undefined): boolean {
+  return hasDeterministicWorkspaceChecks(checks) || hasToolCallChecks(checks);
+}

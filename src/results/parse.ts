@@ -31,13 +31,14 @@ import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
 } from '../version.ts';
-import type {
-  ForgeArtifactParseContext,
-  InteractionArtifactV1,
-  JudgeEvidenceV1,
-  RunResult,
-  SetupArtifactV1,
-  WorkspaceEvidenceV1,
+import {
+  type ForgeArtifactParseContext,
+  type InteractionArtifactV1,
+  type JudgeEvidenceV1,
+  MAX_MATCHED_TOOL_CALLS,
+  type RunResult,
+  type SetupArtifactV1,
+  type WorkspaceEvidenceV1,
 } from './types.ts';
 
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -126,13 +127,41 @@ const workspaceEvidenceSchema = z
 const checkResult = z
   .object({
     name: safeText,
+    label: z
+      .string()
+      .regex(/^[a-z][a-z0-9_]*$/)
+      .optional(),
+    requirement_level: z.enum(REQUIREMENT_LEVELS).optional(),
     passed: z.boolean(),
     detail: z
       .string()
       .max(64 * 1024)
       .optional(),
+    tool_calls: z
+      .object({
+        matched_count: z.number().int().nonnegative(),
+        calls: z
+          .array(
+            z
+              .object({
+                step_id: z.number().int(),
+                tool_call_id: safeText,
+                function_name: safeText,
+              })
+              .strict(),
+          )
+          .max(MAX_MATCHED_TOOL_CALLS),
+      })
+      .strict()
+      .refine(({ matched_count, calls }) => calls.length <= matched_count)
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    ({ passed, tool_calls }) =>
+      tool_calls === undefined || passed === tool_calls.matched_count > 0,
+    'A tool call check passes exactly when a call matched.',
+  );
 
 const artifactDescriptor = z
   .object({
@@ -234,7 +263,15 @@ export const evaluationResultSchema = z
         ...criterion,
         ...(label === undefined ? {} : { label }),
       })),
-      value.checks.map(({ name, passed }) => ({ name, passed })),
+      value.checks.map(
+        ({ label, requirement_level, detail, tool_calls, ...check }) => ({
+          ...check,
+          ...(label === undefined ? {} : { label }),
+          ...(requirement_level === undefined ? {} : { requirement_level }),
+          ...(detail === undefined ? {} : { detail }),
+          ...(tool_calls === undefined ? {} : { tool_calls }),
+        }),
+      ),
     );
     if (
       value.judging_criteria_total !== expected.judging_criteria_total ||
