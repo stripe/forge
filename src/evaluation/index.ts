@@ -3,6 +3,7 @@ export {
   type EvaluatedRunEvidence,
   type EvaluateRunEvidenceInput,
   evaluateRunEvidence,
+  runToolCallChecks,
   runWorkspaceChecks,
   UnsupportedEvaluationCapabilityError,
 } from './checks.ts';

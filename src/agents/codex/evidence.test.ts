@@ -372,6 +372,27 @@ function clippedMcpText(original: string, budget = 12_000): string {
   );
 }
 
+// Bytes policy: the extra odd byte goes to the tail, and the marker counts
+// omitted Unicode scalars after both ends round to complete UTF-8 codepoints.
+function clippedMcpChars(original: string, budget = 12_000): string {
+  const bytes = Buffer.from(original);
+  let prefix = Math.floor(budget / 2);
+  let suffix = bytes.length - (budget - prefix);
+  while ((bytes[prefix]! & 0xc0) === 0x80) prefix -= 1;
+  while ((bytes[suffix]! & 0xc0) === 0x80) suffix += 1;
+  const omitted = Array.from(bytes.subarray(prefix, suffix).toString()).length;
+  return (
+    bytes.subarray(0, prefix).toString() +
+    `…${omitted} chars truncated…` +
+    bytes.subarray(suffix).toString()
+  );
+}
+
+const MCP_CLIPS = [
+  { unit: 'tokens', clip: clippedMcpText },
+  { unit: 'chars', clip: clippedMcpChars },
+];
+
 function capturedMcp(
   options: {
     result?: Record<string, unknown>;
@@ -1847,53 +1868,61 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
-  it('preserves proven plain, structured, Unicode, and failed MCP truncation exactly', async () => {
-    const longText =
-      'prefix …1 tokens truncated… ' +
-      'abcdef🦀漢字'.repeat(12_000) +
-      ' suffix';
-    for (const options of [
-      {
-        result: { content: [{ type: 'text', text: longText }], isError: false },
-      },
-      {
-        result: {
-          content: [{ type: 'text', text: 'unused' }],
-          structuredContent: { answer: longText },
-          isError: true,
+  it.each(MCP_CLIPS)(
+    'preserves proven plain, structured, Unicode, and failed MCP $unit truncation exactly',
+    async ({ clip }) => {
+      const longText =
+        'prefix …1 tokens truncated… ' +
+        'abcdef🦀漢字'.repeat(12_000) +
+        ' suffix';
+      for (const options of [
+        {
+          result: {
+            content: [{ type: 'text', text: longText }],
+            isError: false,
+          },
         },
-      },
-      { error: { message: longText } },
-    ]) {
-      const sequence = capturedMcp(options);
-      const output = clippedMcpText(String(sequence[4]!.payload.output));
-      sequence[4]!.payload.output = output;
-      const evidence = await loadToolSequence(sequence);
-      assert.equal(evidence.kind, 'available');
-      if (evidence.kind !== 'available')
-        throw new Error('Expected truncated MCP evidence.');
-      assert.equal(evidence.warnings.length, 1);
-      assert.equal(evidence.warnings[0]?.code, 'value_omitted');
-      assert.match(evidence.warnings[0]?.message ?? '', /Codex truncated/);
-      const trajectory = parseAtifTrajectory(evidence.trajectory);
-      const result = trajectory.steps
-        .flatMap((step) => step.observation?.results ?? [])
-        .find((item) => item.source_call_id === 'mcp-call');
-      assert.equal(result?.content, output);
-      assert.deepEqual(result?.extra, {
-        is_error: Boolean(options.error || options.result?.isError),
-      });
-      const projection = createJudgeTranscriptProjection(trajectory);
-      assert.ok(
-        projection.transcriptJson.includes(JSON.stringify(output).slice(1, -1)),
-      );
-      assert.ok(
-        !projection.transcriptJson.includes(
-          JSON.stringify(longText).slice(1, -1),
-        ),
-      );
-    }
-  });
+        {
+          result: {
+            content: [{ type: 'text', text: 'unused' }],
+            structuredContent: { answer: longText },
+            isError: true,
+          },
+        },
+        { error: { message: longText } },
+      ]) {
+        const sequence = capturedMcp(options);
+        const output = clip(String(sequence[4]!.payload.output));
+        sequence[4]!.payload.output = output;
+        const evidence = await loadToolSequence(sequence);
+        assert.equal(evidence.kind, 'available');
+        if (evidence.kind !== 'available')
+          throw new Error('Expected truncated MCP evidence.');
+        assert.equal(evidence.warnings.length, 1);
+        assert.equal(evidence.warnings[0]?.code, 'value_omitted');
+        assert.match(evidence.warnings[0]?.message ?? '', /Codex truncated/);
+        const trajectory = parseAtifTrajectory(evidence.trajectory);
+        const result = trajectory.steps
+          .flatMap((step) => step.observation?.results ?? [])
+          .find((item) => item.source_call_id === 'mcp-call');
+        assert.equal(result?.content, output);
+        assert.deepEqual(result?.extra, {
+          is_error: Boolean(options.error || options.result?.isError),
+        });
+        const projection = createJudgeTranscriptProjection(trajectory);
+        assert.ok(
+          projection.transcriptJson.includes(
+            JSON.stringify(output).slice(1, -1),
+          ),
+        );
+        assert.ok(
+          !projection.transcriptJson.includes(
+            JSON.stringify(longText).slice(1, -1),
+          ),
+        );
+      }
+    },
+  );
 
   it('accepts exact clipping through a JSON escape without requiring valid output JSON', async () => {
     const result = { content: [{ type: 'text', text: '\\'.repeat(1_000) }] };
@@ -1931,7 +1960,7 @@ describe('Codex exact rollout evidence', () => {
 
   it('does not interpret marker-like source text as actual truncation', async () => {
     const text =
-      'A literal …42 tokens truncated… and [omitted 2 text items ...].';
+      'Literal …42 tokens truncated… and …42 chars truncated… and [omitted 2 text items ...].';
     for (const output of [
       undefined,
       [
@@ -1948,60 +1977,70 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
-  it('validates the shared array budget, later text omissions, and retained images', async () => {
-    const longText = `…3 tokens truncated…${'x'.repeat(900)}`;
-    const image = { type: 'image', mimeType: 'image/png', data: IMAGE_DATA };
-    const content = [
-      { type: 'text', text: 'small' },
-      { type: 'text', text: longText },
-      { type: 'text', text: '' },
-      image,
-      { type: 'text', text: 'not shown' },
-    ];
-    const output = [
-      { type: 'input_text', text: MCP_HEADER },
-      { type: 'input_text', text: 'small' },
-      { type: 'input_text', text: clippedMcpText(longText, 25) },
-      { type: 'input_image', image_url: `data:image/png;base64,${IMAGE_DATA}` },
-      { type: 'input_text', text: '[omitted 2 text items ...]' },
-    ];
-    const evidence = await loadToolSequence(
-      capturedMcp({ result: { content }, output }),
-    );
-    assert.equal(evidence.kind, 'available');
-    if (evidence.kind !== 'available')
-      throw new Error('Expected truncated mixed output.');
-    assert.equal(
-      evidence.warnings.filter(({ message }) =>
-        message.includes('Codex truncated'),
-      ).length,
-      1,
-    );
-    const projection = createJudgeTranscriptProjection(
-      parseAtifTrajectory(evidence.trajectory),
-    );
-    assert.ok(projection.transcriptJson.includes('[omitted 2 text items ...]'));
-    assert.ok(!projection.transcriptJson.includes('not shown'));
-    assert.ok(!projection.transcriptJson.includes(IMAGE_DATA));
-    for (const corrupt of [
-      output.map((block, index) =>
-        index === 2 ? { ...block, text: `${block.text}!` } : block,
-      ),
-      output.map((block, index) =>
-        index === 4 ? { ...block, text: '[omitted 1 text items ...]' } : block,
-      ),
-      output.filter((_, index) => index !== 3),
-      [...output, { type: 'input_text', text: 'not shown' }],
-    ])
-      assert.equal(
-        (
-          await loadToolSequence(
-            capturedMcp({ result: { content }, output: corrupt }),
-          )
-        ).kind,
-        'unavailable',
+  it.each(MCP_CLIPS)(
+    'validates the shared array $unit budget, later text omissions, and retained images',
+    async ({ clip }) => {
+      const longText = `…3 tokens truncated…${'x'.repeat(900)}`;
+      const image = { type: 'image', mimeType: 'image/png', data: IMAGE_DATA };
+      const content = [
+        { type: 'text', text: 'small' },
+        { type: 'text', text: longText },
+        { type: 'text', text: '' },
+        image,
+        { type: 'text', text: 'not shown' },
+      ];
+      const output = [
+        { type: 'input_text', text: MCP_HEADER },
+        { type: 'input_text', text: 'small' },
+        { type: 'input_text', text: clip(longText, 25) },
+        {
+          type: 'input_image',
+          image_url: `data:image/png;base64,${IMAGE_DATA}`,
+        },
+        { type: 'input_text', text: '[omitted 2 text items ...]' },
+      ];
+      const evidence = await loadToolSequence(
+        capturedMcp({ result: { content }, output }),
       );
-  });
+      assert.equal(evidence.kind, 'available');
+      if (evidence.kind !== 'available')
+        throw new Error('Expected truncated mixed output.');
+      assert.equal(
+        evidence.warnings.filter(({ message }) =>
+          message.includes('Codex truncated'),
+        ).length,
+        1,
+      );
+      const projection = createJudgeTranscriptProjection(
+        parseAtifTrajectory(evidence.trajectory),
+      );
+      assert.ok(
+        projection.transcriptJson.includes('[omitted 2 text items ...]'),
+      );
+      assert.ok(!projection.transcriptJson.includes('not shown'));
+      assert.ok(!projection.transcriptJson.includes(IMAGE_DATA));
+      for (const corrupt of [
+        output.map((block, index) =>
+          index === 2 ? { ...block, text: `${block.text}!` } : block,
+        ),
+        output.map((block, index) =>
+          index === 4
+            ? { ...block, text: '[omitted 1 text items ...]' }
+            : block,
+        ),
+        output.filter((_, index) => index !== 3),
+        [...output, { type: 'input_text', text: 'not shown' }],
+      ])
+        assert.equal(
+          (
+            await loadToolSequence(
+              capturedMcp({ result: { content }, output: corrupt }),
+            )
+          ).kind,
+          'unavailable',
+        );
+    },
+  );
 
   it('supports omission exactly at a text boundary but rejects retained empty text after exhaustion', async () => {
     const content = [
@@ -2099,40 +2138,48 @@ describe('Codex exact rollout evidence', () => {
     );
   });
 
-  it('rejects fabricated clips and keeps identity, argument, status, and header checks', async () => {
-    const result = {
-      content: [{ type: 'text', text: 'abcdefgh'.repeat(1_000) }],
-    };
-    const original = `${MCP_HEADER}\n${JSON.stringify(result.content)}`;
-    const output = clippedMcpText(original, 100);
-    for (const corrupt of [
-      output.replace('abcdefgh', 'Abcdefgh'),
-      `${output.slice(0, -1)}!`,
-      output.replace(/…[0-9]+ tokens truncated…/, '…0 tokens truncated…'),
-      output.replace(/…[0-9]+ tokens truncated…/, '…2 tokens truncated…'),
-      `${MCP_HEADER}\nunrelated …100 tokens truncated… text`,
-      clippedMcpText(original, 2), // The elapsed-time header itself is unavailable.
-    ])
-      assert.equal(
-        (await loadToolSequence(capturedMcp({ result, output: corrupt }))).kind,
-        'unavailable',
-      );
-    for (const changed of [
-      { id: 'other' },
-      { arguments: { changed: true } },
-      { status: 'failed' },
-    ]) {
-      const sequence = capturedMcp({ result, output });
-      sequence[3]!.payload.item = {
-        ...(sequence[3]!.payload.item as object),
-        ...changed,
+  it.each(MCP_CLIPS)(
+    'rejects fabricated $unit clips and keeps identity, argument, status, and header checks',
+    async ({ unit, clip }) => {
+      const result = {
+        content: [{ type: 'text', text: 'abcdefgh'.repeat(1_000) }],
       };
-      assert.equal((await loadToolSequence(sequence)).kind, 'unavailable');
-    }
-    const wrongTurn = capturedMcp({ result, output });
-    wrongTurn[3]!.payload.turn_id = 'other';
-    assert.equal((await loadToolSequence(wrongTurn)).kind, 'unavailable');
-  });
+      const original = `${MCP_HEADER}\n${JSON.stringify(result.content)}`;
+      const output = clip(original, 100);
+      const marker = new RegExp(`…[0-9]+ ${unit} truncated…`);
+      for (const corrupt of [
+        output.replace('abcdefgh', 'Abcdefgh'),
+        `${output.slice(0, -1)}!`,
+        output.replace(marker, `…0 ${unit} truncated…`),
+        output.replace(marker, `…2 ${unit} truncated…`),
+        output.replace(marker, (match) =>
+          match.replace(/[0-9]+/, (count) => String(Number(count) + 1)),
+        ),
+        `${MCP_HEADER}\nunrelated …100 ${unit} truncated… text`,
+        clip(original, 2), // The elapsed-time header itself is unavailable.
+      ])
+        assert.equal(
+          (await loadToolSequence(capturedMcp({ result, output: corrupt })))
+            .kind,
+          'unavailable',
+        );
+      for (const changed of [
+        { id: 'other' },
+        { arguments: { changed: true } },
+        { status: 'failed' },
+      ]) {
+        const sequence = capturedMcp({ result, output });
+        sequence[3]!.payload.item = {
+          ...(sequence[3]!.payload.item as object),
+          ...changed,
+        };
+        assert.equal((await loadToolSequence(sequence)).kind, 'unavailable');
+      }
+      const wrongTurn = capturedMcp({ result, output });
+      wrongTurn[3]!.payload.turn_id = 'other';
+      assert.equal((await loadToolSequence(wrongTurn)).kind, 'unavailable');
+    },
+  );
 
   it('normalizes captured discovery and MCP calls as correlated root behavior', async () => {
     const result = await loadToolSequence(capturedMcp());

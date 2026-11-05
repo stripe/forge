@@ -627,7 +627,7 @@ selector.
 | --- | --- | --- |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, Responses provider configuration, hook policy, CLI verification, exec/resume, evidence, and plugin installer | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
 | [`layout.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
-| [`pluginConfig.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/pluginConfig.ts) | Bound and filter run-owned TOML to native plugin, project trust, and hook state | Called before native installation and every session send |
+| [`pluginConfig.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/pluginConfig.ts) | Bound and filter run-owned TOML to native plugin, project trust, hook state, and Forge-declared bearer-reference MCP servers | Called before native installation and every session send |
 | [`plugins.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/plugins.ts) | Implement `AgentPluginInstaller`: native commands, catalog/source verification, installed inventory and receipt | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
 | [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
 | [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
@@ -697,7 +697,7 @@ one originally selected.
 
 | File | Main symbols | Role and relationships |
 | --- | --- | --- |
-| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
+| [`checks.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/checks.ts) | `collectWorkspaceEvidence`, `runWorkspaceChecks`, `runToolCallChecks`, `evaluateRunEvidence` | Reads exact configured paths from sealed workspace, runs deterministic file and tool call checks, validates criterion-result alignment, then calls `scoreEvaluation`. |
 | [`judgeWorkspace.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeWorkspace.ts) | `collectJudgeWorkspaceEvidence`, `boundJudgeWorkspaceEvidence`, `renderJudgeWorkspaceEvidence` | Lists eligible sealed-workspace files under hard bounds and renders the exact text appended to judge prompts. Called by execution. |
 | [`judgeTranscript.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/judgeTranscript.ts) | `createJudgeTranscriptProjection`, `parseJudgeTranscriptProjection` | Positive allowlist from redacted root ATIF to judge-visible steps. Used by execution, public judging helpers, result schemas, and verifier. |
 | [`criterionJudge.ts`](https://github.com/stripe/forge/blob/main/src/evaluation/criterionJudge.ts) | `judgeCriteria`, prompt/response helpers | Renders one prompt per criterion, runs bounded concurrent workers, retries, and parses strict judgments. Receives an invocation callback from execution. |

@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { parseSetupStep } from '../model/parse.ts';
 import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
-import { configurePluginMcp, configurePluginMcpDocument } from './pluginMcp.ts';
+import {
+  configurePluginMcp,
+  configurePluginMcpDocument,
+  prepareCodexPluginMcpRelocation,
+  relocateCodexPluginMcp,
+  writeRelocatedPluginMcp,
+} from './pluginMcp.ts';
 
 const servers = ['stripe'] as const;
 const step = {
@@ -23,7 +29,7 @@ describe('plugin MCP bearer authentication', () => {
       },
       extra: true,
     };
-    const claude = configurePluginMcpDocument(input, 'claude-code', servers);
+    const claude = configurePluginMcpDocument(input, servers);
     assert.deepEqual(claude, {
       ...input,
       mcpServers: {
@@ -38,23 +44,27 @@ describe('plugin MCP bearer authentication', () => {
       },
     });
     assert.equal(input.mcpServers.stripe.headers.authorization, 'old');
-    const codex = configurePluginMcpDocument(
+    const codex = relocateCodexPluginMcp(
       {
         mcpServers: {
           stripe: {
             url: 'https://mcp.stripe.com',
-            http_headers: { Authorization: 'old', Accept: 'application/json' },
+            bearer_token_env_var: 'OLD_KEY',
           },
+          other: { command: 'local', enabled_tools: ['read'] },
         },
+        extra: true,
       },
-      'codex',
       servers,
     );
     assert.deepEqual(codex, {
-      mcpServers: {
+      document: {
+        mcpServers: { other: { command: 'local', enabled_tools: ['read'] } },
+        extra: true,
+      },
+      declarations: {
         stripe: {
           url: 'https://mcp.stripe.com',
-          http_headers: { Accept: 'application/json' },
           bearer_token_env_var: 'STRIPE_API_KEY',
         },
       },
@@ -75,14 +85,87 @@ describe('plugin MCP bearer authentication', () => {
     ]) {
       assert.throws(
         () =>
-          configurePluginMcpDocument(
+          relocateCodexPluginMcp(
             { mcpServers: stripe ? { stripe } : {} },
-            'codex',
             servers,
           ),
         /absent|HTTP|auth/,
       );
     }
+  });
+
+  it('rejects bundled settings the Codex relocation would drop, URL credential carriers and header auth', () => {
+    const base = { type: 'http', url: 'https://mcp.stripe.com' };
+    for (const extra of [
+      { enabled: false },
+      { enabled_tools: ['read'] },
+      { disabled_tools: ['write'] },
+      { startup_timeout_sec: 60 },
+      { tool_timeout_sec: 120 },
+      { required: true },
+      { http_headers: { Accept: 'application/json' } },
+      { http_headers: { 'X-API-Key': 'synthetic-secret' } },
+      { http_headers: { Authorization: 'synthetic-secret' } },
+      { env_http_headers: { 'X-Other': 'SOME_ENV' } },
+      { headers: { Authorization: 'synthetic-secret' } },
+      { bearer_token: 'synthetic-secret' },
+      { bearer_token_env_var: 7 },
+      { url: 'https://mcp.stripe.com?api_key=synthetic-secret' },
+      { url: 'https://mcp.stripe.com#synthetic-secret' },
+      { url: 'https://mcp.stripe.com?' },
+      { url: 'https://user:synthetic-secret@mcp.stripe.com' },
+    ]) {
+      assert.throws(
+        () =>
+          relocateCodexPluginMcp(
+            { mcpServers: { stripe: { ...base, ...extra } } },
+            servers,
+          ),
+        /not carry|auth|URL/,
+        JSON.stringify(extra),
+      );
+    }
+  });
+
+  it('moves Codex connections out of the bundle, which Codex re-materializes after startup', async () => {
+    const state = createMemoryWorkspace();
+    await state.mutable.writeFile(
+      'plugin/.mcp.json',
+      Buffer.from(
+        '{"mcpServers":{"stripe":{"type":"http","url":"https://mcp.stripe.com"}}}',
+      ),
+    );
+    const relocation = await prepareCodexPluginMcpRelocation(
+      state.mutable,
+      'plugin',
+      servers,
+    );
+    assert.deepEqual(relocation.declarations, {
+      stripe: {
+        url: 'https://mcp.stripe.com',
+        bearer_token_env_var: 'STRIPE_API_KEY',
+      },
+    });
+    // Preparing the move changes nothing until it is written.
+    assert.deepEqual(
+      JSON.parse(
+        Buffer.from(await state.mutable.readFile('plugin/.mcp.json')).toString(
+          'utf8',
+        ),
+      ),
+      {
+        mcpServers: { stripe: { type: 'http', url: 'https://mcp.stripe.com' } },
+      },
+    );
+    await writeRelocatedPluginMcp(state.mutable, relocation);
+    assert.deepEqual(
+      JSON.parse(
+        Buffer.from(await state.mutable.readFile('plugin/.mcp.json')).toString(
+          'utf8',
+        ),
+      ),
+      { mcpServers: {} },
+    );
   });
 
   it('rejects manifest redirects instead of configuring an unused file', async () => {
@@ -92,7 +175,7 @@ describe('plugin MCP bearer authentication', () => {
       Buffer.from('{"mcpServers":"custom.json"}'),
     );
     await assert.rejects(
-      configurePluginMcp(state.mutable, 'plugin', 'claude-code', servers),
+      configurePluginMcp(state.mutable, 'plugin', servers),
       /manifest MCP overrides/,
     );
   });
@@ -104,7 +187,7 @@ describe('plugin MCP bearer authentication', () => {
       Buffer.from('{"name":"fixture","version":"1.0.0"}'),
     );
     await assert.rejects(
-      configurePluginMcp(state.mutable, 'plugin', 'codex', servers),
+      prepareCodexPluginMcpRelocation(state.mutable, 'plugin', servers),
       /Agent Plugins.*bearer auth.*Claude-format/,
     );
   });

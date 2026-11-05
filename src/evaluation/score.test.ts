@@ -294,4 +294,21 @@ describe('scoreEvaluation', () => {
       assert.equal(actual.judging_criteria_total, 0);
     }
   });
+
+  it('records OPTIONAL checks without letting them gate status', () => {
+    const optional = {
+      name: 'tool_called: Read',
+      requirement_level: 'OPTIONAL' as const,
+      passed: false,
+    };
+    assert.equal(scoreEvaluation([], [optional]).status, 'passed');
+    assert.equal(
+      scoreEvaluation(
+        [],
+        [optional, { ...optional, requirement_level: 'MUST' }],
+      ).status,
+      'failed',
+    );
+    assert.deepEqual(scoreEvaluation([], [optional]).checks, [optional]);
+  });
 });

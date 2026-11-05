@@ -111,10 +111,14 @@ Installed manifests may use the native `.codex-plugin`, `.claude-plugin`, or
 Codex plugin installation and interaction share the run-owned `CODEX_HOME`.
 Before installation and every initial or resumed turn, Forge filters its
 `config.toml` to validated native marketplace/plugin settings, project trust,
-and hook enablement/review state. This lets Codex load enabled skills, hooks,
-and MCP configuration without inheriting user-level provider or authentication
-settings. Changes to plugin enablement
-remain effective on subsequent turns. Codex's recorded workspace trust is
+hook enablement/review state, and Forge-declared MCP servers. Each
+`mcp_servers` entry must be exactly a `url` and a `bearer_token_env_var`.
+Forge rejects inline tokens, static or environment headers, other server
+settings, and URLs with userinfo, a query string, or a fragment. This lets
+Codex load enabled skills, hooks, and MCP configuration without inheriting
+user-level provider or authentication settings. Changes to plugin enablement
+remain effective on subsequent turns; a declared MCP server stays configured
+independently of plugin enablement. Codex's recorded workspace trust is
 retained because its resume path does not repeat first-turn trust initialization.
 
 Hook trust is an agent coordinate in the experiment:
@@ -147,20 +151,31 @@ During setup, the prepared operation:
 3. installs through the agent's native CLI;
 4. validates the native plugin identity, version, path, load status, and source
    provenance;
-5. configures the bundled MCP connection; and
-6. fingerprints the configured installation and records a receipt in `setup.json`.
+5. configures the bundled MCP connection and fingerprints the installed tree
+   (Codex fingerprints first, before Forge moves the connection out of the
+   bundle); and
+6. records a receipt in `setup.json`.
 
 The receipt includes:
 
 - the resolved marketplace and native plugin selection;
 - the exact catalog commit used to read the marketplace entry;
 - the native plugin ID and installed version;
-- the selected source kind and installer-reported Git commit when available; and
-- a deterministic digest and size/count summary of the installed tree.
+- the selected source kind and installer-reported Git commit when available;
+- a deterministic digest and size/count summary of the installed tree; and
+- for Codex installs with MCP authentication, optional
+  `mcp_configuration: codex-user-config` and `mcp_connections`. Together they
+  mean Forge moved the bundled declarations into the run-owned user
+  configuration, so `installed_tree` fingerprints the plugin before that move.
+  `mcp_connections` lists the declared servers as `{name, url}`, sorted by name;
+  a URL never carries userinfo, a query string, or a fragment, and no key or
+  header value is recorded. Both fields appear together or not at all. Receipts
+  without them keep their previous meaning and still read; older strict readers
+  may reject receipts that carry them.
 
 Forge bounds and validates the installed tree, rejecting symbolic links and
 special entries. The tree fingerprint covers relative paths, directories, and
-the exact regular-file bytes read after installation in stable path order,
+the exact regular-file bytes read at the fingerprint point in stable path order,
 independent of the adapter's listing order. It lets runs compare installed
 contents even when the plugin version or reported source commit is unchanged.
 
@@ -200,12 +215,26 @@ secret values. See the README for other
 [credential grants](../README.md#requirements--credentials).
 
 Forge keeps the bundled URL and unrelated plugin content. Claude uses an
-Authorization header template; Codex uses `bearer_token_env_var`. Both reference
+Authorization header template in the plugin's MCP configuration. Codex
+re-materializes its plugin cache after startup, which discards edits to the
+bundled `.mcp.json` and leaves the server on Codex's OAuth path. Forge therefore
+moves each selected server out of the bundle into the run-owned Codex
+`config.toml` as `[mcp_servers.<name>]` with `bearer_token_env_var`; the
+plugin's skills and other content still load from the plugin.
+
+The move carries only a transport `type`, the `url`, and an existing bearer
+variable, which Forge replaces. Setup fails, before changing either file, when a
+selected bundled server has anything else: `enabled`, `enabled_tools`,
+`disabled_tools`, timeouts, static or environment headers, unknown fields, or a
+URL with userinfo, a query string, or a fragment. Setup also fails when the
+merged configuration would exceed the configuration size or entry limits, or
+when `config.toml` already declares a different server of the same name; an
+identical repeated declaration is accepted. A rejected move leaves the prior
+`config.toml` and the bundle unchanged. Both reference
 `STRIPE_API_KEY` inside the runtime, so other tools invoked by the agent can
 use the same key. Tokens reach only agent commands, never setup commands.
-Forge fingerprints the configured installation. Runtime credential names and
-references are part of the Forge version; the host variable name is not recorded
-in the plan.
+Runtime credential names and references are part of the Forge version; the host
+variable name is not recorded in the plan.
 
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
 source fails setup. Custom MCP config paths, OAuth, and host login passthrough

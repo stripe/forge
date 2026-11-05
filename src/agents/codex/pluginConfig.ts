@@ -4,7 +4,14 @@ import { parse } from 'toml';
 
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
 import { isSha256Digest } from '../../model/hashes.ts';
-import { isSafeSimpleIdentifier } from '../../model/paths.ts';
+import {
+  isSafeMcpEndpointUrl,
+  isSafeSimpleIdentifier,
+} from '../../model/paths.ts';
+import type {
+  CodexMcpServerConfig,
+  CodexMcpServerDeclarations,
+} from '../pluginMcp.ts';
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const MAX_CONFIG_DEPTH = 64;
@@ -14,8 +21,70 @@ const MAX_ENTRIES = 10_000;
 export async function prepareCodexPluginConfiguration(
   home: MutableWorkspace,
 ): Promise<void> {
+  const config = await readSanitizedConfiguration(home);
+  if (config) await writeConfiguration(home, config);
+}
+
+/**
+ * Declare Forge-owned MCP connections in user configuration, which Codex's
+ * plugin startup sync leaves intact; values are environment references only.
+ */
+export async function declareCodexMcpServers(
+  home: MutableWorkspace,
+  servers: CodexMcpServerDeclarations,
+): Promise<void> {
+  const config = (await readSanitizedConfiguration(home)) ?? {
+    marketplaces: {},
+    plugins: {},
+  };
+  const mcpServers = { ...config.mcp_servers };
+  for (const [name, server] of Object.entries(servers)) {
+    if (!isSafeSimpleIdentifier(name) || !server || !safeMcpServer(server))
+      invalid();
+    const existing = Object.hasOwn(mcpServers, name)
+      ? mcpServers[name]
+      : undefined;
+    // An identical repeat is harmless; silently replacing a connection is not.
+    if (
+      existing &&
+      (existing.url !== server.url ||
+        existing.bearer_token_env_var !== server.bearer_token_env_var)
+    )
+      throw new Error(
+        'Codex MCP server conflicts with an existing declaration of the same name.',
+      );
+    mcpServers[name] = { ...server };
+  }
+  await writeConfiguration(home, {
+    ...config,
+    ...(Object.keys(mcpServers).length ? { mcp_servers: mcpServers } : {}),
+  });
+}
+
+type SanitizedConfiguration = {
+  readonly marketplaces: Record<string, Record<string, string>>;
+  readonly plugins: Record<string, { enabled: boolean }>;
+  readonly projects?: Record<string, { trust_level: string }>;
+  readonly hooks?: { state: Record<string, Record<string, boolean | string>> };
+  readonly mcp_servers?: Record<string, CodexMcpServerConfig>;
+};
+
+async function writeConfiguration(
+  home: MutableWorkspace,
+  config: SanitizedConfiguration,
+): Promise<void> {
+  // Hold the result to the limits the next read enforces, before writing.
+  if (Object.keys(config.mcp_servers ?? {}).length > MAX_ENTRIES) invalid();
+  const body = Buffer.from(stringify(config));
+  if (body.byteLength > MAX_CONFIG_BYTES) invalid();
+  await home.writeFile('config.toml', body, { mode: 0o600 });
+}
+
+async function readSanitizedConfiguration(
+  home: MutableWorkspace,
+): Promise<SanitizedConfiguration | undefined> {
   const inspected = await home.inspect('config.toml');
-  if (inspected.kind === 'absent') return;
+  if (inspected.kind === 'absent') return undefined;
   if (inspected.kind !== 'file')
     throw new Error('Codex configuration must be a regular file.');
   let config: Record<string, unknown>;
@@ -127,19 +196,35 @@ export async function prepareCodexPluginConfiguration(
         .map((key) => [key, value[key] as boolean | string]),
     );
   }
-  await home.writeFile(
-    'config.toml',
-    Buffer.from(
-      stringify({
-        marketplaces,
-        plugins,
-        ...(Object.keys(projects).length ? { projects } : {}),
-        ...(Object.keys(hookStates).length
-          ? { hooks: { state: hookStates } }
-          : {}),
-      }),
-    ),
-    { mode: 0o600 },
+  const mcpServers: Record<string, CodexMcpServerConfig> = Object.create(
+    null,
+  ) as Record<string, CodexMcpServerConfig>;
+  for (const [name, value] of entries(config.mcp_servers)) {
+    if (!isSafeSimpleIdentifier(name) || !safeMcpServer(value)) invalid();
+    mcpServers[name] = value;
+  }
+  return {
+    marketplaces,
+    plugins,
+    ...(Object.keys(projects).length ? { projects } : {}),
+    ...(Object.keys(hookStates).length ? { hooks: { state: hookStates } } : {}),
+    ...(Object.keys(mcpServers).length ? { mcp_servers: mcpServers } : {}),
+  };
+}
+
+/**
+ * Exactly a remote HTTP URL and an environment-referenced bearer. Inline auth,
+ * static or environment headers, URL credentials, and other settings are
+ * rejected because Forge neither generates nor can vouch for them.
+ */
+function safeMcpServer(value: unknown): value is CodexMcpServerConfig {
+  return (
+    record(value) &&
+    Object.keys(value).length === 2 &&
+    typeof value.url === 'string' &&
+    isSafeMcpEndpointUrl(value.url) &&
+    typeof value.bearer_token_env_var === 'string' &&
+    /^[A-Za-z_][A-Za-z0-9_]{0,255}$/.test(value.bearer_token_env_var)
   );
 }
 

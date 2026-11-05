@@ -3,7 +3,10 @@ import { parse } from 'toml';
 import { describe, it } from 'vitest';
 
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
-import { prepareCodexPluginConfiguration } from './pluginConfig.ts';
+import {
+  declareCodexMcpServers,
+  prepareCodexPluginConfiguration,
+} from './pluginConfig.ts';
 
 describe('Codex run-owned plugin configuration', () => {
   it('retains native plugin and project/hook state while removing provider settings', async () => {
@@ -57,6 +60,102 @@ trusted_hash = "sha256:${'a'.repeat(64)}"
     );
   });
 
+  it('declares Forge MCP connections and preserves them through later preparation', async () => {
+    const state = createMemoryWorkspace({
+      'config.toml': '[plugins."fixture@test"]\nenabled=true\n',
+    });
+    await declareCodexMcpServers(state.mutable, {
+      stripe: {
+        url: 'https://mcp.stripe.com',
+        bearer_token_env_var: 'STRIPE_API_KEY',
+      },
+    });
+    await prepareCodexPluginConfiguration(state.mutable);
+    const config = JSON.parse(
+      JSON.stringify(
+        parse(
+          Buffer.from(await state.readonly.readFile('config.toml')).toString(),
+        ),
+      ),
+    );
+    assert.deepEqual(config, {
+      marketplaces: {},
+      plugins: { 'fixture@test': { enabled: true } },
+      mcp_servers: {
+        stripe: {
+          url: 'https://mcp.stripe.com',
+          bearer_token_env_var: 'STRIPE_API_KEY',
+        },
+      },
+    });
+  });
+
+  it('allows an identical repeated declaration and rejects a conflicting one before writing', async () => {
+    const server = {
+      url: 'https://mcp.stripe.com',
+      bearer_token_env_var: 'STRIPE_API_KEY',
+    };
+    const state = createMemoryWorkspace();
+    await declareCodexMcpServers(state.mutable, { stripe: server });
+    await declareCodexMcpServers(state.mutable, { stripe: { ...server } });
+    const before = Buffer.from(await state.readonly.readFile('config.toml'));
+    for (const conflict of [
+      { ...server, url: 'https://other.example.test' },
+      { ...server, bearer_token_env_var: 'OTHER_KEY' },
+    ]) {
+      await assert.rejects(
+        declareCodexMcpServers(state.mutable, { stripe: conflict }),
+        /conflicts/,
+      );
+      assert.deepEqual(
+        Buffer.from(await state.readonly.readFile('config.toml')),
+        before,
+      );
+    }
+  });
+
+  it('rejects a merged configuration its next read would refuse, leaving prior bytes intact', async () => {
+    const url = `https://mcp.example.test/${'a'.repeat(4_000)}`;
+    const server = (index: number) =>
+      `[mcp_servers.s${index}]\nurl = "${url}"\nbearer_token_env_var = "KEY"\n`;
+    const state = createMemoryWorkspace({
+      'config.toml': Array.from({ length: 256 }, (_, i) => server(i)).join(''),
+    });
+    await prepareCodexPluginConfiguration(state.mutable);
+    const before = Buffer.from(await state.readonly.readFile('config.toml'));
+    assert.ok(before.byteLength < 1024 * 1024);
+    await assert.rejects(
+      declareCodexMcpServers(state.mutable, {
+        stripe: { url, bearer_token_env_var: 'KEY' },
+      }),
+      /unsupported or malformed/,
+    );
+    assert.deepEqual(
+      Buffer.from(await state.readonly.readFile('config.toml')),
+      before,
+    );
+
+    const full = createMemoryWorkspace({
+      'config.toml': Array.from(
+        { length: 10_000 },
+        (_, i) =>
+          `[mcp_servers.s${i}]\nurl = "https://a.test"\nbearer_token_env_var = "K"\n`,
+      ).join(''),
+    });
+    await prepareCodexPluginConfiguration(full.mutable);
+    const fullBefore = Buffer.from(await full.readonly.readFile('config.toml'));
+    await assert.rejects(
+      declareCodexMcpServers(full.mutable, {
+        stripe: { url: 'https://a.test', bearer_token_env_var: 'K' },
+      }),
+      /unsupported or malformed/,
+    );
+    assert.deepEqual(
+      Buffer.from(await full.readonly.readFile('config.toml')),
+      fullBefore,
+    );
+  });
+
   it('allows an absent config and canonical local marketplace paths', async () => {
     const absent = createMemoryWorkspace();
     await prepareCodexPluginConfiguration(absent.mutable);
@@ -98,6 +197,16 @@ enabled=true
       `token = "${'x'.repeat(1024 * 1024)}"`,
       `token = ${'['.repeat(65)}"synthetic-secret"${']'.repeat(65)}`,
       '[plugins.__proto__]\nenabled=true',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token="synthetic-secret"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\ncommand="synthetic-secret"',
+      '[mcp_servers.stripe]\nurl="https://user:synthetic-secret@mcp.stripe.com"\nbearer_token_env_var="KEY"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="synthetic-secret value"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nhttp_headers={Authorization="synthetic-secret"}',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nhttp_headers={"X-API-Key"="synthetic-secret"}',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nenv_http_headers={"X-Other"="synthetic-secret value"}',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com?api_key=synthetic-secret"\nbearer_token_env_var="KEY"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com#synthetic-secret"\nbearer_token_env_var="KEY"',
+      '[mcp_servers.stripe]\nurl="https://mcp.stripe.com"\nbearer_token_env_var="KEY"\nenabled_tools=["read"]',
     ]) {
       const state = createMemoryWorkspace({ 'config.toml': config });
       await assert.rejects(

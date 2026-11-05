@@ -962,6 +962,63 @@ treatments:
     assert.ok(Object.hasOwn(withTags, 'tags'));
   });
 
+  it('accepts label and requirement_level on tool call checks only', () => {
+    const parse = (checks: unknown) =>
+      parseEvalCase({
+        id: 'suite/task',
+        version: '0.1.0',
+        task: 'Complete the task.',
+        checks,
+      } as never).checks;
+    const parsed = parse({
+      file_checks: [{ file: 'a.txt', description: 'output' }],
+      tool_call_checks: [
+        { tool: 'x', label: 'api', requirement_level: 'MUST' },
+      ],
+    });
+    assert.equal(parsed?.file_checks?.[0]?.description, 'output');
+    assert.equal(parsed?.tool_call_checks?.[0]?.label, 'api');
+    for (const bad of [
+      { file_checks: [{ file: 'a.txt', label: 'output' }] },
+      { file_checks: [{ file: 'a.txt', requirement_level: 'MUST' }] },
+      { tool_call_checks: [{ tool: 'x', description: 'x' }] },
+      { tool_call_checks: [{ tool: 'x', label: 'Not Valid' }] },
+      { tool_call_checks: [{ tool: 'x', requirement_level: 'MAYBE' }] },
+    ]) {
+      assert.throws(() => parse(bad), BenchmarkModelError);
+    }
+  });
+
+  it('validates tool call checks', () => {
+    const parse = (tool_call_checks: unknown) =>
+      parseEvalCase({
+        id: 'suite/task',
+        version: '0.1.0',
+        task: 'Complete the task.',
+        checks: { tool_call_checks },
+      } as never);
+    const nested = (depth: number): Record<string, unknown> =>
+      depth === 1 ? { k: 'v' } : { k: nested(depth - 1) };
+    assert.deepEqual(
+      parse([{ tool: 'stripe__x', inputs: { a: { b: 1 } } }]).checks
+        ?.tool_call_checks?.length,
+      1,
+    );
+    parse([{ tool: 'x', inputs: nested(5) }]);
+    for (const bad of [
+      [{ tool: 'x', inputs: nested(6) }],
+      [{ tool: 'x', inputs: { a: [1] } }],
+      [{ tool: 'x', count: { min: 1 } }],
+      [{ tool: '(' }],
+      [{ tool: 'a\nb' }],
+      [{ tool: 'x'.repeat(1025) }],
+      [{ tool: 'x', extra: true }],
+      JSON.parse('[{"tool":"x","inputs":{"__proto__":"x"}}]'),
+      JSON.parse('[{"tool":"x","inputs":{"a":{"__proto__":1}}}]'),
+    ]) {
+      assert.throws(() => parse(bad), BenchmarkModelError);
+    }
+  });
   it('validates manifest case identities, paths, and uniqueness', () => {
     const entry = {
       id: 'smoke/write',

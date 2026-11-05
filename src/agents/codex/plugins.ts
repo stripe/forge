@@ -14,7 +14,10 @@ import {
   isSafeWorkspaceRelativePath,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
-import { configurePluginMcp } from '../pluginMcp.ts';
+import {
+  prepareCodexPluginMcpRelocation,
+  writeRelocatedPluginMcp,
+} from '../pluginMcp.ts';
 import { inspectInstalledPluginTree } from '../pluginTree.ts';
 import {
   assertCodexRuntimeLayout,
@@ -23,6 +26,7 @@ import {
   resolveCodexLayout,
 } from './layout.ts';
 import {
+  declareCodexMcpServers,
   prepareCodexPluginConfiguration,
   qualifiedPluginId,
   record,
@@ -258,14 +262,33 @@ export function createCodexPluginInstaller(options: {
             identity.name,
             installed.version,
           );
-          const mcpServers = context.mcpServers;
-          if (mcpServers)
-            await configurePluginMcp(home, relative, 'codex', mcpServers);
+          // Fingerprint before Forge edits anything: the move below removes the
+          // connection from the tree, so the tree alone would not identify it.
           const installedTree = await inspectInstalledPluginTree(
             home,
             relative,
             signal,
           );
+          let connections:
+            | NonNullable<AgentPluginInstallationReceipt['mcp_connections']>
+            | undefined;
+          const mcpServers = context.mcpServers;
+          if (mcpServers) {
+            // Validate the whole move and the merged configuration before
+            // changing either file.
+            const relocation = await prepareCodexPluginMcpRelocation(
+              home,
+              relative,
+              mcpServers,
+            );
+            await declareCodexMcpServers(home, relocation.declarations);
+            await writeRelocatedPluginMcp(home, relocation);
+            connections = Object.entries(relocation.declarations)
+              .sort(([left], [right]) => (left < right ? -1 : 1))
+              .map(([name, server]) =>
+                Object.freeze({ name, url: server!.url }),
+              );
+          }
           return Object.freeze({
             adapter: options.adapterId,
             plugin: selected.plugin,
@@ -275,6 +298,14 @@ export function createCodexPluginInstaller(options: {
             version: installed.version,
             source: Object.freeze({ kind: source.kind }),
             installed_tree: installedTree,
+            ...(connections?.length
+              ? {
+                  mcp_configuration: 'codex-user-config' as const,
+                  mcp_connections: Object.freeze(
+                    connections,
+                  ) as typeof connections,
+                }
+              : {}),
           });
         },
       });

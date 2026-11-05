@@ -763,6 +763,59 @@ describe('local artifact store', () => {
     );
   });
 
+  it('expects check results, but no workspace evidence, for tool call checks only', async () => {
+    const canonical = [
+      { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+      { path: 'trajectory.json', body: oneShotTrajectory },
+    ];
+    const plan = createTestResolvedRunPlan({
+      checks: { tool_call_checks: [{ tool: 'Read' }] },
+    });
+    const withChecks =
+      (
+        checks: Array<Record<string, unknown>>,
+      ): Parameters<typeof commitArtifacts>[1] =>
+      (result) =>
+        ({
+          ...result,
+          evaluation: { ...result.evaluation, checks },
+        }) as never;
+    const valid = await commitArtifacts(
+      canonical,
+      withChecks([
+        {
+          name: 'tool_called: Read',
+          requirement_level: 'SHOULD',
+          passed: true,
+        },
+      ]),
+      { plan },
+    );
+    assert.ok(await verifyCompletedRun(valid));
+    for (const altered of [
+      { name: 'tool_called: Write', requirement_level: 'SHOULD' },
+      { name: 'tool_called: Read', requirement_level: 'OPTIONAL' },
+      { name: 'tool_called: Read', requirement_level: 'SHOULD', label: 'x' },
+    ]) {
+      const tampered = await commitArtifacts(
+        canonical,
+        withChecks([{ ...altered, passed: true }]),
+        { plan },
+      );
+      await assert.rejects(
+        verifyCompletedRun(tampered),
+        /evaluation configuration does not match/,
+      );
+    }
+    const missingChecks = await commitArtifacts(canonical, (result) => result, {
+      plan,
+    });
+    await assert.rejects(
+      verifyCompletedRun(missingChecks),
+      /evaluation configuration does not match/,
+    );
+  });
+
   it('rejects result evidence without provenance', () => {
     const result = resultFor([]);
     const evidenceWithoutProvenance: Record<string, unknown> = {

@@ -35,9 +35,11 @@ import {
   type ExperimentConfigV1,
   type JsonObject,
   type JsonValue,
+  REQUIREMENT_LEVELS,
   type ResolvedRunPlanV1,
   type RunSelection,
   type SetupStepV1,
+  type ToolCallCheckInputsV1,
 } from './types.ts';
 
 export const MAX_BENCHMARK_YAML_BYTES = 1024 * 1024;
@@ -54,6 +56,7 @@ const MAX_CHECK_REGEX_BYTES = 1_024;
 const MAX_CASE_TAG_COUNT = 32;
 const MAX_CASE_TAG_KEY_BYTES = 128;
 const MAX_CASE_TAG_VALUE_BYTES = 256;
+const MAX_TOOL_CALL_INPUT_DEPTH = 5;
 
 const FiniteNumberSchema = z.number().finite();
 const PositiveIntegerSchema = FiniteNumberSchema.int().safe().positive();
@@ -203,6 +206,14 @@ const ForgeProvenanceSchema = z
     }
   });
 
+const CheckMetadataFields = {
+  label: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
+  requirement_level: z.enum(REQUIREMENT_LEVELS).optional(),
+};
+
 const FilesystemCheckSchema = z
   .object({
     description: TrimmedTextSchema.optional(),
@@ -229,10 +240,63 @@ const FilesystemCheckSchema = z
   })
   .strict();
 
+function toolCallInputsSchema(depth: number): z.ZodType<ToolCallCheckInputsV1> {
+  const scalar = z.union([
+    z.string(),
+    FiniteNumberSchema,
+    z.boolean(),
+    z.null(),
+  ]);
+  const value =
+    depth < MAX_TOOL_CALL_INPUT_DEPTH
+      ? z.union([scalar, toolCallInputsSchema(depth + 1)])
+      : scalar;
+  // z.record drops an own "__proto__" key, which would loosen the match.
+  return z
+    .custom<unknown>(
+      (input) =>
+        typeof input !== 'object' ||
+        input === null ||
+        !Object.hasOwn(input, '__proto__'),
+      'inputs must not use __proto__',
+    )
+    .pipe(z.record(z.string(), value)) as z.ZodType<ToolCallCheckInputsV1>;
+}
+
+const ToolCallCheckSchema = z
+  .object({
+    ...CheckMetadataFields,
+    tool: z
+      .string()
+      .min(1)
+      .refine(
+        (pattern) =>
+          Buffer.byteLength(pattern, 'utf8') <= MAX_CHECK_REGEX_BYTES,
+        `tool must not exceed ${MAX_CHECK_REGEX_BYTES} bytes`,
+      )
+      .refine(
+        (pattern) => !/[\u0000-\u001f\u007f]/u.test(pattern),
+        'tool must not contain control characters',
+      )
+      .superRefine((pattern, context) => {
+        try {
+          RegExp(pattern);
+        } catch {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'tool must be a valid regular expression',
+          });
+        }
+      }),
+    inputs: toolCallInputsSchema(1).optional(),
+  })
+  .strict();
+
 const ChecksSchema = z
   .object({
     files_created: z.array(WorkspacePathSchema).max(1_000).optional(),
     file_checks: z.array(FilesystemCheckSchema).max(1_000).optional(),
+    tool_call_checks: z.array(ToolCallCheckSchema).max(1_000).optional(),
   })
   .strict();
 
