@@ -1,13 +1,12 @@
+import { createInspectRunCredentials } from './application/inspectRunCredentials/createInspectRunCredentials.ts';
+import { createPlanRun } from './application/planRun/createPlanRun.ts';
+import { createValidateRun } from './application/validateRun/createValidateRun.ts';
 import type {
   EvalCredentialUse,
   ExecuteEvalInput,
   PreflightEvalInput,
 } from './execution/execute.ts';
-import {
-  executeEvalWithSetupActions,
-  inspectEvalCredentialsWithSetupActions,
-  preflightEvalWithSetupActions,
-} from './execution/execute.ts';
+import { executeEvalWithSetupActions } from './execution/execute.ts';
 import {
   loadDatasetWithSetupActions,
   loadExperimentConfigWithSetupActions,
@@ -31,7 +30,6 @@ import type {
   SetupActionBundleReferenceV1,
   SetupStepV1,
 } from './model/types.ts';
-import { resolveRunPlanWithSetupActions } from './planning/planner.ts';
 import { verifyCompletedRunWithPlanParser } from './results/localStore.ts';
 import type { CompletedRun, CompletedRunV1 } from './results/types.ts';
 import {
@@ -83,6 +81,9 @@ export function createForgeEngine(
   const setupActions = createSetupActionRegistry(
     options.setupActionBundles ?? [],
   );
+  const planRun = createPlanRun({ setupActions });
+  const validateRun = createValidateRun({ setupActions });
+  const inspectRunCredentials = createInspectRunCredentials({ setupActions });
   const engine: ForgeEngine = {
     setupActionBundles: setupActions.actionBundles,
     setupActionIds: setupActions.actionIds,
@@ -110,18 +111,9 @@ export function createForgeEngine(
     loadExperimentConfig(experimentPath) {
       return loadExperimentConfigWithSetupActions(experimentPath, setupActions);
     },
-    resolveRunPlan(input) {
-      return parseResolvedRunPlanWithSetupActions(
-        resolveRunPlanWithSetupActions(input, setupActions),
-        setupActions,
-      );
-    },
-    preflightEval(request) {
-      preflightEvalWithSetupActions(request, setupActions);
-    },
-    inspectEvalCredentials(request) {
-      return inspectEvalCredentialsWithSetupActions(request, setupActions);
-    },
+    resolveRunPlan: (input) => planRun.plan(input),
+    preflightEval: (request) => validateRun.validate(request),
+    inspectEvalCredentials: (request) => inspectRunCredentials.inspect(request),
     executeEval(request) {
       return executeEvalWithSetupActions(request, setupActions);
     },
