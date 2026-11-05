@@ -1,4 +1,4 @@
-import { createPlanRun } from './application/planRun/createPlanRun.ts';
+import { createPlanRun } from './domain/service/planRun.ts';
 import type {
   EvalCredentialUse,
   ExecuteEvalInput,

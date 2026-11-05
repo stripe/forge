@@ -4,7 +4,7 @@ import type {
   LoadedExperimentConfigV1,
   ResolvedRunPlanV1,
   RunSelection,
-} from '../../model/types.ts';
+} from '../../../model/types.ts';
 
 export interface PlanRunInput {
   readonly dataset: LoadedDatasetV1;

@@ -1,7 +1,7 @@
 import { parseResolvedRunPlanWithSetupActions } from '../../model/parse.ts';
 import { resolveRunPlanWithSetupActions } from '../../planning/planner.ts';
 import type { SetupActionRegistry } from '../../setup/registry.ts';
-import type { PlanRun } from './planRun.ts';
+import type { PlanRun } from '../contract/usecase/planRun.ts';
 
 export interface PlanRunDependencies {
   readonly setupActions: SetupActionRegistry;

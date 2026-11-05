@@ -4,8 +4,8 @@ import { parseResolvedRunPlanWithSetupActions } from '../../model/parse.ts';
 import type { ResolvedRunPlanV1 } from '../../model/types.ts';
 import { resolveRunPlanWithSetupActions } from '../../planning/planner.ts';
 import type { SetupActionRegistry } from '../../setup/registry.ts';
-import { createPlanRun } from './createPlanRun.ts';
-import type { PlanRunInput } from './planRun.ts';
+import type { PlanRunInput } from '../contract/usecase/planRun.ts';
+import { createPlanRun } from './planRun.ts';
 
 vi.mock('../../planning/planner.ts', () => ({
   resolveRunPlanWithSetupActions: vi.fn(),
