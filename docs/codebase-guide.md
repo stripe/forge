@@ -75,6 +75,38 @@ without model credentials or upstream model calls:
 FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
 ```
 
+Browser mode is a model-free devbox environment PoC. It builds a separate,
+lockfile-pinned development image with Chromium, Playwright MCP, and both native
+agent CLIs; the package's default runtime image is unchanged:
+
+```sh
+FORGE_LIVE=1 FORGE_LIVE_MODE=browser pnpm test:live
+```
+
+It checks native Claude Code/Codex MCP registration, tool discovery, navigation,
+page interaction, browser state across HTTP client reconnects, screenshot capture,
+and container removal. The fixture app and controller share container localhost.
+The running container has external networking disabled and receives no model
+credentials; the image build needs Docker Hub, npm, Debian, and Playwright browser
+download access. If your host requires an egress proxy, explicitly set
+`FORGE_LIVE_BROWSER_BUILD_PROXY` to its credential-free HTTP(S) origin. Set
+`FORGE_LIVE_BROWSER_BUILD_NETWORK=host` when a Linux host-local build proxy
+requires host networking. These settings apply only to image construction;
+the probe container still uses `--network none`. No proxy credentials or host
+model credentials are copied into the image. Pinned dependencies and their
+upstream license files stay in the image; inspect
+`scripts/live/browser/package-lock.json` for package provenance.
+
+Evidence is retained under `results/live/<suite-id>-browser/evidence/`, with a
+`report.json` alongside it recording image/asset identity and verified artifact
+hashes. Existing attempt directories are not overwritten. Container cleanup uses
+an independent deadline on success, failure, or cancellation. Cached images remain
+available for subsequent runs. This probe does not execute a model-backed Forge
+evaluation, test voluntary browser adoption, or implement browser YAML, Ava,
+visual judging, or the public runtime/agent lifecycle integration. In particular,
+native Codex registration does not establish that Forge's current plugin config
+sanitizer will preserve the connection; adapter integration remains follow-up work.
+
 Full mode is the default and makes potentially billable calls. Run it only when
 credentialed, billable execution is authorized, using the provider credentials
 appropriate to the selected agent:
