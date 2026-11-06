@@ -35,13 +35,6 @@ try {
       signal,
       progress,
     });
-  } else if (mode === 'browser') {
-    const { runBrowserIntegrationSuite } = await import('./live/browser.mjs');
-    report = await runBrowserIntegrationSuite({
-      ...configuration,
-      signal,
-      progress,
-    });
   } else if (mode === 'setup') {
     const { runSetupIntegrationSuite } = await import('./live/setup.mjs');
     const setup = await runSetupIntegrationSuite({

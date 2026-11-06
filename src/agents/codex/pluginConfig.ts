@@ -8,6 +8,7 @@ import {
   isSafeMcpEndpointUrl,
   isSafeSimpleIdentifier,
 } from '../../model/paths.ts';
+import { BROWSER_MCP_URL } from '../../setup/forgeBrowser.ts';
 import type {
   CodexMcpServerConfig,
   CodexMcpServerDeclarations,
@@ -39,7 +40,11 @@ export async function declareCodexMcpServers(
   };
   const mcpServers = { ...config.mcp_servers };
   for (const [name, server] of Object.entries(servers)) {
-    if (!isSafeSimpleIdentifier(name) || !server || !safeMcpServer(server))
+    if (
+      !isSafeSimpleIdentifier(name) ||
+      !server ||
+      !safeMcpServer(server, name)
+    )
       invalid();
     const existing = Object.hasOwn(mcpServers, name)
       ? mcpServers[name]
@@ -200,7 +205,7 @@ async function readSanitizedConfiguration(
     null,
   ) as Record<string, CodexMcpServerConfig>;
   for (const [name, value] of entries(config.mcp_servers)) {
-    if (!isSafeSimpleIdentifier(name) || !safeMcpServer(value)) invalid();
+    if (!isSafeSimpleIdentifier(name) || !safeMcpServer(value, name)) invalid();
     mcpServers[name] = value;
   }
   return {
@@ -213,18 +218,24 @@ async function readSanitizedConfiguration(
 }
 
 /**
- * Exactly a remote HTTP URL and an environment-referenced bearer. Inline auth,
+ * A remote HTTP URL and environment-referenced bearer, or Forge's fixed local browser URL. Inline auth,
  * static or environment headers, URL credentials, and other settings are
  * rejected because Forge neither generates nor can vouch for them.
  */
-function safeMcpServer(value: unknown): value is CodexMcpServerConfig {
+function safeMcpServer(
+  value: unknown,
+  name: string,
+): value is CodexMcpServerConfig {
   return (
     record(value) &&
-    Object.keys(value).length === 2 &&
     typeof value.url === 'string' &&
     isSafeMcpEndpointUrl(value.url) &&
-    typeof value.bearer_token_env_var === 'string' &&
-    /^[A-Za-z_][A-Za-z0-9_]{0,255}$/.test(value.bearer_token_env_var)
+    ((Object.keys(value).length === 1 &&
+      name === 'forge-browser' &&
+      value.url === BROWSER_MCP_URL) ||
+      (Object.keys(value).length === 2 &&
+        typeof value.bearer_token_env_var === 'string' &&
+        /^[A-Za-z_][A-Za-z0-9_]{0,255}$/.test(value.bearer_token_env_var)))
   );
 }
 

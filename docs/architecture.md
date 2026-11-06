@@ -576,7 +576,7 @@ All resolved secret values become inputs to the output-safety boundary. Forge
 redacts them from host-completion prompts and responses, normalized evidence,
 interaction audit, and judge workspace evidence; setup receipts, ordinary core
 artifacts, contributed artifacts, and result metadata must pass secret scans.
-Native source artifacts are the deliberate restricted exception.
+Native source and browser capture artifacts are deliberate restricted exceptions.
 
 ### 3. Prepare runtime and agent
 
@@ -692,11 +692,11 @@ or inferred host settings do not belong in runtime config.
 ### Built-in Docker runtime
 
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
-with the Docker CLI. Forge verifies its packaged Dockerfile and entrypoint,
+with the Docker CLI. Forge verifies its packaged image assets, including the optional browser lockfile and service,
 builds an image with pinned Claude Code and Codex versions, and records the
 built image ID. Image builds begin during runtime preparation or explicit
 `validate --host`; ordinary validation, planning, and a resume that skips every
-selection do not build an image. A runtime adapter shares its build per platform,
+selection do not build an image. A runtime adapter shares its build per platform and browser requirement,
 and Docker's content cache can reuse layers across invocations.
 
 Each run uses a non-root container with a read-only image filesystem. On hosts
@@ -800,7 +800,8 @@ The built-ins are:
 - `forge/command`: execute an explicit argv vector from a safe
   workspace-relative directory, without credentials;
 - `forge/credentials`: declare agent-scoped credentials without issuing setup
-  commands or mutating state; and
+  commands or mutating state;
+- `forge/browser`: start the explicitly granted browser integration; and
 - `forge/plugin`: resolve a registered plugin name for the selected agent
   adapter, install it, and retain a verified installation receipt.
 
@@ -823,6 +824,65 @@ snapshot and observed contents; plugin
 state remains writable during interaction. See
 [Marketplace plugin treatments](plugin-action.md) for registered names and
 installation semantics.
+
+### Browser setup and evidence
+
+`forge/browser` accepts an empty `with` object and requests invariant browser
+availability. The experiment's optional `browser` field has strict `access`
+and `integration` objects. `access.agent` and `access.role_player` default to
+false. `integration.provider` and `integration.controller` are required;
+the implemented values are `local` and `playwright-mcp`. Unknown fields and
+`role_player: true` are rejected. This separates browser placement and lifecycle
+(provider) from the navigation, snapshot, and screenshot tools (controller).
+See the README for [configuration and execution](../README.md#browser-access).
+
+Planning requires an agent grant for a requested browser, rejects duplicate
+requests across case and treatment setup, and clones and freezes the resolved
+configuration in `plan.browser`. An experiment configuration without a selected
+setup request is unused and omitted from the plan. Browser availability may be
+a treatment setup action when that availability is the experimental variable.
+YAML does not import implementations or name participant lists.
+
+Pure setup preflight requires the selected adapter's `supportsBrowserMcp`
+capability and declares the `forge-browser` executable plus run-owned
+`forge-browser` state at `/home/forge/.forge-browser`. The Docker runtime builds
+the browser-enabled image only for selected browser plans. Its locked dependency
+graph and service bytes are part of the packaged asset digest. Ordered setup
+starts provider-owned Chromium and an HTTP Playwright MCP controller attached
+through CDP. Both bind to container loopback. The service receives an explicit
+credential-free environment. Browser state persists across agent CLI turns;
+Claude loads the run-owned MCP file on every turn, and Codex preserves the fixed
+loopback connection alongside its validated plugin MCP declarations. No browser
+instructions or skills are injected into the task.
+
+Docker quiescence stops the browser/controller and container before evidence
+reads; disposal removes the run-owned resources on success or failure. Browser
+setup records the controller and Playwright version pins in `setup.json`.
+The current local implementation requires the documented `/home/forge` layout.
+Docker preflight rejects browser runs with setup-sealed state mounts, because
+those mounts require replacing the container and would destroy running services.
+Custom runtimes must supply the compatible pinned service and implement a shutdown
+barrier covering its background processes; the receipt records required pins,
+not an independent runtime version probe. Hosted providers, alternative
+controllers, Ava access, and domain restriction policies are not implemented.
+The browser shares the coding agent's container/network boundary and Chromium
+runs with its sandbox disabled; the MCP endpoint grants browser authority to
+processes in that container. Access fields govern Forge's tool registration,
+not isolation from an agent's own commands.
+
+After quiescence, Forge scans at most 1,024 managed output entries and retains
+PNG/JPEG captures in lexical order, up to 32 files, 2 MiB per capture, and 16 MiB
+total. Oversized or over-budget captures are omitted with a count in
+`browser/manifest.json`. Unsafe entries or invalid image signatures fail evidence
+collection. Outputs saved outside the managed directory are not collected.
+The manifest maps retained paths to source paths, hashes, byte sizes, and the
+exact run/session identity. These files are restricted supplemental artifacts
+committed atomically with the run; local storage uses mode `0600`. The completed
+run verifier checks identity, limits, and manifest/descriptor agreement in
+addition to verifying every artifact's bytes. A browser run with no screenshots
+still stores an empty manifest. Pixels are unredacted and never loaded by the
+text-only judge. Normal browser tool activity remains subject to the existing
+native/fallback transcript selection policy.
 
 ## Interaction architecture
 

@@ -4,6 +4,7 @@ import {
   isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
 import type { JsonObject } from '../model/types.ts';
+import { browserSetupHandler } from './forgeBrowser.ts';
 import { commandSetupHandler } from './forgeCommand.ts';
 import { credentialsSetupHandler } from './forgeCredentials.ts';
 import { pluginSetupHandler } from './forgePlugin.ts';
@@ -107,6 +108,12 @@ const credentialsSetupAction: SetupActionDefinition = Object.freeze({
 
 export const builtInSetupActions: readonly SetupActionDefinition[] =
   Object.freeze([
+    Object.freeze({
+      ...browserSetupHandler,
+      parseWith(input: unknown): JsonObject {
+        return z.object({}).strict().parse(input);
+      },
+    }),
     writeSetupAction,
     commandSetupAction,
     pluginSetupAction,

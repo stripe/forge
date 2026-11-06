@@ -101,12 +101,24 @@ export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
   with: PluginSetupWithV1;
 }
 
+/** Case-owned browser requirement; access and integration belong to the experiment. */
+export interface BrowserSetupStepV1 extends SetupStepV1<Record<string, never>> {
+  uses: 'forge/browser';
+  with: Record<string, never>;
+}
+
+export interface BrowserConfigV1 {
+  access: { agent: boolean; role_player: boolean };
+  integration: { provider: 'local'; controller: 'playwright-mcp' };
+}
+
 /** Closed union for consumers which intentionally handle only package built-ins. */
 export type BuiltInSetupStepV1 =
   | WriteSetupStepV1
   | CommandSetupStepV1
   | CredentialsSetupStepV1
-  | PluginSetupStepV1;
+  | PluginSetupStepV1
+  | BrowserSetupStepV1;
 
 /**
  * Metadata for tool call checks. `label` is a repeatable category like a
@@ -287,6 +299,7 @@ export interface ExperimentConfigV1 {
   };
   /** Required only when the experiment uses host-supplied setup actions. */
   forge?: { action_bundles: SetupActionBundleReferenceV1[] };
+  browser?: BrowserConfigV1;
   runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;
@@ -372,6 +385,7 @@ export interface ResolvedRunPlanV1 {
   };
   role_player?: ModelRefV1;
   agent: AgentSelectionV1;
+  browser?: BrowserConfigV1;
   runtime: ForgeRuntimeV1;
   limits: { run_timeout_ms: number };
 }

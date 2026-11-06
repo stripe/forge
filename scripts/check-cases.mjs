@@ -10,6 +10,7 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 // Validate checked-in dataset snapshots and harness test inputs.
 export const REPOSITORY_DATASET_ROOTS = Object.freeze([
   'test/fixtures/one-shot/dataset',
+  'test/fixtures/browser/dataset',
   'test/fixtures/multi-turn/dataset',
   'release/datasets/stripe-integration-public-evals',
 ]);

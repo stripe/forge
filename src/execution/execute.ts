@@ -66,6 +66,7 @@ import {
 import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
+import { collectBrowserArtifacts } from '../evidence/browser.ts';
 import {
   createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
@@ -491,6 +492,13 @@ export async function executeEvalWithTestHooks(
       secrets,
     );
 
+    const browserArtifacts = await collectBrowserArtifacts({
+      plan: input.plan,
+      runtime: sealed,
+      runId: input.runId,
+      sessionId: interaction.sessionId,
+      signal,
+    });
     const evaluated = await step('evaluation', async () => {
       throwIfAborted(signal, phase);
       const criteria = input.plan.evaluation.judging_criteria;
@@ -641,8 +649,8 @@ export async function executeEvalWithTestHooks(
     const coreDescriptors = coreArtifacts.map(describeArtifact);
     const nativeArtifacts =
       selectedEvidence.nativeArtifact === undefined
-        ? []
-        : [selectedEvidence.nativeArtifact];
+        ? browserArtifacts
+        : [selectedEvidence.nativeArtifact, ...browserArtifacts];
     const nativeDescriptors = nativeArtifacts.map(describeArtifact);
     let contributedArtifacts: RunArtifact[] = [];
     if ((input.composition.contributors?.length ?? 0) > 0) {
@@ -984,6 +992,10 @@ function buildEvalPreflight(
   const setup = setupExecutor.preflight(plan.setup, {
     selection: plan.agent,
     runtime: plan.runtime,
+    ...(plan.browser === undefined ? {} : { browser: plan.browser }),
+    ...(agent.supportsBrowserMcp === undefined
+      ? {}
+      : { supportsBrowserMcp: agent.supportsBrowserMcp }),
     ...(agent.pluginInstaller === undefined
       ? {}
       : { pluginInstaller: agent.pluginInstaller }),

@@ -178,6 +178,8 @@ export interface AgentAdapter {
   readonly metadata?: AgentAdapterMetadata;
   /** Native realization for the public `forge/plugin` action, when supported. */
   readonly pluginInstaller?: AgentPluginInstaller;
+  /** Supports the run-owned local Playwright MCP connection without prompt instructions. */
+  readonly supportsBrowserMcp?: true;
   /** Pure declaration used before credentials resolve or a runtime allocates. */
   requirements(selection: AgentSelectionV1): AgentRuntimeRequirements;
   /** Pure coding-agent identity used when Forge must construct fallback ATIF. */

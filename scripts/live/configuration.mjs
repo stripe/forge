@@ -13,15 +13,8 @@ export function readLiveConfiguration(environment, repositoryRoot) {
   }
 
   const mode = optionalEnvironment('FORGE_LIVE_MODE') ?? 'full';
-  if (
-    mode !== 'full' &&
-    mode !== 'setup' &&
-    mode !== 'completions' &&
-    mode !== 'browser'
-  ) {
-    throw new Error(
-      'FORGE_LIVE_MODE must be full or setup or completions or browser.',
-    );
+  if (mode !== 'full' && mode !== 'setup' && mode !== 'completions') {
+    throw new Error('FORGE_LIVE_MODE must be full or setup or completions.');
   }
   // Host completion coverage uses a scripted agent and needs no Docker or agent key.
   if (mode === 'completions') {
@@ -50,9 +43,7 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     ? 'OPENAI_BASE_URL'
     : 'ANTHROPIC_BASE_URL';
   const gatewayBaseUrl =
-    mode === 'setup' || mode === 'browser'
-      ? undefined
-      : optionalEnvironment(gatewayEnvironmentName);
+    mode === 'setup' ? undefined : optionalEnvironment(gatewayEnvironmentName);
   const gatewaySelected = gatewayBaseUrl !== undefined;
   const credentialEnvironmentName = codexSelected
     ? 'CODEX_API_KEY'
@@ -60,7 +51,7 @@ export function readLiveConfiguration(environment, repositoryRoot) {
       ? 'ANTHROPIC_AUTH_TOKEN'
       : 'ANTHROPIC_API_KEY';
   const upstreamCredential =
-    mode === 'setup' || mode === 'browser'
+    mode === 'setup'
       ? undefined
       : requiredEnvironment(credentialEnvironmentName);
   const timeoutMs = positiveIntegerEnvironment(
@@ -89,16 +80,6 @@ export function readLiveConfiguration(environment, repositoryRoot) {
     gatewaySelected,
     credentialEnvironmentName,
     upstreamCredential,
-    ...(mode === 'browser'
-      ? {
-          browserBuildProxy: optionalEnvironment(
-            'FORGE_LIVE_BROWSER_BUILD_PROXY',
-          ),
-          browserBuildNetwork:
-            optionalEnvironment('FORGE_LIVE_BROWSER_BUILD_NETWORK') ??
-            'default',
-        }
-      : {}),
     timeoutMs,
     dockerExecutable,
     repositoryRoot,

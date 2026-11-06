@@ -15,6 +15,12 @@ import {
 } from '../evaluation/judgeEvidenceBudget.ts';
 import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
 import { criterionResultMatchesDefinition } from '../evaluation/score.ts';
+import {
+  BROWSER_MANIFEST_PATH,
+  browserManifestSchema,
+  MAX_BROWSER_CAPTURE_BYTES,
+  MAX_BROWSER_TOTAL_BYTES,
+} from '../evidence/browser.ts';
 import { trajectoryCoversCompletedTurns } from '../evidence/selection.ts';
 import {
   hasDeterministicChecks,
@@ -30,6 +36,10 @@ import {
 import { isSafeDatasetRelativePath } from '../model/paths.ts';
 import { pluginDefinitionForAgent } from '../model/plugins.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
+import {
+  FORGE_PLAYWRIGHT_MCP_VERSION,
+  FORGE_PLAYWRIGHT_VERSION,
+} from '../runtime/docker/assets.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import { assertCompatibleForgeVersion } from '../version.ts';
 import {
@@ -256,7 +266,11 @@ export async function verifyCompletedRunWithPlanParser(
       path.join(runDir, ...descriptor.path.split('/')),
       descriptor.path === 'setup.json'
         ? Math.min(descriptor.size_bytes, MAX_SETUP_ARTIFACT_BYTES)
-        : descriptor.size_bytes,
+        : descriptor.path === BROWSER_MANIFEST_PATH
+          ? Math.min(descriptor.size_bytes, 512 * 1024)
+          : descriptor.path.startsWith('browser/')
+            ? Math.min(descriptor.size_bytes, MAX_BROWSER_CAPTURE_BYTES)
+            : descriptor.size_bytes,
     );
     if (
       body.byteLength !== descriptor.size_bytes ||
@@ -266,7 +280,10 @@ export async function verifyCompletedRunWithPlanParser(
         `Artifact does not match its descriptor: ${descriptor.path}`,
       );
     }
-    if (VERIFIED_ARTIFACT_PATHS.has(descriptor.path)) {
+    if (
+      VERIFIED_ARTIFACT_PATHS.has(descriptor.path) ||
+      descriptor.path === BROWSER_MANIFEST_PATH
+    ) {
       artifactBodies.set(descriptor.path, body);
     }
   }
@@ -465,6 +482,13 @@ function verifyCanonicalArtifactInventory(
     if (/^extensions\/[a-z0-9][a-z0-9._-]{0,127}\//.test(artifactPath)) {
       continue;
     }
+    if (
+      /^browser\/(manifest\.json|capture-\d{3}\.(png|jpeg))$/.test(artifactPath)
+    ) {
+      if (descriptor.sensitivity !== 'restricted')
+        throw new ArtifactStoreError('Browser artifacts must be restricted.');
+      continue;
+    }
     const nativePrefix = `native/${result.agent.adapter}/session.`;
     const extension = artifactPath.startsWith(nativePrefix)
       ? artifactPath.slice(nativePrefix.length)
@@ -487,11 +511,67 @@ function verifyCanonicalArtifactInventory(
   }
 }
 
+function verifyBrowserArtifacts(
+  result: RunResult,
+  plan: ResolvedRunPlanV1,
+  bodies: ReadonlyMap<string, Buffer>,
+): void {
+  const descriptors = result.supplemental_artifacts.filter((item) =>
+    item.path.startsWith('browser/'),
+  );
+  if (!plan.browser) {
+    if (descriptors.length)
+      throw new ArtifactStoreError('Browser artifacts require browser setup.');
+    return;
+  }
+  const body = bodies.get(BROWSER_MANIFEST_PATH);
+  if (!body) throw new ArtifactStoreError('Browser manifest is missing.');
+  let manifest: ReturnType<typeof browserManifestSchema.parse>;
+  try {
+    manifest = browserManifestSchema.parse(JSON.parse(body.toString('utf8')));
+  } catch {
+    throw new ArtifactStoreError('Browser manifest is invalid.');
+  }
+  if (
+    serializeCanonicalJson(manifest) !== body.toString('utf8') ||
+    manifest.run_id !== result.run_id ||
+    manifest.session_id !== result.agent.session_id ||
+    descriptors.length !== manifest.captures.length + 1 ||
+    manifest.captures.reduce((sum, item) => sum + item.size_bytes, 0) >
+      MAX_BROWSER_TOTAL_BYTES
+  ) {
+    throw new ArtifactStoreError(
+      'Browser manifest does not match the completed run.',
+    );
+  }
+  const manifestDescriptor = descriptors.find(
+    (item) => item.path === BROWSER_MANIFEST_PATH,
+  );
+  if (manifestDescriptor?.media_type !== 'application/json')
+    throw new ArtifactStoreError('Browser manifest must be JSON.');
+  for (const [index, capture] of manifest.captures.entries()) {
+    const descriptor = descriptors.find((item) => item.path === capture.path);
+    if (
+      !descriptor ||
+      descriptor.sha256 !== capture.sha256 ||
+      descriptor.size_bytes !== capture.size_bytes ||
+      descriptor.media_type !== capture.media_type ||
+      capture.path !==
+        `browser/capture-${String(index).padStart(3, '0')}.${capture.media_type === 'image/png' ? 'png' : 'jpeg'}`
+    ) {
+      throw new ArtifactStoreError(
+        'Browser capture does not match its manifest.',
+      );
+    }
+  }
+}
+
 function verifySetupArtifact(
   result: RunResult,
   plan: ResolvedRunPlanV1,
   artifactBodies: ReadonlyMap<string, Buffer>,
 ): void {
+  verifyBrowserArtifacts(result, plan, artifactBodies);
   const artifactPath = 'setup.json';
   const body = requireCoreArtifact(result, artifactBodies, artifactPath);
   const setup = parseJsonArtifact(artifactPath, body, (value) =>
@@ -550,6 +630,21 @@ function verifySetupArtifact(
       ) {
         throw new ArtifactStoreError(
           'Plugin installation resolution does not match the completed run plan.',
+        );
+      }
+    } else if (step.uses === 'forge/browser') {
+      const expected = {
+        provider: 'local',
+        controller: 'playwright-mcp',
+        playwright_mcp_version: FORGE_PLAYWRIGHT_MCP_VERSION,
+        playwright_version: FORGE_PLAYWRIGHT_VERSION,
+      };
+      if (
+        serializeCanonicalJson(step.resolution) !==
+        serializeCanonicalJson(expected)
+      ) {
+        throw new ArtifactStoreError(
+          'Browser setup resolution does not match this Forge release.',
         );
       }
     } else if (

@@ -27,6 +27,7 @@ export interface TestResolvedRunPlanOptions {
   readonly treatmentSetup?: readonly SetupStepV1[];
   readonly checks?: ChecksV1;
   readonly runtime?: ForgeRuntimeV1;
+  readonly browser?: ResolvedRunPlanV1['browser'];
 }
 
 /** Create a strict, minimal one-shot plan for public contract tests. */
@@ -135,6 +136,7 @@ export function createTestResolvedRunPlan(
       ? {}
       : { role_player: { ...options.rolePlayer } }),
     agent: { ...agent },
+    ...(options.browser === undefined ? {} : { browser: options.browser }),
     runtime: options.runtime ?? {
       adapter: 'docker',
       image: { kind: 'forge' },

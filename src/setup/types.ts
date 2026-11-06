@@ -38,6 +38,8 @@ export interface SetupPreflightContext {
   readonly runtime: ResolvedRunPlanV1['runtime'];
   /** Selected adapter's narrow native plugin mechanism, when available. */
   readonly pluginInstaller?: AgentPluginInstaller;
+  readonly browser?: ResolvedRunPlanV1['browser'];
+  readonly supportsBrowserMcp?: true;
 }
 
 /** Runtime capabilities shared by all steps in one already-preflighted setup. */

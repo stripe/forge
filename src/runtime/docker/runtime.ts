@@ -25,6 +25,7 @@ import type {
   ForgeDockerRuntimeV1,
   ForgeRuntimeV1,
 } from '../../model/types.ts';
+import { BROWSER_EXECUTABLE } from '../../setup/forgeBrowser.ts';
 import { hashStateFile, importHostFileIntoState } from '../hostFileImport.ts';
 import {
   createHostCommandRunner,
@@ -35,6 +36,7 @@ import {
   FORGE_CLAUDE_CODE_VERSION,
   FORGE_CODEX_VERSION,
   FORGE_RUNTIME_ASSET_DIGEST,
+  FORGE_RUNTIME_ASSET_FILES,
 } from './assets.ts';
 import { DockerCommandController } from './commandRunner.ts';
 
@@ -83,6 +85,8 @@ export interface ValidateDockerRuntimeHostOptions {
   readonly buildTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
   readonly platform: RuntimePlatform;
+  /** Build the optional local browser layer for browser-enabled plans. */
+  readonly browserEnabled?: boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -116,6 +120,7 @@ export async function validateDockerRuntimeHost(
     dockerExecutable,
     hostCommands,
     platform: options.platform,
+    browserEnabled: options.browserEnabled ?? false,
     signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
     userId: filesystemIdentity.containerUserId,
@@ -195,14 +200,16 @@ export function createDockerRuntimeAdapter(
     'maximumCommandOutputBytes',
   );
   const filesystemIdentity = resolveFilesystemIdentity();
-  const imageBuilds = new Map<RuntimePlatform, SharedImageBuild>();
+  const imageBuilds = new Map<string, SharedImageBuild>();
 
   async function imageFor(
     platform: RuntimePlatform,
     signal: AbortSignal,
+    browserEnabled: boolean,
   ): Promise<BuiltForgeImage> {
     signal.throwIfAborted();
-    let build = imageBuilds.get(platform);
+    const buildKey = `${platform}:${browserEnabled}`;
+    let build = imageBuilds.get(buildKey);
     if (!build) {
       const controller = new AbortController();
       const created: SharedImageBuild = {
@@ -214,6 +221,7 @@ export function createDockerRuntimeAdapter(
           dockerExecutable,
           hostCommands,
           platform,
+          browserEnabled,
           signal: controller.signal,
           temporaryRoot,
           userId: filesystemIdentity.containerUserId,
@@ -224,13 +232,13 @@ export function createDockerRuntimeAdapter(
           },
           (error: unknown) => {
             created.settled = true;
-            if (imageBuilds.get(platform) === created)
-              imageBuilds.delete(platform);
+            if (imageBuilds.get(buildKey) === created)
+              imageBuilds.delete(buildKey);
             throw error;
           },
         ),
       };
-      imageBuilds.set(platform, created);
+      imageBuilds.set(buildKey, created);
       build = created;
     }
     const shared = build;
@@ -249,7 +257,7 @@ export function createDockerRuntimeAdapter(
       if (shared.waiters === 0 && !shared.settled) {
         // A run may stop waiting independently. Only the last waiter cancels
         // the shared build, and must drain its command and temporary context.
-        if (imageBuilds.get(platform) === shared) imageBuilds.delete(platform);
+        if (imageBuilds.get(buildKey) === shared) imageBuilds.delete(buildKey);
         shared.controller.abort();
         await shared.promise.catch(() => undefined);
       }
@@ -262,6 +270,14 @@ export function createDockerRuntimeAdapter(
       validateRuntime(plan.runtime);
       validateExecutableRequirements(requirements.executables);
       validateStateRequirements(requirements.stateDirectories);
+      if (
+        plan.browser &&
+        requirements.stateDirectories.some((item) => item.sealAfterSetup)
+      ) {
+        throw new TypeError(
+          'Local browser setup cannot be combined with setup-sealed mounts that restart the Docker container.',
+        );
+      }
     },
     async prepare(input: RuntimePreparation): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
@@ -273,7 +289,12 @@ export function createDockerRuntimeAdapter(
       const stateRequirements = validateStateRequirements(
         input.requirements.stateDirectories,
       );
-      const image = await imageFor(runtime.platform, input.signal);
+      const browserEnabled = input.plan.browser !== undefined;
+      const image = await imageFor(
+        runtime.platform,
+        input.signal,
+        browserEnabled,
+      );
       input.signal.throwIfAborted();
 
       const runRoot = await fs.mkdtemp(
@@ -493,6 +514,7 @@ export function createDockerRuntimeAdapter(
             imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
             imageId: image.id,
             imageTag: image.tag,
+            browserEnabled: String(browserEnabled),
             platform: runtime.platform,
           }),
         });
@@ -664,6 +686,18 @@ export function createDockerRuntimeAdapter(
           importsOpen = false;
           sealedPromise ??= (async () => {
             await waitForImports();
+            if (browserEnabled) {
+              const stoppedBrowser = await controller
+                .finalizedWithoutCredentials()
+                .run([BROWSER_EXECUTABLE, 'stop'], {
+                  timeoutMs: 15_000,
+                  maxOutputBytes: 64 * 1024,
+                });
+              if (stoppedBrowser.exitCode !== 0)
+                throw new Error(
+                  'Browser could not stop before evidence sealing.',
+                );
+            }
             await controller.closeAndWait();
             const stopped = await hostCommands.run(
               [dockerExecutable, 'stop', '--time', '10', containerName],
@@ -736,6 +770,7 @@ interface BuildForgeImageInput {
   readonly signal: AbortSignal;
   readonly temporaryRoot: string;
   readonly userId: number;
+  readonly browserEnabled?: boolean;
 }
 
 interface BuiltForgeImage {
@@ -756,30 +791,28 @@ async function buildForgeImage(
   const buildRoot = await fs.mkdtemp(
     path.join(input.temporaryRoot, 'stripe-forge-build-'),
   );
-  const image = imageTag(input.platform, input.userId);
+  const image = imageTag(
+    input.platform,
+    input.userId,
+    input.browserEnabled ?? false,
+  );
   try {
-    const dockerfile = await fs.readFile(
-      path.join(PACKAGED_ASSET_ROOT, 'Dockerfile'),
-    );
-    const entrypoint = await fs.readFile(
-      path.join(PACKAGED_ASSET_ROOT, 'entrypoint.sh'),
-    );
-    const digest = createHash('sha256')
-      .update(dockerfile)
-      .update('\0')
-      .update(entrypoint)
-      .digest('hex');
-    if (digest !== FORGE_RUNTIME_ASSET_DIGEST) {
+    const digest = createHash('sha256');
+    for (const [index, file] of FORGE_RUNTIME_ASSET_FILES.entries()) {
+      const body = await fs.readFile(path.join(PACKAGED_ASSET_ROOT, file));
+      if (index > 0) digest.update('\0');
+      digest.update(body);
+      const target = path.join(buildRoot, file);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, body, {
+        mode: file.endsWith('.sh') || file.endsWith('.cjs') ? 0o755 : 0o644,
+      });
+    }
+    if (digest.digest('hex') !== FORGE_RUNTIME_ASSET_DIGEST) {
       throw new Error(
         'Packaged Forge Docker assets do not match their digest.',
       );
     }
-    await fs.writeFile(path.join(buildRoot, 'Dockerfile'), dockerfile, {
-      mode: 0o644,
-    });
-    await fs.writeFile(path.join(buildRoot, 'entrypoint.sh'), entrypoint, {
-      mode: 0o755,
-    });
     const built = await input.hostCommands.run(
       [
         input.dockerExecutable,
@@ -788,6 +821,8 @@ async function buildForgeImage(
         input.platform,
         '--build-arg',
         `FORGE_UID=${input.userId}`,
+        '--build-arg',
+        `FORGE_BROWSER_ENABLED=${input.browserEnabled ?? false}`,
         '--tag',
         image,
         '--file',
@@ -1148,8 +1183,12 @@ function resolveFilesystemIdentity(): Readonly<{
   });
 }
 
-function imageTag(platform: RuntimePlatform, userId: number): string {
-  return `stripe-forge-runtime:${FORGE_RUNTIME_ASSET_DIGEST.slice(0, 20)}-${
+function imageTag(
+  platform: RuntimePlatform,
+  userId: number,
+  browserEnabled: boolean,
+): string {
+  return `stripe-forge-runtime:${FORGE_RUNTIME_ASSET_DIGEST.slice(0, 20)}${browserEnabled ? '-browser' : ''}-${
     platform === 'linux/amd64' ? 'amd64' : 'arm64'
   }-uid${userId}`;
 }

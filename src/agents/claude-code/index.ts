@@ -10,6 +10,7 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.ts';
+import { BROWSER_STATE_PATH } from '../../setup/forgeBrowser.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 import {
@@ -134,6 +135,7 @@ export function createClaudeCodeAdapter(
       layout_mode: usesDefaultClaudeCodeLayout(layout) ? 'default' : 'custom',
     }),
     pluginInstaller,
+    supportsBrowserMcp: true,
     requirements,
     evidenceIdentity(selection) {
       requirements(selection);
@@ -186,6 +188,9 @@ export function createClaudeCodeAdapter(
               ...(disallowedTools.length === 0
                 ? []
                 : ['--disallowedTools', disallowedTools.join(',')]),
+              ...(context.plan.browser === undefined
+                ? []
+                : ['--mcp-config', `${BROWSER_STATE_PATH}/mcp.json`]),
               '--model',
               context.selection.model,
             ],

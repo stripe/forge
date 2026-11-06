@@ -42,7 +42,8 @@ export type PlanningErrorCode =
   | 'invalid_loaded_dataset'
   | 'invalid_dataset_input'
   | 'action_bundle_mismatch'
-  | 'missing_runtime_platform';
+  | 'missing_runtime_platform'
+  | 'invalid_browser_configuration';
 
 export class PlanningError extends Error {
   readonly code: PlanningErrorCode;
@@ -171,6 +172,18 @@ export function resolveRunPlanWithSetupActions(
       { cause: error },
     );
   }
+  const browserRequests = setup.filter(
+    (step) => step.uses === 'forge/browser',
+  ).length;
+  if (
+    browserRequests > 1 ||
+    (browserRequests === 1 && !config.browser?.access.agent)
+  ) {
+    throw new PlanningError(
+      'invalid_browser_configuration',
+      'Browser setup requires exactly one request and an explicit browser.access.agent grant.',
+    );
+  }
   const configuredActionBundles = config.forge?.action_bundles ?? [];
   try {
     setupActions.assertStepsDeclared(setup, configuredActionBundles);
@@ -261,6 +274,7 @@ export function resolveRunPlanWithSetupActions(
           ),
         }),
     agent: resolveAgentSelection(selection.agent),
+    ...(browserRequests === 0 ? {} : { browser: cloneJson(config.browser!) }),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),
   };

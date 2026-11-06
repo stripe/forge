@@ -283,6 +283,70 @@ Planning with `platform: native` queries the Docker server's architecture
 without building or allocating a runtime. `validate --host` additionally
 builds the runtime image and probes the host without making model calls.
 
+### Browser access
+
+A case requests browser availability through its shared setup:
+
+```yaml
+# case.yaml excerpt
+setup:
+  - uses: forge/browser
+    with: {}
+```
+
+The experiment grants access and selects the integration:
+
+```yaml
+# experiment.yaml excerpt
+browser:
+  access:
+    agent: true
+    role_player: false
+  integration:
+    provider: local
+    controller: playwright-mcp
+```
+
+Access defaults off. A browser setup request requires an explicit agent grant;
+without a request, Forge allocates no browser. The current integration runs
+headless Chromium and Playwright MCP inside the evaluation's Docker container.
+The **provider** owns the browser process and its lifetime; the **controller**
+exposes browser tools. Claude Code and Codex receive the MCP connection without
+extra prompts or skills. The agent decides whether to use it.
+
+From a Forge source checkout on a Docker-capable development host, run the
+`test/fixtures/browser/` greeting example:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+node dist/cli.js validate --experiment test/fixtures/browser/experiment.yaml
+node dist/cli.js plan --experiment test/fixtures/browser/experiment.yaml
+export ANTHROPIC_API_KEY=your-restricted-key
+node dist/cli.js run --experiment test/fixtures/browser/experiment.yaml \
+  --credential-env ANTHROPIC_API_KEY \
+  --output ./results/browser --run-id browser-greeting-001
+```
+
+Validation needs no model credentials or image build. `plan` resolves the
+example's `native` platform through Docker. Execution builds the pinned browser
+image on first use and makes coding-agent model calls; the example has no Ava
+or judge calls. Browser downloads need public npm, Debian, and Playwright CDN
+access during image construction. The fixture server is started by case setup
+and is reachable at `http://127.0.0.1:3030` from both the agent and browser.
+To use Codex, replace the example's matrix agent with
+`{adapter: codex, provider: openai, model: gpt-5.4}` and grant `OPENAI_API_KEY`
+instead of `ANTHROPIC_API_KEY`.
+
+Completed results under `results/browser/runs/browser-greeting-001/` include
+`browser/manifest.json` and any selected `browser/capture-*.png` or `.jpeg` files.
+Screenshots saved by MCP in its managed output directory are retained under
+bounds, with original paths, run/session identity, and artifact hashes. The
+manifest reports omitted captures; there may be zero screenshots if the agent
+did not take any. Browser artifacts are restricted and excluded from judging.
+The exact contract, retention limits, and current limitations are in
+[the browser architecture](docs/architecture.md#browser-setup-and-evidence).
+
 ### Select from an experiment
 
 The released experiment defines the available cases, treatments, and agents.

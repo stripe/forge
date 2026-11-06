@@ -91,6 +91,7 @@ describe('ForgeEngine setup action bundles', () => {
 
   it('keeps extension names absent from and unavailable to the default engine', () => {
     assert.deepEqual(defaultForgeEngine.setupActionIds, [
+      'forge/browser',
       'forge/command',
       'forge/credentials',
       'forge/plugin',

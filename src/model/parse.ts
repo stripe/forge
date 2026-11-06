@@ -571,6 +571,33 @@ const ExperimentMatrixSchema = z.unknown().transform((matrix, context) => {
   return parsed.data;
 });
 
+const BrowserIntegrationSchema = z
+  .object({
+    provider: z.literal('local'),
+    controller: z.literal('playwright-mcp'),
+  })
+  .strict();
+const BrowserAccessSchema = z
+  .object({
+    agent: z.boolean().default(false),
+    role_player: z.literal(false).default(false),
+  })
+  .strict();
+const BrowserConfigSchema = z
+  .object({
+    access: BrowserAccessSchema.prefault({}),
+    integration: BrowserIntegrationSchema,
+  })
+  .strict();
+const ResolvedBrowserConfigSchema = z
+  .object({
+    access: z
+      .object({ agent: z.literal(true), role_player: z.literal(false) })
+      .strict(),
+    integration: BrowserIntegrationSchema,
+  })
+  .strict();
+
 const ExperimentConfigSchema = z
   .object({
     id: CaseIdSchema,
@@ -587,6 +614,7 @@ const ExperimentConfigSchema = z
         .optional(),
     }).strict(),
     forge: AuthoredForgeSchema.optional(),
+    browser: BrowserConfigSchema.optional(),
     runtime: RuntimeSchema,
     models: z
       .object({
@@ -777,6 +805,7 @@ const ResolvedRunPlanSchema = z
       .strict(),
     role_player: ModelRefSchema.optional(),
     agent: AgentSelectionSchema,
+    browser: ResolvedBrowserConfigSchema.optional(),
     runtime: ResolvedRuntimeSchema,
     limits: z
       .object({
@@ -808,6 +837,20 @@ const ResolvedRunPlanSchema = z
         context,
         ['selection', 'agent'],
         'selection agent must match the resolved agent',
+      );
+    }
+
+    const browserRequests = plan.setup.filter(
+      (step) => step.uses === 'forge/browser',
+    ).length;
+    if (
+      browserRequests > 1 ||
+      (browserRequests === 1) !== (plan.browser !== undefined)
+    ) {
+      addPlanIssue(
+        context,
+        ['browser'],
+        'exactly one browser setup request requires an enabled resolved browser configuration',
       );
     }
 

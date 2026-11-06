@@ -12,11 +12,11 @@ import type { PluginMcpServerId } from '../model/types.ts';
  */
 export type CodexMcpServerConfig = {
   readonly url: string;
-  readonly bearer_token_env_var: string;
+  readonly bearer_token_env_var?: string;
 };
 
 export type CodexMcpServerDeclarations = Readonly<
-  Partial<Record<PluginMcpServerId, CodexMcpServerConfig>>
+  Partial<Record<PluginMcpServerId | 'forge-browser', CodexMcpServerConfig>>
 >;
 
 /** Bundled settings the Codex relocation carries; anything else is rejected. */

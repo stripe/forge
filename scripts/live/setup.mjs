@@ -23,6 +23,7 @@ import {
   detectDockerRuntimePlatform,
 } from '../../dist/runtime/docker/index.js';
 
+import { runBrowserSetupIntegration } from './browserSetup.mjs';
 import { assertNoCleanupWarnings, assertRuntimeCleanup } from './cleanup.mjs';
 
 const PLUGIN = 'stripe@claude-plugins-official';
@@ -404,7 +405,22 @@ export async function runSetupIntegrationSuite({
         await assertRuntimeCleanup({ dockerExecutable, runtimeRoot, runId });
       }
     }
-    return { verified: true, model_calls: 0, platform, cases: reports };
+    const browser = await runBrowserSetupIntegration({
+      dockerExecutable,
+      resultsRoot,
+      suiteId,
+      signal,
+      progress,
+      platform,
+      liveAgent,
+    });
+    return {
+      verified: true,
+      model_calls: 0,
+      platform,
+      cases: reports,
+      browser,
+    };
   } finally {
     await fs.rm(fixtureRoot, { recursive: true, force: true });
   }

@@ -101,6 +101,7 @@ describe('@stripe/forge package root', () => {
     assert.equal(credentialsSetupHandler.uses, 'forge/credentials');
     assert.equal(typeof defineSetupActionBundle, 'function');
     assert.deepEqual([...firstPartySetupHandlers.keys()].sort(), [
+      'forge/browser',
       'forge/command',
       'forge/credentials',
       'forge/plugin',

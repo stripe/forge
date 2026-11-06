@@ -354,6 +354,7 @@ export async function runCli(
             ? ['linux/amd64', 'linux/arm64']
             : [hostSelection.runtime_platform]
           : [undefined];
+      let browserRequired = false;
       for (const runtimePlatform of validationPlatforms) {
         const plans = selections.map((selection) =>
           engine.resolveRunPlan({
@@ -363,6 +364,7 @@ export async function runCli(
             ...(runtimePlatform === undefined ? {} : { runtimePlatform }),
           }),
         );
+        browserRequired ||= plans.some((plan) => plan.browser !== undefined);
         const composition = await compositionFactory({
           datasetRoot: dataset.root,
           ...(plans[0] === undefined ? {} : { runtime: plans[0].runtime }),
@@ -383,6 +385,7 @@ export async function runCli(
                 options.validateDockerHost ?? validateDockerRuntimeHost
               )({
                 platform: hostSelection.runtime_platform,
+                ...(browserRequired ? { browserEnabled: true } : {}),
                 ...(options.signal === undefined
                   ? {}
                   : { signal: options.signal }),

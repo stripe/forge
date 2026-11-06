@@ -1,0 +1,38 @@
+id: examples/browser-greeting
+version: 0.1.0
+display_name: Browser greeting
+initial_prompt: >-
+  Implement index.html as a greeting form: an input labeled Name and a Greet
+  button. Clicking Greet should display Hello, followed by the entered name.
+  A server is already running at http://127.0.0.1:3030 and serves index.html.
+execution_mode: one_shot
+setup:
+  - uses: forge/write
+    with:
+      target: index.html
+      source:
+        content: '<!doctype html><html lang="en"><head><title>Greeting</title></head><body><h1>Greeting</h1></body></html>'
+  - uses: forge/write
+    with:
+      target: server.cjs
+      source:
+        dataset_path: fixtures/server.cjs
+  - uses: forge/command
+    with:
+      argv:
+        - node
+        - -e
+        - >-
+          const {spawn}=require('node:child_process');
+          const child=spawn(process.execPath,['/workspace/server.cjs'],{detached:true,stdio:'ignore',env:{PATH:'/usr/local/bin:/usr/bin:/bin'}});
+          child.unref();
+  - uses: forge/browser
+    with: {}
+judging_criteria: []
+checks:
+  files_created:
+    - index.html
+  file_checks:
+    - file: index.html
+      exists: true
+      contains: 'Greet'

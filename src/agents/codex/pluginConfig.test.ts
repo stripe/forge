@@ -90,6 +90,39 @@ trusted_hash = "sha256:${'a'.repeat(64)}"
     });
   });
 
+  it('preserves the local browser connection alongside plugin auth and rejects broader unauthenticated connections', async () => {
+    const state = createMemoryWorkspace();
+    await declareCodexMcpServers(state.mutable, {
+      stripe: {
+        url: 'https://mcp.stripe.com',
+        bearer_token_env_var: 'STRIPE_API_KEY',
+      },
+      'forge-browser': { url: 'http://127.0.0.1:8931/mcp' },
+    });
+    await prepareCodexPluginConfiguration(state.mutable);
+    const source = Buffer.from(
+      await state.readonly.readFile('config.toml'),
+    ).toString();
+    const config = parse(source) as { mcp_servers: Record<string, unknown> };
+    assert.deepEqual(JSON.parse(JSON.stringify(config.mcp_servers)), {
+      stripe: {
+        url: 'https://mcp.stripe.com',
+        bearer_token_env_var: 'STRIPE_API_KEY',
+      },
+      'forge-browser': { url: 'http://127.0.0.1:8931/mcp' },
+    });
+    for (const declaration of [
+      { 'forge-browser': { url: 'http://127.0.0.1:9999/mcp' } },
+      { stripe: { url: 'https://mcp.stripe.com' } },
+    ]) {
+      await assert.rejects(declareCodexMcpServers(state.mutable, declaration));
+      assert.equal(
+        Buffer.from(await state.readonly.readFile('config.toml')).toString(),
+        source,
+      );
+    }
+  });
+
   it('allows an identical repeated declaration and rejects a conflicting one before writing', async () => {
     const server = {
       url: 'https://mcp.stripe.com',

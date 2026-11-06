@@ -48,3 +48,9 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
+
+The optional browser-enabled Docker runtime installs @playwright/mcp 0.0.84
+and Playwright 1.65.0-alpha-2026-10-30 from Microsoft, licensed under Apache-2.0,
+along with their pinned dependencies and Chromium. The packaged browser
+package-lock.json records dependency provenance; installed upstream license
+and notice files remain in the runtime image.

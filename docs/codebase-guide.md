@@ -75,37 +75,15 @@ without model credentials or upstream model calls:
 FORGE_LIVE=1 FORGE_LIVE_MODE=setup pnpm test:live
 ```
 
-Browser mode is a model-free devbox environment PoC. It builds a separate,
-lockfile-pinned development image with Chromium, Playwright MCP, and both native
-agent CLIs; the package's default runtime image is unchanged:
-
-```sh
-FORGE_LIVE=1 FORGE_LIVE_MODE=browser pnpm test:live
-```
-
-It checks native Claude Code/Codex MCP registration, tool discovery, navigation,
-page interaction, browser state across HTTP client reconnects, screenshot capture,
-and container removal. The fixture app and controller share container localhost.
-The running container has external networking disabled and receives no model
-credentials; the image build needs Docker Hub, npm, Debian, and Playwright browser
-download access. If your host requires an egress proxy, explicitly set
-`FORGE_LIVE_BROWSER_BUILD_PROXY` to its credential-free HTTP(S) origin. Set
-`FORGE_LIVE_BROWSER_BUILD_NETWORK=host` when a Linux host-local build proxy
-requires host networking. These settings apply only to image construction;
-the probe container still uses `--network none`. No proxy credentials or host
-model credentials are copied into the image. Pinned dependencies and their
-upstream license files stay in the image; inspect
-`scripts/live/browser/package-lock.json` for package provenance.
-
-Evidence is retained under `results/live/<suite-id>-browser/evidence/`, with a
-`report.json` alongside it recording image/asset identity and verified artifact
-hashes. Existing attempt directories are not overwritten. Container cleanup uses
-an independent deadline on success, failure, or cancellation. Cached images remain
-available for subsequent runs. This probe does not execute a model-backed Forge
-evaluation, test voluntary browser adoption, or implement browser YAML, Ava,
-visual judging, or the public runtime/agent lifecycle integration. In particular,
-native Codex registration does not establish that Forge's current plugin config
-sanitizer will preserve the connection; adapter integration remains follow-up work.
+Setup mode also executes the browser example through YAML loading, immutable
+planning, `forge/browser`, the native agent adapter's MCP configuration path,
+real browser interaction and reconnection, screenshot retention, and verified
+artifact commit. Its coding-agent model invocation is replaced by a deterministic
+probe; no model credentials or model calls are used. Choose
+`FORGE_LIVE_AGENT=codex` to exercise Codex's registration path. Browser assets are
+packaged with the normal runtime and built only for plans requesting a browser;
+there is no separate browser execution mode. User setup and run instructions
+are in the README's [browser workflow](../README.md#browser-access).
 
 Full mode is the default and makes potentially billable calls. Run it only when
 credentialed, billable execution is authorized, using the provider credentials
@@ -659,7 +637,7 @@ selector.
 | --- | --- | --- |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/index.ts) | `createCodexAdapter`; wires isolated `CODEX_HOME`, Responses provider configuration, hook policy, CLI verification, exec/resume, evidence, and plugin installer | Registered in `ForgeComposition.agents`; implements `AgentAdapter` |
 | [`layout.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/layout.ts) | Normalize and validate workspace/home/config paths | Called from all adapter lifecycle methods |
-| [`pluginConfig.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/pluginConfig.ts) | Bound and filter run-owned TOML to native plugin, project trust, hook state, and Forge-declared bearer-reference MCP servers | Called before native installation and every session send |
+| [`pluginConfig.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/pluginConfig.ts) | Bound and filter run-owned TOML to native plugin, project trust, hook state, and Forge-declared bearer-reference MCP servers and the fixed local browser connection | Called before native installation and every session send |
 | [`plugins.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/plugins.ts) | Implement `AgentPluginInstaller`: native commands, catalog/source verification, installed inventory and receipt | Constructed by `index.ts`; invoked through `setup/forgePlugin.ts` |
 | [`stream.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/stream.ts) | Parse `codex exec --json` output into one bounded `AgentTurn` and validate session continuity | Called by `AgentSession.send` in `index.ts` |
 | [`evidence.ts`](https://github.com/stripe/forge/blob/main/src/agents/codex/evidence.ts) | Locate the exact rollout by session ID, parse/validate JSONL records, normalize messages/reasoning/tools to ATIF | Called after quiescence by adapter methods |
@@ -707,8 +685,7 @@ parser, not an adapter, is the authoritative schema boundary.
 
 ## `src/evidence`: native-versus-fallback selection
 
-[`src/evidence/selection.ts`](https://github.com/stripe/forge/blob/main/src/evidence/selection.ts) is a single-file
-subsystem because selection policy must stay centralized. Its important symbols
+[`src/evidence/selection.ts`](https://github.com/stripe/forge/blob/main/src/evidence/selection.ts) centralizes native/fallback selection policy. Browser retention is handled separately by `browser.ts` after runtime quiescence. Its important symbols
 are:
 
 - `parseAgentEvidenceIdentity`: validates the pure identity declared before
@@ -720,8 +697,7 @@ are:
 - private fallback builders that bound assistant text, tool counts, and tool
   arguments before constructing ATIF.
 
-This directory depends on `contracts/agent` and `atif`, but not on runtime,
-storage, or a specific adapter. Both execution and result verification call the
+Native selection depends on `contracts/agent` and `atif`. Browser retention uses the sealed runtime contract; neither path depends on storage or a specific agent adapter. Both execution and result verification call the
 same coverage policy so a stored trajectory cannot pass weaker checks than the
 one originally selected.
 

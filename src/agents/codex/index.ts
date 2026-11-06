@@ -9,6 +9,7 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
+import { BROWSER_MCP_URL } from '../../setup/forgeBrowser.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
 import {
@@ -18,7 +19,10 @@ import {
   resolveCodexLayout,
   usesDefaultCodexLayout,
 } from './layout.ts';
-import { prepareCodexPluginConfiguration } from './pluginConfig.ts';
+import {
+  declareCodexMcpServers,
+  prepareCodexPluginConfiguration,
+} from './pluginConfig.ts';
 import { createCodexPluginInstaller } from './plugins.ts';
 import { parseCodexStream } from './stream.ts';
 
@@ -129,6 +133,7 @@ export function createCodexAdapter(
       endpoint_mode: options.baseUrl === undefined ? 'default' : 'custom',
       layout_mode: usesDefaultCodexLayout(layout) ? 'default' : 'custom',
     }),
+    supportsBrowserMcp: true,
     pluginInstaller: createCodexPluginInstaller({
       adapterId: id,
       executable,
@@ -183,6 +188,11 @@ export function createCodexAdapter(
               context.runtime.stateDirectories.get(CODEX_HOME_STATE_ID);
             if (!home)
               throw new TypeError('Codex run-owned state is unavailable.');
+            if (context.plan.browser !== undefined) {
+              await declareCodexMcpServers(home, {
+                'forge-browser': { url: BROWSER_MCP_URL },
+              });
+            }
             await prepareCodexPluginConfiguration(home);
             const automation = context.selection.hook_trust === 'automation';
             const result = await context.runtime.commands.agent.run(

@@ -1,0 +1,8 @@
+{
+  "name": "forge-browser-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@playwright/mcp": "0.0.84"
+  }
+}

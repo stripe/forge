@@ -86,6 +86,8 @@ export function createSetupExecutorWithHandlers(
         selection: AgentSelectionV1;
         runtime: ResolvedRunPlanV1['runtime'];
         pluginInstaller?: AgentPluginInstaller;
+        browser?: ResolvedRunPlanV1['browser'];
+        supportsBrowserMcp?: true;
       }>,
     ) {
       const selection = freezeClone(context.selection);
@@ -115,6 +117,12 @@ export function createSetupExecutorWithHandlers(
             stepIndex: index,
             selection,
             runtime,
+            ...(context.browser === undefined
+              ? {}
+              : { browser: freezeClone(context.browser) }),
+            ...(context.supportsBrowserMcp === undefined
+              ? {}
+              : { supportsBrowserMcp: context.supportsBrowserMcp }),
             ...(context.pluginInstaller === undefined
               ? {}
               : { pluginInstaller: context.pluginInstaller }),

@@ -17,6 +17,19 @@ RUN npm install --global --omit=dev --no-audit --no-fund \
     && test -x /usr/local/bin/codex \
     && /usr/local/bin/codex --version
 
+# Browser dependencies are installed only for plans requesting forge/browser.
+ARG FORGE_BROWSER_ENABLED=false
+COPY --chown=root:root browser /opt/forge-browser
+RUN if [ "$FORGE_BROWSER_ENABLED" = true ]; then \
+      cd /opt/forge-browser \
+      && npm ci --omit=dev --no-audit --no-fund \
+      && PLAYWRIGHT_BROWSERS_PATH=/opt/forge-browsers npx --no-install playwright install --with-deps chromium \
+      && chmod -R a+rX /opt/forge-browsers \
+      && chmod 0755 /opt/forge-browser/service.cjs \
+      && ln -s /opt/forge-browser/service.cjs /usr/local/bin/forge-browser \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 COPY --chown=root:root entrypoint.sh /usr/local/bin/forge-entrypoint
 RUN chmod 0755 /usr/local/bin/forge-entrypoint
 

@@ -671,6 +671,35 @@ describe('Forge CLI', () => {
     assert.deepEqual(platforms, ['linux/amd64', 'linux/arm64']);
   });
 
+  it('selects the browser image for explicit host validation of browser plans', async () => {
+    let browserEnabled: boolean | undefined;
+    let stderr = '';
+    const code = await runCli(
+      [
+        'validate',
+        '--experiment',
+        'test/fixtures/browser/experiment.yaml',
+        '--host',
+      ],
+      {
+        detectDockerPlatform: async () => 'linux/amd64',
+        validateDockerHost: async (options) => {
+          browserEnabled = options.browserEnabled;
+          return {
+            platform: options.platform,
+            imageId: `sha256:${'a'.repeat(64)}`,
+          };
+        },
+        stdout: () => {},
+        stderr: (value) => {
+          stderr += value;
+        },
+      },
+    );
+    assert.equal(code, 0, stderr);
+    assert.equal(browserEnabled, true);
+  });
+
   it('validates Docker host readiness only when requested', async () => {
     const fixture = await createBenchmarkFixture();
     const experiment = await fs.readFile(fixture.experimentPath, 'utf8');
