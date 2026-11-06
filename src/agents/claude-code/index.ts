@@ -265,6 +265,10 @@ function validateBaseUrl(value: string): string {
   return value;
 }
 
+export type {
+  ClaudeRecoveredEvidence,
+  LoadClaudeEvidenceInput,
+} from './evidence.ts';
 export { loadClaudeEvidence } from './evidence.ts';
 export type { ClaudeCodeLayout } from './layout.ts';
 export {

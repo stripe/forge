@@ -4,8 +4,15 @@ import {
   createNormalizedTrajectory,
   parseAtifTrajectory,
 } from '../../atif/index.ts';
+import type {
+  AgentAdapter,
+  AgentNativeEvidenceResult,
+} from '../../contracts/agent.ts';
 import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
-import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
+import {
+  selectAgentEvidence,
+  trajectoryCoversCompletedTurns,
+} from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
 
@@ -57,6 +64,17 @@ async function nativeEvidence(raw: string) {
     agentVersion: '2.1.273',
     model: 'claude-test',
     signal: new AbortController().signal,
+  });
+}
+
+async function recoveredNativeEvidence(raw: string) {
+  return loadClaudeEvidence({
+    project: createMemoryWorkspace({ 'session-1.jsonl': raw }).readonly,
+    sessionId: 'session-1',
+    agentVersion: '2.1.273',
+    model: 'claude-test',
+    signal: new AbortController().signal,
+    unsupportedSystemEvents: 'omit',
   });
 }
 
@@ -1052,6 +1070,216 @@ describe('Claude native evidence', () => {
           message: `Claude session evidence could not be normalized safely (${diagnosticKind} at line 1).`,
         },
       });
+    });
+  }
+
+  it('recovers unsupported system events only for preservation, retaining surrounding tool evidence', async () => {
+    const raw = [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: 'Read the file' },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call-1',
+              name: 'Read',
+              input: { path: 'file.txt' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'system',
+        subtype: 'synthetic-private-subtype',
+        content: 'Synthetic private system payload',
+      },
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call-1',
+              content: 'File content',
+            },
+          ],
+        },
+      },
+      { type: 'system', subtype: 'api_error' },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: 'Done' },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    const strict = await nativeEvidence(raw);
+    assert.deepEqual(strict, {
+      kind: 'unavailable',
+      reason: {
+        code: 'source_incomplete',
+        message:
+          'Claude session evidence could not be normalized safely (system at line 3).',
+      },
+    });
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    const trajectory = parseAtifTrajectory(recovered.trajectory);
+    assert.deepEqual(
+      trajectory.steps.map(({ source, message }) => ({ source, message })),
+      [
+        { source: 'user', message: 'Read the file' },
+        { source: 'agent', message: '' },
+        { source: 'agent', message: 'Done' },
+      ],
+    );
+    assert.deepEqual(trajectory.steps[1]?.observation?.results, [
+      { source_call_id: 'call-1', content: 'File content' },
+    ]);
+    assert.deepEqual(recovered.warnings, [
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Unsupported Claude system events were omitted from recovered ATIF (records: 2).',
+        path: 'line:3',
+      },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(recovered),
+      /synthetic-private-subtype|Synthetic private system payload/,
+    );
+    assert.throws(
+      () =>
+        selectAgentEvidence({
+          agent: { id: 'claude-code', version: 'test' } as AgentAdapter,
+          identity: { name: 'claude-code', version: '2.1.273' },
+          model: 'claude-test',
+          sessionId: 'session-1',
+          completedTurns: [
+            { user: 'Read the file', assistant: 'Done', toolCalls: [] },
+          ],
+          collected: recovered as unknown as AgentNativeEvidenceResult,
+        }),
+      /invalid native evidence result/,
+    );
+  });
+
+  it('keeps supported sessions available when recovery is enabled', async () => {
+    const records = [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: 'Do the task' },
+      },
+      { type: 'system', subtype: 'turn_duration' },
+      { type: 'system', subtype: 'api_error', source: 'request_retry' },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: 'Done' },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    assert.deepEqual(
+      await recoveredNativeEvidence(records),
+      await nativeEvidence(records),
+    );
+  });
+
+  it('bounds repeated unsupported-system diagnostics to one count and first location', async () => {
+    const raw = [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: 'Do the task' },
+      },
+      ...Array.from({ length: 300 }, () => ({
+        type: 'system',
+        subtype: 'future',
+      })),
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: 'Done' },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    assert.deepEqual(recovered.warnings, [
+      {
+        code: 'unsupported_native_event',
+        message:
+          'Unsupported Claude system events were omitted from recovered ATIF (records: 300).',
+        path: 'line:2',
+      },
+    ]);
+  });
+
+  for (const { description, raw } of [
+    { description: 'malformed JSON', raw: '{' },
+    {
+      description: 'mixed session identity',
+      raw: JSON.stringify({ type: 'system', sessionId: 'another-session' }),
+    },
+    {
+      description: 'compaction boundary',
+      raw: JSON.stringify({ type: 'system', subtype: 'compact_boundary' }),
+    },
+    {
+      description: 'compact summary',
+      raw: JSON.stringify({ type: 'system', isCompactSummary: true }),
+    },
+    {
+      description: 'sidechain',
+      raw: JSON.stringify({ type: 'system', isSidechain: true }),
+    },
+    {
+      description: 'unsupported attachment',
+      raw: JSON.stringify({
+        type: 'attachment',
+        attachment: { type: 'future' },
+      }),
+    },
+    {
+      description: 'oversized line',
+      raw: JSON.stringify({ type: 'system', content: 'x'.repeat(1024 * 1024) }),
+    },
+  ]) {
+    it(`does not recover ${description}`, async () => {
+      const conversation = [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        raw,
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n');
+      assert.deepEqual(
+        await recoveredNativeEvidence(conversation),
+        await nativeEvidence(conversation),
+      );
+      assert.equal(
+        (await recoveredNativeEvidence(conversation)).kind,
+        'unavailable',
+      );
     });
   }
 

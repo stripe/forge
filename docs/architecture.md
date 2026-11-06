@@ -1045,6 +1045,20 @@ as an invalid timestamp instead adds a partial-evidence warning. Unsupported
 record diagnostics identify a safe category and line number, never payload
 values.
 
+For transcript preservation, embedding hosts can opt into
+`loadClaudeEvidence({ ..., unsupportedSystemEvents: 'omit' })` from
+`@stripe/forge/agents/claude-code`. Unsupported system records are omitted,
+with one bounded warning recording their count and first line. If any were
+omitted, the loader returns `kind: 'recovered'`, containing ATIF for recognized
+conversation records, native provenance, and warnings. This projection is for
+unscored preservation only: it is not an `AgentNativeEvidenceResult`, and the
+engine rejects it as a score-bearing candidate. Hosts must redact the projection,
+mark its completeness `partial`, and keep recovery eligibility separate from
+ordinary partial-evidence warnings. With no unsupported system records, the
+loader retains its normal result. Compaction, sidechains, unsupported
+non-system content, identity mismatches, malformed JSON, and safety limits still
+prevent recovery. Agent adapters and automated execution keep strict behavior.
+
 Claude attachment records with string-valued `rendered[].content` become ATIF
 system steps in native order, retaining rendered text and valid timestamps;
 `extra` identifies the native record and attachment types. They stay excluded

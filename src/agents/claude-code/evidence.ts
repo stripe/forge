@@ -13,6 +13,7 @@ import {
 } from '../../atif/index.ts';
 import type {
   AgentNativeArtifact,
+  AgentNativeEvidenceAvailable,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
@@ -116,6 +117,14 @@ export interface LoadClaudeEvidenceInput {
   readonly agentVersion: string;
   readonly model: string;
   readonly signal: AbortSignal;
+  /** Preserve an unscored transcript by omitting unsupported system events. */
+  readonly unsupportedSystemEvents?: 'reject' | 'omit';
+}
+
+/** A preservation-only projection, never a score-bearing evidence candidate. */
+export interface ClaudeRecoveredEvidence
+  extends Omit<AgentNativeEvidenceAvailable, 'kind'> {
+  readonly kind: 'recovered';
 }
 
 /** Capture the exact selected Claude project JSONL without transforming it. */
@@ -145,9 +154,20 @@ export async function loadClaudeNativeArtifact(
 }
 
 /** Load and normalize exact native evidence; Forge's engine owns fallback selection. */
+export function loadClaudeEvidence(
+  input: LoadClaudeEvidenceInput & { readonly unsupportedSystemEvents: 'omit' },
+): Promise<AgentNativeEvidenceResult | ClaudeRecoveredEvidence>;
+export function loadClaudeEvidence(
+  input: LoadClaudeEvidenceInput & {
+    readonly unsupportedSystemEvents?: 'reject';
+  },
+): Promise<AgentNativeEvidenceResult>;
+export function loadClaudeEvidence(
+  input: LoadClaudeEvidenceInput,
+): Promise<AgentNativeEvidenceResult | ClaudeRecoveredEvidence>;
 export async function loadClaudeEvidence(
   input: LoadClaudeEvidenceInput,
-): Promise<AgentNativeEvidenceResult> {
+): Promise<AgentNativeEvidenceResult | ClaudeRecoveredEvidence> {
   const unavailable = (
     code: 'source_unavailable' | 'source_invalid' | 'source_incomplete',
     message: string,
@@ -181,7 +201,7 @@ export async function loadClaudeEvidence(
     );
     const converted = recordsToAtif(records, input);
     return {
-      kind: 'available',
+      kind: converted.recovered ? 'recovered' : 'available',
       // Adapters classify source parsing/normalization failures. The engine
       // authoritatively parses this fresh projection again at its trust boundary.
       trajectory: parseAtifTrajectory(converted.trajectory),
@@ -222,10 +242,18 @@ async function readExactSessionBytes(
 function recordsToAtif(
   records: readonly LocatedSessionRecord[],
   input: LoadClaudeEvidenceInput,
-): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
+): {
+  trajectory: AtifTrajectoryV1_8;
+  warnings: AgentNativeEvidenceWarning[];
+  recovered: boolean;
+} {
   const steps: AtifStep[] = [];
   const warnings: AgentNativeEvidenceWarning[] = [];
   const bookkeepingOmissions: BookkeepingOmissions = new Map();
+  const unsupportedSystemOmissions =
+    input.unsupportedSystemEvents === 'omit'
+      ? { count: 0, firstLine: 0 }
+      : undefined;
   let reportedSessionId: string | undefined;
   let lastAgentStep: AtifAgentStep | undefined;
   const toolStepsByCallId = new Map<string, AtifAgentStep>();
@@ -389,6 +417,7 @@ function recordsToAtif(
         bookkeepingOmissions,
         recordIndex,
         addStep,
+        unsupportedSystemOmissions,
       );
     } else {
       throw new ClaudeSessionIncompleteError(
@@ -410,6 +439,7 @@ function recordsToAtif(
     throw new Error('Claude session contains no complete conversation.');
   }
   return {
+    recovered: (unsupportedSystemOmissions?.count ?? 0) > 0,
     trajectory: {
       schema_version: ATIF_SCHEMA_VERSION,
       session_id: input.sessionId,
@@ -422,6 +452,15 @@ function recordsToAtif(
     },
     warnings: [
       ...warnings,
+      ...(unsupportedSystemOmissions && unsupportedSystemOmissions.count > 0
+        ? [
+            {
+              code: 'unsupported_native_event' as const,
+              message: `Unsupported Claude system events were omitted from recovered ATIF (records: ${unsupportedSystemOmissions.count}).`,
+              path: `line:${unsupportedSystemOmissions.firstLine}`,
+            },
+          ]
+        : []),
       ...Array.from(
         bookkeepingOmissions,
         ([kind, { count, firstLine }]): AgentNativeEvidenceWarning => ({
@@ -627,6 +666,7 @@ function handleNonConversationRecord(
   bookkeepingOmissions: BookkeepingOmissions,
   recordIndex: number,
   addStep: (step: Omit<AtifStep, 'step_id'>) => void,
+  unsupportedSystemOmissions: BookkeepingOmission | undefined,
 ): void {
   if (IGNORED_RECORD_TYPES.has(record.type ?? '')) {
     return;
@@ -781,6 +821,12 @@ function handleNonConversationRecord(
       });
       return;
     }
+  }
+  if (record.type === 'system' && unsupportedSystemOmissions !== undefined) {
+    unsupportedSystemOmissions.count += 1;
+    if (unsupportedSystemOmissions.count === 1)
+      unsupportedSystemOmissions.firstLine = recordIndex + 1;
+    return;
   }
   throw incompleteRecord(
     record,
