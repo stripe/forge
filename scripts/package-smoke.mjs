@@ -154,6 +154,9 @@ try {
         await assert.rejects(import(removed), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
       }
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
+      assert.equal(typeof claude.loadClaudeEvidence, 'function');
+      assert.equal(typeof claude.recoverClaudeEvidence, 'function');
+      assert.equal('recoverClaudeEvidence' in forge, false);
       assert.equal(typeof opencode.createOpenCodeAdapter, 'function');
       assert.equal(typeof opencode.parseOpenCodeStream, 'function');
       assert.equal(typeof opencode.loadOpenCodeEvidence, 'function');
@@ -350,6 +353,11 @@ try {
     // The isolated consumer needs no Vitest dependency to typecheck this contract.
     publicApiTest
       .replace("from 'vitest'", "from 'node:test'")
+      .replace(
+        "'../src/agents/claude-code/index.ts'",
+        "'@stripe/forge/agents/claude-code'",
+      )
+      .replace("'../src/atif/index.ts'", "'@stripe/forge/atif'")
       .replace(/'\.\.\/src\/([A-Za-z]+)\.ts'/g, (specifier, module) => {
         const target = consumerImports.get(module);
         if (target === undefined)

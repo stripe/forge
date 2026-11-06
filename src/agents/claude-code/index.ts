@@ -266,10 +266,11 @@ function validateBaseUrl(value: string): string {
 }
 
 export type {
+  ClaudeEvidenceRecoveryResult,
   ClaudeRecoveredEvidence,
   LoadClaudeEvidenceInput,
 } from './evidence.ts';
-export { loadClaudeEvidence } from './evidence.ts';
+export { loadClaudeEvidence, recoverClaudeEvidence } from './evidence.ts';
 export type { ClaudeCodeLayout } from './layout.ts';
 export {
   CLAUDE_PLUGIN_STATE_ID,
