@@ -1,3 +1,4 @@
+import { resolveBrowserConfig } from '../model/browser.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
   ancestorDirectories,
@@ -172,16 +173,14 @@ export function resolveRunPlanWithSetupActions(
       { cause: error },
     );
   }
-  const browserRequests = setup.filter(
-    (step) => step.uses === 'forge/browser',
-  ).length;
-  if (
-    browserRequests > 1 ||
-    (browserRequests === 1 && !config.browser?.access.agent)
-  ) {
+  let browser: ResolvedRunPlanV1['browser'];
+  try {
+    browser = resolveBrowserConfig(setup, config.browser);
+  } catch (error) {
     throw new PlanningError(
       'invalid_browser_configuration',
-      'Browser setup requires exactly one request and an explicit browser.access.agent grant.',
+      error instanceof Error ? error.message : 'Invalid browser setup',
+      { cause: error },
     );
   }
   const configuredActionBundles = config.forge?.action_bundles ?? [];
@@ -274,7 +273,7 @@ export function resolveRunPlanWithSetupActions(
           ),
         }),
     agent: resolveAgentSelection(selection.agent),
-    ...(browserRequests === 0 ? {} : { browser: cloneJson(config.browser!) }),
+    ...(browser === undefined ? {} : { browser: cloneJson(browser) }),
     runtime: resolveRuntime(config.runtime, input.runtimePlatform),
     limits: cloneJson(config.limits),
   };

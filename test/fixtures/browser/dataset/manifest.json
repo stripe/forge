@@ -1,6 +1,6 @@
 {
-  "dataset": { "id": "forge-browser-example", "version": "0.1.0" },
+  "dataset": { "id": "forge-browser-example", "version": "0.2.0" },
   "cases": [
-    { "id": "examples/browser-greeting", "version": "0.1.0", "path": "cases/examples/greeting.case.yaml" }
+    { "id": "examples/browser-greeting", "version": "0.2.0", "path": "cases/examples/greeting.case.yaml" }
   ]
 }

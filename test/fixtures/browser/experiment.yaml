@@ -1,16 +1,9 @@
 id: examples/browser
-version: 0.1.0
+version: 0.2.0
 dataset:
   path: ./dataset
   id: forge-browser-example
-  version: 0.1.0
-browser:
-  access:
-    agent: true
-    role_player: false
-  integration:
-    provider: local
-    controller: playwright-mcp
+  version: 0.2.0
 runtime:
   adapter: docker
   image: { kind: forge }

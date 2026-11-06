@@ -1,4 +1,5 @@
 import type { ReadonlyWorkspace } from '../contracts/runtime.ts';
+import { BrowserSetupWithSchema } from '../model/browser.ts';
 import {
   FORGE_PLAYWRIGHT_MCP_VERSION,
   FORGE_PLAYWRIGHT_VERSION,
@@ -13,8 +14,13 @@ export const BROWSER_EXECUTABLE = 'forge-browser';
 export const browserSetupHandler: SetupStepHandler = Object.freeze({
   uses: 'forge/browser',
   preflight(step, context) {
-    if (step.uses !== 'forge/browser' || Object.keys(step.with).length !== 0) {
-      throw new TypeError('forge/browser requires an empty with object.');
+    if (step.uses !== 'forge/browser')
+      throw new TypeError('Invalid browser setup action.');
+    const { access } = BrowserSetupWithSchema.parse(step.with);
+    if (!access.agent) {
+      if (context.browser !== undefined)
+        throw new TypeError('Disabled setup cannot grant browser access.');
+      return { requirements: {}, async apply() {} };
     }
     if (
       !context.browser?.access.agent ||
@@ -23,7 +29,7 @@ export const browserSetupHandler: SetupStepHandler = Object.freeze({
       context.browser.integration.controller !== 'playwright-mcp'
     ) {
       throw new TypeError(
-        'forge/browser requires an explicit supported browser configuration.',
+        'forge/browser requires a resolved supported browser configuration.',
       );
     }
     if (!context.supportsBrowserMcp) {

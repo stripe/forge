@@ -9,6 +9,7 @@ import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
 } from '../version.ts';
+import { BrowserIntegrationSchema, resolveBrowserConfig } from './browser.ts';
 import { JudgingCriterionSchema } from './criteria.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
 import { isSha256Digest } from './hashes.ts';
@@ -571,21 +572,8 @@ const ExperimentMatrixSchema = z.unknown().transform((matrix, context) => {
   return parsed.data;
 });
 
-const BrowserIntegrationSchema = z
-  .object({
-    provider: z.literal('local'),
-    controller: z.literal('playwright-mcp'),
-  })
-  .strict();
-const BrowserAccessSchema = z
-  .object({
-    agent: z.boolean().default(false),
-    role_player: z.literal(false).default(false),
-  })
-  .strict();
 const BrowserConfigSchema = z
   .object({
-    access: BrowserAccessSchema.prefault({}),
     integration: BrowserIntegrationSchema,
   })
   .strict();
@@ -840,17 +828,20 @@ const ResolvedRunPlanSchema = z
       );
     }
 
-    const browserRequests = plan.setup.filter(
-      (step) => step.uses === 'forge/browser',
-    ).length;
-    if (
-      browserRequests > 1 ||
-      (browserRequests === 1) !== (plan.browser !== undefined)
-    ) {
+    try {
+      const expectedBrowser = resolveBrowserConfig(plan.setup, plan.browser);
+      if (!jsonValuesEqual(plan.browser ?? null, expectedBrowser ?? null)) {
+        addPlanIssue(
+          context,
+          ['browser'],
+          'resolved browser configuration must match setup access grants',
+        );
+      }
+    } catch (error) {
       addPlanIssue(
         context,
         ['browser'],
-        'exactly one browser setup request requires an enabled resolved browser configuration',
+        error instanceof Error ? error.message : 'Invalid browser setup',
       );
     }
 

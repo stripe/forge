@@ -1,5 +1,5 @@
 id: examples/browser-greeting
-version: 0.1.0
+version: 0.2.0
 display_name: Browser greeting
 initial_prompt: >-
   Implement index.html as a greeting form: an input labeled Name and a Greet
@@ -27,7 +27,9 @@ setup:
           const child=spawn(process.execPath,['/workspace/server.cjs'],{detached:true,stdio:'ignore',env:{PATH:'/usr/local/bin:/usr/bin:/bin'}});
           child.unref();
   - uses: forge/browser
-    with: {}
+    with:
+      access:
+        agent: true
 judging_criteria: []
 checks:
   files_created:

@@ -827,21 +827,24 @@ installation semantics.
 
 ### Browser setup and evidence
 
-`forge/browser` accepts an empty `with` object and requests invariant browser
-availability. The experiment's optional `browser` field has strict `access`
-and `integration` objects. `access.agent` and `access.role_player` default to
-false. `integration.provider` and `integration.controller` are required;
-the implemented values are `local` and `playwright-mcp`. Unknown fields and
-`role_player: true` are rejected. This separates browser placement and lifecycle
-(provider) from the navigation, snapshot, and screenshot tools (controller).
-See the README for [configuration and execution](../README.md#browser-access).
+`forge/browser` owns grants in its strict `with.access` object. `agent` and
+`role_player` default to false; omitted `access` grants neither. Unknown fields
+and `role_player: true` are rejected. The experiment's optional `browser` field
+contains only a strict `integration` object, with required `provider` and
+`controller` fields. Without an override, planning resolves `local` and
+`playwright-mcp`, the currently implemented values. The provider owns browser
+placement and lifecycle; the controller exposes navigation, snapshot, and
+screenshot tools. See the README for
+[configuration and execution](../README.md#browser-access).
 
-Planning requires an agent grant for a requested browser, rejects duplicate
-requests across case and treatment setup, and clones and freezes the resolved
-configuration in `plan.browser`. An experiment configuration without a selected
-setup request is unused and omitted from the plan. Browser availability may be
-a treatment setup action when that availability is the experimental variable.
-YAML does not import implementations or name participant lists.
+Planning rejects duplicate requests across case and treatment setup and clones
+and freezes the explicit setup grants and resolved integration in `plan.browser`.
+Without an enabled grant, no browser configuration is emitted or browser
+resources allocated, even with an experiment override. A disabled action is a
+setup no-op with no resolution receipt. Experiments cannot grant access.
+Browser availability may be a treatment setup action when that availability is
+the experimental variable. YAML does not import implementations or name
+participant lists.
 
 Pure setup preflight requires the selected adapter's `supportsBrowserMcp`
 capability and declares the `forge-browser` executable plus run-owned

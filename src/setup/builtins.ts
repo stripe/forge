@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BrowserSetupWithSchema } from '../model/browser.ts';
 import {
   isSafeDatasetRelativePath,
   isSafeWorkspaceRelativePath,
@@ -111,7 +112,7 @@ export const builtInSetupActions: readonly SetupActionDefinition[] =
     Object.freeze({
       ...browserSetupHandler,
       parseWith(input: unknown): JsonObject {
-        return z.object({}).strict().parse(input);
+        return BrowserSetupWithSchema.parse(input);
       },
     }),
     writeSetupAction,

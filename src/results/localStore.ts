@@ -634,6 +634,13 @@ function verifySetupArtifact(
         );
       }
     } else if (step.uses === 'forge/browser') {
+      if (plan.browser === undefined) {
+        if (step.resolution !== undefined)
+          throw new ArtifactStoreError(
+            'Disabled browser setup cannot record a service resolution.',
+          );
+        continue;
+      }
       const expected = {
         provider: 'local',
         controller: 'playwright-mcp',

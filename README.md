@@ -285,30 +285,31 @@ builds the runtime image and probes the host without making model calls.
 
 ### Browser access
 
-A case requests browser availability through its shared setup:
+A case grants browser access through its shared setup:
 
 ```yaml
 # case.yaml excerpt
 setup:
   - uses: forge/browser
-    with: {}
+    with:
+      access:
+        agent: true
 ```
 
-The experiment grants access and selects the integration:
+Without an experiment override, Forge uses local Chromium with Playwright MCP.
+An optional experiment field selects the integration:
 
 ```yaml
 # experiment.yaml excerpt
 browser:
-  access:
-    agent: true
-    role_player: false
   integration:
     provider: local
     controller: playwright-mcp
 ```
 
-Access defaults off. A browser setup request requires an explicit agent grant;
-without a request, Forge allocates no browser. The current integration runs
+Omitted access fields default to false. Without an enabled setup grant, Forge
+allocates no browser, even when the experiment specifies an integration.
+The experiment cannot grant access. The current integration runs
 headless Chromium and Playwright MCP inside the evaluation's Docker container.
 The **provider** owns the browser process and its lifetime; the **controller**
 exposes browser tools. Claude Code and Codex receive the MCP connection without

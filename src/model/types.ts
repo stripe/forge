@@ -101,14 +101,19 @@ export interface PluginSetupStepV1 extends SetupStepV1<PluginSetupWithV1> {
   with: PluginSetupWithV1;
 }
 
-/** Case-owned browser requirement; access and integration belong to the experiment. */
-export interface BrowserSetupStepV1 extends SetupStepV1<Record<string, never>> {
-  uses: 'forge/browser';
-  with: Record<string, never>;
+/** Case- or treatment-owned browser grants, independent of its implementation. */
+export interface BrowserSetupWithV1 extends JsonObject {
+  access: { agent: boolean; role_player: false };
 }
 
+export interface BrowserSetupStepV1 extends SetupStepV1<BrowserSetupWithV1> {
+  uses: 'forge/browser';
+  with: BrowserSetupWithV1;
+}
+
+/** Fully resolved browser choices recorded in a run plan. */
 export interface BrowserConfigV1 {
-  access: { agent: boolean; role_player: boolean };
+  access: { agent: boolean; role_player: false };
   integration: { provider: 'local'; controller: 'playwright-mcp' };
 }
 
@@ -299,7 +304,7 @@ export interface ExperimentConfigV1 {
   };
   /** Required only when the experiment uses host-supplied setup actions. */
   forge?: { action_bundles: SetupActionBundleReferenceV1[] };
-  browser?: BrowserConfigV1;
+  browser?: Pick<BrowserConfigV1, 'integration'>;
   runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;

@@ -53,64 +53,113 @@ async function inputs() {
 describe('browser setup in a normal Forge run', () => {
   it('defaults authored grants off and rejects unknown fields and unsupported roles/integrations', async () => {
     const { experiment } = await inputs();
-    assert.deepEqual(
-      parseExperimentConfig({
-        ...experiment.config,
-        browser: { integration: browser.integration },
-      }).browser?.access,
-      { agent: false, role_player: false },
-    );
+    for (const withValue of [
+      {},
+      { access: {} },
+      { access: { agent: false } },
+    ]) {
+      assert.deepEqual(
+        parseSetupStep({ uses: 'forge/browser', with: withValue }).with,
+        { access: { agent: false, role_player: false } },
+      );
+    }
     for (const config of [
-      { ...browser, profile: 'default' },
-      { ...browser, access: { agent: true, role_player: true } },
+      browser,
+      { integration: browser.integration, profile: 'default' },
       {
-        ...browser,
         integration: { provider: 'browserbase', controller: 'playwright-mcp' },
       },
-      { ...browser, integration: { ...browser.integration, options: {} } },
+      { integration: { ...browser.integration, options: {} } },
     ])
       assert.throws(() =>
         parseExperimentConfig({ ...experiment.config, browser: config }),
       );
-    assert.throws(() =>
-      parseSetupStep({
-        uses: 'forge/browser',
-        with: { participants: ['agent'] },
-      }),
-    );
+    for (const withValue of [
+      { participants: ['agent'] },
+      { access: { role_player: true } },
+      { access: { judge: true } },
+      { integration: browser.integration },
+    ])
+      assert.throws(() =>
+        parseSetupStep({ uses: 'forge/browser', with: withValue }),
+      );
   });
 
-  it('requires a grant, rejects duplicate requests, and clones and freezes the resolved configuration', async () => {
+  it('resolves default integration and clones and freezes explicit overrides', async () => {
     const input = await inputs();
-    assert.ok(Object.isFrozen(input.plan.browser?.access));
-    assert.notEqual(input.plan.browser, input.experiment.config.browser);
-    for (const config of [
-      undefined,
-      { ...browser, access: { agent: false, role_player: false } },
-    ]) {
-      assert.throws(
-        () =>
-          engine.resolveRunPlan({
-            ...input,
-            experiment: {
-              ...input.experiment,
-              config: engine.parseExperimentConfig({
-                ...input.experiment.config,
-                browser: config,
-              }),
-            },
-            runtimePlatform: 'linux/amd64',
-          }),
-        /explicit browser.access.agent grant/,
-      );
-    }
+    assert.equal(input.experiment.config.browser, undefined);
+    assert.deepEqual(input.plan.browser, browser);
+    const experiment = {
+      ...input.experiment,
+      config: engine.parseExperimentConfig({
+        ...input.experiment.config,
+        browser: { integration: browser.integration },
+      }),
+    };
+    const plan = engine.resolveRunPlan({
+      ...input,
+      experiment,
+      runtimePlatform: 'linux/amd64',
+    });
+    assert.deepEqual(plan.browser, browser);
+    assert.notEqual(
+      plan.browser?.integration,
+      experiment.config.browser?.integration,
+    );
+    assert.ok(Object.isFrozen(plan.browser?.access));
+    assert.ok(Object.isFrozen(plan.browser?.integration));
+    assert.deepEqual(parseResolvedRunPlan(plan), plan);
+  });
+
+  it('rejects duplicate requests and resolved plans inconsistent with setup grants', async () => {
+    const input = await inputs();
     const duplicate = structuredClone(input.plan);
-    duplicate.case.setup.push({ uses: 'forge/browser', with: {} });
-    duplicate.setup = [...duplicate.case.setup];
-    assert.throws(() => parseResolvedRunPlan(duplicate), /exactly one browser/);
+    duplicate.treatment.setup.push({
+      uses: 'forge/browser',
+      with: { access: { agent: true } },
+    });
+    duplicate.setup = [...duplicate.case.setup, ...duplicate.treatment.setup];
+    assert.throws(() => parseResolvedRunPlan(duplicate), /At most one browser/);
+    const experiment = {
+      ...input.experiment,
+      config: engine.parseExperimentConfig({
+        ...input.experiment.config,
+        matrix: {
+          ...input.experiment.config.matrix,
+          treatments: ['baseline', 'duplicate'],
+        },
+        treatments: {
+          baseline: { setup: [] },
+          duplicate: { setup: [{ uses: 'forge/browser', with: {} }] },
+        },
+      }),
+    };
+    assert.throws(
+      () =>
+        engine.resolveRunPlan({
+          ...input,
+          experiment,
+          selection: { ...input.selection, treatment: 'duplicate' },
+          runtimePlatform: 'linux/amd64',
+        }),
+      /At most one browser/,
+    );
     const noGrant = structuredClone(input.plan);
     delete noGrant.browser;
-    assert.throws(() => parseResolvedRunPlan(noGrant), /exactly one browser/);
+    assert.throws(
+      () => parseResolvedRunPlan(noGrant),
+      /must match setup access grants/,
+    );
+    const disabled = structuredClone(input.plan);
+    for (const steps of [disabled.case.setup, disabled.setup]) {
+      steps.find((step) => step.uses === 'forge/browser')!.with = {
+        access: { agent: false, role_player: false },
+      };
+    }
+    assert.throws(
+      () => parseResolvedRunPlan(disabled),
+      /must match setup access grants/,
+    );
   });
 
   it('omits unused browser configuration from a selection with no setup request', async () => {
@@ -132,10 +181,96 @@ describe('browser setup in a normal Forge run', () => {
     const plan = engine.resolveRunPlan({
       ...input,
       dataset: { ...input.dataset, cases },
+      experiment: {
+        ...input.experiment,
+        config: parseExperimentConfig({
+          ...input.experiment.config,
+          browser: { integration: browser.integration },
+        }),
+      },
       runtimePlatform: 'linux/amd64',
     });
     assert.equal(plan.browser, undefined);
     assert.equal(Object.hasOwn(plan, 'browser'), false);
+  });
+
+  it('executes a disabled request without browser capabilities or artifacts despite an override', async (context) => {
+    const input = await inputs();
+    const cases = new Map(
+      [...input.dataset.cases].map(([id, loaded]) => [
+        id,
+        {
+          ...loaded,
+          definition: {
+            ...loaded.definition,
+            setup: loaded.definition.setup.map((step) =>
+              step.uses === 'forge/browser'
+                ? parseSetupStep({ uses: 'forge/browser', with: {} })
+                : step,
+            ),
+          },
+        },
+      ]),
+    );
+    const plan = engine.resolveRunPlan({
+      ...input,
+      dataset: { ...input.dataset, cases },
+      experiment: {
+        ...input.experiment,
+        config: parseExperimentConfig({
+          ...input.experiment.config,
+          browser: { integration: browser.integration },
+        }),
+      },
+      runtimePlatform: 'linux/amd64',
+    });
+    assert.equal(plan.browser, undefined);
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-browser-disabled-'),
+    );
+    context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({
+      id: plan.agent.adapter,
+      turns: [{ text: 'done', sessionId: 'disabled-session', toolCalls: [] }],
+    });
+    const completed = await engine.executeEval({
+      runId: 'browser-disabled',
+      plan,
+      composition: {
+        credentialResolver: createStaticCredentialResolver(),
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        inputProvider: createMemoryRunInputProvider({
+          'fixtures/server.cjs': 'fixture',
+        }),
+        artifactStore: createArtifactStore({ root }),
+      },
+    });
+    await engine.verifyCompletedRun(completed.location);
+    assert.ok(
+      runtime.runs[0]!.commands.every(
+        (command) => command.argv[0] !== 'forge-browser',
+      ),
+    );
+    const result = JSON.parse(
+      await fs.readFile(path.join(completed.location, 'result.json'), 'utf8'),
+    );
+    assert.ok(
+      result.artifacts.every(
+        (artifact: { path: string }) => !artifact.path.startsWith('browser/'),
+      ),
+    );
+    const setup = JSON.parse(
+      await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8'),
+    );
+    assert.ok(
+      setup.steps
+        .filter((step: { uses: string }) => step.uses === 'forge/browser')
+        .every(
+          (step: { resolution?: unknown }) => step.resolution === undefined,
+        ),
+    );
   });
 
   it('fails unsupported agents in pure preflight before allocation or credential lookup', async () => {
