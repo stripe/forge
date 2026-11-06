@@ -19,10 +19,7 @@ import {
 import { expandExperiment } from '../src/planning/planner.ts';
 import { createArtifactStore } from '../src/results/localStore.ts';
 import { serializeCanonicalJson } from '../src/serialization.ts';
-import {
-  BROWSER_MCP_URL,
-  BROWSER_STATE_ID,
-} from '../src/setup/forgeBrowser.ts';
+import { BROWSER_STATE_ID } from '../src/setup/forgeBrowser.ts';
 import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
@@ -35,6 +32,7 @@ const browser = {
   access: { agent: true, role_player: false },
   integration: { provider: 'local', controller: 'playwright-mcp' },
 } as const;
+const BROWSER_MCP_URL = 'http://127.0.0.1:41327/mcp';
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
 
 async function inputs() {
@@ -182,6 +180,12 @@ describe('browser setup in a normal Forge run', () => {
     context.onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
     const runtime = createFakeRuntimeAdapter({
       stateFiles: { [BROWSER_STATE_ID]: { 'captures/screenshot.png': png } },
+      command: () => ({
+        exitCode: 0,
+        stdout: BROWSER_MCP_URL,
+        stderr: '',
+        durationMs: 0,
+      }),
     });
     const scripted = createScriptedAgentAdapter({
       id: plan.agent.adapter,
@@ -280,6 +284,16 @@ describe('browser setup in a normal Forge run', () => {
             item.id,
             createMemoryWorkspace().mutable,
           ]),
+      );
+      states.set(
+        BROWSER_STATE_ID,
+        createMemoryWorkspace({
+          'mcp.json': JSON.stringify({
+            mcpServers: {
+              'forge-browser': { type: 'http', url: BROWSER_MCP_URL },
+            },
+          }),
+        }).mutable,
       );
       const workspace = createMemoryWorkspace();
       const argvCalls: string[][] = [];

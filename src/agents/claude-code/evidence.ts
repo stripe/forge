@@ -506,7 +506,7 @@ function attachToolResults(
       ...(matchedStep === undefined || requestedCallId === undefined
         ? {}
         : { source_call_id: requestedCallId }),
-      content: nativeContent(block.content),
+      content: nativeContent(block.content, warnings, recordIndex),
       ...(block.is_error === undefined
         ? {}
         : { extra: { is_error: block.is_error } }),
@@ -599,7 +599,28 @@ function jsonValue(value: unknown): JsonValue {
   }
 }
 
-function nativeContent(value: unknown): string {
+function nativeContent(
+  value: unknown,
+  warnings: AgentNativeEvidenceWarning[],
+  recordIndex: number,
+): string {
+  if (Array.isArray(value)) {
+    value = value.map((block, index) => {
+      if (block && typeof block === 'object' && block.type === 'image') {
+        warnings.push({
+          code: 'value_omitted',
+          message:
+            'Claude image content was retained only in the restricted native artifact.',
+          path: `line:${recordIndex + 1}.content[${index}]`,
+        });
+        return {
+          type: 'text',
+          text: '[Claude image content retained only in the native artifact.]',
+        };
+      }
+      return block;
+    });
+  }
   if (typeof value === 'string') return value;
   const json = jsonValue(value);
   return JSON.stringify(json);

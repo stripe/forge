@@ -18,4 +18,4 @@ export const FORGE_RUNTIME_ASSET_FILES = [
 
 /** Hash of all files in FORGE_RUNTIME_ASSET_FILES in that order. */
 export const FORGE_RUNTIME_ASSET_DIGEST =
-  'bf02e9130d359d30f54714b39d1ad2e0e90a2101897542384109e0b18ef1ad07';
+  'f09ed2782dc24f992df0894e7efeb103371b01cd69c1bc67017b9e0fbbece9df';

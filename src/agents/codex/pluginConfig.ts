@@ -8,7 +8,7 @@ import {
   isSafeMcpEndpointUrl,
   isSafeSimpleIdentifier,
 } from '../../model/paths.ts';
-import { BROWSER_MCP_URL } from '../../setup/forgeBrowser.ts';
+import { isBrowserMcpUrl } from '../../setup/forgeBrowser.ts';
 import type {
   CodexMcpServerConfig,
   CodexMcpServerDeclarations,
@@ -218,7 +218,7 @@ async function readSanitizedConfiguration(
 }
 
 /**
- * A remote HTTP URL and environment-referenced bearer, or Forge's fixed local browser URL. Inline auth,
+ * A remote HTTP URL and environment-referenced bearer, or Forge's run-owned loopback browser endpoint. Inline auth,
  * static or environment headers, URL credentials, and other settings are
  * rejected because Forge neither generates nor can vouch for them.
  */
@@ -232,7 +232,7 @@ function safeMcpServer(
     isSafeMcpEndpointUrl(value.url) &&
     ((Object.keys(value).length === 1 &&
       name === 'forge-browser' &&
-      value.url === BROWSER_MCP_URL) ||
+      isBrowserMcpUrl(value.url)) ||
       (Object.keys(value).length === 2 &&
         typeof value.bearer_token_env_var === 'string' &&
         /^[A-Za-z_][A-Za-z0-9_]{0,255}$/.test(value.bearer_token_env_var)))

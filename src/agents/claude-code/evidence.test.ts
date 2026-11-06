@@ -106,6 +106,79 @@ async function conversationEvidence(records: readonly unknown[]) {
 }
 
 describe('Claude native evidence', () => {
+  it('keeps screenshot pixels out of normalized evidence and the text judge', async () => {
+    const pixels = 'RESTRICTED_SCREENSHOT_BASE64';
+    const records = [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: 'Inspect the page' },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'screenshot',
+              name: 'mcp__forge-browser__browser_take_screenshot',
+              input: {},
+            },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'screenshot',
+              content: [
+                { type: 'text', text: 'Screenshot saved' },
+                {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: pixels,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: 'Done' },
+      },
+    ];
+    const evidence = await nativeEvidence(
+      records.map((record) => JSON.stringify(record)).join('\n'),
+    );
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available')
+      throw new Error('Expected native evidence');
+    const normalized = JSON.stringify(evidence.trajectory);
+    assert.ok(!normalized.includes(pixels));
+    assert.match(normalized, /Screenshot saved/);
+    assert.match(
+      normalized,
+      /image content retained only in the native artifact/,
+    );
+    assert.ok(
+      evidence.warnings.some((warning) => warning.code === 'value_omitted'),
+    );
+    assert.ok(
+      !createJudgeTranscriptProjection(
+        parseAtifTrajectory(evidence.trajectory),
+      ).transcriptJson.includes(pixels),
+    );
+  });
   it('returns unavailable native evidence without constructing fallback', async () => {
     const evidence = await loadClaudeEvidence({
       project: undefined,

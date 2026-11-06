@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 // Executes inside the real eval container. The scripted interaction makes no model calls.
-const endpoint = 'http://127.0.0.1:8931/mcp';
+const endpoint = JSON.parse(
+  readFileSync('/home/forge/.forge-browser/mcp.json', 'utf8'),
+).mcpServers['forge-browser'].url;
 const signal = AbortSignal.timeout(60_000);
 async function connect() {
   let session;

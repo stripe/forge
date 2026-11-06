@@ -91,7 +91,10 @@ export async function runBrowserSetupIntegration({
                     options,
                   );
                   assert.equal(listed.exitCode, 0);
-                  assert.match(listed.stdout, /127\.0\.0\.1:8931\/mcp/);
+                  assert.match(
+                    listed.stdout,
+                    /127\.0\.0\.1:[1-9][0-9]{0,4}\/mcp/,
+                  );
                 } else {
                   assert.equal(argv[0], 'claude');
                   const index = argv.indexOf('--mcp-config');
@@ -106,7 +109,10 @@ export async function runBrowserSetupIntegration({
                     Buffer.from(await state.readFile('mcp.json')).toString(),
                   );
                   const endpoint = document.mcpServers['forge-browser'].url;
-                  assert.equal(endpoint, 'http://127.0.0.1:8931/mcp');
+                  assert.match(
+                    endpoint,
+                    /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/mcp$/,
+                  );
                   // `mcp list` excludes invocation-only --mcp-config connections.
                   // Independently exercise native registration support, then remove it.
                   const added = await context.runtime.commands.agent.run(
@@ -129,7 +135,10 @@ export async function runBrowserSetupIntegration({
                     options,
                   );
                   assert.equal(listed.exitCode, 0, listed.stderr);
-                  assert.match(listed.stdout, /127\.0\.0\.1:8931\/mcp/);
+                  assert.match(
+                    listed.stdout,
+                    /127\.0\.0\.1:[1-9][0-9]{0,4}\/mcp/,
+                  );
                   const removed = await context.runtime.commands.agent.run(
                     [
                       'claude',

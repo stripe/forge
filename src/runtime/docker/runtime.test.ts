@@ -177,64 +177,67 @@ describe('Forge Docker runtime', () => {
     assert.equal(Object.hasOwn(adapter, 'version'), false);
   });
 
-  it('separates browser image builds and stops the service before sealing the container', async () => {
-    const temporaryRoot = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'forge-browser-runtime-'),
-    );
-    roots.push(temporaryRoot);
-    const docker = fakeDocker();
-    const adapter = createDockerRuntimeAdapter({
-      temporaryRoot,
-      hostCommands: docker.runner,
-    });
-    const input = preparation();
-    const browser = {
-      access: { agent: true, role_player: false },
-      integration: { provider: 'local', controller: 'playwright-mcp' },
-    } as const;
-    const ordinary = await adapter.prepare(input);
-    const withBrowser = await adapter.prepare({
-      ...input,
-      runId: 'browser-run',
-      plan: { ...input.plan, browser },
-    });
-    const builds = docker.calls.filter((call) => call.argv[1] === 'build');
-    assert.equal(builds.length, 2);
-    assert.ok(builds[0]!.argv.includes('FORGE_BROWSER_ENABLED=false'));
-    assert.ok(builds[1]!.argv.includes('FORGE_BROWSER_ENABLED=true'));
-    assert.notEqual(
-      builds[0]!.argv[builds[0]!.argv.indexOf('--tag') + 1],
-      builds[1]!.argv[builds[1]!.argv.indexOf('--tag') + 1],
-    );
-    await withBrowser.finalizeSetup();
-    const before = docker.calls.length;
-    const sealed = await withBrowser.quiesce();
-    const calls = docker.calls.slice(before);
-    assert.ok(calls[0]!.argv.includes('forge-browser'));
-    assert.equal(calls[0]!.argv.at(-1), 'stop');
-    assert.equal(calls[1]!.argv[1], 'stop');
-    assert.equal(sealed.metadata.browserEnabled, 'true');
-    await withBrowser.dispose();
-    await ordinary.dispose();
-    assert.throws(
-      () =>
-        adapter.preflight({
-          plan: { ...input.plan, browser },
-          environment: { variables: {} },
-          requirements: {
-            executables: [],
-            stateDirectories: [
-              {
-                id: 'sealed',
-                containerPath: '/opt/sealed',
-                sealAfterSetup: true,
-              },
-            ],
-          },
-        }),
-      /setup-sealed/,
-    );
-  });
+  it.each([false, true])(
+    'separates browser image builds and stops the service before sealing (setup finalized: %s)',
+    async (finalized) => {
+      const temporaryRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'forge-browser-runtime-'),
+      );
+      roots.push(temporaryRoot);
+      const docker = fakeDocker();
+      const adapter = createDockerRuntimeAdapter({
+        temporaryRoot,
+        hostCommands: docker.runner,
+      });
+      const input = preparation();
+      const browser = {
+        access: { agent: true, role_player: false },
+        integration: { provider: 'local', controller: 'playwright-mcp' },
+      } as const;
+      const ordinary = await adapter.prepare(input);
+      const withBrowser = await adapter.prepare({
+        ...input,
+        runId: 'browser-run',
+        plan: { ...input.plan, browser },
+      });
+      const builds = docker.calls.filter((call) => call.argv[1] === 'build');
+      assert.equal(builds.length, 2);
+      assert.ok(builds[0]!.argv.includes('FORGE_BROWSER_ENABLED=false'));
+      assert.ok(builds[1]!.argv.includes('FORGE_BROWSER_ENABLED=true'));
+      assert.notEqual(
+        builds[0]!.argv[builds[0]!.argv.indexOf('--tag') + 1],
+        builds[1]!.argv[builds[1]!.argv.indexOf('--tag') + 1],
+      );
+      if (finalized) await withBrowser.finalizeSetup();
+      const before = docker.calls.length;
+      const sealed = await withBrowser.quiesce();
+      const calls = docker.calls.slice(before);
+      assert.ok(calls[0]!.argv.includes('forge-browser'));
+      assert.equal(calls[0]!.argv.at(-1), 'stop');
+      assert.equal(calls[1]!.argv[1], 'stop');
+      assert.equal(sealed.metadata.browserEnabled, 'true');
+      await withBrowser.dispose();
+      await ordinary.dispose();
+      assert.throws(
+        () =>
+          adapter.preflight({
+            plan: { ...input.plan, browser },
+            environment: { variables: {} },
+            requirements: {
+              executables: [],
+              stateDirectories: [
+                {
+                  id: 'sealed',
+                  containerPath: '/opt/sealed',
+                  sealAfterSetup: true,
+                },
+              ],
+            },
+          }),
+        /setup-sealed/,
+      );
+    },
+  );
 
   for (const cancelledIndex of [0, 1]) {
     it(`isolates cancellation of image-build ${cancelledIndex === 0 ? 'starter' : 'follower'} from other evals`, async () => {

@@ -7,10 +7,12 @@ const state = '/home/forge/.forge-browser';
 const ready = path.join(state, 'ready');
 const pidFile = path.join(state, 'pid');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+let cleanup = async () => {};
 
 async function main() {
   const mode = process.argv[2];
   if (mode === 'start') {
+    fs.rmSync(ready, { force: true });
     const log = fs.openSync(path.join(state, 'service.log'), 'a', 0o600);
     const child = spawn(process.execPath, [__filename, 'serve'], {
       detached: true, stdio: ['ignore', log, log],
@@ -19,11 +21,22 @@ async function main() {
     });
     fs.closeSync(log);
     child.unref();
-    for (let i = 0; i < 500; i++) {
-      if (fs.existsSync(ready)) return;
-      await delay(100);
+    try {
+      for (let i = 0; i < 500; i++) {
+        if (fs.existsSync(ready)) {
+          const receipt = JSON.parse(fs.readFileSync(ready, 'utf8'));
+          if (receipt.pid !== child.pid) throw new Error('Unexpected browser owner.');
+          process.stdout.write(receipt.url + '\n');
+          return;
+        }
+        process.kill(child.pid, 0);
+        await delay(100);
+      }
+      throw new Error('Browser startup timed out.');
+    } catch (error) {
+      try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+      throw error;
     }
-    throw new Error('Browser startup timed out.');
   }
   if (mode === 'stop') {
     if (!fs.existsSync(pidFile)) return;
@@ -31,8 +44,10 @@ async function main() {
     if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error('Invalid browser PID.');
     try { process.kill(pid, 'SIGTERM'); } catch (error) {
       if (error.code !== 'ESRCH') throw error;
+      fs.rmSync(ready, { force: true });
+      return;
     }
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 100; i++) {
       if (!fs.existsSync(ready)) return;
       await delay(100);
     }
@@ -40,42 +55,55 @@ async function main() {
   }
   if (mode !== 'serve') throw new Error('Expected start, stop, or serve.');
   fs.writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
-  const { chromium } = require('playwright');
-  const browser = await chromium.launchPersistentContext('/tmp/forge-browser-profile', {
-    headless: true, viewport: { width: 1280, height: 720 },
-    args: ['--no-sandbox', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9222'],
-  });
-  fs.mkdirSync(path.join(state, 'captures'), { recursive: true });
-  const controller = spawn(process.execPath, [
-    path.join(__dirname, 'node_modules/@playwright/mcp/cli.js'),
-    '--host', '127.0.0.1', '--port', '8931', '--headless', '--no-sandbox',
-    '--no-webmcp', '--shared-browser-context', '--viewport-size', '1280x720',
-    '--cdp-endpoint', 'http://127.0.0.1:9222',
-    '--output-dir', path.join(state, 'captures'),
-  ], { env: process.env, stdio: ['ignore', 'inherit', 'inherit'] });
-  let stopping = false;
-  const stop = async () => {
-    if (stopping) return;
-    stopping = true;
-    controller.kill('SIGTERM');
-    await browser.close().catch(() => {});
+  const profile = fs.mkdtempSync('/tmp/forge-browser-');
+  let browser;
+  let controller;
+  let stopping;
+  cleanup = () => stopping ??= (async () => {
+    if (controller && controller.exitCode === null && controller.signalCode === null) {
+      const exited = new Promise(resolve => controller.once('exit', resolve));
+      controller.kill('SIGTERM');
+      await exited;
+    }
+    await browser?.close();
     fs.rmSync(ready, { force: true });
-    process.exit(0);
-  };
+    fs.rmSync(pidFile, { force: true });
+    fs.rmSync(profile, { recursive: true, force: true });
+  })();
+  const stop = () => { void cleanup().then(() => process.exit(0), () => process.exit(1)); };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
-  controller.once('error', () => { void stop(); });
-  controller.once('exit', () => { void stop(); });
-  for (let i = 0; i < 300; i++) {
-    try {
-      const response = await fetch('http://127.0.0.1:8931/mcp', { signal: AbortSignal.timeout(1000) });
-      if (response.status < 500) {
-        fs.writeFileSync(ready, 'ready\n', { mode: 0o600 });
-        return;
-      }
-    } catch {}
-    await delay(100);
-  }
-  await stop();
+  const { chromium } = require('playwright');
+  browser = await chromium.launchPersistentContext(profile, {
+    headless: true, viewport: { width: 1280, height: 720 },
+    args: ['--no-sandbox', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'],
+  });
+  const [cdpPort] = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n');
+  if (!/^[1-9][0-9]{0,4}$/.test(cdpPort) || +cdpPort > 65535) throw new Error('Invalid CDP port.');
+  fs.mkdirSync(path.join(state, 'captures'), { recursive: true });
+  controller = spawn(process.execPath, [
+    path.join(__dirname, 'node_modules/@playwright/mcp/cli.js'),
+    '--host', '127.0.0.1', '--port', '0', '--headless', '--no-sandbox',
+    '--no-webmcp', '--shared-browser-context', '--viewport-size', '1280x720',
+    '--cdp-endpoint', `http://127.0.0.1:${cdpPort}`,
+    '--output-dir', path.join(state, 'captures'),
+  ], { env: process.env, stdio: ['ignore', 'inherit', 'pipe'] });
+  // The pinned controller reports its OS-assigned listening address after binding.
+  // Read our child's report, never probe a preselected port that another run could own.
+  let output = '';
+  controller.stderr.on('data', chunk => {
+    process.stderr.write(chunk);
+    output = (output + chunk.toString()).slice(-8192);
+    const match = /Listening on (http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4})[\r\n]/.exec(output);
+    if (match && !stopping) {
+      fs.writeFileSync(ready, JSON.stringify({ pid: process.pid, url: `${match[1]}/mcp` }), { mode: 0o600 });
+    }
+  });
+  controller.once('error', () => { void cleanup().finally(() => process.exit(1)); });
+  controller.once('exit', () => { if (!stopping) void cleanup().finally(() => process.exit(1)); });
 }
-main().catch(() => { process.stderr.write('Browser service failed.\n'); process.exit(1); });
+main().catch(async () => {
+  await cleanup().catch(() => {});
+  process.stderr.write('Browser service failed.\n');
+  process.exit(1);
+});

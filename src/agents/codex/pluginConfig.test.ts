@@ -112,7 +112,9 @@ trusted_hash = "sha256:${'a'.repeat(64)}"
       'forge-browser': { url: 'http://127.0.0.1:8931/mcp' },
     });
     for (const declaration of [
-      { 'forge-browser': { url: 'http://127.0.0.1:9999/mcp' } },
+      { 'forge-browser': { url: 'http://127.0.0.1:65536/mcp' } },
+      { 'forge-browser': { url: 'http://localhost:1234/mcp' } },
+      { 'forge-browser': { url: 'http://127.0.0.1:1234/other' } },
       { stripe: { url: 'https://mcp.stripe.com' } },
     ]) {
       await assert.rejects(declareCodexMcpServers(state.mutable, declaration));

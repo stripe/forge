@@ -687,12 +687,13 @@ export function createDockerRuntimeAdapter(
           sealedPromise ??= (async () => {
             await waitForImports();
             if (browserEnabled) {
-              const stoppedBrowser = await controller
-                .finalizedWithoutCredentials()
-                .run([BROWSER_EXECUTABLE, 'stop'], {
-                  timeoutMs: 15_000,
-                  maxOutputBytes: 64 * 1024,
-                });
+              const stoppedBrowser = await (setupFinalized
+                ? controller.finalizedWithoutCredentials()
+                : uncredentialedCommands
+              ).run([BROWSER_EXECUTABLE, 'stop'], {
+                timeoutMs: 15_000,
+                maxOutputBytes: 64 * 1024,
+              });
               if (stoppedBrowser.exitCode !== 0)
                 throw new Error(
                   'Browser could not stop before evidence sealing.',

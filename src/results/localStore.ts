@@ -41,6 +41,7 @@ import {
   FORGE_PLAYWRIGHT_VERSION,
 } from '../runtime/docker/assets.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
+import { isBrowserMcpUrl } from '../setup/forgeBrowser.ts';
 import { assertCompatibleForgeVersion } from '../version.ts';
 import {
   parseInteractionArtifact,
@@ -636,12 +637,14 @@ function verifySetupArtifact(
       const expected = {
         provider: 'local',
         controller: 'playwright-mcp',
+        mcp_url: step.resolution?.mcp_url,
         playwright_mcp_version: FORGE_PLAYWRIGHT_MCP_VERSION,
         playwright_version: FORGE_PLAYWRIGHT_VERSION,
       };
       if (
+        !isBrowserMcpUrl(step.resolution?.mcp_url) ||
         serializeCanonicalJson(step.resolution) !==
-        serializeCanonicalJson(expected)
+          serializeCanonicalJson(expected)
       ) {
         throw new ArtifactStoreError(
           'Browser setup resolution does not match this Forge release.',

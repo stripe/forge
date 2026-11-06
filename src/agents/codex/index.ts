@@ -9,7 +9,10 @@ import {
   credentialReference,
 } from '../../contracts/credentials.ts';
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
-import { BROWSER_MCP_URL } from '../../setup/forgeBrowser.ts';
+import {
+  BROWSER_STATE_ID,
+  readBrowserMcpUrl,
+} from '../../setup/forgeBrowser.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
 import {
@@ -170,6 +173,12 @@ export function createCodexAdapter(
     async openSession(context): Promise<AgentSession> {
       requirements(context.selection);
       assertCodexRuntimeLayout(layout, context.runtime.paths);
+      const browserState =
+        context.runtime.stateDirectories.get(BROWSER_STATE_ID);
+      const browserUrl =
+        context.plan.browser === undefined
+          ? undefined
+          : await readBrowserMcpUrl(browserState!);
       let currentSessionId: string | undefined;
       let sending = false;
       return {
@@ -190,7 +199,7 @@ export function createCodexAdapter(
               throw new TypeError('Codex run-owned state is unavailable.');
             if (context.plan.browser !== undefined) {
               await declareCodexMcpServers(home, {
-                'forge-browser': { url: BROWSER_MCP_URL },
+                'forge-browser': { url: browserUrl! },
               });
             }
             await prepareCodexPluginConfiguration(home);

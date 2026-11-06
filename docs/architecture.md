@@ -849,10 +849,10 @@ capability and declares the `forge-browser` executable plus run-owned
 the browser-enabled image only for selected browser plans. Its locked dependency
 graph and service bytes are part of the packaged asset digest. Ordered setup
 starts provider-owned Chromium and an HTTP Playwright MCP controller attached
-through CDP. Both bind to container loopback. The service receives an explicit
-credential-free environment. Browser state persists across agent CLI turns;
-Claude loads the run-owned MCP file on every turn, and Codex preserves the fixed
-loopback connection alongside its validated plugin MCP declarations. No browser
+through CDP. Both bind to loopback on OS-assigned ports; setup records the
+controller endpoint. The service receives an explicit credential-free environment. Browser state persists across agent CLI turns;
+Claude loads the run-owned MCP file on every turn, and Codex preserves the
+run-owned loopback connection alongside its validated plugin MCP declarations. No browser
 instructions or skills are injected into the task.
 
 Docker quiescence stops the browser/controller and container before evidence
@@ -881,8 +881,10 @@ committed atomically with the run; local storage uses mode `0600`. The completed
 run verifier checks identity, limits, and manifest/descriptor agreement in
 addition to verifying every artifact's bytes. A browser run with no screenshots
 still stores an empty manifest. Pixels are unredacted and never loaded by the
-text-only judge. Normal browser tool activity remains subject to the existing
-native/fallback transcript selection policy.
+text-only judge. Native inline images are omitted from normalized tool output with
+explicit fidelity warnings; the restricted native log can retain them. Normal
+browser tool activity remains subject to the existing native/fallback transcript
+selection policy.
 
 ## Interaction architecture
 
