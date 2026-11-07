@@ -221,9 +221,14 @@ export interface DockerResourcesV1 {
   process_count: number;
 }
 
+/** An authored pin selects only a matching explicit host build bundle. */
+export type DockerImageV1 =
+  | { kind: 'forge' }
+  | { kind: 'build'; id: string; sha256: `sha256:${string}` };
+
 export interface ForgeDockerRuntimeV1 {
   adapter: 'docker';
-  image: { kind: 'forge' };
+  image: DockerImageV1;
   platform: 'linux/amd64' | 'linux/arm64';
   resources: DockerResourcesV1;
 }
@@ -231,7 +236,7 @@ export interface ForgeDockerRuntimeV1 {
 /** Docker authoring form; `native` is materialized before a run plan exists. */
 export interface ForgeDockerRuntimeConfigV1 {
   adapter: 'docker';
-  image: { kind: 'forge' };
+  image: DockerImageV1;
   platform: ForgeDockerRuntimeV1['platform'] | 'native';
   resources: DockerResourcesV1;
 }
