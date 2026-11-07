@@ -5,6 +5,11 @@ export {
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.ts';
 export {
+  type DockerImageExtension,
+  type DockerImageExtensionInput,
+  defineDockerImageExtension,
+} from './imageExtension.ts';
+export {
   type DetectDockerRuntimePlatformOptions,
   detectDockerRuntimePlatform,
 } from './platform.ts';

@@ -600,6 +600,10 @@ derived snapshots and can be stale after interruption.
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
 
+Embedding hosts can add tools using a trusted, pinned
+[Docker image extension](docs/architecture.md#built-in-docker-runtime) while
+reusing Forge's runtime lifecycle. The CLI uses the packaged base image.
+
 ## Development
 
 Development requires Node.js 22.12 or newer. From a source checkout with

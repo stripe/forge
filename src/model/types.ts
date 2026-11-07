@@ -223,7 +223,10 @@ export interface DockerResourcesV1 {
 
 export interface ForgeDockerRuntimeV1 {
   adapter: 'docker';
-  image: { kind: 'forge' };
+  image: {
+    kind: 'forge';
+    extension?: { id: string; sha256: `sha256:${string}` };
+  };
   platform: 'linux/amd64' | 'linux/arm64';
   resources: DockerResourcesV1;
 }
@@ -231,7 +234,10 @@ export interface ForgeDockerRuntimeV1 {
 /** Docker authoring form; `native` is materialized before a run plan exists. */
 export interface ForgeDockerRuntimeConfigV1 {
   adapter: 'docker';
-  image: { kind: 'forge' };
+  image: {
+    kind: 'forge';
+    extension?: { id: string; sha256: `sha256:${string}` };
+  };
   platform: ForgeDockerRuntimeV1['platform'] | 'native';
   resources: DockerResourcesV1;
 }

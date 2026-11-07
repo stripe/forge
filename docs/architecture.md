@@ -701,6 +701,25 @@ built image ID. Image builds begin during runtime preparation or explicit
 selection do not build an image. A runtime adapter shares its build per platform,
 and Docker's content cache can reuse layers across invocations.
 
+Embedding hosts can supply an explicit immutable image extension through
+`defineDockerImageExtension` and `createDockerRuntimeAdapter({imageExtension})`.
+The extension contains a bounded UTF-8 Dockerfile and build-context files. Its
+Dockerfile starts with `ARG FORGE_BASE_IMAGE` followed by
+`FROM ${FORGE_BASE_IMAGE}`; Forge creates a local alias named by the verified base's immutable image ID
+and passes that alias to Docker, which requires a named image for `FROM`.
+The runtime's `image.extension: {id, sha256}` pins the bundle in the plan.
+Pure preflight rejects a requested extension without a matching host bundle;
+omitting the pin selects the base image even when a bundle is available.
+The extension is trusted host code and can execute arbitrary build commands;
+its digest identifies supplied bytes, not downloaded package contents.
+No Dockerfile paths or imports are discovered from authored YAML or environment
+variables. Extension builds probe the Forge user and pinned agent versions;
+they are not a general proof of image equivalence. Hosts must preserve the
+entrypoint, workspace/home layout, and tool behavior. Runtime metadata records
+the extension identity, base image ID, and selected immutable image ID.
+`validateDockerRuntimeHost({imageExtension})` builds and probes the extension
+without allocating an eval. The public CLI does not supply extension bundles.
+
 Each run uses a non-root container with a read-only image filesystem. On hosts
 which expose a non-root Unix UID, Forge builds the image's named `forge` user
 with that UID so host and container views of bind-mounted files have the same
@@ -1727,7 +1746,8 @@ The public CLI and built-in composition currently have these limits:
   cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content
   checks, and root-trajectory tool call checks on names and arguments. Post-agent test commands and static-analysis checks are not built in.
-- The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
+- The Docker adapter accepts the Forge-owned image with optional explicit host
+  image extensions. Arbitrary replacement images, mounts, and
   network policies need a host-supplied [runtime adapter](#runtime-architecture).
 - Execution is local, with bounded concurrency and explicit resume. There is no
   distributed scheduler, automatic experiment retry loop, remote publisher, or

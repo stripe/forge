@@ -43,6 +43,14 @@ try {
       progress,
     });
   } else if (mode === 'setup') {
+    const { runImageExtensionIntegration } = await import(
+      './live/imageExtension.mjs'
+    );
+    const imageExtension = await runImageExtensionIntegration({
+      ...configuration,
+      signal,
+      progress,
+    });
     const { runSetupIntegrationSuite } = await import('./live/setup.mjs');
     const setup = await runSetupIntegrationSuite({
       ...configuration,
@@ -59,6 +67,7 @@ try {
       suite_id: suiteId,
       mode,
       setup,
+      image_extension: imageExtension,
       ...(codex === undefined ? {} : { codex }),
     };
   } else {
