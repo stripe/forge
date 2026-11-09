@@ -109,9 +109,7 @@ describe('OpenCode 1.19.0 archived native exports', () => {
         turns.flatMap((turn) => turn.toolCalls.map((call) => call.name)),
         tools,
       );
-      assert.ok(
-        turns.every((turn) => turn.sessionId === input.sessionId),
-      );
+      assert.ok(turns.every((turn) => turn.sessionId === input.sessionId));
       const evidence = await loadOpenCodeEvidence(input);
       assert.equal(evidence.kind, 'available');
       if (evidence.kind !== 'available') return;
@@ -169,10 +167,10 @@ describe('OpenCode 1.19.0 archived native exports', () => {
   it('replays reused gateway call IDs across separate resumed turns', async () => {
     const { value, input, body } = await fixture('reused-call-id');
     const turns = replayTurns(value);
-    assert.deepEqual(turns.map((turn) => turn.text), [
-      'Reply 1.\n\nReply 2.',
-      'Reply 3.\n\nReply 4.',
-    ]);
+    assert.deepEqual(
+      turns.map((turn) => turn.text),
+      ['Reply 1.\n\nReply 2.', 'Reply 3.\n\nReply 4.'],
+    );
     assert.deepEqual(
       turns.map((turn) => turn.toolCalls.map((call) => call.id)),
       [['call_1', 'call_2'], ['call_1']],
@@ -226,10 +224,10 @@ describe('OpenCode 1.19.0 archived native exports', () => {
       collected,
     });
     assert.equal(selected.provenance.source.kind, 'driver_fallback');
-    assert.deepEqual(selected.warnings.map((warning) => warning.code), [
-      'source_incomplete',
-      'fallback_used',
-    ]);
+    assert.deepEqual(
+      selected.warnings.map((warning) => warning.code),
+      ['source_incomplete', 'fallback_used'],
+    );
     assert.equal(selected.trajectory.steps[1]!.message, turns[0]!.text);
     assert.equal(
       JSON.stringify(selected.trajectory).includes('Summary omitted.'),
