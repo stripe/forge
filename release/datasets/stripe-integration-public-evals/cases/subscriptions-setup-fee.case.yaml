@@ -1,0 +1,24 @@
+id: stripe-integration-public-evals/subscriptions-setup-fee
+version: 0.1.0
+task: |-
+  I'm building a managed IT service called "OpsDesk" using Next.js and TypeScript. New customers pay a one-time $299 onboarding fee and then $99/month for support. Both charges should be collected in one Checkout flow, but only the support plan should renew. Build the Stripe integration using the stripe npm package. Requirements: - Start Checkout with the one-time and recurring Prices - Show the onboarding fee and monthly plan as separate line items - Confirm the initial invoice was paid before provisioning - Ensure future invoices contain only the recurring support plan - Handle subscription and payment failures through webhooks Assume Next.js App Router is set up and both Price IDs already exist.
+initial_prompt: |-
+  I'm building a managed IT service called "OpsDesk" using Next.js and TypeScript. New customers pay a one-time $299 onboarding fee and then $99/month for support. Both charges should be collected in one Checkout flow, but only the support plan should renew. Build the Stripe integration using the stripe npm package. Requirements: - Start Checkout with the one-time and recurring Prices - Show the onboarding fee and monthly plan as separate line items - Confirm the initial invoice was paid before provisioning - Ensure future invoices contain only the recurring support plan - Handle subscription and payment failures through webhooks Assume Next.js App Router is set up and both Price IDs already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates one mode ''subscription'' Checkout Session containing the one-time $299 Price and recurring $99 monthly Price as separate line items.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a one-time Price for onboarding and a recurring Price for support.'
+    requirement_level: MUST
+  - value: 'MUST: Confirms the initial invoice is paid and contains both expected Price IDs before provisioning.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies a later renewal invoice contains the recurring support Price and does not contain the onboarding Price.'
+    requirement_level: MUST
+  - value: 'MUST: Includes a renewal test, such as advancing a Test Clock or otherwise generating a test renewal, that asserts invoice line-item Price IDs rather than only inspecting the created subscription.'
+    requirement_level: MUST
+  - value: 'MUST NOT use payment mode, a second Checkout Session, or a recurring Price for the onboarding fee.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and handles checkout.session.completed, invoice.paid, and invoice.payment_failed idempotently by event ID.'
+    requirement_level: MUST

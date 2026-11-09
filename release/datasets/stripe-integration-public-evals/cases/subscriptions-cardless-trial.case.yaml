@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/subscriptions-cardless-trial
+version: 0.1.0
+task: |-
+  I'm building a writing assistant called "DraftPilot" using Next.js and TypeScript. Users can start a 14-day Pro trial without entering a card. Three days before the trial ends, ask them to add a payment method; if none is present at the end, pause the subscription and access. Build the flow using the stripe npm package. Requirements: - Start a subscription trial without Checkout collecting a payment method - Configure Stripe's missing-payment-method behavior - Create a SetupIntent flow for adding a card during the trial - Resume the paused subscription after a valid payment method is attached - Synchronize trial and access state through webhooks Assume Next.js App Router is set up.
+initial_prompt: |-
+  I'm building a writing assistant called "DraftPilot" using Next.js and TypeScript. Users can start a 14-day Pro trial without entering a card. Three days before the trial ends, ask them to add a payment method; if none is present at the end, pause the subscription and access. Build the flow using the stripe npm package. Requirements: - Start a subscription trial without Checkout collecting a payment method - Configure Stripe's missing-payment-method behavior - Create a SetupIntent flow for adding a card during the trial - Resume the paused subscription after a valid payment method is attached - Synchronize trial and access state through webhooks Assume Next.js App Router is set up.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates the 14-day subscription trial without requiring a PaymentMethod and sets trial_settings.end_behavior.missing_payment_method to ''pause''.'
+    requirement_level: MUST
+  - value: 'MUST: Creates a Customer-scoped SetupIntent with usage ''off_session'' and confirms it client-side, including any required customer action.'
+    requirement_level: MUST
+  - value: 'MUST: After the SetupIntent succeeds, sets the resulting PaymentMethod as subscription.default_payment_method and resumes the same paused subscription with stripe.subscriptions.resume.'
+    requirement_level: MUST
+  - value: 'MUST: Waits for any resumption invoice to be paid and confirms current subscription state before restoring paid access.'
+    requirement_level: MUST
+  - value: 'MUST NOT use pause_collection, clear pause_collection, or change trial_end as a substitute for resuming a subscription whose status is ''paused''.'
+    requirement_level: MUST
+  - value: 'MUST: Uses customer.subscription.trial_will_end to send the three-day payment-method reminder and handles customer.subscription.paused and customer.subscription.resumed as true status transitions.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures from the raw request body and processes relevant events idempotently by event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Derives access from persisted, current Stripe subscription and invoice state rather than the browser redirect or SetupIntent result alone.'
+    requirement_level: MUST

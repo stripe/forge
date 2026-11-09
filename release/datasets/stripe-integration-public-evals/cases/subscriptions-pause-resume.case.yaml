@@ -1,0 +1,28 @@
+id: stripe-integration-public-evals/subscriptions-pause-resume
+version: 0.1.0
+task: |-
+  I'm building a seasonal fitness app called "TrailFit" using Node.js and TypeScript. Customers can either pause payment collection for up to 60 days while retaining read-only access, or resume a subscription that Stripe truly paused after a cardless trial ended without a payment method. Build both flows with the stripe npm package and make their different behavior explicit. Requirements: - Add endpoints for collection pause, scheduled collection resume, and true paused-subscription resume - Preserve the subscription status correctly in each case - Apply the right access policy for each pause type - Keep local state synchronized through webhooks Assume an Express app and database helpers already exist.
+initial_prompt: |-
+  I'm building a seasonal fitness app called "TrailFit" using Node.js and TypeScript. Customers can either pause payment collection for up to 60 days while retaining read-only access, or resume a subscription that Stripe truly paused after a cardless trial ended without a payment method. Build both flows with the stripe npm package and make their different behavior explicit. Requirements: - Add endpoints for collection pause, scheduled collection resume, and true paused-subscription resume - Preserve the subscription status correctly in each case - Apply the right access policy for each pause type - Keep local state synchronized through webhooks Assume an Express app and database helpers already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: For read-only access, updates pause_collection with an explicit behavior and a resumes_at no more than 60 days in the future.'
+    requirement_level: MUST
+  - value: 'MUST: Persists pause_collection separately and does not set or report subscription.status as ''paused'' for that flow.'
+    requirement_level: MUST
+  - value: 'MUST: Clears pause_collection to resume collection and does not wait for customer.subscription.resumed.'
+    requirement_level: MUST
+  - value: 'MUST: For a subscription truly paused after a cardless trial, sets a verified usable default PaymentMethod and calls stripe.subscriptions.resume with intentional billing_cycle_anchor and payment_behavior values.'
+    requirement_level: MUST
+  - value: 'MUST: Handles any resumption invoice and confirms current subscription and payment state before restoring full access.'
+    requirement_level: MUST
+  - value: 'MUST: Applies read-only access while pause_collection is set and withholds subscription access while status is ''paused''.'
+    requirement_level: MUST
+  - value: 'MUST: Uses customer.subscription.updated for pause_collection changes and customer.subscription.paused or customer.subscription.resumed only for true status transitions.'
+    requirement_level: MUST
+  - value: 'MUST: Authorizes the authenticated account owner for each pause or resume endpoint and does not trust a client-supplied Customer or subscription ID without an ownership check.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and processes pause-related events idempotently by event ID.'
+    requirement_level: MUST
