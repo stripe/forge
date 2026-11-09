@@ -523,7 +523,8 @@ describe('OpenCode adapter', () => {
     ])
       assert.throws(preflight, {
         name: 'TypeError',
-        message: /model_profile\.attachment: true.*input modalities.*attachment evidence/,
+        message:
+          /model_profile\.attachment: true.*input modalities.*attachment evidence/,
       });
     assert.equal(attachments.model_profile.attachment, true);
   });
