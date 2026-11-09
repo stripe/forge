@@ -17,7 +17,7 @@ const tokens = {
   input: 5,
   output: 2,
   reasoning: 1,
-  cache: { read: 3, write: 0 },
+  cache: { read: 3, write: 4 },
 };
 
 export function openCodeMessages(turn: OpenCodeFixtureTurn, index = 0) {

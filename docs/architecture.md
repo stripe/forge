@@ -1132,9 +1132,13 @@ export so a failed capture cannot leave stale native evidence eligible. An
 export failure preserves the completed driver turn; cancellation propagates.
 After quiescence, evidence collection only reads the saved JSON. Normalization
 validates session/version/model identity and retains user text, assistant text,
-reasoning, correlated tool results and errors, and available usage. Compaction,
-attachments, unsupported conversation parts, or incomplete tools trigger
-explicit fallback. Exact parseable session exports remain restricted artifacts
+reasoning, correlated tool results and errors, and available usage. ATIF prompt
+tokens include native input, cache read, and cache write; completion tokens
+include native output and reasoning. Raw counters remain in metrics `extra`.
+Missing native cost is omitted; a live turn's `costUsd` is omitted if any finished
+step lacks cost. Explicit zero costs are preserved, without inferring pricing.
+Compaction, attachments, unsupported conversation parts, or incomplete tools
+trigger explicit fallback. Exact parseable session exports remain restricted artifacts
 even when their content cannot be normalized. Native auto-compaction remains
 enabled; turn replies retain assistant text before and after compaction but
 exclude the summary message immediately preceding a synthetic continuation,

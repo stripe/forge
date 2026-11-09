@@ -154,7 +154,20 @@ describe('OpenCode native evidence', () => {
     assert.equal(trajectory.steps.length, 6);
     assert.equal(trajectory.steps[1]!.source, 'agent');
     assert.equal(trajectory.steps[1]!.reasoning_content, 'Private reasoning.');
-    assert.equal(trajectory.steps[1]!.metrics?.cached_tokens, 3);
+    for (const step of trajectory.steps.filter((step) => step.source === 'agent'))
+      assert.deepEqual(step.metrics, {
+        prompt_tokens: 12,
+        completion_tokens: 3,
+        cached_tokens: 3,
+        cost_usd: 0.01,
+        extra: {
+          input_tokens: 5,
+          output_tokens: 2,
+          reasoning_tokens: 1,
+          cache_read_tokens: 3,
+          cache_write_tokens: 4,
+        },
+      });
     assert.equal(
       trajectory.steps[4]!.observation?.results[0]?.extra?.is_error,
       true,
@@ -168,6 +181,36 @@ describe('OpenCode native evidence', () => {
       Buffer.from((await loadOpenCodeNativeArtifact(input))!.body).toString(),
       body,
     );
+  });
+  it('omits missing native cost while preserving explicit zero and reported cost', async () => {
+    const value = openCodeExport([turns[0]!]);
+    Object.assign(value.messages[1]!.info, { cost: undefined });
+    Object.assign(value.messages[2]!.info, { cost: 0 });
+    const { input, body } = fixture(value);
+    const evidence = await loadOpenCodeEvidence(input);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') return;
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    assert.equal(
+      Object.hasOwn(trajectory.steps[1]!.metrics!, 'cost_usd'),
+      false,
+    );
+    assert.equal(trajectory.steps[1]!.metrics?.prompt_tokens, 12);
+    assert.equal(trajectory.steps[2]!.metrics?.cost_usd, 0);
+    assert.equal(
+      Buffer.from((await loadOpenCodeNativeArtifact(input))!.body).toString(),
+      body,
+    );
+  });
+  it('rejects malformed native cost rather than treating it as missing', async () => {
+    for (const cost of [null, -1, '0.01']) {
+      const value = openCodeExport([turns[0]!]);
+      Object.assign(value.messages[1]!.info, { cost });
+      const evidence = await loadOpenCodeEvidence(fixture(value).input);
+      assert.equal(evidence.kind, 'unavailable');
+      if (evidence.kind === 'unavailable')
+        assert.equal(evidence.reason.code, 'source_invalid');
+    }
   });
   it('rejects wrong session/version/model and ambiguous native identities', async () => {
     const original = openCodeExport(turns);
