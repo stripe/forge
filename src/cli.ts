@@ -44,7 +44,10 @@ import {
   serializeResolvedRunPlan,
 } from './planning/index.ts';
 import { validateExperimentDataset } from './planning/planner.ts';
-import { createAnthropicCompletionProvider } from './providers/anthropic/index.ts';
+import {
+  AnthropicCompletionError,
+  createAnthropicCompletionProvider,
+} from './providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from './providers/openai/index.ts';
 import { createArtifactStore } from './results/index.ts';
 import {
@@ -1017,6 +1020,20 @@ function isUsageError(error: unknown): boolean {
 function errorMessage(error: unknown, running: boolean): string {
   const diagnostic = credentialDiagnostic(error, running);
   if (diagnostic !== undefined) return diagnostic;
+  const seen = new Set<unknown>();
+  let cause = error;
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    if (
+      cause instanceof AnthropicCompletionError &&
+      cause.code === 'invalid_request' &&
+      cause.message ===
+        'Claude Fable is not supported yet as the judge or Ava model.'
+    ) {
+      return cause.message;
+    }
+    cause = cause.cause;
+  }
   if (error instanceof Error && error.message) return error.message;
   return 'Unknown failure.';
 }

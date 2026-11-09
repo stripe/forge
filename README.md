@@ -101,12 +101,15 @@ and receive an output budget of at least 16,000 tokens to allow for reasoning.
 Reasoning blocks are excluded from completion text.
 
 Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
-Claude 4.5-or-newer model identifiers with strict structured-output support.
-Opus 4.7 and later and Claude 5-or-newer models use default sampling; Forge
-omits `temperature` for them.
-Claude 5-or-newer models always think, and thinking tokens share the output
-budget with answer text. Forge gives them at least 16,000 output tokens and
-excludes thinking blocks from completion text.
+Claude Haiku, Sonnet, or Opus 4.5-or-newer model identifiers with strict
+structured-output support. Claude Fable is not supported yet as the judge or
+Ava model; Forge rejects it during pure preflight, before credential lookup
+or model requests. Coding-agent model selection is separate.
+Opus 4.7 and later and supported-family models at version 5 or newer use
+default sampling; Forge omits `temperature` for them. Haiku, Sonnet, and Opus
+models at version 5 or newer always think, and thinking tokens share the
+output budget with answer text. Forge gives them at least 16,000 output tokens
+and excludes thinking blocks from completion text.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present,

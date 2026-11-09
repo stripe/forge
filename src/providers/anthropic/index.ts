@@ -36,6 +36,7 @@ const MAX_SCHEMA_NODES = 100_000;
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 const CLAUDE_MODEL_FAMILY_VERSION =
   /(?:^|[./-])claude-(haiku|sonnet|opus)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-./])/;
+const CLAUDE_FABLE_MODEL = /(?:^|[./-])claude-fable(?=$|[-./])/;
 const ANTHROPIC_UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
   'minimum',
   'maximum',
@@ -86,7 +87,7 @@ export class AnthropicCompletionError extends Error {
   }
 }
 
-/** Anthropic structured outputs require Claude 4.5 or newer. */
+/** Forge supports structured outputs for Claude Haiku, Sonnet, and Opus 4.5+. */
 export function supportsAnthropicStructuredOutputModel(model: string): boolean {
   return claudeModelCapabilities(model).structuredOutput;
 }
@@ -315,6 +316,12 @@ function assertModel(model: ModelRefV1, providerId: string): void {
     throw new AnthropicCompletionError(
       'invalid_request',
       'Anthropic completion model does not match this provider.',
+    );
+  }
+  if (CLAUDE_FABLE_MODEL.test(model.model)) {
+    throw new AnthropicCompletionError(
+      'invalid_request',
+      'Claude Fable is not supported yet as the judge or Ava model.',
     );
   }
   if (!supportsAnthropicStructuredOutputModel(model.model)) {

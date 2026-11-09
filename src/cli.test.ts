@@ -3370,6 +3370,105 @@ describe('Forge CLI', () => {
     });
   }
 
+  for (const purpose of ['judge', 'role_player'] as const) {
+    for (const command of ['validate', 'run'] as const) {
+      it(`clearly rejects a Fable ${purpose} on ${command} before credential lookup or execution`, async () => {
+        const fixture = await createBenchmarkFixture({
+          withHostCompletions: true,
+          models: {
+            [purpose]: { provider: 'anthropic', model: 'claude-fable-5-1' },
+          },
+        });
+        let stderr = '';
+        let credentialReads = 0;
+        let executions = 0;
+        const environment = {
+          get ANTHROPIC_API_KEY(): string {
+            credentialReads += 1;
+            throw new Error('must not read credentials');
+          },
+          get OPENAI_API_KEY(): string {
+            credentialReads += 1;
+            throw new Error('must not read credentials');
+          },
+        };
+        const exitCode = await runCli(
+          [
+            command,
+            '--experiment',
+            fixture.experimentPath,
+            ...(command === 'run'
+              ? [
+                  '--credential-env',
+                  'ANTHROPIC_API_KEY',
+                  '--credential-env',
+                  'OPENAI_API_KEY',
+                ]
+              : []),
+          ],
+          {
+            environment,
+            stdout: () => assert.fail('must not emit success output'),
+            stderr: (text) => {
+              stderr += text;
+            },
+            execute: async () => {
+              executions += 1;
+              throw new Error('must not execute');
+            },
+          },
+        );
+        assert.equal(exitCode, 1);
+        assert.equal(
+          stderr,
+          'forge: Claude Fable is not supported yet as the judge or Ava model.\n',
+        );
+        assert.equal(credentialReads, 0);
+        assert.equal(executions, 0);
+        await assert.rejects(
+          fs.access(path.join(fixture.root, 'experiments', 'results')),
+        );
+      });
+    }
+  }
+
+  it('allows Fable as a coding-agent model with supported Anthropic host models', async () => {
+    const fixture = await createBenchmarkFixture({
+      withHostCompletions: true,
+      models: {
+        judge: { provider: 'anthropic', model: 'claude-sonnet-5-1' },
+        role_player: { provider: 'anthropic', model: 'claude-opus-5-1' },
+      },
+    });
+    const config = parseExperimentConfigYaml(
+      await fs.readFile(fixture.experimentPath, 'utf8'),
+    );
+    await fs.writeFile(
+      fixture.experimentPath,
+      JSON.stringify({
+        ...config,
+        matrix: {
+          ...config.matrix,
+          agents: [
+            {
+              adapter: 'claude-code',
+              provider: 'anthropic',
+              model: 'claude-fable-5-1',
+            },
+          ],
+        },
+      }),
+    );
+    assert.equal(
+      await runCli(['validate', '--experiment', fixture.experimentPath], {
+        environment: {},
+        stdout: () => undefined,
+        stderr: (text) => assert.fail(text),
+      }),
+      0,
+    );
+  });
+
   it('rejects malformed credential mappings without echoing their value', async () => {
     const fixture = await createBenchmarkFixture();
     const accidentalSecret = 'sk-live-accidental-secret';

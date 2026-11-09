@@ -1019,6 +1019,9 @@ Provider-specific output budgets account for reasoning tokens without changing
 Ava or judge validation. Compatible endpoints and credentials are explicit host
 configuration; neither enters plans or results. See the README's
 [credentials](../README.md#requirements--credentials) for CLI bindings.
+The Anthropic provider supports Claude Haiku, Sonnet, and Opus 4.5 or newer.
+Its pure requirements validation explicitly rejects Claude Fable as a judge
+or Ava model before credentials or requests; coding-agent selection is separate.
 
 ## Evidence architecture
 

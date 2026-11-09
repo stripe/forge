@@ -617,6 +617,69 @@ describe('Anthropic completion provider', () => {
     assert.equal(destinationRequests, 0);
   });
 
+  it('explicitly rejects Fable for judge and Ava before credentials or fetch', async () => {
+    const transport = recordingFetch(() => messageResponse());
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
+    for (const purpose of ['judge', 'role_player'] as const) {
+      for (const modelName of [
+        'claude-fable',
+        'claude-fable-5-1',
+        'claude-fable-5-1-20261101',
+        'anthropic/claude-fable-5-1',
+        'gateway/claude-fable-5.1',
+        'gateway.claude-fable-5-1',
+        'gateway-claude-fable-5-1',
+      ]) {
+        const model = { provider: 'anthropic', model: modelName };
+        const expected = {
+          name: 'AnthropicCompletionError',
+          code: 'invalid_request',
+          message:
+            'Claude Fable is not supported yet as the judge or Ava model.',
+        };
+        assert.equal(supportsAnthropicStructuredOutputModel(modelName), false);
+        assert.throws(() => provider.requirements({ model, purpose }), expected);
+        await assert.rejects(
+          provider.preflight!({
+            runId: 'run-fable',
+            model,
+            purpose,
+            credentials: {},
+            signal: new AbortController().signal,
+          }),
+          expected,
+        );
+        await assert.rejects(
+          provider.complete(completionRequest({ model, purpose }), {
+            credentials: {},
+          }),
+          expected,
+        );
+      }
+    }
+    assert.equal(transport.calls.length, 0);
+  });
+
+  it('keeps lookalike names on the generic unsupported-model error', () => {
+    const provider = createAnthropicCompletionProvider();
+    for (const model of ['notclaude-fable-5-1', 'claude-fabled-5-1']) {
+      assert.throws(
+        () =>
+          provider.requirements({
+            model: { provider: 'anthropic', model },
+            purpose: 'judge',
+          }),
+        {
+          code: 'invalid_request',
+          message:
+            'Anthropic Forge completions require Claude 4.5 or newer structured outputs.',
+        },
+      );
+    }
+  });
+
   it('rejects provider mismatches and unsupported structured-output models before fetch', async () => {
     const transport = recordingFetch(() => messageResponse());
     const provider = createAnthropicCompletionProvider({
