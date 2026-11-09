@@ -195,6 +195,15 @@ try {
       assert.equal(typeof setup.defineSetupActionBundle, 'function');
       assert.equal(typeof testing.createScriptedCompletionProvider, 'function');
 
+      const bundleReceipt = {
+        adapter: 'custom-agent', installation: 'bundle', plugin: 'test@marketplace',
+        marketplace: 'owner/repo', marketplace_commit: 'a'.repeat(40), version: '1.0.0',
+        source: {kind: 'git-subdir', commit: 'b'.repeat(40), path: 'portable/plugin'},
+        installed_tree: {format: 'forge-plugin-tree-v1', sha256: 'sha256:' + 'c'.repeat(64),
+          entry_count: 1, file_count: 1, size_bytes: 1},
+      };
+      assert.deepEqual(forge.parseAgentPluginInstallationReceipt(bundleReceipt), bundleReceipt);
+
       const externalPlan = testing.createTestResolvedRunPlan({runtime: {
         adapter: 'package-smoke/process',
         platform: 'linux/amd64', config: {profile: 'offline'},

@@ -56,10 +56,24 @@ interface PluginInstallationReceiptBase extends JsonObject {
 
 export interface NativeAgentPluginInstallationReceipt
   extends PluginInstallationReceiptBase {
+  /** Absent only on the historical native wire shape. */
+  readonly installation?: 'native';
   readonly native_plugin_id: string;
 }
 
-/** An adapter materializes the Claude-format bundle and configures skills and MCP. */
+/** An adapter materializes and configures a Git subdirectory without a native ID. */
+export interface BundleAgentPluginInstallationReceipt
+  extends PluginInstallationReceiptBase {
+  readonly installation: 'bundle';
+  readonly source: JsonObject & {
+    readonly kind: 'git-subdir';
+    readonly commit: string;
+    /** Canonical portable repository-relative POSIX path. */
+    readonly path: string;
+  };
+}
+
+/** @deprecated Historical wire shape; new installations use the neutral bundle type. */
 export interface OpenCodeBundleInstallationReceipt
   extends PluginInstallationReceiptBase {
   readonly installation: 'opencode-bundle';
@@ -72,6 +86,7 @@ export interface OpenCodeBundleInstallationReceipt
 
 export type AgentPluginInstallationReceipt =
   | NativeAgentPluginInstallationReceipt
+  | BundleAgentPluginInstallationReceipt
   | OpenCodeBundleInstallationReceipt;
 
 /** Ambient-free context for binding one portable plugin to an agent adapter. */
@@ -81,7 +96,7 @@ export interface AgentPluginPreflightContext {
   readonly mcpServers?: readonly PluginMcpServerId[];
 }
 
-/** Narrow authority supplied to one already-preflighted native installation. */
+/** Narrow authority supplied to one already-preflighted installation. */
 export interface AgentPluginInstallContext {
   readonly runId: string;
   readonly paths: RuntimeLogicalPaths;
@@ -92,7 +107,7 @@ export interface AgentPluginInstallContext {
   readonly signal: AbortSignal;
 }
 
-/** One native plugin operation bound before credentials or runtime allocation. */
+/** One plugin operation bound before credentials or runtime allocation. */
 export interface PreparedAgentPluginInstallation {
   readonly requirements: RuntimeRequirements;
   install(
@@ -104,7 +119,7 @@ export interface PreparedAgentPluginInstallation {
 export interface AgentPluginInstaller {
   /** Accepts environment-backed bearer auth for bundled HTTP MCP servers. */
   readonly supportsMcpBearerAuth?: true;
-  /** Purely validate compatibility and bind the later native operation. */
+  /** Purely validate compatibility and bind the later installation. */
   preflight(
     plugin: PluginSelectionV1,
     context: AgentPluginPreflightContext,

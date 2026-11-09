@@ -218,6 +218,7 @@ describe('Claude plugin installer', () => {
       plugin: distribution.plugin,
       marketplace: distribution.marketplace,
       marketplace_commit: CATALOG_COMMIT,
+      installation: 'native',
       native_plugin_id: nativeId,
       version: LATEST_VERSION,
       source: { kind: 'git-subdir', commit: PLUGIN_COMMIT },

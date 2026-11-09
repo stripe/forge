@@ -5,6 +5,10 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type AgentPluginInstallationReceipt,
+  type BundleAgentPluginInstallationReceipt,
+  type NativeAgentPluginInstallationReceipt,
+  type OpenCodeBundleInstallationReceipt,
   createArtifactStore,
   createForgeEngine,
   createJudgeTranscriptProjection,
@@ -44,6 +48,47 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('exports neutral receipt types and historical authoring types', () => {
+    const common = {
+      adapter: 'custom',
+      plugin: 'test@marketplace',
+      marketplace: 'owner/repo',
+      marketplace_commit: 'a'.repeat(40),
+      version: '1.0.0',
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: `sha256:${'b'.repeat(64)}`,
+        entry_count: 1,
+        file_count: 1,
+        size_bytes: 1,
+      },
+    } as const;
+    const native: NativeAgentPluginInstallationReceipt = {
+      ...common,
+      native_plugin_id: 'test@marketplace',
+      source: { kind: 'archive' },
+    };
+    const bundle: BundleAgentPluginInstallationReceipt = {
+      ...common,
+      installation: 'bundle',
+      source: {
+        kind: 'git-subdir',
+        commit: 'c'.repeat(40),
+        path: 'portable/plugin',
+      },
+    };
+    const historical: OpenCodeBundleInstallationReceipt = {
+      ...bundle,
+      installation: 'opencode-bundle',
+      source: { ...bundle.source, path: 'providers/claude/plugin' },
+    };
+    const receipts: AgentPluginInstallationReceipt[] = [
+      native, bundle, historical,
+    ];
+    for (const receipt of receipts)
+      assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
+  });
+
   it('keeps the OpenAI provider on its documented implementation subpath', async () => {
     assert.equal('createOpenAICompletionProvider' in rootExports, false);
     const openai = await import('./providers/openai/index.ts');

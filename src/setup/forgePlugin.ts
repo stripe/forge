@@ -1,7 +1,7 @@
 import type { PreparedAgentPluginInstallation } from '../contracts/plugin.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
 import { pluginMcpCredentials } from '../model/pluginCredentials.ts';
-import { pluginDefinitionForAgent } from '../model/plugins.ts';
+import { pluginDefinitionForName } from '../model/plugins.ts';
 import type { PluginSetupStepV1, SetupStepV1 } from '../model/types.ts';
 import type {
   PreparedSetupStep,
@@ -22,13 +22,12 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
       );
     }
     const pluginStep = step as PluginSetupStepV1;
-    const definition = pluginDefinitionForAgent(
+    const definition = pluginDefinitionForName(
       pluginStep.with.plugin,
-      context.selection.adapter,
     );
     if (!definition) {
       throw new TypeError(
-        `Plugin ${JSON.stringify(pluginStep.with.plugin)} does not support agent ${JSON.stringify(context.selection.adapter)}.`,
+        `Unknown registered plugin ${JSON.stringify(pluginStep.with.plugin)}.`,
       );
     }
     if (!context.pluginInstaller) {

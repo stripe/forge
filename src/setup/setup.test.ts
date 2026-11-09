@@ -264,7 +264,7 @@ describe('portable setup actions', () => {
     ]);
   });
 
-  for (const adapter of ['claude-code', 'codex'] as const) {
+  for (const adapter of ['claude-code', 'codex', 'custom-opencode'] as const) {
     it(`selects the compatible Stripe distribution and agent credentials for ${adapter}`, () => {
       const step = parseSetupStep({
         uses: 'forge/plugin',
@@ -326,14 +326,14 @@ describe('portable setup actions', () => {
     });
   }
 
-  it('rejects unsupported agents and missing installers in preflight', () => {
+  it('rejects missing installers for any adapter in preflight', () => {
     const step = parseSetupStep({
       uses: 'forge/plugin',
       with: { plugin: 'stripe' },
     });
     assert.throws(
       () => createSetupExecutor().preflight([step], setupTarget),
-      /does not support agent/,
+      /does not support forge\/plugin/,
     );
     assert.throws(
       () =>

@@ -104,6 +104,93 @@ describe('plugin installation receipts', () => {
       assert.throws(() => parseAgentPluginInstallationReceipt(bad));
   });
 
+  it('preserves neutral and exact historical shapes without rewriting', () => {
+    const { native_plugin_id: _id, ...base } = RECEIPT;
+    const historicalBundle = {
+      ...base,
+      adapter: 'custom-opencode',
+      installation: 'opencode-bundle',
+      source: {
+        kind: 'git-subdir',
+        commit: 'b'.repeat(40),
+        path: 'providers/claude/plugin',
+      },
+    };
+    for (const receipt of [
+      RECEIPT,
+      { ...RECEIPT, installation: 'native' },
+      {
+        ...RECEIPT,
+        installation: 'native',
+        mcp_configuration: 'codex-user-config',
+        mcp_connections: [{ name: 'stripe', url: 'https://mcp.stripe.com' }],
+      },
+      historicalBundle,
+      {
+        ...historicalBundle,
+        installation: 'bundle',
+        source: { ...historicalBundle.source, path: 'other/bundle' },
+      },
+    ]) {
+      const input = JSON.parse(JSON.stringify(receipt));
+      const parsed = parseAgentPluginInstallationReceipt(input);
+      assert.deepEqual(parsed, receipt);
+      assert.deepEqual(parseAgentPluginInstallationReceipt(parsed), parsed);
+      assert.notEqual(parsed.source, input.source);
+      assert.ok(Object.isFrozen(parsed));
+      assert.ok(Object.isFrozen(parsed.source));
+      assert.ok(Object.isFrozen(parsed.installed_tree));
+    }
+    assert.throws(() =>
+      parseAgentPluginInstallationReceipt({
+        ...historicalBundle,
+        source: { ...historicalBundle.source, path: 'other/bundle' },
+      }),
+    );
+  });
+
+  it('rejects unknown discriminators, mixed identities and unsafe bundle paths', () => {
+    const { native_plugin_id: _id, ...base } = RECEIPT;
+    const bundle = {
+      ...base,
+      installation: 'bundle',
+      source: {
+        kind: 'git-subdir',
+        commit: 'b'.repeat(40),
+        path: 'some/plugin',
+      },
+    };
+    for (const malformed of [
+      { ...RECEIPT, installation: undefined },
+      { ...RECEIPT, installation: 'unknown' },
+      { ...base, installation: 'native' },
+      { ...bundle, native_plugin_id: RECEIPT.native_plugin_id },
+      { ...bundle, adapter_details: {} },
+      {
+        ...bundle,
+        mcp_configuration: 'codex-user-config',
+        mcp_connections: [{ name: 'stripe', url: 'https://mcp.stripe.com' }],
+      },
+      { ...bundle, source: { kind: 'archive' } },
+      { ...bundle, source: { ...bundle.source, commit: undefined } },
+      { ...bundle, source: { ...bundle.source, extra: true } },
+      { ...RECEIPT, installation: 'native', source: bundle.source },
+      ...[
+        '', '.', '..', '../plugin', '/plugin', 'C:/plugin', 'a\\b', 'a//b',
+        'a/./b', 'a/../b', 'a/', 'a\n', 'é'.repeat(128),
+        Array(17).fill('a'.repeat(250)).join('/'),
+      ].map((path) => ({ ...bundle, source: { ...bundle.source, path } })),
+    ])
+      assert.throws(() => parseAgentPluginInstallationReceipt(malformed));
+    assert.equal(
+      parseAgentPluginInstallationReceipt({
+        ...bundle,
+        source: { ...bundle.source, path: 'é'.repeat(127) },
+      }).source.path,
+      'é'.repeat(127),
+    );
+  });
+
   it('accepts each supported source kind when no source commit is reported', () => {
     for (const kind of [
       'marketplace-path',

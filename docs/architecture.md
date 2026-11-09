@@ -813,13 +813,14 @@ extension bundles own exactly one other namespace, cannot replace built-ins,
 and must produce canonical `with` payloads that are fixed points under their
 parser. Bundle manifests still pin the host implementation by version and digest.
 
-Plans retain `forge/plugin`'s short registered name. Pure preflight selects its
-native distribution and declares agent-scoped MCP credential requirements using
+Plans retain `forge/plugin`'s short registered name. Pure preflight resolves its
+distribution without an adapter-ID allowlist; the selected installer's pure
+preflight decides support. Forge declares agent-scoped MCP credentials using
 policy fixed by the Forge version. Setup installs the current marketplace entry,
 configures its existing MCP connection, and fingerprints the installation.
-The `setup.json` receipt records resolved native IDs, catalog commit, installed
-version, reported source commit when available, and the installed-tree
-fingerprint; Codex receipts also mark when the MCP connection moved to run-owned
+The `setup.json` receipt records `installation: native | bundle`, native IDs
+where applicable, catalog commit, installed version, source provenance, and the
+installed-tree fingerprint; Codex receipts also mark when the MCP connection moved to run-owned
 user configuration and list its non-sensitive endpoint. These identify the catalog
 snapshot and observed contents; plugin
 state remains writable during interaction. See
@@ -883,8 +884,13 @@ native config merging.
 OpenCode's `forge/plugin` installer materializes the same Claude-format Stripe
 bundle used by Claude Code and Codex into run-owned state. It loads only the
 bundle's skills and MCP connection through generated native configuration.
-The adapter merges that fragment with its generated model config and restores
-the combined snapshot on every turn. See the [plugin contract](plugin-action.md)
+Prepare initializes an empty run-owned activation record. The installer activates
+Stripe after fingerprinting the bundle and fragment. At session open, the
+adapter validates and snapshots activation and any active fragment, merges it
+with generated model config, and restores the combined config on every turn.
+This also works through trusted custom actions. Missing or malformed activation,
+orphaned plugin state, and missing or invalid active fragments fail before a
+turn; prepare rejects pre-existing activation state. See the [plugin contract](plugin-action.md)
 for source selection, authentication, supported bundle behavior, and installation
 receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`,
 `executable`, `expectedVersion`, and logical `layout`
@@ -1525,7 +1531,9 @@ hashes. It also requires:
 - canonical plan bytes to match their artifact descriptor and result summary;
 - recorded criterion text, labels, and requirement levels to match the plan;
 - workspace evidence with no unknown fields;
-- `setup.json` to match ordered plan actions and valid plugin receipts;
+- `setup.json` to match ordered plan actions and strict plugin receipts, with
+  adapter/distribution identities checked against the plan and installation kind
+  read from the receipt rather than inferred from adapter IDs;
 - `interaction.json` to match result summaries;
 - trajectory session identity and completed-turn coverage to match the
   interaction;
@@ -1533,6 +1541,13 @@ hashes. It also requires:
 - conditional canonical artifacts to exist exactly when required; and
 - judge evidence to match the stored trajectory projection, or carry the
   verified driver-budget omission described in [judge-visible projection](#judge-visible-projection).
+
+Plugin parsing preserves exact historical native and OpenCode bundle wire
+shapes. Verification checks original bytes before interpreting their installation
+kind and does not rewrite saved artifacts. It checks declared provenance and
+cross-artifact consistency, rather than proving an arbitrary adapter's mechanism
+or private source policy. The [plugin contract](plugin-action.md#execution-and-receipt)
+owns receipt fields and compatibility rules.
 
 `criterionResultMatchesDefinition` from `@stripe/forge` compares a recorded
 judgment's text, label, and requirement level

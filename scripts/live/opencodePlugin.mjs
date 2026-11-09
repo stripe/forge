@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import * as http from 'node:http';
+import { readPluginActivation } from '../../dist/agents/opencode/pluginActivation.js';
 import {
   mergeStripeOpenCodeConfiguration,
   PLUGIN_CONFIG_PATH,
@@ -162,8 +163,6 @@ export function fixtureOpenCodeRuntime(runtime, forge, mcp) {
     ...runtime,
     async prepare(input) {
       const prepared = await runtime.prepare(input);
-      if (!input.plan.setup.some((step) => step.uses === 'forge/plugin'))
-        return prepared;
       return {
         ...prepared,
         commands: {
@@ -187,6 +186,10 @@ export function fixtureOpenCodeRuntime(runtime, forge, mcp) {
         },
         async finalizeSetup() {
           const state = prepared.stateDirectories.get(forge.OPENCODE_STATE_ID);
+          if (!(await readPluginActivation(state))) {
+            await prepared.finalizeSetup();
+            return;
+          }
           const directory = input.requirements.stateDirectories.find(
             (entry) => entry.id === forge.OPENCODE_STATE_ID,
           ).containerPath;
@@ -277,7 +280,9 @@ export async function verifyPublishedOpenCodePlugin(
       signal,
     });
     forge.parseAgentPluginInstallationReceipt(receipt);
+    assert.equal(receipt.installation, 'bundle');
     const state = prepared.stateDirectories.get(forge.OPENCODE_STATE_ID);
+    assert.equal(await readPluginActivation(state), true);
     const configuration = JSON.parse(
       Buffer.from(await state.readFile(PLUGIN_CONFIG_PATH)).toString(),
     );

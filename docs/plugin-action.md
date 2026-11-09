@@ -31,10 +31,11 @@ use the Claude-format distribution `stripe@claude-plugins-official` from
 as described below.
 
 `with` accepts only `plugin`. Plans retain this short name; the producing Forge
-version defines its native distribution and credential mapping. During pure
-preflight, Forge resolves the name for the run's adapter and checks its installer
-and authentication capabilities. Unsupported adapters fail before credentials
-are resolved or a runtime is allocated.
+version defines its distribution and credential mapping. During pure preflight,
+Forge resolves the name without an adapter-ID allowlist and checks the selected
+adapter's installer and bearer-auth capability. The installer's pure preflight
+accepts or rejects the distribution and MCP policy before credentials are
+resolved or a runtime is allocated. Custom adapter IDs use the same boundary.
 
 The resolved marketplace name must match the fetched catalog, and the native
 plugin name must select exactly one entry.
@@ -128,15 +129,20 @@ with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
 the bundled URL. The adapter combines this fragment with the model definition
 from the experiment's agent `model_profile` and restores it before every turn,
 including resume. A workspace `opencode.json` is ignored; model declarations
-belong to the agent selection, and skills/MCP come from `forge/plugin`. See the
+belong to the agent selection. A run-owned activation record selects installed
+skills/MCP. Prepare creates an empty record; successful installation activates
+Stripe after fingerprinting the bundle and fragment. The adapter reads and
+snapshots that record when opening a session, including when a trusted custom
+action invokes the installer. Missing or malformed activation, an orphaned
+Stripe root, or a missing or invalid active fragment fails before the first
+turn. Prepare rejects pre-existing activation state. See the
 [OpenCode setup](../README.md#opencode-setup) for a baseline/plugin comparison.
 
-OpenCode receipts use `installation: opencode-bundle` instead of
-`native_plugin_id`. They retain the selected catalog identity and commit, record
-`source: {kind: git-subdir, commit, path}` with path `providers/claude/plugin`, and
-fingerprint the copied bundle plus generated config. The native Claude/Codex
-receipt shape is unchanged. Like other plugin state, bundle files remain writable
-during interaction; the receipt describes installation-time contents.
+OpenCode emits `installation: bundle` without a `native_plugin_id`. Its source
+record contains `kind: git-subdir`, the checked-out commit, and the adapter's
+required path `providers/claude/plugin`. Its tree fingerprints the copied bundle
+plus generated fragment, excluding the activation record. Like other plugin
+state, bundle files remain writable during interaction.
 
 ## Hook policy and writable state
 
@@ -190,9 +196,10 @@ During setup, the prepared operation:
 
 The receipt includes:
 
-- the resolved marketplace and native plugin selection;
+- the resolved marketplace and qualified plugin selection;
 - the exact catalog commit used to read the marketplace entry;
-- the native plugin ID or bundle installation kind, and installed version;
+- `installation: native` with a `native_plugin_id`, or `installation: bundle`
+  without a native ID, and the installed version;
 - the selected source kind and installer-reported Git commit when available;
 - a deterministic digest and size/count summary of the installed tree; and
 - for Codex installs with MCP authentication, optional
@@ -202,8 +209,35 @@ The receipt includes:
   `mcp_connections` lists the declared servers as `{name, url}`, sorted by name;
   a URL never carries userinfo, a query string, or a fragment, and no key or
   header value is recorded. Both fields appear together or not at all. Receipts
-  without them keep their previous meaning and still read; older strict readers
-  may reject receipts that carry them.
+  without them describe the configured installation.
+
+Native source records retain the source-kind and optional Git-commit rules
+above. Bundle source records require exactly `kind: git-subdir`, a full lowercase
+40-hex commit, and a canonical repository-relative POSIX path: no absolute or
+drive paths, backslashes, traversal, controls, empty components, or noncanonical
+forms. Paths are bounded to 4096 UTF-8 bytes and 255 bytes per component. Core
+parsing checks portability; the installer owns any narrower source policy.
+Bundles cannot carry the Codex MCP relocation fields. Unknown fields and mixed
+native/bundle identities are rejected. Local and archive bundle sources are
+unsupported.
+
+The public parser clones and freezes receipts while preserving their wire shape.
+It also reads exact historical native receipts with no `installation` key and
+historical `installation: opencode-bundle` receipts with the fixed
+`providers/claude/plugin` source path. It does not add a discriminator or rewrite
+saved artifacts. `NativeAgentPluginInstallationReceipt` retains historical
+authoring compatibility; `BundleAgentPluginInstallationReceipt` is the neutral
+bundle type, and `OpenCodeBundleInstallationReceipt` is deprecated.
+
+Completed-run verification checks original artifact bytes and canonical form,
+then matches the receipt's adapter and registered distribution to the plan. It
+uses the recorded installation kind, treating historical native and bundle
+shapes as those respective kinds. Native receipts must match the requested
+plugin name. Adapter IDs do not select a mechanism: a valid native receipt naming
+`opencode` can pass. Verification checks declared provenance and consistency; it
+cannot prove an adapter's mechanism or private source policy. The existing Forge
+release gate still applies. Older strict readers reject the neutral shapes; use
+the producing Forge revision to read new runs.
 
 Forge bounds and validates the installed tree, rejecting symbolic links and
 special entries. The tree fingerprint covers relative paths, directories, and
