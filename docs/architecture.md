@@ -994,7 +994,7 @@ a missing executed tool. These are lower-bound coverage checks, not exact
 one-to-one matching; they apply by native source format, including for custom
 Codex adapter IDs. OpenCode's `opencode-session-json` source preserves the
 same part snapshots as its live stream: coverage requires the observed
-assistant text and unique tool call IDs, names, and inputs for every turn.
+assistant text and unique OpenCode part IDs, tool names, and inputs for every turn.
 Tools are correlated by ID because parallel completion order can differ
 from the export's creation order.
 These checks also run during completed-run verification.
@@ -1132,8 +1132,15 @@ export so a failed capture cannot leave stale native evidence eligible. An
 export failure preserves the completed driver turn; cancellation propagates.
 After quiescence, evidence collection only reads the saved JSON. Normalization
 validates session/version/model identity and retains user text, assistant text,
-reasoning, correlated tool results and errors, and available usage. Compaction,
-attachments, unsupported conversation parts, or incomplete tools trigger
+reasoning, correlated tool results and errors, and available usage. Driver call
+IDs and ATIF `tool_call_id` / `source_call_id` use OpenCode's unique tool part ID.
+Gateway `callID` values are bounded opaque strings and may repeat across
+executions; their original values remain in the restricted export. The live
+stream accepts an unseen tool part after a retried message finishes only when
+its error is `Tool execution aborted` and its metadata marks `interrupted: true`.
+This cleanup records the abandoned attempt without starting another model step;
+other new trailing events and changed snapshots of completed parts are rejected.
+Compaction, attachments, unsupported conversation parts, or incomplete tools trigger
 explicit fallback. Exact parseable session exports remain restricted artifacts
 even when their content cannot be normalized. Native auto-compaction remains
 enabled; turn replies retain assistant text before and after compaction but
