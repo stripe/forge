@@ -189,6 +189,94 @@ describe('Anthropic completion provider', () => {
     }
   });
 
+  it('raises output caps for always-thinking Claude models on direct and gateway requests', async () => {
+    for (const [model, alwaysThinks] of [
+      ['claude-sonnet-4-6', false],
+      ['claude-opus-4-8', false],
+      ['claude-sonnet-5-5', true],
+      ['anthropic/claude-opus-5-5', true],
+      ['claude-haiku-5', true],
+      ['gateway/claude-sonnet-5.5', true],
+      ['claude-opus-6-0', true],
+    ] as const) {
+      for (const gateway of [false, true]) {
+        const transport = recordingFetch(() => messageResponse());
+        const provider = createAnthropicCompletionProvider({
+          ...(gateway
+            ? { baseUrl: 'https://gateway.example.test/anthropic' }
+            : {}),
+          fetch: transport.fetch,
+        });
+        for (const purpose of ['role_player', 'judge'] as const) {
+          for (const maxTokens of [
+            undefined,
+            400,
+            700,
+            1_024,
+            16_000,
+            ANTHROPIC_MAX_TOKENS,
+          ]) {
+            const request = completionRequest({
+              model: { provider: 'anthropic', model },
+              purpose,
+              ...(maxTokens === undefined ? {} : { maxTokens }),
+            });
+            await provider.complete(request, {
+              credentials: {
+                [gateway
+                  ? ANTHROPIC_AUTH_TOKEN_CREDENTIAL
+                  : ANTHROPIC_API_KEY_CREDENTIAL]: 'test-scoped-key',
+              },
+            });
+            const body = JSON.parse(String(transport.calls.at(-1)!.init.body));
+            const requested = maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
+            assert.equal(
+              body.max_tokens,
+              alwaysThinks ? Math.max(requested, 16_000) : requested,
+              model,
+            );
+            assert.equal(request.maxTokens, maxTokens);
+          }
+        }
+      }
+    }
+  });
+
+  it('excludes thinking blocks from plain and structured answers while retaining output usage', async () => {
+    for (const model of ['claude-sonnet-4-6', 'claude-sonnet-5-5']) {
+      for (const structured of [false, true]) {
+        const provider = createAnthropicCompletionProvider({
+          fetch: async () =>
+            Response.json({
+              type: 'message',
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: '', signature: 'signature' },
+                { type: 'redacted_thinking', data: 'private-redacted-data' },
+                { type: 'text', text: '{"message":' },
+                { type: 'thinking', thinking: 'private-thought' },
+                { type: 'text', text: '"continue"}' },
+              ],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 10, output_tokens: 100 },
+            }),
+        });
+        const response = await provider.complete(
+          completionRequest({
+            model: { provider: 'anthropic', model },
+            ...(structured ? { responseSchema: schema } : {}),
+          }),
+          { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
+        );
+        assert.deepEqual(response, {
+          content: '{"message":"continue"}',
+          stopReason: 'end_turn',
+          usage: { inputTokens: 10, outputTokens: 100, cachedInputTokens: 0 },
+        });
+      }
+    }
+  });
+
   it('recursively projects unsupported constraints without mutating the neutral schema', async () => {
     const neutralSchema: StrictCompletionResponseSchema = {
       name: 'bounded_result',
@@ -796,6 +884,30 @@ describe('Anthropic completion provider', () => {
         content: [{ type: 'text', text: '{}' }],
         stop_reason: 'end_turn',
         usage: { input_tokens: -1, output_tokens: 1 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'private-thought' }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 1, output_tokens: 100 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'redacted_thinking', data: 'private-data' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 100 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '' },
+          { type: 'text', text: 42 },
+        ],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     ]) {
       const provider = createAnthropicCompletionProvider({

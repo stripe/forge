@@ -29,6 +29,8 @@ export const ANTHROPIC_API_KEY_CREDENTIAL = 'apiKey' as const;
 export const ANTHROPIC_AUTH_TOKEN_CREDENTIAL = 'authToken' as const;
 
 const MAX_BASE_URL_BYTES = 4_096;
+/** Thinking tokens share the output budget with answer text. */
+const ALWAYS_THINKING_MIN_MAX_TOKENS = 16_000;
 const MAX_SCHEMA_DEPTH = 100;
 const MAX_SCHEMA_NODES = 100_000;
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
@@ -92,10 +94,15 @@ export function supportsAnthropicStructuredOutputModel(model: string): boolean {
 function claudeModelCapabilities(model: string): {
   structuredOutput: boolean;
   acceptsSamplingTemperature: boolean;
+  alwaysThinks: boolean;
 } {
   const version = CLAUDE_MODEL_FAMILY_VERSION.exec(model);
   if (!version) {
-    return { structuredOutput: false, acceptsSamplingTemperature: true };
+    return {
+      structuredOutput: false,
+      acceptsSamplingTemperature: true,
+      alwaysThinks: false,
+    };
   }
   const family = version[1];
   const major = Number(version[2]);
@@ -105,6 +112,7 @@ function claudeModelCapabilities(model: string): {
     // Opus 4.7+ and Claude 5+ require default sampling.
     acceptsSamplingTemperature:
       major < 5 && !(family === 'opus' && major === 4 && minor >= 7),
+    alwaysThinks: major >= 5,
   };
 }
 
@@ -472,9 +480,12 @@ function resolveCredential(
 function serializeRequest(request: CompletionRequest): string {
   try {
     const capabilities = claudeModelCapabilities(request.model.model);
+    const requestedMaxTokens = request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
     const serialized = JSON.stringify({
       model: request.model.model,
-      max_tokens: request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
+      max_tokens: capabilities.alwaysThinks
+        ? Math.max(requestedMaxTokens, ALWAYS_THINKING_MIN_MAX_TOKENS)
+        : requestedMaxTokens,
       messages: request.messages,
       ...(request.systemPrompt === undefined
         ? {}
@@ -613,6 +624,12 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   const text: string[] = [];
   for (const block of value.content) {
     if (
+      isRecord(block) &&
+      (block.type === 'thinking' || block.type === 'redacted_thinking')
+    ) {
+      continue;
+    }
+    if (
       !isRecord(block) ||
       block.type !== 'text' ||
       typeof block.text !== 'string'
@@ -621,6 +638,7 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
     }
     text.push(block.text);
   }
+  if (text.length === 0) throw invalidResponse();
   const content = text.join('');
   if (structured) {
     try {

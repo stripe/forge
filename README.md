@@ -104,6 +104,9 @@ Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
 Claude 4.5-or-newer model identifiers with strict structured-output support.
 Opus 4.7 and later and Claude 5-or-newer models use default sampling; Forge
 omits `temperature` for them.
+Claude 5-or-newer models always think, and thinking tokens share the output
+budget with answer text. Forge gives them at least 16,000 output tokens and
+excludes thinking blocks from completion text.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present,

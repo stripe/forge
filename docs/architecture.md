@@ -1011,8 +1011,9 @@ The completion runtime:
 The built-in Anthropic and OpenAI providers use Node's native `fetch` with
 strict structured output through Messages and Responses respectively. The
 OpenAI provider disables response storage, normalizes cached input usage, and
-ignores reasoning blocks. Both bound requests, responses, and duration, reject
-redirects, and expose errors without provider response bodies. OpenAI projects
+ignores reasoning blocks; Anthropic excludes thinking blocks. Both bound
+requests, responses, and duration, reject redirects, and expose errors without
+provider response bodies. OpenAI projects
 `uniqueItems` out of generation schemas; Ava still validates uniqueness locally.
 Provider-specific output budgets account for reasoning tokens without changing
 Ava or judge validation. Compatible endpoints and credentials are explicit host
@@ -1422,10 +1423,12 @@ rendered characters total. Truncation and unavailable evidence are recorded
 explicitly. `judge-evidence.json` records the redacted workspace subset and
 exact projected transcript for audit; it is not an input to a later judge call.
 
-At most four criteria run concurrently, with temperature 0, a 1,024-token
-response limit, and a strict one-criterion JSON schema. Each gets up to three
-attempts with fixed one- and five-second retry waits. Exhaustion records that
-criterion with `passed: null`, a bounded explanation, and an `error` containing
+At most four criteria run concurrently. Each request carries temperature 0,
+a 1,024-token output budget, and a strict one-criterion JSON schema; the
+provider may adapt sampling and output budgets to the selected model. Each
+gets up to three attempts with fixed one- and five-second retry waits.
+Exhaustion records that criterion with `passed: null`, a bounded explanation,
+and an `error` containing
 `type` (`parse_error` or `request_error`), `attempts`, and `message`. The final
 unsuccessful attempt determines the error type. Other criteria continue, and
 the run commits its evidence, valid judgments, checks, and safe completion-call
