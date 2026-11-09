@@ -132,6 +132,63 @@ describe('Anthropic completion provider', () => {
     });
   });
 
+  it('omits temperature for Claude models that require default sampling on direct and gateway requests', async () => {
+    for (const [model, samplingTemperature] of [
+      ['claude-sonnet-4-6', true],
+      ['claude-opus-4-6', true],
+      ['claude-haiku-4-5', true],
+      ['claude-sonnet-4-7', true],
+      ['claude-opus-4-7', false],
+      ['claude-opus-4-8', false],
+      ['claude-opus-4-7-20261001', false],
+      ['claude-sonnet-5-5', false],
+      ['claude-opus-5-5', false],
+      ['claude-haiku-5', false],
+      ['anthropic/claude-sonnet-5', false],
+      ['gateway/claude-opus-4.7', false],
+      ['claude-sonnet-6-0', false],
+    ] as const) {
+      for (const gateway of [false, true]) {
+        const transport = recordingFetch(() =>
+          messageResponse({ content: '{"message":"continue"}' }),
+        );
+        const provider = createAnthropicCompletionProvider({
+          ...(gateway
+            ? { baseUrl: 'https://gateway.example.test/anthropic' }
+            : {}),
+          fetch: transport.fetch,
+        });
+        for (const [purpose, temperature] of [
+          ['role_player', 0.3],
+          ['judge', 0],
+        ] as const) {
+          const request = completionRequest({
+            model: { provider: 'anthropic', model },
+            purpose,
+            temperature,
+            responseSchema: schema,
+          });
+          await provider.complete(request, {
+            credentials: {
+              [gateway
+                ? ANTHROPIC_AUTH_TOKEN_CREDENTIAL
+                : ANTHROPIC_API_KEY_CREDENTIAL]: 'test-scoped-key',
+            },
+          });
+          const body = JSON.parse(String(transport.calls.at(-1)!.init.body));
+          assert.equal(
+            Object.hasOwn(body, 'temperature'),
+            samplingTemperature,
+            model,
+          );
+          if (samplingTemperature)
+            assert.equal(body.temperature, temperature, model);
+          assert.equal(request.temperature, temperature);
+        }
+      }
+    }
+  });
+
   it('recursively projects unsupported constraints without mutating the neutral schema', async () => {
     const neutralSchema: StrictCompletionResponseSchema = {
       name: 'bounded_result',

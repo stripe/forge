@@ -102,6 +102,8 @@ Reasoning blocks are excluded from completion text.
 
 Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
 Claude 4.5-or-newer model identifiers with strict structured-output support.
+Opus 4.7 and later and Claude 5-or-newer models use default sampling; Forge
+omits `temperature` for them.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present,
