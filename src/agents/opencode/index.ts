@@ -14,7 +14,7 @@ import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
-import { OPENCODE_LAUNCHER } from './launcher.ts';
+import { OPENCODE_LAUNCHER, OPENCODE_LAUNCHER_REFUSAL } from './launcher.ts';
 import {
   assertOpenCodeRuntimeLayout,
   OPENCODE_STATE_ID,
@@ -81,6 +81,10 @@ export function createOpenCodeAdapter(
       throw new TypeError('OpenCode requires an explicit model.');
     if (selection.model_profile === undefined)
       throw new TypeError('OpenCode requires an explicit model_profile.');
+    if (selection.model_profile.attachment)
+      throw new TypeError(
+        'OpenCode does not support model_profile.attachment: true until input modalities and attachment evidence are supported.',
+      );
     const model = `forge/${selection.model}`;
     return {
       executables: [executable, 'node'],
@@ -233,10 +237,19 @@ export function createOpenCodeAdapter(
               },
             );
             signal.throwIfAborted();
-            if (result.exitCode !== 0)
+            if (result.exitCode !== 0) {
+              // Only the launcher's fixed diagnostic is safe to expose from stderr.
+              const stderr = result.stderr.slice(0, 4096);
+              const lines = stderr.split(/\r?\n/);
+              // A fragment cut by the scan bound cannot prove a complete line.
+              if (result.stderr.length > stderr.length) lines.pop();
+              const refusal = lines.includes(OPENCODE_LAUNCHER_REFUSAL);
               throw new Error(
-                'OpenCode exited without a successful completed turn.',
+                refusal
+                  ? OPENCODE_LAUNCHER_REFUSAL
+                  : 'OpenCode exited without a successful completed turn.',
               );
+            }
             const turn = parseOpenCodeStream(result.stdout, currentSessionId);
             currentSessionId = turn.sessionId;
             try {

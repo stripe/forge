@@ -353,7 +353,9 @@ matrix:
 
 `model_profile` is required for OpenCode. Limits must be positive safe integers,
 with output no greater than context; all three capabilities are explicit
-booleans. Unknown fields are rejected. Claude Code and Codex reject this field.
+booleans. Set `attachment: false`: OpenCode rejects `attachment: true` during
+pure preflight until input modalities and attachment evidence are supported
+end to end. Unknown fields are rejected. Claude Code and Codex reject this field.
 The adapter sets `tool_call: true`, so the model must support tools. A workspace
 `opencode.json` is ignored. API routing and credentials stay outside the
 experiment:
