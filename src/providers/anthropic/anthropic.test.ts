@@ -266,7 +266,9 @@ describe('Anthropic completion provider', () => {
             model: { provider: 'anthropic', model },
             ...(structured ? { responseSchema: schema } : {}),
           }),
-          { credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' } },
+          {
+            credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
+          },
         );
         assert.deepEqual(response, {
           content: '{"message":"continue"}',
@@ -640,7 +642,10 @@ describe('Anthropic completion provider', () => {
             'Claude Fable is not supported yet as the judge or Ava model.',
         };
         assert.equal(supportsAnthropicStructuredOutputModel(modelName), false);
-        assert.throws(() => provider.requirements({ model, purpose }), expected);
+        assert.throws(
+          () => provider.requirements({ model, purpose }),
+          expected,
+        );
         await assert.rejects(
           provider.preflight!({
             runId: 'run-fable',

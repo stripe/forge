@@ -487,7 +487,8 @@ function resolveCredential(
 function serializeRequest(request: CompletionRequest): string {
   try {
     const capabilities = claudeModelCapabilities(request.model.model);
-    const requestedMaxTokens = request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
+    const requestedMaxTokens =
+      request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
     const serialized = JSON.stringify({
       model: request.model.model,
       max_tokens: capabilities.alwaysThinks
