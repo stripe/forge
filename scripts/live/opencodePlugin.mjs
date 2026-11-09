@@ -241,7 +241,7 @@ export async function verifyPublishedOpenCodePlugin(
   const { signal, dockerExecutable, runtimeRoot, suiteId } = options;
   const runId = `${suiteId}-opencode-published-plugin`;
   const agent = forge.createOpenCodeAdapter({
-    baseUrl: 'http://unused.example/v1',
+    baseUrl: 'https://unused.example/v1',
   });
   const selected = agent.requirements(plan.agent);
   const installation = agent.pluginInstaller.preflight(

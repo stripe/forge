@@ -108,6 +108,49 @@ async function fixture(
 }
 
 describe('OpenCode adapter', () => {
+  for (const baseUrl of [
+    'https://gateway.example/v1',
+    'https://192.0.2.1:8443/v1',
+    'http://localhost:1234/v1',
+    'http://gateway.localhost:1234/v1',
+    'http://127.0.0.1:1234/v1',
+    'http://127.10.20.30:1234/v1',
+    'http://[::1]:1234/v1',
+    'http://host.docker.internal:1234/v1',
+    'http://HOST.DOCKER.INTERNAL:1234/v1',
+  ]) {
+    it(`accepts the gateway URL ${baseUrl}`, () => {
+      const adapter = createOpenCodeAdapter({ baseUrl });
+      const config = JSON.parse(
+        adapter.requirements(selection).environment.variables!
+          .OPENCODE_CONFIG_CONTENT!,
+      );
+      assert.equal(config.provider.forge.options.baseURL, baseUrl);
+      assert.equal(
+        config.provider.forge.options.apiKey,
+        '{env:OPENCODE_API_KEY}',
+      );
+    });
+  }
+  for (const baseUrl of [
+    'http://gateway.example/v1',
+    'http://mcp.stripe.com/v1',
+    'http://192.168.1.2/v1',
+    'http://128.0.0.1/v1',
+    'http://[2001:db8::1]/v1',
+    'http://localhost.example/v1',
+    'http://127.0.0.1.example/v1',
+    'http://host.docker.internal.example/v1',
+    'http://sub.host.docker.internal/v1',
+    'http://host.docker.internal./v1',
+  ]) {
+    it(`rejects the plaintext gateway URL ${baseUrl}`, () => {
+      assert.throws(
+        () => createOpenCodeAdapter({ baseUrl }),
+        /plaintext HTTP only for a loopback host or host\.docker\.internal/,
+      );
+    });
+  }
   it('restores the installed plugin configuration on initial and resumed turns', async () => {
     const test = await fixture();
     const config = stripeOpenCodeConfiguration(

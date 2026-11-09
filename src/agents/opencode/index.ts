@@ -29,6 +29,7 @@ import {
 } from './pluginConfig.ts';
 import { createOpenCodePluginInstaller } from './plugins.ts';
 import { parseOpenCodeStream } from './stream.ts';
+import { isLocalOpenCodeHostname } from './urls.ts';
 
 export interface OpenCodeAdapterOptions {
   readonly id?: string;
@@ -318,6 +319,10 @@ function validateBaseUrl(value: string): string {
   )
     throw new TypeError(
       'OpenCode baseUrl must not contain credentials, query parameters, or a fragment.',
+    );
+  if (url.protocol === 'http:' && !isLocalOpenCodeHostname(url.hostname))
+    throw new TypeError(
+      'OpenCode baseUrl may use plaintext HTTP only for a loopback host or host.docker.internal.',
     );
   return value;
 }

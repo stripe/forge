@@ -132,9 +132,10 @@ merchant outside Forge.
 
 OpenCode requires `OPENCODE_BASE_URL`, a Chat Completions API root such as
 `https://gateway.example.com/v1`, and an explicit
-`--credential-env OPENCODE_API_KEY` grant. This supports the
-protocol used by LiteLLM and other compatible gateways; each selected model
-must support the configured tools and capabilities. Responses endpoints use
+`--credential-env OPENCODE_API_KEY` grant. Use HTTPS for remote endpoints;
+HTTP is accepted only for loopback hosts or exactly `host.docker.internal`.
+This supports the protocol used by LiteLLM and other compatible gateways;
+each selected model must support the configured tools and capabilities. Responses endpoints use
 the separate Codex route. See [OpenCode setup](#opencode-setup).
 
 The runtime installs pinned Claude Code, Codex, and OpenCode CLI releases from npm.
@@ -377,12 +378,11 @@ with `env: [STRIPE_API_KEY]` in case setup and pass
 OpenCode loads skills and MCP from the same Claude-format Stripe plugin used
 by Claude Code and Codex. It does not load Claude-specific hooks, commands, or
 agents. As with Codex, the Stripe marketplace is the trust root: Forge fetches
-its catalog at unpinned HEAD and trusts its source SHA and the bundle's MCP URL.
-The agent sends the `STRIPE_API_KEY` bearer to that URL; Forge does not restrict
-its host or require HTTPS. The receipt records the catalog commit and installed
-contents, but does not pin future installs. See the
-[plugin contract](docs/plugin-action.md) for installation provenance and source
-selection.
+its catalog at unpinned HEAD and trusts its source SHA. OpenCode checks the
+bundle's MCP destination before adding the `STRIPE_API_KEY` bearer reference.
+The receipt records the catalog commit and installed contents, but does not pin
+future installs. See the [plugin contract](docs/plugin-action.md#opencode-skills-and-mcp)
+for the allowed destinations, installation provenance, and source selection.
 
 The CLI credential reference is `opencode.api-key`; use
 `--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment
