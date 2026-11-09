@@ -100,6 +100,12 @@ export type AgentNativeEvidenceResult =
 export interface AgentSession {
   send(message: string, options: { signal: AbortSignal }): Promise<AgentTurn>;
   sessionId(): string | undefined;
+  /**
+   * Called once when interaction returns, before runtime quiescence. Commands
+   * are still available. Optional capture failures should be handled by the
+   * adapter; rejection or cancellation fails the interaction phase.
+   */
+  finalize?(signal: AbortSignal): Promise<void>;
 }
 
 export interface AgentRuntimeRequirements {

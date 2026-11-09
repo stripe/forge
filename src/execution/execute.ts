@@ -818,6 +818,10 @@ async function executeInteraction(
         toolCalls: Object.freeze(toolCalls),
       }),
     ]);
+    if (session.finalize !== undefined) {
+      await session.finalize(signal);
+      signal.throwIfAborted();
+    }
     return Object.freeze({
       turns,
       stopReason: 'task_complete',
@@ -861,6 +865,10 @@ async function executeInteraction(
     conversation.failure === null
       ? null
       : rolePlayerErrorRecord(conversation.failure);
+  if (session.finalize !== undefined) {
+    await session.finalize(signal);
+    signal.throwIfAborted();
+  }
   return Object.freeze({
     turns: conversation.turns,
     stopReason: conversation.stopReason,

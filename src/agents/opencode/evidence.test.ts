@@ -18,6 +18,7 @@ import {
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
 import { createOpenCodeAdapter } from './index.ts';
+import { MAX_NATIVE_BYTES } from './native.ts';
 import { parseOpenCodeStream } from './stream.ts';
 
 const turns = [
@@ -272,6 +273,43 @@ describe('OpenCode native evidence', () => {
       trajectoryCoversCompletedTurns(trajectory, driver, result.source),
       false,
     );
+  });
+  it('keeps exact raw bytes when the native JSON exceeds ATIF graph limits', async () => {
+    const value = {
+      ...openCodeExport(turns),
+      metadata: Array.from({ length: 100_001 }, () => null),
+    };
+    const { input, body } = fixture(value);
+    assert.ok(Buffer.byteLength(body) < MAX_NATIVE_BYTES);
+    const collected = await loadOpenCodeEvidence(input);
+    assert.equal(collected.kind, 'unavailable');
+    const selected = selectAgentEvidence({
+      agent: createOpenCodeAdapter(),
+      identity: { name: 'opencode', version: '1.19.0' },
+      model: OPEN_CODE_MODEL,
+      sessionId: OPEN_CODE_SESSION,
+      completedTurns: turns.map((turn) => ({
+        user: turn.prompt, assistant: turn.response, toolCalls: [],
+      })),
+      collected,
+    });
+    assert.equal(selected.provenance.source.kind, 'driver_fallback');
+    assert.equal(
+      Buffer.from((await loadOpenCodeNativeArtifact(input))!.body).toString(),
+      body,
+    );
+  });
+  it('rejects raw exports with invalid JSON, UTF-8, or excessive bytes', async () => {
+    for (const body of [
+      Buffer.from('{'),
+      Buffer.concat([Buffer.from(fixture().body), Buffer.from([0xff])]),
+      Buffer.from(fixture().body.padEnd(MAX_NATIVE_BYTES + 1)),
+    ]) {
+      assert.equal(await loadOpenCodeNativeArtifact({
+        ...fixture().input,
+        state: createMemoryWorkspace({ 'session.json': body }).readonly,
+      }), undefined);
+    }
   });
   it('bounds malformed exports and propagates cancellation', async () => {
     const input = fixture().input;

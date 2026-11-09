@@ -5,6 +5,7 @@ import {
   type JsonObject,
   parseAtifTrajectory,
 } from '../../atif/index.ts';
+import { assertBoundedJsonValue } from '../../atif/parser.ts';
 import type {
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
@@ -19,7 +20,6 @@ import {
   nonnegative,
   OPENCODE_FORMAT,
   OpenCodeNativeError,
-  parseJson,
   record,
   sessionId,
   string,
@@ -50,7 +50,7 @@ async function readExport(
   });
   input.signal.throwIfAborted();
   const value = record(
-    parseJson(new TextDecoder('utf-8', { fatal: true }).decode(body)),
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)),
   );
   if (record(value.info).id !== input.sessionId)
     throw new OpenCodeNativeError();
@@ -84,6 +84,7 @@ export async function loadOpenCodeEvidence(
     const captured = await readExport(input);
     if (!captured) return unavailable('source_unavailable');
     const { value } = captured;
+    assertBoundedJsonValue(value);
     const info = record(value.info);
     if (info.version !== input.agentVersion) throw new OpenCodeNativeError();
     if (

@@ -14,7 +14,10 @@ import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
-import { OPENCODE_LAUNCHER } from './launcher.ts';
+import {
+  OPENCODE_EXPORT_LAUNCHER,
+  OPENCODE_LAUNCHER,
+} from './launcher.ts';
 import {
   assertOpenCodeRuntimeLayout,
   OPENCODE_STATE_ID,
@@ -83,7 +86,7 @@ export function createOpenCodeAdapter(
       throw new TypeError('OpenCode requires an explicit model_profile.');
     const model = `forge/${selection.model}`;
     return {
-      executables: [executable, 'node'],
+      executables: [executable, 'node', 'sh'],
       environment: {
         variables: {
           XDG_CONFIG_HOME: `${layout.stateDirectory}/config`,
@@ -195,7 +198,7 @@ export function createOpenCodeAdapter(
             throw new Error('OpenCode session cannot accept concurrent turns.');
           sending = true;
           try {
-            // Invalidate before any mutation: failed export must never expose an earlier turn.
+            // Invalidate before mutation so only a final capture can be eligible.
             await state.writeFile(EXPORT_PATH, new Uint8Array(), {
               mode: 0o600,
             });
@@ -239,38 +242,56 @@ export function createOpenCodeAdapter(
               );
             const turn = parseOpenCodeStream(result.stdout, currentSessionId);
             currentSessionId = turn.sessionId;
-            try {
-              const exported = await context.runtime.commands.agent.run(
-                [executable, 'export', currentSessionId],
-                {
-                  cwd: '.',
-                  signal,
-                  timeoutMs: 30_000,
-                  maxOutputBytes: MAX_NATIVE_BYTES,
-                },
-              );
-              signal.throwIfAborted();
-              if (
-                exported.exitCode === 0 &&
-                Buffer.byteLength(exported.stdout) <= MAX_NATIVE_BYTES
-              )
-                await state.writeFile(
-                  EXPORT_PATH,
-                  Buffer.from(exported.stdout),
-                  { mode: 0o600 },
-                );
-            } catch {
-              // Native capture is optional; cancellation is not an evidence failure.
-              signal.throwIfAborted();
-              await state
-                .writeFile(EXPORT_PATH, new Uint8Array(), { mode: 0o600 })
-                .catch(() => undefined);
-            }
             signal.throwIfAborted();
             return turn;
           } finally {
             sending = false;
           }
+        },
+        async finalize(signal) {
+          signal.throwIfAborted();
+          if (currentSessionId === undefined) return;
+          try {
+            await state.writeFile(EXPORT_PATH, new Uint8Array(), { mode: 0o600 });
+            const exported = await context.runtime.commands.agent.run(
+              [
+                'node',
+                '-e',
+                OPENCODE_EXPORT_LAUNCHER,
+                `${layout.stateDirectory}/${EXPORT_PATH}`,
+                String(MAX_NATIVE_BYTES),
+                executable,
+                currentSessionId,
+              ],
+              {
+                cwd: '.',
+                signal,
+                timeoutMs: 30_000,
+                maxOutputBytes: 64 * 1024,
+              },
+            );
+            signal.throwIfAborted();
+            const entry = await state.inspect(`${EXPORT_PATH}.partial`);
+            if (
+              exported.exitCode !== 0 ||
+              entry.kind !== 'file' ||
+              (entry.size ?? 0) > MAX_NATIVE_BYTES
+            )
+              throw new Error('OpenCode native capture failed.');
+            const body = await state.readFile(`${EXPORT_PATH}.partial`, {
+              maxBytes: MAX_NATIVE_BYTES,
+            });
+            signal.throwIfAborted();
+            // Only Forge publishes. A rejected command can never publish later.
+            await state.writeFile(EXPORT_PATH, body, { mode: 0o600 });
+          } catch {
+            await state
+              .writeFile(EXPORT_PATH, new Uint8Array(), { mode: 0o600 })
+              .catch(() => undefined);
+            // Native capture is optional; cancellation is not an evidence failure.
+            signal.throwIfAborted();
+          }
+          signal.throwIfAborted();
         },
       };
     },

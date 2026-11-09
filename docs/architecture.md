@@ -467,6 +467,7 @@ sequenceDiagram
         Forge->>Completion: role-player completion, if multi-turn
         Forge->>Agent: session.send(message)
     end
+    Forge->>Agent: session.finalize(signal), if implemented
     Forge->>Runtime: quiesce()
     Runtime-->>Forge: sealed read-only runtime
     Forge->>Agent: collect exact native evidence/session artifact
@@ -623,6 +624,13 @@ safe, stable session ID; changing identity between turns is a contract
 violation. Agent text, tool calls, tool inputs, optional cost, and session
 identity are snapshotted at the boundary so later adapter mutation cannot
 change the driver ledger.
+
+When interaction returns, Forge awaits the optional `session.finalize(signal)`
+once before quiescence, while agent commands remain available. This includes a
+recorded Ava failure, even with no completed turns; fatal interaction errors
+skip finalization. An adapter handles optional capture failures itself. A
+rejection or cancellation from finalization fails the interaction phase.
+Adapters without the hook keep their existing behavior.
 
 One-shot and multi-turn interaction are described separately below.
 
@@ -1126,17 +1134,24 @@ fabricate image-file references, fetch image URLs, or attach those native bytes
 to a text-only judge. Incomplete, compacted, ambiguous, or unsupported
 conversation records still trigger whole-trajectory fallback.
 
-OpenCode exports the exact session after each completed turn, while commands
-are still permitted. Before another turn, the adapter invalidates the previous
-export so a failed capture cannot leave stale native evidence eligible. An
-export failure preserves the completed driver turn; cancellation propagates.
+OpenCode attempts one exact-session export during finalization after interaction,
+while commands are still permitted. Native stdout goes directly to a mode `0600`
+regular temporary file created exclusively in declared state. Export requires
+Node and a POSIX `sh`; the shell sets a file-size limit before the CLI runs.
+Shell block sizes allow at most 32 MiB of temporary output, while capture and
+evidence reads accept at most 16 MiB. Export has a 30-second timeout.
+After observing successful export and the byte limit, Forge copies the bounded
+temporary bytes to the eligible file through its state capability. A rejected export cannot publish later. Before each turn it invalidates any
+prior capture. Export failure preserves the completed driver turns and falls
+back to driver evidence; cancellation propagates.
 After quiescence, evidence collection only reads the saved JSON. Normalization
 validates session/version/model identity and retains user text, assistant text,
 reasoning, correlated tool results and errors, and available usage. Compaction,
 attachments, unsupported conversation parts, or incomplete tools trigger
-explicit fallback. Exact parseable session exports remain restricted artifacts
-even when their content cannot be normalized. Native auto-compaction remains
-enabled; turn replies retain assistant text before and after compaction but
+explicit fallback. Exact UTF-8 JSON exports within the byte limit remain
+restricted artifacts when `info.id` matches the selected session, even if ATIF
+normalization rejects their graph size, depth, or content. Native auto-compaction
+remains enabled; turn replies retain assistant text before and after compaction but
 exclude the summary message immediately preceding a synthetic continuation,
 rejecting ambiguous sequences. Compacted exports fall back before native text
 reconciliation, so the driver trajectory uses that summary-free reply.
