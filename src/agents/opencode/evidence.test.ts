@@ -154,7 +154,9 @@ describe('OpenCode native evidence', () => {
     assert.equal(trajectory.steps.length, 6);
     assert.equal(trajectory.steps[1]!.source, 'agent');
     assert.equal(trajectory.steps[1]!.reasoning_content, 'Private reasoning.');
-    for (const step of trajectory.steps.filter((step) => step.source === 'agent'))
+    for (const step of trajectory.steps.filter(
+      (step) => step.source === 'agent',
+    ))
       assert.deepEqual(step.metrics, {
         prompt_tokens: 12,
         completion_tokens: 3,
