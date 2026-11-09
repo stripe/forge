@@ -282,8 +282,25 @@ export function createOpenCodeAdapter(
               maxBytes: MAX_NATIVE_BYTES,
             });
             signal.throwIfAborted();
-            // Only Forge publishes. A rejected command can never publish later.
+            // The launcher writes only the partial; Forge copies it after success.
+            // Both paths remain agent-writable until the runtime quiesces.
             await state.writeFile(EXPORT_PATH, body, { mode: 0o600 });
+            // Cleanup failure must not invalidate an otherwise eligible capture.
+            await context.runtime.commands.agent
+              .run(
+                [
+                  'node',
+                  '-e',
+                  'require("node:fs").unlinkSync(process.argv[1]);',
+                  `${layout.stateDirectory}/${EXPORT_PATH}.partial`,
+                ],
+                {
+                  signal,
+                  timeoutMs: 30_000,
+                  maxOutputBytes: 64 * 1024,
+                },
+              )
+              .catch(() => undefined);
           } catch {
             await state
               .writeFile(EXPORT_PATH, new Uint8Array(), { mode: 0o600 })

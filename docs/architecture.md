@@ -1137,12 +1137,20 @@ conversation records still trigger whole-trajectory fallback.
 OpenCode attempts one exact-session export during finalization after interaction,
 while commands are still permitted. Native stdout goes directly to a mode `0600`
 regular temporary file created exclusively in declared state. Export requires
-Node and a POSIX `sh`; the shell sets a file-size limit before the CLI runs.
+Node and a POSIX `sh`; the shell sets `ulimit -f` before the CLI runs. This limit
+applies to all file writes by the `opencode export` process, including database
+and log writes. A very large session database can therefore make export fail
+even when its JSON output would fit, causing fallback to driver evidence.
 Shell block sizes allow at most 32 MiB of temporary output, while capture and
 evidence reads accept at most 16 MiB. Export has a 30-second timeout.
 After observing successful export and the byte limit, Forge copies the bounded
-temporary bytes to the eligible file through its state capability. A rejected export cannot publish later. Before each turn it invalidates any
-prior capture. Export failure preserves the completed driver turns and falls
+temporary bytes to the eligible file through its state capability, then attempts
+to remove the temporary file. Cleanup failure leaves the published capture
+eligible and the temporary file for runtime disposal. The launcher writes only
+the temporary path, so its late completion alone cannot publish a rejected
+capture. Both paths remain agent-writable until quiescence; other agent-started
+processes can replace them. Before each turn Forge invalidates any prior capture.
+Export failure preserves the completed driver turns and falls
 back to driver evidence; cancellation propagates.
 After quiescence, evidence collection only reads the saved JSON. Normalization
 validates session/version/model identity and retains user text, assistant text,

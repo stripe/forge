@@ -20,6 +20,7 @@ import type {
 } from '../../contracts/agent.ts';
 import type { CommandOptions, CommandResult } from '../../contracts/command.ts';
 import { selectAgentEvidence } from '../../evidence/selection.ts';
+import { createOwnedWorkspace } from '../../runtime/workspace.ts';
 import {
   createMemoryRunInputProvider,
   createMemoryWorkspace,
@@ -271,6 +272,91 @@ describe('OpenCode adapter', () => {
     assert.ok((await test.state.readonly.readFile('session.json')).length > 0);
     assert.equal(session.sessionId(), OPEN_CODE_SESSION);
     assert.equal(test.calls[0]!.options.signal, test.context.signal);
+  });
+  it('removes the partial after publishing the exact native bytes', async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-publish-'),
+    );
+    try {
+      const state = await createOwnedWorkspace(directory);
+      const native = JSON.stringify(
+        openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+      );
+      const executable = path.join(directory, 'opencode');
+      await writeFile(
+        executable,
+        `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(native)});\n`,
+        { mode: 0o700 },
+      );
+      const test = await fixture();
+      const adapter = createOpenCodeAdapter({
+        baseUrl: 'https://gateway.example/v1',
+        executable,
+        layout: { ...test.context.runtime.paths, stateDirectory: directory },
+      });
+      const session = await adapter.openSession({
+        ...test.context,
+        runtime: {
+          ...test.context.runtime,
+          stateDirectories: new Map([[OPENCODE_STATE_ID, state]]),
+          commands: {
+            agent: {
+              async run(argv) {
+                if (argv[2] === OPENCODE_LAUNCHER)
+                  return result(
+                    openCodeStream({ prompt: 'Do it', response: 'Done' }),
+                  );
+                if (argv[2] !== OPENCODE_EXPORT_LAUNCHER)
+                  assert.equal(
+                    Buffer.from(await state.readFile('session.json')).toString(),
+                    native,
+                  );
+                const launched = spawnSync(process.execPath, argv.slice(1));
+                assert.equal(launched.status, 0, launched.stderr.toString());
+                return result(launched.stdout.toString(), launched.status ?? 1);
+              },
+            },
+          },
+        },
+      });
+      await session.send('Do it', { signal: test.context.signal });
+      await session.finalize!(test.context.signal);
+      assert.equal(
+        Buffer.from(await state.readFile('session.json')).toString(),
+        native,
+      );
+      assert.equal(
+        (await stat(path.join(directory, 'session.json'))).mode & 0o777,
+        0o600,
+      );
+      assert.equal((await state.inspect('session.json.partial')).kind, 'absent');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('preserves published native evidence when partial cleanup fails', async () => {
+    const native = JSON.stringify(
+      openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+    );
+    const test = await fixture(async (argv, _options, state) => {
+      if (argv[2] === OPENCODE_LAUNCHER)
+        return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
+      if (argv[2] === OPENCODE_EXPORT_LAUNCHER) {
+        await state.mutable.writeFile(
+          'session.json.partial',
+          Buffer.from(native),
+        );
+        return result('');
+      }
+      throw new Error('cleanup failed');
+    });
+    const session = await test.adapter.openSession(test.context);
+    await session.send('Do it', { signal: test.context.signal });
+    await session.finalize!(test.context.signal);
+    assert.equal(
+      Buffer.from(await test.state.readonly.readFile('session.json')).toString(),
+      native,
+    );
   });
   it('passes a declared prompt file unchanged through real Node stdin', async () => {
     const directory = await mkdtemp(
