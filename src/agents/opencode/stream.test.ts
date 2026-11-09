@@ -73,10 +73,7 @@ describe('OpenCode live stream', () => {
     assert.deepEqual(result.toolCalls, [
       { id: 'prt_abandoned', name: 'bash', input: cleanup.part.state.input },
     ]);
-    assert.deepEqual(
-      parseOpenCodeStream(encode([...events, cleanup])),
-      result,
-    );
+    assert.deepEqual(parseOpenCodeStream(encode([...events, cleanup])), result);
     // Cleanup after an intermediate finish must still allow the next step.
     const intermediate = {
       ...finish,
@@ -204,10 +201,10 @@ describe('OpenCode live stream', () => {
       const result = parseOpenCodeStream(
         encode([...events.slice(0, 3), ...middle, ...events.slice(3)]),
       );
-      assert.deepEqual(result.toolCalls.map(({ id }) => id), [
-        'prt_tool0',
-        'prt_second',
-      ]);
+      assert.deepEqual(
+        result.toolCalls.map(({ id }) => id),
+        ['prt_tool0', 'prt_second'],
+      );
       assert.deepEqual(result.toolCalls[1]!.input, { command: 'second' });
     }
     const next = openCodeEvents(turn, 1);

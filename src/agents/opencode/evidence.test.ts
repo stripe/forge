@@ -219,7 +219,10 @@ describe('OpenCode native evidence', () => {
         ['prt_second', 'Second result'],
       ],
     );
-    assert.equal(trajectory.steps[4]!.tool_calls?.[0]!.tool_call_id, 'prt_tool1');
+    assert.equal(
+      trajectory.steps[4]!.tool_calls?.[0]!.tool_call_id,
+      'prt_tool1',
+    );
     assert.equal(
       trajectoryCoversCompletedTurns(trajectory, driver, collected.source),
       true,
@@ -270,7 +273,13 @@ describe('OpenCode native evidence', () => {
         time: { start: 1790000000000, end: 1790000000001 },
       },
     };
-    message.parts = [start, completed, retry, ...message.parts.slice(1), cleanup];
+    message.parts = [
+      start,
+      completed,
+      retry,
+      ...message.parts.slice(1),
+      cleanup,
+    ];
     value.messages.splice(1, 1);
     const events = openCodeEvents(turns[0]!).slice(4);
     events.splice(
@@ -281,10 +290,10 @@ describe('OpenCode native evidence', () => {
     );
     events.push({ ...events[0]!, type: 'tool_use', part: cleanup });
     const parsed = parseOpenCodeStream(encode(events));
-    assert.deepEqual(parsed.toolCalls.map(({ id }) => id), [
-      'prt_tool0',
-      'prt_abandoned',
-    ]);
+    assert.deepEqual(
+      parsed.toolCalls.map(({ id }) => id),
+      ['prt_tool0', 'prt_abandoned'],
+    );
     const collected = await loadOpenCodeEvidence(fixture(value).input);
     assert.equal(collected.kind, 'available');
     if (collected.kind !== 'available') return;
@@ -367,10 +376,10 @@ describe('OpenCode native evidence', () => {
         collected,
       });
       assert.equal(selected.provenance.source.kind, 'driver_fallback');
-      assert.deepEqual(selected.warnings.map(({ code }) => code), [
-        'source_incomplete',
-        'fallback_used',
-      ]);
+      assert.deepEqual(
+        selected.warnings.map(({ code }) => code),
+        ['source_incomplete', 'fallback_used'],
+      );
       assert.equal(
         Buffer.from((await loadOpenCodeNativeArtifact(input))!.body).toString(),
         body,

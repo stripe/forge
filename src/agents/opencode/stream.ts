@@ -127,7 +127,10 @@ export function parseOpenCodeStream(
           calls.set(partId, call);
           messageHasTools = true;
           // Cleanup records the abandoned attempt, not a new model step.
-        } else if (event.type === 'step_finish' && part.type === 'step-finish') {
+        } else if (
+          event.type === 'step_finish' &&
+          part.type === 'step-finish'
+        ) {
           completed = terminal(part.reason) && !stepHasTools;
           cost += nonnegative(part.cost);
           activeMessage = undefined;
