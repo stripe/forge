@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import {
-  link, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -27,9 +34,7 @@ import {
   createTestResolvedRunPlan,
 } from '../../testing/index.ts';
 import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
-import {
-  OPENCODE_EXPORT_LAUNCHER, OPENCODE_LAUNCHER,
-} from './launcher.ts';
+import { OPENCODE_EXPORT_LAUNCHER, OPENCODE_LAUNCHER } from './launcher.ts';
 import { MAX_NATIVE_BYTES } from './native.ts';
 import {
   PLUGIN_CONFIG_PATH,
@@ -88,12 +93,16 @@ async function fixture(
               await state.mutable.writeFile(
                 'session.json.partial',
                 Buffer.from(
-                  JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
+                  JSON.stringify(
+                    openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+                  ),
                 ),
               );
               return result('');
             }
-            return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
+            return result(
+              openCodeStream({ prompt: 'Do it', response: 'Done' }),
+            );
           },
         },
       },
@@ -308,7 +317,9 @@ describe('OpenCode adapter', () => {
                   );
                 if (argv[2] !== OPENCODE_EXPORT_LAUNCHER)
                   assert.equal(
-                    Buffer.from(await state.readFile('session.json')).toString(),
+                    Buffer.from(
+                      await state.readFile('session.json'),
+                    ).toString(),
                     native,
                   );
                 const launched = spawnSync(process.execPath, argv.slice(1));
@@ -329,7 +340,10 @@ describe('OpenCode adapter', () => {
         (await stat(path.join(directory, 'session.json'))).mode & 0o777,
         0o600,
       );
-      assert.equal((await state.inspect('session.json.partial')).kind, 'absent');
+      assert.equal(
+        (await state.inspect('session.json.partial')).kind,
+        'absent',
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -354,7 +368,9 @@ describe('OpenCode adapter', () => {
     await session.send('Do it', { signal: test.context.signal });
     await session.finalize!(test.context.signal);
     assert.equal(
-      Buffer.from(await test.state.readonly.readFile('session.json')).toString(),
+      Buffer.from(
+        await test.state.readonly.readFile('session.json'),
+      ).toString(),
       native,
     );
   });
@@ -453,7 +469,9 @@ describe('OpenCode adapter', () => {
     }
   });
   it('writes native bytes through a regular file descriptor without stdout capture', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'forge-opencode-export-'));
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-export-'),
+    );
     try {
       const destination = path.join(directory, 'session.json');
       const payload = JSON.stringify({
@@ -469,10 +487,18 @@ describe('OpenCode adapter', () => {
         { mode: 0o700 },
       );
       await writeFile(destination, 'old bytes', { mode: 0o644 });
-      const launched = spawnSync(process.execPath, [
-        '-e', OPENCODE_EXPORT_LAUNCHER, destination, String(MAX_NATIVE_BYTES),
-        executable, OPEN_CODE_SESSION,
-      ], { maxBuffer: 64 * 1024 });
+      const launched = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          OPENCODE_EXPORT_LAUNCHER,
+          destination,
+          String(MAX_NATIVE_BYTES),
+          executable,
+          OPEN_CODE_SESSION,
+        ],
+        { maxBuffer: 64 * 1024 },
+      );
       assert.equal(launched.status, 0);
       assert.equal(launched.stdout.length, 0);
       assert.equal(await readFile(destination, 'utf8'), 'old bytes');
@@ -483,8 +509,12 @@ describe('OpenCode adapter', () => {
       for (const createLink of [symlink, link]) {
         await createLink(source, `${destination}.partial`);
         const unsafe = spawnSync(process.execPath, [
-          '-e', OPENCODE_EXPORT_LAUNCHER, destination, String(MAX_NATIVE_BYTES),
-          executable, OPEN_CODE_SESSION,
+          '-e',
+          OPENCODE_EXPORT_LAUNCHER,
+          destination,
+          String(MAX_NATIVE_BYTES),
+          executable,
+          OPEN_CODE_SESSION,
         ]);
         assert.notEqual(unsafe.status, 0);
         assert.equal(await readFile(source, 'utf8'), payload);
@@ -493,13 +523,24 @@ describe('OpenCode adapter', () => {
       await writeFile(destination, '');
       for (const failure of ['non-zero', 'oversized']) {
         if (failure === 'non-zero')
-          await writeFile(executable, `#!${process.execPath}\nprocess.stdout.write('{}'); process.exitCode = 1;\n`, { mode: 0o700 });
+          await writeFile(
+            executable,
+            `#!${process.execPath}\nprocess.stdout.write('{}'); process.exitCode = 1;\n`,
+            { mode: 0o700 },
+          );
         else
-          await writeFile(executable, `#!${process.execPath}\nrequire('node:fs').createReadStream(${JSON.stringify(source)}).pipe(process.stdout);\n`, { mode: 0o700 });
+          await writeFile(
+            executable,
+            `#!${process.execPath}\nrequire('node:fs').createReadStream(${JSON.stringify(source)}).pipe(process.stdout);\n`,
+            { mode: 0o700 },
+          );
         const rejected = spawnSync(process.execPath, [
-          '-e', OPENCODE_EXPORT_LAUNCHER, destination,
+          '-e',
+          OPENCODE_EXPORT_LAUNCHER,
+          destination,
           String(failure === 'oversized' ? 1024 : MAX_NATIVE_BYTES),
-          executable, OPEN_CODE_SESSION,
+          executable,
+          OPEN_CODE_SESSION,
         ]);
         assert.equal(rejected.status, 1);
         assert.equal((await readFile(destination)).length, 0);
@@ -509,19 +550,29 @@ describe('OpenCode adapter', () => {
     }
   });
   it('bounds the file while the exporter is still running', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'forge-opencode-bound-'));
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-bound-'),
+    );
     try {
       const executable = path.join(directory, 'opencode');
       const destination = path.join(directory, 'session.json');
-      await writeFile(executable, [
-        `#!${process.execPath}`,
-        "require('node:fs').writeSync(1, Buffer.alloc(64 * 1024));",
-        "process.stderr.write('ready');",
-        'setTimeout(() => {}, 300);',
-      ].join('\n'), { mode: 0o700 });
+      await writeFile(
+        executable,
+        [
+          `#!${process.execPath}`,
+          "require('node:fs').writeSync(1, Buffer.alloc(64 * 1024));",
+          "process.stderr.write('ready');",
+          'setTimeout(() => {}, 300);',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
       const child = spawn(process.execPath, [
-        '-e', OPENCODE_EXPORT_LAUNCHER, destination, '1024',
-        executable, OPEN_CODE_SESSION,
+        '-e',
+        OPENCODE_EXPORT_LAUNCHER,
+        destination,
+        '1024',
+        executable,
+        OPEN_CODE_SESSION,
       ]);
       const closed = once(child, 'close');
       await once(child.stderr, 'data');
@@ -544,10 +595,16 @@ describe('OpenCode adapter', () => {
     await session.send('Do it', { signal: test.context.signal });
     await session.finalize!(test.context.signal);
     // Simulate an exporter completing during runtime shutdown after rejection.
-    await test.state.mutable.writeFile('session.json.partial', Buffer.from(
-      JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
-    ));
-    assert.equal((await test.state.readonly.readFile('session.json')).length, 0);
+    await test.state.mutable.writeFile(
+      'session.json.partial',
+      Buffer.from(
+        JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
+      ),
+    );
+    assert.equal(
+      (await test.state.readonly.readFile('session.json')).length,
+      0,
+    );
     const evidenceContext = {
       ...test.context,
       sessionId: OPEN_CODE_SESSION,
@@ -559,8 +616,14 @@ describe('OpenCode adapter', () => {
         metadata: {},
       },
     };
-    assert.equal((await test.adapter.collectEvidence(evidenceContext)).kind, 'unavailable');
-    assert.equal(await test.adapter.collectNativeArtifact!(evidenceContext), undefined);
+    assert.equal(
+      (await test.adapter.collectEvidence(evidenceContext)).kind,
+      'unavailable',
+    );
+    assert.equal(
+      await test.adapter.collectNativeArtifact!(evidenceContext),
+      undefined,
+    );
   });
   it('does not export a session without completed turns', async () => {
     const test = await fixture();
@@ -568,7 +631,11 @@ describe('OpenCode adapter', () => {
     await session.finalize!(test.context.signal);
     assert.equal(test.calls.length, 0);
   });
-  for (const failure of ['command rejection', 'non-zero exit', 'oversized export']) {
+  for (const failure of [
+    'command rejection',
+    'non-zero exit',
+    'oversized export',
+  ]) {
     it(`uses explicit driver fallback after an export with ${failure}`, async () => {
       let exports = 0;
       const native = JSON.stringify(
@@ -592,15 +659,25 @@ describe('OpenCode adapter', () => {
       });
       await test.state.mutable.writeFile('session.json', Buffer.from(native));
       const session = await test.adapter.openSession(test.context);
-      const first = await session.send('Do it', { signal: test.context.signal });
-      assert.equal((await test.state.readonly.readFile('session.json')).length, 0);
-      const second = await session.send('Again', { signal: test.context.signal });
+      const first = await session.send('Do it', {
+        signal: test.context.signal,
+      });
+      assert.equal(
+        (await test.state.readonly.readFile('session.json')).length,
+        0,
+      );
+      const second = await session.send('Again', {
+        signal: test.context.signal,
+      });
       assert.equal(second.text, 'Done');
       assert.equal(exports, 0);
       await session.finalize!(test.context.signal);
       assert.equal(exports, 1);
       assert.equal(session.sessionId(), OPEN_CODE_SESSION);
-      assert.equal((await test.state.readonly.readFile('session.json')).length, 0);
+      assert.equal(
+        (await test.state.readonly.readFile('session.json')).length,
+        0,
+      );
       const evidenceContext = {
         ...test.context,
         sessionId: OPEN_CODE_SESSION,
@@ -661,7 +738,10 @@ describe('OpenCode adapter', () => {
       } else {
         await session.send('Do it', { signal: controller.signal });
         await assert.rejects(session.finalize!(controller.signal), /cancelled/);
-        assert.equal((await test.state.readonly.readFile('session.json')).length, 0);
+        assert.equal(
+          (await test.state.readonly.readFile('session.json')).length,
+          0,
+        );
       }
     }
   });

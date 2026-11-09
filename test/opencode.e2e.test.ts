@@ -64,8 +64,11 @@ describe('OpenCode engine integration', () => {
               assert.equal(turns.length, mode === 'multi_turn' ? 2 : 1);
               assert.equal(runtime.runs[0]!.events.includes('quiesce'), false);
               assert.equal(call.argv[6], OPEN_CODE_SESSION);
-              await runtime.runs[0]!.stateDirectories.get(OPENCODE_STATE_ID)!.mutable.writeFile(
-                'session.json.partial', Buffer.from(JSON.stringify(openCodeExport(turns))),
+              await runtime.runs[0]!.stateDirectories.get(
+                OPENCODE_STATE_ID,
+              )!.mutable.writeFile(
+                'session.json.partial',
+                Buffer.from(JSON.stringify(openCodeExport(turns))),
               );
               return {
                 stdout: '',

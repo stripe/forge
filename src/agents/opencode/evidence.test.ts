@@ -289,7 +289,9 @@ describe('OpenCode native evidence', () => {
       model: OPEN_CODE_MODEL,
       sessionId: OPEN_CODE_SESSION,
       completedTurns: turns.map((turn) => ({
-        user: turn.prompt, assistant: turn.response, toolCalls: [],
+        user: turn.prompt,
+        assistant: turn.response,
+        toolCalls: [],
       })),
       collected,
     });
@@ -305,10 +307,13 @@ describe('OpenCode native evidence', () => {
       Buffer.concat([Buffer.from(fixture().body), Buffer.from([0xff])]),
       Buffer.from(fixture().body.padEnd(MAX_NATIVE_BYTES + 1)),
     ]) {
-      assert.equal(await loadOpenCodeNativeArtifact({
-        ...fixture().input,
-        state: createMemoryWorkspace({ 'session.json': body }).readonly,
-      }), undefined);
+      assert.equal(
+        await loadOpenCodeNativeArtifact({
+          ...fixture().input,
+          state: createMemoryWorkspace({ 'session.json': body }).readonly,
+        }),
+        undefined,
+      );
     }
   });
   it('bounds malformed exports and propagates cancellation', async () => {

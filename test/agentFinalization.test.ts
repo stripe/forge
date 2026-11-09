@@ -39,8 +39,7 @@ function fixture(outcome: Outcome) {
               message: 'Continue',
             }),
             JSON.stringify({
-              remaining_need_ids:
-                outcome === 'task_complete' ? [] : ['need_1'],
+              remaining_need_ids: outcome === 'task_complete' ? [] : ['need_1'],
               message: outcome === 'task_complete' ? '' : 'Continue',
             }),
           ],
@@ -60,7 +59,9 @@ function fixture(outcome: Outcome) {
     composition: {
       runtime: runtime.adapter,
       agents: new Map([[scripted.adapter.id, scripted.adapter]]),
-      completionProviders: new Map([[completion.provider.id, completion.provider]]),
+      completionProviders: new Map([
+        [completion.provider.id, completion.provider],
+      ]),
       credentialResolver: createStaticCredentialResolver(),
       inputProvider: createMemoryRunInputProvider(),
       artifactStore: createMemoryArtifactStore().store,
@@ -95,10 +96,14 @@ describe('agent session finalization', () => {
                     ? 1
                     : 2,
               );
-              assert.equal(test.runtime.runs[0]!.events.includes('quiesce'), false);
+              assert.equal(
+                test.runtime.runs[0]!.events.includes('quiesce'),
+                false,
+              );
               await context.runtime.commands.agent.run(['capture'], { signal });
               await context.runtime.workspace.writeFile(
-                'finalized.txt', Buffer.from('captured'),
+                'finalized.txt',
+                Buffer.from('captured'),
               );
               finalized++;
             },
@@ -108,7 +113,9 @@ describe('agent session finalization', () => {
           assert.equal(finalized, 1);
           assert.equal(test.runtime.runs[0]!.events.includes('quiesce'), true);
           assert.equal(
-            Buffer.from(await context.runtime.workspace.readFile('finalized.txt')).toString(),
+            Buffer.from(
+              await context.runtime.workspace.readFile('finalized.txt'),
+            ).toString(),
             'captured',
           );
           return test.scripted.adapter.collectEvidence(context);
@@ -130,7 +137,9 @@ describe('agent session finalization', () => {
         completed.result.stop_reason,
         outcome === 'one_shot'
           ? 'task_complete'
-          : outcome === 'zero_turn_error' ? 'role_player_error' : outcome,
+          : outcome === 'zero_turn_error'
+            ? 'role_player_error'
+            : outcome,
       );
     });
   }

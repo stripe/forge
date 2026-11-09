@@ -14,10 +14,7 @@ import {
   loadOpenCodeEvidence,
   loadOpenCodeNativeArtifact,
 } from './evidence.ts';
-import {
-  OPENCODE_EXPORT_LAUNCHER,
-  OPENCODE_LAUNCHER,
-} from './launcher.ts';
+import { OPENCODE_EXPORT_LAUNCHER, OPENCODE_LAUNCHER } from './launcher.ts';
 import {
   assertOpenCodeRuntimeLayout,
   OPENCODE_STATE_ID,
@@ -252,7 +249,9 @@ export function createOpenCodeAdapter(
           signal.throwIfAborted();
           if (currentSessionId === undefined) return;
           try {
-            await state.writeFile(EXPORT_PATH, new Uint8Array(), { mode: 0o600 });
+            await state.writeFile(EXPORT_PATH, new Uint8Array(), {
+              mode: 0o600,
+            });
             const exported = await context.runtime.commands.agent.run(
               [
                 'node',

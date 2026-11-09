@@ -160,7 +160,10 @@ describe('OpenCode whole-prompt judge budget integration', () => {
               : call.argv[2] === OPENCODE_EXPORT_LAUNCHER
                 ? ''
                 : stream;
-          if (call.scope === 'agent' && call.argv[2] !== OPENCODE_EXPORT_LAUNCHER) {
+          if (
+            call.scope === 'agent' &&
+            call.argv[2] !== OPENCODE_EXPORT_LAUNCHER
+          ) {
             const state =
               runtime.runs[0]!.stateDirectories.get(
                 OPENCODE_STATE_ID,
@@ -171,15 +174,16 @@ describe('OpenCode whole-prompt judge budget integration', () => {
             );
           }
           if (call.argv[2] === OPENCODE_EXPORT_LAUNCHER) {
-            await runtime.runs[0]!.stateDirectories.get(OPENCODE_STATE_ID)!.mutable.writeFile(
-              'session.json.partial', Buffer.from(raw),
-            );
+            await runtime.runs[0]!.stateDirectories.get(
+              OPENCODE_STATE_ID,
+            )!.mutable.writeFile('session.json.partial', Buffer.from(raw));
           }
           return {
             stdout,
             stderr: '',
             exitCode:
-              call.argv[2] === OPENCODE_EXPORT_LAUNCHER && scenario.capture === 'failed'
+              call.argv[2] === OPENCODE_EXPORT_LAUNCHER &&
+              scenario.capture === 'failed'
                 ? 1
                 : 0,
             durationMs: 1,
