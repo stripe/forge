@@ -439,6 +439,7 @@ contains:
 | `CredentialResolver` | Resolve opaque references | Secret lookup only for explicitly requested references |
 | `RunInputProvider` | Read dataset payloads | Read-only access below one dataset root |
 | `RunArtifactStore` | Stage and atomically commit results | One run namespace in the result store |
+| Optional `AttemptDiagnosticsStore` | Persist bounded observations independently of results | Attempt namespace only; never scoring authority |
 | `RunObserver` | Receive lifecycle events | No control; failures are ignored |
 | `RunArtifactContributor` list | Add supplemental files | Only below `extensions/<contributor-id>/` |
 
@@ -1032,7 +1033,8 @@ include waits from the source run. Runs without judging criteria retain
 their source-run totals with the unchanged evaluation. Reused older regrades
 without counters leave the wait total absent. Older results may omit the new
 fields. These are observations and do not change plan digests. Attempts that
-fail before result commit do not persist these records.
+fail before result commit retain a bounded projection in attempt diagnostics when
+recording is available.
 
 ## Evidence architecture
 
@@ -1710,6 +1712,65 @@ Duplicate run IDs, paths, missing descriptors, descriptor mismatches, unsafe
 paths, and collisions fail the transaction. Restricted native artifacts are
 mode `0600`; ordinary artifacts are mode `0644`.
 
+### Attempt diagnostics
+
+`AttemptDiagnosticsStore` is an explicit, optional composition capability, separate
+from `RunArtifactStore`. The experiment controller supplies a local store by
+default at `diagnostics/<eval-run-id>/attempt.json`. Single-eval hosts may supply
+`createAttemptDiagnosticsStore({root})` through `composition.attemptDiagnosticsStore`.
+The root's parents must exist. The store resolves that explicit host root once,
+so output aliases remain usable; links beneath the resolved root are rejected. The host owns
+retention and deletion; there is no background retention service.
+
+`attempt.json` uses `schema_version: forge-attempt-v1` and its own Forge producer
+identity. Its strict, canonical record binds the run ID, optional experiment run
+ID, selection, and plan digest. Reservation is flushed before dispatch; execution
+start is recorded at entry and flushed after pure preflight. UTC fields record
+reservation, start, first failure, cleanup completion, and finish. Monotonic
+elapsed milliseconds measure failure, cleanup, and finish from execution entry;
+wall-clock changes do not determine durations. Checkpoints and report rows expose
+known start/finish times and recording availability. Older records may omit them.
+
+The recorder persists phase boundaries and completed host-call observations. It
+retains at most 256 completion subattempt summaries within 128 KiB, using the
+result's shared retry fields and provider/model identity, with totals and omitted counts afterward. Calls still in flight
+may lack summaries in an interrupted snapshot. Records are capped at 512 KiB.
+Process and protocol capture are explicitly unsupported; restricted excerpts are
+disabled. No prompt, URL, environment mapping, stack, or raw output is captured.
+Safe failure messages follow the existing credential-redaction boundary.
+
+Each attempt has one serialized writer, atomic replacement, increasing revisions,
+and idempotent identical terminal writes. Concurrent observations coalesce while
+a write is active. The local store uses fixed filenames, private directories
+(`0700`), private files (`0600`), and rejects symlinks. One host process owns the
+root; the experiment lock supplies process exclusion. As with the result store,
+trusted host code must not replace ancestor directories during I/O.
+
+The engine partitions a fixed two-second total write allowance: one second for
+reservation and progress, half a second for the first failure, and half a second
+for terminal publication. Exhausted progress cannot consume the failure or
+terminal allowance. Awaited diagnostic writes pause the execution time allowance;
+caller cancellation remains active. Recording failures yield a generic warning
+without changing committed artifacts or scores. Diagnostic warnings do not await
+observers. Stores must honor cancellation before publishing a snapshot. Finished
+snapshots ignore late observations and lifecycle updates. Abrupt host loss can
+lose pending observations.
+
+Resume preserves historical files and checks supported, readable records against
+the selected attempt identity, separately from scored artifacts. All diagnostic
+history reads share one two-second deadline and caller cancellation. After the
+deadline, remaining attempts become unavailable without further store reads.
+Missing, malformed, newer-format, unsafe-permission, unreadable, or timed-out
+diagnostics become `unavailable` in checkpoints and reports. Resume continues
+with at most one generic history warning per invocation; it does not repair or
+relax file modes. An identity conflict in a readable record checked before the
+deadline stops resume and releases the lock. Custom stores
+signal that conflict with the exported `AttemptDiagnosticsIdentityError`; other
+read failures mean unavailable history. Returned host records are also parsed
+and identity-checked by the controller. Caller cancellation still stops resume.
+Diagnostics cannot satisfy completed-run verification and are never used for
+judging, fallback evidence, scoring, or regrade. Plan digests exclude observations.
+
 ### Completed-run verification
 
 [`verifyCompletedRun`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) does more than verify
@@ -1799,9 +1860,11 @@ even if the other signal fires during cleanup. A new abort during cleanup does
 not replace the fatal error that started it. Caller-provided abort reasons
 are not persisted. On any failure Forge:
 
-1. rolls back an open artifact transaction;
-2. disposes a prepared runtime if it has not already been disposed; and
-3. surfaces an abort-specific error when the combined signal fired.
+1. freezes the first failure, its UTC time, and elapsed time;
+2. flushes attempt diagnostics before rolling back an open artifact transaction;
+3. disposes a prepared runtime, stopping mutation with teardown authority; and
+4. records cleanup failures separately, finalizes diagnostics, and surfaces the
+   frozen error.
 
 Cleanup does not rely on an already-aborted execution signal. Runtime disposal
 is idempotent, and the Docker implementation waits for an in-progress quiesce
@@ -1822,7 +1885,7 @@ be committed; failures before that point remain fatal.
 
 | Entry point | Purpose |
 | --- | --- |
-| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation (including choice decisions and the completion adapter), results, setup, and composition contracts |
+| `@stripe/forge` | Schemas, loaders, planning, execution, evaluation (including choice decisions and the completion adapter), results, attempt diagnostics, setup, and composition contracts |
 | `@stripe/forge/atif` | Current ATIF parser, serializer, normalization types, and constants |
 | `@stripe/forge/atif/v1.8` | Explicitly versioned ATIF v1.8 surface |
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |

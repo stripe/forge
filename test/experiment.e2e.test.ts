@@ -757,9 +757,20 @@ describe('resumable CLI experiment runs', () => {
       path.join(fixture.root, 'runs', 'attempt-1', 'result.json'),
     );
     const journal = await fixture.readCheckpoint();
-    assert.deepEqual(journal.entries[1]!.attempts, [
-      { run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed' },
-    ]);
+    assert.deepEqual(
+      journal.entries[1]!.attempts.map(({ run_id, state, error_code }) => ({
+        run_id,
+        state,
+        error_code,
+      })),
+      [{ run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed' }],
+    );
+    assert.equal(
+      journal.entries[1]!.attempts[0]!.diagnostics_status,
+      'available',
+    );
+    assert.ok(journal.entries[1]!.attempts[0]!.reserved_at);
+    assert.ok(journal.entries[1]!.attempts[0]!.finished_at);
     assert.equal(
       (await fs.readFile(fixture.checkpoint, 'utf8')).includes(
         'secret-adapter-detail',
@@ -797,10 +808,19 @@ describe('resumable CLI experiment runs', () => {
       resumedReport.runs.map((run) => run.run_id),
       ['attempt-1', 'attempt-4', 'attempt-3'],
     );
-    assert.deepEqual((await fixture.readCheckpoint()).entries[1]!.attempts, [
-      { run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed' },
-      { run_id: 'attempt-4', state: 'completed' },
-    ]);
+    assert.deepEqual(
+      (await fixture.readCheckpoint()).entries[1]!.attempts.map(
+        ({ run_id, state, error_code }) => ({
+          run_id,
+          state,
+          ...(error_code === undefined ? {} : { error_code }),
+        }),
+      ),
+      [
+        { run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed' },
+        { run_id: 'attempt-4', state: 'completed' },
+      ],
+    );
     assert.deepEqual(
       await fs.readFile(
         path.join(fixture.root, 'runs', 'attempt-1', 'result.json'),
@@ -1305,18 +1325,28 @@ describe('resumable CLI experiment runs', () => {
       path.join(fixture.root, 'runs', 'attempt-1'),
     );
     assert.equal(completed.result.stop_reason, 'role_player_error');
-    assert.deepEqual((await fixture.readCheckpoint()).entries[0]!.attempts, [
-      {
-        run_id: 'attempt-1',
-        state: 'errored',
-        error_code: 'role_player_error',
-        diagnostic: {
-          phase: 'interaction',
-          reason: 'failure',
-          message: 'unavailable',
+    assert.deepEqual(
+      (await fixture.readCheckpoint()).entries[0]!.attempts.map(
+        ({ run_id, state, error_code, diagnostic }) => ({
+          run_id,
+          state,
+          error_code,
+          diagnostic,
+        }),
+      ),
+      [
+        {
+          run_id: 'attempt-1',
+          state: 'errored',
+          error_code: 'role_player_error',
+          diagnostic: {
+            phase: 'interaction',
+            reason: 'failure',
+            message: 'unavailable',
+          },
         },
-      },
-    ]);
+      ],
+    );
     const resumed = await fixture.run(['--resume', 'exp-1'], options);
     assert.equal(resumed.code, 1);
     assert.equal(resumed.summary.executed, 1);
@@ -1330,7 +1360,16 @@ interface Checkpoint {
   entries: Array<{
     selection: RunSelection;
     plan_sha256: string;
-    attempts: Array<{ run_id: string; state: string; error_code?: string }>;
+    attempts: Array<{
+      run_id: string;
+      state: string;
+      error_code?: string;
+      diagnostic?: { phase: string; reason: string; message: string };
+      reserved_at?: string;
+      started_at?: string;
+      finished_at?: string;
+      diagnostics_status?: string;
+    }>;
   }>;
 }
 

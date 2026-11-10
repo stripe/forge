@@ -2,8 +2,22 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import type { AttemptDiagnosticsStore } from './contracts/attemptDiagnostics.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
+import { createAttemptDiagnosticsStore } from './diagnostics/localStore.ts';
+import {
+  type AttemptDiagnosticsIdentity,
+  AttemptDiagnosticsIdentityError,
+  assertAttemptDiagnosticsIdentity,
+  attemptDiagnosticsIdentity,
+  parseAttemptDiagnostics,
+} from './diagnostics/model.ts';
+import { createAttemptRecorder } from './diagnostics/recorder.ts';
 import type { ForgeEngine } from './engine.ts';
+import {
+  ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
+  createAttemptDiagnosticsWriter,
+} from './execution/diagnosticsIO.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import {
@@ -247,6 +261,9 @@ export async function runExperiment(
     await fs.mkdir(root);
   }
   const release = await acquireExperimentRunLock(root);
+  const diagnosticsStore =
+    options.composition.attemptDiagnosticsStore ??
+    createAttemptDiagnosticsStore({ root });
   const checkpoint = path.join(root, 'experiment.json');
   const reportPath = path.join(root, 'report.json');
   const inspections = new Map<string, CachedInspection>();
@@ -309,12 +326,47 @@ export async function runExperiment(
       }
     }
     const runIds = new Set<string>();
-    for (const entry of experimentRun.entries) {
-      for (const attempt of entry.attempts) {
-        if (runIds.has(attempt.run_id))
-          throw new Error('Experiment run contains duplicate run IDs.');
-        runIds.add(attempt.run_id);
+    const historyTimeout = new AbortController();
+    const historyTimer = setTimeout(
+      () =>
+        historyTimeout.abort(
+          new Error('Attempt diagnostic history deadline exhausted.'),
+        ),
+      ATTEMPT_DIAGNOSTIC_IO_BUDGET_MS,
+    );
+    try {
+      for (const [index, entry] of experimentRun.entries.entries()) {
+        for (const [attemptIndex, attempt] of entry.attempts.entries()) {
+          options.signal.throwIfAborted();
+          if (runIds.has(attempt.run_id))
+            throw new Error('Experiment run contains duplicate run IDs.');
+          runIds.add(attempt.run_id);
+          const saved = await readAttemptHistory(
+            diagnosticsStore,
+            attemptDiagnosticsIdentity(
+              attempt.run_id,
+              options.plans[index]!,
+              experimentRun.experiment_run_id,
+            ),
+            options.signal,
+            historyTimeout.signal,
+          );
+          Object.assign(attempt, saved ? timingFields(saved.timing) : {}, {
+            diagnostics_status: saved ? 'available' : 'unavailable',
+          });
+          if (saved?.primary_failure && attempt.state === 'running') {
+            const { error_code, ...diagnostic } = saved.primary_failure;
+            entry.attempts[attemptIndex] = {
+              ...attempt,
+              state: 'errored',
+              error_code,
+              diagnostic,
+            };
+          }
+        }
       }
+    } finally {
+      clearTimeout(historyTimer);
     }
     reportReady = true;
 
@@ -333,7 +385,13 @@ export async function runExperiment(
           recovered.error_code !== 'invalid_artifacts' ||
           last.state !== 'errored'
         ) {
-          entry.attempts[entry.attempts.length - 1] = recovered;
+          entry.attempts[entry.attempts.length - 1] = {
+            ...timingFields(last),
+            ...(last.diagnostics_status === undefined
+              ? {}
+              : { diagnostics_status: last.diagnostics_status }),
+            ...recovered,
+          };
         }
         if (recovered.state === 'completed') {
           skipped += 1;
@@ -407,22 +465,38 @@ export async function runExperiment(
             const runId = runIdSchema.parse(options.runIdFactory());
             if (
               runIds.has(runId) ||
-              (await exists(path.join(root, 'runs', runId)))
+              (await exists(path.join(root, 'runs', runId))) ||
+              (await exists(path.join(root, 'diagnostics', runId)))
             ) {
               throw new Error('Eval run ID already exists.');
             }
             runIds.add(runId);
-            entry.attempts.push({ run_id: runId, state: 'running' });
+            const reservedAt = new Date().toISOString();
+            const recorder = createAttemptRecorder({
+              identity: attemptDiagnosticsIdentity(
+                runId,
+                options.plans[index]!,
+                experimentRun!.experiment_run_id,
+              ),
+              write: createAttemptDiagnosticsWriter(diagnosticsStore),
+              reservedAt,
+            });
+            await recorder.reserve();
+            entry.attempts.push({
+              run_id: runId,
+              state: 'running',
+              reserved_at: reservedAt,
+            });
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
             options.progress({
               selection: entry.selection,
               run_id: runId,
               state: 'running',
             });
-            return { index, runId, entry };
+            return { index, runId, entry, reservedAt, recorder };
           });
           if (task === undefined) return;
-          const { index, runId, entry } = task;
+          const { index, runId, entry, reservedAt, recorder } = task;
           let attempt: SettledAttempt;
           let artifact: ExperimentRunArtifact | null = null;
           try {
@@ -432,6 +506,7 @@ export async function runExperiment(
               runId,
               plan: options.plans[index]!,
               composition: options.composition,
+              attemptDiagnostics: recorder,
               signal,
             });
             const [actualLocation, expectedLocation] = await Promise.all([
@@ -462,11 +537,31 @@ export async function runExperiment(
                 ? { diagnostic: { phase: error.phase, ...error.diagnostic } }
                 : {}),
             };
+            if (recorder.snapshot.state === 'reserved') {
+              await recorder.failure({
+                error_code: attempt.error_code,
+                phase: attempt.diagnostic?.phase ?? 'preflight',
+                reason: attempt.diagnostic?.reason ?? 'failure',
+                message:
+                  attempt.diagnostic?.message ??
+                  'Host execution callback failed before execution entry was recorded.',
+              });
+              recorder.cleanupCompleted();
+              await recorder.finish('errored');
+            }
             // A callback can fail after its local commit (for example during
             // host cleanup). Keep the execution error while exposing verified
             // artifacts for independent publication.
             artifact = (await inspect(entry, runId)).artifact;
           }
+          attempt = {
+            ...attempt,
+            reserved_at: reservedAt,
+            ...timingFields(recorder.snapshot.timing),
+            diagnostics_status: recorder.available
+              ? 'available'
+              : 'unavailable',
+          };
           await update(async () => {
             entry.attempts[entry.attempts.length - 1] = attempt;
             await writeExperimentRunCheckpoint(checkpoint, experimentRun!);
@@ -539,6 +634,10 @@ export async function runExperiment(
                 ? last
                 : inspected.attempt;
             runs.push({
+              ...timingFields(last),
+              ...(last.diagnostics_status === undefined
+                ? {}
+                : { diagnostics_status: last.diagnostics_status }),
               selection_index: index,
               selection: entry.selection,
               run_id: last.run_id,
@@ -873,4 +972,50 @@ async function exists(location: string): Promise<boolean> {
 
 function hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
+}
+
+function timingFields(timing: {
+  reserved_at?: string | undefined;
+  started_at?: string | undefined;
+  finished_at?: string | undefined;
+}) {
+  return {
+    ...(timing.reserved_at === undefined
+      ? {}
+      : { reserved_at: timing.reserved_at }),
+    ...(timing.started_at === undefined
+      ? {}
+      : { started_at: timing.started_at }),
+    ...(timing.finished_at === undefined
+      ? {}
+      : { finished_at: timing.finished_at }),
+  };
+}
+
+async function readAttemptHistory(
+  store: AttemptDiagnosticsStore,
+  identity: AttemptDiagnosticsIdentity,
+  callerSignal: AbortSignal,
+  historySignal: AbortSignal,
+) {
+  const signal = AbortSignal.any([callerSignal, historySignal]);
+  let onAbort: () => void = () => undefined;
+  try {
+    signal.throwIfAborted();
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const input = await Promise.race([store.read(identity, signal), aborted]);
+    if (input === undefined) return undefined;
+    const record = parseAttemptDiagnostics(input);
+    assertAttemptDiagnosticsIdentity(record.identity, identity);
+    return record;
+  } catch (error) {
+    callerSignal.throwIfAborted();
+    if (error instanceof AttemptDiagnosticsIdentityError) throw error;
+    return undefined;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }

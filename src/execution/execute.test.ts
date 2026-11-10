@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
-
+import { afterEach, describe, it, vi } from 'vitest';
 import type {
   AgentAdapter,
   AgentNativeEvidenceResult,
@@ -22,6 +21,8 @@ import type {
   RuntimeAdapter,
   SealedRuntime,
 } from '../contracts/runtime.ts';
+import { createAttemptDiagnosticsStore } from '../diagnostics/localStore.ts';
+import { attemptDiagnosticsIdentity } from '../diagnostics/model.ts';
 import type { ResolvedRunPlanV1 } from '../model/types.ts';
 import { createArtifactStore, verifyCompletedRun } from '../results/index.ts';
 import { createOwnedWorkspace } from '../runtime/workspace.ts';
@@ -51,6 +52,199 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('flushes a failed attempt before cleanup and retains its first failure when disposal also fails', async () => {
+    const fixture = await executionFixture({ openSessionFailure: true });
+    const artifactsRoot = path.join(fixture.root, 'artifacts');
+    const store = createAttemptDiagnosticsStore({ root: fixture.root });
+    const composition = fixture.composition(
+      createArtifactStore({ root: artifactsRoot }),
+    );
+    const identity = attemptDiagnosticsIdentity('failed-attempt', fixture.plan);
+    await assert.rejects(
+      executeEval({
+        runId: identity.run_id,
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          attemptDiagnosticsStore: store,
+          runtime: {
+            ...composition.runtime,
+            async prepare(context) {
+              const runtime = await composition.runtime.prepare(context);
+              return {
+                ...runtime,
+                async dispose() {
+                  const beforeCleanup = await store.read(
+                    identity,
+                    new AbortController().signal,
+                  );
+                  assert.equal(
+                    beforeCleanup!.primary_failure!.error_code,
+                    'agent_failed',
+                  );
+                  assert.equal(beforeCleanup!.timing.finished_at, undefined);
+                  await runtime.dispose();
+                  throw new Error('private cleanup detail');
+                },
+              };
+            },
+          },
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ForgeExecutionError);
+        assert.equal(error.code, 'agent_failed');
+        assert.equal(error.diagnostic!.message, 'could not start agent');
+        return true;
+      },
+    );
+    const saved = (await store.read(identity, new AbortController().signal))!;
+    assert.equal(saved.state, 'errored');
+    assert.ok(saved.timing.started_at);
+    assert.ok(saved.timing.failure_observed_at);
+    assert.ok(saved.timing.cleanup_completed_at);
+    assert.ok(saved.timing.finished_at);
+    assert.deepEqual(saved.cleanup_failures, ['runtime_dispose_failed']);
+    assert.doesNotMatch(JSON.stringify(saved), /private cleanup detail/);
+    await assert.rejects(
+      fs.stat(path.join(artifactsRoot, 'runs', identity.run_id)),
+      { code: 'ENOENT' },
+    );
+  });
+
+  it('commits identical artifacts and scores with recording disabled, enabled, or failing', async () => {
+    const fixture = await executionFixture();
+    const committed = [];
+    for (const mode of ['disabled', 'enabled', 'disk-failure']) {
+      const composition = fixture.composition(
+        createArtifactStore({ root: path.join(fixture.root, mode) }),
+      );
+      const recording =
+        mode === 'disabled'
+          ? {}
+          : {
+              attemptDiagnosticsStore:
+                mode === 'enabled'
+                  ? createAttemptDiagnosticsStore({ root: fixture.root })
+                  : {
+                      async read() {
+                        throw new Error('disk unavailable');
+                      },
+                      async write() {
+                        throw new Error('disk unavailable');
+                      },
+                    },
+            };
+      const run = await executeEval({
+        runId: 'same-run',
+        plan: fixture.plan,
+        composition: { ...composition, ...recording },
+        now: monotonicClock(),
+      });
+      committed.push(run);
+    }
+    for (const run of committed.slice(1)) {
+      assert.deepEqual(run.result, committed[0]!.result);
+      for (const filename of [
+        'result.json',
+        ...run.result.artifacts.map(({ path }) => path),
+      ])
+        assert.deepEqual(
+          await fs.readFile(path.join(run.location, filename)),
+          await fs.readFile(path.join(committed[0]!.location, filename)),
+        );
+    }
+  });
+
+  it.each(['start', 'interaction', 'hung'] as const)(
+    'keeps %s diagnostic I/O outside the execution timeout',
+    async (mode) => {
+      const fixture = await executionFixture();
+      const plan = { ...fixture.plan, limits: { run_timeout_ms: 500 } };
+      const baseline = await executeEval({
+        runId: 'same-run',
+        plan,
+        composition: fixture.composition(
+          createArtifactStore({ root: path.join(fixture.root, 'baseline') }),
+        ),
+        now: monotonicClock(),
+      });
+      let enter!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      let delayed = false;
+      let writeSignal: AbortSignal | undefined;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      // Node's native timeout signal does not use the fake timer queue.
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+        const controller = new AbortController();
+        setTimeout(
+          () => controller.abort(new DOMException('Timeout', 'TimeoutError')),
+          delay,
+        );
+        return controller.signal;
+      });
+      try {
+        const outcome = executeEval({
+          runId: 'same-run',
+          plan,
+          composition: {
+            ...fixture.composition(
+              createArtifactStore({
+                root: path.join(fixture.root, 'recorded'),
+              }),
+            ),
+            attemptDiagnosticsStore: {
+              async read() {
+                return undefined;
+              },
+              async write(snapshot, signal) {
+                if (
+                  !delayed &&
+                  (mode !== 'interaction' ||
+                    snapshot.location?.phase === 'interaction')
+                ) {
+                  delayed = true;
+                  writeSignal = signal;
+                  enter();
+                  if (mode === 'hung') await new Promise(() => undefined);
+                  else await new Promise((resolve) => setTimeout(resolve, 750));
+                }
+                return { ...snapshot, revision: 1 };
+              },
+            },
+          },
+          now: monotonicClock(),
+        }).then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+        await entered;
+        await vi.advanceTimersByTimeAsync(mode === 'hung' ? 1000 : 750);
+        const settled = await outcome;
+        assert.ok(
+          'result' in settled,
+          'diagnostic latency must not fail execution',
+        );
+        assert.equal(writeSignal!.aborted, mode === 'hung');
+        assert.deepEqual(settled.result.result, baseline.result);
+        for (const filename of [
+          'result.json',
+          ...baseline.result.artifacts.map(({ path }) => path),
+        ]) {
+          assert.deepEqual(
+            await fs.readFile(path.join(settled.result.location, filename)),
+            await fs.readFile(path.join(baseline.location, filename)),
+          );
+        }
+      } finally {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+      }
+    },
+  );
+
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
     const fixture = await executionFixture();
     const store = createArtifactStore({
@@ -700,6 +894,8 @@ describe('executeEval', () => {
       const agent = composition.agents.get('claude-code')!;
       const controller = new AbortController();
       const plan = { ...fixture.plan, limits: { run_timeout_ms: 30 } };
+      const diagnostics: import('../diagnostics/model.ts').AttemptDiagnosticsSnapshot[] =
+        [];
       await assert.rejects(
         executeEval({
           runId: cancellation ? 'cancelled' : 'timed-out',
@@ -707,6 +903,15 @@ describe('executeEval', () => {
           signal: controller.signal,
           composition: {
             ...composition,
+            attemptDiagnosticsStore: {
+              async read() {
+                return undefined;
+              },
+              async write(snapshot) {
+                diagnostics.push(snapshot);
+                return { ...snapshot, revision: diagnostics.length };
+              },
+            },
             runtime: {
               ...composition.runtime,
               async prepare(context) {
@@ -770,6 +975,11 @@ describe('executeEval', () => {
         },
       );
       assert.equal(fixture.calls.at(-1), 'runtime:dispose');
+      assert.equal(
+        diagnostics.at(-1)!.primary_failure!.reason,
+        cancellation ? 'cancelled' : 'timeout',
+      );
+      assert.ok(diagnostics.at(-1)!.timing.finished_at);
     }
   });
 

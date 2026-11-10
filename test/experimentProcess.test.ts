@@ -26,7 +26,7 @@ describe('experiment run recovery across real process death', () => {
       let started = launch(root, 'crash');
       child = started.child;
       assert.deepEqual(await message(child), {
-        type: 'reserved',
+        type: 'started',
         run_id: 'crashed-2',
       });
       const before = JSON.parse(
@@ -39,6 +39,21 @@ describe('experiment run recovery across real process death', () => {
         ),
         ['completed', 'running', undefined],
       );
+      const diagnosticPath = path.join(
+        root,
+        'diagnostics',
+        'crashed-2',
+        'attempt.json',
+      );
+      const interruptedBytes = await fs.readFile(diagnosticPath);
+      const interrupted = JSON.parse(interruptedBytes.toString());
+      assert.equal(interrupted.state, 'running');
+      assert.ok(interrupted.timing.reserved_at);
+      assert.ok(interrupted.timing.started_at);
+      assert.equal(interrupted.timing.finished_at, undefined);
+      await assert.rejects(fs.stat(path.join(root, 'runs', 'crashed-2')), {
+        code: 'ENOENT',
+      });
       const owners = await fs.readdir(path.join(root, '.experiment.lock'));
       assert.equal(owners.length, 1);
       assert.equal(
@@ -93,6 +108,11 @@ describe('experiment run recovery across real process death', () => {
       assert.equal(
         checkpoint.entries[1].attempts[0].error_code,
         'invalid_artifacts',
+      );
+      assert.deepEqual(await fs.readFile(diagnosticPath), interruptedBytes);
+      assert.equal(
+        checkpoint.entries[1].attempts[0].started_at,
+        interrupted.timing.started_at,
       );
       for (const [name, bytes] of retained)
         assert.deepEqual(

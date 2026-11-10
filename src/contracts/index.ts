@@ -1,5 +1,6 @@
 export * from './agent.ts';
 export * from './artifacts.ts';
+export type { AttemptDiagnosticsStore } from './attemptDiagnostics.ts';
 export * from './command.ts';
 export * from './completion.ts';
 export * from './composition.ts';
