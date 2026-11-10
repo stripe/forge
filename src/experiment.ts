@@ -602,6 +602,14 @@ export async function runExperiment(
               inspected.usage !== undefined
                 ? { agent_usage: inspected.usage }
                 : {}),
+              ...(effective.state === 'completed' &&
+              inspected.agentCost !== undefined
+                ? {
+                    agent_estimated_cost_usd:
+                      inspected.agentCost.estimated_cost_usd,
+                    agent_pricing_version: inspected.agentCost.pricing_version,
+                  }
+                : {}),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -641,6 +649,7 @@ interface AttemptInspection {
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
   usage?: AgentTokenUsage;
+  agentCost?: { estimated_cost_usd: number | null; pricing_version: string };
 }
 interface CachedInspection {
   identity: string;
@@ -690,6 +699,15 @@ async function inspectAttempt(
       ...(completed.result.agent.usage === undefined
         ? {}
         : { usage: completed.result.agent.usage }),
+      ...(completed.result.agent.estimated_cost_usd !== undefined &&
+      completed.result.agent.pricing_version !== undefined
+        ? {
+            agentCost: {
+              estimated_cost_usd: completed.result.agent.estimated_cost_usd,
+              pricing_version: completed.result.agent.pricing_version,
+            },
+          }
+        : {}),
       artifact: {
         location,
         evaluation: {

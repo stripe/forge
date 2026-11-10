@@ -104,6 +104,11 @@ describe('executeEval', () => {
       output_tokens: null,
       reasoning_tokens: null,
     });
+    assert.equal(verified.result.agent.estimated_cost_usd, null);
+    assert.match(
+      verified.result.agent.pricing_version!,
+      /^sha256:[0-9a-f]{64}$/,
+    );
     assert.equal(verified.result.agent.session_id, 'canonical-session');
     assert.equal(
       observed.filter((event) => event.type === 'agent_usage').length,

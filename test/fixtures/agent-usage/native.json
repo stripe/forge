@@ -1,0 +1,26 @@
+{
+  "provenance": "Synthetic protocol fixtures with realistic magnitudes; no paired measured cost.",
+  "codex": {
+    "input_tokens": 184320,
+    "cached_input_tokens": 147456,
+    "cache_write_input_tokens": 16384,
+    "output_tokens": 4096,
+    "reasoning_output_tokens": 3072
+  },
+  "claude": {
+    "input_tokens": 1824,
+    "cache_read_input_tokens": 234560,
+    "cache_creation_input_tokens": 32500,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 25000,
+      "ephemeral_1h_input_tokens": 7500
+    },
+    "output_tokens": 6842
+  },
+  "opencode": {
+    "input": 1824,
+    "output": 2048,
+    "reasoning": 4096,
+    "cache": { "read": 234560, "write": 32500 }
+  }
+}

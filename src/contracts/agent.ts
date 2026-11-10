@@ -21,6 +21,11 @@ export interface AgentToolCall {
 export interface AgentTokenUsage {
   readonly input_tokens: number | null;
   readonly cached_input_tokens: number | null;
+  /** Absent in older results; null when the adapter cannot report writes. */
+  readonly cache_write_input_tokens?: number | null | undefined;
+  /** Native Anthropic TTL breakdown, when supplied. */
+  readonly cache_write_5m_input_tokens?: number | null | undefined;
+  readonly cache_write_1h_input_tokens?: number | null | undefined;
   readonly output_tokens: number | null;
   readonly reasoning_tokens: number | null;
 }

@@ -150,6 +150,13 @@ const runSchema = z
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
     agent_usage: agentTokenUsageSchema.optional(),
+    agent_estimated_cost_usd: z
+      .number()
+      .finite()
+      .nonnegative()
+      .nullable()
+      .optional(),
+    agent_pricing_version: digest.optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -162,7 +169,11 @@ const runSchema = z
       completed !== (run.evaluation !== null) ||
       (run.state === 'errored') !== (run.error_code !== null) ||
       (run.state !== 'errored' && run.diagnostic !== undefined) ||
-      (!completed && run.agent_usage !== undefined) ||
+      (!completed &&
+        (run.agent_usage !== undefined ||
+          run.agent_estimated_cost_usd !== undefined)) ||
+      (run.agent_estimated_cost_usd === undefined) !==
+        (run.agent_pricing_version === undefined) ||
       (completed && run.result_path === null) ||
       (run.result_path !== null &&
         run.result_path !== `runs/${run.run_id}/result.json`)
@@ -234,6 +245,20 @@ const modelUsageSchema = z
     usage: agentTokenUsageSchema,
   })
   .strict();
+const costSummarySchema = z
+  .object({
+    estimated_cost_usd: z.number().finite().nonnegative().nullable(),
+    priced_evaluations: count,
+    evaluations: count,
+  })
+  .strict();
+const modelCostSchema = costSummarySchema.extend({
+  agent: modelUsageSchema.shape.agent,
+});
+const armCostSchema = costSummarySchema.extend({
+  treatment: coordinates.shape.treatment,
+  agent: coordinates.shape.agent,
+});
 const reportSchema = z
   .object({
     forge: z.unknown().transform(parseForgeBuildIdentity),
@@ -242,6 +267,8 @@ const reportSchema = z
     checkpoint_sha256: digest,
     summary: statisticsSchema,
     agent_usage_by_model: z.array(modelUsageSchema).max(100_000).optional(),
+    agent_cost_by_model: z.array(modelCostSchema).max(100_000).optional(),
+    agent_cost_by_arm: z.array(armCostSchema).max(100_000).optional(),
     cases: z.array(caseSchema).min(1).max(100_000),
     runs: z.array(runSchema).min(1).max(100_000),
   })
@@ -311,6 +338,13 @@ export function parseExperimentRunReport(
       serializeCanonicalJson(aggregate.agent_usage_by_model ?? null)
   )
     throw new Error('Report token usage does not match its run rows.');
+  for (const key of ['agent_cost_by_model', 'agent_cost_by_arm'] as const) {
+    if (
+      serializeCanonicalJson(report[key] ?? null) !==
+      serializeCanonicalJson(aggregate[key] ?? null)
+    )
+      throw new Error('Report agent cost does not match its run rows.');
+  }
   if (
     serializeCanonicalJson(report.summary) !==
       serializeCanonicalJson(aggregate.summary) ||
@@ -357,6 +391,8 @@ function assertReportBytes(body: string): void {
 function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
   summary: ExperimentRunReportStatisticsV1;
   agent_usage_by_model?: z.infer<typeof modelUsageSchema>[];
+  agent_cost_by_model?: z.infer<typeof modelCostSchema>[];
+  agent_cost_by_arm?: z.infer<typeof armCostSchema>[];
   cases: ExperimentRunReportCaseV1[];
 } {
   const groups = new Map<
@@ -410,10 +446,80 @@ function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
   });
   return {
     ...(usages.length === 0 ? {} : { agent_usage_by_model: usages }),
+    ...aggregateCosts(runs),
     summary: statistics(runs),
     cases: [...groups.values()].map((group) => ({
       ...group.coordinates,
       ...statistics(group.runs),
+    })),
+  };
+}
+
+/** Only latest completed rows contribute; old and unknown estimates stay unpriced. */
+function aggregateCosts(runs: ExperimentRunReportRunV1[]): {
+  agent_cost_by_model?: z.infer<typeof modelCostSchema>[];
+  agent_cost_by_arm?: z.infer<typeof armCostSchema>[];
+} {
+  const completed = runs.filter((run) => run.state === 'completed');
+  if (!completed.some((run) => run.agent_estimated_cost_usd !== undefined))
+    return {};
+  const models = new Map<
+    string,
+    {
+      agent: z.infer<typeof modelCostSchema>['agent'];
+      runs: ExperimentRunReportRunV1[];
+    }
+  >();
+  const arms = new Map<
+    string,
+    {
+      treatment: string;
+      agent: z.infer<typeof armCostSchema>['agent'];
+      runs: ExperimentRunReportRunV1[];
+    }
+  >();
+  for (const run of completed) {
+    const { adapter, provider, model } = run.selection.agent;
+    const agent = { adapter, provider, model };
+    const modelKey = serializeCanonicalJson(agent);
+    const modelGroup = models.get(modelKey) ?? { agent, runs: [] };
+    modelGroup.runs.push(run);
+    models.set(modelKey, modelGroup);
+    const arm = {
+      treatment: run.selection.treatment,
+      agent: run.selection.agent,
+    };
+    const armKey = serializeCanonicalJson(arm);
+    const armGroup = arms.get(armKey) ?? { ...arm, runs: [] };
+    armGroup.runs.push(run);
+    arms.set(armKey, armGroup);
+  }
+  const sum = (
+    rows: ExperimentRunReportRunV1[],
+  ): z.infer<typeof costSummarySchema> => {
+    let total = 0;
+    let priced = 0;
+    for (const run of rows) {
+      if (run.agent_estimated_cost_usd == null) continue;
+      total += run.agent_estimated_cost_usd;
+      priced += 1;
+    }
+    return {
+      estimated_cost_usd:
+        priced === 0 || !Number.isFinite(total) ? null : total,
+      priced_evaluations: priced,
+      evaluations: rows.length,
+    };
+  };
+  return {
+    agent_cost_by_model: [...models.values()].map(({ agent, runs }) => ({
+      agent,
+      ...sum(runs),
+    })),
+    agent_cost_by_arm: [...arms.values()].map(({ treatment, agent, runs }) => ({
+      treatment,
+      agent,
+      ...sum(runs),
     })),
   };
 }

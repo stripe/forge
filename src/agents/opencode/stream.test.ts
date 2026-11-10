@@ -241,6 +241,7 @@ it('sums OpenCode steps once and preserves unknown usage in a step', () => {
   const expected = {
     input_tokens: 16,
     cached_input_tokens: 6,
+    cache_write_input_tokens: 0,
     output_tokens: 6,
     reasoning_tokens: 2,
   };
@@ -255,6 +256,7 @@ it('sums OpenCode steps once and preserves unknown usage in a step', () => {
   assert.deepEqual(parseOpenCodeStream(encode(missing)).usage, {
     input_tokens: null,
     cached_input_tokens: null,
+    cache_write_input_tokens: null,
     output_tokens: null,
     reasoning_tokens: null,
   });
