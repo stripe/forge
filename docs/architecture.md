@@ -1001,7 +1001,7 @@ Rate-limit, short, and fallback retries each have a separate budget per logical
 request. Mixed failures can use at most 12 calls in total. Failures that cannot
 be classified use the bounded fallback schedule; non-finite random samples use
 the full scheduled delay. Cancellation interrupts waits and prevents further
-calls. The plan's run timeout still bounds execution. Clock, random source, and sleep can be
+calls. The active plan timeout still bounds retries. Clock, random source, and sleep can be
 supplied through Ava and judge execution options for deterministic hosts.
 The exported legacy attempt constants describe the short schedule. Observation
 callbacks cannot change retry or cancellation outcomes. If the measurement
@@ -1915,8 +1915,42 @@ providers receive benchmark prompts and the evidence needed for their roles.
 
 ## Failure, cancellation, and cleanup semantics
 
-Every run combines the caller's abort signal with the plan timeout. Fatal
-errors are mapped to stable `ForgeExecutionError` codes and the phase in which
+Newly resolved plans record `limits.evaluation_timeout_ms`, defaulting to
+`DEFAULT_EVALUATION_TIMEOUT_MS` (five minutes). The optional field is accepted
+in experiment configs and saved plans, with the same positive integer and
+24-hour bound as `limits.run_timeout_ms`. The package root exports the default
+constant. Experiment parsing and planning materialize it; saved-plan parsing
+preserves its absence and canonical bytes. Older strict readers reject the
+new field. The new plan policy changes plan digests, so a fresh resolution
+cannot resume an experiment saved with the shared-budget policy.
+
+The run timeout covers preflight through quiescence. Once quiescence succeeds,
+Forge checks the remaining run budget before starting the fresh evaluation
+budget. Evidence collection, normalization, judge workspace collection, judge
+calls and retries, deterministic checks, contributors, and finalization share
+that second budget through the check before atomic commit starts. Finalization
+gets the time remaining in the evaluation budget, not a fresh allowance.
+Awaited diagnostic-store writes remain outside both budgets. Saved plans
+without the field retain the shared run timeout through the original lifecycle.
+Runtime readiness checks use only the run timeout and do not evaluate evidence.
+
+The caller's abort signal stays active across both budgets. Evidence reads,
+judge calls, deterministic evidence collection, and artifact contributors stop
+waiting on abort even if a dependency does not settle. Contributor failures
+belong to `artifact_stage`; late contributions cannot enter the transaction.
+Host integrations must still honor cancellation to stop their underlying work.
+
+Artifact-store calls have no cancellation contract. Forge awaits each begin or
+write before handling expiry and rolling back, and checks the deadline again
+before committing. Runtime disposal is also awaited with teardown authority;
+expiry during disposal prevents commit after it settles. Once atomic commit
+starts, Forge awaits its outcome even if the deadline or caller signal fires,
+so it cannot report failure while a commit later publishes a completed run.
+These waits are not hard I/O bounds; custom stores and runtimes must bound their
+own operations. A stalled store or cleanup can still delay completion.
+
+Timeout messages name the active budget, its limit, and the execution phase.
+Fatal errors are mapped to stable `ForgeExecutionError` codes and the phase in which
 they occurred. The controller attaches a credential-redacted diagnostic of at
 most 4,096 characters after all credentials have been resolved. It uses only the
 error's message, never its stack, cause, or other properties. Built-in agent

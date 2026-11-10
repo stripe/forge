@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it, vi } from 'vitest';
+import { criterionJudgment } from '../../test/fixtures/criterionJudgment.ts';
 import type {
   AgentAdapter,
   AgentNativeEvidenceResult,
@@ -31,6 +32,7 @@ import type {
   SetupExecutionContext,
   SetupStepHandler,
 } from '../setup/types.ts';
+import { createScriptedCompletionProvider } from '../testing/completionProvider.ts';
 import { FORGE_BUILD_IDENTITY, FORGE_VERSION } from '../version.ts';
 import { ForgeExecutionError } from './errors.ts';
 import {
@@ -52,6 +54,476 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it.each([false, true])(
+    'gives evidence and judging a fresh allowance only in split-budget plans (%s)',
+    async (split) => {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(
+        createArtifactStore({ root: fixture.root }),
+      );
+      const agent = composition.agents.get('claude-code')!;
+      const plan = judgedPlan(fixture.plan, split);
+      const delayedPhases = new Set<string>();
+      let runSignal: AbortSignal | undefined;
+      const judge = createScriptedCompletionProvider({
+        responses: [
+          async (request) => {
+            await vi.advanceTimersByTimeAsync(400);
+            assert.equal(request.signal.aborted, !split);
+            return judgment();
+          },
+        ],
+      });
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'performance'],
+      });
+      try {
+        const execution = executeEval({
+          runId: 'budget-boundary',
+          plan,
+          composition: {
+            ...composition,
+            artifactStore: {
+              async begin(runId) {
+                await vi.advanceTimersByTimeAsync(10);
+                assert.equal(runSignal!.aborted, false);
+                return composition.artifactStore.begin(runId);
+              },
+            },
+            completionProviders: new Map([[judge.provider.id, judge.provider]]),
+            attemptDiagnosticsStore: {
+              async read() {
+                return undefined;
+              },
+              async write(snapshot) {
+                const phase = snapshot.location?.phase;
+                if (phase !== undefined && !delayedPhases.has(phase)) {
+                  delayedPhases.add(phase);
+                  await vi.advanceTimersByTimeAsync(750);
+                }
+                return { ...snapshot, revision: 1 };
+              },
+            },
+            runtime: {
+              ...composition.runtime,
+              async prepare(context) {
+                runSignal = context.signal;
+                const runtime = await composition.runtime.prepare(context);
+                return {
+                  ...runtime,
+                  async quiesce() {
+                    await vi.advanceTimersByTimeAsync(50);
+                    return runtime.quiesce();
+                  },
+                };
+              },
+            },
+            agents: new Map([
+              [
+                agent.id,
+                {
+                  ...agent,
+                  async openSession(context) {
+                    const session = await agent.openSession(context);
+                    return {
+                      ...session,
+                      async send(message, options) {
+                        await vi.advanceTimersByTimeAsync(900);
+                        return session.send(message, options);
+                      },
+                    };
+                  },
+                  async collectEvidence(context) {
+                    await vi.advanceTimersByTimeAsync(80);
+                    assert.equal(context.signal.aborted, !split);
+                    return agent.collectEvidence(context);
+                  },
+                },
+              ],
+            ]),
+          },
+        });
+        if (split) {
+          const completed = await execution;
+          assert.equal(completed.result.evaluation.status, 'passed');
+          assert.equal(judge.calls.length, 1);
+          await verifyCompletedRun(completed.location);
+          const savedPlan = JSON.parse(
+            await fs.readFile(
+              path.join(completed.location, 'plan.json'),
+              'utf8',
+            ),
+          );
+          assert.equal(savedPlan.limits.evaluation_timeout_ms, 500);
+        } else {
+          await assert.rejects(execution, (error: unknown) => {
+            assert.ok(error instanceof ForgeExecutionError);
+            assert.equal(error.phase, 'evidence');
+            assert.match(
+              error.diagnostic!.message,
+              /Run timeout of 1000ms exceeded during evidence/,
+            );
+            return true;
+          });
+          assert.equal(judge.calls.length, 0);
+        }
+        assert.equal(fixture.calls.at(-1), 'runtime:dispose');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(['evidence', 'evaluation', 'checks', 'contributor'] as const)(
+    'bounds stalled %s work and retains timeout or caller cancellation through cleanup',
+    async (phase) => {
+      const failurePhase =
+        phase === 'checks'
+          ? 'evaluation'
+          : phase === 'contributor'
+            ? 'artifact_stage'
+            : phase;
+      for (const cancelled of [false, true]) {
+        const fixture = await executionFixture();
+        const composition = fixture.composition(inertStore());
+        const agent = composition.agents.get('claude-code')!;
+        const controller = new AbortController();
+        const plan = judgedPlan(fixture.plan, true);
+        const snapshots: import('../diagnostics/model.ts').AttemptDiagnosticsSnapshot[] =
+          [];
+        let operationSignal: AbortSignal | undefined;
+        const stall = async (signal: AbortSignal) => {
+          operationSignal = signal;
+          await vi.advanceTimersByTimeAsync(cancelled ? 10 : 500);
+          if (cancelled) controller.abort('private caller detail');
+          return new Promise<never>(() => undefined);
+        };
+        const judge = createScriptedCompletionProvider({
+          responses: [
+            (request) =>
+              phase === 'evaluation' ? stall(request.signal) : judgment(),
+          ],
+        });
+        vi.useFakeTimers({
+          toFake: ['setTimeout', 'clearTimeout', 'performance'],
+        });
+        try {
+          await assert.rejects(
+            executeEval({
+              runId: 'stalled-phase',
+              plan,
+              signal: controller.signal,
+              composition: {
+                ...composition,
+                completionProviders: new Map([
+                  [judge.provider.id, judge.provider],
+                ]),
+                contributors:
+                  phase === 'contributor'
+                    ? [
+                        {
+                          id: 'stalled',
+                          contribute: ({ signal }) => stall(signal),
+                        },
+                        {
+                          id: 'unreachable',
+                          async contribute() {
+                            assert.fail('Later contributors must not run.');
+                          },
+                        },
+                      ]
+                    : [],
+                attemptDiagnosticsStore: {
+                  async read() {
+                    return undefined;
+                  },
+                  async write(snapshot) {
+                    snapshots.push(snapshot);
+                    return { ...snapshot, revision: snapshots.length };
+                  },
+                },
+                runtime: {
+                  ...composition.runtime,
+                  async prepare(context) {
+                    const runtime = await composition.runtime.prepare(context);
+                    return {
+                      ...runtime,
+                      async quiesce() {
+                        const sealed = await runtime.quiesce();
+                        if (phase !== 'checks') return sealed;
+                        return {
+                          ...sealed,
+                          workspace: {
+                            ...sealed.workspace,
+                            inspect: () => stall(context.signal),
+                            listFiles: () => Promise.resolve([]),
+                          },
+                        };
+                      },
+                      async dispose() {
+                        assert.equal(operationSignal!.aborted, true);
+                        await vi.advanceTimersByTimeAsync(2000);
+                        controller.abort('late cancellation');
+                        await runtime.dispose();
+                        throw new Error('private cleanup detail');
+                      },
+                    };
+                  },
+                },
+                agents: new Map([
+                  [
+                    agent.id,
+                    {
+                      ...agent,
+                      collectEvidence: (context) =>
+                        phase === 'evidence'
+                          ? stall(context.signal)
+                          : agent.collectEvidence(context),
+                    },
+                  ],
+                ]),
+              },
+            }),
+            (error: unknown) => {
+              assert.ok(error instanceof ForgeExecutionError);
+              assert.equal(error.code, 'aborted');
+              assert.equal(error.phase, failurePhase);
+              assert.equal(
+                error.diagnostic!.reason,
+                cancelled ? 'cancelled' : 'timeout',
+              );
+              assert.match(
+                error.diagnostic!.message,
+                cancelled
+                  ? /Caller cancellation/
+                  : /Evaluation timeout of 500ms exceeded during/,
+              );
+              assert.doesNotMatch(
+                error.diagnostic!.message,
+                /private|late cancellation/,
+              );
+              return true;
+            },
+          );
+          const saved = snapshots.at(-1)!;
+          assert.equal(saved.primary_failure!.phase, failurePhase);
+          assert.equal(
+            saved.primary_failure!.reason,
+            cancelled ? 'cancelled' : 'timeout',
+          );
+          assert.deepEqual(saved.cleanup_failures, ['runtime_dispose_failed']);
+          assert.ok(saved.timing.finished_at);
+          assert.equal(fixture.calls.at(-1), 'runtime:dispose');
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    },
+  );
+
+  it.each(['begin', 'write', 'runtime_dispose', 'result_commit'] as const)(
+    'does not commit when the evaluation budget expires during %s',
+    async (stage) => {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(inertStore());
+      let writes = 0;
+      let commits = 0;
+      let rollbacks = 0;
+      let disposals = 0;
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'performance'],
+      });
+      try {
+        await assert.rejects(
+          executeEval({
+            runId: 'finalization-timeout',
+            plan: {
+              ...fixture.plan,
+              limits: { run_timeout_ms: 1000, evaluation_timeout_ms: 500 },
+            },
+            composition: {
+              ...composition,
+              observer: {
+                async observe(event) {
+                  if (
+                    stage === 'result_commit' &&
+                    event.type === 'phase_started' &&
+                    event.phase === stage
+                  )
+                    await vi.advanceTimersByTimeAsync(500);
+                },
+              },
+              artifactStore: {
+                async begin() {
+                  if (stage === 'begin') await vi.advanceTimersByTimeAsync(500);
+                  return {
+                    async write() {
+                      writes++;
+                      if (stage === 'write')
+                        await vi.advanceTimersByTimeAsync(500);
+                    },
+                    async commit() {
+                      commits++;
+                      assert.fail('An expired budget must prevent commit.');
+                    },
+                    async rollback() {
+                      rollbacks++;
+                    },
+                  };
+                },
+              },
+              runtime: {
+                ...composition.runtime,
+                async prepare(context) {
+                  const runtime = await composition.runtime.prepare(context);
+                  return {
+                    ...runtime,
+                    async dispose() {
+                      disposals++;
+                      if (stage === 'runtime_dispose')
+                        await vi.advanceTimersByTimeAsync(500);
+                      await runtime.dispose();
+                    },
+                  };
+                },
+              },
+            },
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ForgeExecutionError);
+            const phase =
+              stage === 'begin' || stage === 'write' ? 'artifact_stage' : stage;
+            assert.equal(error.phase, phase);
+            assert.equal(error.diagnostic!.reason, 'timeout');
+            assert.match(
+              error.diagnostic!.message,
+              new RegExp(
+                `Evaluation timeout of 500ms exceeded during ${phase}`,
+              ),
+            );
+            return true;
+          },
+        );
+        assert.equal(commits, 0);
+        assert.equal(rollbacks, 1);
+        assert.equal(disposals, 1);
+        if (stage === 'begin') assert.equal(writes, 0);
+        if (stage === 'write') assert.equal(writes, 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('awaits an atomic commit already in progress when the budget expires', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({ root: fixture.root });
+    let rollbacks = 0;
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'performance'],
+    });
+    try {
+      const completed = await executeEval({
+        runId: 'atomic-commit',
+        plan: {
+          ...fixture.plan,
+          limits: { run_timeout_ms: 1000, evaluation_timeout_ms: 500 },
+        },
+        composition: fixture.composition({
+          async begin(runId) {
+            const transaction = await store.begin(runId);
+            return {
+              write: (artifact) => transaction.write(artifact),
+              async commit(result) {
+                await vi.advanceTimersByTimeAsync(600);
+                return transaction.commit(result);
+              },
+              async rollback() {
+                rollbacks++;
+                await transaction.rollback();
+              },
+            };
+          },
+        }),
+      });
+      assert.equal(completed.result.evaluation.status, 'passed');
+      assert.equal(rollbacks, 0);
+      await verifyCompletedRun(completed.location);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['interaction', 'quiesce'] as const)(
+    'does not renew a run budget that expired during %s',
+    async (phase) => {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(inertStore());
+      const agent = composition.agents.get('claude-code')!;
+      const judge = createScriptedCompletionProvider({
+        responses: [judgment()],
+      });
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'performance'],
+      });
+      try {
+        await assert.rejects(
+          executeEval({
+            runId: 'expired-before-switch',
+            plan: judgedPlan(fixture.plan, true),
+            composition: {
+              ...composition,
+              completionProviders: new Map([
+                [judge.provider.id, judge.provider],
+              ]),
+              runtime: {
+                ...composition.runtime,
+                async prepare(context) {
+                  const runtime = await composition.runtime.prepare(context);
+                  return {
+                    ...runtime,
+                    async quiesce() {
+                      if (phase === 'quiesce')
+                        await vi.advanceTimersByTimeAsync(1000);
+                      return runtime.quiesce();
+                    },
+                  };
+                },
+              },
+              agents: new Map([
+                [
+                  agent.id,
+                  {
+                    ...agent,
+                    async openSession(context) {
+                      const session = await agent.openSession(context);
+                      if (phase === 'interaction')
+                        await vi.advanceTimersByTimeAsync(1000);
+                      return session;
+                    },
+                  },
+                ],
+              ]),
+            },
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ForgeExecutionError);
+            assert.equal(error.phase, phase);
+            assert.match(
+              error.diagnostic!.message,
+              new RegExp(`Run timeout of 1000ms exceeded during ${phase}`),
+            );
+            return true;
+          },
+        );
+        assert.equal(judge.calls.length, 0);
+        assert.equal(fixture.calls.at(-1), 'runtime:dispose');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('flushes a failed attempt before cleanup and retains its first failure when disposal also fails', async () => {
     const fixture = await executionFixture({ openSessionFailure: true });
     const artifactsRoot = path.join(fixture.root, 'artifacts');
@@ -1828,6 +2300,32 @@ function nativeEvidence(
     },
     warnings: [],
   } as AgentNativeEvidenceResult;
+}
+
+function judgedPlan(
+  plan: ResolvedRunPlanV1,
+  split: boolean,
+): ResolvedRunPlanV1 {
+  const criteria = [
+    { requirement_level: 'SHOULD' as const, value: 'Creates the greeting.' },
+  ];
+  return {
+    ...plan,
+    case: { ...plan.case, judging_criteria: criteria },
+    evaluation: {
+      ...plan.evaluation,
+      judging_criteria: criteria,
+      judge: { provider: 'test-provider', model: 'judge-model' },
+    },
+    limits: {
+      run_timeout_ms: 1000,
+      ...(split ? { evaluation_timeout_ms: 500 } : {}),
+    },
+  };
+}
+
+function judgment(): string {
+  return JSON.stringify(criterionJudgment(true, 'The greeting exists.'));
 }
 
 function resolvedPlan(): ResolvedRunPlanV1 {

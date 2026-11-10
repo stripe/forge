@@ -4,6 +4,7 @@ import type { ForgeBuildIdentity } from '../version.ts';
 
 export const DEFAULT_MAX_TURNS = 10;
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
+export const DEFAULT_EVALUATION_TIMEOUT_MS = 5 * 60 * 1000;
 export const DEFAULT_DOCKER_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
 export const DEFAULT_DOCKER_CPU_COUNT = 2;
 export const DEFAULT_DOCKER_PROCESS_COUNT = 512;
@@ -303,6 +304,8 @@ export interface ExperimentConfigV1 {
   matrix: ExperimentMatrixV1;
   limits: {
     run_timeout_ms: number;
+    /** Evaluation and finalization allowance after quiescence; defaults during planning. */
+    evaluation_timeout_ms?: number;
   };
 }
 
@@ -380,5 +383,9 @@ export interface ResolvedRunPlanV1 {
   role_player?: ModelRefV1;
   agent: AgentSelectionV1;
   runtime: ForgeRuntimeV1;
-  limits: { run_timeout_ms: number };
+  limits: {
+    run_timeout_ms: number;
+    /** Absent in older plans, which retain the shared run timeout. */
+    evaluation_timeout_ms?: number;
+  };
 }
