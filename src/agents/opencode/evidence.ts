@@ -6,11 +6,16 @@ import {
   parseAtifTrajectory,
 } from '../../atif/index.ts';
 import type {
+  AgentEvidenceContext,
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import {
+  NativeArtifactReadError,
+  reportNativeArtifactUnavailable,
+} from '../nativeArtifactError.ts';
 import {
   array,
   EXPORT_PATH,
@@ -27,7 +32,8 @@ import {
   tool,
 } from './native.ts';
 
-export interface LoadOpenCodeEvidenceInput {
+export interface LoadOpenCodeEvidenceInput
+  extends Pick<AgentEvidenceContext, 'onNativeArtifactUnavailable'> {
   readonly state: ReadonlyWorkspace | undefined;
   readonly sessionId: string;
   readonly agentVersion: string;
@@ -43,26 +49,35 @@ async function readExport(
   sessionId(input.sessionId);
   const entry = await input.state.inspect(EXPORT_PATH);
   if (entry.kind === 'absent' || entry.size === 0) return undefined;
-  if (entry.kind !== 'file' || (entry.size ?? 0) > MAX_NATIVE_BYTES)
-    throw new OpenCodeNativeError();
+  if ((entry.size ?? 0) > MAX_NATIVE_BYTES)
+    throw new NativeArtifactReadError('too_large');
+  if (entry.kind !== 'file') throw new OpenCodeNativeError();
   const body = await input.state.readFile(EXPORT_PATH, {
     maxBytes: MAX_NATIVE_BYTES,
   });
   input.signal.throwIfAborted();
+  if (body.byteLength > MAX_NATIVE_BYTES)
+    throw new NativeArtifactReadError('too_large');
   const value = record(
     parseJson(new TextDecoder('utf-8', { fatal: true }).decode(body)),
   );
   if (record(value.info).id !== input.sessionId)
-    throw new OpenCodeNativeError();
+    throw new NativeArtifactReadError('identity_conflict');
   return { body, value };
 }
 
 export async function loadOpenCodeNativeArtifact(
-  input: Pick<LoadOpenCodeEvidenceInput, 'state' | 'sessionId' | 'signal'>,
+  input: Pick<
+    LoadOpenCodeEvidenceInput,
+    'state' | 'sessionId' | 'signal' | 'onNativeArtifactUnavailable'
+  >,
 ): Promise<AgentNativeArtifact | undefined> {
   try {
     const captured = await readExport(input);
-    if (!captured) return undefined;
+    if (!captured) {
+      reportNativeArtifactUnavailable(input);
+      return undefined;
+    }
     return {
       format: OPENCODE_FORMAT,
       sessionId: input.sessionId,
@@ -70,8 +85,9 @@ export async function loadOpenCodeNativeArtifact(
       extension: 'json',
       body: Uint8Array.from(captured.body),
     };
-  } catch {
+  } catch (error) {
     input.signal.throwIfAborted();
+    reportNativeArtifactUnavailable(input, error);
     return undefined;
   }
 }

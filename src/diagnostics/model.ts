@@ -24,6 +24,7 @@ import {
   MAX_INVOCATION_RECORDS,
   restrictedDescriptorSchema,
 } from './agent.ts';
+import { failureEvidenceSchema } from './failureEvidence.ts';
 import { attemptTimingSchema } from './timing.ts';
 
 export const MAX_ATTEMPT_DIAGNOSTICS_BYTES = 512 * 1024;
@@ -84,6 +85,7 @@ const recordSchema = z
       .optional(),
     agent_invocations_omitted: count.optional(),
     restricted: restrictedDescriptorSchema.optional(),
+    failure_evidence: failureEvidenceSchema.optional(),
     completion_calls: z
       .array(completionSchema)
       .max(MAX_ATTEMPT_COMPLETION_SUMMARIES),
@@ -103,8 +105,22 @@ const recordSchema = z
       Buffer.byteLength(
         serializeCanonicalJson(record.agent_invocations ?? []),
       ) > MAX_AGENT_DIAGNOSTICS_BYTES ||
-      (record.restricted !== undefined &&
+      ((record.restricted !== undefined ||
+        record.failure_evidence?.partial_trajectory.artifact !== undefined ||
+        record.failure_evidence?.native_log.artifact !== undefined) &&
         record.capture.restricted !== 'enabled') ||
+      (record.failure_evidence !== undefined &&
+        (record.primary_failure === undefined ||
+          (record.capture.restricted === 'disabled' &&
+            [
+              record.failure_evidence.partial_trajectory,
+              record.failure_evidence.native_log,
+            ].some(({ state }) => state !== 'disabled')) ||
+          (record.capture.restricted === 'unsupported' &&
+            [
+              record.failure_evidence.partial_trajectory,
+              record.failure_evidence.native_log,
+            ].some(({ state }) => state !== 'unsupported')))) ||
       terminal !== (record.timing.finished_at !== undefined) ||
       (record.state === 'running' && record.timing.started_at === undefined) ||
       (record.state === 'reserved' && record.timing.started_at !== undefined) ||
@@ -182,7 +198,9 @@ export function parseAttemptDiagnostics(
   if (
     Buffer.byteLength(serializeCanonicalJson(record)) +
       (record.restricted?.cli_events.bytes ?? 0) +
-      (record.restricted?.stderr.bytes ?? 0) >
+      (record.restricted?.stderr.bytes ?? 0) +
+      (record.failure_evidence?.native_log.artifact?.bytes ?? 0) +
+      (record.failure_evidence?.partial_trajectory.artifact?.bytes ?? 0) >
     MAX_ATTEMPT_DIAGNOSTICS_BYTES
   )
     throw new Error('Attempt diagnostics exceed the total byte limit.');

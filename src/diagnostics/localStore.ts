@@ -140,19 +140,24 @@ export function createAttemptDiagnosticsStore(options: {
     excerpts: RestrictedAgentExcerpts | undefined,
     signal: AbortSignal,
   ) {
-    if (!candidate.restricted) {
-      if (excerpts)
-        throw new Error('Restricted diagnostics require descriptors.');
-      return;
-    }
+    if (
+      excerpts &&
+      ((!candidate.restricted &&
+        (excerpts.cli_events !== '' ||
+          excerpts.stderr !== '' ||
+          !candidate.failure_evidence)) ||
+        (excerpts.native_log !== undefined &&
+          !candidate.failure_evidence?.native_log.artifact) ||
+        (excerpts.partial_trajectory !== undefined &&
+          !candidate.failure_evidence?.partial_trajectory.artifact))
+    )
+      throw new Error('Restricted diagnostics require descriptors.');
+    const entries = excerptDescriptors(candidate);
+    if (!entries.length) return;
     const folder = await restrictedDirectory(target, true);
-    for (const [key, extension] of [
-      ['cli_events', 'json'],
-      ['stderr', 'txt'],
-    ] as const) {
-      const descriptor = candidate.restricted[key];
-      if (excerpts) {
-        const body = excerpts[key];
+    for (const [key, descriptor, extension] of entries) {
+      if (excerpts?.[key] !== undefined) {
+        const body = excerpts[key]!;
         if (
           Buffer.byteLength(body) !== descriptor.bytes ||
           createHash('sha256').update(body).digest('hex') !== descriptor.sha256
@@ -236,16 +241,11 @@ export function createAttemptDiagnosticsStore(options: {
         JSON.parse(buffer.subarray(0, bytesRead).toString('utf8')),
       );
       assertAttemptDiagnosticsIdentity(record.identity, identity);
-      if (record.restricted) {
+      if (excerptDescriptors(record).length) {
         try {
           const folder = await restrictedDirectory(target, false);
-          await verifyExcerpt(
-            folder,
-            record.restricted.cli_events,
-            'json',
-            signal,
-          );
-          await verifyExcerpt(folder, record.restricted.stderr, 'txt', signal);
+          for (const [, descriptor, extension] of excerptDescriptors(record))
+            await verifyExcerpt(folder, descriptor, extension, signal);
         } catch {
           throw new Error(
             'Restricted diagnostics are missing, unsafe or mismatched.',
@@ -358,4 +358,37 @@ export function createAttemptDiagnosticsStore(options: {
       return operation;
     },
   };
+}
+
+function excerptDescriptors(
+  record: AttemptDiagnosticsRecord,
+): Array<
+  [
+    keyof Pick<
+      RestrictedAgentExcerpts,
+      'cli_events' | 'stderr' | 'native_log' | 'partial_trajectory'
+    >,
+    { sha256: string; bytes: number },
+    string,
+  ]
+> {
+  const entries: ReturnType<typeof excerptDescriptors> = [];
+  if (record.restricted)
+    entries.push(
+      ['cli_events', record.restricted.cli_events, 'json'],
+      ['stderr', record.restricted.stderr, 'txt'],
+    );
+  if (record.failure_evidence?.native_log.artifact)
+    entries.push([
+      'native_log',
+      record.failure_evidence.native_log.artifact,
+      'txt',
+    ]);
+  if (record.failure_evidence?.partial_trajectory.artifact)
+    entries.push([
+      'partial_trajectory',
+      record.failure_evidence.partial_trajectory.artifact,
+      'json',
+    ]);
+  return entries;
 }
