@@ -362,6 +362,38 @@ and the lock owner together. The log is optional for older folders and is never
 an input to resume decisions, judging, scoring, verification, or regrade.
 Completed-run file inventories apply only within `runs/<eval-run-id>/`.
 
+`forge status --experiment-run <directory> [--json]` observes the checkpoint,
+last complete event, and local lock owner without locking or writing. Its pure
+summary counts latest selection states, treating an empty attempt list as
+`pending`; failure groups include all errored attempts, including retries later
+completed. Group keys are error code and optional diagnostic phase, reason,
+and message; absent diagnostics form their own group. In-flight groups use
+adapter, provider, and model and list the latest `running` eval IDs.
+The JSON summary contains `experiment_run_id`, `counts`, `failures`,
+`in_flight`, `last_event_at` (null without an event), `event_log`, and
+`liveness`. `event_log` preserves the tail reader's bounded unavailability
+reason or reports `available` with a `complete` or `interrupted` tail. It never
+copies the raw event payload. Liveness records `state` (`alive`, `stale`,
+`no_lock`, or `unknown`) and `pid` (null without a known owner). Unknown
+liveness adds a fixed reason: `invalid_lock`, `io_error`, `io_timeout`,
+`probe_error`, or `observation_error`.
+Bounded checkpoint reads use one open file handle, so an atomic replacement
+does not mix versions. Buffers use the observed file size plus one byte;
+growth during the read is rejected instead of parsing a truncated prefix.
+Each file observation uses the shared 250 ms read budget. Timeout stops the
+command waiting and prevents new reads once an issued operation settles;
+already-issued filesystem calls can settle later. Other files are separate
+observations; no consistent
+cross-file snapshot or artifact verification is implied. Empty lock directories
+are stale and a disappearing owner is reported as no lock. Lock enumeration
+reads at most two entries. Malformed or unreadable locks report unknown;
+missing, torn, invalid, newer-format, or mismatched event logs report their
+availability without failing the checkpoint summary. Only an unreadable or
+invalid checkpoint or a checkpoint/directory identity mismatch fails status. PID probes use signal zero on this host; permission
+denied still indicates a live process. Locks record no host or process start
+identity, so copied folders and PID reuse can mislead liveness. See the README's
+[status workflow](../README.md#results-and-scores) for usage and exit codes.
+
 `--resume <experiment-run-id>` requires an explicit ID and loads that
 experiment run's saved selections. Bare `--resume` is rejected. The resolved
 plans must retain their original checksums. Resume independently verifies prior eval run
@@ -1712,9 +1744,10 @@ engine APIs:
 
 - `validate` loads inputs, expands every selection, resolves plans, constructs
   the default composition, and runs pure preflight;
-- `plan` selects one entry and prints canonical plan JSON; and
+- `plan` selects one entry and prints canonical plan JSON;
 - `run` supplies its argument validation and input loader to the shared
-  experiment run command stage for bounded execution and explicit resume.
+  experiment run command stage for bounded execution and explicit resume; and
+- `status` summarizes saved experiment progress and probes its local lock owner.
 
 Its default composition registers the built-in Docker runtime, Claude Code,
 Codex, and OpenCode agent adapters, Anthropic and OpenAI host completion
