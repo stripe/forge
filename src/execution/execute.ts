@@ -491,17 +491,21 @@ export async function executeEvalWithTestHooks(
       return {
         evidence,
         nativeArtifact,
-        fallbackRedactions:
-          evidence.completeness === 'fallback'
-            ? fallbackTurns.replacements + interaction.toolResultRedactions
-            : 0,
+        fallback: {
+          turns: fallbackTurns.value,
+          redactions:
+            fallbackTurns.replacements + interaction.toolResultRedactions,
+        },
       };
     });
     const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
     );
-    selectedRedacted.replacements += selectedEvidence.fallbackRedactions ?? 0;
+    if (selectedEvidence.evidence.completeness === 'fallback') {
+      selectedRedacted.replacements +=
+        selectedEvidence.fallback?.redactions ?? 0;
+    }
 
     const evaluated = await step('evaluation', async () => {
       throwIfAborted(signal, phase);
@@ -558,6 +562,9 @@ export async function executeEvalWithTestHooks(
                     model: input.plan.agent.model,
                     sessionId: interaction.sessionId,
                     completedTurns: interaction.turns,
+                    ...(selectedEvidence.fallback === undefined
+                      ? {}
+                      : { fallbackTurns: selectedEvidence.fallback.turns }),
                   },
                   reason,
                 );
@@ -566,7 +573,10 @@ export async function executeEvalWithTestHooks(
                   preflight.agent,
                   interaction.sessionId,
                 );
-                return redactNormalizedTrajectory(evidence, secrets);
+                const redacted = redactNormalizedTrajectory(evidence, secrets);
+                redacted.replacements +=
+                  selectedEvidence.fallback?.redactions ?? 0;
+                return redacted;
               },
             });
       const redacted = resolved?.redacted ?? selectedRedacted;

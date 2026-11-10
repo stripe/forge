@@ -8,7 +8,6 @@ import {
   JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES,
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
-  MAX_JUDGE_TRANSCRIPT_BYTES,
 } from '../evaluation/judgeTranscript.ts';
 import { FORGE_VERSION } from '../version.ts';
 import {
@@ -876,20 +875,10 @@ describe('canonical interaction and judge evidence parsing', () => {
         CONTEXT,
       ),
     );
-    assert.throws(
-      () =>
-        parseJudgeEvidence(
-          judgeEvidenceWithSteps([
-            {
-              step_id: 1,
-              source: 'agent',
-              message: 'x'.repeat(MAX_JUDGE_TRANSCRIPT_BYTES),
-            },
-          ]),
-          CONTEXT,
-        ),
-      /Judge transcript projection exceeds the .*byte limit/,
-    );
+    const large = judgeEvidenceWithSteps([
+      { step_id: 1, source: 'agent', message: 'x'.repeat(1024 * 1024) },
+    ]);
+    assert.deepEqual(parseJudgeEvidence(large, CONTEXT), large);
 
     const cycle: Record<string, unknown> = {};
     cycle.self = cycle;

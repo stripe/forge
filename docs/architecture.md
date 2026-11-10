@@ -1125,8 +1125,9 @@ accept a result-level `_meta` object or `null` (treated as absent); other types
 trigger `source_incomplete` fallback. This field remains snapshot-only. Exec
 stream results accept `_meta` of any JSON type and opaque `structured_content`
 within the per-line byte and depth limits and the stream-wide byte and node
-budgets, which every line of one `codex exec` invocation shares. These fields
-are omitted from the driver turn. The discarded metadata's type cannot fail a live turn.
+budgets, which every line of one `codex exec` invocation shares. The driver
+omits `_meta` but retains `structured_content` as JSON text in its bounded tool
+result. The discarded metadata's type cannot fail a live turn.
 Native evidence retains the verified rendered `structuredContent` or content
 mirror. Metadata in recorded rendered output is preserved after credential
 redaction; snapshot-only metadata is not added to judge evidence. Supported
@@ -1203,31 +1204,13 @@ with `createJudgeTranscriptProjection(trajectory)` from `@stripe/forge`.
 `judgeCriteria` accepts a validated projection rather than an arbitrary string;
 bounded-JSON graph preflight still applies before recursive validation.
 
-Projected transcript JSON is capped at 786,432 UTF-8 bytes (768 KiB), including
-markers and the final LF. Oversized projections retain equally sized start/end
-excerpts of the canonical step JSON, with cuts at Unicode code-point boundaries.
-The largest equal code-unit prefix/suffix pair that fits after JSON escaping is
-kept. The transcript then contains a single `source: "omission"` record with
-`message`, `prefix`, and `suffix`, rather than complete conversation steps.
-The marker names the missing middle; no content is invented to fill it.
-`JudgeTranscriptProjectionV1.warnings` and `judge-evidence.json.transcript.warnings`
-record `transcript_truncated`. These optional fields are absent for untruncated
-projections; readers accept older artifacts without them. A marked excerpt
-requires its exact warning. Judge-only loss is absent from `result.evidence`,
-which describes the canonical trajectory. The full saved trajectory remains
-unchanged. Completed-run verification recomputes the projection: its limit,
-marker text, and cut rule are part of the artifact contract. Changing them can
-invalidate saved truncated runs; inspect those runs with the producing build.
-Untrusted projections still reject excess bytes and invalid shapes, with
-bounded-JSON graph preflight before recursive validation.
-
 Execution budgets transcript bytes against the complete criterion prompt's
 1,048,576-byte UTF-8 limit. Instructions, the largest rendered criterion with
 the optional example-answer section, and all collected workspace text take
 priority. The transcript receives the remaining bytes, and every criterion
 uses the same selection. `selectJudgeEvidence` exposes this pure choice for
-already-sized inputs. Each authored criterion remains limited to 65,536
-characters.
+already-sized inputs; there is no fixed transcript byte cap. Each authored
+criterion remains limited to 65,536 characters.
 
 If the native projection exceeds that budget, Forge selects the existing
 completed-turn driver fallback, saves it as `trajectory.json`, and records a
@@ -1246,9 +1229,14 @@ already unavailable. `result.json` also records completeness `fallback` and a
 Empty steps without the omission record still require the ordinary projection
 equality check.
 
+The optional transcript `warnings` field remains separate from `omitted`.
+Parsers accept a `source: "omission"` excerpt with its exact
+`transcript_truncated` warning. Execution creates complete projections and does
+not emit excerpts or their warnings; completed-run verification still requires
+the projection or budget check above.
+
 Budget selection never trims transcript contents or reduces workspace text to
-make room; the projection's own 768 KiB cap above is applied earlier. Existing
-workspace collection and canonical ATIF bounds still apply.
+make room. Existing workspace collection and canonical ATIF bounds still apply.
 Transcript overflow degrades evidence instead of failing evaluation; mandatory
 prompt text, including the empty transcript JSON, must still fit the unchanged
 whole-prompt and provider limits.

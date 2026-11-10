@@ -14,8 +14,8 @@ import { serializeCanonicalJson } from '../serialization.ts';
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
-/** Portable upper bound before workspace, criterion, and prompt text are added. */
-export const MAX_JUDGE_TRANSCRIPT_BYTES = 768 * 1024;
+// Retain the strict reader contract for existing excerpt projections. New
+// projections keep complete steps; execution selects by the whole-prompt budget.
 const TRANSCRIPT_OMISSION_MESSAGE =
   '[Forge truncated the judge transcript to 768 KiB. The prefix and suffix are excerpts of canonical step JSON; intervening evidence is omitted.]';
 const TRANSCRIPT_WARNING = Object.freeze({
@@ -76,7 +76,7 @@ export interface JudgeVisibleAgentStepV1 {
   readonly observation?: JudgeVisibleObservationV1;
 }
 
-/** Root behavior, or a marked start/end excerpt when the full projection exceeds its budget. */
+/** Root behavior, or a previously recorded marked start/end excerpt. */
 export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
   | JudgeVisibleAgentStepV1
@@ -97,7 +97,7 @@ export interface JudgeTranscriptProjectionV1 {
   readonly includedFields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
   /** Exact canonical JSON supplied to the judge, including its final LF. */
   readonly transcriptJson: string;
-  /** Present when the transcript contains a marked start/end excerpt. */
+  /** Present on previously recorded marked start/end excerpts. */
   readonly warnings?: readonly {
     readonly code: 'transcript_truncated';
     readonly message: string;
@@ -121,9 +121,8 @@ export const EMPTY_JUDGE_TRANSCRIPT: JudgeTranscriptProjectionV1 =
  *
  * The input is validated first and projected by positive allowlist. System and
  * copied-context steps are excluded. Opaque tool arguments and result content
- * are observable agent behavior; all other ATIF metadata, reasoning, extras,
- * and subagent references are excluded. Oversized projections retain marked
- * start/end excerpts within the byte budget.
+ * remain intact because they are observable agent behavior; all other ATIF
+ * metadata, reasoning, extras, and subagent references are excluded.
  */
 export function createJudgeTranscriptProjection(
   trajectory: AtifTrajectoryV1_8,
@@ -149,37 +148,7 @@ export function createJudgeTranscriptProjection(
     }
   }
 
-  const transcriptJson = serializeCanonicalJson(projectedSteps);
-  if (Buffer.byteLength(transcriptJson, 'utf8') <= MAX_JUDGE_TRANSCRIPT_BYTES) {
-    return makeProjection(transcriptJson);
-  }
-  return makeProjection(truncateTranscript(transcriptJson), true);
-}
-
-function truncateTranscript(text: string): string {
-  const render = (length: number): string => {
-    let prefixEnd = length;
-    let suffixStart = text.length - length;
-    if (/[\uD800-\uDBFF]/.test(text[prefixEnd - 1] ?? '')) prefixEnd -= 1;
-    if (/[\uDC00-\uDFFF]/.test(text[suffixStart] ?? '')) suffixStart += 1;
-    return serializeCanonicalJson([
-      {
-        source: 'omission',
-        message: TRANSCRIPT_OMISSION_MESSAGE,
-        prefix: text.slice(0, prefixEnd),
-        suffix: text.slice(suffixStart),
-      },
-    ]);
-  };
-  let low = 0;
-  let high = Math.min(Math.floor(text.length / 2), MAX_JUDGE_TRANSCRIPT_BYTES);
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(render(middle), 'utf8') <= MAX_JUDGE_TRANSCRIPT_BYTES)
-      low = middle;
-    else high = middle - 1;
-  }
-  return render(low);
+  return makeProjection(serializeCanonicalJson(projectedSteps));
 }
 
 /**
@@ -194,7 +163,6 @@ export function parseJudgeTranscriptProjection(
 ): JudgeTranscriptProjectionV1 {
   assertBoundedProjectionJson(input, 'metadata');
   const projection = ProjectionSchema.parse(input);
-  assertTranscriptByteLimit(projection.transcriptJson);
   let decoded: unknown;
   try {
     decoded = JSON.parse(projection.transcriptJson);
@@ -297,7 +265,6 @@ function makeProjection(
   transcriptJson: string,
   truncated = false,
 ): JudgeTranscriptProjectionV1 {
-  assertTranscriptByteLimit(transcriptJson);
   return Object.freeze({
     source: JUDGE_TRANSCRIPT_SOURCE,
     projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
@@ -308,15 +275,6 @@ function makeProjection(
     transcriptJson,
     ...(truncated ? { warnings: Object.freeze([TRANSCRIPT_WARNING]) } : {}),
   });
-}
-
-function assertTranscriptByteLimit(transcriptJson: string): void {
-  const bytes = Buffer.byteLength(transcriptJson, 'utf8');
-  if (bytes > MAX_JUDGE_TRANSCRIPT_BYTES) {
-    throw new TypeError(
-      `Judge transcript projection exceeds the ${MAX_JUDGE_TRANSCRIPT_BYTES}-byte limit.`,
-    );
-  }
 }
 
 function assertBoundedProjectionJson(
