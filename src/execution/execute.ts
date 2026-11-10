@@ -140,6 +140,8 @@ import {
   prepareCompletionRuntime,
 } from './completionRuntime.ts';
 import {
+  createExecutionErrorWithDiagnostic,
+  executionDiagnostic,
   executionError,
   ForgeExecutionError,
   type ForgeExecutionErrorCode,
@@ -744,7 +746,7 @@ export async function executeEvalWithTestHooks(
       await prepared.dispose().catch(() => undefined);
     }
     if (aborted) {
-      throw new ForgeExecutionError(
+      throw createExecutionErrorWithDiagnostic(
         'aborted',
         phase,
         timedOut
@@ -2119,19 +2121,20 @@ function mapExecutionError(
 ): ForgeExecutionError {
   if (error instanceof ForgeExecutionError) {
     const message = `Forge failed during ${error.phase}.`;
-    return new ForgeExecutionError(
+    const diagnostic = executionDiagnostic(error);
+    return createExecutionErrorWithDiagnostic(
       error.code,
       error.phase,
       secrets === undefined ? message : error.message,
       {
         cause: error.cause,
         diagnostic: {
-          reason: error.diagnostic?.reason ?? 'failure',
+          reason: diagnostic?.reason ?? 'failure',
           message:
             secrets === undefined
               ? message
               : boundedErrorMessage(
-                  new Error(error.diagnostic?.message ?? error.message),
+                  new Error(diagnostic?.message ?? error.message),
                   'Forge execution failed.',
                   secrets,
                 ),
@@ -2140,7 +2143,7 @@ function mapExecutionError(
     );
   }
   const message = `Forge failed during ${phase}.`;
-  return new ForgeExecutionError(
+  return createExecutionErrorWithDiagnostic(
     EXECUTION_ERROR_CODE_BY_PHASE[phase],
     phase,
     message,

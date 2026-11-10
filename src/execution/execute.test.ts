@@ -653,16 +653,14 @@ describe('executeEval', () => {
         'preflight',
         `Resolver rejected ${SECRET}`,
       ),
-      new ForgeExecutionError(
-        'setup_failed',
-        'setup',
-        `Resolver rejected ${SECRET}`,
-        {
-          diagnostic: {
-            reason: 'failure',
-            message: `Private diagnostic ${SECRET}`,
-          },
-        },
+      Object.defineProperty(
+        new ForgeExecutionError(
+          'setup_failed',
+          'setup',
+          `Resolver rejected ${SECRET}`,
+        ),
+        'diagnostic',
+        { value: { reason: 'failure', message: `Private diagnostic ${SECRET}` } },
       ),
     ];
     for (const failure of failures) {
@@ -735,6 +733,49 @@ describe('executeEval', () => {
       },
     );
     assert.equal(fixture.calls.includes('runtime:prepare'), false);
+  });
+
+  it('ignores a host-added diagnostic and redacts its Error.message at the engine boundary', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const agent = composition.agents.get('claude-code')!;
+    const failure = Object.defineProperty(
+      new ForgeExecutionError(
+        'agent_failed',
+        'interaction',
+        `Agent rejected ${SECRET}`,
+      ),
+      'diagnostic',
+      { value: { reason: 'failure', message: 'private host diagnostic' } },
+    );
+    await assert.rejects(
+      executeEval({
+        runId: 'host-diagnostic-redaction',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([
+            [
+              agent.id,
+              {
+                ...agent,
+                async openSession() {
+                  throw failure;
+                },
+              },
+            ],
+          ]),
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ForgeExecutionError);
+        assert.deepEqual(error.diagnostic, {
+          reason: 'failure',
+          message: 'Agent rejected [REDACTED]',
+        });
+        return true;
+      },
+    );
   });
 
   it('bounds and redacts fatal diagnostics while retaining the phase and original cause', async () => {

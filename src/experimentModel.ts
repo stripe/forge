@@ -47,6 +47,7 @@ const attemptSchema = z.discriminatedUnion('state', [
       run_id: experimentRunIdSchema,
       state: z.literal('errored'),
       error_code: experimentRunErrorCodeSchema,
+      error_phase: experimentRunDiagnosticSchema.shape.phase.optional(),
       diagnostic: experimentRunDiagnosticSchema.optional(),
     })
     .strict(),

@@ -308,16 +308,19 @@ and ordered attempts with a unique eval run ID and `running`, `completed`, or
 `diagnostic` with the execution phase, reason (`failure`, `timeout`, or
 `cancelled`), and a bounded message. Execution-boundary diagnostics appear in
 progress events and inspection outcomes even when no run artifact was committed.
-Report rows retain only the stable error code and `diagnostic.phase`, without
-diagnostic messages or reasons. Older records may omit diagnostics. Plain host
-callback errors still retain only a stable code; callbacks that throw a
-`ForgeExecutionError` with a diagnostic remain trusted by the scheduler. Callers
-must not copy raw error strings into these records. Committed role-player failures
+Attempts retain a known phase separately in optional `error_phase`, so dropping
+message detail does not lose it. Execution diagnostics are minted by an internal
+engine factory, outside the public `ForgeExecutionError` constructor. The scheduler
+reads only engine-owned diagnostics, ignoring host-added properties and getters,
+then validates them against the bounded strict schema before persistence. Missing,
+malformed, empty, or oversized detail is omitted while the stable code and valid
+phase remain. Plain host callback errors retain only a stable code. Report rows
+retain that code and `diagnostic.phase`, without diagnostic messages or reasons;
+older records may omit phase and diagnostic fields. Committed role-player failures
 recover their diagnostic from the verified result when its optional final message
-is present, including after a
-checkpoint interruption. Their bounded provider error text remains in attempt
-diagnostics and stderr progress, outside the report. A bounded
-worker pool executes pending plans;
+passes the same schema, including after a checkpoint interruption. Their bounded
+provider error text remains in attempt diagnostics and stderr progress, outside
+the report. A bounded worker pool executes pending plans;
 one coordinator serializes reservations, checkpoint mutations, and writes so
 out-of-order completions cannot overwrite one another. `jobs` defaults to one
 and is scheduling policy, excluded from plan identities. Checkpoint updates use
@@ -1617,10 +1620,13 @@ errors are mapped to stable `ForgeExecutionError` codes and the phase in which
 they occurred. Until all credentials have been resolved, non-abort errors
 handled by the lifecycle catch use the fixed note `Forge failed during <phase>.`,
 including host-thrown `ForgeExecutionError` instances, which retain their own
-code and phase. After resolution, the controller attaches a credential-redacted diagnostic
-of at most 4,096 characters. It uses the error message or an existing Forge
-diagnostic message, never its stack or cause. Built-in agent
-process failures include the exit status without copying stdout or stderr.
+code and phase. After resolution, the controller attaches a credential-redacted
+diagnostic of at most 4,096 characters. Any `Error.message` can be retained after
+redaction, or an existing engine-minted diagnostic message; host-added diagnostic
+properties are ignored. Custom adapters and providers must keep their messages
+free of sensitive non-credential data. Diagnostics never include stacks or causes.
+Built-in agent process failures include the exit status without copying stdout
+or stderr.
 Caller cancellation and the plan timeout keep the `aborted` code but have
 distinct diagnostic reasons. The first signal to abort determines that reason,
 even if the other signal fires during cleanup. A new abort during cleanup does
