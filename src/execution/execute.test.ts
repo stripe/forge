@@ -645,6 +645,98 @@ describe('executeEval', () => {
     assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
+  it('uses a fixed note before all diagnostic secrets are known, preserving Forge codes and phases', async () => {
+    const failures = [
+      new Error(`Resolver rejected ${SECRET}`),
+      new ForgeExecutionError(
+        'credential_failed',
+        'preflight',
+        `Resolver rejected ${SECRET}`,
+      ),
+      new ForgeExecutionError(
+        'setup_failed',
+        'setup',
+        `Resolver rejected ${SECRET}`,
+        {
+          diagnostic: {
+            reason: 'failure',
+            message: `Private diagnostic ${SECRET}`,
+          },
+        },
+      ),
+    ];
+    for (const failure of failures) {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(inertStore());
+      await assert.rejects(
+        executeEval({
+          runId: 'early-credential-failure',
+          plan: fixture.plan,
+          composition: {
+            ...composition,
+            credentialResolver: {
+              async resolve() {
+                throw failure;
+              },
+            },
+          },
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof ForgeExecutionError);
+          const code =
+            failure instanceof ForgeExecutionError
+              ? failure.code
+              : 'credential_failed';
+          const phase =
+            failure instanceof ForgeExecutionError ? failure.phase : 'preflight';
+          const message = `Forge failed during ${phase}.`;
+          assert.equal(error.code, code);
+          assert.equal(error.phase, phase);
+          assert.equal(error.message, message);
+          assert.deepEqual(error.diagnostic, { reason: 'failure', message });
+          assert.doesNotMatch(
+            JSON.stringify(error.diagnostic),
+            /Resolver|Private|sk-ant-test-secret/,
+          );
+          return true;
+        },
+      );
+      assert.equal(fixture.calls.includes('runtime:prepare'), false);
+    }
+  });
+
+  it('uses a fixed diagnostic for a plain error during pure preflight', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const failure = new Error(`Preflight rejected ${SECRET}`);
+    await assert.rejects(
+      executeEval({
+        runId: 'early-preflight-failure',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          runtime: {
+            ...composition.runtime,
+            preflight() {
+              throw failure;
+            },
+          },
+        },
+      }),
+      {
+        code: 'invalid_plan',
+        phase: 'preflight',
+        message: 'Forge failed during preflight.',
+        cause: failure,
+        diagnostic: {
+          reason: 'failure',
+          message: 'Forge failed during preflight.',
+        },
+      },
+    );
+    assert.equal(fixture.calls.includes('runtime:prepare'), false);
+  });
+
   it('bounds and redacts fatal diagnostics while retaining the phase and original cause', async () => {
     const fixture = await executionFixture();
     const composition = fixture.composition(inertStore());

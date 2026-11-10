@@ -499,7 +499,7 @@ describe('shared experiment command', () => {
     assert.equal(report.summary.pass_rate, null);
     assert.equal(report.runs[0]!.evaluation, null);
     assert.equal(report.runs[0]!.error_code, 'role_player_error');
-    assert.deepEqual(report.runs[0]!.diagnostic, first.outcomes[0]!.diagnostic);
+    assert.deepEqual(report.runs[0]!.diagnostic, { phase: 'interaction' });
     assert.equal(
       report.runs[0]!.result_path,
       `runs/${first.outcomes[0]!.run_id}/result.json`,

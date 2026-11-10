@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
+import { RUN_PHASES } from './contracts/observability.ts';
 import { isSha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
+import { MAX_ERROR_MESSAGE_CHARACTERS } from './security/errorMessage.ts';
 import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
@@ -27,20 +29,9 @@ export const experimentRunErrorCodeSchema = z.enum([
 ]);
 export const experimentRunDiagnosticSchema = z
   .object({
-    phase: z.enum([
-      'preflight',
-      'runtime_prepare',
-      'setup',
-      'interaction',
-      'quiesce',
-      'evidence',
-      'evaluation',
-      'artifact_stage',
-      'runtime_dispose',
-      'result_commit',
-    ]),
+    phase: z.enum(RUN_PHASES),
     reason: z.enum(['failure', 'timeout', 'cancelled']),
-    message: z.string().min(1).max(4096),
+    message: z.string().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
   })
   .strict();
 

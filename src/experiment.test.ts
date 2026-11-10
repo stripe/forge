@@ -4,7 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 import type { ForgeComposition } from './contracts/composition.ts';
+import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
+import { executeEvalWithTestHooks } from './execution/execute.ts';
 import * as experimentRunExports from './experiment.ts';
 import {
   type ExperimentRunOptions,
@@ -24,6 +26,7 @@ import {
   createFakeRuntimeAdapter,
   createMemoryRunInputProvider,
   createScriptedAgentAdapter,
+  createScriptedCompletionProvider,
   createStaticCredentialResolver,
   createTestResolvedRunPlan,
 } from './testing/index.ts';
@@ -113,7 +116,8 @@ describe('public experiment run API', () => {
     const report = parseExperimentRunReport(
       JSON.parse(await fs.readFile(result.report, 'utf8')),
     );
-    assert.deepEqual(report.runs[0]!.diagnostic, expected);
+    assert.deepEqual(report.runs[0]!.diagnostic, { phase: expected.phase });
+    assert.equal(JSON.stringify(report).includes(expected.message), false);
     assert.equal(report.runs[0]!.result_path, null);
     const inspected = await inspectExperimentRun({
       root,
@@ -149,6 +153,169 @@ describe('public experiment run API', () => {
     ).entries[0]!.attempts;
     assert.deepEqual(history[0], last);
     assert.equal(history[1]!.state, 'completed');
+  });
+
+  it('keeps a run failure when experiment cancellation arrives during runtime cleanup', async () => {
+    const root = await experimentRunRoot();
+    const plan = createTestResolvedRunPlan();
+    const composition = makeComposition(root);
+    const agent = composition.agents.get(plan.agent.adapter)!;
+    const controller = new AbortController();
+    const configured = {
+      ...composition,
+      agents: new Map([
+        [
+          agent.id,
+          {
+            ...agent,
+            async openSession() {
+              throw new Error('Agent failed before cancellation.');
+            },
+          },
+        ],
+      ]),
+      runtime: {
+        ...composition.runtime,
+        async prepare(
+          context: Parameters<typeof composition.runtime.prepare>[0],
+        ) {
+          const runtime = await composition.runtime.prepare(context);
+          return {
+            ...runtime,
+            async dispose() {
+              controller.abort(new Error('Cancelled during cleanup.'));
+              await runtime.dispose();
+            },
+          };
+        },
+      },
+    };
+    const events: ExperimentRunProgressEvent[] = [];
+    await assert.rejects(
+      runExperiment({
+        root,
+        engine: defaultForgeEngine,
+        plans: [plan],
+        composition: configured,
+        resume: false,
+        signal: controller.signal,
+        runIdFactory: () => 'failed-before-cancel',
+        execute: (input) => defaultForgeEngine.executeEval(input),
+        progress: (event) => events.push(event),
+      }),
+      /Cancelled during cleanup/,
+    );
+    const checkpoint = parseExperimentRunCheckpoint(
+      JSON.parse(await fs.readFile(path.join(root, 'experiment.json'), 'utf8')),
+    );
+    const attempt = checkpoint.entries[0]!.attempts[0]!;
+    assert.equal(attempt.state, 'errored');
+    if (attempt.state !== 'errored') throw new Error('Expected failed attempt');
+    assert.equal(attempt.error_code, 'agent_failed');
+    assert.deepEqual(attempt.diagnostic, {
+      phase: 'interaction',
+      reason: 'failure',
+      message: 'Agent failed before cancellation.',
+    });
+    const event = events.find((event) => event.state === 'errored');
+    assert.ok(event?.state === 'errored');
+    assert.equal(event.error_code, 'agent_failed');
+    assert.deepEqual(event.diagnostic, attempt.diagnostic);
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(root, 'report.json'), 'utf8')),
+    );
+    assert.equal(report.runs[0]!.error_code, 'agent_failed');
+    assert.deepEqual(report.runs[0]!.diagnostic, { phase: 'interaction' });
+  });
+
+  it('keeps bounded role-player text in attempts and progress, with only phase in reports and no fallback for older results', async () => {
+    for (const hasMessage of [true, false]) {
+      const root = await experimentRunRoot();
+      const plan = createTestResolvedRunPlan({
+        mode: 'multi_turn',
+        rolePlayer: { provider: 'scripted', model: 'role-player' },
+      });
+      const secret = 'private-provider-token';
+      const provider = createScriptedCompletionProvider({
+        id: 'scripted',
+        requirements: {
+          credentials: {
+            token: { reference: credentialReference('test.role-player') },
+          },
+        },
+        responses: Array.from(
+          { length: 3 },
+          () => new Error(`Provider rejected ${secret}: ${'x'.repeat(5000)}`),
+        ),
+      }).provider;
+      const composition = {
+        ...makeComposition(root),
+        completionProviders: new Map([[provider.id, provider]]),
+        credentialResolver: createStaticCredentialResolver({
+          'test.role-player': secret,
+        }),
+      };
+      const engine = {
+        ...defaultForgeEngine,
+        async verifyCompletedRun(location: string) {
+          const completed =
+            await defaultForgeEngine.verifyCompletedRun(location);
+          if (hasMessage) return completed;
+          // Simulate a verified older result whose optional final message is absent.
+          assert.ok(completed.result.failure !== null);
+          const { message: _message, ...failure } = completed.result.failure;
+          return { ...completed, result: { ...completed.result, failure } };
+        },
+      };
+      const events: ExperimentRunProgressEvent[] = [];
+      const summary = await runExperiment({
+        root,
+        engine,
+        plans: [plan],
+        composition,
+        resume: false,
+        signal: new AbortController().signal,
+        runIdFactory: () => 'role-player-failure',
+        execute: (input) =>
+          executeEvalWithTestHooks(input, {
+            waitBeforeCompletionRetry: async () => undefined,
+          }),
+        progress: (event) => events.push(event),
+      });
+      const checkpoint = parseExperimentRunCheckpoint(
+        JSON.parse(await fs.readFile(summary.checkpoint, 'utf8')),
+      );
+      const attempt = checkpoint.entries[0]!.attempts[0]!;
+      assert.ok(attempt.state === 'errored');
+      assert.equal(attempt.error_code, 'role_player_error');
+      if (hasMessage) {
+        assert.ok(attempt.diagnostic);
+        assert.equal(attempt.diagnostic.message.length, 4096);
+        assert.match(
+          attempt.diagnostic.message,
+          /^Provider rejected \[REDACTED\]: x+…$/,
+        );
+        assert.doesNotMatch(JSON.stringify(attempt), /private-provider-token/);
+      } else {
+        assert.equal(attempt.diagnostic, undefined);
+      }
+      const inspected = await inspectExperimentRun({ root, engine });
+      assert.deepEqual(inspected.outcomes[0]!.diagnostic, attempt.diagnostic);
+      const event = events.find((event) => event.state === 'errored');
+      assert.ok(event?.state === 'errored');
+      assert.deepEqual(event.diagnostic, attempt.diagnostic);
+      const reportBody = await fs.readFile(summary.report, 'utf8');
+      const report = parseExperimentRunReport(JSON.parse(reportBody));
+      assert.equal(report.runs[0]!.error_code, 'role_player_error');
+      assert.deepEqual(
+        report.runs[0]!.diagnostic,
+        hasMessage ? { phase: 'interaction' } : undefined,
+      );
+      assert.doesNotMatch(
+        reportBody,
+        /Provider rejected|REDACTED|private-provider-token/,
+      );
+    }
   });
 
   it('reads a pending-only checkpoint using its Forge identity without companion artifacts', async () => {

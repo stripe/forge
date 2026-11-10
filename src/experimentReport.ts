@@ -144,7 +144,7 @@ const runSchema = z
     run_id: experimentRunIdSchema.nullable(),
     state: z.enum(['pending', 'completed', 'errored']),
     error_code: experimentRunErrorCodeSchema.nullable(),
-    diagnostic: experimentRunDiagnosticSchema.optional(),
+    diagnostic: experimentRunDiagnosticSchema.pick({ phase: true }).optional(),
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),

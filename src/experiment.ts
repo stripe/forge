@@ -452,10 +452,10 @@ export async function runExperiment(
             attempt = {
               run_id: runId,
               state: 'errored',
-              error_code: signal.aborted
-                ? 'aborted'
-                : error instanceof ForgeExecutionError
-                  ? error.code
+              error_code: error instanceof ForgeExecutionError
+                ? error.code
+                : signal.aborted
+                  ? 'aborted'
                   : 'execution_error',
               ...(error instanceof ForgeExecutionError &&
               error.diagnostic !== undefined
@@ -547,7 +547,7 @@ export async function runExperiment(
                 effective.state === 'errored' ? effective.error_code : null,
               ...(effective.state === 'errored' &&
               effective.diagnostic !== undefined
-                ? { diagnostic: effective.diagnostic }
+                ? { diagnostic: { phase: effective.diagnostic.phase } }
                 : {}),
               attempt_count: entry.attempts.length,
               result_path:
@@ -622,13 +622,15 @@ async function inspectAttempt(
             run_id: runId,
             state: 'errored',
             error_code: 'role_player_error',
-            diagnostic: {
-              phase: 'interaction',
-              reason: 'failure',
-              message:
-                completed.result.failure.message ??
-                completed.result.failure.explanation.slice(0, 4096),
-            },
+            ...(completed.result.failure.message !== undefined
+              ? {
+                  diagnostic: {
+                    phase: 'interaction' as const,
+                    reason: 'failure' as const,
+                    message: completed.result.failure.message,
+                  },
+                }
+              : {}),
           };
     const evaluation = completed.result.evaluation;
     return {

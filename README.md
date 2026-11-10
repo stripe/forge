@@ -578,13 +578,15 @@ requirements; SHOULD failures identify unmet recommendations. OPTIONAL
 statistics are telemetry and do not enter either scored group.
 
 Execution errors appear in the experiment's `experiment.json` attempt history
-and `report.json` run rows. When available, `diagnostic` records the phase,
-a timeout/cancellation/failure reason, and a bounded, credential-redacted message,
-even if the run failed before saving artifacts. The same detail appears in
-stderr progress events. Older attempts and custom host callback failures may
-have only `error_code`. For a committed Ava failure, `result.json.failure.message`
-records the final request or output rejection reason; raw rejected responses
-are not saved.
+and `report.json` run rows. When available, the attempt's `diagnostic` records
+the phase, a timeout/cancellation/failure reason, and a bounded,
+credential-redacted message, even if the run failed before saving artifacts.
+Attempt diagnostics and stderr progress can include role-player provider error
+text. Report rows retain only the stable `error_code` and `diagnostic.phase`,
+without diagnostic messages or reasons. Older attempts and custom host callback
+failures may have only `error_code`. For a committed Ava failure,
+`result.json.failure.message` records the final request or output rejection
+reason; raw rejected responses are not saved.
 
 ### Inspect evidence
 

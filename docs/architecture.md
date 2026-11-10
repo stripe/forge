@@ -307,11 +307,16 @@ and ordered attempts with a unique eval run ID and `running`, `completed`, or
 `errored` state. Errored attempts retain a stable error code and an optional
 `diagnostic` with the execution phase, reason (`failure`, `timeout`, or
 `cancelled`), and a bounded message. Execution-boundary diagnostics appear in
-progress events, inspection outcomes, and report rows even when no run artifact
-was committed. Older records may omit them. Arbitrary host callback errors
-still retain only a stable code; callers must not copy raw error strings into
-these records. Committed role-player failures recover their diagnostic from the
-verified result, including after a checkpoint interruption. A bounded
+progress events and inspection outcomes even when no run artifact was committed.
+Report rows retain only the stable error code and `diagnostic.phase`, without
+diagnostic messages or reasons. Older records may omit diagnostics. Plain host
+callback errors still retain only a stable code; callbacks that throw a
+`ForgeExecutionError` with a diagnostic remain trusted by the scheduler. Callers
+must not copy raw error strings into these records. Committed role-player failures
+recover their diagnostic from the verified result when its optional final message
+is present, including after a
+checkpoint interruption. Their bounded provider error text remains in attempt
+diagnostics and stderr progress, outside the report. A bounded
 worker pool executes pending plans;
 one coordinator serializes reservations, checkpoint mutations, and writes so
 out-of-order completions cannot overwrite one another. `jobs` defaults to one
@@ -1609,9 +1614,12 @@ providers receive benchmark prompts and the evidence needed for their roles.
 
 Every run combines the caller's abort signal with the plan timeout. Fatal
 errors are mapped to stable `ForgeExecutionError` codes and the phase in which
-they occurred. The controller attaches a credential-redacted diagnostic of at
-most 4,096 characters after all credentials have been resolved. It uses only the
-error's message, never its stack, cause, or other properties. Built-in agent
+they occurred. Until all credentials have been resolved, non-abort errors
+handled by the lifecycle catch use the fixed note `Forge failed during <phase>.`,
+including host-thrown `ForgeExecutionError` instances, which retain their own
+code and phase. After resolution, the controller attaches a credential-redacted diagnostic
+of at most 4,096 characters. It uses the error message or an existing Forge
+diagnostic message, never its stack or cause. Built-in agent
 process failures include the exit status without copying stdout or stderr.
 Caller cancellation and the plan timeout keep the `aborted` code but have
 distinct diagnostic reasons. The first signal to abort determines that reason,
@@ -1621,7 +1629,8 @@ are not persisted. On any failure Forge:
 
 1. rolls back an open artifact transaction;
 2. disposes a prepared runtime if it has not already been disposed; and
-3. surfaces an abort-specific error when the combined signal fired.
+3. surfaces an abort-specific error when the combined signal had already fired
+   when the failure was caught.
 
 Cleanup does not rely on an already-aborted execution signal. Runtime disposal
 is idempotent, and the Docker implementation waits for an in-progress quiesce

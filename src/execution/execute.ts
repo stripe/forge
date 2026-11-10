@@ -2118,17 +2118,26 @@ function mapExecutionError(
   secrets: readonly string[] | undefined,
 ): ForgeExecutionError {
   if (error instanceof ForgeExecutionError) {
-    return new ForgeExecutionError(error.code, error.phase, error.message, {
-      cause: error.cause,
-      diagnostic: {
-        reason: error.diagnostic?.reason ?? 'failure',
-        message: boundedErrorMessage(
-          new Error(error.diagnostic?.message ?? error.message),
-          'Forge execution failed.',
-          secrets ?? [],
-        ),
+    const message = `Forge failed during ${error.phase}.`;
+    return new ForgeExecutionError(
+      error.code,
+      error.phase,
+      secrets === undefined ? message : error.message,
+      {
+        cause: error.cause,
+        diagnostic: {
+          reason: error.diagnostic?.reason ?? 'failure',
+          message:
+            secrets === undefined
+              ? message
+              : boundedErrorMessage(
+                  new Error(error.diagnostic?.message ?? error.message),
+                  'Forge execution failed.',
+                  secrets,
+                ),
+        },
       },
-    });
+    );
   }
   const message = `Forge failed during ${phase}.`;
   return new ForgeExecutionError(
