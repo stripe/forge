@@ -55,6 +55,8 @@ import {
   detectDockerRuntimePlatform,
 } from './runtime/docker/index.ts';
 import { serializeCanonicalJson } from './serialization.ts';
+import { selectedModelProbes } from './validation/models.ts';
+import { runModelProbe } from './validation/runProbe.ts';
 
 const DEFAULT_RESULTS_DIRECTORY = 'results';
 const ANTHROPIC_API_KEY_REFERENCE = 'anthropic.api-key';
@@ -95,6 +97,7 @@ const HOST_CLI_OPTIONS = {
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
   host: { type: 'boolean' },
+  'probe-models': { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
 } as const;
@@ -114,7 +117,7 @@ const SELECTOR_OPTIONS: readonly (keyof typeof HOST_CLI_OPTIONS)[] = [
 ];
 
 const USAGE = `Usage:
-  forge validate --experiment <file> [--host]
+  forge validate --experiment <file> [selection options] [--host] [--probe-models]
   forge plan --experiment <file> [selection options]
   forge run --experiment <file> [selection options] [run options]
   forge run --experiment <file> --resume <experiment-run-id> [run options]
@@ -141,9 +144,10 @@ Run options:
                         Bind one credential reference for scoped access or separate keys
 
 Validation options:
+  --probe-models        Send small paid model tests with no case content; no CLI or container
   --host                Apply setup and check native MCP connections without model calls
   --credential-env <environment-name>
-                        With --host, authorize the host variables used by native MCP checks
+                        With --host or --probe-models, authorize the host variables they use
 
 Regrade options:
   --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
@@ -322,7 +326,10 @@ export async function runCli(
       ...(command === 'validate'
         ? ([
             'host',
-            ...(parsed.values.host ? ['credential-env' as const] : []),
+            'probe-models',
+            ...(parsed.values.host || parsed.values['probe-models']
+              ? ['credential-env' as const]
+              : []),
           ] as const)
         : []),
       ...(command === 'run'
@@ -423,7 +430,7 @@ export async function runCli(
         parsed.values['credential-env'],
       );
       const credentials =
-        hostSelection === undefined
+        hostSelection === undefined && !parsed.values['probe-models']
           ? undefined
           : createCliCredentialBindingSession(
               grants,
@@ -461,6 +468,7 @@ export async function runCli(
           readinessRequests.push({ plan, composition });
         }
       }
+      let credentialUses: readonly EvalCredentialUse[] = [];
       if (credentials !== undefined) {
         if (
           grants.environmentNames.length > 0 &&
@@ -470,12 +478,14 @@ export async function runCli(
             'Same-name credential grants require an engine with inspectEvalCredentials. Use explicit reference=HOST_VAR bindings with this engine.',
           );
         }
-        credentials.finalize(
-          readinessRequests.flatMap(
-            (request) => engine.inspectEvalCredentials?.(request) ?? [],
-          ),
+        credentialUses = readinessRequests.flatMap(
+          (request) => engine.inspectEvalCredentials?.(request) ?? [],
         );
+        credentials.finalize(credentialUses);
       }
+      const probes = parsed.values['probe-models']
+        ? selectedModelProbes(readinessRequests)
+        : undefined;
       const host =
         hostSelection === undefined
           ? undefined
@@ -486,6 +496,43 @@ export async function runCli(
                 options.signal,
               ),
             };
+      const probeResults = [];
+      if (probes !== undefined) {
+        stderr(
+          'Model probes send small paid requests with no case content. They do not test agent CLIs or containers.\n',
+        );
+        for (const { purpose, adapter, provider, model } of probes) {
+          stderr(
+            `${JSON.stringify({ purpose, ...(adapter === undefined ? {} : { adapter }), provider, model })}\n`,
+          );
+        }
+        for (const {
+          purpose,
+          adapter,
+          provider,
+          model,
+          probe,
+          composition,
+        } of probes) {
+          const result = await runModelProbe(
+            probe,
+            probeCredentialResolver(
+              composition.credentialResolver,
+              credentialUses,
+              purpose,
+            ),
+            options.signal ?? new AbortController().signal,
+          );
+          probeResults.push({
+            purpose,
+            ...(adapter === undefined ? {} : { adapter }),
+            provider,
+            model,
+            ...result,
+          });
+        }
+      }
+      const valid = probeResults.every(({ outcome }) => outcome === 'ok');
       stdout(
         serializeCanonicalJson({
           dataset: dataset.manifest.dataset,
@@ -495,10 +542,11 @@ export async function runCli(
           },
           ...(host === undefined ? {} : { host }),
           run_count: selections.length,
-          valid: true,
+          ...(probes === undefined ? {} : { model_probes: probeResults }),
+          valid,
         }),
       );
-      return 0;
+      return valid ? 0 : 1;
     }
 
     let caseId = parsed.values.case;
@@ -1051,6 +1099,36 @@ function createCliCredentialResolver(
           { cause: error },
         );
       }
+    },
+  };
+}
+
+/**
+ * A probe resolves a credential under the purpose execution uses for it, so an
+ * explicit grant authorizes the same consumer for the probe and for the run.
+ */
+function probeCredentialResolver(
+  resolver: CredentialResolver,
+  uses: readonly EvalCredentialUse[],
+  role: 'agent' | 'role_player' | 'judge',
+): CredentialResolver {
+  const completion = `forge-eval:completion:${role}:`;
+  return {
+    ...(resolver.sourceIdentity === undefined
+      ? {}
+      : { sourceIdentity: (...args) => resolver.sourceIdentity!(...args) }),
+    resolve(reference, context) {
+      const use = uses.find(
+        (candidate) =>
+          candidate.reference === reference &&
+          (role === 'agent'
+            ? !candidate.purpose.startsWith('forge-eval:completion:')
+            : candidate.purpose.startsWith(completion)),
+      );
+      return resolver.resolve(
+        reference,
+        use === undefined ? context : { ...context, purpose: use.purpose },
+      );
     },
   };
 }

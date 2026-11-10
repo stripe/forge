@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 
 import { createCodexAdapter } from './agents/codex/index.ts';
 import {
@@ -14,6 +14,7 @@ import type { AgentAdapter } from './contracts/agent.ts';
 import type { CompletionProvider } from './contracts/completion.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
+import type { ModelProbeResult } from './contracts/modelProbe.ts';
 import { CredentialReferenceConflictError } from './credentialDeclarations.ts';
 import {
   createForgeEngine,
@@ -135,6 +136,8 @@ function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -143,6 +146,518 @@ afterEach(async () => {
 });
 
 describe('Forge CLI', () => {
+  it('prints all distinct selected probes before authority and returns their outcomes', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    let stderr = '';
+    let stdout = '';
+    let calls = 0;
+    const targets: string[] = [];
+    const code = await runCli(
+      [
+        'validate',
+        '--probe-models',
+        '--experiment',
+        fixture.experimentPath,
+        '--agent',
+        'claude-code',
+        '--model',
+        'claude-opus-4-6',
+        '--treatment',
+        'enhanced',
+      ],
+      {
+        environment: {},
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        compositionFactory: async (options) => {
+          const base = await createDefaultCliComposition(options);
+          const agent = base.agents.get('claude-code')!;
+          return {
+            ...base,
+            credentialResolver: {
+              resolve: async () => {
+                assert.fail('no real credentials');
+              },
+            },
+            runtime: {
+              ...base.runtime,
+              prepare: async () => {
+                assert.fail('no runtime');
+              },
+            },
+            agents: new Map([
+              [
+                'claude-code',
+                {
+                  ...agent,
+                  probeModel: (selection) => {
+                    targets.push(selection.model);
+                    return {
+                      endpoint: 'https://models.example/v1/messages',
+                      run: async () => {
+                        calls++;
+                        assert.match(stderr, /small paid requests/);
+                        assert.match(stderr, /claude-opus-4-6/);
+                        assert.doesNotMatch(stderr, /claude-sonnet/);
+                        return { outcome: 'ok' as const };
+                      },
+                    };
+                  },
+                },
+              ],
+            ]),
+          };
+        },
+      },
+    );
+    assert.equal(code, 0, stderr);
+    assert.ok(targets.length > 0);
+    assert.ok(targets.every((target) => target === 'claude-opus-4-6'));
+    assert.equal(calls, 1);
+    const result = JSON.parse(stdout);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.model_probes, [
+      {
+        purpose: 'agent',
+        adapter: 'claude-code',
+        provider: 'anthropic',
+        model: 'claude-opus-4-6',
+        outcome: 'ok',
+      },
+    ]);
+    assert.equal(result.run_count, 1);
+  });
+
+  for (const outcome of [
+    'unknown_model',
+    'auth',
+    'missing_structured_output',
+    'rate_limited',
+    'timeout',
+    'other',
+  ] as const) {
+    it(`exits nonzero for ${outcome} without exposing raw failures`, async () => {
+      const fixture = await createBenchmarkFixture();
+      let stdout = '';
+      assert.equal(
+        await runCli(
+          [
+            'validate',
+            '--probe-models',
+            '--experiment',
+            fixture.experimentPath,
+          ],
+          {
+            environment: {},
+            stdout: (text) => {
+              stdout += text;
+            },
+            stderr: () => undefined,
+            compositionFactory: async (options) => {
+              const base = await createDefaultCliComposition(options);
+              const agent = base.agents.get('claude-code')!;
+              return {
+                ...base,
+                agents: new Map([
+                  [
+                    'claude-code',
+                    {
+                      ...agent,
+                      probeModel: () => ({
+                        endpoint: 'https://models.example',
+                        run: async (): Promise<ModelProbeResult> => ({
+                          outcome,
+                        }),
+                      }),
+                    },
+                  ],
+                ]),
+              };
+            },
+          },
+        ),
+        1,
+      );
+      assert.equal(JSON.parse(stdout).valid, false);
+      assert.equal(JSON.parse(stdout).model_probes[0].outcome, outcome);
+    });
+  }
+
+  it('probes Ava and judge separately, deduplicating cases and repetitions', async () => {
+    const fixture = await createBenchmarkFixture({ repetitions: 2 });
+    await fs.writeFile(
+      fixture.caseFilePath,
+      `id: case/example
+version: 0.1.0
+task: Synthetic private task
+execution_mode: multi_turn
+setup: []
+judging_criteria: [The task is complete.]
+`,
+    );
+    let calls = 0;
+    let stderr = '';
+    let stdout = '';
+    const code = await runCli(
+      ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+      {
+        environment: {},
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        compositionFactory: async (options) => {
+          const base = await createDefaultCliComposition(options);
+          const probe = {
+            endpoint: 'https://models.example',
+            run: async () => {
+              calls++;
+              assert.match(stderr, /"purpose":"agent"/);
+              assert.match(stderr, /"purpose":"role_player"/);
+              assert.match(stderr, /"purpose":"judge"/);
+              assert.doesNotMatch(stderr, /Synthetic private task/);
+              return { outcome: 'ok' as const };
+            },
+          };
+          return {
+            ...base,
+            agents: new Map(
+              [...base.agents].map(([id, agent]) => [
+                id,
+                { ...agent, probeModel: () => probe },
+              ]),
+            ),
+            completionProviders: new Map([
+              [
+                'openai',
+                {
+                  id: 'openai',
+                  version: FORGE_VERSION,
+                  requirements: () => ({ credentials: {} }),
+                  complete: async () => {
+                    assert.fail('not an eval');
+                  },
+                  probeModel: () => probe,
+                },
+              ],
+            ]),
+          };
+        },
+      },
+    );
+    assert.equal(code, 0, stderr);
+    assert.equal(calls, 3);
+    assert.equal(JSON.parse(stdout).model_probes.length, 3);
+    assert.equal(JSON.parse(stdout).run_count, 2);
+  });
+
+  it('requires pure preflight and reports unavailable probe support without authority', async () => {
+    const fixture = await createBenchmarkFixture();
+    for (const unsupported of [true, false]) {
+      let calls = 0;
+      let stderr = '';
+      let stdout = '';
+      const code = await runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: {},
+          stdout: (text) => {
+            stdout += text;
+          },
+          stderr: (text) => {
+            stderr += text;
+          },
+          compositionFactory: async (options) => {
+            const base = await createDefaultCliComposition(options);
+            const original = base.agents.get('claude-code')!;
+            const agent: AgentAdapter = { ...original };
+            delete (agent as { probeModel?: unknown }).probeModel;
+            return {
+              ...base,
+              agents: new Map([
+                [
+                  'claude-code',
+                  unsupported
+                    ? agent
+                    : {
+                        ...original,
+                        probeModel: () => ({
+                          endpoint: 'https://models.example',
+                          run: async () => {
+                            calls++;
+                            return { outcome: 'ok' };
+                          },
+                        }),
+                      },
+                ],
+              ]),
+              credentialResolver: {
+                resolve: async () => {
+                  calls++;
+                  return 'secret';
+                },
+              },
+              runtime: {
+                ...base.runtime,
+                preflight: (input) => {
+                  if (!unsupported) throw new Error('Invalid runtime');
+                  return base.runtime.preflight(input);
+                },
+              },
+            };
+          },
+        },
+      );
+      assert.equal(code, 1);
+      assert.equal(calls, 0);
+      if (unsupported)
+        assert.equal(
+          JSON.parse(stdout).model_probes[0].reason,
+          'probe_unavailable',
+        );
+      else assert.match(stderr, /could not execute/);
+    }
+  });
+
+  it('combines host readiness and model probes on the detected native platform', async () => {
+    const fixture = await createBenchmarkFixture();
+    await fs.writeFile(
+      fixture.experimentPath,
+      (await fs.readFile(fixture.experimentPath, 'utf8')).replace(
+        'platform: linux/amd64',
+        'platform: native',
+      ),
+    );
+    for (const hostFails of [false, true]) {
+      const events: string[] = [];
+      const platforms: string[] = [];
+      let stdout = '';
+      let detects = 0;
+      const code = await runCli(
+        [
+          'validate',
+          '--host',
+          '--probe-models',
+          '--experiment',
+          fixture.experimentPath,
+        ],
+        {
+          environment: {},
+          detectDockerPlatform: async () => {
+            detects++;
+            return 'linux/arm64';
+          },
+          engine: {
+            ...defaultForgeEngine,
+            validateRuntime: async (requests) => {
+              events.push('host');
+              platforms.push(
+                ...requests.map(({ plan }) => plan.runtime.platform),
+              );
+              if (hostFails) throw new Error('Host unavailable');
+              return [];
+            },
+          },
+          compositionFactory: async (options) => {
+            const base = await createDefaultCliComposition(options);
+            const agent = base.agents.get('claude-code')!;
+            return {
+              ...base,
+              agents: new Map([
+                [
+                  'claude-code',
+                  {
+                    ...agent,
+                    probeModel: () => ({
+                      endpoint: 'https://models.example',
+                      run: async () => {
+                        events.push('probe');
+                        return { outcome: 'ok' };
+                      },
+                    }),
+                  },
+                ],
+              ]),
+            };
+          },
+          stdout: (text) => {
+            stdout += text;
+          },
+        },
+      );
+      assert.equal(code, hostFails ? 1 : 0);
+      assert.equal(detects, 1);
+      assert.deepEqual(platforms, ['linux/arm64']);
+      assert.deepEqual(events, hostFails ? ['host'] : ['host', 'probe']);
+      if (!hostFails) {
+        const result = JSON.parse(stdout);
+        assert.deepEqual(result.host, {
+          docker_platform: 'linux/arm64',
+          runtime_platform: 'linux/arm64',
+          checks: [],
+        });
+        assert.equal(result.model_probes.length, 1);
+        assert.equal(result.model_probes[0].outcome, 'ok');
+        assert.equal(result.valid, true);
+      }
+    }
+  });
+
+  it('continues to later models after a failing factory, capability, malformed result, or enforced timeout', async () => {
+    const fixture = await createGroupedBenchmarkFixture();
+    for (const failure of ['factory', 'call', 'result', 'hang'] as const) {
+      let stdout = '';
+      let stderr = '';
+      let started: () => void = () => undefined;
+      const firstStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let factories = 0;
+      vi.useFakeTimers();
+      const pending = runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: {},
+          compositionFactory: async (options) => {
+            const base = await createDefaultCliComposition(options);
+            const agent = base.agents.get('claude-code')!;
+            return {
+              ...base,
+              agents: new Map([
+                [
+                  'claude-code',
+                  {
+                    ...agent,
+                    probeModel: (selection) => {
+                      factories++;
+                      if (
+                        selection.model.includes('sonnet') &&
+                        failure === 'factory'
+                      )
+                        throw new Error('secret-value');
+                      return {
+                        endpoint: 'https://models.example',
+                        run: async () => {
+                          if (selection.model.includes('sonnet')) {
+                            started();
+                            if (failure === 'call')
+                              throw new Error('secret-value');
+                            if (failure === 'result')
+                              return {
+                                outcome: 'secret-value',
+                              } as unknown as ModelProbeResult;
+                            if (failure === 'hang')
+                              return new Promise(() => undefined);
+                          }
+                          return { outcome: 'ok' };
+                        },
+                      };
+                    },
+                  },
+                ],
+              ]),
+            };
+          },
+          stdout: (text) => {
+            stdout += text;
+          },
+          stderr: (text) => {
+            stderr += text;
+          },
+        },
+      );
+      if (failure === 'hang') {
+        await firstStarted;
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      assert.equal(await pending, 1);
+      const results = JSON.parse(stdout).model_probes;
+      assert.ok(factories >= 2);
+      assert.equal(results.length, 2);
+      assert.equal(
+        results[0].reason,
+        {
+          factory: 'probe_unavailable',
+          call: 'probe_failed',
+          result: 'invalid_probe_result',
+          hang: 'deadline_exceeded',
+        }[failure],
+      );
+      assert.equal(results[1].outcome, 'ok');
+      assert.doesNotMatch(stdout + stderr, /secret-value|https:\/\/models/);
+      assert.equal(vi.getTimerCount(), 0);
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses an explicit credential grant for a model-only check', async () => {
+    const fixture = await createBenchmarkFixture();
+    let calls = 0;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      calls++;
+      assert.equal(url, 'https://api.anthropic.com/v1/messages');
+      assert.equal(new Headers(init.headers).get('x-api-key'), 'synthetic-key');
+      return new Response(
+        JSON.stringify({
+          type: 'message',
+          content: [{ type: 'text', text: 'OK' }],
+        }),
+      );
+    });
+    let stdout = '';
+    assert.equal(
+      await runCli(
+        [
+          'validate',
+          '--probe-models',
+          '--experiment',
+          fixture.experimentPath,
+          '--credential-env',
+          'ANTHROPIC_API_KEY',
+        ],
+        {
+          environment: { ANTHROPIC_API_KEY: 'synthetic-key' },
+          stdout: (text) => {
+            stdout += text;
+          },
+        },
+      ),
+      0,
+    );
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(stdout).model_probes[0].outcome, 'ok');
+    assert.doesNotMatch(stdout, /synthetic-key/);
+  });
+
+  it('does not read an exported key for a model-only check without a grant', async () => {
+    const fixture = await createBenchmarkFixture();
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('probe must not send a request without a credential');
+    });
+    let stdout = '';
+    assert.equal(
+      await runCli(
+        ['validate', '--probe-models', '--experiment', fixture.experimentPath],
+        {
+          environment: { ANTHROPIC_API_KEY: 'synthetic-key' },
+          stdout: (text) => {
+            stdout += text;
+          },
+        },
+      ),
+      1,
+    );
+    const probes = JSON.parse(stdout).model_probes;
+    assert.equal(probes[0].outcome, 'auth');
+    assert.doesNotMatch(stdout, /synthetic-key/);
+  });
+
   it('targets named groups, intersects selectors, and preserves saved group identity on resume', async () => {
     const fixture = await createGroupedBenchmarkFixture();
     const config = parseExperimentConfigYaml(

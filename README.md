@@ -303,6 +303,37 @@ MCP and discovers tools without invoking them or making model calls. It requires
 an explicit `--credential-env` grant for each required MCP key and reports model
 authentication as untested. Failures name the stage; temporary runtimes are disposed after success or failure.
 
+Use `validate --probe-models` to test model IDs, keys, and host structured output
+before starting an eval. It uses the same selection filters as `run` and prints
+the full list of model names, providers, adapters, and roles to stderr before
+sending them:
+
+```sh
+npx --no-install forge validate --probe-models --experiment ./my-eval/experiment.yaml
+```
+
+This opt-in check makes paid requests: one small request per distinct agent
+adapter/provider/model, plus one strict structured-output request per used Ava
+and judge model, separately for each role. It uses the same endpoint routing
+as execution and requires the same explicit `--credential-env` grants for the
+selected agent and Ava/judge models. It sends fixed test prompts with no case content. JSON on stdout includes
+`model_probes` with each `outcome`: `ok`, `unknown_model`, `auth`,
+`missing_structured_output`, `rate_limited`, `timeout`, or `other`.
+Failures may also include an allowlisted `reason` and `http_status`, never raw
+provider errors or endpoint URLs. Only model-specific error signals produce
+`unknown_model`; routing or parameter errors without such signals stay `other`.
+Any failed probe sets `valid: false` and exits with status 1; probes do not retry.
+A failed or unavailable probe does not stop the remaining models. Each probe has
+a one-minute deadline, including key lookup, or a lower provider timeout.
+
+This tests models from the host. It does not exercise an agent CLI, container,
+setup, tools, or container connectivity. Use `validate --host` for runtime
+readiness. The flags can be combined; host readiness runs first and must pass
+before model requests start. A successful model probe does not prove
+that an eval will succeed. Agent tests allow a truncated response from their
+small token budget; host tests require a valid structured response. Host
+providers may raise the output budget to allow for model reasoning.
+
 For a payment case with Stripe MCP and both agents, use the
 [plugin experiment](https://github.com/stripe/forge/blob/main/release/plugin-experiment.yaml)
 beside its `datasets/` directory:

@@ -14,6 +14,11 @@ import {
 } from '../../contracts/credentials.ts';
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type { ModelRefV1 } from '../../model/types.ts';
+import {
+  createHttpModelProbe,
+  isProbeObject,
+  modelProbeRequest,
+} from '../../validation/httpProbe.ts';
 import { FORGE_VERSION } from '../../version.ts';
 
 export const ANTHROPIC_MESSAGES_API_VERSION = '2023-06-01' as const;
@@ -147,6 +152,36 @@ export function createAnthropicCompletionProvider(
     requirements(input: CompletionProviderRequirementInput) {
       validateCapability(input);
       return requirements;
+    },
+    probeModel(input: CompletionProviderRequirementInput) {
+      validateCapability(input);
+      const request = modelProbeRequest(input.model);
+      return createHttpModelProbe({
+        endpoint,
+        model: input.model.model,
+        credential,
+        fetch: fetchImplementation,
+        timeoutMs,
+        headers: (secret) =>
+          auth === 'bearer'
+            ? {
+                authorization: `Bearer ${secret}`,
+                'anthropic-version': ANTHROPIC_MESSAGES_API_VERSION,
+              }
+            : {
+                'x-api-key': secret,
+                'anthropic-version': ANTHROPIC_MESSAGES_API_VERSION,
+              },
+        body: serializeRequest(request),
+        structured: true,
+        accepts: (raw) => {
+          const response = parseResponse(raw, false);
+          return (
+            response.stopReason === 'end_turn' &&
+            isProbeObject(response.content)
+          );
+        },
+      });
     },
     async preflight(input: CompletionProviderPreflightInput): Promise<void> {
       throwIfAborted(input.signal);
