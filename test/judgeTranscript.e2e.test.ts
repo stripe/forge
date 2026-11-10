@@ -123,8 +123,7 @@ it.each([
         judgingCriteria: ['The observed result reports success.'],
         judge: { provider: 'test-provider', model: 'judge' },
       });
-      const assistant =
-        `START ${'x'.repeat(driverOverflow ? 1_100_000 : 900_000)} END`;
+      const assistant = `START ${'x'.repeat(driverOverflow ? 1_100_000 : 900_000)} END`;
       const agent = createScriptedAgentAdapter({
         ...(nativeOverflow
           ? {
