@@ -51,6 +51,70 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('commits the transcript when a third-party adapter returns malformed usage', async () => {
+    const fixture = await executionFixture();
+    const store = createArtifactStore({
+      root: path.join(fixture.root, 'artifacts'),
+    });
+    const composition = fixture.composition(store);
+    const agent = composition.agents.get('claude-code')!;
+    const observed: RunEvent[] = [];
+    const completed = await executeEval({
+      runId: 'malformed-usage',
+      plan: fixture.plan,
+      composition: {
+        ...composition,
+        observer: {
+          observe(event) {
+            observed.push(event);
+          },
+        },
+        agents: new Map([
+          [
+            agent.id,
+            {
+              ...agent,
+              async openSession(context) {
+                const session = await agent.openSession(context);
+                return {
+                  ...session,
+                  async send(message, options) {
+                    const turn = await session.send(message, options);
+                    return {
+                      ...turn,
+                      usage: {
+                        input_tokens: 1.5,
+                        cached_input_tokens: 0,
+                        output_tokens: 3,
+                        reasoning_tokens: null,
+                      },
+                    };
+                  },
+                };
+              },
+            },
+          ],
+        ]),
+      },
+    });
+    const verified = await verifyCompletedRun(completed.location);
+    assert.deepEqual(verified.result.agent.usage, {
+      input_tokens: null,
+      cached_input_tokens: null,
+      output_tokens: null,
+      reasoning_tokens: null,
+    });
+    assert.equal(verified.result.agent.session_id, 'canonical-session');
+    assert.equal(
+      observed.filter((event) => event.type === 'agent_usage').length,
+      1,
+    );
+    assert.equal(
+      verified.result.evaluation.status,
+      completed.result.evaluation.status,
+    );
+  });
+
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
     const fixture = await executionFixture();
     const store = createArtifactStore({

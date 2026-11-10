@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import type { AgentTokenUsage } from './contracts/agent.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
 import { ForgeExecutionError } from './execution/errors.ts';
@@ -85,6 +86,13 @@ export interface ExperimentRunInspection {
 
 export type ExperimentRunProgressEvent =
   | { readonly state: 'started' | 'resuming'; readonly location: string }
+  | {
+      readonly state: 'agent_usage';
+      readonly selection: RunSelection;
+      readonly run_id: string;
+      readonly turn: number;
+      readonly usage: AgentTokenUsage;
+    }
   | {
       readonly state: 'running' | 'completed' | 'skipped';
       readonly selection: RunSelection;
@@ -277,7 +285,17 @@ export async function runExperiment(
   };
   const recording = createExperimentProgress({
     root,
-    progress: options.progress,
+    progress(event) {
+      if (event.state !== 'agent_usage') {
+        options.progress(event);
+        return;
+      }
+      try {
+        options.progress(event);
+      } catch {
+        // A usage callback failure must not drop the saved observation.
+      }
+    },
   });
   const progress = recording.record;
   let reportReady = false;
@@ -442,6 +460,20 @@ export async function runExperiment(
               runId,
               plan: options.plans[index]!,
               composition: options.composition,
+              observer: {
+                async observe(event) {
+                  if (event.type !== 'agent_usage') return;
+                  await update(async () => {
+                    progress({
+                      state: 'agent_usage',
+                      selection: entry.selection,
+                      run_id: runId,
+                      turn: event.turn,
+                      usage: event.usage,
+                    });
+                  });
+                },
+              },
               signal,
             });
             const [actualLocation, expectedLocation] = await Promise.all([
@@ -566,6 +598,10 @@ export async function runExperiment(
                 inspected.artifact === null
                   ? null
                   : `runs/${last.run_id}/result.json`,
+              ...(effective.state === 'completed' &&
+              inspected.usage !== undefined
+                ? { agent_usage: inspected.usage }
+                : {}),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -604,6 +640,7 @@ interface AttemptInspection {
   attempt: SettledAttempt;
   artifact: ExperimentRunArtifact | null;
   evaluation: ExperimentRunReportEvaluationV1 | null;
+  usage?: AgentTokenUsage;
 }
 interface CachedInspection {
   identity: string;
@@ -650,6 +687,9 @@ async function inspectAttempt(
     return {
       attempt,
       evaluation: summarizeReportEvaluation(evaluation),
+      ...(completed.result.agent.usage === undefined
+        ? {}
+        : { usage: completed.result.agent.usage }),
       artifact: {
         location,
         evaluation: {

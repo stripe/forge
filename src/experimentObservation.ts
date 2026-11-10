@@ -5,6 +5,8 @@ export const EXPERIMENT_OBSERVATION_LIMITS = Object.freeze({
   appendMs: 250,
   drainMs: 500,
   readMs: 250,
+  recentEventBytes: 8 * 1024 * 1024,
+  tokenRateWindowMs: 60_000,
 });
 
 export async function observeWithin<T>(

@@ -3,9 +3,12 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import {
+  type ExperimentRunEvent,
   type ExperimentRunEventReadStatus,
+  type ExperimentRunEventsReadStatus,
   isFilesystemError,
   readExperimentRunEventStatus,
+  readRecentExperimentRunEvents,
 } from './experimentEvents.ts';
 import {
   EXPERIMENT_LOCK_OWNER_NAME,
@@ -69,6 +72,27 @@ export interface ExperimentRunStatus {
     readonly agent: AgentModel;
     readonly run_ids: readonly string[];
   }[];
+  readonly token_rates?: {
+    readonly state: 'available' | 'unavailable';
+    readonly reason?:
+      | Extract<
+          ExperimentRunEventsReadStatus,
+          { state: 'unavailable' }
+        >['reason']
+      | 'no_usage';
+    readonly basis: 'per_turn';
+    readonly window_seconds: 60;
+    readonly observed_at: string;
+    readonly truncated: boolean;
+    readonly invalid_records: number;
+    readonly models: readonly {
+      readonly agent: AgentModel;
+      readonly tokens_per_minute: number | null;
+      readonly reason?: 'missing_counters' | 'overflow' | 'no_recent_usage';
+      readonly turns: number;
+      readonly turns_with_total: number;
+    }[];
+  };
   readonly last_event_at: string | null;
   readonly event_log: EventLogObservation;
   readonly liveness: ExperimentRunLiveness;
@@ -132,6 +156,7 @@ export function summarizeExperimentRun(
 /** Independent observations, without a lock or any filesystem mutation. */
 export async function readExperimentRunStatus(
   root: string,
+  now: () => Date = () => new Date(),
 ): Promise<ExperimentRunStatus> {
   const loaded = await observeWithin(async (signal) => {
     try {
@@ -153,18 +178,53 @@ export async function readExperimentRunStatus(
   const checkpoint = loaded.value;
   if (checkpoint.experiment_run_id !== path.basename(path.resolve(root)))
     throw new Error('Experiment run ID does not match its directory.');
-  const eventLog = await readExperimentRunEventStatus(root);
-  const owner = await observeWithin(
-    (readSignal) => readLiveness(root, readSignal),
-    EXPERIMENT_OBSERVATION_LIMITS.readMs,
-  );
-  return summarizeExperimentRun(
+  const [eventLog, recent, owner] = await Promise.all([
+    readExperimentRunEventStatus(root),
+    readRecentExperimentRunEvents(root).catch(
+      (): ExperimentRunEventsReadStatus => ({
+        state: 'unavailable',
+        reason: 'observation_error',
+        events: [],
+        truncated: false,
+        invalid_records: 0,
+      }),
+    ),
+    observeWithin(
+      (readSignal) => readLiveness(root, readSignal),
+      EXPERIMENT_OBSERVATION_LIMITS.readMs,
+    ),
+  ]);
+  const rates = summarizeTokenRates(
     checkpoint,
-    eventLog,
-    owner.state === 'available'
-      ? owner.value
-      : { state: 'unknown', pid: null, reason: 'io_timeout' },
+    recent.events,
+    now(),
+    recent.truncated,
+    recent.invalid_records,
   );
+  const unavailable =
+    eventLog.state === 'unavailable'
+      ? eventLog
+      : recent.state === 'unavailable'
+        ? recent
+        : undefined;
+  return {
+    ...summarizeExperimentRun(
+      checkpoint,
+      eventLog,
+      owner.state === 'available'
+        ? owner.value
+        : { state: 'unknown', pid: null, reason: 'io_timeout' },
+    ),
+    token_rates:
+      unavailable === undefined
+        ? rates
+        : {
+            ...rates,
+            state: 'unavailable',
+            reason: unavailable.reason,
+            models: [],
+          },
+  };
 }
 
 async function readStatusFile(
@@ -276,6 +336,17 @@ export function renderExperimentRunStatus(status: ExperimentRunStatus): string {
         `  ${JSON.stringify(agent)}: ${run_ids.length} ${JSON.stringify(run_ids)}`,
     ),
     ...(status.in_flight.length === 0 ? ['  none'] : []),
+    'Agent tokens/min (per-turn reports, trailing 60s):',
+    ...(status.token_rates?.models.map(
+      ({ agent, tokens_per_minute, turns, turns_with_total, reason }) =>
+        `  ${JSON.stringify(agent)}: ${tokens_per_minute ?? `unavailable (${reason ?? 'missing_counters'})`} (${turns_with_total}/${turns} turns with input and output)`,
+    ) ?? []),
+    ...(!status.token_rates?.models.length
+      ? [`  unavailable (${status.token_rates?.reason ?? 'no_usage'})`]
+      : []),
+    ...(status.token_rates?.truncated || status.token_rates?.invalid_records
+      ? ['  omitted log records; rate may be incomplete']
+      : []),
     'Failures (all attempts):',
     ...status.failures.map(
       ({ count, ...failure }) => `  ${count} ${JSON.stringify(failure)}`,
@@ -283,4 +354,120 @@ export function renderExperimentRunStatus(status: ExperimentRunStatus): string {
     ...(status.failures.length === 0 ? ['  none'] : []),
   ];
   return `${lines.join('\n')}\n`;
+}
+
+/** A trailing minute of reported turns, including attempts which later fail. */
+export function summarizeTokenRates(
+  checkpoint: ExperimentRunCheckpoint,
+  events: readonly ExperimentRunEvent[],
+  now: Date,
+  truncated = false,
+  invalidRecords = 0,
+): NonNullable<ExperimentRunStatus['token_rates']> {
+  const unavailable = (
+    reason: NonNullable<
+      NonNullable<ExperimentRunStatus['token_rates']>['reason']
+    >,
+  ): NonNullable<ExperimentRunStatus['token_rates']> => ({
+    state: 'unavailable',
+    reason,
+    basis: 'per_turn',
+    window_seconds: 60,
+    observed_at: now.toISOString(),
+    truncated,
+    invalid_records: invalidRecords,
+    models: [],
+  });
+  if (
+    events.some(
+      (event) => event.experiment_run_id !== checkpoint.experiment_run_id,
+    )
+  )
+    return unavailable('identity_mismatch');
+  if (invalidRecords > 0) return unavailable('invalid_record');
+  if (truncated) return unavailable('truncated');
+  if (events.some((event) => event.recording_gap !== undefined))
+    return unavailable('recording_gap');
+  const attempts = new Map(
+    checkpoint.entries.flatMap((entry) =>
+      entry.attempts.map(
+        (attempt) => [attempt.run_id, entry.selection] as const,
+      ),
+    ),
+  );
+  const models = new Map<
+    string,
+    {
+      agent: AgentModel;
+      tokens_per_minute: number | null;
+      reason?: 'missing_counters' | 'overflow' | 'no_recent_usage';
+      turns: number;
+      turns_with_total: number;
+    }
+  >();
+  const seen = new Set<string>();
+  for (const event of events) {
+    if (event.state !== 'agent_usage') continue;
+    const selection = attempts.get(event.run_id);
+    if (
+      !selection ||
+      serializeCanonicalJson(selection) !==
+        serializeCanonicalJson(event.selection)
+    )
+      continue;
+    const { adapter, provider, model } = selection.agent;
+    const agent = { adapter, provider, model };
+    const key = serializeCanonicalJson(agent);
+    const group: {
+      agent: AgentModel;
+      tokens_per_minute: number | null;
+      reason?: 'missing_counters' | 'overflow' | 'no_recent_usage';
+      turns: number;
+      turns_with_total: number;
+    } = models.get(key) ?? {
+      agent,
+      tokens_per_minute: 0,
+      turns: 0,
+      turns_with_total: 0,
+    };
+    models.set(key, group);
+    const age = now.getTime() - Date.parse(event.observed_at);
+    const identity = `${event.run_id}:${event.turn}`;
+    if (
+      age < 0 ||
+      age >= EXPERIMENT_OBSERVATION_LIMITS.tokenRateWindowMs ||
+      seen.has(identity)
+    )
+      continue;
+    seen.add(identity);
+    group.turns += 1;
+    const { input_tokens, output_tokens } = event.usage;
+    if (input_tokens !== null && output_tokens !== null) {
+      group.turns_with_total += 1;
+      if (group.tokens_per_minute !== null) {
+        const sum = group.tokens_per_minute + input_tokens + output_tokens;
+        group.tokens_per_minute = Number.isSafeInteger(sum) ? sum : null;
+        if (group.tokens_per_minute === null) group.reason = 'overflow';
+      }
+    } else {
+      group.tokens_per_minute = null;
+      group.reason = 'missing_counters';
+    }
+  }
+  if (models.size === 0) return unavailable('no_usage');
+  for (const group of models.values()) {
+    if (group.turns === 0) {
+      group.tokens_per_minute = null;
+      group.reason = 'no_recent_usage';
+    }
+  }
+  return {
+    state: 'available',
+    basis: 'per_turn',
+    window_seconds: 60,
+    observed_at: now.toISOString(),
+    truncated,
+    invalid_records: invalidRecords,
+    models: [...models.values()],
+  };
 }

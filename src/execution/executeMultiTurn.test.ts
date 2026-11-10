@@ -399,11 +399,23 @@ describe('executeEval multi-turn and judging integration', () => {
     const agent = createScriptedAgentAdapter({
       turns: [
         {
+          usage: {
+            input_tokens: 10,
+            cached_input_tokens: 5,
+            output_tokens: 4,
+            reasoning_tokens: null,
+          },
           text: firstAssistant,
           sessionId,
           toolCalls: [],
         },
         {
+          usage: {
+            input_tokens: 20,
+            cached_input_tokens: 8,
+            output_tokens: 6,
+            reasoning_tokens: null,
+          },
           text: secondAssistant,
           sessionId,
           toolCalls: [],
@@ -464,8 +476,16 @@ describe('executeEval multi-turn and judging integration', () => {
     });
     const artifacts = createMemoryArtifactStore();
 
+    const usageEvents: unknown[] = [];
+    const perRunUsageEvents: unknown[] = [];
     const completed = await executeEval({
       runId: 'incomplete-native-fallback-1',
+      observer: {
+        observe(event) {
+          if (event.type === 'agent_usage')
+            perRunUsageEvents.push({ turn: event.turn, usage: event.usage });
+        },
+      },
       plan: createTestResolvedRunPlan({
         mode: 'multi_turn',
         prompt: 'Complete both parts.',
@@ -475,6 +495,12 @@ describe('executeEval multi-turn and judging integration', () => {
         judge: JUDGE_MODEL,
       }),
       composition: {
+        observer: {
+          observe(event) {
+            if (event.type === 'agent_usage')
+              usageEvents.push({ turn: event.turn, usage: event.usage });
+          },
+        },
         runtime: runtime.adapter,
         agents: new Map([[agent.adapter.id, agent.adapter]]),
         completionProviders: new Map([
@@ -487,6 +513,33 @@ describe('executeEval multi-turn and judging integration', () => {
       now: incrementingClock(),
     });
 
+    assert.deepEqual(perRunUsageEvents, usageEvents);
+    assert.deepEqual(completed.result.agent.usage, {
+      input_tokens: 30,
+      cached_input_tokens: 13,
+      output_tokens: 10,
+      reasoning_tokens: null,
+    });
+    assert.deepEqual(usageEvents, [
+      {
+        turn: 1,
+        usage: {
+          input_tokens: 10,
+          cached_input_tokens: 5,
+          output_tokens: 4,
+          reasoning_tokens: null,
+        },
+      },
+      {
+        turn: 2,
+        usage: {
+          input_tokens: 20,
+          cached_input_tokens: 8,
+          output_tokens: 6,
+          reasoning_tokens: null,
+        },
+      },
+    ]);
     assert.deepEqual(agent.messages, [firstUser, secondUser]);
     assert.equal(completed.result.evidence.completeness, 'fallback');
     assert.equal(

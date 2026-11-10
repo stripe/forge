@@ -466,7 +466,9 @@ results/experiments/<experiment-run-id>/
 
 Each line in `events.jsonl` is one canonical JSON progress event with an
 `observed_at` UTC timestamp. Resume appends a `resumed` marker and further
-events to the same file. Follow it with `tail -f` while a run is active.
+events to the same file. `agent_usage` adds a record after each completed turn
+with counters, in stderr progress and in this log. It also advances the last-event
+time. Follow the log with `tail -f` while a run is active.
 Recording runs in the background with bounded memory and waits. Disk errors,
 slow writes, or a full queue can leave gaps: `run-summary.json` then includes
 `progress_log` with `state: unavailable`, a reason, and the affected event count.
@@ -490,6 +492,18 @@ from the last readable `events.jsonl` record. `event_log` reports whether it
 is available, has an interrupted tail, or is unavailable with a fixed reason.
 Missing, torn, unreadable, newer-format, or mismatched logs do not hide the
 checkpoint summary; an unavailable event has a null `last_event_at`.
+
+Status also shows agent tokens per minute from turn usage reported in the trailing
+60 seconds. It adds input and output tokens; cached input and reasoning are
+already included. Rates include attempts that later fail. Missing counters make
+a model's rate unavailable with a reason. A model with no usage in the past
+minute also shows unavailable; a recent report of zero tokens shows zero.
+Missing, malformed, unreadable, or mismatched logs also make the rate unavailable,
+as do an interrupted tail,
+a bounded read that omits earlier records, and saved recording gaps. Without
+usage events, no rate is inferred from completed evals. Undetected gaps can
+undercount. Counters arrive when an agent invocation finishes, so long
+invocations produce bursts.
 
 Liveness checks the `.experiment.lock` owner PID on this host: alive, stale,
 or no lock. An unreadable or invalid lock reports `unknown` with a fixed
@@ -555,6 +569,15 @@ and one `runs` row per saved selection. With optional `jq`:
 jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \
   results/experiments/EXPERIMENT_RUN_ID/report.json
 ```
+
+When an adapter reports tokens, `result.json` includes `agent.usage`. Its
+input, cached input, output, and reasoning counters are nullable; an unknown
+counter is not zero. Experiment reports retain each completed row's
+`agent_usage` and sum it in `agent_usage_by_model`, grouped by adapter, provider,
+and model across cases and treatments. These groups count evals with usage.
+A counter stays unknown if any contributing eval lacks it. Old results and
+reports without these fields still parse. Host role-player and judge tokens
+remain separate in `completion_calls`.
 
 `coverage` is completed selections divided by all saved selections.
 `pass_rate` is passed evaluations divided by completed evaluations without

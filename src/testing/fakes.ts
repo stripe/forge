@@ -521,6 +521,7 @@ function copyAgentTurn(turn: AgentTurn): AgentTurn {
     sessionId: turn.sessionId,
     toolCalls: turn.toolCalls.map((toolCall) => ({ ...toolCall })),
     ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+    ...(turn.usage === undefined ? {} : { usage: { ...turn.usage } }),
   };
 }
 

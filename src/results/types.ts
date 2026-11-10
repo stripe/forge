@@ -2,6 +2,7 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
+import type { AgentTokenUsage } from '../contracts/agent.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
@@ -313,6 +314,7 @@ interface RunResultCommon {
     model: string;
     session_id: string | null;
     cost_usd: number | null;
+    usage?: AgentTokenUsage;
   };
   readonly completion_calls: readonly CompletionCallSummaryV1[];
   readonly interaction: {

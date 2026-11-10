@@ -135,3 +135,85 @@ it('rejects excess tool calls rather than truncating the observed driver activit
     message: 'Claude output exceeded its tool-call limit.',
   });
 });
+
+it('uses terminal invocation usage once, includes cache reads and writes in input, and leaves reasoning unknown', () => {
+  const usage = {
+    input_tokens: 10,
+    output_tokens: 4,
+    cache_read_input_tokens: 8,
+    cache_creation_input_tokens: 2,
+  };
+  const terminal = {
+    type: 'result',
+    session_id: 'selected',
+    result: 'done',
+    usage,
+  };
+  const parsed = parseClaudeStream(
+    [{ type: 'assistant', message: { usage, content: [] } }, terminal]
+      .map((event) => JSON.stringify(event))
+      .join('\n'),
+  );
+  assert.deepEqual(parsed.usage, {
+    input_tokens: 20,
+    cached_input_tokens: 8,
+    output_tokens: 4,
+    reasoning_tokens: null,
+  });
+  assert.deepEqual(
+    parseClaudeStream(
+      JSON.stringify({ ...terminal, usage: { input_tokens: 0 } }),
+    ).usage,
+    {
+      input_tokens: null,
+      cached_input_tokens: null,
+      output_tokens: null,
+      reasoning_tokens: null,
+    },
+  );
+  for (const invalid of [
+    null,
+    { input_tokens: -1 },
+    { output_tokens: 0.5 },
+    { cache_creation_input_tokens: '2' },
+  ]) {
+    const observed = parseClaudeStream(
+      JSON.stringify({ ...terminal, usage: invalid }),
+    );
+    assert.equal(observed.text, 'done');
+    assert.equal(observed.sessionId, 'selected');
+    assert.equal(observed.usage!.input_tokens, null);
+    assert.equal(observed.usage!.output_tokens, null);
+  }
+});
+
+it('keeps a completed Claude turn when native token counters are malformed', () => {
+  for (const usage of [
+    null,
+    [],
+    2,
+    { input_tokens: 1.5, cache_read_input_tokens: 0, output_tokens: 3 },
+    {
+      input_tokens: 5,
+      cache_read_input_tokens: 3,
+      cache_creation_input_tokens: null,
+      output_tokens: 3,
+    },
+    {
+      input_tokens: Number.MAX_SAFE_INTEGER,
+      cache_read_input_tokens: 1,
+      output_tokens: 3,
+    },
+  ]) {
+    const turn = parseClaudeStream(
+      JSON.stringify({
+        type: 'result',
+        session_id: 'selected',
+        result: 'Kept response',
+        usage,
+      }),
+    );
+    assert.equal(turn.text, 'Kept response');
+    assert.equal(turn.usage!.input_tokens, null);
+  }
+});

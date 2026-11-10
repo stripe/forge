@@ -292,3 +292,24 @@ describe('OpenCode native evidence', () => {
     );
   });
 });
+
+it('keeps native transcript evidence while omitting malformed optional usage metrics', async () => {
+  for (const tokens of [
+    null,
+    'invalid',
+    { input: 1.5, output: 2, reasoning: 1, cache: { read: 0, write: 0 } },
+  ]) {
+    const value = openCodeExport(turns);
+    Object.assign(value.messages[1]!.info, { tokens });
+    const evidence = await loadOpenCodeEvidence(fixture(value).input);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available') continue;
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    assert.equal(trajectory.steps[1]!.metrics, undefined);
+    assert.equal(trajectory.steps[1]!.tool_calls!.length, 1);
+    assert.ok(
+      evidence.warnings.some((warning) => warning.code === 'value_omitted'),
+    );
+    assert.ok(!JSON.stringify(evidence.warnings).includes('invalid'));
+  }
+});

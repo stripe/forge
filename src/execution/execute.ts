@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { observeAgentTokenUsage, sumAgentTokenUsage } from '../agentUsage.ts';
 import {
   ATIF_SCHEMA_VERSION,
   type AtifNormalizationProvenance,
@@ -17,6 +18,7 @@ import type {
   AgentRuntimeRequirements,
   AgentSession,
   AgentSessionRuntime,
+  AgentTokenUsage,
   AgentTurn,
 } from '../contracts/agent.ts';
 import type {
@@ -40,7 +42,7 @@ import {
   type AgentAdapterMetadata,
   agentAdapterMetadataSchema,
 } from '../contracts/metadata.ts';
-import type { RunPhase } from '../contracts/observability.ts';
+import type { RunObserver, RunPhase } from '../contracts/observability.ts';
 import type {
   MutableWorkspace,
   PreparedRuntime,
@@ -158,6 +160,8 @@ export interface ExecuteEvalInput {
   readonly plan: ResolvedRunPlanV1;
   readonly composition: ForgeComposition;
   readonly signal?: AbortSignal;
+  /** Additional per-run observer; failures are isolated like composition observers. */
+  readonly observer?: RunObserver;
   /** Test seam; production uses the wall clock. */
   readonly now?: () => Date;
 }
@@ -316,7 +320,9 @@ export async function executeEvalWithTestHooks(
   const now = input.now ?? (() => new Date());
   const startedAt = now();
   const events = createRunEventEmitter(
-    input.composition.observer ? [input.composition.observer] : [],
+    [input.composition.observer, input.observer].filter(
+      (observer): observer is RunObserver => observer !== undefined,
+    ),
   );
   let phase: RunPhase = 'preflight';
   let prepared: PreparedRuntime | undefined;
@@ -434,6 +440,7 @@ export async function executeEvalWithTestHooks(
         completions,
         signal,
         hooks.waitBeforeCompletionRetry,
+        events.agentUsage,
       );
     });
 
@@ -769,6 +776,7 @@ interface ExecutedInteraction {
   readonly turns: readonly ConversationTurn[];
   readonly stopReason: RunStopReasonV1;
   readonly totalCostUsd: number | null;
+  readonly usage: AgentTokenUsage | undefined;
   readonly sessionId: string | null;
   readonly avaAudit?: AvaConversationAudit;
   readonly failure: RolePlayerErrorV1 | null;
@@ -780,8 +788,10 @@ async function executeInteraction(
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
+  onUsage: (turn: number, usage: AgentTokenUsage) => Promise<void>,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
+  const usages: (AgentTokenUsage | undefined)[] = [];
   const trackedSession: AgentSession = Object.freeze({
     sessionId: () => session.sessionId(),
     async send(
@@ -817,6 +827,8 @@ async function executeInteraction(
           'Agent turn identity does not match its persistent session.',
         );
       }
+      usages.push(turn.usage);
+      if (turn.usage !== undefined) await onUsage(usages.length, turn.usage);
       lastTurnSessionId = turn.sessionId;
       return turn;
     },
@@ -840,6 +852,7 @@ async function executeInteraction(
       turns,
       stopReason: 'task_complete',
       totalCostUsd: response.costUsd ?? null,
+      usage: sumAgentTokenUsage(usages),
       sessionId: resolveSessionId(session, lastTurnSessionId, true),
       failure: null,
     });
@@ -886,6 +899,7 @@ async function executeInteraction(
     turns: conversation.turns,
     stopReason: conversation.stopReason,
     totalCostUsd: conversation.totalCostUsd,
+    usage: sumAgentTokenUsage(usages),
     sessionId: resolveSessionId(
       session,
       lastTurnSessionId,
@@ -923,6 +937,9 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
     sessionId: turn.sessionId,
     toolCalls: snapshotAgentToolCalls(turn.toolCalls),
     ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+    ...(turn.usage === undefined
+      ? {}
+      : { usage: Object.freeze(observeAgentTokenUsage(turn.usage)) }),
   });
 }
 
@@ -1969,6 +1986,9 @@ function buildResult(input: {
       model: input.input.plan.agent.model,
       session_id: input.interaction.sessionId,
       cost_usd: input.interaction.totalCostUsd,
+      ...(input.interaction.usage === undefined
+        ? {}
+        : { usage: input.interaction.usage }),
     },
     completion_calls: input.completionCalls.map((call) => ({ ...call })),
     interaction: {

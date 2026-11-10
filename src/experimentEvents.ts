@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import { agentTokenUsageSchema } from './agentUsage.ts';
 import type { ExperimentRunProgressEvent } from './experiment.ts';
 import {
   experimentRunDiagnosticSchema,
@@ -68,6 +69,16 @@ const envelope = {
 };
 const selection = z.unknown().transform(parseRunSelection);
 const eventSchema = z.discriminatedUnion('state', [
+  z
+    .object({
+      state: z.literal('agent_usage'),
+      selection,
+      run_id: experimentRunIdSchema,
+      turn: z.number().int().positive().safe(),
+      usage: agentTokenUsageSchema,
+      ...envelope,
+    })
+    .strict(),
   z
     .object({
       state: z.literal('started'),
@@ -317,4 +328,166 @@ function parseEventTail(
     }
   }
   return { state: 'unavailable', reason: 'interrupted' };
+}
+
+export type ExperimentRunEventsReadStatus = {
+  readonly events: ExperimentRunEvent[];
+  readonly truncated: boolean;
+  readonly invalid_records: number;
+} & (
+  | { readonly state: 'available' }
+  | {
+      readonly state: 'unavailable';
+      readonly reason:
+        | Extract<
+            ExperimentRunEventReadStatus,
+            { state: 'unavailable' }
+          >['reason']
+        | 'truncated'
+        | 'recording_gap'
+        | 'observation_error';
+    }
+);
+
+/** Complete records from a bounded, time-limited tail with explicit coverage gaps. */
+export async function readRecentExperimentRunEvents(
+  root: string,
+): Promise<ExperimentRunEventsReadStatus> {
+  root = path.resolve(root);
+  const result = await observeWithin(
+    (signal) => readRecentEventTail(root, signal),
+    EXPERIMENT_OBSERVATION_LIMITS.readMs,
+  );
+  return result.state === 'available'
+    ? result.value
+    : {
+        state: 'unavailable',
+        reason: 'io_timeout',
+        events: [],
+        truncated: false,
+        invalid_records: 0,
+      };
+}
+
+async function readRecentEventTail(
+  root: string,
+  signal: AbortSignal,
+): Promise<ExperimentRunEventsReadStatus> {
+  let handle: fs.FileHandle | undefined;
+  try {
+    handle = await fs.open(
+      path.join(root, 'events.jsonl'),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    signal.throwIfAborted();
+    const stat = await handle.stat();
+    signal.throwIfAborted();
+    if (!stat.isFile()) return unavailable('unsafe_file');
+    if (stat.size === 0) return unavailable('empty');
+    const length = Math.min(
+      stat.size,
+      EXPERIMENT_OBSERVATION_LIMITS.recentEventBytes,
+    );
+    const tail = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(
+      tail,
+      0,
+      length,
+      stat.size - length,
+    );
+    signal.throwIfAborted();
+    const bytes = tail.subarray(0, bytesRead);
+    const end = bytes.lastIndexOf(10);
+    const truncated = stat.size > length;
+    const start = truncated ? bytes.indexOf(10) + 1 : 0;
+    const events: ExperimentRunEvent[] = [];
+    let invalid_records = 0;
+    let reason:
+      | Extract<
+          ExperimentRunEventsReadStatus,
+          { state: 'unavailable' }
+        >['reason']
+      | undefined;
+    if (end < start)
+      return {
+        ...unavailable(
+          bytes.length > MAX_EVENT_BYTES ? 'oversized_record' : 'interrupted',
+        ),
+        truncated,
+      };
+    for (const line of bytes
+      .subarray(start, end)
+      .toString('utf8')
+      .split('\n')) {
+      signal.throwIfAborted();
+      if (!line) continue;
+      if (Buffer.byteLength(line) + 1 > MAX_EVENT_BYTES) {
+        invalid_records += 1;
+        reason ??= 'oversized_record';
+        continue;
+      }
+      let event: ExperimentRunEvent;
+      try {
+        event = parseExperimentRunEvent(JSON.parse(line));
+      } catch (error) {
+        if (
+          !(error instanceof SyntaxError) &&
+          !(error instanceof z.ZodError) &&
+          !(
+            error instanceof BenchmarkModelError &&
+            error.code === 'invalid_experiment_config'
+          )
+        )
+          throw error;
+        invalid_records += 1;
+        reason ??= 'invalid_record';
+        continue;
+      }
+      if (event.experiment_run_id !== path.basename(root))
+        reason ??= 'identity_mismatch';
+      if (event.recording_gap !== undefined) reason ??= 'recording_gap';
+      events.push(event);
+    }
+    if (end !== bytes.length - 1 || bytesRead !== length)
+      reason ??= 'interrupted';
+    if (truncated) reason ??= 'truncated';
+    if (events.length === 0) reason ??= 'empty';
+    return {
+      events,
+      truncated,
+      invalid_records,
+      ...(reason === undefined
+        ? { state: 'available' }
+        : { state: 'unavailable', reason }),
+    };
+  } catch (error) {
+    if (isFilesystemError(error))
+      return unavailable(
+        (error as NodeJS.ErrnoException).code === 'ENOENT'
+          ? 'missing'
+          : 'io_error',
+      );
+    if (signal.aborted) return unavailable('io_timeout');
+    throw error;
+  } finally {
+    if (handle !== undefined)
+      await handle.close().catch((error: unknown) => {
+        if (!isFilesystemError(error)) throw error;
+      });
+  }
+
+  function unavailable(
+    reason: Extract<
+      ExperimentRunEventsReadStatus,
+      { state: 'unavailable' }
+    >['reason'],
+  ): ExperimentRunEventsReadStatus {
+    return {
+      state: 'unavailable',
+      reason,
+      events: [],
+      truncated: false,
+      invalid_records: 0,
+    };
+  }
 }

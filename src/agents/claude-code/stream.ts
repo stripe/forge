@@ -1,4 +1,9 @@
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import { observeAgentTokenUsage, sumObservedTokens } from '../../agentUsage.ts';
+import type {
+  AgentTokenUsage,
+  AgentToolCall,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 
 const MAX_STREAM_LINES = 100_000;
 const MAX_STREAM_LINE_BYTES = 1024 * 1024;
@@ -9,6 +14,7 @@ interface ClaudeStreamEvent {
   result?: string;
   session_id?: string;
   total_cost_usd?: number;
+  usage?: unknown;
   message?: {
     content?: Array<{
       type?: string;
@@ -27,6 +33,7 @@ export function parseClaudeStream(stdout: string): AgentTurn {
   let lastAssistantText = '';
   let sessionId: string | undefined;
   let costUsd: number | undefined;
+  let usage: AgentTokenUsage | undefined;
   let lineStart = 0;
   let lineCount = 0;
 
@@ -64,6 +71,15 @@ export function parseClaudeStream(stdout: string): AgentTurn {
         }
       }
     } else if (event.type === 'result') {
+      if (event.usage !== undefined) {
+        const native = event.usage;
+        usage =
+          native !== null &&
+          typeof native === 'object' &&
+          !Array.isArray(native)
+            ? claudeUsage(native as Record<string, unknown>)
+            : observeAgentTokenUsage(null);
+      }
       if (typeof event.result === 'string') resultText = event.result;
       if (typeof event.session_id === 'string') sessionId = event.session_id;
       if (
@@ -86,6 +102,22 @@ export function parseClaudeStream(stdout: string): AgentTurn {
     sessionId,
     toolCalls,
     ...(costUsd === undefined ? {} : { costUsd }),
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function claudeUsage(native: Record<string, unknown>): AgentTokenUsage {
+  return {
+    input_tokens: sumObservedTokens(
+      native.input_tokens,
+      native.cache_read_input_tokens,
+      native.cache_creation_input_tokens === undefined
+        ? 0
+        : native.cache_creation_input_tokens,
+    ),
+    cached_input_tokens: sumObservedTokens(native.cache_read_input_tokens),
+    output_tokens: sumObservedTokens(native.output_tokens),
+    reasoning_tokens: null,
   };
 }
 

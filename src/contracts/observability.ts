@@ -1,3 +1,4 @@
+import type { AgentTokenUsage } from './agent.ts';
 export type RunPhase =
   | 'preflight'
   | 'runtime_prepare'
@@ -10,12 +11,21 @@ export type RunPhase =
   | 'runtime_dispose'
   | 'result_commit';
 
-export type RunEventType = 'phase_started' | 'phase_completed';
-
-export interface RunEvent {
-  readonly type: RunEventType;
+interface RunEventBase {
   readonly phase: RunPhase;
 }
+
+export type RunEvent = RunEventBase &
+  (
+    | { readonly type: 'phase_started' | 'phase_completed' }
+    | {
+        readonly type: 'agent_usage';
+        readonly turn: number;
+        readonly usage: AgentTokenUsage;
+      }
+  );
+
+export type RunEventType = RunEvent['type'];
 
 /** Observers receive redacted lifecycle events and have no runtime authority. */
 export interface RunObserver {
