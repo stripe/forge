@@ -58,7 +58,8 @@ describe('OpenCode engine integration', () => {
                   stripe: { type: 'http', url: 'https://mcp.stripe.com' },
                 },
               }),
-              [`stripe-source/${bundlePath}/skills/test/SKILL.md`]: 'Use Stripe.',
+              [`stripe-source/${bundlePath}/skills/test/SKILL.md`]:
+                'Use Stripe.',
             },
           },
           async command(call) {
@@ -69,26 +70,37 @@ describe('OpenCode engine integration', () => {
                 : [],
             );
             if (call.argv[1] === '--version')
-              return { stdout: '1.19.0', stderr: '', exitCode: 0, durationMs: 1 };
+              return {
+                stdout: '1.19.0',
+                stderr: '',
+                exitCode: 0,
+                durationMs: 1,
+              };
             if (call.argv.includes('git')) {
               const stdout = call.argv.includes('show')
                 ? JSON.stringify({
                     name: 'claude-plugins-official',
-                    plugins: [{
-                      name: 'stripe',
-                      source: {
-                        source: 'git-subdir',
-                        url: 'https://github.com/stripe/ai.git',
-                        path: bundlePath, sha: sourceCommit,
+                    plugins: [
+                      {
+                        name: 'stripe',
+                        source: {
+                          source: 'git-subdir',
+                          url: 'https://github.com/stripe/ai.git',
+                          path: bundlePath,
+                          sha: sourceCommit,
+                        },
                       },
-                    }],
+                    ],
                   })
-                : call.argv.includes('rev-parse') ? sourceCommit : '';
+                : call.argv.includes('rev-parse')
+                  ? sourceCommit
+                  : '';
               return { stdout, stderr: '', exitCode: 0, durationMs: 1 };
             }
-            const state = runtime.runs[0]!.stateDirectories.get(
-              OPENCODE_STATE_ID,
-            )!.readonly;
+            const state =
+              runtime.runs[0]!.stateDirectories.get(
+                OPENCODE_STATE_ID,
+              )!.readonly;
             const config = JSON.parse(
               Buffer.from(await state.readFile('config.json')).toString(),
             );
@@ -119,19 +131,21 @@ describe('OpenCode engine integration', () => {
             version: '1.0.0',
             sha256: `sha256:${'d'.repeat(64)}`,
           },
-          actions: [{
-            uses: 'fixture/install-plugin',
-            parseWith(input) {
-              assert.deepEqual(input, {});
-              return {};
+          actions: [
+            {
+              uses: 'fixture/install-plugin',
+              parseWith(input) {
+                assert.deepEqual(input, {});
+                return {};
+              },
+              preflight(_step, context) {
+                return pluginSetupHandler.preflight(
+                  { uses: 'forge/plugin', with: { plugin: 'stripe' } },
+                  context,
+                );
+              },
             },
-            preflight(_step, context) {
-              return pluginSetupHandler.preflight(
-                { uses: 'forge/plugin', with: { plugin: 'stripe' } },
-                context,
-              );
-            },
-          }],
+          ],
         });
         const engine = createForgeEngine({ setupActionBundles: [custom] });
         const base = createTestResolvedRunPlan({
@@ -144,10 +158,12 @@ describe('OpenCode engine integration', () => {
             model_profile: OPEN_CODE_MODEL_PROFILE,
           },
         });
-        const setup = [{
-          uses,
-          with: uses === 'forge/plugin' ? { plugin: 'stripe' } : {},
-        }];
+        const setup = [
+          {
+            uses,
+            with: uses === 'forge/plugin' ? { plugin: 'stripe' } : {},
+          },
+        ];
         const plan = engine.parseResolvedRunPlan({
           ...base,
           treatment: { ...base.treatment, setup },
@@ -175,11 +191,16 @@ describe('OpenCode engine integration', () => {
         engine.preflightEval({ plan, composition });
         assert.equal(runtime.runs.length, 0);
         const completed = await engine.executeEval({
-          runId: 'custom-plugin', plan, composition,
+          runId: 'custom-plugin',
+          plan,
+          composition,
         });
         await engine.verifyCompletedRun(completed.location);
         const saved = JSON.parse(
-          await fs.readFile(path.join(completed.location, 'setup.json'), 'utf8'),
+          await fs.readFile(
+            path.join(completed.location, 'setup.json'),
+            'utf8',
+          ),
         );
         assert.equal(saved.steps[0].uses, uses);
         assert.equal(saved.steps[0].resolution.installation, 'bundle');

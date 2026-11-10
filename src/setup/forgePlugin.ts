@@ -22,9 +22,7 @@ export const pluginSetupHandler: SetupStepHandler = Object.freeze({
       );
     }
     const pluginStep = step as PluginSetupStepV1;
-    const definition = pluginDefinitionForName(
-      pluginStep.with.plugin,
-    );
+    const definition = pluginDefinitionForName(pluginStep.with.plugin);
     if (!definition) {
       throw new TypeError(
         `Unknown registered plugin ${JSON.stringify(pluginStep.with.plugin)}.`,

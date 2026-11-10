@@ -1300,7 +1300,8 @@ describe('local artifact store', () => {
         ...bundleBase,
         installation: 'opencode-bundle',
         source: {
-          kind: 'git-subdir', commit: 'b'.repeat(40),
+          kind: 'git-subdir',
+          commit: 'b'.repeat(40),
           path: 'providers/claude/plugin',
         },
       };
@@ -1319,17 +1320,23 @@ describe('local artifact store', () => {
         { ...receipt, adapter },
         { ...receipt, adapter, installation: 'native' },
         {
-          ...receipt, adapter, mcp_configuration: 'codex-user-config',
+          ...receipt,
+          adapter,
+          mcp_configuration: 'codex-user-config',
           mcp_connections: [{ name: 'stripe', url: 'https://mcp.stripe.com' }],
         },
         {
-          ...receipt, adapter, installation: 'native',
+          ...receipt,
+          adapter,
+          installation: 'native',
           mcp_configuration: 'codex-user-config',
           mcp_connections: [{ name: 'stripe', url: 'https://mcp.stripe.com' }],
         },
         { ...bundleReceipt, adapter },
         {
-          ...bundleReceipt, adapter, installation: 'bundle',
+          ...bundleReceipt,
+          adapter,
+          installation: 'bundle',
           source: { ...bundleReceipt.source, path: 'another/portable/bundle' },
         },
       ]) {
@@ -1339,7 +1346,9 @@ describe('local artifact store', () => {
           (result) => result,
           { plan },
         );
-        const resultBytes = await fs.readFile(path.join(location, 'result.json'));
+        const resultBytes = await fs.readFile(
+          path.join(location, 'result.json'),
+        );
         const planBytes = await fs.readFile(path.join(location, 'plan.json'));
         await verifyCompletedRun(location);
         assert.deepEqual(
@@ -1359,15 +1368,23 @@ describe('local artifact store', () => {
       for (const resolution of [
         { ...receipt, adapter: 'other-adapter' },
         {
-          ...receipt, adapter, installation: 'native',
+          ...receipt,
+          adapter,
+          installation: 'native',
           native_plugin_id: 'other@marketplace',
         },
         { ...bundleReceipt, adapter, plugin: 'other@marketplace' },
         {
-          ...bundleReceipt, adapter, installation: 'bundle',
+          ...bundleReceipt,
+          adapter,
+          installation: 'bundle',
           source: { ...bundleReceipt.source, path: '../unsafe' },
         },
-        { ...bundleReceipt, adapter, native_plugin_id: receipt.native_plugin_id },
+        {
+          ...bundleReceipt,
+          adapter,
+          native_plugin_id: receipt.native_plugin_id,
+        },
       ]) {
         const location = await commitArtifacts(
           [...core, { path: 'setup.json', body: setup(resolution) }],

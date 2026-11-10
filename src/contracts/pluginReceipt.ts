@@ -70,8 +70,7 @@ export function parseAgentPluginInstallationReceipt(
       : {}),
   };
   if (bundle) {
-    if (relocated)
-      throw new TypeError('Bundle receipt cannot relocate MCP.');
+    if (relocated) throw new TypeError('Bundle receipt cannot relocate MCP.');
     const source = input.source;
     if (
       !isPlainRecord(source) ||

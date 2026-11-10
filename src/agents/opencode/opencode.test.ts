@@ -157,14 +157,27 @@ describe('OpenCode adapter', () => {
     for (const state of [
       {},
       { [PLUGIN_ACTIVATION_PATH]: '{}' },
-      { [PLUGIN_ACTIVATION_PATH]: JSON.stringify({ ...baseline, format: 'wrong' }) },
       {
-        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({ ...baseline, plugins: ['unknown'] }),
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({
+          ...baseline,
+          format: 'wrong',
+        }),
       },
       {
-        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({ ...baseline, plugins: ['stripe', 'stripe'] }),
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({
+          ...baseline,
+          plugins: ['unknown'],
+        }),
       },
-      { [PLUGIN_ACTIVATION_PATH]: JSON.stringify({ ...baseline, extra: true }) },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({
+          ...baseline,
+          plugins: ['stripe', 'stripe'],
+        }),
+      },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({ ...baseline, extra: true }),
+      },
       { [PLUGIN_ACTIVATION_PATH]: '{}'.padEnd(16 * 1024 + 1) },
       {
         [PLUGIN_ACTIVATION_PATH]: JSON.stringify(baseline),
@@ -289,7 +302,10 @@ describe('OpenCode adapter', () => {
       ),
       { format: 'forge-opencode-plugins-v1', plugins: [] },
     );
-    assert.equal((await fresh.readonly.inspect('plugins/stripe')).kind, 'absent');
+    assert.equal(
+      (await fresh.readonly.inspect('plugins/stripe')).kind,
+      'absent',
+    );
     await assert.rejects(test.adapter.prepare(prepare), /already exists/);
     assert.deepEqual(test.calls[0]!.argv, ['opencode', '--version']);
     for (const output of [

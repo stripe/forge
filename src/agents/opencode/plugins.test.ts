@@ -200,13 +200,17 @@ describe('OpenCode Stripe bundle installation', () => {
 
   it('does not publish activation when copying or fingerprinting fails', async () => {
     const test = fixture();
-    await assert.rejects(test.install({
-      ...test.state.mutable,
-      async readFile(file, options) {
-        if (file.startsWith(PLUGIN_ROOT)) throw new Error('Fingerprint failed');
-        return test.state.mutable.readFile(file, options);
-      },
-    }), /Fingerprint failed/);
+    await assert.rejects(
+      test.install({
+        ...test.state.mutable,
+        async readFile(file, options) {
+          if (file.startsWith(PLUGIN_ROOT))
+            throw new Error('Fingerprint failed');
+          return test.state.mutable.readFile(file, options);
+        },
+      }),
+      /Fingerprint failed/,
+    );
     assert.equal(
       (await test.state.readonly.inspect(PLUGIN_ACTIVATION_PATH)).kind,
       'absent',

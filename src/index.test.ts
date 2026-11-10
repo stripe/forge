@@ -7,8 +7,6 @@ import {
   type AgentAdapter,
   type AgentPluginInstallationReceipt,
   type BundleAgentPluginInstallationReceipt,
-  type NativeAgentPluginInstallationReceipt,
-  type OpenCodeBundleInstallationReceipt,
   createArtifactStore,
   createForgeEngine,
   createJudgeTranscriptProjection,
@@ -32,7 +30,9 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeEvidenceV1,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
+  type NativeAgentPluginInstallationReceipt,
   normalizeEnvironmentSpecification,
+  type OpenCodeBundleInstallationReceipt,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -83,7 +83,9 @@ describe('@stripe/forge package root', () => {
       source: { ...bundle.source, path: 'providers/claude/plugin' },
     };
     const receipts: AgentPluginInstallationReceipt[] = [
-      native, bundle, historical,
+      native,
+      bundle,
+      historical,
     ];
     for (const receipt of receipts)
       assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
