@@ -4,6 +4,20 @@ export interface CommandResult {
   readonly stderr: string;
   readonly exitCode: number;
   readonly durationMs: number;
+  readonly capture?: CommandCapture;
+}
+
+/** Bounded raw output for adapter-local extraction; never ordinary diagnostic text. */
+export interface CommandCapture {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly durationMs: number;
+  readonly stdoutBytes: number;
+  readonly stderrBytes: number;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
+  readonly exitCode?: number;
+  readonly signal?: string;
 }
 
 /** Controls shared by every command runtime. */
@@ -18,6 +32,8 @@ export interface CommandOptions {
   readonly maxOutputBytes?: number;
   /** Complete stdout lines, without their newline terminators. */
   readonly onStdoutLine?: (line: string) => void;
+  /** Decoded stderr chunks, within the combined output bound. */
+  readonly onStderrChunk?: (chunk: string) => void;
 }
 
 /**
@@ -34,6 +50,7 @@ export interface CommandRunner {
 }
 
 export class CommandExecutionError extends Error {
+  readonly capture: CommandCapture | undefined;
   constructor(
     message: string,
     readonly code:
@@ -42,9 +59,11 @@ export class CommandExecutionError extends Error {
       | 'command_start_failed'
       | 'command_timeout'
       | 'command_runner_closed',
-    options?: ErrorOptions,
+    options?: ErrorOptions & { readonly capture?: CommandCapture },
   ) {
     super(message, options);
     this.name = 'CommandExecutionError';
+    this.capture = options?.capture;
+    Object.defineProperty(this, 'capture', { enumerable: false });
   }
 }

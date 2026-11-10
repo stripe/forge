@@ -9,11 +9,18 @@ import type {
   CommandResult,
   CommandRunner,
 } from '../../contracts/command.ts';
+import { CommandExecutionError } from '../../contracts/command.ts';
 import type {
   MutableWorkspace,
   RuntimeLogicalPaths,
 } from '../../contracts/runtime.ts';
+import type {
+  AgentInvocationRecord,
+  RestrictedAgentExcerpts,
+} from '../../diagnostics/agent.ts';
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
+import { createRedactedTail } from '../../security/diagnosticRedaction.ts';
+import { redactSecrets } from '../../security/redaction.ts';
 import { createMemoryRunInputProvider } from '../../testing/memoryInputs.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
 import { createTestResolvedRunPlan } from '../../testing/plans.ts';
@@ -591,3 +598,371 @@ http_headers={"X-Wrong"="synthetic-secret"}
     );
   });
 });
+
+describe('Codex invocation diagnostics', () => {
+  const prefix = [
+    { type: 'thread.started', thread_id: SESSION_ID },
+    { type: 'turn.started' },
+  ].map((value) => JSON.stringify(value));
+  for (const [name, tail, expected] of [
+    [
+      'error item',
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'i', type: 'error', message: 'HTTP 502 secret-value' },
+      }),
+      'item_error',
+    ],
+    [
+      'failed turn',
+      JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'status 429 secret-value' },
+      }),
+      'turn_failed',
+    ],
+    [
+      'unknown event',
+      JSON.stringify({ type: 'malicious-secret-value' }),
+      'unsupported_event_type',
+    ],
+    [
+      'unknown field',
+      JSON.stringify({ type: 'turn.completed', 'secret-value': 'private' }),
+      'unexpected_field',
+    ],
+    [
+      'unknown item',
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'i', type: 'secret-value' },
+      }),
+      'unsupported_event_type',
+    ],
+    ['malformed JSON', '{secret-value', 'invalid_json'],
+    [
+      'event order',
+      JSON.stringify({ type: 'thread.started', thread_id: SESSION_ID }),
+      'invalid_event_order',
+    ],
+  ] as const) {
+    it(`retains a safe location for ${name} without accepting the invocation`, async () => {
+      const stdout = [...prefix, tail].join('\n');
+      const records: AgentInvocationRecord[] = [];
+      const bodies: RestrictedAgentExcerpts[] = [];
+      const f = fixture({
+        command: (call) => {
+          for (const line of stdout.split('\n'))
+            call.options.onStdoutLine?.(line);
+          return result(stdout);
+        },
+      });
+      const session = await f.adapter.openSession({
+        ...f.sessionContext,
+        diagnostics: {
+          restrictedExcerpts: false,
+          redact: (text) => redactSecrets(text, ['secret-value']).value,
+          redactedTail: (maximumBytes) =>
+            createRedactedTail(['secret-value'], maximumBytes),
+          async record(record, body) {
+            records.push(record);
+            if (body) bodies.push(body);
+          },
+        },
+      });
+      await assert.rejects(
+        session.send('private prompt', {
+          signal: new AbortController().signal,
+        }),
+      );
+      const last = records.at(-1)!;
+      assert.equal(last.rejection?.code, expected);
+      assert.equal(last.rejection?.line_index, 3);
+      assert.equal(
+        last.rejection?.schema_path,
+        expected === 'item_error' || name === 'unknown item'
+          ? 'event.item'
+          : 'event',
+      );
+      assert.equal(last.state, 'failed');
+      assert.equal(last.events.length, 3);
+      assert.equal(JSON.stringify(records).includes('secret-value'), false);
+      assert.deepEqual(bodies, []);
+      if (expected === 'item_error' || expected === 'turn_failed') {
+        assert.equal(
+          last.first_failure?.http_status,
+          expected === 'item_error' ? 502 : 429,
+        );
+        assert.equal(last.first_failure?.http_origin, 'agent_reported');
+      }
+    });
+  }
+
+  it('retains process and parser failures together on a nonzero exit', async () => {
+    const stdout = [
+      ...prefix,
+      JSON.stringify({ type: 'turn.failed', error: { message: 'HTTP 502' } }),
+    ].join('\n');
+    const records: AgentInvocationRecord[] = [];
+    const f = fixture({ command: () => result(stdout, 1) });
+    const session = await f.adapter.openSession({
+      ...f.sessionContext,
+      diagnostics: {
+        restrictedExcerpts: false,
+        redact: (text) => redactSecrets(text, []).value,
+        redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+        async record(record) {
+          records.push(record);
+        },
+      },
+    });
+    await assert.rejects(
+      session.send('task', { signal: new AbortController().signal }),
+      /status 1/,
+    );
+    assert.equal(records.at(-1)!.process?.exit_code, 1);
+    assert.equal(records.at(-1)!.rejection?.code, 'process_nonzero_exit');
+    assert.equal(records.at(-1)!.extraction_rejection?.code, 'turn_failed');
+    assert.equal(records.at(-1)!.events.at(-1)?.http_status, 502);
+    assert.equal(session.sessionId(), undefined);
+  });
+
+  it('never accepts a completed turn from a failed process', async () => {
+    const records: AgentInvocationRecord[] = [];
+    const f = fixture({ command: () => result(completed(), 7) });
+    const session = await f.adapter.openSession({
+      ...f.sessionContext,
+      diagnostics: {
+        restrictedExcerpts: false,
+        redact: (text) => redactSecrets(text, []).value,
+        redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+        async record(record) {
+          records.push(record);
+        },
+      },
+    });
+    await assert.rejects(
+      session.send('task', { signal: new AbortController().signal }),
+      /status 7/,
+    );
+    assert.equal(records.at(-1)!.rejection?.code, 'process_nonzero_exit');
+    assert.equal(records.at(-1)!.extraction_rejection, undefined);
+    assert.equal(records.at(-1)!.last_completed_turn, 4);
+  });
+
+  it('records nonzero tool exits without failing a successful turn or changing its text', async () => {
+    const tool = {
+      type: 'item.completed',
+      item: {
+        id: 'tool',
+        type: 'command_execution',
+        command: 'private command',
+        aggregated_output: 'private output',
+        exit_code: 2,
+        status: 'completed',
+      },
+    };
+    const stdout = completed().split('\n');
+    stdout.splice(2, 0, JSON.stringify(tool));
+    const records: AgentInvocationRecord[] = [];
+    const f = fixture({ command: () => result(stdout.join('\n')) });
+    const session = await f.adapter.openSession({
+      ...f.sessionContext,
+      diagnostics: {
+        restrictedExcerpts: true,
+        redact: (text) => redactSecrets(text, []).value,
+        redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+        async record(record, body) {
+          assert.equal(body, undefined);
+          records.push(record);
+        },
+      },
+    });
+    const turn = await session.send('task', {
+      signal: new AbortController().signal,
+    });
+    assert.equal(turn.text, 'Done');
+    assert.equal(records.at(-1)!.state, 'completed');
+    assert.equal(records.at(-1)!.tool_failure_count, 1);
+    assert.equal(records.at(-1)!.events[2]!.tool_exit_code, 2);
+    assert.equal(JSON.stringify(records).includes('private'), false);
+  });
+
+  for (const code of [
+    'command_timeout',
+    'command_aborted',
+    'command_output_limit',
+    'command_start_failed',
+  ] as const) {
+    it(`keeps bounded partial capture for ${code}`, async () => {
+      const stdout = [...prefix, '{malformed'].join('\n');
+      const records: AgentInvocationRecord[] = [];
+      let excerpt: RestrictedAgentExcerpts | undefined;
+      const f = fixture({
+        command: (call) => {
+          for (const line of stdout.split('\n'))
+            call.options.onStdoutLine?.(line);
+          call.options.onStderrChunk?.('stderr secret-');
+          call.options.onStderrChunk?.('value');
+          throw new CommandExecutionError('Command failed.', code, {
+            capture: {
+              stdout,
+              stderr: 'stderr secret-value',
+              durationMs: 50,
+              stdoutBytes: Buffer.byteLength(stdout),
+              stderrBytes: 19,
+              stdoutTruncated: code === 'command_output_limit',
+              stderrTruncated: false,
+              signal: 'SIGTERM',
+            },
+          });
+        },
+      });
+      const session = await f.adapter.openSession({
+        ...f.sessionContext,
+        diagnostics: {
+          restrictedExcerpts: true,
+          redact: (text) => redactSecrets(text, ['secret-value']).value,
+          redactedTail: (maximumBytes) =>
+            createRedactedTail(['secret-value'], maximumBytes),
+          async record(record, body) {
+            records.push(record);
+            excerpt = body;
+          },
+        },
+      });
+      await assert.rejects(
+        session.send('task', { signal: new AbortController().signal }),
+        { code },
+      );
+      const last = records.at(-1)!;
+      assert.equal(last.process?.error_code, code);
+      assert.equal(last.process?.signal, 'SIGTERM');
+      assert.equal(last.extraction_rejection?.code, 'invalid_json');
+      assert.equal(
+        last.rejection?.code,
+        code === 'command_output_limit' ? 'output_limit' : 'unknown',
+      );
+      assert.equal(excerpt?.stderr, 'stderr [REDACTED]');
+      assert.equal(excerpt?.cli_events.includes('agent_exec'), true);
+    });
+  }
+
+  it('ignores capture failures without changing successful output', async () => {
+    const f = fixture();
+    const session = await f.adapter.openSession({
+      ...f.sessionContext,
+      diagnostics: {
+        restrictedExcerpts: false,
+        redact: (text) => redactSecrets(text, []).value,
+        redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+        async record() {
+          throw new Error('storage failure');
+        },
+      },
+    });
+    assert.equal(
+      (await session.send('task', { signal: new AbortController().signal }))
+        .text,
+      'Done',
+    );
+  });
+});
+
+it('records the typed command failure and capture gap for a custom runner without partial output', async () => {
+  const records: AgentInvocationRecord[] = [];
+  const f = fixture({
+    command() {
+      throw new CommandExecutionError('Timeout.', 'command_timeout');
+    },
+  });
+  const session = await f.adapter.openSession({
+    ...f.sessionContext,
+    diagnostics: {
+      restrictedExcerpts: false,
+      redact: (text) => redactSecrets(text, []).value,
+      redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+      async record(record) {
+        records.push(record);
+      },
+    },
+  });
+  await assert.rejects(
+    session.send('task', { signal: new AbortController().signal }),
+    { code: 'command_timeout' },
+  );
+  assert.equal(records.at(-1)!.capture, 'unsupported');
+  assert.deepEqual(records.at(-1)!.process, { error_code: 'command_timeout' });
+});
+
+it.each([
+  { failure: 'command_timeout', ending: '' },
+  { failure: 'command_timeout', ending: '\n' },
+  { failure: 'command_aborted', ending: '' },
+  { failure: 'command_aborted', ending: '\n' },
+  { failure: 'nonzero_exit', ending: '' },
+  { failure: 'nonzero_exit', ending: '\n' },
+  { failure: 'command_start_failed', ending: '' },
+] as const)(
+  'keeps $failure with clean incomplete output unlocated (ending $ending)',
+  async ({ failure, ending }) => {
+    for (const callbacks of [false, true]) {
+      const lines =
+        failure === 'command_start_failed'
+          ? []
+          : completed().split('\n').slice(0, 2);
+      const stdout = lines.join('\n') + ending;
+      const records: AgentInvocationRecord[] = [];
+      let body: RestrictedAgentExcerpts | undefined;
+      const f = fixture({
+        command(call) {
+          if (callbacks)
+            for (const line of lines) call.options.onStdoutLine?.(line);
+          if (failure === 'nonzero_exit') return result(stdout, 1);
+          throw new CommandExecutionError('Command failed.', failure, {
+            capture: {
+              stdout,
+              stderr: '',
+              durationMs: 1,
+              stdoutBytes: Buffer.byteLength(stdout),
+              stderrBytes: 0,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            },
+          });
+        },
+      });
+      const session = await f.adapter.openSession({
+        ...f.sessionContext,
+        diagnostics: {
+          restrictedExcerpts: true,
+          redact: (text) => text,
+          redactedTail: (maximumBytes) => createRedactedTail([], maximumBytes),
+          async record(record, excerpts) {
+            records.push(record);
+            body = excerpts;
+          },
+        },
+      });
+      await assert.rejects(
+        session.send('task', { signal: new AbortController().signal }),
+      );
+      const last = records.at(-1)!;
+      assert.equal(last.state, 'failed');
+      assert.equal(session.sessionId(), undefined);
+      assert.equal(last.event_count, lines.length);
+      assert.equal(last.events.length, lines.length);
+      assert.equal(last.first_failure, undefined);
+      assert.equal(last.extraction_rejection?.code, 'invalid_event_order');
+      assert.equal(last.extraction_rejection?.line_index, undefined);
+      assert.equal(JSON.parse(body!.cli_events).failure, null);
+      if (failure === 'nonzero_exit') {
+        assert.equal(last.process?.exit_code, 1);
+        assert.equal(last.rejection?.code, 'process_nonzero_exit');
+      } else {
+        assert.equal(last.process?.error_code, failure);
+        assert.equal(last.rejection?.code, 'unknown');
+      }
+    }
+  },
+);

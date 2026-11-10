@@ -5,6 +5,10 @@ import type { AttemptDiagnosticsStore } from '../contracts/attemptDiagnostics.ts
 import { createAttemptDiagnosticsWriter } from '../execution/diagnosticsIO.ts';
 import type { CompletionCallSummaryV1 } from '../results/types.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
+import type {
+  AgentInvocationRecord,
+  RestrictedAgentExcerpts,
+} from './agent.ts';
 import {
   type AttemptDiagnosticsSnapshot,
   attemptDiagnosticsIdentity,
@@ -363,4 +367,134 @@ describe('attempt recorder', () => {
     assert.equal(record.completion_calls[0]!.disposition, 'rate_limit_retry');
     assert.doesNotMatch(JSON.stringify(record), /private prompt|content/);
   });
+});
+
+it('bounds accumulated agent invocations while preserving the newest failure and omitted counts', async () => {
+  const recorder = createAttemptRecorder({
+    identity,
+    store: {
+      async read() {
+        return undefined;
+      },
+      async write(snapshot) {
+        return parseAttemptDiagnostics({ ...snapshot, revision: 1 });
+      },
+    },
+  });
+  const capture = recorder.agentCapture([]);
+  for (let sequence = 1; sequence <= 100; sequence++) {
+    await capture.record({
+      sequence,
+      operation: 'agent_exec',
+      cli_version: '1.0.0',
+      source: 'codex_exec_json',
+      state: sequence === 100 ? 'failed' : 'completed',
+      capture: 'observed',
+      event_count: 0,
+      tool_failure_count: 0,
+      last_completed_turn: 0,
+      events: [],
+      ...(sequence === 100 ? { rejection: { code: 'unknown' as const } } : {}),
+    });
+  }
+  assert.equal(recorder.snapshot.agent_invocations!.length, 64);
+  assert.equal(recorder.snapshot.agent_invocations_omitted, 36);
+  assert.equal(recorder.snapshot.agent_invocations!.at(-1)!.state, 'failed');
+  assert.equal(recorder.recordingFailed, false);
+});
+
+it('gives adapters redaction authority without exposing resolved secrets', () => {
+  const recorder = createAttemptRecorder({
+    identity,
+    store: {
+      supportsRestrictedExcerpts: true,
+      async read() {
+        return undefined;
+      },
+      async write(snapshot) {
+        return parseAttemptDiagnostics({ ...snapshot, revision: 1 });
+      },
+    },
+  });
+  const capture = recorder.agentCapture(['host-only-key'], true);
+  assert.equal('secrets' in capture, false);
+  assert.equal(JSON.stringify(capture).includes('host-only-key'), false);
+  assert.equal(capture.redact('failure host-only-key'), 'failure [REDACTED]');
+  const tail = capture.redactedTail(32);
+  tail.push('failure host-only-');
+  tail.push('key');
+  assert.equal(tail.finish().text, 'failure [REDACTED]');
+});
+
+it('publishes Codex failures and excerpts with reserved budgets after progress fails, then ignores late capture', async () => {
+  const invocation: AgentInvocationRecord = {
+    sequence: 1,
+    operation: 'agent_exec',
+    cli_version: '1.0.0',
+    source: 'codex_exec_json',
+    state: 'failed',
+    capture: 'observed',
+    event_count: 0,
+    tool_failure_count: 0,
+    last_completed_turn: 0,
+    events: [],
+    rejection: { code: 'invalid_json' },
+  };
+  const body: RestrictedAgentExcerpts = {
+    cli_events: '{"failure":"synthetic"}',
+    stderr: 'redacted tail',
+    events_truncated: false,
+    stderr_truncated: false,
+  };
+  const writes: Array<{
+    snapshot: AttemptDiagnosticsSnapshot;
+    excerpts: RestrictedAgentExcerpts | undefined;
+  }> = [];
+  const recorder = createAttemptRecorder({
+    identity,
+    store: {
+      supportsRestrictedExcerpts: true,
+      async read() {
+        return undefined;
+      },
+      async write(snapshot, _signal, excerpts) {
+        writes.push({ snapshot, excerpts });
+        if (!snapshot.primary_failure)
+          throw new Error('Progress storage failed.');
+        return parseAttemptDiagnostics({
+          ...snapshot,
+          revision: writes.length,
+        });
+      },
+    },
+  });
+  await recorder.start();
+  assert.equal(recorder.recordingFailed, true);
+  const capture = recorder.agentCapture([], true);
+  await capture.record(invocation, body);
+  assert.equal(writes.length, 1);
+  await recorder.failure({
+    error_code: 'agent_failed',
+    phase: 'interaction',
+    reason: 'failure',
+    message: 'Agent failed.',
+  });
+  await recorder.finish('errored');
+  assert.equal(writes.length, 3);
+  for (const write of writes.slice(1)) {
+    assert.deepEqual(write.snapshot.agent_invocations, [invocation]);
+    assert.equal(write.snapshot.capture.restricted, 'enabled');
+    assert.deepEqual(write.excerpts, body);
+    assert.ok(write.snapshot.restricted);
+  }
+  assert.equal(writes.at(-1)!.snapshot.state, 'errored');
+  const terminal = recorder.snapshot;
+  await capture.record(
+    { ...invocation, sequence: 2 },
+    { ...body, stderr: 'late tail' },
+  );
+  recorder.agentCapture([], false);
+  await recorder.flush();
+  assert.deepEqual(recorder.snapshot, terminal);
+  assert.equal(writes.length, 3);
 });

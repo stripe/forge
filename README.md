@@ -641,8 +641,24 @@ keeps it and checks its identity before retrying with a new ID. Unreadable or
 unsupported diagnostics, including files moved with different owners or modes,
 become `unavailable` without blocking resume. A readable identity conflict still
 stops resume. Recording can fail or time out, so absence of detail does not
-establish success. These records
-are owner-only, contain no raw process output, and never enter scoring or regrade.
+establish success. These records are owner-only and never enter scoring or regrade.
+
+For Codex, optional `agent_invocations` records retain process exit or command
+failure details, typed stream rejections, and the last 20 structural event
+summaries plus the first failure. Tool exit codes are observations; they do not
+make a successful agent turn fail. HTTP statuses carry `agent_reported` origin.
+These summaries contain no messages, commands, arguments, or output.
+
+To retain redacted failure excerpts, pass `--restricted-diagnostic-excerpts` to
+`forge run`, including on resume. It defaults to off and has no environment or
+benchmark setting. Excerpts of CLI events and stderr live under
+`diagnostics/<eval-run-id>/restricted/`; `attempt.json` names their size and
+SHA-256. Only the latest saved failed Codex call has excerpt references. Older
+digest files can remain on disk for readers holding prior snapshots; hosts own
+deletion. Excerpts stay out of reports and progress output. Treat them as sensitive:
+exact credential redaction cannot remove all private data.
+See the [capture contract](docs/architecture.md#attempt-diagnostics) for bounds,
+embedding options, and capture gaps.
 
 Ava and the judge back off through rate limits and temporary provider failures;
 see the [host completion retry policy](docs/architecture.md#host-side-completion-providers).

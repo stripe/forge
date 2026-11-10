@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
 
 import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type { ProtocolRejection } from '../../diagnostics/agent.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_LINES = 100_000;
-const MAX_STREAM_LINE_BYTES = 1024 * 1024;
+export const MAX_CODEX_STREAM_LINE_BYTES = 1024 * 1024;
 const MAX_GRAPH_NODES = 100_000;
 const MAX_GRAPH_DEPTH = 64;
 const MAX_TOOL_CALLS = 2_000;
@@ -17,14 +18,48 @@ interface StreamItem {
   readonly toolCall?: AgentToolCall;
 }
 
+export interface CodexStreamOptions {
+  readonly hookAutomation?: boolean;
+  readonly workspacePath?: string;
+}
+
+export function isCodexAdvisory(
+  event: JsonRecord | undefined,
+  options: CodexStreamOptions,
+  state: {
+    readonly threadStarted: boolean;
+    readonly turnStarted: boolean;
+    readonly turnCompleted: boolean;
+  },
+): boolean {
+  if (
+    !state.threadStarted ||
+    state.turnStarted ||
+    state.turnCompleted ||
+    event?.type !== 'item.completed'
+  )
+    return false;
+  const item = event.item;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const raw = item as JsonRecord;
+  if (raw.type !== 'error') return false;
+  // The pinned CLI emits these advisories before starting the selected turn.
+  return Boolean(
+    (options.hookAutomation &&
+      raw.message ===
+        '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.') ||
+      (options.workspacePath !== undefined &&
+        raw.message ===
+          `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`),
+  );
+}
+
 /** Parse one completed `codex exec --json` or `codex exec resume --json` invocation. */
-export function parseCodexStream(
+function parseStream(
   stdout: string,
-  expectedSessionId?: string,
-  options: {
-    readonly hookAutomation?: boolean;
-    readonly workspacePath?: string;
-  } = {},
+  expectedSessionId: string | undefined,
+  options: CodexStreamOptions,
+  location: { line_index?: number },
 ): AgentTurn {
   if (
     expectedSessionId !== undefined &&
@@ -33,7 +68,10 @@ export function parseCodexStream(
     throw new CodexStreamError('The expected Codex session ID is invalid.');
   }
   if (Buffer.byteLength(stdout, 'utf8') > MAX_STREAM_BYTES) {
-    throw new CodexStreamError('Codex output exceeded its byte limit.');
+    throw new CodexStreamError(
+      'Codex output exceeded its byte limit.',
+      'output_limit',
+    );
   }
 
   let sessionId: string | undefined;
@@ -48,28 +86,40 @@ export function parseCodexStream(
 
   for (let end = 0; end <= stdout.length; end += 1) {
     if (end !== stdout.length && stdout.charCodeAt(end) !== 10) continue;
+    if (end === stdout.length && lineStart === end) break;
     lineCount += 1;
+    location.line_index = lineCount;
     if (lineCount > MAX_STREAM_LINES) {
-      throw new CodexStreamError('Codex output exceeded its line limit.');
+      throw new CodexStreamError(
+        'Codex output exceeded its line limit.',
+        'output_limit',
+      );
     }
     const line = stdout.slice(lineStart, end);
     lineStart = end + 1;
-    if (Buffer.byteLength(line, 'utf8') > MAX_STREAM_LINE_BYTES) {
-      throw new CodexStreamError('Codex output contained an oversized line.');
+    if (Buffer.byteLength(line, 'utf8') > MAX_CODEX_STREAM_LINE_BYTES) {
+      throw new CodexStreamError(
+        'Codex output contained an oversized line.',
+        'output_limit',
+      );
     }
     if (!line.trim()) continue;
     const event = parseLine(line, graphBudget);
 
     if (event.type === 'error' || event.type === 'turn.failed') {
       // Error messages and payloads can contain provider responses or secrets.
-      throw new CodexStreamError('Codex reported a failed turn.');
+      throw new CodexStreamError(
+        'Codex reported a failed turn.',
+        'turn_failed',
+      );
     }
-    if (completed) invalidStream();
+    if (completed) invalidStream('invalid_event_order');
 
     switch (event.type) {
       case 'thread.started': {
         onlyKeys(event, ['type', 'thread_id']);
-        if (sessionId !== undefined || started) invalidStream();
+        if (sessionId !== undefined || started)
+          invalidStream('invalid_event_order');
         const id = requiredString(event.thread_id);
         if (
           !isSafeCodexSessionId(id) ||
@@ -84,7 +134,8 @@ export function parseCodexStream(
       }
       case 'turn.started':
         onlyKeys(event, ['type']);
-        if (sessionId === undefined || started) invalidStream();
+        if (sessionId === undefined || started)
+          invalidStream('invalid_event_order');
         started = true;
         break;
       case 'item.started':
@@ -99,47 +150,45 @@ export function parseCodexStream(
           /[^A-Za-z0-9._-]/.test(id)
         )
           invalidStream();
-        // The pinned CLI emits this advisory twice before turn.started. It is
-        // accepted only for an invocation which explicitly selected automation.
-        const hookAdvisory =
-          options.hookAutomation &&
-          raw.message ===
-            '`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.';
-        const configAdvisory =
-          options.workspacePath !== undefined &&
-          raw.message ===
-            `Ignored unsupported project-local config keys in ${options.workspacePath}/.codex/config.toml: model_providers. If you want these settings to apply, manually set them in your user-level config.toml.`;
         if (
-          (hookAdvisory || configAdvisory) &&
-          sessionId !== undefined &&
-          !started &&
-          event.type === 'item.completed' &&
-          raw.type === 'error'
+          isCodexAdvisory(event, options, {
+            threadStarted: sessionId !== undefined,
+            turnStarted: started,
+            turnCompleted: completed,
+          })
         ) {
           onlyKeys(raw, ['id', 'type', 'message']);
-          if (completedItems.has(id)) invalidStream();
+          if (completedItems.has(id)) invalidStream('invalid_event_order');
           completedItems.set(id, raw);
           break;
         }
         if (!started || (completedItems.has(id) && !items.has(id)))
-          invalidStream();
-        const item = parseItem(raw);
+          invalidStream('invalid_event_order');
+        let item: StreamItem;
+        try {
+          item = parseItem(raw);
+        } catch (error) {
+          if (error instanceof CodexStreamError)
+            error.rejection.schema_path = 'event.item';
+          throw error;
+        }
         const previous = items.get(id);
         if (previous !== undefined && previous.type !== item.type)
-          invalidStream();
+          invalidStream('invalid_event_order');
         const previousCompletion = completedItems.get(id);
         if (
           previousCompletion !== undefined &&
           (event.type !== 'item.completed' ||
             !isDeepStrictEqual(previousCompletion, raw))
         )
-          invalidStream();
+          invalidStream('invalid_event_order');
         if (event.type === 'item.completed') completedItems.set(id, raw);
         if (previous === undefined && item.toolCall !== undefined) {
           toolCount += 1;
           if (toolCount > MAX_TOOL_CALLS) {
             throw new CodexStreamError(
               'Codex output exceeded its tool-call limit.',
+              'output_limit',
             );
           }
         }
@@ -150,20 +199,29 @@ export function parseCodexStream(
       }
       case 'turn.completed':
         onlyKeys(event, ['type', 'usage']);
-        if (!started) invalidStream();
-        validateUsage(event.usage);
+        if (!started) invalidStream('invalid_event_order');
+        try {
+          validateUsage(event.usage);
+        } catch (error) {
+          if (error instanceof CodexStreamError)
+            error.rejection.schema_path = 'event.usage';
+          throw error;
+        }
         completed = true;
         break;
       default:
         throw new CodexStreamError(
           'Codex output contained an unsupported event.',
+          'unsupported_event_type',
         );
     }
   }
 
+  delete location.line_index;
   if (!completed || sessionId === undefined) {
     throw new CodexStreamError(
-      'Codex produced no completed turn with a valid session ID.',
+      'Codex stream ended without a completed turn with a valid session ID.',
+      'invalid_event_order',
     );
   }
   return {
@@ -179,12 +237,30 @@ export function parseCodexStream(
   };
 }
 
+export function parseCodexStream(
+  stdout: string,
+  expectedSessionId?: string,
+  options: CodexStreamOptions = {},
+): AgentTurn {
+  const location: { line_index?: number } = {};
+  try {
+    return parseStream(stdout, expectedSessionId, options, location);
+  } catch (error) {
+    if (error instanceof CodexStreamError && location.line_index !== undefined)
+      Object.assign(error.rejection, location);
+    throw error;
+  }
+}
+
 export class CodexStreamError extends Error {
   readonly code = 'invalid_codex_stream' as const;
 
-  constructor(message: string) {
+  readonly rejection: ProtocolRejection;
+
+  constructor(message: string, code: ProtocolRejection['code'] = 'unknown') {
     super(message);
     this.name = 'CodexStreamError';
+    this.rejection = { code, schema_path: 'event' };
   }
 }
 
@@ -312,9 +388,12 @@ function parseItem(item: JsonRecord): StreamItem {
       return { type, toolCall: { id, name: type, input: { items: entries } } };
     }
     case 'error':
-      throw new CodexStreamError('Codex reported a failed item.');
+      throw new CodexStreamError('Codex reported a failed item.', 'item_error');
     default:
-      throw new CodexStreamError('Codex output contained an unsupported item.');
+      throw new CodexStreamError(
+        'Codex output contained an unsupported item.',
+        'unsupported_event_type',
+      );
   }
 }
 
@@ -347,7 +426,11 @@ function nonnegativeInteger(value: unknown): void {
 }
 
 function onlyKeys(value: JsonRecord, keys: readonly string[]): void {
-  if (Object.keys(value).some((key) => !keys.includes(key))) invalidStream();
+  if (Object.keys(value).some((key) => !keys.includes(key)))
+    throw new CodexStreamError(
+      'Codex output contained an unexpected field.',
+      'unexpected_field',
+    );
 }
 
 function requiredRecord(value: unknown): JsonRecord {
@@ -370,8 +453,8 @@ function optionalString(value: unknown): void {
   if (value !== undefined) requiredString(value);
 }
 
-function invalidStream(): never {
-  throw new CodexStreamError('Codex output contained a malformed event.');
+function invalidStream(code: ProtocolRejection['code'] = 'unknown'): never {
+  throw new CodexStreamError('Codex output contained a malformed event.', code);
 }
 
 function parseLine(line: string, budget: { nodes: number }): JsonRecord {
@@ -379,7 +462,10 @@ function parseLine(line: string, budget: { nodes: number }): JsonRecord {
   try {
     value = JSON.parse(line) as unknown;
   } catch {
-    invalidStream();
+    throw new CodexStreamError(
+      'Codex output contained invalid JSON.',
+      'invalid_json',
+    );
   }
 
   // Validate iteratively before walking item structures or exposing opaque
@@ -394,6 +480,7 @@ function parseLine(line: string, budget: { nodes: number }): JsonRecord {
     if (budget.nodes > MAX_GRAPH_NODES || next.depth > MAX_GRAPH_DEPTH) {
       throw new CodexStreamError(
         'Codex output exceeded its JSON structure limits.',
+        'output_limit',
       );
     }
     if (typeof next.value === 'number' && !Number.isFinite(next.value))
@@ -403,6 +490,7 @@ function parseLine(line: string, budget: { nodes: number }): JsonRecord {
       if (budget.nodes + pending.length + children.length > MAX_GRAPH_NODES) {
         throw new CodexStreamError(
           'Codex output exceeded its JSON structure limits.',
+          'output_limit',
         );
       }
       for (const child of children) {

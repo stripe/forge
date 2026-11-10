@@ -113,7 +113,11 @@ describe('host command runner with real subprocesses', () => {
   it('reports a missing executable as a startup failure', async () => {
     await assert.rejects(
       runner.run([path.join(await temporaryRoot(), 'missing')], options),
-      { code: 'command_start_failed' },
+      (error) => {
+        assert.ok(error instanceof Error && 'capture' in error);
+        assert.deepEqual((error.capture as { stdout: string }).stdout, '');
+        return 'code' in error && error.code === 'command_start_failed';
+      },
     );
   });
 
@@ -145,7 +149,11 @@ describe('host command runner with real subprocesses', () => {
           ),
           { ...options, signal: AbortSignal.abort(reason) },
         ),
-      (error) => error === reason,
+      (error) =>
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'command_aborted' &&
+        error.cause === reason,
     );
     await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
   });
@@ -171,7 +179,17 @@ describe('host command runner with real subprocesses', () => {
         },
       },
     );
-    const rejected = assert.rejects(command, { code: 'command_timeout' });
+    const rejected = assert.rejects(command, (error) => {
+      assert.ok(
+        error instanceof Error && 'capture' in error && 'code' in error,
+      );
+      const capture =
+        error.capture as import('../contracts/command.ts').CommandCapture;
+      assert.match(capture.stdout, /^\d+\n$/);
+      assert.equal(capture.stdoutBytes, Buffer.byteLength(capture.stdout));
+      assert.equal(capture.signal, 'SIGTERM');
+      return error.code === 'command_timeout';
+    });
     let pid: number | undefined;
     try {
       pid = await ready;
@@ -271,3 +289,65 @@ async function waitUntilExited(pid: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+it('keeps bounded stdout/stderr and observed byte counts on output overflow', async () => {
+  const stderr: string[] = [];
+  await assert.rejects(
+    runner.run(node('process.stderr.write("abcdef");'), {
+      ...options,
+      maxOutputBytes: 4,
+      onStderrChunk: (chunk) => stderr.push(chunk),
+    }),
+    (error) => {
+      assert.ok(error instanceof Error && 'capture' in error);
+      const capture =
+        error.capture as import('../contracts/command.ts').CommandCapture;
+      assert.equal(capture.stderr, 'abcd');
+      assert.equal(capture.stderrBytes, 6);
+      assert.equal(capture.stderrTruncated, true);
+      assert.equal(capture.stdoutTruncated, false);
+      assert.ok(capture.durationMs >= 0);
+      return true;
+    },
+  );
+  assert.equal(stderr.join(''), 'abcd');
+});
+
+it('exposes partial output when cancellation follows a ready line', async () => {
+  const controller = new AbortController();
+  await assert.rejects(
+    runner.run(node('console.log("ready"); setInterval(() => {}, 1000);'), {
+      ...options,
+      signal: controller.signal,
+      onStdoutLine: () => controller.abort(),
+    }),
+    (error) => {
+      assert.ok(error instanceof Error && 'capture' in error);
+      const capture =
+        error.capture as import('../contracts/command.ts').CommandCapture;
+      assert.equal(capture.stdout, 'ready\n');
+      assert.equal(capture.stdoutBytes, 6);
+      assert.equal(capture.stdoutTruncated, false);
+      assert.equal(capture.signal, 'SIGTERM');
+      return true;
+    },
+  );
+});
+
+it('keeps output observation failures from changing command execution', async () => {
+  const result = await runner.run(
+    node('console.log("ready"); process.stderr.write("diagnostic");'),
+    {
+      ...options,
+      onStdoutLine() {
+        throw new Error('observer failed');
+      },
+      onStderrChunk() {
+        throw new Error('observer failed');
+      },
+    },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, 'ready\n');
+  assert.equal(result.stderr, 'diagnostic');
+});

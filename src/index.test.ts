@@ -5,8 +5,11 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type AgentDiagnosticsCapture,
+  type AgentInvocationRecord,
   type ChoiceAnswer,
   type ChoiceQuestion,
+  type CommandCapture,
   type CompletionCallTotalsV1,
   CompletionInvocationError,
   type CompletionSubattemptRecordV1,
@@ -41,6 +44,7 @@ import {
   MAX_COMPLETION_CALL_SUMMARIES,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   normalizeEnvironmentSpecification,
+  type ProtocolRejection,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -48,6 +52,8 @@ import {
   parseResolvedRunPlan,
   parseSetupArtifact,
   preflightEval,
+  type RedactedDiagnosticTail,
+  type RestrictedAgentExcerpts,
   type RuntimeAdapter,
   type RuntimePreflight,
   resolveManifestCaseIdFromFile,
@@ -194,6 +200,12 @@ describe('@stripe/forge package root', () => {
 
     const _acceptsPublicContracts = (
       _agent: AgentAdapter,
+      _capture: AgentDiagnosticsCapture,
+      _invocation: AgentInvocationRecord,
+      _commandCapture: CommandCapture,
+      _rejection: ProtocolRejection,
+      _redactedTail: RedactedDiagnosticTail,
+      _excerpts: RestrictedAgentExcerpts,
       _transport: CompletionTransportObservation,
       _subattempt: CompletionSubattemptRecordV1,
       _totals: CompletionCallTotalsV1,

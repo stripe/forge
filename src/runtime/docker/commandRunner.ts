@@ -230,6 +230,9 @@ export class DockerCommandController {
         ...(input.options.signal === undefined
           ? {}
           : { signal: input.options.signal }),
+        ...(input.options.onStderrChunk === undefined
+          ? {}
+          : { onStderrChunk: input.options.onStderrChunk }),
         timeoutMs: input.timeoutMs,
       });
     } finally {

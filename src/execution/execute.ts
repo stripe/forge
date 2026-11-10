@@ -469,7 +469,20 @@ export async function executeEvalWithTestHooks(
         diagnostics.phase('interaction'),
       );
       throwIfAborted(signal, phase);
+      const capture = diagnostics.agentCapture(
+        secrets,
+        input.composition.restrictedDiagnosticExcerpts,
+      );
       const session = await preflight.agent.openSession({
+        diagnostics: {
+          ...capture,
+          record: (record, excerpts, publication) =>
+            publication === 'invocation_boundary'
+              ? executionTimeout.withoutRecordingTime(() =>
+                  capture.record(record, excerpts),
+                )
+              : capture.record(record, excerpts),
+        },
         runId: input.runId,
         plan: input.plan,
         selection: input.plan.agent,

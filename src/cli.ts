@@ -91,6 +91,7 @@ const HOST_CLI_OPTIONS = {
   model: { type: 'string' },
   repetition: { type: 'string' },
   'credential-env': { type: 'string', multiple: true },
+  'restricted-diagnostic-excerpts': { type: 'boolean' },
   'experiment-run': { type: 'string' },
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
@@ -137,6 +138,8 @@ Run options:
   --jobs <count>       Maximum simultaneous evals (default: 1)
   --credential-env <environment-name>
                         Authorize selected consumers of this host variable
+  --restricted-diagnostic-excerpts
+                      Save redacted Codex failure excerpts in private diagnostics
   --credential-env <reference>=<environment-name>
                         Bind one credential reference for scoped access or separate keys
 
@@ -324,6 +327,7 @@ export async function runCli(
               EXPERIMENT_CLI_OPTIONS,
             ) as (keyof typeof EXPERIMENT_CLI_OPTIONS)[]),
             'credential-env' as const,
+            'restricted-diagnostic-excerpts' as const,
           ]
         : []),
     ];
@@ -620,7 +624,10 @@ async function runPublicExperiment(
         options.execute ?? ((request) => engine.executeEval(request));
       return {
         plans,
-        composition,
+        composition:
+          values['restricted-diagnostic-excerpts'] === true
+            ? { ...composition, restrictedDiagnosticExcerpts: true }
+            : composition,
         execute: async (request) => {
           try {
             return await execute(request);

@@ -18,6 +18,12 @@ import {
   FORGE_BUILD_IDENTITY,
   parseForgeBuildIdentity,
 } from '../version.ts';
+import {
+  agentInvocationSchema,
+  MAX_AGENT_DIAGNOSTICS_BYTES,
+  MAX_INVOCATION_RECORDS,
+  restrictedDescriptorSchema,
+} from './agent.ts';
 import { attemptTimingSchema } from './timing.ts';
 
 export const MAX_ATTEMPT_DIAGNOSTICS_BYTES = 512 * 1024;
@@ -67,11 +73,17 @@ const recordSchema = z
     capture: z
       .object({
         policy: z.literal('structured-v1'),
-        process: z.literal('unsupported'),
-        protocol: z.literal('unsupported'),
-        restricted: z.literal('disabled'),
+        process: z.enum(['unsupported', 'observed', 'partial']),
+        protocol: z.enum(['unsupported', 'observed', 'partial']),
+        restricted: z.enum(['disabled', 'enabled', 'unsupported']),
       })
       .strict(),
+    agent_invocations: z
+      .array(agentInvocationSchema)
+      .max(MAX_INVOCATION_RECORDS)
+      .optional(),
+    agent_invocations_omitted: count.optional(),
+    restricted: restrictedDescriptorSchema.optional(),
     completion_calls: z
       .array(completionSchema)
       .max(MAX_ATTEMPT_COMPLETION_SUMMARIES),
@@ -88,6 +100,11 @@ const recordSchema = z
   .superRefine((record, context) => {
     const terminal = record.state === 'completed' || record.state === 'errored';
     if (
+      Buffer.byteLength(
+        serializeCanonicalJson(record.agent_invocations ?? []),
+      ) > MAX_AGENT_DIAGNOSTICS_BYTES ||
+      (record.restricted !== undefined &&
+        record.capture.restricted !== 'enabled') ||
       terminal !== (record.timing.finished_at !== undefined) ||
       (record.state === 'running' && record.timing.started_at === undefined) ||
       (record.state === 'reserved' && record.timing.started_at !== undefined) ||
@@ -161,7 +178,15 @@ export function parseAttemptDiagnostics(
     MAX_ATTEMPT_DIAGNOSTICS_BYTES
   )
     throw new Error('Attempt diagnostics exceed the byte limit.');
-  return recordSchema.parse(input);
+  const record = recordSchema.parse(input);
+  if (
+    Buffer.byteLength(serializeCanonicalJson(record)) +
+      (record.restricted?.cli_events.bytes ?? 0) +
+      (record.restricted?.stderr.bytes ?? 0) >
+    MAX_ATTEMPT_DIAGNOSTICS_BYTES
+  )
+    throw new Error('Attempt diagnostics exceed the total byte limit.');
+  return record;
 }
 export function serializeAttemptDiagnostics(
   record: AttemptDiagnosticsRecord,
