@@ -220,7 +220,7 @@ describe('OpenCode native evidence', () => {
       ],
     );
     assert.equal(
-      trajectory.steps[4]!.tool_calls?.[0]!.tool_call_id,
+      trajectory.steps[4]?.tool_calls?.[0]?.tool_call_id,
       'prt_tool1',
     );
     assert.equal(
