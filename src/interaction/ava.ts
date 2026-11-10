@@ -480,7 +480,9 @@ function responseRejectionMessage(error: unknown): string {
     // Fixed schema paths and issue categories only: no values, unknown keys,
     // validator messages, or raw rejected responses.
     const path = issue.path
-      .map((part) => (typeof part === 'number' ? `[${part}]` : `.${String(part)}`))
+      .map((part) =>
+        typeof part === 'number' ? `[${part}]` : `.${String(part)}`,
+      )
       .join('');
     return `Ava response did not match the required schema at response${path} (${issue.code}).`;
   }
