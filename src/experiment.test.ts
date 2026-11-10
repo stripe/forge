@@ -245,7 +245,9 @@ describe('public experiment run API', () => {
       options,
     );
     assert.equal(authored.diagnostic, undefined);
-    Object.defineProperty(authored, 'diagnostic', { value: options.diagnostic });
+    Object.defineProperty(authored, 'diagnostic', {
+      value: options.diagnostic,
+    });
     const hostile = new ForgeExecutionError(
       'credential_failed',
       'preflight',
@@ -371,7 +373,9 @@ describe('public experiment run API', () => {
       assert.equal(attempt.error_code, 'agent_failed');
       assert.equal(attempt.error_phase, 'interaction');
       assert.equal(attempt.diagnostic, undefined);
-      assert.deepEqual(report.runs[index]!.diagnostic, { phase: 'interaction' });
+      assert.deepEqual(report.runs[index]!.diagnostic, {
+        phase: 'interaction',
+      });
     }
   });
 
@@ -463,10 +467,7 @@ describe('public experiment run API', () => {
       const reportBody = await fs.readFile(summary.report, 'utf8');
       const report = parseExperimentRunReport(JSON.parse(reportBody));
       assert.equal(report.runs[0]!.error_code, 'role_player_error');
-      assert.deepEqual(
-        report.runs[0]!.diagnostic,
-        { phase: 'interaction' },
-      );
+      assert.deepEqual(report.runs[0]!.diagnostic, { phase: 'interaction' });
       assert.doesNotMatch(
         reportBody,
         /Provider rejected|REDACTED|private-provider-token/,

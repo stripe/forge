@@ -4,7 +4,10 @@ import * as path from 'node:path';
 import { z } from 'zod';
 import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
-import { executionDiagnostic, ForgeExecutionError } from './execution/errors.ts';
+import {
+  executionDiagnostic,
+  ForgeExecutionError,
+} from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import {
   type ExperimentRunAttempt as Attempt,
@@ -94,7 +97,10 @@ export type ExperimentRunProgressEvent =
       readonly selection: RunSelection;
       readonly run_id: string;
       readonly error_code: Extract<Attempt, { state: 'errored' }>['error_code'];
-      readonly error_phase?: Extract<Attempt, { state: 'errored' }>['error_phase'];
+      readonly error_phase?: Extract<
+        Attempt,
+        { state: 'errored' }
+      >['error_phase'];
       readonly diagnostic?: Extract<
         Attempt,
         { state: 'errored' }
@@ -463,11 +469,12 @@ export async function runExperiment(
             attempt = {
               run_id: runId,
               state: 'errored',
-              error_code: error instanceof ForgeExecutionError
-                ? error.code
-                : signal.aborted
-                  ? 'aborted'
-                  : 'execution_error',
+              error_code:
+                error instanceof ForgeExecutionError
+                  ? error.code
+                  : signal.aborted
+                    ? 'aborted'
+                    : 'execution_error',
               ...(phase.success ? { error_phase: phase.data } : {}),
               ...(diagnostic.success ? { diagnostic: diagnostic.data } : {}),
             };
@@ -549,7 +556,7 @@ export async function runExperiment(
                 : inspected.attempt;
             const errorPhase =
               effective.state === 'errored'
-                ? effective.error_phase ?? effective.diagnostic?.phase
+                ? (effective.error_phase ?? effective.diagnostic?.phase)
                 : undefined;
             runs.push({
               selection_index: index,

@@ -660,7 +660,9 @@ describe('executeEval', () => {
           `Resolver rejected ${SECRET}`,
         ),
         'diagnostic',
-        { value: { reason: 'failure', message: `Private diagnostic ${SECRET}` } },
+        {
+          value: { reason: 'failure', message: `Private diagnostic ${SECRET}` },
+        },
       ),
     ];
     for (const failure of failures) {
@@ -686,7 +688,9 @@ describe('executeEval', () => {
               ? failure.code
               : 'credential_failed';
           const phase =
-            failure instanceof ForgeExecutionError ? failure.phase : 'preflight';
+            failure instanceof ForgeExecutionError
+              ? failure.phase
+              : 'preflight';
           const message = `Forge failed during ${phase}.`;
           assert.equal(error.code, code);
           assert.equal(error.phase, phase);
