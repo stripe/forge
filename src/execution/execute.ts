@@ -42,11 +42,10 @@ import {
   agentAdapterMetadataSchema,
 } from '../contracts/metadata.ts';
 import type { RunPhase } from '../contracts/observability.ts';
-import type {
-  AgentPluginInstallationReceipt,
-  NativeAgentPluginInstallationReceipt,
-} from '../contracts/plugin.ts';
-import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import {
+  isNativePluginInstallationReceipt,
+  parseAgentPluginInstallationReceipt,
+} from '../contracts/pluginReceipt.ts';
 import type {
   MutableWorkspace,
   PreparedRuntime,
@@ -84,6 +83,7 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
+import { mcpToolRefusalWarnings } from '../mcpToolRefusals.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
@@ -422,17 +422,23 @@ export async function validateRuntimeWithSetupActions(
         );
         if (
           definition === undefined ||
-          !isNativePluginReceipt(receipt) ||
           receipt.adapter !== plan.agent.adapter ||
           receipt.plugin !== definition.distribution.plugin ||
-          receipt.marketplace !== definition.distribution.marketplace ||
+          receipt.marketplace !== definition.distribution.marketplace
+        )
+          throw new Error(
+            'Plugin MCP receipt does not match the expected plugin and authentication.',
+          );
+        if (definition.mcpServers.length === 0) continue;
+        // Expected servers come from the code-owned definition, never the receipt.
+        if (
+          !isNativePluginInstallationReceipt(receipt) ||
           receipt.native_plugin_id.split('@')[0] !==
             definition.distribution.plugin.split('@')[0]
         )
           throw new Error(
-            'Plugin receipt does not match the expected plugin.',
+            'Plugin MCP receipt does not match the expected plugin and authentication.',
           );
-        if (definition.mcpServers.length === 0) continue;
         await preflight.agent.pluginInstaller!.checkMcp!({
           receipt,
           servers: definition.mcpServers,
@@ -469,12 +475,6 @@ export async function validateRuntimeWithSetupActions(
     if (failure) throw failure;
   }
   return Object.freeze(results);
-}
-
-function isNativePluginReceipt(
-  receipt: AgentPluginInstallationReceipt,
-): receipt is NativeAgentPluginInstallationReceipt {
-  return receipt.installation !== 'opencode-bundle';
 }
 
 function readinessMcpServers(
@@ -683,6 +683,7 @@ export async function executeEvalWithTestHooks(
             preflight.agentEvidenceIdentity,
           ),
           nativeArtifact: undefined,
+          warnings: [],
         };
       }
       if (interaction.sessionId === null) {
@@ -720,7 +721,11 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return { evidence, nativeArtifact };
+      return {
+        evidence,
+        nativeArtifact,
+        warnings: mcpToolRefusalWarnings(collected.mcpToolRefusals),
+      };
     });
     const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
@@ -894,7 +899,10 @@ export async function executeEvalWithTestHooks(
         evaluation: evaluated.evaluation,
         coreDescriptors,
         supplementalDescriptors: nativeDescriptors,
-        warnings: rolePlayerWarnings(interaction.failure),
+        warnings: [
+          ...rolePlayerWarnings(interaction.failure),
+          ...selectedEvidence.warnings,
+        ],
         startedAt,
         completedAt: now(),
       });
@@ -918,7 +926,10 @@ export async function executeEvalWithTestHooks(
       }
     });
 
-    const warnings: RunWarningV1[] = rolePlayerWarnings(interaction.failure);
+    const warnings: RunWarningV1[] = [
+      ...rolePlayerWarnings(interaction.failure),
+      ...selectedEvidence.warnings,
+    ];
     await step('runtime_dispose', async () => {
       try {
         await prepared!.dispose();

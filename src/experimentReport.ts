@@ -1,10 +1,10 @@
 import { z } from 'zod';
-
 import {
   experimentRunDiagnosticSchema,
   experimentRunErrorCodeSchema,
   experimentRunIdSchema,
 } from './experimentModel.ts';
+import { mcpToolRefusalWarningSchema } from './mcpToolRefusals.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { ModelProfileSchema, parseRunSelection } from './model/parse.ts';
 import type { RequirementLevelV1 } from './model/types.ts';
@@ -148,6 +148,7 @@ const runSchema = z
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
+    warnings: z.array(mcpToolRefusalWarningSchema).max(1).optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -161,6 +162,7 @@ const runSchema = z
       (run.state === 'errored') !== (run.error_code !== null) ||
       (run.state !== 'errored' && run.diagnostic !== undefined) ||
       (completed && run.result_path === null) ||
+      (run.warnings !== undefined && run.result_path === null) ||
       (run.result_path !== null &&
         run.result_path !== `runs/${run.run_id}/result.json`)
     ) {

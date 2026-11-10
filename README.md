@@ -537,7 +537,12 @@ Interaction stop reasons are separate from evaluation status: reaching
 `max_turns` can still produce a pass.
 
 `report.json` contains an overall `summary`, per-case/configuration `cases`,
-and one `runs` row per saved selection. With optional `jq`:
+and one `runs` row per saved selection. Codex MCP dispatch refusals appear as
+warnings in saved results and report rows, even when native evidence falls back.
+Codex reports missing counts as unavailable. The absence of a warning does not
+prove that tools work.
+See the [artifact contract](docs/architecture.md) for scope and format.
+With optional `jq`:
 
 ```sh
 jq '.cases[] | {case_id, treatment, agent, completed, errored, judge_errors, pass_rate, criterion_scores}' \

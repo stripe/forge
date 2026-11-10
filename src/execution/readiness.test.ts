@@ -14,11 +14,14 @@ import {
 import { createMemoryRunInputProvider } from '../testing/memoryInputs.ts';
 import { createTestResolvedRunPlan } from '../testing/plans.ts';
 
-function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
+function fixture(
+  fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup',
+  adapterId: 'codex' | 'claude-code' = 'codex',
+) {
   const mcpServers: PluginMcpServerId[] = ['stripe'];
   const runtime = createFakeRuntimeAdapter();
   const agent = createScriptedAgentAdapter({
-    id: 'codex',
+    id: adapterId,
     requirements: {
       executables: [],
       stateDirectories: [],
@@ -30,6 +33,7 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
     },
   });
   const resolutions: string[] = [];
+  const checkedServers: PluginMcpServerId[] = [];
   const installer: AgentPluginInstaller = {
     supportsMcpBearerAuth: true,
     preflight(distribution, context) {
@@ -40,7 +44,7 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
           await commands.run(['install']);
           if (fail === 'setup') throw new Error('install failed');
           return {
-            adapter: 'codex',
+            adapter: adapterId,
             plugin: distribution.plugin,
             marketplace: distribution.marketplace,
             marketplace_commit: 'a'.repeat(40),
@@ -58,7 +62,8 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
         },
       };
     },
-    async checkMcp({ commands }) {
+    async checkMcp({ commands, servers }) {
+      checkedServers.push(...servers);
       await commands.run(['check-mcp']);
       if (fail === 'mcp') throw new Error('mock-token authentication failed');
     },
@@ -73,7 +78,7 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
     },
   };
   const plan = createTestResolvedRunPlan({
-    agent: { adapter: 'codex', provider: 'openai', model: 'unused' },
+    agent: { adapter: adapterId, provider: 'openai', model: 'unused' },
     treatmentSetup: [
       {
         uses: 'forge/plugin',
@@ -111,10 +116,54 @@ function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
     inputProvider: createMemoryRunInputProvider(),
     artifactStore: createMemoryArtifactStore().store,
   };
-  return { runtime, agent, plan, composition, resolutions };
+  return { runtime, agent, plan, composition, resolutions, checkedServers };
 }
 
 describe('runtime readiness', () => {
+  it('keeps native discovery out of measured evals, including failed and unsupported checkers', async () => {
+    for (const [adapterId, supported] of [
+      ['codex', true],
+      ['codex', false],
+      ['claude-code', true],
+    ] as const) {
+      const test = fixture('mcp', adapterId);
+      const agent = test.composition.agents.get(adapterId)!;
+      const composition = {
+        ...test.composition,
+        credentialResolver: createStaticCredentialResolver({
+          'model-key': 'mock-model-token',
+          'env:STRIPE_API_KEY': 'mock-token',
+        }),
+        agents: new Map([
+          [
+            adapterId,
+            {
+              ...agent,
+              pluginInstaller: supported
+                ? agent.pluginInstaller!
+                : {
+                    supportsMcpBearerAuth: true as const,
+                    preflight: agent.pluginInstaller!.preflight,
+                  },
+            },
+          ],
+        ]),
+      };
+      const completed = await defaultForgeEngine.executeEval({
+        runId: `discovery-${adapterId}-${supported}`,
+        plan: test.plan,
+        composition,
+      });
+      assert.equal(completed.result.agent.session_id, 'test-session');
+      assert.deepEqual(test.checkedServers, []);
+      assert.ok(
+        !test.runtime.runs[0]!.commands.some(
+          (command) => command.argv[0] === 'check-mcp',
+        ),
+      );
+    }
+  });
+
   it('checks MCP after setup finalization, scopes tokens to agent commands and skips model auth', async () => {
     const test = fixture();
     const results = await defaultForgeEngine.validateRuntime([test]);

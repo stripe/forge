@@ -1526,6 +1526,28 @@ evaluation, timing, stop reason, warnings, and descriptors for every companion
 file. It is the commit marker and therefore is not listed in its own artifact
 array.
 
+Codex also counts exact native MCP dispatch refusals independently of ATIF
+normalization. The optional `AgentNativeEvidenceResult.mcpToolRefusals` has
+`state: available` with a safe nonnegative integer `count`, or
+`state: unavailable` with `reason: source_unavailable`, `source_invalid`, or
+`source_incomplete`. The scan uses the same bounded, exact-root-session rollout.
+It matches failed MCP completion snapshots, counts each call ID once, and retains
+no tool names or error text. Unrelated normalization failure preserves a valid
+count; unreadable or malformed source produces an unavailable observation.
+Adapters that do not record this observation omit the member.
+
+A positive count or an unavailable observation adds a `mcp_tool_refusals` result
+warning with fixed text and the typed observation in its optional
+`mcp_tool_refusals` member. Invalid adapter observations degrade to
+`source_invalid`. These warnings survive driver fallback and appear in optional
+`warnings` on verified experiment artifact metadata and report run rows,
+including resumed and regraded reports. Report warnings contain at most one MCP
+refusal warning. Zero counts produce no warning. Absence can therefore mean zero,
+an older run, or an adapter that did not record counts; it proves no tool health.
+This observation does not change plans, evidence selection, scores, or judge
+inputs. New readers accept old results and reports without these optional fields;
+older strict readers may reject new fields.
+
 ### Transactional local store
 
 [`createArtifactStore`](https://github.com/stripe/forge/blob/main/src/results/localStore.ts) implements a two-phase
