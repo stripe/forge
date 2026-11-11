@@ -279,6 +279,7 @@ export function createOpenCodeAdapter(
               throw new Error('OpenCode native capture failed.');
             const body = await state.readFile(`${EXPORT_PATH}.partial`, {
               maxBytes: MAX_NATIVE_BYTES,
+              signal,
             });
             signal.throwIfAborted();
             // The launcher writes only the partial; Forge copies it after success.

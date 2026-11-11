@@ -76,7 +76,7 @@ export interface ReadonlyWorkspace {
   inspect(relativePath: string): Promise<WorkspaceEntry>;
   readFile(
     relativePath: string,
-    options?: { maxBytes?: number },
+    options?: { maxBytes?: number; signal?: AbortSignal },
   ): Promise<Uint8Array>;
   /** Stable lexical order. Symlinks are reported but never traversed. */
   listFiles(options?: WorkspaceListOptions): Promise<readonly WorkspaceEntry[]>;

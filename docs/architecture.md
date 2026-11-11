@@ -699,6 +699,17 @@ platform, and bounded public JSON config. The composition's adapter must match
 that ID and implement pure synchronous preflight. Private paths, credentials,
 or inferred host settings do not belong in runtime config.
 
+`readFile` accepts an optional abort signal. Built-in host-backed reads open
+the final component once with no-follow and nonblocking flags, validate the
+descriptor as a regular file within the size bound, and read at most the byte
+limit plus one overflow byte through that descriptor. Cancellation is checked
+between filesystem operations; it cannot interrupt a pending kernel operation.
+Containment still checks the canonical root and resolved parent by pathname,
+so parent directories must remain stable until open. Docker protects each state
+root's host ancestors, and OpenCode captures are direct children of that root.
+Concurrent replacement of nested parent directories remains a containment race;
+evidence selection and grading reads occur after quiescence.
+
 ### Built-in Docker runtime
 
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
@@ -1199,8 +1210,10 @@ even when its JSON output would fit, causing fallback to driver evidence.
 Shell block sizes allow at most 32 MiB of temporary output, while capture and
 evidence reads accept at most 16 MiB. Export has a 30-second timeout.
 After observing successful export and the byte limit, Forge copies the bounded
-temporary bytes to the eligible file through its state capability, then attempts
-to remove the temporary file. Cleanup failure leaves the published capture
+temporary bytes through the descriptor-validated, capped state reader to the
+eligible file, then attempts to remove the temporary file. A symlink at open or
+a descriptor for a special file fails capture; reads beyond the byte bound also
+fail capture. Cleanup failure leaves the published capture
 eligible and the temporary file for runtime disposal. The launcher writes only
 the temporary path, so its late completion alone cannot publish a rejected
 capture. Both paths remain agent-writable until quiescence; other agent-started

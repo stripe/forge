@@ -47,6 +47,7 @@ async function readExport(
     throw new OpenCodeNativeError();
   const body = await input.state.readFile(EXPORT_PATH, {
     maxBytes: MAX_NATIVE_BYTES,
+    signal: input.signal,
   });
   input.signal.throwIfAborted();
   const value = record(

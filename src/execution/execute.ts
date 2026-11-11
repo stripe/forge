@@ -1504,8 +1504,10 @@ function projectReadonlyWorkspace(
 ): ReadonlyWorkspace {
   return Object.freeze({
     inspect: (relativePath: string) => workspace.inspect(relativePath),
-    readFile: (relativePath: string, options?: { maxBytes?: number }) =>
-      workspace.readFile(relativePath, options),
+    readFile: (
+      relativePath: string,
+      options?: { maxBytes?: number; signal?: AbortSignal },
+    ) => workspace.readFile(relativePath, options),
     listFiles: (options?: WorkspaceListOptions) => workspace.listFiles(options),
   });
 }

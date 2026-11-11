@@ -745,6 +745,41 @@ describe('OpenCode adapter', () => {
       }
     }
   });
+  it('passes cancellation through the capture read and invalidates rejected bytes', async () => {
+    const controller = new AbortController();
+    const reason = new Error('cancel capture read');
+    const test = await fixture();
+    let readCapture = false;
+    const state = {
+      ...test.state.mutable,
+      async readFile(
+        relativePath: string,
+        options?: { maxBytes?: number; signal?: AbortSignal },
+      ) {
+        if (relativePath === 'session.json.partial') {
+          readCapture = true;
+          assert.equal(options?.signal, controller.signal);
+          controller.abort(reason);
+        }
+        return test.state.mutable.readFile(relativePath, options);
+      },
+    };
+    const session = await test.adapter.openSession({
+      ...test.context,
+      runtime: {
+        ...test.context.runtime,
+        stateDirectories: new Map([[OPENCODE_STATE_ID, state]]),
+      },
+    });
+    await session.send('Do it', { signal: controller.signal });
+
+    await assert.rejects(
+      session.finalize!(controller.signal),
+      (error) => error === reason,
+    );
+    assert.equal(readCapture, true);
+    assert.equal((await test.state.readonly.readFile('session.json')).length, 0);
+  });
   it('requires a model profile during pure capability preflight', () => {
     const { model_profile: _, ...missing } = selection;
     const adapter = createOpenCodeAdapter({
