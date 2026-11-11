@@ -81,24 +81,47 @@ After changesets reach `main`, the
 [release workflow](https://github.com/stripe/forge/blob/main/.github/workflows/release.yml)
 creates or updates a **Version Packages** PR with the version bump and
 `CHANGELOG.md`. Review its release notes and passing checks, then merge it to
-publish the new version to **GitHub Packages** under the `latest` dist-tag.
-Changesets creates a `vX.Y.Z` Git tag and GitHub Release. Pushes without a new
-version do not publish another package. Let the version PR own version changes;
-do not bump `package.json` manually.
+prepare the next release of `@stripe/forge`. Let the version PR own version
+changes; do not bump `package.json` manually.
 
-The workflow runs `pnpm check` before publication. Because PRs created with
-`GITHUB_TOKEN` do not trigger `pull_request` workflows, it explicitly dispatches
-the PR checks on `changeset-release/main` after creating or updating the PR.
-The repository must allow GitHub Actions to create pull requests under
-**Settings → Actions → General → Workflow permissions**. The workflow uses
-`GITHUB_TOKEN` for repository operations and GitHub Packages; no npm token is
-needed. Package access remains governed by GitHub Packages permissions.
+Publication to **public npm** is disabled unless the repository Actions variable
+`NPM_PUBLISH_ENABLED` equals `true`. Version PRs and their checks work while the
+gate is disabled. With the gate enabled and no pending changesets, the workflow
+checks the stable package version against npm. A missing version proceeds to
+the `npm` GitHub environment and runs `pnpm check` before publishing under the
+`latest` dist-tag. An existing version is skipped; registry errors stop the run.
+Changesets creates a `vX.Y.Z` Git tag and GitHub Release after publication.
+
+Before enabling publication:
+
+1. Allow GitHub Actions to create pull requests under **Settings → Actions →
+   General → Workflow permissions**; this is also needed for version PRs.
+2. Configure the `npm` GitHub environment with the desired reviewers and a
+   deployment branch restriction to `main`.
+3. Have an npm maintainer establish `@stripe/forge` with its first reviewed
+   public release, then configure an [npm trusted publisher](https://docs.npmjs.com/trusted-publishers/)
+   for organization `stripe`, repository `forge`, workflow `release.yml`, and
+   environment `npm`, with direct publishing allowed. The workflow does not
+   bootstrap npm package ownership. Follow npm's configuration validation
+   deadline when scheduling the first automated release.
+4. Set `NPM_PUBLISH_ENABLED=true` when ready to enable automated releases.
+
+Publishing uses npm OIDC authentication on Node.js 24; no npm token is stored in
+GitHub. npm generates provenance when the source repository and package are
+public; private source repositories do not receive provenance attestations.
+The launch gate controls this workflow, not an authorized maintainer's manual
+publishes. Package metadata targets public npm, and this workflow does not
+publish to GitHub Packages.
+
+PRs created with `GITHUB_TOKEN` do not trigger `pull_request` workflows, so the
+version job explicitly dispatches checks on `changeset-release/main` after
+creating or updating its PR.
 
 To retry an interrupted release, rerun the release workflow on `main`.
 Changesets skips versions already published; if publication succeeded but the
 Git tag or GitHub Release failed, finish those separately from the published
-commit. The registry remains `https://npm.pkg.github.com`; public npm publishing
-is not enabled.
+commit. Leave the launch variable unset or set it to `false` to disable future
+workflow publications; changing it does not cancel an already-running publish.
 Stable releases use Forge's exact-version
 [artifact compatibility rules](architecture.md#1-parse-and-pure-preflight),
 even while the repository is private. Retain the producing Forge version when
