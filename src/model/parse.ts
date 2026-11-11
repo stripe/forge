@@ -457,10 +457,25 @@ const TreatmentSchema = z
   })
   .strict();
 
+const DockerImageSchema = z.union([
+  z
+    .object({
+      kind: z.literal('forge'),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('build'),
+      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+      sha256: z.string().refine(isSha256Digest, 'must be a sha256: digest'),
+    })
+    .strict(),
+]);
+
 const DockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
-    image: z.object({ kind: z.literal('forge') }).strict(),
+    image: DockerImageSchema,
     platform: z.enum(['linux/amd64', 'linux/arm64', 'native']),
     resources: z
       .object({
@@ -736,7 +751,7 @@ const MaterializedEvalCaseSchema = CompatibleEvalCaseSchema.safeExtend({
 const ResolvedDockerRuntimeSchema = z
   .object({
     adapter: z.literal('docker'),
-    image: z.object({ kind: z.literal('forge') }).strict(),
+    image: DockerImageSchema,
     platform: z.enum(['linux/amd64', 'linux/arm64']),
     resources: z
       .object({
