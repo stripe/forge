@@ -38,6 +38,7 @@ import {
   FORGE_RUNTIME_ASSET_DIGEST,
 } from './assets.ts';
 import { DockerCommandController } from './commandRunner.ts';
+import { type DockerImageBuild, defineDockerImageBuild } from './imageBuild.ts';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -74,6 +75,7 @@ export interface DockerRuntimeAdapterOptions {
   readonly hostCommands?: HostCommandRunner;
   readonly operationTimeoutMs?: number;
   readonly buildTimeoutMs?: number;
+  readonly imageBuild?: DockerImageBuild;
   readonly maximumCommandOutputBytes?: number;
 }
 
@@ -82,6 +84,7 @@ export interface ValidateDockerRuntimeHostOptions {
   readonly temporaryRoot?: string;
   readonly hostCommands?: HostCommandRunner;
   readonly buildTimeoutMs?: number;
+  readonly imageBuild?: DockerImageBuild;
   readonly operationTimeoutMs?: number;
   readonly platform: RuntimePlatform;
   readonly signal?: AbortSignal;
@@ -109,22 +112,26 @@ export async function validateDockerRuntimeHost(
   const hostCommands = options.hostCommands ?? createHostCommandRunner();
   const signal = options.signal ?? new AbortController().signal;
   const filesystemIdentity = resolveFilesystemIdentity();
+  const operationTimeoutMs = positive(
+    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
+    'operationTimeoutMs',
+  );
   const image = await buildForgeImage({
+    bundle: options.imageBuild
+      ? defineDockerImageBuild(options.imageBuild)
+      : undefined,
     buildTimeoutMs: positive(
       options.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
       'buildTimeoutMs',
     ),
     dockerExecutable,
     hostCommands,
+    operationTimeoutMs,
     platform: options.platform,
     signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
     userId: filesystemIdentity.containerUserId,
   });
-  const operationTimeoutMs = positive(
-    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
-    'operationTimeoutMs',
-  );
   const probeName = `stripe-forge-host-probe-${randomUUID()}`;
   let probe: Awaited<ReturnType<typeof hostCommands.run>>;
   try {
@@ -173,7 +180,7 @@ export async function validateDockerRuntimeHost(
   return Object.freeze({ platform: options.platform, imageId: image.id });
 }
 
-/** Forge-owned, Docker CLI based runtime. It accepts no host Dockerfile. */
+/** Docker CLI lifecycle with explicit trusted standalone builds. */
 export function createDockerRuntimeAdapter(
   options: DockerRuntimeAdapterOptions = {},
 ): RuntimeAdapter {
@@ -196,14 +203,30 @@ export function createDockerRuntimeAdapter(
     'maximumCommandOutputBytes',
   );
   const filesystemIdentity = resolveFilesystemIdentity();
-  const imageBuilds = new Map<RuntimePlatform, SharedImageBuild>();
+  const bundle = options.imageBuild
+    ? defineDockerImageBuild(options.imageBuild)
+    : undefined;
+  const imageBuilds = new Map<string, SharedImageBuild>();
+  function validateImageBuild(runtime: ForgeDockerRuntimeV1) {
+    if (
+      runtime.image.kind === 'build' &&
+      (!bundle ||
+        runtime.image.id !== bundle.id ||
+        runtime.image.sha256 !== bundle.sha256)
+    )
+      throw new TypeError(
+        'Runtime image build does not match the host bundle.',
+      );
+  }
 
   async function imageFor(
     platform: RuntimePlatform,
+    selection: 'base' | 'build',
     signal: AbortSignal,
   ): Promise<BuiltForgeImage> {
     signal.throwIfAborted();
-    let build = imageBuilds.get(platform);
+    const key = `${platform}:${selection}`;
+    let build = imageBuilds.get(key);
     if (!build) {
       const controller = new AbortController();
       const created: SharedImageBuild = {
@@ -211,9 +234,11 @@ export function createDockerRuntimeAdapter(
         waiters: 0,
         settled: false,
         promise: buildForgeImage({
+          bundle: selection === 'build' ? bundle : undefined,
           buildTimeoutMs,
           dockerExecutable,
           hostCommands,
+          operationTimeoutMs,
           platform,
           signal: controller.signal,
           temporaryRoot,
@@ -225,13 +250,12 @@ export function createDockerRuntimeAdapter(
           },
           (error: unknown) => {
             created.settled = true;
-            if (imageBuilds.get(platform) === created)
-              imageBuilds.delete(platform);
+            if (imageBuilds.get(key) === created) imageBuilds.delete(key);
             throw error;
           },
         ),
       };
-      imageBuilds.set(platform, created);
+      imageBuilds.set(key, created);
       build = created;
     }
     const shared = build;
@@ -250,7 +274,7 @@ export function createDockerRuntimeAdapter(
       if (shared.waiters === 0 && !shared.settled) {
         // A run may stop waiting independently. Only the last waiter cancels
         // the shared build, and must drain its command and temporary context.
-        if (imageBuilds.get(platform) === shared) imageBuilds.delete(platform);
+        if (imageBuilds.get(key) === shared) imageBuilds.delete(key);
         shared.controller.abort();
         await shared.promise.catch(() => undefined);
       }
@@ -260,13 +284,14 @@ export function createDockerRuntimeAdapter(
   return Object.freeze({
     id: 'forge/docker',
     preflight({ plan, requirements }: RuntimePreflight) {
-      validateRuntime(plan.runtime);
+      validateImageBuild(validateRuntime(plan.runtime));
       validateExecutableRequirements(requirements.executables);
       validateStateRequirements(requirements.stateDirectories);
     },
     async prepare(input: RuntimePreparation): Promise<PreparedRuntime> {
       input.signal.throwIfAborted();
       const runtime = validateRuntime(input.plan.runtime);
+      validateImageBuild(runtime);
       validateEnvironment(input.environment);
       const executableRequirements = validateExecutableRequirements(
         input.requirements.executables,
@@ -274,7 +299,11 @@ export function createDockerRuntimeAdapter(
       const stateRequirements = validateStateRequirements(
         input.requirements.stateDirectories,
       );
-      const image = await imageFor(runtime.platform, input.signal);
+      const image = await imageFor(
+        runtime.platform,
+        runtime.image.kind === 'build' ? 'build' : 'base',
+        input.signal,
+      );
       input.signal.throwIfAborted();
 
       const runRoot = await fs.mkdtemp(
@@ -488,11 +517,19 @@ export function createDockerRuntimeAdapter(
           stateDirectories: sealedStateDirectories,
           metadata: Object.freeze({
             adapter: 'forge/docker',
-            claudeCodeVersion: FORGE_CLAUDE_CODE_VERSION,
-            codexVersion: FORGE_CODEX_VERSION,
-            opencodeVersion: FORGE_OPENCODE_VERSION,
+            claudeCodeVersion:
+              image.bundle?.tools.claudeCode ?? FORGE_CLAUDE_CODE_VERSION,
+            codexVersion: image.bundle?.tools.codex ?? FORGE_CODEX_VERSION,
+            opencodeVersion:
+              image.bundle?.tools.opencode ?? FORGE_OPENCODE_VERSION,
             containerUserId: String(filesystemIdentity.containerUserId),
-            imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}`,
+            ...(image.bundle
+              ? {
+                  imageBuildId: image.bundle.id,
+                  imageBuildSha256: image.bundle.sha256,
+                  imageCompatibility: 'forge/docker-v1',
+                }
+              : { imageAssetDigest: `sha256:${FORGE_RUNTIME_ASSET_DIGEST}` }),
             imageId: image.id,
             imageTag: image.tag,
             platform: runtime.platform,
@@ -731,9 +768,11 @@ function readonlyWorkspace(workspace: MutableWorkspace): ReadonlyWorkspace {
 }
 
 interface BuildForgeImageInput {
+  readonly bundle?: DockerImageBuild | undefined;
   readonly buildTimeoutMs: number;
   readonly dockerExecutable: string;
   readonly hostCommands: HostCommandRunner;
+  readonly operationTimeoutMs: number;
   readonly platform: RuntimePlatform;
   readonly signal: AbortSignal;
   readonly temporaryRoot: string;
@@ -741,6 +780,7 @@ interface BuildForgeImageInput {
 }
 
 interface BuiltForgeImage {
+  readonly bundle?: DockerImageBuild;
   readonly tag: string;
   readonly id: string;
 }
@@ -755,6 +795,7 @@ interface SharedImageBuild {
 async function buildForgeImage(
   input: BuildForgeImageInput,
 ): Promise<BuiltForgeImage> {
+  if (input.bundle) return buildStandaloneImage(input);
   const buildRoot = await fs.mkdtemp(
     path.join(input.temporaryRoot, 'stripe-forge-build-'),
   );
@@ -830,7 +871,154 @@ async function buildForgeImage(
   }
 }
 
+async function buildStandaloneImage(
+  input: BuildForgeImageInput,
+): Promise<BuiltForgeImage> {
+  const bundle = input.bundle!;
+  const root = await fs.mkdtemp(
+    path.join(input.temporaryRoot, 'stripe-forge-image-build-'),
+  );
+  const tag = `stripe-forge-build:${bundle.sha256.slice(7)}-${input.platform.split('/')[1]}-uid${input.userId}`;
+  const probeName = `stripe-forge-image-probe-${randomUUID()}`;
+  let probeRoot: string | undefined;
+  const commandOptions = {
+    signal: input.signal,
+    maxOutputBytes: 32 * 1024 * 1024,
+  };
+  const checked = async (
+    argv: readonly string[],
+    message: string,
+    timeoutMs = input.operationTimeoutMs,
+  ) => {
+    const result = await input.hostCommands.run(
+      [input.dockerExecutable, ...argv],
+      { ...commandOptions, timeoutMs },
+    );
+    if (result.exitCode !== 0) throw new Error(message);
+    return result;
+  };
+  try {
+    await fs.writeFile(path.join(root, 'Dockerfile'), bundle.dockerfile);
+    for (const [name, body] of Object.entries(bundle.files)) {
+      await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true });
+      await fs.writeFile(path.join(root, name), body);
+    }
+    await checked(
+      [
+        'build',
+        '--platform',
+        input.platform,
+        '--build-arg',
+        `FORGE_UID=${input.userId}`,
+        '--tag',
+        tag,
+        '--file',
+        path.join(root, 'Dockerfile'),
+        root,
+      ],
+      'Docker could not build the host image bundle.',
+      input.buildTimeoutMs,
+    );
+    const inspected = await checked(
+      ['image', 'inspect', '--format', '{{.Id}}', tag],
+      'Docker could not inspect the host image.',
+    );
+    const id = inspected.stdout.trim();
+    if (!/^sha256:[a-f0-9]{64}$/.test(id))
+      throw new Error('Docker did not return an immutable host image ID.');
+    probeRoot = await fs.mkdtemp(
+      path.join(input.temporaryRoot, 'stripe-forge-image-check-'),
+    );
+    const workspace = path.join(probeRoot, 'workspace');
+    const home = path.join(probeRoot, 'home');
+    await fs.mkdir(workspace, { mode: 0o777 });
+    await fs.mkdir(home, { mode: 0o777 });
+    await fs.chmod(workspace, 0o777);
+    await fs.chmod(home, 0o777);
+    // Use the actual entrypoint/CMD and the eval restrictions, without credentials.
+    await checked(
+      dockerRunArgv({
+        dockerExecutable: input.dockerExecutable,
+        containerName: probeName,
+        cidFile: path.join(probeRoot, 'cid'),
+        platform: input.platform,
+        image: id,
+        workspaceRoot: workspace,
+        homeRoot: home,
+        stateMounts: [],
+        network: 'none',
+        sealSetupState: false,
+        resources: {
+          memory_bytes: 536870912,
+          cpu_count: 1,
+          process_count: 128,
+        },
+      }).slice(1),
+      'Host image compatibility: container startup failed.',
+    );
+    const script = `
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const {spawnSync} = require('node:child_process');
+assert.equal(process.getuid(), ${input.userId});
+assert.equal(process.getgid(), 10001);
+assert.equal(process.env.HOME, '/home/forge');
+assert.ok(Number(process.versions.node.split('.')[0]) >= 22);
+assert.equal(process.cwd(), '/workspace');
+for (const name of ['/workspace/probe', '/home/forge/probe', '/tmp/probe']) fs.writeFileSync(name, 'forge-compatible');
+assert.throws(() => fs.writeFileSync('/forge-readonly-probe', 'unexpected'));
+for (const command of [['/bin/sh', '-c', 'exit 0'], ['git', '--version'], ['curl', '--version']]) {
+  const result = spawnSync(command[0], command.slice(1), {encoding: 'utf8', timeout: 10000});
+  assert.equal(result.status, 0);
+}
+const expected = ${JSON.stringify(bundle.tools)};
+for (const [tool, executable] of [['claudeCode', 'claude'], ['codex', 'codex'], ['opencode', 'opencode']]) {
+  const result = spawnSync(executable, ['--version'], {encoding: 'utf8', timeout: 10000});
+  assert.equal(result.status, 0);
+  const actual = result.stdout.trim();
+  assert.equal(tool === 'codex' ? actual : actual.split(/\\s+/)[0], tool === 'codex' ? 'codex-cli ' + expected[tool] : expected[tool]);
+}
+`;
+    await checked(
+      [
+        'exec',
+        '--workdir',
+        '/workspace',
+        probeName,
+        '/usr/local/bin/node',
+        '-e',
+        script,
+      ],
+      'Host image compatibility: user, layout, mounts, required tools, or versions failed.',
+    );
+    for (const directory of [workspace, home])
+      if (
+        (await fs.readFile(path.join(directory, 'probe'), 'utf8')) !==
+        'forge-compatible'
+      )
+        throw new Error(
+          'Host image compatibility: bind mount did not preserve writes.',
+        );
+    await checked(
+      ['stop', '--time', '10', probeName],
+      'Host image compatibility: container shutdown failed.',
+    );
+    return Object.freeze({ id, tag, bundle });
+  } finally {
+    await bestEffortRemoveContainer(
+      input.dockerExecutable,
+      probeName,
+      input.hostCommands,
+      input.operationTimeoutMs,
+      1024 * 1024,
+    );
+    if (probeRoot) await fs.rm(probeRoot, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
 function dockerRunArgv(input: {
+  network?: 'none';
   cidFile: string;
   containerName: string;
   dockerExecutable: string;
@@ -858,6 +1046,7 @@ function dockerRunArgv(input: {
     input.platform,
     '--user',
     FORGE_CONTAINER_USER,
+    ...(input.network ? ['--network', input.network] : []),
     '--read-only',
     '--cap-drop',
     'ALL',
@@ -954,11 +1143,11 @@ function validateRuntime(runtime: ForgeRuntimeV1): ForgeDockerRuntimeV1 {
   if (
     !('image' in runtime) ||
     runtime.adapter !== 'docker' ||
-    runtime.image.kind !== 'forge' ||
+    (runtime.image.kind !== 'forge' && runtime.image.kind !== 'build') ||
     (runtime.platform !== 'linux/amd64' && runtime.platform !== 'linux/arm64')
   ) {
     throw new TypeError(
-      'Forge v1 supports only its owned Docker runtime image.',
+      'Forge Docker runtime requires an owned image or explicit host build.',
     );
   }
   positive(runtime.resources.memory_bytes, 'runtime.resources.memory_bytes');

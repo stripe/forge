@@ -42,6 +42,18 @@ export function identifier(value: unknown): string {
   return id;
 }
 
+/** Gateway call IDs are opaque data, never filesystem path components. */
+export function opaqueId(value: unknown): string {
+  const id = string(value);
+  if (
+    !id.length ||
+    id.length > 4_096 ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(id)
+  )
+    throw new OpenCodeNativeError();
+  return id;
+}
+
 export function sessionId(value: unknown): string {
   const id = identifier(value);
   if (!id.startsWith('ses_')) throw new OpenCodeNativeError();
@@ -64,8 +76,11 @@ export function tool(part: NativeRecord) {
   const state = record(part.state);
   if (state.status !== 'completed' && state.status !== 'error')
     throw new OpenCodeNativeError(true);
+  opaqueId(part.callID);
   return {
-    id: identifier(part.callID),
+    // A gateway can reuse callID across retries or turns. OpenCode's part ID
+    // identifies the execution in both the driver ledger and normalized ATIF.
+    id: identifier(part.id),
     name: identifier(part.tool),
     input: record(state.input),
   };
