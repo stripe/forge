@@ -778,7 +778,10 @@ describe('OpenCode adapter', () => {
       (error) => error === reason,
     );
     assert.equal(readCapture, true);
-    assert.equal((await test.state.readonly.readFile('session.json')).length, 0);
+    assert.equal(
+      (await test.state.readonly.readFile('session.json')).length,
+      0,
+    );
   });
   it('requires a model profile during pure capability preflight', () => {
     const { model_profile: _, ...missing } = selection;

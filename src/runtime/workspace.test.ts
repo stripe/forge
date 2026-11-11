@@ -50,14 +50,14 @@ describe('owned workspace', () => {
     const target = path.join(outside, 'sentinel');
     await fs.writeFile(target, 'outside');
     const realpath = fsPromises.realpath;
-    const check = vi.spyOn(fsPromises, 'realpath').mockImplementationOnce(
-      async () => {
+    const check = vi
+      .spyOn(fsPromises, 'realpath')
+      .mockImplementationOnce(async () => {
         const parent = await realpath(test.root);
         await fs.unlink(test.capture);
         await fs.symlink(target, test.capture);
         return parent;
-      },
-    );
+      });
     syncBuiltinESMExports();
 
     await assert.rejects(
@@ -75,15 +75,15 @@ describe('owned workspace', () => {
   }, async () => {
     const test = await captureFixture();
     const realpath = fsPromises.realpath;
-    const check = vi.spyOn(fsPromises, 'realpath').mockImplementationOnce(
-      async () => {
+    const check = vi
+      .spyOn(fsPromises, 'realpath')
+      .mockImplementationOnce(async () => {
         const parent = await realpath(test.root);
         await fs.unlink(test.capture);
         const created = spawnSync('mkfifo', [test.capture], { timeout: 500 });
         assert.equal(created.status, 0, created.stderr?.toString());
         return parent;
-      },
-    );
+      });
     syncBuiltinESMExports();
 
     await assert.rejects(
@@ -98,15 +98,18 @@ describe('owned workspace', () => {
     const prototype = await fileHandlePrototype(test.capture);
     const stat = prototype.stat;
     let opened: fs.FileHandle | undefined;
-    const checked = vi.spyOn(prototype, 'stat').mockImplementationOnce(
-      async function (this: typeof prototype, ...args: Parameters<typeof stat>) {
+    const checked = vi
+      .spyOn(prototype, 'stat')
+      .mockImplementationOnce(async function (
+        this: typeof prototype,
+        ...args: Parameters<typeof stat>
+      ) {
         opened = this;
         const result = await stat.apply(this, args);
         await fs.unlink(test.capture);
         await fs.symlink('missing-target', test.capture);
         return result;
-      },
-    );
+      });
 
     assert.equal(
       Buffer.from(
@@ -123,14 +126,17 @@ describe('owned workspace', () => {
     const prototype = await fileHandlePrototype(test.capture);
     const stat = prototype.stat;
     let opened: fs.FileHandle | undefined;
-    const checked = vi.spyOn(prototype, 'stat').mockImplementationOnce(
-      async function (this: typeof prototype, ...args: Parameters<typeof stat>) {
+    const checked = vi
+      .spyOn(prototype, 'stat')
+      .mockImplementationOnce(async function (
+        this: typeof prototype,
+        ...args: Parameters<typeof stat>
+      ) {
         opened = this;
         const result = await stat.apply(this, args);
         await fs.appendFile(test.capture, Buffer.alloc(128 * 1024, 'a'));
         return result;
-      },
-    );
+      });
     const read = prototype.read;
     let bytesRead = 0;
     vi.spyOn(prototype, 'read').mockImplementation(async function (
