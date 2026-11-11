@@ -74,13 +74,28 @@ export async function createOwnedWorkspace(
       // stable during this pathname-based containment check (e.g. quiesced).
       // NOFOLLOW binds final-component validation to the descriptor; NONBLOCK
       // lets us reject a FIFO without waiting for a writer during open.
-      const handle = await fs.open(
-        candidate,
-        constants.O_RDONLY |
-          constants.O_NOFOLLOW |
-          constants.O_NONBLOCK |
-          (constants.O_NOCTTY ?? 0),
-      );
+      const handle = await fs
+        .open(
+          candidate,
+          constants.O_RDONLY |
+            constants.O_NOFOLLOW |
+            constants.O_NONBLOCK |
+            (constants.O_NOCTTY ?? 0),
+        )
+        .catch((error: unknown) => {
+          // Native open errors include the absolute host path.
+          const code =
+            error instanceof Error && 'code' in error ? error.code : undefined;
+          if (code === 'ELOOP') {
+            throw new Error(
+              `Workspace reads do not follow symlinks: ${relativePath}`,
+            );
+          }
+          if (code === 'ENXIO' || code === 'ENODEV' || code === 'EISDIR') {
+            throw new Error(`Workspace path is not a file: ${relativePath}`);
+          }
+          throw new Error(`Workspace file could not be opened: ${relativePath}`);
+        });
       try {
         options.signal?.throwIfAborted();
         const stat = await handle.stat();

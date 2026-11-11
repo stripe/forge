@@ -62,11 +62,48 @@ describe('owned workspace', () => {
 
     await assert.rejects(
       test.workspace.readFile('session.json.partial'),
-      (error) =>
-        error instanceof Error && 'code' in error && error.code === 'ELOOP',
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(
+          error.message,
+          'Workspace reads do not follow symlinks: session.json.partial',
+        );
+        assert.equal(error.message.includes(test.root), false);
+        return true;
+      },
     );
     assert.equal(check.mock.calls.length, 1);
     assert.equal(await fs.readFile(target, 'utf8'), 'outside');
+  });
+
+  it('keeps special-file open errors relative to the workspace', async () => {
+    const test = await captureFixture();
+    const open = vi.spyOn(fsPromises, 'open');
+    syncBuiltinESMExports();
+    for (const code of ['ENXIO', 'ENODEV', 'EISDIR']) {
+      open.mockRejectedValueOnce(
+        Object.assign(new Error(`${code}: open '${test.capture}'`), { code }),
+      );
+      await assert.rejects(
+        test.workspace.readFile('session.json.partial'),
+        { message: 'Workspace path is not a file: session.json.partial' },
+      );
+    }
+  });
+
+  it('keeps other open-time failures relative to the workspace', async () => {
+    const test = await captureFixture();
+    const open = vi.spyOn(fsPromises, 'open');
+    syncBuiltinESMExports();
+    for (const code of ['ENOENT', 'EACCES']) {
+      open.mockRejectedValueOnce(
+        Object.assign(new Error(`${code}: open '${test.capture}'`), { code }),
+      );
+      await assert.rejects(
+        test.workspace.readFile('session.json.partial'),
+        { message: 'Workspace file could not be opened: session.json.partial' },
+      );
+    }
   });
 
   it('rejects replacement of the capture with a FIFO without waiting for a writer', {
