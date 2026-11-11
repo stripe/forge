@@ -97,7 +97,6 @@ export async function loadOpenCodeEvidence(
     const warnings: AgentNativeEvidenceWarning[] = [];
     const messageIds = new Set<string>();
     const partIds = new Set<string>();
-    const callIds = new Set<string>();
     let userId: string | undefined;
     let finished = false;
     for (const rawMessage of array(value.messages)) {
@@ -157,8 +156,6 @@ export async function loadOpenCodeEvidence(
           case 'tool': {
             if (user) throw new OpenCodeNativeError(true);
             const call = tool(part);
-            if (callIds.has(call.id)) throw new OpenCodeNativeError();
-            callIds.add(call.id);
             const state = record(part.state);
             if (
               record(state.time).compacted !== undefined ||
