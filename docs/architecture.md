@@ -701,6 +701,61 @@ built image ID. Image builds begin during runtime preparation or explicit
 selection do not build an image. A runtime adapter shares its build per platform,
 and Docker's content cache can reuse layers across invocations.
 
+#### Custom Docker images
+
+Use your own Dockerfile through the Forge library in three steps:
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { createClaudeCodeAdapter } from '@stripe/forge/agents/claude-code';
+import {
+  createDockerRuntimeAdapter,
+  defineDockerImageBuild,
+} from '@stripe/forge/runtime/docker';
+
+// 1. Supply the build files and installed CLI versions.
+const imageBuild = defineDockerImageBuild({
+  id: 'my-image',
+  dockerfile: await readFile('./Dockerfile', 'utf8'),
+  files: { 'entrypoint.sh': await readFile('./entrypoint.sh', 'utf8') },
+  tools: { claudeCode: '2.1.273', codex: '0.149.0', opencode: '1.19.0' },
+});
+
+// 2. Use runtime as composition.runtime; register agent in composition.agents.
+const runtime = createDockerRuntimeAdapter({ imageBuild });
+const agent = createClaudeCodeAdapter({
+  expectedVersion: imageBuild.tools.claudeCode,
+});
+
+// 3. Set experiment.runtime.image before resolving plans.
+const image = { kind: 'build', id: imageBuild.id, sha256: imageBuild.sha256 } as const;
+```
+
+`files` supplies text files for Docker's `COPY` instructions. Forge computes the
+hash; the plan's ID/hash must match this bundle. `image: {kind: forge}` retains
+the default image. Match each selected agent adapter's `expectedVersion` to its
+corresponding tool pin.
+
+Your Dockerfile must provide (see [Forge's recipe](https://github.com/stripe/forge/tree/main/src/runtime/docker/assets)):
+
+- Non-root `forge:forge`, using the supplied `FORGE_UID` build argument and GID
+  `10001`, with `HOME=/home/forge` and `/workspace`.
+- `/bin/sh`, Node 22+ at `/usr/local/bin/node`, Git, curl, and all three
+  declared agent CLIs on `PATH`.
+- An entrypoint/CMD that keeps the container running under the restrictions below.
+
+Before creating the eval workspace, Forge probes startup/shutdown, identity,
+writable mounts, and tool versions without credentials or network access.
+Failures reject the image. Check without running an eval using
+`validateDockerRuntimeHost({imageBuild, platform: 'linux/amd64'})`.
+
+The public CLI uses the packaged image. This API accepts up to 128 supporting
+text files and 4 MiB of serialized input; URL fetching and prebuilt images are
+unsupported. Use trusted Dockerfiles: probes do not guarantee image safety or
+agent compatibility, and hashes exclude external build downloads.
+
+#### Container isolation
+
 Each run uses a non-root container with a read-only image filesystem. On hosts
 which expose a non-root Unix UID, Forge builds the image's named `forge` user
 with that UID so host and container views of bind-mounted files have the same
@@ -1727,7 +1782,8 @@ The public CLI and built-in composition currently have these limits:
   cannot replace Ava's lifecycle.
 - Deterministic evaluation supports file creation, existence, and regex content
   checks, and root-trajectory tool call checks on names and arguments. Post-agent test commands and static-analysis checks are not built in.
-- The Docker adapter accepts the Forge-owned image. Custom images, mounts, and
+- The Docker adapter accepts the Forge-owned image and compatible standalone
+  host build bundles. Prebuilt images, arbitrary mounts, and
   network policies need a host-supplied [runtime adapter](#runtime-architecture).
 - Execution is local, with bounded concurrency and explicit resume. There is no
   distributed scheduler, automatic experiment retry loop, remote publisher, or

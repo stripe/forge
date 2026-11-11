@@ -600,6 +600,10 @@ derived snapshots and can be stale after interruption.
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
 
+When using Forge as a library, you can
+[supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
+reusing its container lifecycle. The CLI uses the packaged image.
+
 ## Development
 
 Development requires Node.js 22.12 or newer. From a source checkout with
