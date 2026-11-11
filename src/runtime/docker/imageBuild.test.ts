@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
 import { createTestResolvedRunPlan } from '../../testing/plans.ts';
+import type { HostCommandOptions } from '../processCommandRunner.ts';
 import { defineDockerImageBuild } from './imageBuild.ts';
 import {
   createDockerRuntimeAdapter,
@@ -130,12 +131,25 @@ describe('standalone Docker image builds', () => {
     );
   });
 
-  it.each(['success', 'startup', 'tools'] as const)(
+  it.each([
+    'success',
+    'startup',
+    'tools',
+    'shutdown',
+    'cancelled',
+    'runtime',
+  ] as const)(
     'builds only the supplied recipe and cleans up after %s',
     async (failure) => {
       const calls: string[][] = [];
+      const commandOptions: HostCommandOptions[] = [];
       let root = '';
       let probeRoot = '';
+      const controller = new AbortController();
+      const timeouts =
+        failure === 'success'
+          ? {}
+          : { buildTimeoutMs: 123_456, operationTimeoutMs: 3_210 };
       const bundle = defineDockerImageBuild({
         ...input,
         files: {
@@ -144,12 +158,13 @@ describe('standalone Docker image builds', () => {
           cid: 'context-file',
         },
       });
-      const operation = validateDockerRuntimeHost({
-        platform: 'linux/amd64',
+      const options = {
+        ...timeouts,
         imageBuild: bundle,
         hostCommands: {
-          async run(argv) {
+          async run(argv: readonly string[], options: HostCommandOptions) {
             calls.push([...argv]);
+            commandOptions.push(options);
             if (argv[1] === 'build') {
               root = argv.at(-1)!;
               assert.equal(
@@ -159,7 +174,16 @@ describe('standalone Docker image builds', () => {
             }
             if (argv.includes('--detach'))
               probeRoot = path.dirname(argv[argv.indexOf('--cidfile') + 1]!);
-            if (argv[1] === 'exec' && failure === 'success')
+            if (argv[1] === 'exec' && failure === 'cancelled') {
+              controller.abort(new Error('cancelled'));
+              options.signal?.throwIfAborted();
+            }
+            if (
+              argv[1] === 'exec' &&
+              (failure === 'success' ||
+                failure === 'runtime' ||
+                failure === 'shutdown')
+            )
               for (const name of ['workspace', 'home'])
                 await fs.writeFile(
                   path.join(probeRoot, name, 'probe'),
@@ -167,7 +191,8 @@ describe('standalone Docker image builds', () => {
                 );
             const exitCode =
               (failure === 'startup' && argv.includes('--detach')) ||
-              (failure === 'tools' && argv[1] === 'exec')
+              (failure === 'tools' && argv[1] === 'exec') ||
+              (failure === 'shutdown' && argv[1] === 'stop')
                 ? 1
                 : 0;
             return {
@@ -178,10 +203,48 @@ describe('standalone Docker image builds', () => {
             };
           },
         },
-      });
-      if (failure === 'success') await operation;
-      else await assert.rejects(operation, /compatibility/);
+      };
+      if (failure === 'runtime') {
+        const original = createTestResolvedRunPlan();
+        assert.ok('image' in original.runtime);
+        const plan = createTestResolvedRunPlan({
+          runtime: {
+            ...original.runtime,
+            image: { kind: 'build', id: bundle.id, sha256: bundle.sha256 },
+          },
+        });
+        const prepared = await createDockerRuntimeAdapter(options).prepare({
+          runId: 'custom-timeouts',
+          plan,
+          requirements: { executables: [], stateDirectories: [] },
+          environment: { variables: {}, credentials: {} },
+          signal: controller.signal,
+        });
+        await prepared.dispose();
+      } else {
+        const operation = validateDockerRuntimeHost({
+          ...options,
+          platform: 'linux/amd64',
+          signal: controller.signal,
+        });
+        if (failure === 'success') await operation;
+        else
+          await assert.rejects(
+            operation,
+            failure === 'cancelled' ? /cancelled/ : /compatibility/,
+          );
+      }
       assert.equal(calls.filter((argv) => argv[1] === 'build').length, 1);
+      for (const [index, argv] of calls.entries()) {
+        const options = commandOptions[index]!;
+        assert.equal(
+          options.timeoutMs,
+          argv[1] === 'build'
+            ? (timeouts.buildTimeoutMs ?? 900_000)
+            : (timeouts.operationTimeoutMs ?? 60_000),
+        );
+        if (argv[1] === 'rm') assert.equal(options.signal, undefined);
+      }
       const startup = calls.find((argv) => argv.includes('--detach'))!;
       assert.ok(startup.includes('--read-only'));
       assert.ok(startup.includes('none'));

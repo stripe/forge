@@ -112,6 +112,10 @@ export async function validateDockerRuntimeHost(
   const hostCommands = options.hostCommands ?? createHostCommandRunner();
   const signal = options.signal ?? new AbortController().signal;
   const filesystemIdentity = resolveFilesystemIdentity();
+  const operationTimeoutMs = positive(
+    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
+    'operationTimeoutMs',
+  );
   const image = await buildForgeImage({
     bundle: options.imageBuild
       ? defineDockerImageBuild(options.imageBuild)
@@ -122,15 +126,12 @@ export async function validateDockerRuntimeHost(
     ),
     dockerExecutable,
     hostCommands,
+    operationTimeoutMs,
     platform: options.platform,
     signal,
     temporaryRoot: path.resolve(options.temporaryRoot ?? os.tmpdir()),
     userId: filesystemIdentity.containerUserId,
   });
-  const operationTimeoutMs = positive(
-    options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
-    'operationTimeoutMs',
-  );
   const probeName = `stripe-forge-host-probe-${randomUUID()}`;
   let probe: Awaited<ReturnType<typeof hostCommands.run>>;
   try {
@@ -237,6 +238,7 @@ export function createDockerRuntimeAdapter(
           buildTimeoutMs,
           dockerExecutable,
           hostCommands,
+          operationTimeoutMs,
           platform,
           signal: controller.signal,
           temporaryRoot,
@@ -770,6 +772,7 @@ interface BuildForgeImageInput {
   readonly buildTimeoutMs: number;
   readonly dockerExecutable: string;
   readonly hostCommands: HostCommandRunner;
+  readonly operationTimeoutMs: number;
   readonly platform: RuntimePlatform;
   readonly signal: AbortSignal;
   readonly temporaryRoot: string;
@@ -880,13 +883,16 @@ async function buildStandaloneImage(
   let probeRoot: string | undefined;
   const commandOptions = {
     signal: input.signal,
-    timeoutMs: input.buildTimeoutMs,
     maxOutputBytes: 32 * 1024 * 1024,
   };
-  const checked = async (argv: readonly string[], message: string) => {
+  const checked = async (
+    argv: readonly string[],
+    message: string,
+    timeoutMs = input.operationTimeoutMs,
+  ) => {
     const result = await input.hostCommands.run(
       [input.dockerExecutable, ...argv],
-      commandOptions,
+      { ...commandOptions, timeoutMs },
     );
     if (result.exitCode !== 0) throw new Error(message);
     return result;
@@ -911,6 +917,7 @@ async function buildStandaloneImage(
         root,
       ],
       'Docker could not build the host image bundle.',
+      input.buildTimeoutMs,
     );
     const inspected = await checked(
       ['image', 'inspect', '--format', '{{.Id}}', tag],
@@ -1002,7 +1009,7 @@ for (const [tool, executable] of [['claudeCode', 'claude'], ['codex', 'codex'], 
       input.dockerExecutable,
       probeName,
       input.hostCommands,
-      input.buildTimeoutMs,
+      input.operationTimeoutMs,
       1024 * 1024,
     );
     if (probeRoot) await fs.rm(probeRoot, { recursive: true, force: true });
