@@ -30,6 +30,7 @@ export function parseOpenCodeStream(
     let messageHasTools = false;
     let completed = false;
     let cost = 0;
+    let costKnown = true;
     const parts = new Map<string, NativeRecord>();
     const calls = new Map<string, AgentToolCall>();
     const messages = new Set<string>();
@@ -132,7 +133,8 @@ export function parseOpenCodeStream(
           part.type === 'step-finish'
         ) {
           completed = terminal(part.reason) && !stepHasTools;
-          cost += nonnegative(part.cost);
+          if (part.cost === undefined) costKnown = false;
+          else cost += nonnegative(part.cost);
           activeMessage = undefined;
           finishedMessage = message;
         } else if (event.type === 'text' && part.type === 'text') {
@@ -166,7 +168,7 @@ export function parseOpenCodeStream(
       text: [...texts.values()].flat().join('\n\n'),
       sessionId: id,
       toolCalls: [...calls.values()],
-      costUsd: cost,
+      ...(costKnown ? { costUsd: cost } : {}),
     };
   } catch {
     throw new OpenCodeStreamError();

@@ -1208,8 +1208,13 @@ export so a failed capture cannot leave stale native evidence eligible. An
 export failure preserves the completed driver turn; cancellation propagates.
 After quiescence, evidence collection only reads the saved JSON. Normalization
 validates session/version/model identity and retains user text, assistant text,
-reasoning, correlated tool results and errors, and available usage. Driver call
-IDs and ATIF `tool_call_id` / `source_call_id` use OpenCode's unique tool part ID.
+reasoning, correlated tool results and errors, and available usage. ATIF prompt
+tokens include native input, cache read, and cache write; completion tokens
+include native output and reasoning. Raw counters remain in metrics `extra`.
+Missing native cost is omitted; a live turn's `costUsd` is omitted if any finished
+step lacks cost. Explicit zero costs are preserved, without inferring pricing.
+Driver call IDs and ATIF `tool_call_id` / `source_call_id` use OpenCode's unique
+tool part ID.
 Gateway `callID` values are bounded opaque strings and may repeat across
 executions; their original values remain in the restricted export. The live
 stream accepts an unseen tool part after a retried message finishes only when
