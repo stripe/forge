@@ -7,7 +7,10 @@ import { afterEach, describe, it } from 'vitest';
 
 import { runCli } from '../src/cli.ts';
 import type { AgentAdapter } from '../src/contracts/agent.ts';
+import type { CompletionProvider } from '../src/contracts/completion.ts';
 import { createDirectoryRunInputProvider } from '../src/contracts/inputs.ts';
+import { executeEval } from '../src/execution/execute.ts';
+import { createOpenAICompletionProvider } from '../src/providers/openai/index.ts';
 import {
   createArtifactStore,
   parseInteractionArtifact,
@@ -16,9 +19,11 @@ import {
 } from '../src/results/index.ts';
 import {
   createFakeRuntimeAdapter,
+  createMemoryRunInputProvider,
   createScriptedAgentAdapter,
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
+  createTestResolvedRunPlan,
 } from '../src/testing/index.ts';
 
 const temporaryDirectories: string[] = [];
@@ -32,6 +37,108 @@ afterEach(async () => {
 });
 
 describe('multi-turn CLI end to end', () => {
+  it('keeps serialized Sol requests byte-for-byte unchanged when Ava and judge omit temperature', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-sol-e2e-'));
+    temporaryDirectories.push(root);
+    const bodies: string[] = [];
+    const transport = createOpenAICompletionProvider({
+      fetch: async (_, init) => {
+        const body = String(init?.body);
+        bodies.push(body);
+        const { text } = JSON.parse(body);
+        const answers: Record<string, unknown> = {
+          ava_initial_turn: {
+            user_needs: [
+              { description: 'Complete the task', status: 'remaining' },
+            ],
+            message: 'Please complete the task.',
+          },
+          ava_turn: { remaining_need_ids: [], message: '' },
+          criterion_judgment: {
+            results: [
+              { index: 0, passed: true, explanation: 'The task is done.' },
+            ],
+          },
+        };
+        assert.ok(Object.hasOwn(answers, text.format.name));
+        return Response.json({
+          object: 'response',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify(answers[text.format.name]),
+                },
+              ],
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+    const purposes: string[] = [];
+    const provider: CompletionProvider = {
+      ...transport,
+      async complete(request, context) {
+        assert.equal(Object.hasOwn(request, 'temperature'), false);
+        purposes.push(request.purpose);
+        const index = bodies.length;
+        // Restore just the historical caller value; all other inputs are identical.
+        await transport.complete(
+          {
+            ...request,
+            temperature: request.purpose === 'role_player' ? 0.3 : 0,
+          },
+          context,
+        );
+        const result = await transport.complete(request, context);
+        assert.deepEqual(
+          Buffer.from(bodies[index]!, 'utf8'),
+          Buffer.from(bodies[index + 1]!, 'utf8'),
+        );
+        const body = JSON.parse(bodies[index + 1]!);
+        assert.equal(body.model, 'gpt-6.1-sol');
+        assert.equal(body.max_output_tokens, 16_000);
+        assert.equal(Object.hasOwn(body, 'temperature'), false);
+        return result;
+      },
+    };
+    const runtime = createFakeRuntimeAdapter();
+    const agent = createScriptedAgentAdapter({
+      turns: [{ text: 'Done.', sessionId: 'sol-session', toolCalls: [] }],
+    });
+    const model = { provider: 'openai', model: 'gpt-6.1-sol' };
+    const completed = await executeEval({
+      runId: 'sol-temperature',
+      plan: createTestResolvedRunPlan({
+        mode: 'multi_turn',
+        judgingCriteria: ['Completes the task.'],
+        rolePlayer: model,
+        judge: model,
+      }),
+      composition: {
+        runtime: runtime.adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        completionProviders: new Map([[provider.id, provider]]),
+        credentialResolver: createStaticCredentialResolver({
+          'openai.completion-api-key': 'synthetic-sol-key',
+        }),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createArtifactStore({ root }),
+      },
+    });
+    assert.deepEqual(purposes, ['role_player', 'role_player', 'judge']);
+    assert.equal(bodies.length, 6);
+    assert.equal(
+      (await verifyCompletedRun(completed.location)).result.evaluation.status,
+      'passed',
+    );
+  });
+
   it('validates and executes the two-turn fixture with agent-produced work', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-multi-e2e-'));
     temporaryDirectories.push(root);
@@ -259,6 +366,9 @@ describe('multi-turn CLI end to end', () => {
       /private database bytes|private archive bytes|\\u0000/,
     );
     assert.equal(completion.calls.length, 3);
+    for (const { request } of completion.calls) {
+      assert.equal(Object.hasOwn(request, 'temperature'), false);
+    }
     assert.deepEqual(
       summary.result.artifacts.map(({ path: artifactPath }) => artifactPath),
       [

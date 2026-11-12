@@ -82,7 +82,8 @@ agent receives its credential and outbound network access. Keep secrets outside
 dataset and experiment files.
 
 Ava and the judge each default to `provider: openai`, `model: gpt-6.1-sol`
-when their model is omitted. Override either independently with
+when their model is omitted. Both leave sampling at the model default and
+request no temperature. Override either independently with
 `models.role_player` or `models.judge`; the other keeps its default. Both
 accept `provider: anthropic` or `provider: openai`. Selecting a coding agent
 does not change either host model. For example, to use Sonnet for both:
@@ -96,8 +97,8 @@ models:
 OpenAI Ava/judge models use `--credential-env OPENAI_API_KEY`. They use the
 Responses API with strict JSON Schema and `store: false`. `OPENAI_BASE_URL`
 optionally sets the complete API root, including `/v1`; Forge appends
-`/responses`. GPT-5 and later and o-series model identifiers omit `temperature`
-and receive an output budget of at least 16,000 tokens to allow for reasoning.
+`/responses`. GPT-5 and later and o-series model identifiers receive an output
+budget of at least 16,000 tokens to allow for reasoning.
 Reasoning blocks are excluded from completion text.
 
 Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
@@ -105,11 +106,9 @@ Claude Haiku, Sonnet, or Opus 4.5-or-newer model identifiers with strict
 structured-output support. Claude Fable is not supported yet as the judge or
 Ava model; Forge rejects it during pure preflight, before credential lookup
 or model requests. Coding-agent model selection is separate.
-Opus 4.7 and later and supported-family models at version 5 or newer use
-default sampling; Forge omits `temperature` for them. Haiku, Sonnet, and Opus
-models at version 5 or newer always think, and thinking tokens share the
-output budget with answer text. Forge gives them at least 16,000 output tokens
-and excludes thinking blocks from completion text.
+Haiku, Sonnet, and Opus models at version 5 or newer always think, and thinking
+tokens share the output budget with answer text. Forge gives them at least
+16,000 output tokens and excludes thinking blocks from completion text.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present,

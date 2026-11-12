@@ -1015,6 +1015,11 @@ ignores reasoning blocks; Anthropic excludes thinking blocks. Both bound
 requests, responses, and duration, reject redirects, and expose errors without
 provider response bodies. OpenAI projects
 `uniqueItems` out of generation schemas; Ava still validates uniqueness locally.
+Ava and the judge omit temperature, leaving sampling at the model default.
+The public `CompletionRequest.temperature` field remains available to external
+callers. Anthropic forwards it when provided; models that reject sampling
+parameters may reject the request. OpenAI omits it for GPT-5-and-later
+and o-series identifiers.
 Provider-specific output budgets account for reasoning tokens without changing
 Ava or judge validation. Compatible endpoints and credentials are explicit host
 configuration; neither enters plans or results. See the README's
@@ -1426,9 +1431,9 @@ rendered characters total. Truncation and unavailable evidence are recorded
 explicitly. `judge-evidence.json` records the redacted workspace subset and
 exact projected transcript for audit; it is not an input to a later judge call.
 
-At most four criteria run concurrently. Each request carries temperature 0,
-a 1,024-token output budget, and a strict one-criterion JSON schema; the
-provider may adapt sampling and output budgets to the selected model. Each
+At most four criteria run concurrently. Each request carries a 1,024-token
+output budget and a strict one-criterion JSON schema, with no temperature;
+the provider may adapt the output budget to the selected model. Each
 gets up to three attempts with fixed one- and five-second retry waits.
 Exhaustion records that criterion with `passed: null`, a bounded explanation,
 and an `error` containing

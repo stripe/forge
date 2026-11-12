@@ -132,21 +132,21 @@ describe('Anthropic completion provider', () => {
     });
   });
 
-  it('omits temperature for Claude models that require default sampling on direct and gateway requests', async () => {
-    for (const [model, samplingTemperature] of [
-      ['claude-sonnet-4-6', true],
-      ['claude-opus-4-6', true],
-      ['claude-haiku-4-5', true],
-      ['claude-sonnet-4-7', true],
-      ['claude-opus-4-7', false],
-      ['claude-opus-4-8', false],
-      ['claude-opus-4-7-20261001', false],
-      ['claude-sonnet-5-5', false],
-      ['claude-opus-5-5', false],
-      ['claude-haiku-5', false],
-      ['anthropic/claude-sonnet-5', false],
-      ['gateway/claude-opus-4.7', false],
-      ['claude-sonnet-6-0', false],
+  it('preserves explicit temperature and its absence for external callers on direct and gateway requests', async () => {
+    for (const model of [
+      'claude-sonnet-4-6',
+      'claude-opus-4-6',
+      'claude-haiku-4-5',
+      'claude-sonnet-4-7',
+      'claude-opus-4-7',
+      'claude-opus-4-8',
+      'claude-opus-4-7-20261001',
+      'claude-sonnet-5-5',
+      'claude-opus-5-5',
+      'claude-haiku-5',
+      'anthropic/claude-sonnet-5',
+      'gateway/claude-opus-4.7',
+      'claude-sonnet-6-0',
     ] as const) {
       for (const gateway of [false, true]) {
         const transport = recordingFetch(() =>
@@ -158,14 +158,10 @@ describe('Anthropic completion provider', () => {
             : {}),
           fetch: transport.fetch,
         });
-        for (const [purpose, temperature] of [
-          ['role_player', 0.3],
-          ['judge', 0],
-        ] as const) {
+        for (const temperature of [undefined, 0, 0.3]) {
           const request = completionRequest({
             model: { provider: 'anthropic', model },
-            purpose,
-            temperature,
+            ...(temperature === undefined ? {} : { temperature }),
             responseSchema: schema,
           });
           await provider.complete(request, {
@@ -178,11 +174,10 @@ describe('Anthropic completion provider', () => {
           const body = JSON.parse(String(transport.calls.at(-1)!.init.body));
           assert.equal(
             Object.hasOwn(body, 'temperature'),
-            samplingTemperature,
+            temperature !== undefined,
             model,
           );
-          if (samplingTemperature)
-            assert.equal(body.temperature, temperature, model);
+          assert.equal(body.temperature, temperature, model);
           assert.equal(request.temperature, temperature);
         }
       }

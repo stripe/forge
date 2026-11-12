@@ -34,8 +34,8 @@ const ALWAYS_THINKING_MIN_MAX_TOKENS = 16_000;
 const MAX_SCHEMA_DEPTH = 100;
 const MAX_SCHEMA_NODES = 100_000;
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
-const CLAUDE_MODEL_FAMILY_VERSION =
-  /(?:^|[./-])claude-(haiku|sonnet|opus)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-./])/;
+const CLAUDE_MODEL_VERSION =
+  /(?:^|[./-])claude-(?:haiku|sonnet|opus)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-./])/;
 const CLAUDE_FABLE_MODEL = /(?:^|[./-])claude-fable(?=$|[-./])/;
 const ANTHROPIC_UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
   'minimum',
@@ -94,25 +94,19 @@ export function supportsAnthropicStructuredOutputModel(model: string): boolean {
 
 function claudeModelCapabilities(model: string): {
   structuredOutput: boolean;
-  acceptsSamplingTemperature: boolean;
   alwaysThinks: boolean;
 } {
-  const version = CLAUDE_MODEL_FAMILY_VERSION.exec(model);
+  const version = CLAUDE_MODEL_VERSION.exec(model);
   if (!version) {
     return {
       structuredOutput: false,
-      acceptsSamplingTemperature: true,
       alwaysThinks: false,
     };
   }
-  const family = version[1];
-  const major = Number(version[2]);
-  const minor = Number(version[3] ?? 0);
+  const major = Number(version[1]);
+  const minor = Number(version[2] ?? 0);
   return {
     structuredOutput: major > 4 || (major === 4 && minor >= 5),
-    // Opus 4.7+ and Claude 5+ require default sampling.
-    acceptsSamplingTemperature:
-      major < 5 && !(family === 'opus' && major === 4 && minor >= 7),
     alwaysThinks: major >= 5,
   };
 }
@@ -498,8 +492,7 @@ function serializeRequest(request: CompletionRequest): string {
       ...(request.systemPrompt === undefined
         ? {}
         : { system: request.systemPrompt }),
-      ...(request.temperature === undefined ||
-      !capabilities.acceptsSamplingTemperature
+      ...(request.temperature === undefined
         ? {}
         : { temperature: request.temperature }),
       ...(request.responseSchema === undefined
