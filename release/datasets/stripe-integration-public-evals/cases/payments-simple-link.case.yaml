@@ -1,0 +1,20 @@
+id: stripe-integration-public-evals/payments-simple-link
+version: 0.1.0
+task: |-
+  I want to sell a $25 PDF ebook with the minimum possible code. I just need a shareable payment link I can put on my website and in emails — customers click it, pay, and get a confirmation. Use the Stripe API to create this programmatically. Use Node.js/TypeScript and the `stripe` npm package. Requirements: - A script or endpoint that creates a payment link for the ebook - The link should be reusable (multiple customers can use it) - Print or return the payment link URL - A webhook endpoint to receive payment notifications Keep it minimal — no need for a full web server or custom checkout form.
+initial_prompt: |-
+  I want to sell a $25 PDF ebook with the minimum possible code. I just need a shareable payment link I can put on my website and in emails — customers click it, pay, and get a confirmation. Use the Stripe API to create this programmatically. Use Node.js/TypeScript and the `stripe` npm package. Requirements: - A script or endpoint that creates a payment link for the ebook - The link should be reusable (multiple customers can use it) - Print or return the payment link URL - A webhook endpoint to receive payment notifications Keep it minimal — no need for a full web server or custom checkout form.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Uses paymentLinks.create (the Payment Links API) for a reusable shareable URL — preferred over Checkout Sessions for this use case'
+    requirement_level: SHOULD
+  - value: 'Does not explicitly hardcode an API version older than 2026-04-22.dahlia. Pass if apiVersion is omitted or set to 2026-04-22.dahlia or later. Fail only if apiVersion is explicitly set to an older version.'
+    requirement_level: SHOULD
+  - value: 'Configures a product or price for the $25 ebook'
+    requirement_level: OPTIONAL
+  - value: 'The payment link URL is returned, logged, or printed so the user can share it'
+    requirement_level: SHOULD
+  - value: 'Has a webhook handler for payment notification events'
+    requirement_level: SHOULD

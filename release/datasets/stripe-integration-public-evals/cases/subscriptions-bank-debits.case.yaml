@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/subscriptions-bank-debits
+version: 0.1.0
+task: |-
+  I'm building an accounting SaaS called "LedgerLeaf" using Node.js and TypeScript. US customers can pay a $120/month subscription by ACH Direct Debit and EU customers can pay by SEPA Direct Debit. Because both methods settle asynchronously, access must remain pending until the first invoice is actually paid and must be suspended if the debit later fails. Build the integration using Stripe Checkout and the stripe npm package. Requirements: - Choose the appropriate bank-debit payment method from customer region - Collect required mandate acceptance in Checkout - Represent pending, active, and failed payment states in the database - Handle delayed success and failure through webhooks - Never provision from the success redirect alone Assume an Express app and database helper exist.
+initial_prompt: |-
+  I'm building an accounting SaaS called "LedgerLeaf" using Node.js and TypeScript. US customers can pay a $120/month subscription by ACH Direct Debit and EU customers can pay by SEPA Direct Debit. Because both methods settle asynchronously, access must remain pending until the first invoice is actually paid and must be suspended if the debit later fails. Build the integration using Stripe Checkout and the stripe npm package. Requirements: - Choose the appropriate bank-debit payment method from customer region - Collect required mandate acceptance in Checkout - Represent pending, active, and failed payment states in the database - Handle delayed success and failure through webhooks - Never provision from the success redirect alone Assume an Express app and database helper exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates a mode ''subscription'' Checkout Session with a recurring Price and the eligible regional method: us_bank_account for US ACH or sepa_debit for SEPA.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Checkout''s bank-detail and mandate-acceptance flow instead of collecting bank credentials or mandate acceptance on the application server.'
+    requirement_level: MUST
+  - value: 'MUST: Stores the subscription as pending after the redirect, checkout.session.completed, or a processing PaymentIntent.'
+    requirement_level: MUST
+  - value: 'MUST: Grants initial paid access only after checkout.session.async_payment_succeeded or authoritative confirmation that the first invoice is paid.'
+    requirement_level: MUST
+  - value: 'MUST: Handles checkout.session.async_payment_failed and invoice.payment_failed by keeping or moving access out of active state.'
+    requirement_level: MUST
+  - value: 'MUST: Reconciles applicable late-return or dispute signals, including charge.failed, payment_intent.payment_failed, invoice.payment_failed, or charge.dispute.created, against current Stripe payment and invoice state and suspends access when the debit is no longer paid.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat the success redirect, checkout.session.completed, payment_intent.processing, or charge.succeeded alone as irrevocable settlement.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and handles duplicate or out-of-order events idempotently using event IDs plus refreshed Stripe object state.'
+    requirement_level: MUST

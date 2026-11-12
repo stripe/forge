@@ -142,8 +142,8 @@ describe('OpenCode 1.19.0 archived native exports', () => {
               })) ?? [],
           ),
           [
-            { id: 'call_1', content: 'Tool output.', error: false },
-            { id: 'call_2', content: 'Tool failed.', error: true },
+            { id: 'prt_3', content: 'Tool output.', error: false },
+            { id: 'prt_6', content: 'Tool failed.', error: true },
           ],
         );
       }
@@ -173,7 +173,7 @@ describe('OpenCode 1.19.0 archived native exports', () => {
     );
     assert.deepEqual(
       turns.map((turn) => turn.toolCalls.map((call) => call.id)),
-      [['call_1', 'call_2'], ['call_1']],
+      [['prt_4', 'prt_5'], ['prt_13']],
     );
     assert.equal(
       Buffer.from((await loadOpenCodeNativeArtifact(input))!.body).toString(),
@@ -181,10 +181,7 @@ describe('OpenCode 1.19.0 archived native exports', () => {
     );
   });
 
-  // stripe/forge#32 H3.3: session-wide gateway-ID uniqueness rejects two
-  // distinct executions in different turns. Keep the intended behavior here
-  // while the stream/ID follow-up owns the production fix and ATIF ID policy.
-  it.fails('H3.3: loads distinct executions with a reused gateway call ID', async () => {
+  it('loads distinct executions with a reused gateway call ID', async () => {
     const { input } = await fixture('reused-call-id');
     const evidence = await loadOpenCodeEvidence(input);
     assert.equal(evidence.kind, 'available');

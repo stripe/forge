@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/subscriptions-stripe-tax
+version: 0.2.0
+task: |-
+  I'm building a global analytics SaaS called "MetricNest" using Node.js and TypeScript. Customers in multiple countries subscribe to a $39/month plan, and Stripe should calculate tax from the customer's billing address. Build the subscription signup and renewal integration using the stripe npm package and Stripe Tax. Requirements: - Collect the customer's billing address during Checkout - Enable automatic tax on the subscription - Require a valid customer address update when Stripe needs more location data - Display subtotal, tax, and total on the confirmation page - Keep tax and subscription state synchronized through webhooks Assume an Express app and server-rendered checkout page already exist.
+initial_prompt: |-
+  I'm building a global analytics SaaS called "MetricNest" using Node.js and TypeScript. Customers in multiple countries subscribe to a $39/month plan, and Stripe should calculate tax from the customer's billing address. Build the subscription signup and renewal integration using the stripe npm package and Stripe Tax. Requirements: - Collect the customer's billing address during Checkout - Enable automatic tax on the subscription - Require a valid customer address update when Stripe needs more location data - Display subtotal, tax, and total on the confirmation page - Keep tax and subscription state synchronized through webhooks Assume an Express app and server-rendered checkout page already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates a mode ''subscription'' Checkout Session with automatic_tax.enabled true and billing_address_collection set to ''required''.'
+    requirement_level: MUST
+  - value: 'MUST: When Checkout uses an existing Customer, sets customer_update.address to ''auto'' so the collected billing address updates that Customer.'
+    requirement_level: MUST
+  - value: 'MUST NOT use IP address alone as the customer''s tax location or treat automatic_tax.enabled as creating the required tax registrations.'
+    requirement_level: MUST
+  - value: 'MUST: Displays subtotal, discount, tax, and total from the completed Checkout Session or finalized invoice rather than recalculating tax in application code conditional on the discount being applied'
+    requirement_level: MUST
+  - value: 'MUST: Handles invoice.finalization_failed separately from payment failure and inspects last_finalization_error and automatic_tax.status.'
+    requirement_level: MUST
+  - value: 'MUST: When automatic_tax.status is ''requires_location_inputs'', collects and saves corrected Customer location data and retries invoice finalization before provisioning tax-dependent service.'
+    requirement_level: MUST
+  - value: 'MUST NOT infer successful renewal or payment from subscription status alone when an invoice failed to finalize.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and handles checkout.session.completed, invoice.finalization_failed, invoice.paid, and invoice.payment_failed idempotently by event ID.'
+    requirement_level: MUST

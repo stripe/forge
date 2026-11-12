@@ -1,0 +1,34 @@
+id: stripe-integration-public-evals/connect-crafthub-multi-seller
+version: 0.2.0
+task: |-
+  Build the Stripe Connect integration for CraftHub, a two-sided marketplace where one checkout can contain handmade items from several artisan sellers. A cart may contain items from multiple sellers. The platform keeps 12% of each item price and each seller receives 88% of that seller's item subtotal.
+initial_prompt: |-
+  Build the Stripe Connect integration for CraftHub, a two-sided marketplace where one checkout can contain handmade items from several artisan sellers. A cart may contain items from multiple sellers. The platform keeps 12% of each item price and each seller receives 88% of that seller's item subtotal.
+context: |-
+  If asked: the platform is merchant of record; one customer payment covers the whole cart; seller transfers can be created after payment succeeds; processing fees are borne by the platform from its retained amount; sellers only need to receive transfers.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding or Stripe hosted onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Uses separate charges and transfers for the multi-seller cart.'
+    requirement_level: MUST
+  - value: 'MUST NOT use destination charges for the multi-seller cart.'
+    requirement_level: MUST
+  - value: 'MUST: For each seller, transfers round(0.88 * that seller item subtotal in minor units) and retains the remainder on the platform.'
+    requirement_level: MUST
+  - value: 'MUST NOT set application_fee_amount on a Transfer.'
+    requirement_level: MUST
+  - value: 'Configures dashboard as express.'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures fees_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures losses_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures Recipient with stripe_balance.stripe_transfers.'
+    requirement_level: MUST

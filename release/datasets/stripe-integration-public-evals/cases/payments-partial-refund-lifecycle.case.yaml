@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/payments-partial-refund-lifecycle
+version: 0.2.0
+task: |-
+  Add a support action to refund one returned item from an order. It should be safe to retry and show whether the refund actually went through.
+initial_prompt: |-
+  Add a support action to refund one returned item from an order. It should be safe to retry and show whether the refund actually went through.
+context: |-
+  Our Node/TypeScript store sells a $90 bundle of three $30 items. Authorized support staff can refund one or more returned items, but each return should be refunded once. Staff sometimes double-click, and API responses can time out. An order can have several legitimate partial returns. We need to distinguish a submitted refund from one that later fails.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Authorize staff access and resolve the order''s original Stripe payment server-side.'
+    requirement_level: MUST
+  - value: 'MUST: Calculate the amount from approved returns and reject a new refund exceeding the remaining refundable balance; cumulative refunds must not exceed the original captured amount.'
+    requirement_level: MUST
+  - value: 'MUST: Create a partial Refund against the correct Charge or PaymentIntent; either documented identifier is valid.'
+    requirement_level: MUST
+  - value: 'MUST: Ensure concurrent or repeated requests for the same approved return cannot produce duplicate refunds.'
+    requirement_level: MUST
+  - value: 'Use a durable refund-operation identity and stable Stripe idempotency key for retries of that return.'
+    requirement_level: SHOULD
+  - value: 'MUST: Preserve independent identities for distinct legitimate returns rather than blocking all later partial refunds.'
+    requirement_level: MUST
+  - value: 'MUST: Persist and reconcile Refund state, including pending and failed outcomes; an HTTP success response alone must not be presented as irreversible refund completion.'
+    requirement_level: MUST
+  - value: 'Show support the refund identifier, current status, and useful failure information without leaking sensitive payment data.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

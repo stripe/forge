@@ -1,0 +1,38 @@
+id: stripe-integration-public-evals/edge-very-low-flat-fee
+version: 0.2.0
+task: |-
+  I run a micro-task marketplace where workers earn $1–$5 per task payment and the platform wants a flat $0.50 per payment. Recommend an Accounts v2 setup and payment pattern, analyze unit economics, and identify a safer alternative if per-payment economics are not viable.
+initial_prompt: |-
+  I run a micro-task marketplace where workers earn $1–$5 per task payment and the platform wants a flat $0.50 per payment. Recommend an Accounts v2 setup and payment pattern, analyze unit economics, and identify a safer alternative if per-payment economics are not viable.
+context: |-
+  If asked: each task payment has one worker and would route immediately; the platform is merchant of record and owns losses; workers only receive transfers; the $0.50 is intended as gross platform revenue before processing fees; batching tasks into a larger customer payment is acceptable.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
+    requirement_level: MUST
+  - value: 'Configures dashboard as express'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures fees_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures losses_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
+    requirement_level: MUST
+  - value: 'MUST NOT request Merchant configuration or card_payments for a recipient-only connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT require on_behalf_of for the destination charge.'
+    requirement_level: MUST
+  - value: 'MUST: For USD payments, sets application_fee_amount to 50 minor currency units.'
+    requirement_level: MUST
+  - value: 'MUST: Warns that Stripe fees and minimum-charge rules can consume a large share of a $1–$5 payment.'
+    requirement_level: MUST
+  - value: 'Recommends batching multiple tasks into a larger charge or revising the fee model if the margin analysis is negative.'
+    requirement_level: SHOULD
+  - value: 'Links to current Stripe pricing instead of hardcoding a universal processing rate.'
+    requirement_level: SHOULD

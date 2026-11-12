@@ -1,0 +1,34 @@
+id: stripe-integration-public-evals/emily-exact-case-neighborhood-marketplace
+version: 0.2.0
+task: |-
+  Build the Connect design for a neighborhood services marketplace where neighbors sell dog walking, babysitting, and knife sharpening. Users are not technical, each booking has one provider, and the platform supplies the catalog and checkout. The platform must net 1% of each booking on top of Stripe processing fees. Provide the Accounts v2 configuration, destination-charge fee formula, onboarding, and readiness checks.
+initial_prompt: |-
+  Build the Connect design for a neighborhood services marketplace where neighbors sell dog walking, babysitting, and knife sharpening. Users are not technical, each booking has one provider, and the platform supplies the catalog and checkout. The platform must net 1% of each booking on top of Stripe processing fees. Provide the Accounts v2 configuration, destination-charge fee formula, onboarding, and readiness checks.
+context: |-
+  If asked: the platform is merchant of record and owns refunds, disputes, pricing, and losses; funds route immediately to one provider; providers only receive transfers and need Express Dashboard access; processing_fee_estimate is computed from the applicable Stripe pricing.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded or hosted onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
+    requirement_level: MUST
+  - value: 'MUST: Configures dashboard as express, fees_collector as application, and losses_collector as application.'
+    requirement_level: MUST
+  - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
+    requirement_level: MUST
+  - value: 'MUST NOT request Merchant configuration or card_payments for a recipient-only connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT require on_behalf_of for the destination charge.'
+    requirement_level: MUST
+  - value: 'MUST: Sets application_fee_amount to processing_fee_estimate + round(charge_amount * 0.01) in minor units.'
+    requirement_level: MUST
+  - value: 'MUST: Warns that setting application_fee_amount to only 1% can produce a negative platform margin.'
+    requirement_level: MUST
+  - value: 'MUST: Distinguishes negative-balance liability from fraud and risk controls.'
+    requirement_level: MUST

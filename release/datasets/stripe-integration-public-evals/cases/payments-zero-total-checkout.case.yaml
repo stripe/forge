@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-zero-total-checkout
+version: 0.2.0
+task: |-
+  I'm giving workshop attendees a code for a free copy of my paid ebook. Let them redeem it through checkout and still receive the download.
+initial_prompt: |-
+  I'm giving workshop attendees a code for a free copy of my paid ebook. Let them redeem it through checkout and still receive the download.
+context: |-
+  The ebook normally costs $25. We already use hosted Checkout in Node/TypeScript and have an approved 100%-off promotion code in Stripe. Buyers should enter the code on the payment page. These are one-time orders. We collect the recipient's email, and each completed order should get one download even when no money is due.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Allow the approved promotion code in the one-time Checkout flow without trusting a browser-supplied zero total.'
+    requirement_level: MUST
+  - value: 'MUST: Verify that the authoritative Session is a completed one-time payment Session for the expected order/product, with an approved zero total; `no_payment_required` alone is not an order-authorization check.'
+    requirement_level: MUST
+  - value: 'MUST: Fulfill that verified no-cost order when its Session has `payment_status=no_payment_required`.'
+    requirement_level: MUST
+  - value: 'MUST NOT require a PaymentIntent or `payment_intent.succeeded` event for a zero-total Session; such Sessions have no associated PaymentIntent.'
+    requirement_level: MUST
+  - value: 'MUST: Make download fulfillment idempotent for the completed Session/order.'
+    requirement_level: MUST
+  - value: 'MUST NOT fulfill an ordinary unpaid Session merely because it also lacks a successful PaymentIntent.'
+    requirement_level: MUST
+  - value: 'Reuse the same fulfillment function for paid and legitimate no-cost orders, with explicit state checks.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

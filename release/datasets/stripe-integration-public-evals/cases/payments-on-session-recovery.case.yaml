@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-on-session-recovery
+version: 0.2.0
+task: |-
+  Buyers get stuck after a declined card or closing their bank's verification screen. Let them try again without losing their order or paying twice.
+initial_prompt: |-
+  Buyers get stuck after a declined card or closing their bank's verification screen. Let them try again without losing their order or paying twice.
+context: |-
+  This is an existing React Payment Element checkout with a Node/TypeScript PaymentIntents backend. Keep that architecture. We sell a $120 lamp. One order is linked to its payment attempt. Buyers should be able to correct their card or retry verification. They must see whether the payment succeeded, is still processing, or needs another action.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Handle `requires_action` through the documented Stripe client confirmation/authentication flow rather than declaring success.'
+    requirement_level: MUST
+  - value: 'MUST: Allow a retry or replacement method when the existing PaymentIntent is in a recoverable state such as `requires_payment_method`.'
+    requirement_level: MUST
+  - value: 'Reuse the existing PaymentIntent while it remains recoverable; any deliberate replacement must reconcile or terminate the prior attempt so it cannot cause a duplicate payment.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT allow repeated Pay clicks or page renders to leave multiple independently chargeable attempts for the same purchase.'
+    requirement_level: MUST
+  - value: 'MUST: Distinguish succeeded, processing, retryable payment failure, and authentication-required outcomes in the UI and fulfillment logic.'
+    requirement_level: MUST
+  - value: 'MUST: Preserve the order and cart through recoverable payment failures.'
+    requirement_level: MUST
+  - value: 'Provide actionable error text rather than a generic failure message.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST
