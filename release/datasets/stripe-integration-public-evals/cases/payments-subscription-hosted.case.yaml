@@ -1,0 +1,46 @@
+id: stripe-integration-public-evals/payments-subscription-hosted
+version: 0.2.0
+task: |-
+  I'm building a newsletter platform where readers can subscribe to premium content for $12/month. When a reader clicks "Subscribe," they should go through a payment flow. After subscribing, they should be able to manage or cancel their subscription on their own.
+
+  Build the Stripe billing integration. Use Node.js/TypeScript and the `stripe` npm package.
+
+  Requirements:
+  - A backend endpoint that starts a subscription checkout and sends the customer to the payment page
+  - A confirmation page the customer sees after subscribing successfully
+  - A web portal where subscribers can manage their subscription (cancel, update payment method, view invoices)
+  - A webhook endpoint that handles subscription lifecycle events (new subscription, cancellation, payment failure) and updates subscriber status in the database (stub the DB write)
+
+  Assume a basic Express app already exists. Just build out the Stripe pieces.
+initial_prompt: |-
+  I'm building a newsletter platform where readers can subscribe to premium content for $12/month. When a reader clicks "Subscribe," they should go through a payment flow. After subscribing, they should be able to manage or cancel their subscription on their own.
+
+  Build the Stripe billing integration. Use Node.js/TypeScript and the `stripe` npm package.
+
+  Requirements:
+  - A backend endpoint that starts a subscription checkout and sends the customer to the payment page
+  - A confirmation page the customer sees after subscribing successfully
+  - A web portal where subscribers can manage their subscription (cancel, update payment method, view invoices)
+  - A webhook endpoint that handles subscription lifecycle events (new subscription, cancellation, payment failure) and updates subscriber status in the database (stub the DB write)
+
+  Assume a basic Express app already exists. Just build out the Stripe pieces.
+context: |-
+  You are a developer building a newsletter platform that offers a $12/month premium subscription. You want readers to go through a payment flow whose UI you don't have to build yourself, be able to manage and cancel their own subscription afterward, and have all available payment methods shown automatically.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses checkout.sessions.create with mode ''subscription'''
+    requirement_level: MUST
+  - value: 'Does NOT set ui_mode to ''embedded_page'' on the Checkout Session — the hosted redirect surface must be used. This PASSES if ui_mode is absent or set to ''hosted_page''.'
+    requirement_level: SHOULD
+  - value: 'MUST: Has success_url and cancel_url configured'
+    requirement_level: MUST
+  - value: 'Integrates the Billing Portal (billingPortal.sessions.create) for self-service subscription management'
+    requirement_level: SHOULD
+  - value: 'MUST: Has a webhook handler for subscription lifecycle events (customer.subscription.updated or customer.subscription.deleted, invoice.payment_failed, or similar)'
+    requirement_level: MUST
+  - value: 'MUST NOT pass payment_method_types to any Stripe API call — dynamic payment methods must remain enabled. If payment_method_types is absent from all Stripe API calls, this expectation PASSES regardless of which Stripe API is used.'
+    requirement_level: MUST
+  - value: 'Includes the parameter integration_identifier in the checkout.sessions.create call'
+    requirement_level: SHOULD

@@ -1,0 +1,36 @@
+id: stripe-integration-public-evals/pet-care-marketplace-code-gen
+version: 0.1.0
+task: |-
+  Using Node.js and the stripe package, write server code for a pet-care marketplace. Pet owners book one dog walker or sitter per service; providers sign up and receive proceeds, and the platform keeps 15% of each booking. Implement Accounts v2 provider creation, embedded onboarding, a destination-charge PaymentIntent, exact commission rounding, and transfer-readiness gating.
+initial_prompt: |-
+  Using Node.js and the stripe package, write server code for a pet-care marketplace. Pet owners book one dog walker or sitter per service; providers sign up and receive proceeds, and the platform keeps 15% of each booking. Implement Accounts v2 provider creation, embedded onboarding, a destination-charge PaymentIntent, exact commission rounding, and transfer-readiness gating.
+context: |-
+  If asked: the platform is merchant of record and owns pricing, refunds, disputes, and losses; providers are recipient-only and need Express Dashboard access; all input amounts are integer minor units; commission rounding is Math.round(amount * 15 / 100).
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Account-creation code sets dashboard to express, fees_collector to application, and losses_collector to application.'
+    requirement_level: MUST
+  - value: 'MUST: Account-creation code configures Recipient with stripe_balance.stripe_transfers.'
+    requirement_level: MUST
+  - value: 'MUST NOT: Account-creation code configures Merchant or card_payments.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: PaymentIntent code sets transfer_data.destination to the booked provider account ID.'
+    requirement_level: MUST
+  - value: 'MUST: PaymentIntent code sets application_fee_amount to Math.round(amount * 15 / 100).'
+    requirement_level: MUST
+  - value: 'MUST: Payment code validates amount as a positive integer minor-unit value before computing the fee.'
+    requirement_level: MUST
+  - value: 'MUST: Code checks configuration.recipient.capabilities.stripe_balance.stripe_transfers.status === ''active'' before accepting a booking for the provider.'
+    requirement_level: MUST
+  - value: 'MUST NOT: Code uses v1 charges_enabled or payouts_enabled as the readiness condition.'
+    requirement_level: MUST
+  - value: 'MUST NOT: PaymentIntent code sets on_behalf_of.'
+    requirement_level: MUST

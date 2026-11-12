@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/payments-elements-multistep
+version: 0.1.0
+task: |-
+  We're building a premium e-commerce site selling luxury watches internationally. Our checkout needs to be a multi-step flow on our own site: first we collect shipping address, then calculate taxes and duties, then show payment options. We need full control over how the checkout steps are displayed and ordered, but we'd rather Stripe handle taxes, discounts, and shipping calculations without building our own calculation logic.
+
+  We sell cross-border to customers in 30+ countries and want to automatically show prices in each customer's local currency. We also want one-click payment options like Apple Pay and Google Pay prominently displayed. Our backend is Node.js with Express.
+initial_prompt: |-
+  We're building a premium e-commerce site selling luxury watches internationally. Our checkout needs to be a multi-step flow on our own site: first we collect shipping address, then calculate taxes and duties, then show payment options. We need full control over how the checkout steps are displayed and ordered, but we'd rather Stripe handle taxes, discounts, and shipping calculations without building our own calculation logic.
+
+  We sell cross-border to customers in 30+ countries and want to automatically show prices in each customer's local currency. We also want one-click payment options like Apple Pay and Google Pay prominently displayed. Our backend is Node.js with Express.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Uses Elements with Checkout Sessions API (NOT raw PaymentIntents) — the merchant needs to orchestrate a custom multi-step flow while letting Stripe manage checkout state (taxes, shipping, adaptive pricing)'
+    requirement_level: SHOULD
+  - value: 'Includes Express Checkout Element for one-click payments (Apple Pay, Google Pay) — this is the default for conversion-sensitive merchants per Stripe''s guidance'
+    requirement_level: SHOULD
+  - value: 'Includes Currency Selector Element or Adaptive Pricing for showing prices in customers'' local currency — this is the default for cross-border merchants'
+    requirement_level: SHOULD
+  - value: 'MUST: Uses Payment Element (not Card Element) for the payment method input'
+    requirement_level: MUST
+  - value: 'MUST NOT explicitly hardcode an API version older than 2026-04-22.dahlia. Pass if apiVersion is omitted or set to 2026-04-22.dahlia or later. Fail only if apiVersion is explicitly set to an older version.'
+    requirement_level: MUST
+  - value: 'Configures the Stripe client with apiVersion set to ''2026-04-22.dahlia'' (the latest API version) — either in the Stripe constructor options or equivalent configuration. If no apiVersion is explicitly set anywhere in the code, this expectation PASSES (the SDK defaults to the account''s version). This expectation only FAILS if an older apiVersion is explicitly hardcoded.'
+    requirement_level: SHOULD

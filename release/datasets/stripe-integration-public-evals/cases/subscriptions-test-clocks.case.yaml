@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/subscriptions-test-clocks
+version: 0.2.0
+task: |-
+  I'm building automated lifecycle tests for a Node.js/TypeScript subscription service. A plan has a 7-day trial, renews monthly, sends a trial-ending notification, and becomes delinquent when a renewal payment fails. Build a test-only harness using the stripe npm package and Stripe Test Clocks. Requirements: - Create an isolated clock and Customer - Create the trial subscription on that Customer - Advance through trial warning, trial end, first renewal, and a simulated failed renewal - Wait for each clock advance and generated billing activity to finish before asserting - Capture webhook transitions and clean up test data . Build runner and webhook receiver with defined persistence and test interfaces.
+initial_prompt: |-
+  I'm building automated lifecycle tests for a Node.js/TypeScript subscription service. A plan has a 7-day trial, renews monthly, sends a trial-ending notification, and becomes delinquent when a renewal payment fails. Build a test-only harness using the stripe npm package and Stripe Test Clocks. Requirements: - Create an isolated clock and Customer - Create the trial subscription on that Customer - Advance through trial warning, trial end, first renewal, and a simulated failed renewal - Wait for each clock advance and generated billing activity to finish before asserting - Capture webhook transitions and clean up test data . Build runner and webhook receiver with defined persistence and test interfaces.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Runs only with test-mode credentials and creates the clock with stripe.testHelpers.testClocks.create using a deterministic frozen_time.'
+    requirement_level: MUST
+  - value: 'MUST: Creates the Customer with test_clock: clock.id before creating the trial subscription.'
+    requirement_level: MUST
+  - value: 'MUST: Creates the subscription with a seven-day trial and the intended recurring Price.'
+    requirement_level: MUST
+  - value: 'MUST: Advances only to a later frozen_time and never more than two intervals beyond the current clock time, where the shortest attached subscription interval sets the limit; without subscriptions, the limit is two years.'
+    requirement_level: MUST
+  - value: 'MUST: Waits for status: ''ready'' after every advance before asserting state, mutating fixtures, or advancing again.'
+    requirement_level: MUST
+  - value: 'MUST: Handles test_helpers.test_clock.ready and test_helpers.test_clock.internal_failure, or equivalently polls retrieval to a terminal status.'
+    requirement_level: MUST
+  - value: 'MUST: Uses separate ready-gated advances for the trial-warning boundary, trial end, first monthly renewal, and failed-renewal boundary rather than jumping across all checkpoints.'
+    requirement_level: MUST
+  - value: 'MUST: Installs the deterministic failing test payment method before the renewal intended to fail and does not make that same payment method invalidate earlier success assertions.'
+    requirement_level: MUST
+  - value: 'MUST: Does not attach a Customer with more than three total regular or scheduled subscriptions to the simulation.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures, deduplicates by event.id, and asserts persisted trial, paid-invoice, failed-invoice, and subscription-status transitions without assuming event order.'
+    requirement_level: MUST
+  - value: 'Deletes the clock after the test when supported, or records and relies on its deletes_after cleanup.'
+    requirement_level: SHOULD
