@@ -946,6 +946,14 @@ receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`
 options; the CLI supplies its endpoint and credential binding as documented
 in the [README](../README.md#opencode-setup).
 
+The Codex stream parser accepts the pinned CLI's exact missing-model-metadata
+advisory for the selected model after `thread.started` and before `turn.started`.
+The adapter passes that model on initial and resumed sends; direct
+`parseCodexStream` callers must supply `options.model` to accept it. Codex then
+uses fallback model metadata, which may degrade performance. Other error items
+still fail unless they match the existing invocation-scoped hook or project
+config advisories.
+
 All adapters support explicit logical layouts for external runtimes and reject
 runtime paths that do not match the pinned adapter layout. Built-in adapters and
 completion providers use the Forge package version as their implementation
