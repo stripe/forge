@@ -1,10 +1,13 @@
 # Stripe integration sample experiment
 
-The `stripe-integration-public-evals` dataset contains one case,
-`stripe-integration-public-evals/payments-onetime`: implement hosted Stripe
-Checkout for a $50 photography book, a confirmation page, and a webhook handler.
-The case retains its task, opening prompt, context, ten-turn limit, and eight
-judging criteria. It has no fixture files or setup steps.
+The `stripe-integration-public-evals` dataset contains 69 cases covering
+Connect (19), Payments (24), and Subscriptions (26). Each case includes its task,
+opening prompt, ten-turn limit, and judging criteria with explicit
+requirement levels. The cases have no fixture files or setup steps.
+
+The sample experiment selects `stripe-integration-public-evals/payments-onetime`:
+implement hosted Stripe Checkout for a $50 photography book, a confirmation
+page, and a webhook handler.
 
 ## Layout
 
@@ -14,7 +17,7 @@ release/
 ├── datasets/stripe-integration-public-evals/
 │   ├── manifest.json
 │   └── cases/
-│       └── payments-onetime.case.yaml
+│       └── ... (69 case files)
 └── experiment.yaml
 ```
 
@@ -22,7 +25,8 @@ The release holds only the latest version; earlier versions live in Git
 history. The [dataset payload](./datasets/stripe-integration-public-evals)
 contains the manifest, cases, and any fixtures. The manifest lists each case's
 ID, version, and path; each case file declares the same ID and version. This
-README and the experiment remain outside that payload tree.
+README and the experiment remain outside that payload tree. Copy the whole
+`cases/` directory; dataset loading fails if any listed case file is missing.
 
 The [baseline experiment](experiment.yaml) uses
 `dataset.path: ./datasets/stripe-integration-public-evals` and pins the

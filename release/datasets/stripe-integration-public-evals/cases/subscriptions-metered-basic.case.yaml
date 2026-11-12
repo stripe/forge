@@ -1,0 +1,46 @@
+id: stripe-integration-public-evals/subscriptions-metered-basic
+version: 0.2.0
+task: |-
+  I'm maintaining an existing API analytics product that already uses Stripe Billing Meters. Customers pay a $49 monthly platform fee plus $0.002 per API request, billed in arrears. Build the integration using Node.js/TypeScript and the `stripe` npm package. Requirements: - Create or reuse the Customer and subscribe them to the flat recurring Price plus the existing metered Price - Report API usage to the configured Billing Meter with duplicate-safe event identifiers - Show accrued usage and preview the upcoming invoice - Allow corrected usage without double-billing - Keep invoice and access state synchronized through webhooks Assume the Meter and Prices already exist and this is intentionally a basic Billing Meters integration, not a new Metronome pricing-plan implementation.
+initial_prompt: |-
+  I'm maintaining an existing API analytics product that already uses Stripe Billing Meters. Customers pay a $49 monthly platform fee plus $0.002 per API request, billed in arrears. Build the integration using Node.js/TypeScript and the `stripe` npm package. Requirements: - Create or reuse the Customer and subscribe them to the flat recurring Price plus the existing metered Price - Report API usage to the configured Billing Meter with duplicate-safe event identifiers - Show accrued usage and preview the upcoming invoice - Allow corrected usage without double-billing - Keep invoice and access state synchronized through webhooks Assume the Meter and Prices already exist and this is intentionally a basic Billing Meters integration, not a new Metronome pricing-plan implementation.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Creates or reuses the authenticated account''s Stripe Customer and persists the mapping.'
+    requirement_level: SHOULD
+  - value: 'MUST: Creates one subscription containing the $49 flat recurring Price and the existing metered recurring Price.'
+    requirement_level: MUST
+  - value: 'MUST: Loads both existing Price IDs from server configuration or an allowlist rather than client input.'
+    requirement_level: MUST
+  - value: 'MUST: Reports usage with stripe.billing.meterEvents.create using the configured event_name and the Customer identifier in the event payload.'
+    requirement_level: MUST
+  - value: 'MUST: Includes the numeric usage value and applicable event timestamp in each meter-event payload.'
+    requirement_level: MUST
+  - value: 'MUST: Assigns each logical usage event a stable unique identifier and reuses it on retries.'
+    requirement_level: MUST
+  - value: 'MUST NOT report this Billing Meters usage through legacy subscription item usage records.'
+    requirement_level: MUST
+  - value: 'MUST: Displays accrued usage from the configured Meter''s event-summary data for the Customer and billing interval.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the upcoming invoice with stripe.invoices.createPreview for the Customer or Subscription.'
+    requirement_level: MUST
+  - value: 'MUST: Cancels an incorrect meter event by identifier with a Meter Event Adjustment when it is within the supported adjustment window.'
+    requirement_level: MUST
+  - value: 'MUST: For usage outside the adjustment window or already invoiced, uses an explicit accounting remedy such as a Credit Note or reviewed manual adjustment instead of emitting an arbitrary negative usage event.'
+    requirement_level: MUST
+  - value: 'MUST NOT assume canceling a meter event changes an already-finalized invoice.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable subscription-creation and other billing-resource POST requests.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures from the unmodified raw request body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles customer.subscription.updated, customer.subscription.deleted, invoice.finalized, invoice.paid, and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches the current Subscription or Invoice before updating access or invoice state when event order can affect the result.'
+    requirement_level: MUST
+  - value: 'MUST: Bases local access on current authoritative subscription and invoice state rather than successful usage submission.'
+    requirement_level: MUST

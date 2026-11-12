@@ -1,0 +1,28 @@
+id: stripe-integration-public-evals/payments-fixed-usd-jpy-prices
+version: 0.2.0
+task: |-
+  Sell our poster for exactly $25 in the US and ¥3,600 in Japan. Those are fixed prices, not exchange-rate conversions.
+initial_prompt: |-
+  Sell our poster for exactly $25 in the US and ¥3,600 in Japan. Those are fixed prices, not exchange-rate conversions.
+context: |-
+  We use hosted Checkout with Node/TypeScript. Buyers explicitly choose our US or Japan storefront; the server validates that choice. Each storefront has one approved catalog price and currency. We don't want location detection to override the storefront or exchange rates to change the listed price. The receipt and order must retain the currency actually charged.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Use fixed server-approved USD and JPY catalog amounts for the selected storefront.'
+    requirement_level: MUST
+  - value: 'MUST: Represent $25 as USD `2500` and ¥3,600 as JPY `3600`, without multiplying every currency by 100.'
+    requirement_level: MUST
+  - value: 'MUST: Ensure the Session uses the requested storefront''s currency and fixed amount rather than silently localizing it to another amount/currency.'
+    requirement_level: MUST
+  - value: 'MUST NOT present Adaptive Pricing as a guarantee of the two exact fixed prices.'
+    requirement_level: MUST
+  - value: 'MUST: Persist and display the actual charged currency and amount for the order.'
+    requirement_level: MUST
+  - value: 'Use a shared currency-aware amount helper and tests rather than scattering special-case arithmetic.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

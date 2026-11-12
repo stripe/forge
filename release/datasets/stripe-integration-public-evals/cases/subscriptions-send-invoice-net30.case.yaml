@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/subscriptions-send-invoice-net30
+version: 0.2.0
+task: |-
+  I'm building annual B2B software contracts. Customers should receive a recurring invoice by email and have 30 days to pay by the Hosted Invoice Page instead of being charged automatically. Build subscription creation, invoice tracking, reminders, and access-state synchronization in Node.js/TypeScript with the stripe npm package.
+initial_prompt: |-
+  I'm building annual B2B software contracts. Customers should receive a recurring invoice by email and have 30 days to pay by the Hosted Invoice Page instead of being charged automatically. Build subscription creation, invoice tracking, reminders, and access-state synchronization in Node.js/TypeScript with the stripe npm package.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates the annual recurring subscription with collection_method: ''send_invoice'' and days_until_due: 30.'
+    requirement_level: MUST
+  - value: 'MUST: Uses the annual recurring Price and does not create standalone monthly PaymentIntents for the contract.'
+    requirement_level: MUST
+  - value: 'Ensures the Customer has a deliverable email and enables Stripe''s recurring unpaid-invoice reminders in Billing settings with the intended schedule in code sofar as possible'
+    requirement_level: SHOULD
+  - value: 'Does not present subscription-renewal reminder settings as payment reminders for unpaid send_invoice invoices.'
+    requirement_level: SHOULD
+  - value: 'MUST: Exposes invoice.hosted_invoice_url only after finalization and only to the authenticated customer authorized for that invoice.'
+    requirement_level: MUST
+  - value: 'MUST NOT build a custom card form when the requirement is payment through the Hosted Invoice Page.'
+    requirement_level: MUST
+  - value: 'MUST: Tracks invoice open, paid, void, and uncollectible states plus due_date, and applies an explicit overdue access policy only from authoritative invoice state.'
+    requirement_level: MUST
+  - value: 'MUST: Handles invoice.finalized, invoice.sent, invoice.paid, invoice.voided, and invoice.marked_uncollectible idempotently without assuming delivery order.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures against the raw body before applying invoice or access changes.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for subscription creation and server-side authorization for invoice retrieval.'
+    requirement_level: MUST
