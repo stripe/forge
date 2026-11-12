@@ -1100,6 +1100,31 @@ as an invalid timestamp instead adds a partial-evidence warning. Unsupported
 record diagnostics identify a safe category and line number, never payload
 values.
 
+For unscored transcript preservation, embedding hosts can call the separate
+`recoverClaudeEvidence(input)` API from `@stripe/forge/agents/claude-code`
+after strict normalization fails. It takes the same exact-session input as
+`loadClaudeEvidence`, and preserves recognized user, assistant, and tool
+content around malformed or non-object lines, unknown records, and unsupported
+content blocks. Conversion is atomic per record. Omissions break implicit
+tool-result attachment; explicit call IDs remain usable only when unambiguous.
+Bounded diagnostics summarize omission counts and first physical line numbers
+with `source_invalid` or `source_incomplete` warnings, without native field or
+payload values.
+
+Recovery returns `kind: 'recovered'` with valid ATIF, native provenance, and
+`AtifNormalizationWarning` values, or `kind: 'unavailable'` when a valid
+projection cannot be safely attributed. It never returns `available`; even
+fully supported input receives a preservation-only warning. Recovered evidence
+is outside `AgentNativeEvidenceResult`, and the engine rejects it as a
+score-bearing candidate. Hosts own recovery eligibility, redact the projection,
+and mark completeness `partial`. Compaction, sidechains, conflicting session
+identities, safety limits, and no recoverable steps prevent recovery;
+cancellation propagates. Agent version and model metadata come from the caller,
+which must establish their association with the source. Agent adapters and
+automated execution continue using strict `loadClaudeEvidence`. The producing
+Forge release defines the recovery projection, so hosts replaying native bytes
+must use a producer-compatible implementation.
+
 Claude attachment records with string-valued `rendered[].content` become ATIF
 system steps in native order, retaining rendered text and valid timestamps;
 `extra` identifies the native record and attachment types. They stay excluded
@@ -1687,7 +1712,7 @@ be committed; failures before that point remain fatal.
 | `@stripe/forge/cli` | CLI runner and injectable composition seam for host-owned wrappers |
 | `@stripe/forge/experiment` | Shared local scheduling, checkpoints, resume, automatic scorecards and their parser/types, verified outcomes, and read-only inspection |
 | `@stripe/forge/experiment/cli` | Extensible shared run/resume command stage and operational option definitions |
-| `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, and evidence loader |
+| `@stripe/forge/agents/claude-code` | Claude Code adapter, stream parser, strict evidence loader, and unscored transcript recovery |
 | `@stripe/forge/agents/codex` | Codex adapter, stream parser, and exact-rollout evidence loader |
 | `@stripe/forge/agents/opencode` | Experimental OpenCode Chat Completions adapter, stream parser, and exact-session export loader |
 | `@stripe/forge/providers/anthropic` | Direct Anthropic and Messages-compatible host completion provider |

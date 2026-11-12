@@ -4,10 +4,21 @@ import {
   createNormalizedTrajectory,
   parseAtifTrajectory,
 } from '../../atif/index.ts';
+import type {
+  AgentAdapter,
+  AgentNativeEvidenceResult,
+} from '../../contracts/agent.ts';
 import { createJudgeTranscriptProjection } from '../../evaluation/judgeTranscript.ts';
-import { trajectoryCoversCompletedTurns } from '../../evidence/selection.ts';
+import {
+  selectAgentEvidence,
+  trajectoryCoversCompletedTurns,
+} from '../../evidence/selection.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
-import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
+import {
+  loadClaudeEvidence,
+  loadClaudeNativeArtifact,
+  recoverClaudeEvidence,
+} from './evidence.ts';
 
 function hookSuccessRecord(context: string) {
   return {
@@ -57,6 +68,19 @@ async function nativeEvidence(raw: string) {
     agentVersion: '2.1.273',
     model: 'claude-test',
     signal: new AbortController().signal,
+  });
+}
+
+async function recoveredNativeEvidence(
+  raw: string,
+  signal = new AbortController().signal,
+) {
+  return recoverClaudeEvidence({
+    project: createMemoryWorkspace({ 'session-1.jsonl': raw }).readonly,
+    sessionId: 'session-1',
+    agentVersion: '2.1.273',
+    model: 'claude-test',
+    signal,
   });
 }
 
@@ -1054,6 +1078,577 @@ describe('Claude native evidence', () => {
       });
     });
   }
+
+  for (const [description, omitted, expectedCode] of [
+    [
+      'unknown system event',
+      JSON.stringify({
+        type: 'system',
+        subtype: 'private-kind',
+        payload: 'private-payload',
+      }),
+      'source_incomplete',
+    ],
+    [
+      'unknown non-system event',
+      JSON.stringify({ type: 'private-kind', payload: 'private-payload' }),
+      'source_incomplete',
+    ],
+    [
+      'unsupported attachment',
+      JSON.stringify({
+        type: 'attachment',
+        attachment: { type: 'private-kind', payload: 'private-payload' },
+      }),
+      'source_incomplete',
+    ],
+    ['malformed line', 'private-payload{', 'source_invalid'],
+    ['non-object line', '["private-payload"]', 'source_invalid'],
+  ] as const) {
+    it(`preserves recognized conversation around an omitted ${description}`, async () => {
+      const raw = [
+        '',
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Read the file' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-1',
+                name: 'Read',
+                input: { path: 'file.txt' },
+              },
+            ],
+          },
+        }),
+        omitted,
+        JSON.stringify({
+          type: 'user',
+          message: {
+            content: [
+              { type: 'tool_result', content: 'Unlinked private result' },
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-1',
+                content: 'File content',
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n');
+      const strict = await nativeEvidence(raw);
+      assert.equal(strict.kind, 'unavailable');
+      if (strict.kind === 'unavailable')
+        assert.equal(strict.reason.code, expectedCode);
+      const recovered = await recoveredNativeEvidence(raw);
+      assert.equal(recovered.kind, 'recovered');
+      if (recovered.kind !== 'recovered') return;
+      assert.deepEqual(
+        recovered.trajectory.steps.map(({ source, message }) => ({
+          source,
+          message,
+        })),
+        [
+          { source: 'user', message: 'Read the file' },
+          { source: 'agent', message: '' },
+          { source: 'agent', message: 'Done' },
+        ],
+      );
+      assert.deepEqual(recovered.trajectory.steps[1]?.observation?.results, [
+        { source_call_id: 'call-1', content: 'File content' },
+      ]);
+      assert.ok(
+        recovered.warnings.some(
+          ({ code, path }) => code === expectedCode && path === 'line:4',
+        ),
+      );
+      assert.doesNotMatch(
+        JSON.stringify(recovered),
+        /private-kind|private-payload|Unlinked private result/,
+      );
+      assert.throws(
+        () =>
+          selectAgentEvidence({
+            agent: { id: 'claude-code', version: 'test' } as AgentAdapter,
+            identity: { name: 'claude-code', version: '2.1.273' },
+            model: 'claude-test',
+            sessionId: 'session-1',
+            completedTurns: [
+              { user: 'Read the file', assistant: 'Done', toolCalls: [] },
+            ],
+            collected: recovered as unknown as AgentNativeEvidenceResult,
+          }),
+        /invalid native evidence result/,
+      );
+    });
+  }
+
+  it('retains supported user, reasoning, tool, and response blocks around unsupported blocks', async () => {
+    const raw = [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: {
+          content: [
+            { type: 'text', text: 'Do the task' },
+            { type: 'image', payload: 'private-block' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'thinking', thinking: 'Reasoning' },
+            { type: 'text', text: 'Reading' },
+            { type: 'future', payload: 'private-block' },
+            {
+              type: 'tool_use',
+              id: 'call-1',
+              name: 'Read',
+              input: { path: 'file.txt' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'future', payload: 'private-block' },
+            {
+              type: 'tool_result',
+              tool_use_id: 'call-1',
+              content: 'File content',
+            },
+            { type: 'text', text: 'Continue' },
+          ],
+        },
+      },
+      { type: 'assistant', message: { content: 'Done' } },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    assert.equal((await nativeEvidence(raw)).kind, 'unavailable');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    const trajectory = parseAtifTrajectory(recovered.trajectory);
+    assert.deepEqual(
+      trajectory.steps.map(({ source, message }) => ({ source, message })),
+      [
+        { source: 'user', message: 'Do the task' },
+        { source: 'agent', message: 'Reading' },
+        { source: 'user', message: 'Continue' },
+        { source: 'agent', message: 'Done' },
+      ],
+    );
+    assert.equal(trajectory.steps[1]?.reasoning_content, 'Reasoning');
+    assert.deepEqual(trajectory.steps[1]?.tool_calls, [
+      {
+        tool_call_id: 'call-1',
+        function_name: 'Read',
+        arguments: { path: 'file.txt' },
+      },
+    ]);
+    assert.deepEqual(trajectory.steps[1]?.observation?.results, [
+      { source_call_id: 'call-1', content: 'File content' },
+    ]);
+    assert.ok(
+      recovered.warnings.some(
+        ({ code, message, path }) =>
+          code === 'source_incomplete' &&
+          message.includes('count: 3') &&
+          path === 'line:1',
+      ),
+    );
+    assert.doesNotMatch(JSON.stringify(recovered), /private-block/);
+  });
+
+  it('breaks implicit result links across known context and bookkeeping omissions', async () => {
+    for (const omitted of [
+      { type: 'attachment', attachment: { type: 'file', path: 'file.txt' } },
+      {
+        type: 'attachment',
+        attachment: { type: 'prompt_snapshot', systemPrompt: ['Context'] },
+      },
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'batching_reminder_sent',
+          model: 'claude-test',
+          text: 'Reminder',
+        },
+      },
+    ]) {
+      const raw = [
+        { type: 'user', message: { content: 'Read the file' } },
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'tool_use', id: 'call-1', name: 'Read', input: {} },
+            ],
+          },
+        },
+        omitted,
+        {
+          type: 'user',
+          message: {
+            content: [
+              { type: 'tool_result', content: 'Unlinked result' },
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-1',
+                content: 'Linked result',
+              },
+            ],
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n');
+      const recovered = await recoveredNativeEvidence(raw);
+      assert.equal(recovered.kind, 'recovered');
+      if (recovered.kind !== 'recovered') continue;
+      assert.deepEqual(recovered.trajectory.steps[1]?.observation?.results, [
+        { source_call_id: 'call-1', content: 'Linked result' },
+      ]);
+      assert.doesNotMatch(JSON.stringify(recovered), /Unlinked result/);
+    }
+  });
+
+  it('omits ambiguous tool identities and results without losing surrounding text', async () => {
+    const raw = [
+      { type: 'user', message: { content: 'Read both files' } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'First response' },
+            { type: 'tool_use', id: 'duplicate', name: 'Read', input: {} },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'duplicate',
+              content: 'Ambiguous result',
+            },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'Second response' },
+            { type: 'tool_use', id: 'duplicate', name: 'Read', input: {} },
+            { type: 'tool_use', id: 'unique', name: 'Read', input: {} },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'unique',
+              content: 'Unique result',
+            },
+          ],
+        },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    assert.equal((await nativeEvidence(raw)).kind, 'unavailable');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    assert.deepEqual(
+      recovered.trajectory.steps.map(({ message }) => message),
+      ['Read both files', 'First response', 'Second response'],
+    );
+    assert.equal(recovered.trajectory.steps[1]?.tool_calls, undefined);
+    assert.equal(recovered.trajectory.steps[1]?.observation, undefined);
+    assert.deepEqual(recovered.trajectory.steps[2]?.tool_calls, [
+      { tool_call_id: 'unique', function_name: 'Read', arguments: {} },
+    ]);
+    assert.deepEqual(recovered.trajectory.steps[2]?.observation?.results, [
+      { source_call_id: 'unique', content: 'Unique result' },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(recovered.trajectory),
+      /duplicate|Ambiguous result/,
+    );
+  });
+
+  it('omits an invalid record atomically without retaining its partially rendered context', async () => {
+    const raw = [
+      { type: 'user', message: { content: 'Do the task' } },
+      {
+        type: 'attachment',
+        attachment: { type: 'context' },
+        rendered: [{ content: 'Uncommitted context' }, { content: 42 }],
+      },
+      { type: 'assistant', message: { content: 'Done' } },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    assert.deepEqual(
+      recovered.trajectory.steps.map(({ step_id, message }) => ({
+        step_id,
+        message,
+      })),
+      [
+        { step_id: 1, message: 'Do the task' },
+        { step_id: 2, message: 'Done' },
+      ],
+    );
+    assert.ok(
+      recovered.warnings.some(
+        ({ code, path }) => code === 'source_incomplete' && path === 'line:2',
+      ),
+    );
+    assert.doesNotMatch(JSON.stringify(recovered), /Uncommitted context/);
+  });
+
+  it('always marks preservation results incomplete, including fully supported input', async () => {
+    const raw = [
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: 'Do the task' },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: 'Done' },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    const strict = await nativeEvidence(raw);
+    assert.equal(strict.kind, 'available');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (strict.kind !== 'available' || recovered.kind !== 'recovered') return;
+    assert.deepEqual(recovered.trajectory, strict.trajectory);
+    const normalized = createNormalizedTrajectory({
+      trajectory: recovered.trajectory,
+      provenance: {
+        source: recovered.source,
+        adapter: { id: 'claude-code', version: 'test' },
+      },
+      completeness: 'partial',
+      warnings: recovered.warnings,
+    });
+    assert.equal(normalized.warnings[0]?.code, 'source_incomplete');
+  });
+
+  it('aggregates repeated recovery diagnostics using physical line numbers', async () => {
+    const raw = [
+      '',
+      JSON.stringify({ type: 'user', message: { content: 'Do the task' } }),
+      ...Array.from({ length: 300 }, () =>
+        JSON.stringify({ type: 'future-private', payload: 'private-payload' }),
+      ),
+      ...Array.from({ length: 300 }, () => '{private-payload'),
+      JSON.stringify({ type: 'assistant', message: { content: 'Done' } }),
+    ].join('\n');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    assert.equal(recovered.warnings.length, 3);
+    assert.deepEqual(
+      recovered.warnings.slice(1).map(({ code, path }) => ({ code, path })),
+      [
+        { code: 'source_invalid', path: 'line:303' },
+        { code: 'source_incomplete', path: 'line:3' },
+      ],
+    );
+    assert.ok(
+      recovered.warnings
+        .slice(1)
+        .every(({ message }) => message.includes('count: 300')),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(recovered),
+      /future-private|private-payload/,
+    );
+  });
+
+  it('returns unavailable when no understood valid steps remain', async () => {
+    for (const raw of [
+      '',
+      '{',
+      '[]',
+      '{"type":"future"}',
+      '{"type":"assistant","message":{"content":[{"type":"future"}]}}',
+    ]) {
+      assert.equal((await recoveredNativeEvidence(raw)).kind, 'unavailable');
+    }
+    // Preservation does not fabricate a second turn to meet strict coverage.
+    const userOnly = await recoveredNativeEvidence(
+      '{"type":"user","message":{"content":"Unanswered task"}}',
+    );
+    assert.equal(userOnly.kind, 'recovered');
+    if (userOnly.kind === 'recovered')
+      assert.equal(userOnly.trajectory.steps.length, 1);
+  });
+
+  it('records omitted redacted-only assistant records without inventing a response', async () => {
+    const raw = [
+      { type: 'user', message: { content: 'Task' } },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'redacted_thinking', data: 'private' }] },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n');
+    const recovered = await recoveredNativeEvidence(raw);
+    assert.equal(recovered.kind, 'recovered');
+    if (recovered.kind !== 'recovered') return;
+    assert.equal(recovered.trajectory.steps.length, 1);
+    assert.ok(
+      recovered.warnings.some(
+        ({ code, message, path }) =>
+          code === 'source_incomplete' &&
+          message.includes('count: 1') &&
+          path === 'line:2',
+      ),
+    );
+    assert.doesNotMatch(JSON.stringify(recovered), /private/);
+  });
+
+  for (const { description, raw } of [
+    {
+      description: 'mixed session identity',
+      raw: JSON.stringify({ type: 'future', sessionId: 'another-session' }),
+    },
+    {
+      description: 'conflicting session aliases',
+      raw: JSON.stringify({
+        type: 'future',
+        sessionId: 'session-1',
+        session_id: 'another-session',
+      }),
+    },
+    {
+      description: 'invalid session identity',
+      raw: JSON.stringify({ type: 'future', sessionId: 42 }),
+    },
+    {
+      description: 'compaction boundary',
+      raw: JSON.stringify({ type: 'system', subtype: 'compact_boundary' }),
+    },
+    {
+      description: 'compact summary',
+      raw: JSON.stringify({ type: 'future', isCompactSummary: true }),
+    },
+    {
+      description: 'sidechain',
+      raw: JSON.stringify({ type: 'future', isSidechain: true }),
+    },
+    {
+      description: 'oversized line',
+      raw: JSON.stringify({ type: 'system', content: 'x'.repeat(1024 * 1024) }),
+    },
+    { description: 'excessive line count', raw: '\n'.repeat(100_000) },
+    {
+      description: 'unsafe JSON graph',
+      raw:
+        '{"type":"future","payload":' +
+        '['.repeat(70) +
+        '0' +
+        ']'.repeat(70) +
+        '}',
+    },
+    {
+      description: 'aggregate ATIF graph overflow',
+      raw: Array.from({ length: 30_000 }, () =>
+        JSON.stringify({ type: 'user', message: { content: 'Task' } }),
+      ).join('\n'),
+    },
+  ]) {
+    it(`does not recover ${description}`, async () => {
+      const conversation = [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        }),
+        raw,
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        }),
+      ].join('\n');
+      assert.equal(
+        (await recoveredNativeEvidence(conversation)).kind,
+        'unavailable',
+      );
+    });
+  }
+
+  it('refuses source byte-limit overflow and propagates cancellation during reads', async () => {
+    const controller = new AbortController();
+    const input = {
+      project: createMemoryWorkspace({ 'session-1.jsonl': '{}' }).readonly,
+      sessionId: 'session-1',
+      agentVersion: '2.1.273',
+      model: 'claude-test',
+      signal: controller.signal,
+    };
+    const overflowing = await recoverClaudeEvidence({
+      ...input,
+      project: {
+        ...input.project,
+        readFile: async () => new Uint8Array(16 * 1024 * 1024 + 1),
+      },
+    });
+    assert.equal(overflowing.kind, 'unavailable');
+    const reason = new Error('cancelled');
+    await assert.rejects(
+      recoverClaudeEvidence({
+        ...input,
+        project: {
+          ...input.project,
+          async readFile() {
+            controller.abort(reason);
+            return new Uint8Array();
+          },
+        },
+      }),
+      (error) => error === reason,
+    );
+    await assert.rejects(
+      recoverClaudeEvidence(input),
+      (error) => error === reason,
+    );
+  });
 
   it('ignores meta user records before validating their conversation blocks', async () => {
     const evidence = await nativeEvidence(

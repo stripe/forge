@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
+import {
+  type ClaudeEvidenceRecoveryResult,
+  type ClaudeRecoveredEvidence,
+  type LoadClaudeEvidenceInput,
+  loadClaudeEvidence,
+  recoverClaudeEvidence,
+} from '../src/agents/claude-code/index.ts';
+import type {
+  AtifNormalizationWarning,
+  AtifTrajectoryV1_8,
+} from '../src/atif/index.ts';
 import type { DefaultCliCompositionOptions } from '../src/cli.ts';
 import type {
   ExperimentRunArtifact,
@@ -29,6 +40,23 @@ import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
 
 describe('experiment public entry points', () => {
+  it('keeps recovered Claude transcripts outside score-bearing contracts', () => {
+    const strict: (
+      input: LoadClaudeEvidenceInput,
+    ) => Promise<root.AgentNativeEvidenceResult> = loadClaudeEvidence;
+    const recover: (
+      input: LoadClaudeEvidenceInput,
+    ) => Promise<ClaudeEvidenceRecoveryResult> = recoverClaudeEvidence;
+    const _acceptsRecovery = (recovered: ClaudeRecoveredEvidence): void => {
+      const _trajectory: AtifTrajectoryV1_8 = recovered.trajectory;
+      const _warnings: readonly AtifNormalizationWarning[] = recovered.warnings;
+      // @ts-expect-error Preservation-only projections cannot enter scoring.
+      const _graded: root.AgentNativeEvidenceResult = recovered;
+    };
+    assert.equal(typeof strict, 'function');
+    assert.equal(typeof recover, 'function');
+  });
+
   it('exports versioned dataset case entries with their paths', () => {
     const entry: root.DatasetManifestCaseV1 = {
       id: 'first',

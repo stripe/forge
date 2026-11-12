@@ -73,6 +73,26 @@ describe('@stripe/forge package root', () => {
       ].sort(),
     );
   });
+
+  it('keeps Claude collection and preservation on their documented subpath', async () => {
+    assert.equal('loadClaudeEvidence' in rootExports, false);
+    assert.equal('recoverClaudeEvidence' in rootExports, false);
+    const claude = await import('./agents/claude-code/index.ts');
+    assert.deepEqual(
+      Object.keys(claude).sort(),
+      [
+        'CLAUDE_PLUGIN_STATE_ID',
+        'CLAUDE_PLUGIN_STATE_PATH',
+        'CLAUDE_PROJECTS_STATE_ID',
+        'ClaudeStreamError',
+        'createClaudeCodeAdapter',
+        'loadClaudeEvidence',
+        'parseClaudeStream',
+        'recoverClaudeEvidence',
+      ].sort(),
+    );
+  });
+
   it('keeps experiment run orchestration on its documented subpath', () => {
     assert.equal('runExperiment' in rootExports, false);
     assert.equal('readExperimentRunSelections' in rootExports, false);

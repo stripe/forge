@@ -1,6 +1,7 @@
 import {
   ATIF_SCHEMA_VERSION,
   type AtifAgentStep,
+  type AtifNormalizationWarning,
   type AtifObservationResult,
   type AtifStep,
   type AtifSystemStep,
@@ -11,9 +12,12 @@ import {
   type JsonValue,
   parseAtifTrajectory,
 } from '../../atif/index.ts';
+import { assertBoundedJsonValue } from '../../atif/parser.ts';
 import type {
   AgentNativeArtifact,
   AgentNativeEvidenceResult,
+  AgentNativeEvidenceSource,
+  AgentNativeEvidenceUnavailable,
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
@@ -106,7 +110,7 @@ interface SessionRecord {
 }
 
 interface LocatedSessionRecord {
-  record: SessionRecord;
+  record: SessionRecord | undefined;
   line: number;
 }
 
@@ -116,6 +120,28 @@ export interface LoadClaudeEvidenceInput {
   readonly agentVersion: string;
   readonly model: string;
   readonly signal: AbortSignal;
+}
+
+/** A preservation-only projection, never a score-bearing evidence candidate. */
+export interface ClaudeRecoveredEvidence {
+  readonly kind: 'recovered';
+  readonly trajectory: AtifTrajectoryV1_8;
+  readonly source: AgentNativeEvidenceSource;
+  readonly warnings: readonly AtifNormalizationWarning[];
+}
+
+export type ClaudeEvidenceRecoveryResult =
+  | ClaudeRecoveredEvidence
+  | AgentNativeEvidenceUnavailable;
+
+type RecoveryOmissionKind = 'invalid_lines' | 'records' | 'blocks';
+type RecoveryOmissions = Map<RecoveryOmissionKind, BookkeepingOmission>;
+
+function unavailable(
+  code: AgentNativeEvidenceUnavailable['reason']['code'],
+  message: string,
+): AgentNativeEvidenceUnavailable {
+  return { kind: 'unavailable', reason: { code, message } };
 }
 
 /** Capture the exact selected Claude project JSONL without transforming it. */
@@ -148,14 +174,6 @@ export async function loadClaudeNativeArtifact(
 export async function loadClaudeEvidence(
   input: LoadClaudeEvidenceInput,
 ): Promise<AgentNativeEvidenceResult> {
-  const unavailable = (
-    code: 'source_unavailable' | 'source_invalid' | 'source_incomplete',
-    message: string,
-  ): AgentNativeEvidenceResult => ({
-    kind: 'unavailable',
-    reason: { code, message },
-  });
-
   if (!input.project || !isSafeSessionId(input.sessionId)) {
     return unavailable(
       'source_unavailable',
@@ -203,6 +221,72 @@ export async function loadClaudeEvidence(
   }
 }
 
+/**
+ * Preserve understood content from the exact session after strict normalization
+ * fails. This API never produces an available or score-bearing candidate.
+ * Callers own redaction and archival policy, including partial completeness.
+ */
+export async function recoverClaudeEvidence(
+  input: LoadClaudeEvidenceInput,
+): Promise<ClaudeEvidenceRecoveryResult> {
+  input.signal.throwIfAborted();
+  if (!input.project || !isSafeSessionId(input.sessionId)) {
+    return unavailable(
+      'source_unavailable',
+      'The exact Claude session is unavailable.',
+    );
+  }
+  try {
+    const bytes = await readExactSessionBytes(
+      input.project,
+      input.sessionId,
+      input.signal,
+    );
+    if (bytes === undefined) {
+      return unavailable(
+        'source_unavailable',
+        'The exact Claude session is unavailable.',
+      );
+    }
+    const omissions: RecoveryOmissions = new Map();
+    const records = parseJsonl(
+      Buffer.from(bytes).toString('utf8'),
+      input.signal,
+      omissions,
+    );
+    const converted = recordsToAtif(records, input, omissions);
+    const trajectory = parseAtifTrajectory(converted.trajectory);
+    input.signal.throwIfAborted();
+    return {
+      kind: 'recovered',
+      trajectory,
+      source: {
+        kind: 'native_log',
+        format: 'claude-code-jsonl',
+        sessionId: input.sessionId,
+      },
+      warnings: [
+        {
+          code: 'source_incomplete',
+          message:
+            'Recovered Claude evidence is preservation-only; complete conversation coverage is not established.',
+        },
+        ...aggregateRecoveryWarnings(converted.warnings),
+        ...recoveryWarnings(omissions),
+      ],
+    };
+  } catch (error) {
+    if (input.signal.aborted) input.signal.throwIfAborted();
+    return unavailable(
+      error instanceof ClaudeSessionLimitError ||
+        error instanceof ClaudeSessionIncompleteError
+        ? 'source_incomplete'
+        : 'source_invalid',
+      safeSessionFailure(error),
+    );
+  }
+}
+
 async function readExactSessionBytes(
   project: ReadonlyWorkspace,
   sessionId: string,
@@ -216,39 +300,89 @@ async function readExactSessionBytes(
     maxBytes: MAX_SESSION_BYTES,
   });
   signal.throwIfAborted();
+  if (bytes.byteLength > MAX_SESSION_BYTES) {
+    throw new ClaudeSessionLimitError(
+      'Claude session exceeded its byte limit.',
+    );
+  }
   return bytes;
 }
 
 function recordsToAtif(
   records: readonly LocatedSessionRecord[],
   input: LoadClaudeEvidenceInput,
-): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
+  recoveryOmissions?: RecoveryOmissions,
+): {
+  trajectory: AtifTrajectoryV1_8;
+  warnings: AgentNativeEvidenceWarning[];
+} {
   const steps: AtifStep[] = [];
   const warnings: AgentNativeEvidenceWarning[] = [];
   const bookkeepingOmissions: BookkeepingOmissions = new Map();
+  const nativeToolCallCounts = recoveryOmissions
+    ? recoveryToolCallCounts(records, input.sessionId)
+    : undefined;
   let reportedSessionId: string | undefined;
   let lastAgentStep: AtifAgentStep | undefined;
   const toolStepsByCallId = new Map<string, AtifAgentStep>();
 
+  // Commit steps, call identities, and observations together only after a
+  // complete record converts. Omitting a failed record cannot alter prior steps.
+  let pendingSteps: AtifStep[] = [];
+  let pendingToolSteps = new Map<string, AtifAgentStep>();
+  let pendingObservations = new Map<AtifAgentStep, AtifObservationResult[]>();
+  let pendingLastAgentStep: AtifAgentStep | undefined;
   const addStep = (step: Omit<AtifStep, 'step_id'>): void => {
-    const completed = { ...step, step_id: steps.length + 1 } as AtifStep;
-    steps.push(completed);
-    lastAgentStep = completed.source === 'agent' ? completed : undefined;
+    const completed = {
+      ...step,
+      step_id: steps.length + pendingSteps.length + 1,
+    } as AtifStep;
     if (completed.source === 'agent') {
+      const callIds = new Set<string>();
       for (const call of completed.tool_calls ?? []) {
-        if (toolStepsByCallId.has(call.tool_call_id)) {
+        if (
+          toolStepsByCallId.has(call.tool_call_id) ||
+          pendingToolSteps.has(call.tool_call_id) ||
+          callIds.has(call.tool_call_id)
+        ) {
           throw new ClaudeSessionIncompleteError(
             'A Claude tool-call identity was reused across native steps.',
           );
         }
-        toolStepsByCallId.set(call.tool_call_id, completed);
+        callIds.add(call.tool_call_id);
+      }
+      for (const call of completed.tool_calls ?? []) {
+        // Generated IDs represent missing native identities and cannot establish
+        // an explicit link from a later native tool result.
+        if (
+          !nativeToolCallCounts ||
+          nativeToolCallCounts.get(call.tool_call_id) === 1
+        ) {
+          pendingToolSteps.set(call.tool_call_id, completed);
+        }
       }
     }
+    pendingSteps.push(completed);
+    pendingLastAgentStep = completed.source === 'agent' ? completed : undefined;
+  };
+  const addObservation = (
+    step: AtifAgentStep,
+    result: AtifObservationResult,
+  ): void => {
+    const pending = pendingObservations.get(step) ?? [];
+    pending.push(result);
+    pendingObservations.set(step, pending);
   };
 
-  for (const [position, { record, line }] of records.entries()) {
+  for (const [position, located] of records.entries()) {
+    const { line } = located;
+    let { record } = located;
     const recordIndex = line - 1;
     input.signal.throwIfAborted();
+    if (record === undefined) {
+      lastAgentStep = undefined;
+      continue;
+    }
     if (
       record.isCompactSummary === true ||
       record.subtype === 'compact_boundary'
@@ -273,127 +407,177 @@ function recordsToAtif(
         );
       }
     }
-    if (record.type === 'user') {
-      const content = record.message?.content;
-      if (record.isMeta === true) {
-        if (Array.isArray(content)) {
-          attachToolResults(
-            lastAgentStep,
-            toolStepsByCallId,
-            content.filter((block) => block.type === 'tool_result'),
-            warnings,
-            recordIndex,
+    const omissionCount = recoveryOmissionCount(recoveryOmissions);
+    const bookkeepingCount = recoveryOmissionCount(bookkeepingOmissions);
+    if (recoveryOmissions && nativeToolCallCounts) {
+      record = recoverConversationBlocks(
+        record,
+        nativeToolCallCounts,
+        recoveryOmissions,
+        line,
+      );
+    }
+    if (record === undefined) {
+      lastAgentStep = undefined;
+      continue;
+    }
+    const omittedBlocks =
+      recoveryOmissionCount(recoveryOmissions) !== omissionCount;
+    pendingSteps = [];
+    pendingToolSteps = new Map();
+    pendingObservations = new Map();
+    pendingLastAgentStep = omittedBlocks ? undefined : lastAgentStep;
+    const warningCount = warnings.length;
+    try {
+      if (record.type === 'user') {
+        const content = record.message?.content;
+        if (record.isMeta === true) {
+          if (Array.isArray(content)) {
+            attachToolResults(
+              pendingLastAgentStep,
+              toolStepsByCallId,
+              content.filter((block) => block.type === 'tool_result'),
+              warnings,
+              recordIndex,
+              addObservation,
+              recoveryOmissions !== undefined,
+            );
+          }
+        } else {
+          if (typeof content === 'string') {
+            addStep({
+              source: 'user',
+              message: content,
+              ...timestampField(record.timestamp, warnings, recordIndex),
+            });
+          } else if (Array.isArray(content)) {
+            assertSupportedUserBlocks(content);
+            const toolResults = content.filter(
+              (block) => block.type === 'tool_result',
+            );
+            attachToolResults(
+              pendingLastAgentStep,
+              toolStepsByCallId,
+              toolResults,
+              warnings,
+              recordIndex,
+              addObservation,
+              recoveryOmissions !== undefined,
+            );
+            const userText = content
+              .filter(
+                (block) =>
+                  block.type === 'text' && typeof block.text === 'string',
+              )
+              .map((block) => block.text as string)
+              .join('\n');
+            if (userText) {
+              addStep({
+                source: 'user',
+                message: userText,
+                ...timestampField(record.timestamp, warnings, recordIndex),
+              });
+            }
+          } else {
+            throw new ClaudeSessionIncompleteError(
+              'A Claude user record had unsupported conversation content.',
+            );
+          }
+        }
+      } else if (record.type === 'assistant') {
+        const content = record.message?.content;
+        if (
+          content !== undefined &&
+          typeof content !== 'string' &&
+          !Array.isArray(content)
+        ) {
+          throw new ClaudeSessionIncompleteError(
+            'A Claude assistant record had unsupported conversation content.',
           );
         }
-        continue;
-      }
-      if (typeof content === 'string') {
-        addStep({
-          source: 'user',
-          message: content,
-          ...timestampField(record.timestamp, warnings, recordIndex),
-        });
-      } else if (Array.isArray(content)) {
-        assertSupportedUserBlocks(content);
-        const toolResults = content.filter(
-          (block) => block.type === 'tool_result',
-        );
-        attachToolResults(
-          lastAgentStep,
-          toolStepsByCallId,
-          toolResults,
-          warnings,
-          recordIndex,
-        );
-        const userText = content
+        const blocks =
+          typeof content === 'string'
+            ? [{ type: 'text', text: content }]
+            : Array.isArray(content)
+              ? content
+              : [];
+        assertSupportedAssistantBlocks(blocks, warnings, recordIndex);
+        const text = blocks
           .filter(
             (block) => block.type === 'text' && typeof block.text === 'string',
           )
           .map((block) => block.text as string)
           .join('\n');
-        if (userText) {
-          addStep({
-            source: 'user',
-            message: userText,
-            ...timestampField(record.timestamp, warnings, recordIndex),
-          });
-        }
+        const reasoning = blocks
+          .filter(
+            (block) =>
+              block.type === 'thinking' && typeof block.thinking === 'string',
+          )
+          .map((block) => block.thinking as string)
+          .join('\n');
+        const toolCalls = blocks
+          .filter(
+            (block) =>
+              block.type === 'tool_use' && typeof block.name === 'string',
+          )
+          .map(
+            (block, index): AtifToolCall => ({
+              tool_call_id:
+                typeof block.id === 'string'
+                  ? block.id
+                  : recoveredCallId(
+                      steps.length + pendingSteps.length + 1,
+                      index + 1,
+                      nativeToolCallCounts,
+                    ),
+              function_name: block.name as string,
+              arguments: jsonObject(
+                block.input,
+                warnings,
+                `line:${recordIndex + 1}`,
+              ),
+            }),
+          );
+        addStep({
+          source: 'agent',
+          model_name: input.model,
+          message: text,
+          ...(reasoning ? { reasoning_content: reasoning } : {}),
+          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          ...timestampField(record.timestamp, warnings, recordIndex),
+        });
+      } else if (record.type !== undefined) {
+        handleNonConversationRecord(
+          record,
+          records[position + 1]?.record,
+          warnings,
+          bookkeepingOmissions,
+          recordIndex,
+          addStep,
+        );
       } else {
         throw new ClaudeSessionIncompleteError(
-          'A Claude user record had unsupported conversation content.',
+          'A Claude session record did not identify its type.',
         );
       }
-    } else if (record.type === 'assistant') {
-      const content = record.message?.content;
-      if (
-        content !== undefined &&
-        typeof content !== 'string' &&
-        !Array.isArray(content)
-      ) {
-        throw new ClaudeSessionIncompleteError(
-          'A Claude assistant record had unsupported conversation content.',
-        );
+      for (const [step, results] of pendingObservations) {
+        step.observation ??= { results: [] };
+        for (const result of results) step.observation.results.push(result);
       }
-      const blocks =
-        typeof content === 'string'
-          ? [{ type: 'text', text: content }]
-          : Array.isArray(content)
-            ? content
-            : [];
-      assertSupportedAssistantBlocks(blocks, warnings, recordIndex);
-      const text = blocks
-        .filter(
-          (block) => block.type === 'text' && typeof block.text === 'string',
-        )
-        .map((block) => block.text as string)
-        .join('\n');
-      const reasoning = blocks
-        .filter(
-          (block) =>
-            block.type === 'thinking' && typeof block.thinking === 'string',
-        )
-        .map((block) => block.thinking as string)
-        .join('\n');
-      const toolCalls = blocks
-        .filter(
-          (block) =>
-            block.type === 'tool_use' && typeof block.name === 'string',
-        )
-        .map(
-          (block, index): AtifToolCall => ({
-            tool_call_id:
-              typeof block.id === 'string'
-                ? block.id
-                : `claude-call-${steps.length + 1}-${index + 1}`,
-            function_name: block.name as string,
-            arguments: jsonObject(
-              block.input,
-              warnings,
-              `line:${recordIndex + 1}`,
-            ),
-          }),
-        );
-      addStep({
-        source: 'agent',
-        model_name: input.model,
-        message: text,
-        ...(reasoning ? { reasoning_content: reasoning } : {}),
-        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-        ...timestampField(record.timestamp, warnings, recordIndex),
-      });
-    } else if (record.type !== undefined) {
-      handleNonConversationRecord(
-        record,
-        records[position + 1]?.record,
-        warnings,
-        bookkeepingOmissions,
-        recordIndex,
-        addStep,
-      );
-    } else {
-      throw new ClaudeSessionIncompleteError(
-        'A Claude session record did not identify its type.',
-      );
+      steps.push(...pendingSteps);
+      for (const [id, step] of pendingToolSteps)
+        toolStepsByCallId.set(id, step);
+      const omittedContent =
+        omittedBlocks ||
+        (recoveryOmissions !== undefined &&
+          (warnings.length > warningCount ||
+            recoveryOmissionCount(bookkeepingOmissions) > bookkeepingCount));
+      lastAgentStep = omittedContent ? undefined : pendingLastAgentStep;
+    } catch (error) {
+      if (!recoveryOmissions || input.signal.aborted) throw error;
+      warnings.length = warningCount;
+      recordRecoveryOmission(recoveryOmissions, 'records', line);
+      lastAgentStep = undefined;
     }
   }
 
@@ -404,8 +588,10 @@ function recordsToAtif(
     throw new Error('Claude session ID does not match the selected session.');
   }
   if (
-    !steps.some(({ source }) => source === 'user') ||
-    !steps.some(({ source }) => source === 'agent')
+    recoveryOmissions
+      ? steps.length === 0
+      : !steps.some(({ source }) => source === 'user') ||
+        !steps.some(({ source }) => source === 'agent')
   ) {
     throw new Error('Claude session contains no complete conversation.');
   }
@@ -484,6 +670,8 @@ function attachToolResults(
   blocks: readonly SessionBlock[],
   warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
+  addObservation: (step: AtifAgentStep, result: AtifObservationResult) => void,
+  resetFallbackOnOmission: boolean,
 ): void {
   if (blocks.length === 0) return;
   for (const block of blocks) {
@@ -499,6 +687,7 @@ function attachToolResults(
         message: 'A Claude tool result referenced an unknown ATIF tool call.',
         path: `line:${recordIndex + 1}`,
       });
+      if (resetFallbackOnOmission) fallbackStep = undefined;
       continue;
     }
     const step = matchedStep ?? fallbackStep;
@@ -519,13 +708,15 @@ function attachToolResults(
       });
       continue;
     }
-    step.observation = {
-      results: [...(step.observation?.results ?? []), result],
-    };
+    addObservation(step, result);
   }
 }
 
-function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
+function parseJsonl(
+  raw: string,
+  signal: AbortSignal,
+  recoveryOmissions?: RecoveryOmissions,
+): LocatedSessionRecord[] {
   const records: LocatedSessionRecord[] = [];
   let lineStart = 0;
   let lineCount = 0;
@@ -550,14 +741,187 @@ function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
     try {
       value = JSON.parse(line);
     } catch {
+      if (recoveryOmissions) {
+        recordRecoveryOmission(recoveryOmissions, 'invalid_lines', lineCount);
+        records.push({ record: undefined, line: lineCount });
+        continue;
+      }
       throw new Error('Claude session contains malformed JSONL.');
     }
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      if (recoveryOmissions) {
+        recordRecoveryOmission(recoveryOmissions, 'invalid_lines', lineCount);
+        records.push({ record: undefined, line: lineCount });
+        continue;
+      }
       throw new Error('Claude session contains a non-object record.');
+    }
+    if (recoveryOmissions) {
+      // Native bytes remain bounded before this preflight. Unsafe JSON graphs
+      // are fatal even when their record would otherwise be omitted.
+      try {
+        assertBoundedJsonValue(value);
+      } catch {
+        throw new ClaudeSessionLimitError(
+          'Claude session contained unsafe JSON.',
+        );
+      }
     }
     records.push({ record: value as SessionRecord, line: lineCount });
   }
   return records;
+}
+
+function recordRecoveryOmission(
+  omissions: RecoveryOmissions,
+  kind: RecoveryOmissionKind,
+  line: number,
+): void {
+  const previous = omissions.get(kind);
+  omissions.set(kind, {
+    count: (previous?.count ?? 0) + 1,
+    firstLine: previous?.firstLine ?? line,
+  });
+}
+
+function recoveryOmissionCount(
+  omissions: ReadonlyMap<string, BookkeepingOmission> | undefined,
+): number {
+  return Array.from(omissions?.values() ?? []).reduce(
+    (total, { count }) => total + count,
+    0,
+  );
+}
+
+function recoveryWarnings(
+  omissions: RecoveryOmissions,
+): AtifNormalizationWarning[] {
+  const messages: Record<RecoveryOmissionKind, string> = {
+    invalid_lines:
+      'Malformed or non-object Claude JSONL lines were omitted from recovered ATIF',
+    records: 'Unsupported Claude records were omitted from recovered ATIF',
+    blocks:
+      'Unsupported or ambiguous Claude conversation blocks were omitted from recovered ATIF',
+  };
+  return Array.from(omissions, ([kind, { count, firstLine }]) => ({
+    code: kind === 'invalid_lines' ? 'source_invalid' : 'source_incomplete',
+    message: `${messages[kind]} (count: ${count}).`,
+    path: `line:${firstLine}`,
+  }));
+}
+
+function aggregateRecoveryWarnings(
+  warnings: readonly AgentNativeEvidenceWarning[],
+): AtifNormalizationWarning[] {
+  const aggregated = new Map<
+    string,
+    { warning: AgentNativeEvidenceWarning; count: number }
+  >();
+  for (const warning of warnings) {
+    const key = `${warning.code}:${warning.message}`;
+    const previous = aggregated.get(key);
+    aggregated.set(key, {
+      warning: previous?.warning ?? warning,
+      count: (previous?.count ?? 0) + 1,
+    });
+  }
+  return Array.from(aggregated.values(), ({ warning, count }) => ({
+    ...warning,
+    message:
+      count === 1
+        ? warning.message
+        : `${warning.message} (occurrences: ${count}).`,
+  }));
+}
+
+/** Validate attribution before omitting anything, including unknown records. */
+function recoveryToolCallCounts(
+  records: readonly LocatedSessionRecord[],
+  sessionId: string,
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  for (const { record } of records) {
+    if (record === undefined) continue;
+    for (const id of [record.sessionId, record.session_id]) {
+      if (id !== undefined && id !== sessionId) {
+        throw new Error(
+          'Claude session identity changed inside its native log.',
+        );
+      }
+    }
+    if (record.type !== 'assistant' || !Array.isArray(record.message?.content))
+      continue;
+    for (const block of record.message.content) {
+      if (
+        plainRecord(block)?.type === 'tool_use' &&
+        typeof block.id === 'string'
+      ) {
+        counts.set(block.id, (counts.get(block.id) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
+}
+
+function recoveredCallId(
+  step: number,
+  call: number,
+  nativeIds: ReadonlyMap<string, number> | undefined,
+): string {
+  let id = `claude-call-${step}-${call}`;
+  while (nativeIds?.has(id)) id = `${id}-generated`;
+  return id;
+}
+
+/** Keep understood blocks; unknown blocks cannot establish implicit tool links. */
+function recoverConversationBlocks(
+  record: SessionRecord,
+  nativeCallCounts: ReadonlyMap<string, number>,
+  omissions: RecoveryOmissions,
+  line: number,
+): SessionRecord | undefined {
+  if (record.type !== 'user' && record.type !== 'assistant') return record;
+  const content = record.message?.content;
+  if (typeof content === 'string') return record;
+  if (!Array.isArray(content)) {
+    recordRecoveryOmission(omissions, 'records', line);
+    return undefined;
+  }
+  const blocks = content.filter((block) => {
+    let supported = false;
+    if (plainRecord(block) !== undefined) {
+      supported =
+        (block.type === 'text' && typeof block.text === 'string') ||
+        (record.type === 'assistant' &&
+          ((block.type === 'thinking' && typeof block.thinking === 'string') ||
+            block.type === 'redacted_thinking' ||
+            (block.type === 'tool_use' &&
+              typeof block.name === 'string' &&
+              block.name.length > 0 &&
+              (block.id === undefined ||
+                (typeof block.id === 'string' &&
+                  block.id.length > 0 &&
+                  nativeCallCounts.get(block.id) === 1))))) ||
+        (record.type === 'user' &&
+          block.type === 'tool_result' &&
+          (block.tool_use_id === undefined ||
+            (typeof block.tool_use_id === 'string' &&
+              block.tool_use_id.length > 0 &&
+              nativeCallCounts.get(block.tool_use_id) === 1)) &&
+          (block.is_error === undefined ||
+            typeof block.is_error === 'boolean'));
+    }
+    if (!supported) recordRecoveryOmission(omissions, 'blocks', line);
+    return supported;
+  });
+  if (
+    record.type === 'assistant' &&
+    blocks.every((block) => block.type === 'redacted_thinking')
+  ) {
+    recordRecoveryOmission(omissions, 'records', line);
+    return undefined;
+  }
+  return { ...record, message: { ...record.message, content: blocks } };
 }
 
 class ClaudeSessionLimitError extends Error {}
