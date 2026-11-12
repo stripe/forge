@@ -94,7 +94,9 @@ export async function createOwnedWorkspace(
           if (code === 'ENXIO' || code === 'ENODEV' || code === 'EISDIR') {
             throw new Error(`Workspace path is not a file: ${relativePath}`);
           }
-          throw new Error(`Workspace file could not be opened: ${relativePath}`);
+          throw new Error(
+            `Workspace file could not be opened: ${relativePath}`,
+          );
         });
       try {
         options.signal?.throwIfAborted();

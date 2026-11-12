@@ -84,10 +84,9 @@ describe('owned workspace', () => {
       open.mockRejectedValueOnce(
         Object.assign(new Error(`${code}: open '${test.capture}'`), { code }),
       );
-      await assert.rejects(
-        test.workspace.readFile('session.json.partial'),
-        { message: 'Workspace path is not a file: session.json.partial' },
-      );
+      await assert.rejects(test.workspace.readFile('session.json.partial'), {
+        message: 'Workspace path is not a file: session.json.partial',
+      });
     }
   });
 
@@ -99,10 +98,9 @@ describe('owned workspace', () => {
       open.mockRejectedValueOnce(
         Object.assign(new Error(`${code}: open '${test.capture}'`), { code }),
       );
-      await assert.rejects(
-        test.workspace.readFile('session.json.partial'),
-        { message: 'Workspace file could not be opened: session.json.partial' },
-      );
+      await assert.rejects(test.workspace.readFile('session.json.partial'), {
+        message: 'Workspace file could not be opened: session.json.partial',
+      });
     }
   });
 
