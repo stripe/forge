@@ -1,4 +1,4 @@
-/** Independent fixtures matching OpenCode 1.19.0's published session-v1 schema. */
+/** Deterministic fakes; real archived parts are covered by opencodeArchived.test.ts. */
 export const OPEN_CODE_SESSION = 'ses_0123456789abcdefghij';
 export const OPEN_CODE_MODEL = 'gateway/kimi-test';
 export const OPEN_CODE_MODEL_PROFILE = {
@@ -17,7 +17,7 @@ const tokens = {
   input: 5,
   output: 2,
   reasoning: 1,
-  cache: { read: 3, write: 0 },
+  cache: { read: 3, write: 4 },
 };
 
 export function openCodeMessages(turn: OpenCodeFixtureTurn, index = 0) {

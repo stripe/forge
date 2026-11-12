@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/subscriptions-entitlements
+version: 0.1.0
+task: |-
+  I'm building a developer platform called "BuildRail" using Node.js and TypeScript. The Pro and Enterprise Products grant different Stripe Entitlements such as advanced_builds, sso, and audit_logs. Build subscription signup and feature provisioning using the stripe npm package. Requirements: - Create Checkout for a selected recurring Price - Provision and revoke application features from Stripe's active entitlement state - Make entitlement changes authoritative even when a plan is swapped or canceled - Store the latest feature set in the database - Keep ordinary billing failures separate from entitlement synchronization Assume an Express app and a database helper already exist; Product-to-feature mappings are configured in Stripe.
+initial_prompt: |-
+  I'm building a developer platform called "BuildRail" using Node.js and TypeScript. The Pro and Enterprise Products grant different Stripe Entitlements such as advanced_builds, sso, and audit_logs. Build subscription signup and feature provisioning using the stripe npm package. Requirements: - Create Checkout for a selected recurring Price - Provision and revoke application features from Stripe's active entitlement state - Make entitlement changes authoritative even when a plan is swapped or canceled - Store the latest feature set in the database - Keep ordinary billing failures separate from entitlement synchronization Assume an Express app and a database helper already exist; Product-to-feature mappings are configured in Stripe.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates subscription Checkout with the selected recurring Price whose Product has the intended Entitlement feature mappings in Stripe.'
+    requirement_level: MUST
+  - value: 'MUST: Authenticates the tenant, resolves its Customer server-side, and allowlists the selected recurring Price before creating Checkout.'
+    requirement_level: MUST
+  - value: 'MUST: Treats entitlements.active_entitlement_summary.updated as an invalidation signal, not as a complete feature snapshot.'
+    requirement_level: MUST
+  - value: 'MUST: On that event, lists all current active entitlements for the Customer, follows pagination, and maps feature lookup keys to local features.'
+    requirement_level: MUST
+  - value: 'MUST: Atomically replaces the stored feature set and revokes features absent from the latest active-entitlement list.'
+    requirement_level: MUST
+  - value: 'MUST NOT derive feature access solely from Price IDs, subscription events, or invoice payment events.'
+    requirement_level: MUST
+  - value: 'MUST: Tracks billing failures separately and does not directly grant or revoke Entitlements-backed features merely because an invoice fails.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies the raw webhook body with stripe.webhooks.constructEvent and processes entitlement events idempotently by event ID.'
+    requirement_level: MUST

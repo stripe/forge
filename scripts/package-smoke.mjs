@@ -187,6 +187,8 @@ try {
         for (const name of names) assert.equal(name in surface, false);
       }
       assert.equal(typeof docker.createDockerRuntimeAdapter, 'function');
+      assert.equal(typeof docker.defineDockerImageBuild, 'function');
+      assert.ok(Object.isFrozen(docker.defineDockerImageBuild({id: 'smoke', dockerfile: 'FROM example', tools: {claudeCode: '1.0.0', codex: '1.0.0', opencode: '1.0.0'}})));
       assert.equal(typeof setup.createSetupExecutor, 'function');
       assert.equal(setup.credentialsSetupHandler, forge.credentialsSetupHandler);
       assert.deepEqual(forge.parseSetupStep({

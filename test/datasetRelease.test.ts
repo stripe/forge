@@ -3,11 +3,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'vitest';
-import { runCli } from '../src/cli.ts';
+import { createDefaultCliComposition, runCli } from '../src/cli.ts';
 import {
+  defaultForgeEngine,
   expandExperiment,
   loadDataset,
   loadExperimentConfig,
+  parseExperimentConfig,
   resolveRunPlan,
 } from '../src/index.ts';
 
@@ -25,21 +27,19 @@ describe('sample dataset release', () => {
     ]);
     assert.deepEqual(dataset.manifest.dataset, {
       id: 'stripe-integration-public-evals',
-      version: '0.2.0',
+      version: '0.5.0',
     });
+    assert.equal(dataset.manifest.cases.length, 69);
+    assert.equal(dataset.cases.size, 69);
     assert.deepEqual(
-      dataset.manifest.cases.map(({ id, version, path }) => ({
-        id,
-        version,
-        path,
-      })),
-      [
-        {
-          id: 'stripe-integration-public-evals/payments-onetime',
-          version: '0.1.0',
-          path: 'cases/payments-onetime.case.yaml',
-        },
-      ],
+      dataset.manifest.cases.find(
+        ({ id }) => id === 'stripe-integration-public-evals/payments-onetime',
+      ),
+      {
+        id: 'stripe-integration-public-evals/payments-onetime',
+        version: '0.2.0',
+        path: 'cases/payments-onetime.case.yaml',
+      },
     );
     assert.deepEqual(
       {
@@ -107,6 +107,34 @@ describe('sample dataset release', () => {
           run_count: 1,
           valid: true,
         });
+    }
+  });
+
+  it('plans and preflights every released case on the public baseline without credentials', async () => {
+    const [dataset, baseline] = await Promise.all([
+      loadDataset(datasetRoot),
+      loadExperimentConfig(experimentPath),
+    ]);
+    const experiment = {
+      ...baseline,
+      config: parseExperimentConfig({
+        ...baseline.config,
+        matrix: {
+          ...baseline.config.matrix,
+          cases: dataset.manifest.cases.map(({ path }) => path),
+        },
+      }),
+    };
+    const selections = expandExperiment(experiment, dataset);
+    assert.equal(selections.length, 69);
+    const composition = await createDefaultCliComposition({
+      datasetRoot,
+      resultsRoot: path.resolve('results'),
+      environment: {},
+    });
+    for (const selection of selections) {
+      const plan = resolveRunPlan({ dataset, experiment, selection });
+      defaultForgeEngine.preflightEval({ plan, composition });
     }
   });
 

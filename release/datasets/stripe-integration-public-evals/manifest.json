@@ -1,13 +1,353 @@
 {
   "dataset": {
     "id": "stripe-integration-public-evals",
-    "version": "0.2.0"
+    "version": "0.5.0"
   },
   "cases": [
     {
-      "id": "stripe-integration-public-evals/payments-onetime",
+      "id": "stripe-integration-public-evals/b2b-enterprise-platform",
+      "version": "0.2.0",
+      "path": "cases/b2b-enterprise-platform.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/connect-crafthub-multi-seller",
+      "version": "0.2.0",
+      "path": "cases/connect-crafthub-multi-seller.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/connect-creator-fans",
+      "version": "0.2.0",
+      "path": "cases/connect-creator-fans.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/connect-crowdfunding-3d",
+      "version": "0.2.0",
+      "path": "cases/connect-crowdfunding-3d.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/connect-plant-wholesale",
+      "version": "0.2.0",
+      "path": "cases/connect-plant-wholesale.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/edge-inclusive-fee-language",
+      "version": "0.2.0",
+      "path": "cases/edge-inclusive-fee-language.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/edge-very-low-flat-fee",
+      "version": "0.2.0",
+      "path": "cases/edge-very-low-flat-fee.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/emily-exact-case-neighborhood-marketplace",
+      "version": "0.2.0",
+      "path": "cases/emily-exact-case-neighborhood-marketplace.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/event-ticketing-flat-fee",
+      "version": "0.2.0",
+      "path": "cases/event-ticketing-flat-fee.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/freelancer-marketplace-upwork-like",
+      "version": "0.2.0",
+      "path": "cases/freelancer-marketplace-upwork-like.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/hybrid-saas-marketplace-fitness",
+      "version": "0.2.0",
+      "path": "cases/hybrid-saas-marketplace-fitness.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/incompatibility-dashboard-none-scope",
       "version": "0.1.0",
+      "path": "cases/incompatibility-dashboard-none-scope.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/incompatibility-oauth-onboarding",
+      "version": "0.1.0",
+      "path": "cases/incompatibility-oauth-onboarding.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/incompatibility-stripe-losses-destination-charges",
+      "version": "0.2.0",
+      "path": "cases/incompatibility-stripe-losses-destination-charges.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/invoicing-b2b",
+      "version": "0.1.0",
+      "path": "cases/invoicing-b2b.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/on-demand-services-uber-like",
+      "version": "0.2.0",
+      "path": "cases/on-demand-services-uber-like.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-ach-delayed-fulfillment",
+      "version": "0.2.0",
+      "path": "cases/payments-ach-delayed-fulfillment.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-authorize-partial-capture",
+      "version": "0.2.0",
+      "path": "cases/payments-authorize-partial-capture.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-card-element-migration",
+      "version": "0.2.0",
+      "path": "cases/payments-card-element-migration.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-cart-integrity",
+      "version": "0.2.0",
+      "path": "cases/payments-cart-integrity.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-checkout-retry-safety",
+      "version": "0.2.0",
+      "path": "cases/payments-checkout-retry-safety.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-custom-form",
+      "version": "0.3.0",
+      "path": "cases/payments-custom-form.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-dispute-evidence-approval",
+      "version": "0.2.0",
+      "path": "cases/payments-dispute-evidence-approval.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-elements-multistep",
+      "version": "0.1.0",
+      "path": "cases/payments-elements-multistep.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-embedded-redirect-return",
+      "version": "0.2.0",
+      "path": "cases/payments-embedded-redirect-return.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-fixed-usd-jpy-prices",
+      "version": "0.2.0",
+      "path": "cases/payments-fixed-usd-jpy-prices.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-mobile-physical-goods",
+      "version": "0.2.0",
+      "path": "cases/payments-mobile-physical-goods.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-multicurrency",
+      "version": "0.1.0",
+      "path": "cases/payments-multicurrency.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-on-session-recovery",
+      "version": "0.2.0",
+      "path": "cases/payments-on-session-recovery.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-onetime",
+      "version": "0.2.0",
       "path": "cases/payments-onetime.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-partial-refund-lifecycle",
+      "version": "0.2.0",
+      "path": "cases/payments-partial-refund-lifecycle.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-radar-review-fulfillment",
+      "version": "0.2.0",
+      "path": "cases/payments-radar-review-fulfillment.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-save-card-no-charge",
+      "version": "0.2.0",
+      "path": "cases/payments-save-card-no-charge.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-saved-card-consent",
+      "version": "0.2.0",
+      "path": "cases/payments-saved-card-consent.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-simple-link",
+      "version": "0.1.0",
+      "path": "cases/payments-simple-link.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-stock-reservation-expiry",
+      "version": "0.1.0",
+      "path": "cases/payments-stock-reservation-expiry.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-subscription-hosted",
+      "version": "0.2.0",
+      "path": "cases/payments-subscription-hosted.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-surcharging",
+      "version": "0.1.0",
+      "path": "cases/payments-surcharging.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-terminal-reader-recovery",
+      "version": "0.2.0",
+      "path": "cases/payments-terminal-reader-recovery.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/payments-zero-total-checkout",
+      "version": "0.2.0",
+      "path": "cases/payments-zero-total-checkout.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/pet-care-marketplace-code-gen",
+      "version": "0.1.0",
+      "path": "cases/pet-care-marketplace-code-gen.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/saas-self-serve-platform-managed-pricing",
+      "version": "0.2.0",
+      "path": "cases/saas-self-serve-platform-managed-pricing.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-advanced-usage-credits",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-advanced-usage-credits.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-bank-debits",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-bank-debits.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-cardless-trial",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-cardless-trial.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-checkout-duplicate-prevention",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-checkout-duplicate-prevention.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-classic-to-flexible-migration",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-classic-to-flexible-migration.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-connect",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-connect.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-custom-date-cancellation",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-custom-date-cancellation.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-entitlements",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-entitlements.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-fixed",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-fixed.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-incomplete-sca-signup",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-incomplete-sca-signup.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-metered-basic",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-metered-basic.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-migration-backdated",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-migration-backdated.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-month-end-anchor",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-month-end-anchor.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-paid-upgrade-pending",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-paid-upgrade-pending.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-pause-resume",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-pause-resume.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-payment-method-recovery",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-payment-method-recovery.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-perseat",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-perseat.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-prebilling",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-prebilling.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-promotion-codes",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-promotion-codes.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-schedules-phases",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-schedules-phases.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-send-invoice-net30",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-send-invoice-net30.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-setup-fee",
+      "version": "0.1.0",
+      "path": "cases/subscriptions-setup-fee.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-stripe-tax",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-stripe-tax.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-test-clocks",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-test-clocks.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/subscriptions-tiered",
+      "version": "0.2.0",
+      "path": "cases/subscriptions-tiered.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/v2-api-explicit-recommendation",
+      "version": "0.2.0",
+      "path": "cases/v2-api-explicit-recommendation.case.yaml"
+    },
+    {
+      "id": "stripe-integration-public-evals/white-label-custom-platform",
+      "version": "0.2.0",
+      "path": "cases/white-label-custom-platform.case.yaml"
     }
   ]
 }

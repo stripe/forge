@@ -1,0 +1,34 @@
+id: stripe-integration-public-evals/subscriptions-custom-date-cancellation
+version: 0.1.0
+task: |-
+  A customer has a subscription with licensed and metered items and wants service to end on a specific date between renewal dates. Preview the final billing impact, schedule cancellation, include final usage correctly, and allow reactivation before the cancellation takes effect. Build this in Node.js/TypeScript.
+initial_prompt: |-
+  A customer has a subscription with licensed and metered items and wants service to end on a specific date between renewal dates. Preview the final billing impact, schedule cancellation, include final usage correctly, and allow reactivation before the cancellation takes effect. Build this in Node.js/TypeScript.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Validates that the requested cancel_at timestamp is in the future and belongs to the authorized tenant''s subscription.'
+    requirement_level: MUST
+  - value: 'MUST: Uses cancel_at for the requested timestamp rather than cancel_at_period_end.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the cancellation with the same cancel_at and proration inputs that will be applied.'
+    requirement_level: MUST
+  - value: 'MUST: Chooses proration_behavior explicitly for licensed-item time ending at cancel_at.'
+    requirement_level: MUST
+  - value: 'MUST: Continues ingesting metered usage through the cancellation cutoff.'
+    requirement_level: MUST
+  - value: 'MUST: Ensures outstanding metered usage is included on the final invoice and does not set clear_usage when that usage must be charged.'
+    requirement_level: MUST
+  - value: 'MUST: Reconciles the finalized invoice''s usage window and licensed prorations before marking billing complete.'
+    requirement_level: MUST
+  - value: 'MUST: Persists item-level current_period_start and current_period_end values.'
+    requirement_level: MUST
+  - value: 'MUST: Clears cancel_at to reactivate before the effective timestamp.'
+    requirement_level: MUST
+  - value: 'MUST NOT provision service after the authoritative cancellation timestamp.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures and durably deduplicates subscription and final-invoice events.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches the subscription before changing access on cancellation or reactivation.'
+    requirement_level: MUST

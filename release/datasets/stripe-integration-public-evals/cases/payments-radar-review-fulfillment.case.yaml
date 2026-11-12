@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-radar-review-fulfillment
+version: 0.2.0
+task: |-
+  Don't ship orders that Stripe flags for manual review. Once our fraud team approves one, let it continue to fulfillment.
+initial_prompt: |-
+  Don't ship orders that Stripe flags for manual review. Once our fraud team approves one, let it continue to fulfillment.
+context: |-
+  Our electronics store uses Node/TypeScript, automatically captures card payments, and has Radar for Fraud Teams review rules enabled. Staff review payments in Stripe's Dashboard. We want to keep automatic capture; only shipping is held. A closed review isn't always an approval. Non-reviewed paid orders should ship normally, and repeated notifications must not create another shipment.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Keep payment collection state separate from review/fulfillment eligibility.'
+    requirement_level: MUST
+  - value: 'MUST: Hold an otherwise paid order while its associated review is open.'
+    requirement_level: MUST
+  - value: 'MUST: Release a reviewed order only when the authoritative review is approved and the payment/order is still eligible for fulfillment.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat every `review.closed` event as approval; refunded, disputed, or canceled outcomes must not trigger shipping.'
+    requirement_level: MUST
+  - value: 'MUST: Check current review/payment state rather than depend on payment-success and review events arriving in a particular order.'
+    requirement_level: MUST
+  - value: 'MUST: Make release to fulfillment idempotent while allowing paid orders with no review to follow the normal path.'
+    requirement_level: MUST
+  - value: 'Expose the review-hold reason to staff without presenting a collected payment as unpaid.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

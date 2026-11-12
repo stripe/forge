@@ -1,0 +1,28 @@
+id: stripe-integration-public-evals/payments-embedded-redirect-return
+version: 0.2.0
+task: |-
+  Add Bancontact to our embedded checkout. Customers should come back to their order after approving the payment in their bank's app.
+initial_prompt: |-
+  Add Bancontact to our embedded checkout. Customers should come back to their order after approving the payment in their bank's app.
+context: |-
+  We sell physical goods in EUR through an existing embedded Stripe Checkout in React and Node/TypeScript. Our account is eligible for Bancontact. It's fine to leave temporarily for bank authorization, but card buyers shouldn't be redirected unnecessarily. We already have an order page. It must show the right status if the buyer cancels or the payment is still pending.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Enable an eligible Bancontact path while keeping the existing embedded Checkout surface.'
+    requirement_level: MUST
+  - value: 'MUST: Configure the documented return URL and redirect behavior for the selected embedded API/SDK generation.'
+    requirement_level: MUST
+  - value: 'MUST NOT disable required redirects while claiming Bancontact still works.'
+    requirement_level: MUST
+  - value: 'MUST: Resolve the returning customer''s authorized order and show authoritative success, pending, or retryable-failure status.'
+    requirement_level: MUST
+  - value: 'MUST NOT fulfill based solely on a return URL, query parameter, or client completion callback.'
+    requirement_level: MUST
+  - value: 'Use conditional redirect completion where supported so non-redirect methods do not navigate unnecessarily.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

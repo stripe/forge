@@ -250,13 +250,16 @@ my-eval/
 ├── README.md
 ├── datasets/stripe-integration-public-evals/
 │   ├── manifest.json
-│   └── cases/payments-onetime.case.yaml
+│   └── cases/ (69 case files)
 └── experiment.yaml
 ```
 
-The sample evaluates a Stripe Checkout integration using Claude Code, Ava,
-and a criterion judge. Claude Code uses the Anthropic credential; Ava and
-the judge use the default Sol model and the OpenAI completion credential.
+The dataset has 69 cases covering Connect, Payments, and Subscriptions. Copy
+the whole `cases/` directory; dataset loading requires every listed case file.
+The sample experiment selects `payments-onetime`, a Stripe Checkout integration,
+using Claude Code, Ava, and a criterion judge. Claude Code uses the Anthropic
+credential; Ava and the judge use the default Sol model and the OpenAI
+completion credential.
 The release inputs are separate from the installed Forge package; preserve
 their bytes. The experiment's
 `dataset.path: ./datasets/stripe-integration-public-evals` resolves relative
@@ -599,6 +602,10 @@ derived snapshots and can be stale after interruption.
 
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
+
+When using Forge as a library, you can
+[supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
+reusing its container lifecycle. The CLI uses the packaged image.
 
 ## Development
 

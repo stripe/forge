@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/subscriptions-classic-to-flexible-migration
+version: 0.2.0
+task: |-
+  We have existing Stripe subscriptions in classic billing mode and want to migrate selected subscriptions to flexible billing mode without changing the customer's Price, quantity, renewal date, or access. Build a safe migration command in Node.js/TypeScript that previews impact, migrates one subscription, verifies the result, and can be retried.
+initial_prompt: |-
+  We have existing Stripe subscriptions in classic billing mode and want to migrate selected subscriptions to flexible billing mode without changing the customer's Price, quantity, renewal date, or access. Build a safe migration command in Node.js/TypeScript that previews impact, migrates one subscription, verifies the result, and can be retried.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Retrieves the authorized target subscription and verifies billing_mode.type is classic before migration.'
+    requirement_level: MUST
+  - value: 'MUST: Pins Stripe-Version 2025-06-30.basil or later for the migration integration.'
+    requirement_level: MUST
+  - value: 'MUST: Calls stripe.subscriptions.migrate(subscriptionId, { billing_mode: { type: ''flexible'' } }) or POST /v1/subscriptions/{id}/migrate with billing_mode[type]=flexible.'
+    requirement_level: MUST
+  - value: 'MUST NOT update billing_mode through the ordinary subscription update endpoint and does not cancel and recreate the subscription as fallback.'
+    requirement_level: MUST
+  - value: 'MUST: Records the complete before-state and next-invoice baseline and tests representative billing impact before production migration; it does not claim the migrate endpoint has a preview parameter.'
+    requirement_level: MUST
+  - value: 'MUST: Submits only the billing-mode migration and verifies Price, quantity, item periods, billing-cycle anchor, discounts, tax, collection, transfer, and access-relevant settings remain unchanged.'
+    requirement_level: MUST
+  - value: 'MUST: Treats Stripe''s migration response as the eligibility authority, records unsupported errors and request IDs, and leaves rejected subscriptions on classic.'
+    requirement_level: MUST
+  - value: 'MUST: Treats classic-to-flexible migration as one-way and offers no automatic rollback to classic.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a idempotency key that is stable across retries and a local per-subscription migration record so retries are no-ops after verified success.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches the subscription and reports success only after billing_mode.type is flexible and preserved fields match the snapshot.'
+    requirement_level: MUST
