@@ -64,6 +64,42 @@ function paddedEvent(event: unknown, bytes: number) {
 }
 
 describe('OpenCode live stream', () => {
+  it('omits total cost if any finished step lacks cost', () => {
+    for (const missing of [[3, 6], [3], [6]]) {
+      const events = openCodeEvents(turn);
+      for (const index of missing) delete events[index]!.part.cost;
+      const result = parseOpenCodeStream(encode(events));
+      assert.equal(result.text, turn.response);
+      assert.equal(result.sessionId, OPEN_CODE_SESSION);
+      assert.equal(result.toolCalls.length, 1);
+      assert.equal(Object.hasOwn(result, 'costUsd'), false);
+      assert.deepEqual(
+        parseOpenCodeStream(encode(events.flatMap((event) => [event, event]))),
+        result,
+      );
+    }
+  });
+  it('preserves explicit zero cost and sums reported costs across steps', () => {
+    const events = openCodeEvents(turn);
+    events[3]!.part.cost = 0;
+    events[6]!.part.cost = 0;
+    assert.equal(parseOpenCodeStream(encode(events)).costUsd, 0);
+    events[6]!.part.cost = 0.03;
+    assert.equal(parseOpenCodeStream(encode(events)).costUsd, 0.03);
+    events[3]!.part.cost = 0.02;
+    assert.equal(parseOpenCodeStream(encode(events)).costUsd, 0.05);
+  });
+  it('rejects malformed costs even when another step has no cost', () => {
+    for (const cost of [null, -1, '0.01']) {
+      const events = openCodeEvents(turn);
+      delete events[3]!.part.cost;
+      events[6]!.part.cost = cost;
+      assert.throws(
+        () => parseOpenCodeStream(encode(events)),
+        OpenCodeStreamError,
+      );
+    }
+  });
   it('accepts interrupted cleanup of an unseen tool after a recovered retry finishes', () => {
     const { start, retry, text, finish, cleanup } = recoveredCleanup();
     const events = [start, retry, text, finish, cleanup];

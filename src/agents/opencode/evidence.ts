@@ -195,6 +195,11 @@ export async function loadOpenCodeEvidence(
       } else {
         const tokens = record(meta.tokens);
         const cache = record(tokens.cache);
+        const inputTokens = nonnegative(tokens.input);
+        const outputTokens = nonnegative(tokens.output);
+        const reasoningTokens = nonnegative(tokens.reasoning);
+        const cacheReadTokens = nonnegative(cache.read);
+        const cacheWriteTokens = nonnegative(cache.write);
         steps.push({
           ...base,
           source: 'agent',
@@ -206,13 +211,20 @@ export async function loadOpenCodeEvidence(
             ? { tool_calls: calls, observation: { results } }
             : {}),
           metrics: {
-            prompt_tokens: nonnegative(tokens.input),
-            completion_tokens: nonnegative(tokens.output),
-            cached_tokens: nonnegative(cache.read),
-            cost_usd: nonnegative(meta.cost),
+            // OpenCode 1.19.0's Session.getUsage separates both cache counts
+            // from input and reasoning from output; ATIF totals include them.
+            prompt_tokens: inputTokens + cacheReadTokens + cacheWriteTokens,
+            completion_tokens: outputTokens + reasoningTokens,
+            cached_tokens: cacheReadTokens,
+            ...(meta.cost === undefined
+              ? {}
+              : { cost_usd: nonnegative(meta.cost) }),
             extra: {
-              reasoning_tokens: nonnegative(tokens.reasoning),
-              cache_write_tokens: nonnegative(cache.write),
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+              reasoning_tokens: reasoningTokens,
+              cache_read_tokens: cacheReadTokens,
+              cache_write_tokens: cacheWriteTokens,
             },
           },
         });
