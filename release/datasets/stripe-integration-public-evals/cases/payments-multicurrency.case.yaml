@@ -1,0 +1,46 @@
+id: stripe-integration-public-evals/payments-multicurrency
+version: 0.1.0
+task: |-
+  I'm building a payment page for a digital product (a stock photo pack, $19 USD). I sell to customers worldwide and want them to see prices in their local currency automatically — I don't want to build currency detection or conversion logic myself.
+
+  Build the Stripe integration using Node.js/TypeScript and the `stripe` npm package.
+
+  Requirements:
+  - A checkout flow where international customers see localized prices
+  - A success page after payment
+  - A webhook endpoint to handle payment completion
+  - Keep it simple — I don't want to maintain exchange rates or currency mappings
+
+  Assume a basic Express app already exists.
+initial_prompt: |-
+  I'm building a payment page for a digital product (a stock photo pack, $19 USD). I sell to customers worldwide and want them to see prices in their local currency automatically — I don't want to build currency detection or conversion logic myself.
+
+  Build the Stripe integration using Node.js/TypeScript and the `stripe` npm package.
+
+  Requirements:
+  - A checkout flow where international customers see localized prices
+  - A success page after payment
+  - A webhook endpoint to handle payment completion
+  - Keep it simple — I don't want to maintain exchange rates or currency mappings
+
+  Assume a basic Express app already exists.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Checkout Sessions (checkout.sessions.create) — Adaptive Pricing requires Checkout, not PaymentIntents directly'
+    requirement_level: MUST
+  - value: 'Enables Adaptive Pricing — mentions Dashboard enablement, uses adaptive_pricing.enabled on the session, or sets adaptivePricing: { allowed: true } on the client'
+    requirement_level: SHOULD
+  - value: 'MUST NOT implement manual currency routing — no logic that reads currency from a query parameter or request body and passes it to the Checkout Session'
+    requirement_level: MUST
+  - value: 'MUST: Defines prices in a single settlement currency (e.g., USD) rather than creating separate prices or currency_options for EUR, GBP, etc.'
+    requirement_level: MUST
+  - value: 'MUST: For embedded checkout: uses CurrencySelectorElement; for redirect checkout: Stripe''s hosted page handles currency display automatically'
+    requirement_level: MUST
+  - value: 'MUST NOT pass payment_method_types to any Stripe API call — dynamic payment methods should remain enabled since the prompt does not request specific payment methods. If the code does not include payment_method_types at all, this expectation PASSES regardless of which Stripe API is used.'
+    requirement_level: MUST
+  - value: 'Does not explicitly hardcode an API version older than 2026-04-22.dahlia. Pass if apiVersion is omitted or set to 2026-04-22.dahlia or later. Fail only if apiVersion is explicitly set to an older version. Configures the Stripe client with apiVersion set to ''2026-04-22.dahlia'' (the latest API version) — either in the Stripe constructor options or equivalent configuration. If no apiVersion is explicitly set anywhere in the code, this expectation PASSES (the SDK defaults to the account''s version). This expectation only FAILS if an older apiVersion is explicitly hardcoded.'
+    requirement_level: SHOULD
+  - value: 'Includes the parameter integration_identifier in the checkout.sessions.create call'
+    requirement_level: SHOULD

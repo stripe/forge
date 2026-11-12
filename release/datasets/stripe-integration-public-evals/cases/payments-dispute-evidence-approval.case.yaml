@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/payments-dispute-evidence-approval
+version: 0.2.0
+task: |-
+  Build a support tool to prepare evidence when a customer disputes a delivered order. I want to review it before anything is sent to the bank.
+initial_prompt: |-
+  Build a support tool to prepare evidence when a customer disputes a delivered order. I want to review it before anything is sent to the bank.
+context: |-
+  We sell ceramics directly, not through a marketplace. Authorized support staff use a Node/TypeScript admin app. They can select an order and its product-not-received dispute, review tracking and customer messages, and attach delivery proof. Saving a draft must not submit or concede the dispute. A separate confirmation should submit the approved packet before its actual deadline.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Authorize access to the selected order/dispute and retrieve its real reason, status, and evidence deadline.'
+    requirement_level: MUST
+  - value: 'MUST: Prepare relevant order-specific evidence without fabricating delivery proof or customer communications.'
+    requirement_level: MUST
+  - value: 'MUST: For evidence supplied as documents, upload with the supported dispute-evidence file purpose and reference returned file IDs in file-valued fields; ordinary tracking/text evidence need not become a file.'
+    requirement_level: MUST
+  - value: 'MUST: Save drafts without bank submission; when staging through Stripe''s dispute-update API, explicitly use `submit=false`. A local-only draft is also valid.'
+    requirement_level: MUST
+  - value: 'MUST: Require a separate authorized approval step before submission and respect the current dispute state/deadline.'
+    requirement_level: MUST
+  - value: 'MUST NOT close/concede a dispute as a way to save, submit, or undo an evidence draft.'
+    requirement_level: MUST
+  - value: 'Show the deadline and missing relevant evidence before approval, without promising that a valid submission will win.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

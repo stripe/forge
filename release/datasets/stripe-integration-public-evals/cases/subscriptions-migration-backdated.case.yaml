@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/subscriptions-migration-backdated
+version: 0.2.0
+task: |-
+  I'm migrating active monthly subscriptions from another billing provider to Stripe. Each customer already has a Stripe Customer and migrated default payment method. Preserve the original service start date and next renewal date, do not charge again for time already paid to the old provider, and make the batch safe to retry. Build the migration worker in Node.js/TypeScript with the stripe npm package.
+initial_prompt: |-
+  I'm migrating active monthly subscriptions from another billing provider to Stripe. Each customer already has a Stripe Customer and migrated default payment method. Preserve the original service start date and next renewal date, do not charge again for time already paid to the old provider, and make the batch safe to retry. Build the migration worker in Node.js/TypeScript with the stripe npm package.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates one subscription for the migrated Customer with the mapped recurring Price, preserved quantity, and validated default payment method.'
+    requirement_level: MUST
+  - value: 'MUST: Sets backdate_start_date to the original service start and billing_cycle_anchor to the preserved next renewal timestamp.'
+    requirement_level: MUST
+  - value: 'MUST: Sets proration_behavior: ''none'' because elapsed service was already paid to the source provider.'
+    requirement_level: MUST
+  - value: 'MUST NOT create or pay an immediate invoice for the already-paid backdated period.'
+    requirement_level: MUST
+  - value: 'Chooses billing_mode explicitly and documents that, when backdated time is invoiced, classic creates one aggregate prorated line while flexible creates one line per natural billing period on current Basil behavior. Passes if migration invoices no backdated time'
+    requirement_level: SHOULD
+  - value: 'Rejects or separately handles migrations whose backdated invoice would exceed Stripe''s 250-line-item limit. Passes if migration invoices no backdated time'
+    requirement_level: SHOULD
+  - value: 'MUST: Uses a unique source-subscription migration key in local storage and a deterministic Stripe idempotency key for subscription creation.'
+    requirement_level: MUST
+  - value: 'MUST: Previews or dry-runs the mapped dates and amount, then verifies the created subscription''s start_date, next anchor, quantity, and absence of an unintended immediate charge before committing the local migration record.'
+    requirement_level: MUST
+  - value: 'MUST: Stores Stripe object IDs and request outcomes without logging payment-method details or secret keys.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures and applies subscription and invoice events idempotently without assuming delivery order.'
+    requirement_level: MUST

@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/payments-authorize-partial-capture
+version: 0.2.0
+task: |-
+  Reserve the order amount on the customer's card, but only charge for the items we actually pack. Cancel the hold if we can't fulfill the order.
+initial_prompt: |-
+  Reserve the order amount on the customer's card, but only charge for the items we actually pack. Cancel the hold if we can't fulfill the order.
+context: |-
+  Our grocery shop has an existing direct PaymentIntents integration in Node/TypeScript. An order is estimated at $80; if an item is unavailable we might charge only $65. Packing finishes within 24 hours. We want one final charge, not several captures. Warehouse staff can approve or cancel an order, and their action might be retried.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Authorize using manual capture and distinguish `requires_capture` from captured payment success.'
+    requirement_level: MUST
+  - value: 'MUST: Capture only the server-approved final amount, within `amount_capturable`.'
+    requirement_level: MUST
+  - value: 'MUST: Make one ordinary partial capture final and release the unused amount; do not assume the remainder remains available for later captures.'
+    requirement_level: MUST
+  - value: 'MUST: Cancel an eligible uncaptured PaymentIntent when the order cannot be fulfilled rather than issue a refund for uncollected funds.'
+    requirement_level: MUST
+  - value: 'Persist the capture/cancel operation identity and reuse its idempotency key for retries of that same operation; an equivalent state-aware recovery strategy is valid.'
+    requirement_level: SHOULD
+  - value: 'MUST: Reconcile current payment state and ambiguous results before retrying or changing a staff action; do not mark an unsuccessful capture/cancel as completed.'
+    requirement_level: MUST
+  - value: 'MUST: Respect the actual authorization expiry/capture deadline and handle an expired authorization without reporting success.'
+    requirement_level: MUST
+  - value: 'Use Stripe''s returned capture deadline when available rather than assuming every card hold lasts seven days.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

@@ -1,0 +1,36 @@
+id: stripe-integration-public-evals/payments-surcharging
+version: 0.1.0
+task: |-
+  We run a B2B SaaS platform and our payment processing costs have been eating into our margins. Our finance team wants us to pass credit card processing fees on to customers who choose to pay by credit card, while customers who pay by bank transfer should not be charged extra.
+
+  We need an embedded payment form on our billing page — we don't want to redirect customers away to a hosted payment page. The surcharge should be calculated on the fly based on the payment method the customer selects (card vs. bank transfer) and displayed clearly before they confirm. If they pick a card, we add a 3% surcharge; if they pick bank transfer, no surcharge.
+
+  When we issue refunds, we need to refund the full amount including any surcharge that was charged. We're using Node.js with Express on the backend.
+
+  Could you help us design the payment flow, including how to structure the charge on the backend and what the frontend form should look like?
+initial_prompt: |-
+  We run a B2B SaaS platform and our payment processing costs have been eating into our margins. Our finance team wants us to pass credit card processing fees on to customers who choose to pay by credit card, while customers who pay by bank transfer should not be charged extra.
+
+  We need an embedded payment form on our billing page — we don't want to redirect customers away to a hosted payment page. The surcharge should be calculated on the fly based on the payment method the customer selects (card vs. bank transfer) and displayed clearly before they confirm. If they pick a card, we add a 3% surcharge; if they pick bank transfer, no surcharge.
+
+  When we issue refunds, we need to refund the full amount including any surcharge that was charged. We're using Node.js with Express on the backend.
+
+  Could you help us design the payment flow, including how to structure the charge on the backend and what the frontend form should look like?
+context: |-
+  You are a developer at a B2B SaaS company building an embedded billing payment form that adds a 3% surcharge for card payments but not bank transfers, recalculates the surcharge on the fly based on the selected payment method, and refunds the full amount including surcharge.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses PaymentIntents API with Payment Element (NOT Checkout Sessions) — the merchant needs to own checkout state to dynamically recalculate surcharge based on payment method selection'
+    requirement_level: MUST
+  - value: 'MUST: Uses Payment Element (not Card Element or card-only mode) to support both card and bank transfer payment methods'
+    requirement_level: MUST
+  - value: 'MUST: Dynamically recalculates and updates the PaymentIntent amount when the customer switches between card and bank transfer'
+    requirement_level: MUST
+  - value: 'MUST NOT apply surcharge when the customer selects ACH/bank account as the payment method'
+    requirement_level: MUST
+  - value: 'Stores the surcharge amount in metadata so it can be identified at refund time'
+    requirement_level: SHOULD
+  - value: 'Configures the Stripe client with apiVersion set to ''2026-04-22.dahlia'' (the latest API version) — either in the Stripe constructor options or equivalent configuration. If no apiVersion is explicitly set anywhere in the code, this expectation PASSES (the SDK defaults to the account''s version). This expectation only FAILS if an older apiVersion is explicitly hardcoded.'
+    requirement_level: SHOULD
