@@ -2123,6 +2123,57 @@ describe('Forge CLI', () => {
     );
   });
 
+  it('validates OPENCODE_BASE_URL before reading its credential', async () => {
+    const fixture = await createBenchmarkFixture();
+    let reads = 0;
+    for (const baseUrl of [
+      'http://gateway.example/v1',
+      'http://host.docker.internal.example/v1',
+    ]) {
+      await assert.rejects(
+        createDefaultCliComposition({
+          datasetRoot: fixture.datasetRoot,
+          resultsRoot: path.join(fixture.root, 'results'),
+          environment: {
+            OPENCODE_BASE_URL: baseUrl,
+            get OPENCODE_API_KEY() {
+              reads++;
+              return 'must-not-read';
+            },
+          },
+        }),
+        /plaintext HTTP only for a loopback host or host\.docker\.internal/,
+      );
+    }
+    assert.equal(reads, 0);
+    for (const baseUrl of [
+      'https://gateway.example/v1',
+      'http://127.0.0.1:1234/v1',
+      'http://host.docker.internal:1234/v1',
+    ]) {
+      const composition = await createDefaultCliComposition({
+        datasetRoot: fixture.datasetRoot,
+        resultsRoot: path.join(fixture.root, 'results'),
+        environment: { OPENCODE_BASE_URL: baseUrl },
+      });
+      const selected = composition.agents.get('opencode')!;
+      const config = JSON.parse(
+        selected.requirements({
+          adapter: 'opencode',
+          provider: 'openai-compatible',
+          model: 'gateway/model',
+          model_profile: {
+            limit: { context: 32000, output: 4000 },
+            reasoning: false,
+            temperature: true,
+            attachment: false,
+          },
+        }).environment.variables!.OPENCODE_CONFIG_CONTENT!,
+      );
+      assert.equal(config.provider.forge.options.baseURL, baseUrl);
+    }
+  });
+
   it('requires an explicit OpenCode credential grant before reading secrets or allocating a runtime', async () => {
     for (const grant of [
       undefined,

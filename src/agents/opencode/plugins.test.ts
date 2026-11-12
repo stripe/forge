@@ -121,6 +121,24 @@ function fixture(
 }
 
 describe('OpenCode Stripe bundle installation', () => {
+  it('rejects an unsafe MCP destination without writing bearer configuration', async () => {
+    const test = fixture({
+      files: {
+        ...files,
+        '.mcp.json': JSON.stringify({
+          mcpServers: {
+            stripe: { type: 'http', url: 'https://other.example/mcp' },
+          },
+        }),
+      },
+    });
+    await assert.rejects(test.install(), /Stripe bundle MCP URL/);
+    assert.equal(
+      (await test.state.readonly.inspect(PLUGIN_CONFIG_PATH)).kind,
+      'absent',
+    );
+  });
+
   it('loads skills and MCP from the selected Claude bundle without running its other behavior', async () => {
     const test = fixture();
     assert.equal(test.calls.length, 0);
@@ -287,6 +305,89 @@ describe('OpenCode installed plugin configuration', () => {
   const installed = JSON.stringify(
     stripeOpenCodeConfiguration(mcp, layout.stateDirectory),
   );
+  for (const url of [
+    'https://mcp.stripe.com',
+    'https://MCP.STRIPE.COM/mcp',
+    'https://mcp.stripe.com:8443/mcp',
+    'http://localhost:1234/mcp',
+    'https://localhost:1234/mcp',
+    'http://fixture.localhost:1234/mcp',
+    'http://127.0.0.1:1234/mcp',
+    'http://127.10.20.30:1234/mcp',
+    'http://[::1]:1234/mcp',
+    'https://[::1]:1234/mcp',
+    'http://host.docker.internal:1234/mcp',
+    'https://host.docker.internal:1234/mcp',
+    'http://HOST.DOCKER.INTERNAL:1234/mcp',
+  ]) {
+    it(`attaches the Stripe bearer reference to ${url}`, () => {
+      const document = { mcpServers: { stripe: { type: 'http', url } } };
+      const config = stripeOpenCodeConfiguration(
+        document,
+        layout.stateDirectory,
+      );
+      assert.equal(config.mcp.stripe.url, url);
+      assert.equal(
+        config.mcp.stripe.headers.Authorization,
+        'Bearer {env:STRIPE_API_KEY}',
+      );
+      const merged = JSON.parse(
+        mergeStripeOpenCodeConfiguration(
+          '{}',
+          JSON.stringify(config),
+          layout.stateDirectory,
+        ),
+      );
+      assert.deepEqual(merged.mcp, config.mcp);
+      assert.deepEqual(document, {
+        mcpServers: { stripe: { type: 'http', url } },
+      });
+    });
+  }
+  for (const url of [
+    'http://mcp.stripe.com',
+    'https://other.example/mcp',
+    'http://other.example/mcp',
+    'https://mcp.stripe.com.other.example/mcp',
+    'https://sub.mcp.stripe.com/mcp',
+    'https://mcp.stripe.com./mcp',
+    'http://localhost.example/mcp',
+    'http://127.0.0.1.example/mcp',
+    'http://host.docker.internal.example/mcp',
+    'https://sub.host.docker.internal/mcp',
+    'http://host.docker.internal./mcp',
+    'http://192.168.1.2/mcp',
+    'https://192.168.1.2/mcp',
+    'http://[2001:db8::1]/mcp',
+    'ftp://localhost/mcp',
+    'https://user:synthetic-secret@mcp.stripe.com/mcp',
+    'https://mcp.stripe.com?key=synthetic-secret',
+    'https://mcp.stripe.com/#synthetic-secret',
+    'https://mcp.stripe.com/\nnext',
+    'invalid-synthetic-secret',
+  ]) {
+    it(`rejects the MCP destination ${JSON.stringify(url)}`, () => {
+      assert.throws(
+        () =>
+          stripeOpenCodeConfiguration(
+            { mcpServers: { stripe: { type: 'http', url } } },
+            layout.stateDirectory,
+          ),
+        /Stripe bundle MCP URL/,
+      );
+      const tampered = JSON.parse(installed);
+      tampered.mcp.stripe.url = url;
+      assert.throws(
+        () =>
+          mergeStripeOpenCodeConfiguration(
+            '{}',
+            JSON.stringify(tampered),
+            layout.stateDirectory,
+          ),
+        /Stripe bundle MCP URL/,
+      );
+    });
+  }
   it('combines generated model configuration with skills and MCP without mutating inputs', () => {
     const generated = JSON.stringify({
       provider: { forge: { models: { test: {} } } },

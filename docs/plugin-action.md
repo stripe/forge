@@ -125,8 +125,13 @@ paths, unsupported MCP configuration, and unsafe filesystem entries fail setup.
 
 The generated native config adds an absolute skill path and a remote MCP server
 with OAuth disabled and `Authorization: Bearer {env:STRIPE_API_KEY}`. It retains
-the bundled URL. The adapter combines this fragment with the model definition
-from the experiment's agent `model_profile` and restores it before every turn,
+the bundled URL only if it uses HTTPS on exactly `mcp.stripe.com`, or HTTP(S)
+on a [loopback host](architecture.md#coding-agent-adapters) or exactly
+`host.docker.internal` for local test servers. Other destinations fail setup
+before the bearer configuration is written. This policy is scoped to OpenCode.
+The adapter checks the installed fragment again when opening a session.
+It combines this fragment with the model definition from the experiment's agent
+`model_profile` and restores it before every turn,
 including resume. A workspace `opencode.json` is ignored; model declarations
 belong to the agent selection, and skills/MCP come from `forge/plugin`. See the
 [OpenCode setup](../README.md#opencode-setup) for a baseline/plugin comparison.

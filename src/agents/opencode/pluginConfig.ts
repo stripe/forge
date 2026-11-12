@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { isSafeVersion } from '../../model/paths.ts';
 import { PLUGIN_MCP_CREDENTIALS } from '../../model/pluginCredentials.ts';
 import { parseJson, record } from './native.ts';
+import { isLocalOpenCodeHostname } from './urls.ts';
 
 export const BUNDLE_SOURCE_PATH = 'providers/claude/plugin';
 export const PLUGIN_ROOT = 'plugins/stripe';
@@ -61,7 +62,12 @@ export function stripeOpenCodeConfiguration(
     typeof stripe.url !== 'string'
   )
     throw new Error('Unsupported Stripe bundle MCP configuration.');
-  const url = new URL(stripe.url);
+  let url: URL;
+  try {
+    url = new URL(stripe.url);
+  } catch {
+    throw new Error('Invalid Stripe bundle MCP URL.');
+  }
   if (
     !['http:', 'https:'].includes(url.protocol) ||
     url.username ||
@@ -71,6 +77,13 @@ export function stripeOpenCodeConfiguration(
     /[\s{}\u0000-\u001f\u007f]/.test(stripe.url)
   )
     throw new Error('Invalid Stripe bundle MCP URL.');
+  if (
+    !isLocalOpenCodeHostname(url.hostname) &&
+    !(url.protocol === 'https:' && url.hostname === 'mcp.stripe.com')
+  )
+    throw new Error(
+      'Stripe bundle MCP URL must use HTTPS on mcp.stripe.com or HTTP(S) on a loopback host or host.docker.internal.',
+    );
   return {
     skills: { paths: [`${stateDirectory}/${PLUGIN_ROOT}/bundle/skills`] },
     mcp: {

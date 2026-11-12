@@ -946,6 +946,12 @@ receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`
 options; the CLI supplies its endpoint and credential binding as documented
 in the [README](../README.md#opencode-setup).
 
+OpenCode's `baseUrl` (`OPENCODE_BASE_URL` in the CLI) requires HTTPS except for
+loopback hosts or exactly `host.docker.internal`, which may use plaintext HTTP.
+Loopback means `localhost`, names ending in `.localhost`, IPv4 addresses in
+`127.0.0.0/8`, or IPv6 `::1`. The Docker alias exception is scoped to OpenCode;
+the host completion providers retain their loopback-only HTTP rule.
+
 All adapters support explicit logical layouts for external runtimes and reject
 runtime paths that do not match the pinned adapter layout. Built-in adapters and
 completion providers use the Forge package version as their implementation
