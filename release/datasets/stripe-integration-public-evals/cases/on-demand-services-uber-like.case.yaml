@@ -1,0 +1,38 @@
+id: stripe-integration-public-evals/on-demand-services-uber-like
+version: 0.2.0
+task: |-
+  Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding through Stripe embedded onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
+initial_prompt: |-
+  Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding through Stripe embedded onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
+context: |-
+  If asked: each order routes immediately to one driver; the platform is merchant of record and owns pricing, disputes, refunds, and losses; drivers are recipient-only accounts; weekly payout means automatic weekly payouts on Friday in the connected account's local payout settings.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
+    requirement_level: MUST
+  - value: 'MUST: Configures dashboard as express, fees_collector as application, and losses_collector as application.'
+    requirement_level: MUST
+  - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
+    requirement_level: MUST
+  - value: 'MUST NOT request Merchant configuration or card_payments for a recipient-only connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT require on_behalf_of for the destination charge.'
+    requirement_level: MUST
+  - value: 'Includes an embedded notification banner or equivalent embedded requirements surface for driver account health.'
+    requirement_level: SHOULD
+  - value: 'MUST: Sets application_fee_amount to round(charge_amount * 0.25) in minor units.'
+    requirement_level: MUST
+  - value: 'MUST: Configures the connected account payout schedule as weekly with Friday as the weekly anchor.'
+    requirement_level: MUST
+  - value: 'MUST: Gates order routing on configuration.recipient.capabilities.stripe_balance.stripe_transfers.status === ''active''.'
+    requirement_level: MUST
+  - value: 'MUST NOT add hold/release or separate charges and transfers solely because payouts occur weekly.'
+    requirement_level: MUST

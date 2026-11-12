@@ -1,0 +1,28 @@
+id: stripe-integration-public-evals/payments-cart-integrity
+version: 0.2.0
+task: |-
+  Add Stripe checkout to my stationery shop's cart. Customers can buy several products and choose how many of each they want.
+initial_prompt: |-
+  Add Stripe checkout to my stationery shop's cart. Customers can buy several products and choose how many of each they want.
+context: |-
+  I use React and Node/TypeScript. A notebook costs $18 and a pen pack costs $7. Customers can buy 1–5 of each. Prices live in our server catalog. The browser currently sends product IDs, quantities, and its displayed total. Send buyers to Stripe's hosted payment page; I don't want to build our own checkout UI.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Create a one-time hosted Checkout Session server-side for the approved cart.'
+    requirement_level: MUST
+  - value: 'MUST: Resolve each requested product to its server-owned price and currency; client amounts must not determine the charge.'
+    requirement_level: MUST
+  - value: 'MUST: Reject unknown products and quantities outside the integer range 1–5.'
+    requirement_level: MUST
+  - value: 'MUST: Preserve the approved product/quantity breakdown in Checkout line items rather than replacing it with an unverified browser total.'
+    requirement_level: MUST
+  - value: 'Store an internal order reference against the Session for later reconciliation.'
+    requirement_level: SHOULD
+  - value: 'Leave payment-method selection dynamic unless a user requirement or documented incompatibility calls for a restriction.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

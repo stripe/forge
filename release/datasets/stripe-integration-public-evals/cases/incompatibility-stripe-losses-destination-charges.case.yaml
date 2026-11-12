@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/incompatibility-stripe-losses-destination-charges
+version: 0.2.0
+task: |-
+  IMPORTANT: Non-interactive mode. I'm building a ride-sharing marketplace. Drivers provide rides, the platform owns the rider relationship, each ride routes immediately to one driver, and we keep 20%. Drivers need a simple earnings dashboard. We proposed destination charges while asking Stripe to collect fees and own all negative-balance losses. Identify and correct any incompatible requirements, then give the valid Accounts v2 configuration and fee flow.
+initial_prompt: |-
+  IMPORTANT: Non-interactive mode. I'm building a ride-sharing marketplace. Drivers provide rides, the platform owns the rider relationship, each ride routes immediately to one driver, and we keep 20%. Drivers need a simple earnings dashboard. We proposed destination charges while asking Stripe to collect fees and own all negative-balance losses. Identify and correct any incompatible requirements, then give the valid Accounts v2 configuration and fee flow.
+context: |-
+  If asked: destination charges are required for this design; the platform can accept loss liability if necessary; driver accounts are newly created and recipient-only; use current feature availability at evaluation time rather than assuming preview features are GA.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Identifies losses_collector stripe with destination charges as an incompatible configuration.'
+    requirement_level: MUST
+  - value: 'MUST NOT present losses_collector stripe with destination charges as valid.'
+    requirement_level: MUST
+  - value: 'MUST: Retains destination charges for the immediate single-driver routing model.'
+    requirement_level: MUST
+  - value: 'Uses dashboard: express when Express Dashboard is supported for this recipient-only configuration at evaluation time; otherwise uses dashboard: none with an embedded earnings experience and discloses the availability limitation.'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures fees_collector: application, losses_collector: application, and Recipient stripe_balance.stripe_transfers.'
+    requirement_level: MUST
+  - value: 'MUST: Sets application_fee_amount to round(charge_amount * 0.20) in minor units.'
+    requirement_level: MUST
+  - value: 'MUST: States that the platform owns dispute and refund recovery, including explicit transfer reversal for disputes.'
+    requirement_level: MUST
+  - value: 'MUST NOT use any SaaS Managed Risk preview as evidence that Stripe-owned losses work with destination charges.'
+    requirement_level: MUST

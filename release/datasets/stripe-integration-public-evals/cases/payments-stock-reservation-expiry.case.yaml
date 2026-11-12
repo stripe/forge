@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/payments-stock-reservation-expiry
+version: 0.1.0
+task: |-
+  We're selling 20 limited-edition prints. Hold stock while someone checks out, then make it available again if they abandon checkout.
+initial_prompt: |-
+  We're selling 20 limited-edition prints. Hold stock while someone checks out, then make it available again if they abandon checkout.
+context: |-
+  We use hosted Checkout and Node/TypeScript. Buyers get 30 minutes from checkout creation, and every print is the same SKU. Failed checkout setup must not tie up stock indefinitely. Only cards are allowed for this sale; we deliberately don't want delayed bank payments competing for scarce inventory. Two people can try to buy the last print at once. A customer whose checkout expired may start again if stock remains.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Enforce the stock reservation limit under concurrent requests so buyers cannot reserve more units than exist; no particular database or locking mechanism is required.'
+    requirement_level: MUST
+  - value: 'MUST: Bind the reservation to the order and Session, configure a supported 30-minute Checkout expiry, and align the active reservation deadline with the Session''s authoritative expiry.'
+    requirement_level: MUST
+  - value: 'MUST: Recover or compensate partial failures between stock reservation, Session creation, and persistence so stock is not stranded and an untracked payable Session is not silently ignored.'
+    requirement_level: MUST
+  - value: 'MUST: Release an unpaid expired reservation idempotently while making paid commitment and release mutually exclusive.'
+    requirement_level: MUST
+  - value: 'MUST: Reconcile Stripe Session/payment state in completion-versus-expiration races rather than releasing stock solely because a local timer fired.'
+    requirement_level: MUST
+  - value: 'MUST: Make a new or recovered checkout revalidate stock rather than inheriting a released reservation.'
+    requirement_level: MUST
+  - value: 'MUST: Honor the explicit card-only restriction; a method restriction is correct here, not a universal anti-pattern.'
+    requirement_level: MUST
+  - value: 'Add a reconciliation path for missed expiry notifications rather than depending on one webhook delivery forever.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing.'
+    requirement_level: MUST

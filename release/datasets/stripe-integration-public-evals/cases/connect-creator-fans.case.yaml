@@ -1,0 +1,38 @@
+id: stripe-integration-public-evals/connect-creator-fans
+version: 0.2.0
+task: |-
+  Build the Stripe Connect integration for a Patreon-like product where creators sell monthly access to fans. Fans pay monthly, creators receive 90%, and the platform keeps 10%. Keep signup and payment management integrated into the app. Provide Accounts v2 creation, embedded onboarding, recurring payment creation, fee collection, and readiness checks.
+initial_prompt: |-
+  Build the Stripe Connect integration for a Patreon-like product where creators sell monthly access to fans. Fans pay monthly, creators receive 90%, and the platform keeps 10%. Keep signup and payment management integrated into the app. Provide Accounts v2 creation, embedded onboarding, recurring payment creation, fee collection, and readiness checks.
+context: |-
+  If asked: every subscription belongs to one creator; the creator is merchant of record; these are newly created accounts; creators want Express Dashboard access; Stripe should own negative-balance liability.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'Configures dashboard as express'
+    requirement_level: SHOULD
+  - value: 'Configures fees_collector as stripe'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures losses_collector as stripe.'
+    requirement_level: MUST
+  - value: 'MUST: Configures Merchant with card_payments for the connected business.'
+    requirement_level: MUST
+  - value: 'MUST: Creates customer payments as direct charges on the connected account.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST
+  - value: 'MUST: Gates live SaaS charges on configuration.merchant.capabilities.card_payments.status === ''active''.'
+    requirement_level: MUST
+  - value: 'MUST: Creates recurring payments on the creator connected account and sets application_fee_percent to 10 on the Subscription.'
+    requirement_level: MUST
+  - value: 'MUST: Configures Customer for the connected account and supplies customer_account on SetupIntent and Subscription creation.'
+    requirement_level: MUST
+  - value: 'MUST: Provides an in-product path to the creator Express Dashboard.'
+    requirement_level: MUST
+  - value: 'If the recommended Express, Stripe-pricing, Stripe-owned-losses configuration is not GA at evaluation time, the response MUST disclose its preview status and use the currently required preview API version.'
+    requirement_level: MUST

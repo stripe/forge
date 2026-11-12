@@ -1,0 +1,32 @@
+id: stripe-integration-public-evals/subscriptions-incomplete-sca-signup
+version: 0.2.0
+task: |-
+  I'm building a custom Elements signup for a $40/month SaaS plan. The first card payment can require 3D Secure. Create the subscription directly with the Stripe API, complete any customer authentication in the browser, and grant access only after payment succeeds. Use Next.js, TypeScript, and the stripe npm package.
+initial_prompt: |-
+  I'm building a custom Elements signup for a $40/month SaaS plan. The first card payment can require 3D Secure. Create the subscription directly with the Stripe API, complete any customer authentication in the browser, and grant access only after payment succeeds. Use Next.js, TypeScript, and the stripe npm package.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates or reuses the authenticated user''s Customer and collects the payment method with Stripe.js Elements; secret-key operations remain server-side.'
+    requirement_level: MUST
+  - value: 'Creates the subscription with collection_method: ''charge_automatically'' (the default) and payment_behavior: ''default_incomplete''. So for collection_method to fail, a different value must explicitly be set'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures the payment method for future off-session renewals, for example with payment_settings.save_default_payment_method: ''on_subscription''.'
+    requirement_level: MUST
+  - value: 'MUST: Expands latest_invoice.confirmation_secret and returns only its client_secret plus the minimum client-safe identifiers.'
+    requirement_level: MUST
+  - value: 'MUST NOT depend on expanding latest_invoice.payment_intent on API versions where Invoice confirmation_secret replaced that integration path.'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe.js with the invoice confirmation secret to complete required customer authentication and payment in the browser.'
+    requirement_level: MUST
+  - value: 'MUST: Keeps access pending while the subscription is incomplete or the first invoice is open, unpaid, or requires action.'
+    requirement_level: MUST
+  - value: 'MUST: Treats incomplete_expired as terminal: after roughly 23 hours the initial invoice is void, access remains denied, and a fresh subscription is required for another attempt.'
+    requirement_level: MUST
+  - value: 'MUST: Grants access only from authoritative paid subscription or entitlement state, not from the create response or browser redirect.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures; idempotently handles invoice.payment_action_required, invoice.paid, invoice.payment_failed, and customer.subscription.updated without assuming order.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a stable idempotency key for the signup create request and reuses an existing pending subscription for the same signup attempt.'
+    requirement_level: MUST

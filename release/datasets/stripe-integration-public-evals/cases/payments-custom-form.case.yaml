@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/payments-custom-form
+version: 0.3.0
+task: |-
+  I'm building a checkout page for my online store where the entire payment experience stays on our website — no redirecting customers to an external page. Customers should enter their card details directly in a form on our site. Build the Stripe integration using React on the frontend and Node.js/TypeScript on the backend. Use the `stripe` npm package server-side and `@stripe/stripe-js` + `@stripe/react-stripe-js` client-side. Requirements: - Backend endpoint that creates a payment session and returns a client secret - React frontend with an embedded payment form that stays on the page - Handle payment confirmation on the client side - Show success and error states - A backend webhook endpoint to receive payment events The product costs $75. Assume a basic Express server and React app already exist.
+initial_prompt: |-
+  I'm building a checkout page for my online store where the entire payment experience stays on our website — no redirecting customers to an external page. Customers should enter their card details directly in a form on our site. Build the Stripe integration using React on the frontend and Node.js/TypeScript on the backend. Use the `stripe` npm package server-side and `@stripe/stripe-js` + `@stripe/react-stripe-js` client-side. Requirements: - Backend endpoint that creates a payment session and returns a client secret - React frontend with an embedded payment form that stays on the page - Handle payment confirmation on the client side - Show success and error states - A backend webhook endpoint to receive payment events The product costs $75. Assume a basic Express server and React app already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses checkout.sessions.create as the backend payment API (NOT paymentIntents.create directly)'
+    requirement_level: MUST
+  - value: 'MUST: Sets ui_mode to ''form'' on the Checkout Session so the form stays on the page'
+    requirement_level: MUST
+  - value: 'MUST: Passes the Checkout Session client_secret to the frontend'
+    requirement_level: MUST
+  - value: 'Frontend initializes CheckoutFormProvider with the Checkout Session client_secret and renders CheckoutForm from @stripe/react-stripe-js/checkout'
+    requirement_level: SHOULD
+  - value: 'MUST: Confirms the payment client-side with useCheckoutForm() and checkout.confirm({ formConfirmEvent })'
+    requirement_level: MUST
+  - value: 'Confirms with redirect: ''if_required'' so card payments complete without leaving the page'
+    requirement_level: SHOULD
+  - value: 'MUST: Has a webhook endpoint that handles checkout.session.completed or payment events'
+    requirement_level: MUST
+  - value: 'MUST: Stripe secret key is only used server-side, never exposed in frontend code'
+    requirement_level: MUST
