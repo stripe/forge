@@ -1,0 +1,30 @@
+id: stripe-integration-public-evals/subscriptions-connect
+version: 0.2.0
+task: |-
+  I'm building a marketplace called "CoachCloud" using Node.js and TypeScript. Each coach is a Stripe connected account and sells a $50/month membership. The platform owns the membership Price and fan Customer, creates subscription Checkout, transfers recurring proceeds to the coach with destination charges, and keeps a 12% platform fee. Build the Connect subscription integration using the stripe npm package. Requirements: - Create or reuse the fan Customer in the platform account - Create subscription Checkout with the platform-owned recurring Price - Route funds to the connected account and set the platform fee - Set the merchant/on-behalf-of context correctly - Consume webhook events in the account context that produced them - Assume an Express app and connected-account onboarding already exist.
+initial_prompt: |-
+  I'm building a marketplace called "CoachCloud" using Node.js and TypeScript. Each coach is a Stripe connected account and sells a $50/month membership. The platform owns the membership Price and fan Customer, creates subscription Checkout, transfers recurring proceeds to the coach with destination charges, and keeps a 12% platform fee. Build the Connect subscription integration using the stripe npm package. Requirements: - Create or reuse the fan Customer in the platform account - Create subscription Checkout with the platform-owned recurring Price - Route funds to the connected account and set the platform fee - Set the merchant/on-behalf-of context correctly - Consume webhook events in the account context that produced them - Assume an Express app and connected-account onboarding already exist.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates the Checkout Session in the platform account with mode: ''subscription'' and the platform-owned Customer and recurring Price.'
+    requirement_level: MUST
+  - value: 'Sets subscription_data.transfer_data.destination to the coach connected-account ID.'
+    requirement_level: SHOULD
+  - value: 'MUST: Sets subscription_data.application_fee_percent to 12.'
+    requirement_level: MUST
+  - value: 'MUST: Sets subscription_data.on_behalf_of to the coach only when the coach is the intended settlement merchant, and explains that omitting it leaves the platform as merchant of record.'
+    requirement_level: MUST
+  - value: 'MUST NOT create renewal Transfers in addition to transfer_data destination routing.'
+    requirement_level: MUST
+  - value: 'Authenticates the server with a restricted or secret platform key from server-side configuration and validates the connected-account ID against the server-side coach record for the membership being bought'
+    requirement_level: SHOULD
+  - value: 'MUST: Uses a stable idempotency key when creating or retrying the Checkout Session.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures against the raw request body before processing events.'
+    requirement_level: MUST
+  - value: 'MUST: Processes each webhook in its producing account context: use event.account as the Stripe-Account context when present and platform context when it is absent.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by producing account plus event.id and handles checkout.session.completed, invoice.paid, and invoice.payment_failed without assuming delivery order.'
+    requirement_level: MUST

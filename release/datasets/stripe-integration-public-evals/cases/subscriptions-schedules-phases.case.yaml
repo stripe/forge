@@ -1,0 +1,44 @@
+id: stripe-integration-public-evals/subscriptions-schedules-phases
+version: 0.1.0
+task: |-
+  I'm building a cohort-based learning platform called "LaunchClass" using Node.js and TypeScript. A school signs a six-month contract: month 1 is free onboarding, months 2-3 cost $300/month, and months 4-6 cost $500/month; the subscription should cancel after the final phase. Build this contract with Stripe Subscription Schedules and the stripe npm package. Requirements: - Create or reuse a Customer - Define dated phases with the correct Prices and quantities - Configure the schedule to cancel after the last phase - Provide an endpoint to preview and update a future phase without changing the current charge - Keep contract state synchronized through webhooks Assume an Express app exists and Price IDs are environment variables.
+initial_prompt: |-
+  I'm building a cohort-based learning platform called "LaunchClass" using Node.js and TypeScript. A school signs a six-month contract: month 1 is free onboarding, months 2-3 cost $300/month, and months 4-6 cost $500/month; the subscription should cancel after the final phase. Build this contract with Stripe Subscription Schedules and the stripe npm package. Requirements: - Create or reuse a Customer - Define dated phases with the correct Prices and quantities - Configure the schedule to cancel after the last phase - Provide an endpoint to preview and update a future phase without changing the current charge - Keep contract state synchronized through webhooks Assume an Express app exists and Price IDs are environment variables.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates or reuses a Stripe Customer and persists its association with the school.'
+    requirement_level: MUST
+  - value: 'MUST: Authenticates the caller and verifies ownership of the school Customer and Subscription Schedule before reads or updates.'
+    requirement_level: MUST
+  - value: 'MUST: Loads phase Price IDs from server-side environment configuration or an allowlist.'
+    requirement_level: MUST
+  - value: 'MUST: Creates the contract with stripe.subscriptionSchedules.create.'
+    requirement_level: MUST
+  - value: 'MUST: Defines an onboarding phase lasting one month with no charge.'
+    requirement_level: MUST
+  - value: 'MUST: Defines an adjacent two-month phase with the $300 monthly Price and intended quantity.'
+    requirement_level: MUST
+  - value: 'MUST: Defines an adjacent three-month phase with the $500 monthly Price and intended quantity.'
+    requirement_level: MUST
+  - value: 'MUST: Sets end_behavior=''cancel'' on the Subscription Schedule.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the proposed future-phase change with the supported invoice preview parameters before applying it.'
+    requirement_level: MUST
+  - value: 'MUST: Updates the future phase through stripe.subscriptionSchedules.update while preserving the current phase''s price, quantity, and dates.'
+    requirement_level: MUST
+  - value: 'MUST NOT directly update the underlying Subscription to change a schedule-managed future phase.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable Customer, Schedule-create, and Schedule-update POST requests.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures from the unmodified raw request body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles subscription_schedule.updated, subscription_schedule.completed, subscription_schedule.canceled, subscription_schedule.aborted, subscription_schedule.released, and customer.subscription.deleted as applicable.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Retrieves the current Subscription Schedule or Subscription before updating local contract state when an event may be stale or out of order.'
+    requirement_level: MUST
+  - value: 'MUST: Persists local contract state from authoritative current Schedule and Subscription state.'
+    requirement_level: MUST

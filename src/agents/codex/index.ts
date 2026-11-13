@@ -220,6 +220,7 @@ export function createCodexAdapter(
             const turn = parseCodexStream(result.stdout, currentSessionId, {
               hookAutomation: automation,
               workspacePath: layout.workspace,
+              model: context.selection.model,
             });
             currentSessionId = turn.sessionId;
             return turn;

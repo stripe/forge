@@ -194,6 +194,37 @@ describe('Codex adapter', () => {
     );
   });
 
+  it('passes the selected model for metadata advisories on initial and resumed turns', async () => {
+    const test = fixture({
+      command: ({ scope }) => {
+        if (scope === 'uncredentialed')
+          return result(`codex-cli ${FORGE_CODEX_VERSION}\n`);
+        const events = completed().split('\n');
+        events.splice(
+          1,
+          0,
+          JSON.stringify({
+            type: 'item.completed',
+            item: {
+              id: 'item_0',
+              type: 'error',
+              message: `Model metadata for \`${selection.model}\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`,
+            },
+          }),
+        );
+        return result(events.join('\n'));
+      },
+    });
+    const session = await test.adapter.openSession(test.sessionContext);
+    for (const message of ['First', 'Second']) {
+      const turn = await session.send(message, {
+        signal: test.sessionContext.signal,
+      });
+      assert.equal(turn.text, 'Done');
+      assert.equal(turn.sessionId, SESSION_ID);
+    }
+  });
+
   it('applies hook policy and refreshed native plugin settings on initial and resumed turns', async () => {
     for (const hookTrust of ['native', 'automation'] as const) {
       const test = fixture({ hookTrust });

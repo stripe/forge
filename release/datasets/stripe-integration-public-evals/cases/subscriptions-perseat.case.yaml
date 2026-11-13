@@ -1,0 +1,44 @@
+id: stripe-integration-public-evals/subscriptions-perseat
+version: 0.2.0
+task: |-
+  I'm building a team collaboration tool called "TeamSync" using Next.js and TypeScript. Teams pay $10 per user per month. When a team admin adds or removes seats, billing should adjust automatically. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A signup flow where the team admin subscribes and selects the number of seats - An endpoint to add seats (increase quantity) and remove seats (decrease quantity) mid-cycle, with prorated billing - A webhook endpoint that handles subscription updates, payment failures, and invoice events - Show the current seat count and next invoice amount Assume Next.js App Router is already set up. Build out the Stripe integration pieces.
+initial_prompt: |-
+  I'm building a team collaboration tool called "TeamSync" using Next.js and TypeScript. Teams pay $10 per user per month. When a team admin adds or removes seats, billing should adjust automatically. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A signup flow where the team admin subscribes and selects the number of seats - An endpoint to add seats (increase quantity) and remove seats (decrease quantity) mid-cycle, with prorated billing - A webhook endpoint that handles subscription updates, payment failures, and invoice events - Show the current seat count and next invoice amount Assume Next.js App Router is already set up. Build out the Stripe integration pieces.
+context: |-
+  A fail closed admin-check stub is acceptable.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Provides a signup UI where the team admin selects an integer seat count.'
+    requirement_level: MUST
+  - value: 'MUST: Creates a subscription Checkout Session whose per-seat line item quantity equals the validated seat count.'
+    requirement_level: MUST
+  - value: 'MUST: Selects the $10-per-user recurring Price from a server-side allowlist.'
+    requirement_level: MUST
+  - value: 'Authenticates the caller as an administrator of the target team before any seat change.'
+    requirement_level: SHOULD
+  - value: 'MUST: Resolves the Customer, Subscription, and subscription item from the authorized team record instead of trusting client-supplied Stripe IDs.'
+    requirement_level: MUST
+  - value: 'MUST: Validates the requested seat count as a positive integer that satisfies the application''s seat rules.'
+    requirement_level: MUST
+  - value: 'MUST: Changes seats by updating the existing per-seat subscription item''s quantity.'
+    requirement_level: MUST
+  - value: 'MUST: Sets an explicit proration_behavior that produces prorated billing for mid-cycle seat additions and removals.'
+    requirement_level: MUST
+  - value: 'MUST: Previews the proposed quantity change with stripe.invoices.createPreview before committing it.'
+    requirement_level: MUST
+  - value: 'MUST: Displays the authoritative subscription-item quantity as the current seat count.'
+    requirement_level: MUST
+  - value: 'MUST: Displays the amount and currency from the Stripe invoice preview as the next invoice estimate.'
+    requirement_level: MUST
+  - value: 'MUST: Uses idempotency keys for retryable seat-update and signup POST requests.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures from the unmodified raw request body.'
+    requirement_level: MUST
+  - value: 'MUST: Handles customer.subscription.updated, invoice.paid, and invoice.payment_failed.'
+    requirement_level: MUST
+  - value: 'MUST: Deduplicates webhook side effects by Stripe Event ID.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches current subscription and invoice state before changing local seats or access when event order can affect the result.'
+    requirement_level: MUST

@@ -1,0 +1,7 @@
+{
+  "info": {"id":"ses_fixture","version":"1.19.0","time":{"created":1793580977404,"updated":1793580993598}},
+  "messages": [
+    {"info":{"role":"user","time":{"created":1793580977479},"id":"msg_1","sessionID":"ses_fixture","model":{"providerID":"forge","modelID":"fixture-model"}},"parts":[{"type":"text","id":"prt_1","sessionID":"ses_fixture","messageID":"msg_1","text":"Request 1."}]},
+    {"info":{"role":"assistant","time":{"created":1793580978226,"completed":1793580993568},"finish":"stop","cost":0,"tokens":{"total":9816,"input":8831,"output":985,"reasoning":0,"cache":{"write":0,"read":0}},"id":"msg_2","sessionID":"ses_fixture","parentID":"msg_1","providerID":"forge","modelID":"fixture-model"},"parts":[{"type":"step-start","id":"prt_2","sessionID":"ses_fixture","messageID":"msg_2"},{"type":"text","time":{"start":1793580982138,"end":1793580993530},"id":"prt_3","sessionID":"ses_fixture","messageID":"msg_2","text":"Reply 1."},{"type":"step-finish","reason":"stop","cost":0,"tokens":{"total":9816,"input":8831,"output":985,"reasoning":0,"cache":{"write":0,"read":0}},"id":"prt_4","sessionID":"ses_fixture","messageID":"msg_2"}]}
+  ]
+}

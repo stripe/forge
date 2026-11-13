@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/v2-api-explicit-recommendation
+version: 0.2.0
+task: |-
+  I'm building a services marketplace where providers offer services, customers book and pay through the platform, the platform keeps 10%, and providers need simple onboarding through Stripe embedded onboarding. What account type should I use? Reframe that question for the current Accounts v2 model and recommend the exact account dimensions and payment pattern.
+initial_prompt: |-
+  I'm building a services marketplace where providers offer services, customers book and pay through the platform, the platform keeps 10%, and providers need simple onboarding through Stripe embedded onboarding. What account type should I use? Reframe that question for the current Accounts v2 model and recommend the exact account dimensions and payment pattern.
+context: |-
+  If asked: each booking has one provider and routes immediately; the platform is merchant of record and owns pricing, refunds, disputes, and losses; providers are recipient-only and need Express Dashboard access; this is a new integration.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Explicitly recommends Accounts v2 and, when showing an endpoint, uses /v2/core/accounts.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Explains that dashboard, defaults.responsibilities.fees_collector, and defaults.responsibilities.losses_collector are independent dimensions rather than one account type.'
+    requirement_level: MUST
+  - value: 'MUST: Configures dashboard express, fees_collector application, and losses_collector application.'
+    requirement_level: MUST
+  - value: 'MUST: Configures Recipient with stripe_balance.stripe_transfers and does NOT request Merchant or card_payments.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges and application_fee_amount equal to round(charge_amount * 0.10).'
+    requirement_level: MUST
+  - value: 'MUST: Uses Stripe embedded onboarding as the default onboarding flow.'
+    requirement_level: MUST

@@ -25,10 +25,12 @@ export function parseOpenCodeStream(
     let id: string | undefined;
     let activeMessage: string | undefined;
     let finishedMessage: string | undefined;
+    let messageRetried = false;
     let stepHasTools = false;
     let messageHasTools = false;
     let completed = false;
     let cost = 0;
+    let costKnown = true;
     const parts = new Map<string, NativeRecord>();
     const calls = new Map<string, AgentToolCall>();
     const messages = new Set<string>();
@@ -91,6 +93,9 @@ export function parseOpenCodeStream(
           messages.add(message);
           texts.set(message, []);
           messageHasTools = false;
+          messageRetried = false;
+        } else {
+          messageRetried = true;
         }
         activeMessage = message;
         // `stop` finishes one model step. Tools and automatic compaction can
@@ -98,10 +103,38 @@ export function parseOpenCodeStream(
         completed = false;
         stepHasTools = false;
       } else {
-        if (activeMessage !== message) throw new Error();
-        if (event.type === 'step_finish' && part.type === 'step-finish') {
+        if (activeMessage !== message) {
+          // v1.19.0 emits only terminal tool snapshots. A retried attempt can
+          // leave an unseen tool behind, then mark it interrupted in cleanup
+          // after the recovered attempt's finish. Previously seen parts are
+          // checked above; a completed execution cannot become this cleanup.
+          if (
+            activeMessage !== undefined ||
+            message !== finishedMessage ||
+            !messageRetried ||
+            event.type !== 'tool_use' ||
+            part.type !== 'tool'
+          )
+            throw new Error();
+          const state = record(part.state);
+          if (
+            state.status !== 'error' ||
+            state.error !== 'Tool execution aborted' ||
+            record(state.metadata).interrupted !== true
+          )
+            throw new Error();
+          const call = tool(part);
+          if (calls.size >= 2_000) throw new Error();
+          calls.set(partId, call);
+          messageHasTools = true;
+          // Cleanup records the abandoned attempt, not a new model step.
+        } else if (
+          event.type === 'step_finish' &&
+          part.type === 'step-finish'
+        ) {
           completed = terminal(part.reason) && !stepHasTools;
-          cost += nonnegative(part.cost);
+          if (part.cost === undefined) costKnown = false;
+          else cost += nonnegative(part.cost);
           activeMessage = undefined;
           finishedMessage = message;
         } else if (event.type === 'text' && part.type === 'text') {
@@ -112,8 +145,8 @@ export function parseOpenCodeStream(
           const call = tool(part);
           stepHasTools = true;
           messageHasTools = true;
-          if (calls.has(call.id) || calls.size >= 2_000) throw new Error();
-          calls.set(call.id, call);
+          if (calls.size >= 2_000) throw new Error();
+          calls.set(partId, call);
         } else throw new Error();
       }
     }
@@ -123,7 +156,7 @@ export function parseOpenCodeStream(
       text: [...texts.values()].flat().join('\n\n'),
       sessionId: id,
       toolCalls: [...calls.values()],
-      costUsd: cost,
+      ...(costKnown ? { costUsd: cost } : {}),
     };
   } catch {
     throw new OpenCodeStreamError();

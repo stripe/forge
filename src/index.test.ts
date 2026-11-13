@@ -44,6 +44,11 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('keeps image build helpers on the Docker subpath', async () => {
+    assert.equal('defineDockerImageBuild' in rootExports, false);
+    const docker = await import('./runtime/docker/index.ts');
+    assert.equal(typeof docker.defineDockerImageBuild, 'function');
+  });
   it('keeps the OpenAI provider on its documented implementation subpath', async () => {
     assert.equal('createOpenAICompletionProvider' in rootExports, false);
     const openai = await import('./providers/openai/index.ts');

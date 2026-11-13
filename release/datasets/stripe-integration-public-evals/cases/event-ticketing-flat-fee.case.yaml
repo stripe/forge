@@ -1,0 +1,38 @@
+id: stripe-integration-public-evals/event-ticketing-flat-fee
+version: 0.2.0
+task: |-
+  I'm building an event-ticketing marketplace. Organizers sell tickets through the platform, and we charge a flat $2 per customer purchase/order, not per individual ticket in the order. Ticket prices range from $10 to $500. Recommend the Accounts v2 configuration and immediate single-organizer payment flow, implement the $2 fee, and assess whether the model remains profitable across the range.
+initial_prompt: |-
+  I'm building an event-ticketing marketplace. Organizers sell tickets through the platform, and we charge a flat $2 per customer purchase/order, not per individual ticket in the order. Ticket prices range from $10 to $500. Recommend the Accounts v2 configuration and immediate single-organizer payment flow, implement the $2 fee, and assess whether the model remains profitable across the range.
+context: |-
+  If asked: every order belongs to one organizer; proceeds route immediately; the platform is merchant of record and owns pricing, refunds, disputes, and losses; organizers are recipient-only accounts; $2 is gross platform revenue before Stripe fees.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Uses Accounts v2 account creation and configuration for every new connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT create an account with the legacy type parameter set to express, standard, or custom.'
+    requirement_level: MUST
+  - value: 'MUST: Uses destination charges for a single-recipient booking whose proceeds should route immediately to that recipient.'
+    requirement_level: MUST
+  - value: 'Configures dashboard as express.'
+    requirement_level: SHOULD
+  - value: 'MUST: Configures fees_collector as application'
+    requirement_level: MUST
+  - value: 'MUST: Configures losses_collector as application.'
+    requirement_level: MUST
+  - value: 'MUST: Configures recipient capability at configuration.recipient.capabilities.stripe_balance.stripe_transfers for recipient-only connected accounts.'
+    requirement_level: MUST
+  - value: 'MUST NOT request Merchant configuration or card_payments for a recipient-only connected account.'
+    requirement_level: MUST
+  - value: 'MUST NOT require on_behalf_of for the destination charge.'
+    requirement_level: MUST
+  - value: 'MUST: Sets application_fee_amount to 200 minor currency units for a USD purchase order.'
+    requirement_level: MUST
+  - value: 'MUST NOT multiply the $2 fee by the number of tickets in the order.'
+    requirement_level: MUST
+  - value: 'MUST: Warns that a flat $2 gross fee can be unprofitable on higher-value orders when percentage-based processing costs exceed $2.'
+    requirement_level: MUST
+  - value: 'Recommends current Stripe pricing analysis, Platform Pricing Tool rules, or a revised percentage/blended fee before launch.'
+    requirement_level: SHOULD

@@ -1,0 +1,28 @@
+id: stripe-integration-public-evals/payments-saved-card-consent
+version: 0.2.0
+task: |-
+  Let returning customers reuse a saved card at checkout, and let new buyers choose whether to save theirs for next time. A stubbed resolver is acceptable.
+initial_prompt: |-
+  Let returning customers reuse a saved card at checkout, and let new buyers choose whether to save theirs for next time. A stubbed resolver is acceptable.
+context: |-
+  Our florist uses hosted Checkout and Node/TypeScript. Customers sign in, and our database maps each account to a Stripe Customer. Purchases are one-time; we won't charge anyone while they're away. Some older saved cards were collected for a different purpose, and we don't have permission to display them for new purchases. Saving a new card must be optional.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Create Checkout for the authenticated user''s server-resolved Customer rather than accepting an arbitrary browser-supplied Customer ID.'
+    requirement_level: MUST
+  - value: 'MUST: Offer a supported opt-in path to save a newly entered card for future purchases.'
+    requirement_level: MUST
+  - value: 'MUST: Display only saved methods permitted for this purchase context; methods with uncertain or limited redisplay consent must not be exposed indiscriminately.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat ownership/attachment of a card as sufficient proof of permission to redisplay it for any use.'
+    requirement_level: MUST
+  - value: 'MUST: Allow payment to complete without opting into saving.'
+    requirement_level: MUST
+  - value: 'Use Checkout''s native save/redisplay capabilities rather than implementing a custom card vault or selection UI.'
+    requirement_level: SHOULD
+  - value: 'MUST NOT expose a Stripe secret API key in browser/mobile code or expose a scoped client secret to anyone other than its intended customer.'
+    requirement_level: MUST
+  - value: 'MUST: If a webhook alters application state, verifies its signature using the unmodified request body and endpoint signing secret before processing. This signature criterion passes when no webhook handler exists.'
+    requirement_level: MUST

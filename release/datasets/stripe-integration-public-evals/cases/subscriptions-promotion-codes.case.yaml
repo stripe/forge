@@ -1,0 +1,26 @@
+id: stripe-integration-public-evals/subscriptions-promotion-codes
+version: 0.1.0
+task: |-
+  I'm building a meal-planning app called "PantryPlan" using Next.js and TypeScript. The standard plan is $15/month. Marketing needs a public code WELCOME25 for 25% off the first monthly invoice, limited to 500 redemptions, plus a pricing page where customers can enter eligible promotion codes. Build the Stripe integration using the stripe npm package. Requirements: - Create or document the Coupon and Promotion Code setup - Allow code entry in subscription Checkout - Show the applied discount and post-discount total - Prevent expired, inactive, or ineligible codes from being treated as valid - Keep the local subscription state synchronized through webhooks Assume Next.js App Router is set up.
+initial_prompt: |-
+  I'm building a meal-planning app called "PantryPlan" using Next.js and TypeScript. The standard plan is $15/month. Marketing needs a public code WELCOME25 for 25% off the first monthly invoice, limited to 500 redemptions, plus a pricing page where customers can enter eligible promotion codes. Build the Stripe integration using the stripe npm package. Requirements: - Create or document the Coupon and Promotion Code setup - Allow code entry in subscription Checkout - Show the applied discount and post-discount total - Prevent expired, inactive, or ineligible codes from being treated as valid - Keep the local subscription state synchronized through webhooks Assume Next.js App Router is set up.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Creates or documents provisioning a 25-percent-off Coupon with duration ''once'' and Promotion Code WELCOME25 with max_redemptions 500.'
+    requirement_level: MUST
+  - value: 'MUST: Supports customer code entry through either allow_promotion_codes: true in subscription Checkout or a server-side code lookup followed by discounts[].promotion_code.'
+    requirement_level: MUST
+  - value: 'MUST: If applying a code server-side, resolves WELCOME25 to an eligible promo_ object and passes its ID; it does not pass the human-readable code as the promotion_code ID.'
+    requirement_level: MUST
+  - value: 'MUST: Relies on Stripe to enforce active state, expiration, redemption limits, customer restrictions, minimum amount, first-time restrictions, and eligible products.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat an expired, inactive, ineligible, or unresolvable code as applied.'
+    requirement_level: MUST
+  - value: 'MUST: Displays the applied discount and post-discount total from the Checkout Session or invoice totals.'
+    requirement_level: MUST
+  - value: 'MUST NOT model the subscription discount as a discounted one-off PaymentIntent.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies raw-body webhook signatures and processes checkout.session.completed, customer.subscription.updated, and invoice.paid idempotently by event ID.'
+    requirement_level: MUST

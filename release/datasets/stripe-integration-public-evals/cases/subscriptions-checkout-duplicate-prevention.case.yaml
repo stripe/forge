@@ -1,0 +1,40 @@
+id: stripe-integration-public-evals/subscriptions-checkout-duplicate-prevention
+version: 0.1.0
+task: |-
+  I'm adding subscription Checkout to a multi-tenant SaaS application. Concurrent requests, browser retries, or repeated clicks must not create duplicate Customers or subscriptions, and users must not be able to choose arbitrary Prices or another tenant's Customer. Build the secure Next.js/TypeScript flow.
+initial_prompt: |-
+  I'm adding subscription Checkout to a multi-tenant SaaS application. Concurrent requests, browser retries, or repeated clicks must not create duplicate Customers or subscriptions, and users must not be able to choose arbitrary Prices or another tenant's Customer. Build the secure Next.js/TypeScript flow.
+execution_mode: multi_turn
+max_turns: 10
+setup: []
+judging_criteria:
+  - value: 'MUST: Authenticates the user and authorizes subscription purchase for the tenant.'
+    requirement_level: MUST
+  - value: 'MUST: Resolves the Stripe Customer exclusively from the tenant''s server-side ownership record.'
+    requirement_level: MUST
+  - value: 'MUST: Allows only server-side approved recurring Price IDs and quantities.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a database transaction, row lock, or unique constraint to atomically claim one purchase operation per tenant and plan slot.'
+    requirement_level: MUST
+  - value: 'MUST: Re-checks durable Checkout and subscription state while holding the concurrency control.'
+    requirement_level: MUST
+  - value: 'MUST: Reuses an existing Checkout Session only when its status is open.'
+    requirement_level: MUST
+  - value: 'MUST NOT treat expired as a reusable Checkout Session status.'
+    requirement_level: MUST
+  - value: 'MUST: Treats a complete Checkout Session as reconciliation input rather than creating another purchase before checking its subscription.'
+    requirement_level: MUST
+  - value: 'MUST: Blocks a new purchase when the tenant already has a nonterminal subscription under the stated policy, using only valid statuses such as incomplete, trialing, active, past_due, unpaid, or paused.'
+    requirement_level: MUST
+  - value: 'MUST NOT use pending as a Subscription status.'
+    requirement_level: MUST
+  - value: 'MUST: Uses a stable Stripe idempotency key for each Customer and Checkout Session creation operation.'
+    requirement_level: MUST
+  - value: 'MUST: Stores the tenant, operation, Customer, Checkout Session, and resulting Subscription mapping durably.'
+    requirement_level: MUST
+  - value: 'MUST NOT rely on client_reference_id or metadata as an authorization or concurrency control.'
+    requirement_level: MUST
+  - value: 'MUST: Verifies webhook signatures and durably deduplicates Checkout, invoice, and subscription event IDs.'
+    requirement_level: MUST
+  - value: 'MUST: Re-fetches Checkout Session and Subscription state before provisioning tenant access.'
+    requirement_level: MUST
